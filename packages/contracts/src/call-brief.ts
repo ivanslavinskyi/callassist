@@ -1,0 +1,114 @@
+import { z } from "zod";
+
+export const SUPPORTED_CALL_LANGUAGES = [
+  { locale: "de-CH", label: "Deutsch (Schweiz)", shortLabel: "DE-CH" },
+  { locale: "de-DE", label: "Deutsch (Deutschland)", shortLabel: "DE" },
+  { locale: "fr-CH", label: "Français (Suisse)", shortLabel: "FR-CH" },
+  { locale: "it-CH", label: "Italiano (Svizzera)", shortLabel: "IT-CH" },
+  { locale: "en-GB", label: "English (United Kingdom)", shortLabel: "EN-GB" },
+  { locale: "en-US", label: "English (United States)", shortLabel: "EN-US" }
+] as const;
+
+export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
+  ({ locale }) => locale
+) as [
+  (typeof SUPPORTED_CALL_LANGUAGES)[number]["locale"],
+  ...(typeof SUPPORTED_CALL_LANGUAGES)[number]["locale"][]
+];
+
+export const callLocaleSchema = z.enum(SUPPORTED_CALL_LOCALES);
+export type CallLocale = z.infer<typeof callLocaleSchema>;
+
+export const callBriefStatusSchema = z.enum([
+  "ready",
+  "dialing",
+  "in_progress",
+  "awaiting_approval",
+  "completed",
+  "stopped",
+  "failed"
+]);
+export type CallBriefStatus = z.infer<typeof callBriefStatusSchema>;
+
+const callBriefInputBaseSchema = z.object({
+  recipientName: z.string().trim().min(2, "Укажите адресата"),
+  phoneNumber: z
+    .string()
+    .trim()
+    .regex(/^\+[1-9]\d{7,14}$/, "Используйте международный формат, например +41710000000"),
+  objective: z.string().trim().min(10, "Опишите цель звонка подробнее"),
+  locale: callLocaleSchema,
+  allowLanguageSwitch: z.boolean().default(false),
+  fallbackLocale: callLocaleSchema.optional(),
+  allowedFacts: z.array(z.string().trim().min(1)).default([])
+});
+
+function validateLanguagePolicy(
+  input: z.infer<typeof callBriefInputBaseSchema>,
+  context: z.RefinementCtx
+) {
+  if (input.allowLanguageSwitch && !input.fallbackLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "Выберите резервный язык",
+      path: ["fallbackLocale"]
+    });
+  }
+
+  if (input.fallbackLocale === input.locale) {
+    context.addIssue({
+      code: "custom",
+      message: "Резервный язык должен отличаться от основного",
+      path: ["fallbackLocale"]
+    });
+  }
+}
+
+export const createCallBriefInputSchema = callBriefInputBaseSchema.superRefine(
+  validateLanguagePolicy
+);
+
+export const callBriefSchema = callBriefInputBaseSchema
+  .extend({
+    id: z.string().uuid(),
+    status: callBriefStatusSchema,
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime()
+  })
+  .superRefine(validateLanguagePolicy);
+
+export type CreateCallBriefInput = z.input<typeof createCallBriefInputSchema>;
+export type CallBrief = z.infer<typeof callBriefSchema>;
+
+export const transcriptSegmentSchema = z.object({
+  id: z.string().uuid(),
+  role: z.enum(["assistant", "recipient", "system"]),
+  text: z.string(),
+  locale: callLocaleSchema,
+  final: z.boolean(),
+  createdAt: z.string().datetime()
+});
+export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
+
+export const approvalRequestSchema = z.object({
+  id: z.string().uuid(),
+  category: z.enum(["contact_email", "postal_address", "date_of_birth", "legal_commitment"]),
+  title: z.string(),
+  reason: z.string(),
+  proposedSpeech: z.string(),
+  status: z.enum(["pending", "approved", "declined", "expired"]),
+  createdAt: z.string().datetime()
+});
+export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
+
+export const callSnapshotSchema = z.object({
+  brief: callBriefSchema,
+  transcript: z.array(transcriptSegmentSchema),
+  pendingApproval: approvalRequestSchema.nullable()
+});
+export type CallSnapshot = z.infer<typeof callSnapshotSchema>;
+
+export const approvalDecisionSchema = z.object({
+  decision: z.enum(["approved", "declined"])
+});
+export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
