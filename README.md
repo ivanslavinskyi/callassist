@@ -40,17 +40,28 @@ pnpm dev
 
 ## Тестовый звонок через Twilio
 
-По умолчанию используется безопасный локальный режим `TELEPHONY_DRIVER=mock`. Для реального тестового звонка API должен быть доступен Twilio по публичному HTTPS URL. Укажите в `.env`:
+По умолчанию используется безопасный локальный режим `TELEPHONY_DRIVER=mock`. Для реального тестового звонка Twilio должен видеть публичный HTTPS URL, но основной API открывать наружу не требуется. В режиме `twilio` приложение поднимает отдельный webhook-gateway на `127.0.0.1:4001`; на нём зарегистрированы только `/webhooks/twilio/voice` и `/webhooks/twilio/status`, и оба маршрута проверяют подпись Twilio.
+
+Для теста без домена запустите в отдельном терминале Cloudflare Quick Tunnel:
+
+```powershell
+pnpm tunnel:twilio
+```
+
+Туннель направлен только на gateway-порт `4001`, поэтому `/api/*`, SSE и расшифрованные данные через него недоступны. Скопируйте выданный адрес вида `https://random-name.trycloudflare.com` и укажите в `.env`:
 
 ```dotenv
 TELEPHONY_DRIVER=twilio
-PUBLIC_BASE_URL=https://your-public-api.example
+PUBLIC_BASE_URL=https://random-name.trycloudflare.com
+TWILIO_WEBHOOK_PORT=4001
 TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+...
 ```
 
-Затем выполните `pnpm db:migrate` и перезапустите API. URL для голосового TwiML и callback-ов статуса передаются Twilio автоматически при создании звонка. Запись звонка отключена. Язык тестового приветствия берётся из `CallBrief`; для `de-CH`, `fr-CH` и `it-CH` используются доступные Twilio TTS-варианты `de-DE`, `fr-FR` и `it-IT`, при этом исходный locale задания не меняется.
+Оставьте туннель запущенным, выполните `pnpm db:migrate` и перезапустите API. Quick Tunnel выдаёт новый адрес после перезапуска, поэтому тогда нужно обновить `PUBLIC_BASE_URL` и ещё раз перезапустить API. URL для голосового TwiML и callback-ов статуса передаются Twilio автоматически при создании звонка. Запись звонка отключена. Язык тестового приветствия берётся из `CallBrief`; для `de-CH`, `fr-CH` и `it-CH` используются доступные Twilio TTS-варианты `de-DE`, `fr-FR` и `it-IT`, при этом исходный locale задания не меняется.
+
+Quick Tunnel предназначен только для разработки и не имеет гарантии доступности. Если выданный адрес временно не резолвится, перезапустите туннель позже или используйте `ngrok http 4001` как альтернативу.
 
 Проверки проекта:
 

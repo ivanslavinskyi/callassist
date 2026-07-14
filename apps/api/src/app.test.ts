@@ -58,6 +58,18 @@ describe("call API", () => {
     });
   });
 
+  it("does not expose Twilio webhooks on the internal API", async () => {
+    const app = createApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/voice",
+      payload: "CallSid=CA123",
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it("returns a gateway error when the telephony provider cannot start", async () => {
     const failingProvider: TelephonyProvider = {
       mode: "twilio",

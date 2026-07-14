@@ -1,14 +1,16 @@
 import twilio from "twilio";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildApp } from "./app";
+import { buildWebhookApp } from "./app";
 import { CallService } from "./call-service";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
-const apps: ReturnType<typeof buildApp>[] = [];
+const apps: ReturnType<typeof buildWebhookApp>[] = [];
+const services: CallService[] = [];
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
+  await Promise.all(services.splice(0).map((service) => service.close()));
 });
 
 function createHarness() {
@@ -29,8 +31,13 @@ function createHarness() {
     new InMemoryCallRepository(),
     provider
   );
-  const app = buildApp({ service, twilioProvider: provider, logger: false });
+  const app = buildWebhookApp({
+    service,
+    twilioProvider: provider,
+    logger: false
+  });
   apps.push(app);
+  services.push(service);
   return { app, service };
 }
 
@@ -46,6 +53,15 @@ async function createBrief(service: CallService) {
 }
 
 describe("Twilio webhooks", () => {
+  it("does not expose internal API routes", async () => {
+    const { app } = createHarness();
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs"
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
   it("rejects an unsigned voice webhook", async () => {
     const { app, service } = createHarness();
     const brief = await createBrief(service);
