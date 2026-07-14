@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
 import { CallService } from "./call-service";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
+import type { TelephonyProvider } from "./telephony/telephony-provider";
 
 const apps: ReturnType<typeof buildApp>[] = [];
 
@@ -50,6 +51,44 @@ describe("call API", () => {
     const response = await app.inject({ method: "GET", url: "/health" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: "ok", mode: "memory" });
+    expect(response.json()).toEqual({
+      status: "ok",
+      mode: "memory",
+      telephony: "mock"
+    });
+  });
+
+  it("returns a gateway error when the telephony provider cannot start", async () => {
+    const failingProvider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        throw new Error("Twilio unavailable");
+      },
+      async stopCall() {}
+    };
+    const service = new CallService(
+      new InMemoryCallRepository(),
+      failingProvider,
+      () => undefined
+    );
+    const app = buildApp({ service, logger: false });
+    apps.push(app);
+    const brief = await service.create({
+      recipientName: "Example office",
+      phoneNumber: "+442079460000",
+      objective: "Test a provider failure",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${brief.id}/start`
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({ error: "TELEPHONY_START_FAILED" });
+    expect((await service.get(brief.id))?.brief.status).toBe("failed");
   });
 });

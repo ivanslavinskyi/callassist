@@ -1,36 +1,50 @@
 import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
 import {
   approvalDecisionSchema,
   createCallBriefInputSchema,
   type CallEvent
 } from "@callassist/contracts";
 import Fastify from "fastify";
-import type { CallService } from "./call-service";
+import { CallServiceError, type CallService } from "./call-service";
 import { CallRepositoryError } from "./storage/call-repository";
+import {
+  isTwilioCallStatus,
+  type TwilioCallStatus
+} from "./telephony/telephony-provider";
+import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
 type BuildAppOptions = {
   service: CallService;
   logger?: boolean;
+  twilioProvider?: TwilioTelephonyProvider;
   webOrigin?: string;
 };
 
 export function buildApp({
   service,
   logger = true,
+  twilioProvider,
   webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000"
 }: BuildAppOptions) {
   const app = Fastify({ logger });
 
   void app.register(cors, { origin: webOrigin });
+  void app.register(formbody);
 
   app.get("/health", async (_request, reply) => {
     try {
       await service.ping();
-      return { status: "ok", mode: service.repository.mode };
+      return {
+        status: "ok",
+        mode: service.repository.mode,
+        telephony: service.telephonyProvider.mode
+      };
     } catch {
       return reply.status(503).send({
         status: "unavailable",
-        mode: service.repository.mode
+        mode: service.repository.mode,
+        telephony: service.telephonyProvider.mode
       });
     }
   });
@@ -57,6 +71,54 @@ export function buildApp({
       return snapshot;
     }
   );
+
+  if (twilioProvider) {
+    app.post<{ Querystring: { callBriefId?: string } }>(
+      "/webhooks/twilio/voice",
+      async (request, reply) => {
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+
+        const callBriefId = request.query.callBriefId;
+        if (!callBriefId) {
+          return reply.status(400).send({ error: "CALL_BRIEF_ID_REQUIRED" });
+        }
+        const snapshot = await service.get(callBriefId);
+        if (!snapshot) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+
+        return reply
+          .type("text/xml; charset=utf-8")
+          .send(twilioProvider.createVoiceTwiml(snapshot.brief));
+      }
+    );
+
+    app.post<{ Querystring: { callBriefId?: string } }>(
+      "/webhooks/twilio/status",
+      async (request, reply) => {
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+
+        const providerCallId = parameters.CallSid;
+        const status = parameters.CallStatus;
+        if (!providerCallId || !status || !isTwilioCallStatus(status)) {
+          return reply.status(400).send({ error: "INVALID_TWILIO_STATUS" });
+        }
+
+        await service.handleTwilioStatus(
+          providerCallId,
+          status as TwilioCallStatus,
+          request.query.callBriefId
+        );
+        return reply.status(204).send();
+      }
+    );
+  }
 
   app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/start",
@@ -138,10 +200,33 @@ export function buildApp({
   return app;
 }
 
+function normalizeTwilioParameters(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  const parameters: Record<string, string> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (typeof value === "string") parameters[key] = value;
+  }
+  return parameters;
+}
+
+function isValidTwilioWebhook(
+  request: { headers: Record<string, unknown>; raw: { url?: string } },
+  provider: TwilioTelephonyProvider,
+  parameters: Record<string, string>
+) {
+  const signature = request.headers["x-twilio-signature"];
+  if (typeof signature !== "string" || !request.raw.url) return false;
+  return provider.validateWebhook(signature, request.raw.url, parameters);
+}
+
 function sendRepositoryError(
   reply: { status(code: number): { send(payload: unknown): unknown } },
   error: unknown
 ) {
+  if (error instanceof CallServiceError) {
+    return reply.status(502).send({ error: error.code });
+  }
+
   if (error instanceof CallRepositoryError) {
     const status = error.code === "CALL_NOT_FOUND" ? 404 : 409;
     return reply.status(status).send({ error: error.code });

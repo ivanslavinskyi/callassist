@@ -13,8 +13,11 @@ import postgres from "postgres";
 import { decryptJson, encryptJson } from "../security/encryption";
 import {
   CallRepositoryError,
+  shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
-  type CallRepository
+  type CallAttemptRecord,
+  type CallRepository,
+  type StartAttemptInput
 } from "./call-repository";
 
 type DatabaseDate = Date | string;
@@ -50,6 +53,18 @@ type ApprovalRow = {
   proposedSpeech: string;
   status: ApprovalRequest["status"];
   createdAt: DatabaseDate;
+};
+
+type CallAttemptRow = {
+  id: string;
+  callBriefId: string;
+  provider: CallAttemptRecord["provider"];
+  providerCallId: string | null;
+  status: CallBrief["status"];
+  providerStatus: string | null;
+  startedAt: DatabaseDate;
+  endedAt: DatabaseDate | null;
+  failureReason: string | null;
 };
 
 const terminalStatuses = new Set<CallBrief["status"]>([
@@ -170,6 +185,181 @@ export class PostgresCallRepository implements CallRepository {
         ? this.#mapApproval(approvalRows[0])
         : null
     };
+  }
+
+  async getLatestAttempt(id: string) {
+    const [call] = await this.#sql`SELECT id FROM call_briefs WHERE id = ${id}`;
+    if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const [row] = await this.#sql<CallAttemptRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        provider,
+        provider_call_id AS "providerCallId",
+        status,
+        provider_status AS "providerStatus",
+        started_at AS "startedAt",
+        ended_at AS "endedAt",
+        failure_reason AS "failureReason"
+      FROM call_attempts
+      WHERE call_brief_id = ${id}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    return row ? this.#mapAttempt(row) : null;
+  }
+
+  async startAttempt(id: string, input: StartAttemptInput) {
+    const now = new Date();
+    const attemptId = randomUUID();
+    await this.#sql.begin(async (transaction) => {
+      const updated = await transaction`
+        UPDATE call_briefs
+        SET status = 'dialing', updated_at = ${now}
+        WHERE id = ${id} AND status = 'ready'
+        RETURNING id
+      `;
+      if (updated.count === 0) {
+        const existing = await transaction`
+          SELECT id FROM call_briefs WHERE id = ${id}
+        `;
+        if (existing.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
+        throw new CallRepositoryError("CALL_NOT_READY");
+      }
+
+      await transaction`
+        INSERT INTO call_attempts (
+          id,
+          call_brief_id,
+          provider,
+          provider_call_id,
+          status,
+          provider_status,
+          started_at,
+          created_at
+        ) VALUES (
+          ${attemptId},
+          ${id},
+          ${input.provider},
+          ${null},
+          'dialing',
+          ${null},
+          ${now},
+          ${now}
+        )
+      `;
+      await this.#audit(transaction, id, "call.attempt_started", {
+        provider: input.provider
+      });
+      await this.#audit(transaction, id, "call.status_changed", {
+        status: "dialing"
+      });
+    });
+    const attempt = await this.getLatestAttempt(id);
+    if (!attempt || attempt.id !== attemptId) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    return { attempt, snapshot: await this.#require(id) };
+  }
+
+  async attachProviderCall(
+    attemptId: string,
+    providerCallId: string,
+    providerStatus: string
+  ) {
+    const [row] = await this.#sql<{ callId: string }[]>`
+      UPDATE call_attempts
+      SET
+        provider_call_id = ${providerCallId},
+        provider_status = CASE
+          WHEN provider_call_id IS NULL THEN ${providerStatus}
+          ELSE provider_status
+        END
+      WHERE id = ${attemptId}
+        AND (provider_call_id IS NULL OR provider_call_id = ${providerCallId})
+      RETURNING call_brief_id AS "callId"
+    `;
+    if (!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return this.#require(row.callId);
+  }
+
+  async applyProviderStatus(
+    providerCallId: string,
+    providerStatus: string,
+    callStatus: CallBrief["status"],
+    callBriefId?: string
+  ) {
+    const now = new Date();
+    const callId = await this.#sql.begin(async (transaction) => {
+      const [row] = await transaction<
+        {
+          attemptId: string;
+          callId: string;
+          currentStatus: CallBrief["status"];
+        }[]
+      >`
+        SELECT
+          call_attempts.id AS "attemptId",
+          call_briefs.id AS "callId",
+          call_briefs.status AS "currentStatus"
+        FROM call_attempts
+        JOIN call_briefs ON call_briefs.id = call_attempts.call_brief_id
+        WHERE call_attempts.provider_call_id = ${providerCallId}
+          OR (
+            call_attempts.provider_call_id IS NULL
+            AND call_attempts.call_brief_id::text = ${callBriefId ?? ""}
+          )
+        ORDER BY (call_attempts.provider_call_id = ${providerCallId}) DESC,
+          call_attempts.created_at DESC
+        LIMIT 1
+        FOR UPDATE OF call_attempts, call_briefs
+      `;
+      if (!row) return null;
+
+      const terminal = terminalStatuses.has(callStatus);
+      const applyCallStatus = shouldApplyProviderCallStatus(
+        row.currentStatus,
+        callStatus
+      );
+      await transaction`
+        UPDATE call_attempts
+        SET
+          provider_call_id = COALESCE(provider_call_id, ${providerCallId}),
+          provider_status = ${providerStatus},
+          status = CASE WHEN ${applyCallStatus} THEN ${callStatus} ELSE status END,
+          ended_at = CASE
+            WHEN ${terminal} THEN COALESCE(ended_at, ${now})
+            ELSE ended_at
+          END,
+          failure_reason = CASE
+            WHEN ${callStatus === "failed"}
+              THEN COALESCE(failure_reason, ${providerStatus})
+            ELSE failure_reason
+          END
+        WHERE id = ${row.attemptId}
+      `;
+
+      if (applyCallStatus) {
+        await transaction`
+          UPDATE call_briefs
+          SET status = ${callStatus}, updated_at = ${now}
+          WHERE id = ${row.callId}
+        `;
+      }
+      await this.#audit(transaction, row.callId, "call.provider_status", {
+        providerCallId,
+        providerStatus
+      });
+      if (row.currentStatus !== callStatus && applyCallStatus) {
+        await this.#audit(transaction, row.callId, "call.status_changed", {
+          status: callStatus
+        });
+      }
+      return row.callId;
+    });
+
+    if (!callId) return null;
+    return { callId, snapshot: await this.#require(callId) };
   }
 
   async updateStatus(id: string, status: CallBrief["status"]) {
@@ -448,6 +638,14 @@ export class PostgresCallRepository implements CallRepository {
     };
   }
 
+  #mapAttempt(row: CallAttemptRow): CallAttemptRecord {
+    return {
+      ...row,
+      startedAt: toIso(row.startedAt),
+      endedAt: row.endedAt ? toIso(row.endedAt) : null
+    };
+  }
+
   async #require(id: string) {
     const snapshot = await this.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -460,17 +658,6 @@ export class PostgresCallRepository implements CallRepository {
     status: CallBrief["status"],
     now: Date
   ) {
-    if (status === "dialing") {
-      await transaction`
-        INSERT INTO call_attempts (
-          id, call_brief_id, provider, status, started_at, created_at
-        ) VALUES (
-          ${randomUUID()}, ${callBriefId}, 'mock', ${status}, ${now}, ${now}
-        )
-      `;
-      return;
-    }
-
     const endedAt = terminalStatuses.has(status) ? now : null;
     await transaction`
       UPDATE call_attempts

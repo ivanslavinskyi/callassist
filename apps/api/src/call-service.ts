@@ -11,8 +11,24 @@ import {
   CallRepositoryError,
   type CallRepository
 } from "./storage/call-repository";
+import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
+import {
+  mapTwilioStatusToCallStatus,
+  type TelephonyProvider,
+  type TwilioCallStatus
+} from "./telephony/telephony-provider";
 
 type Subscriber = (event: CallEvent) => void;
+
+export class CallServiceError extends Error {
+  constructor(
+    readonly code: "TELEPHONY_START_FAILED" | "TELEPHONY_STOP_FAILED",
+    options?: { cause?: unknown }
+  ) {
+    super(code, options);
+    this.name = "CallServiceError";
+  }
+}
 
 export class CallService {
   readonly #subscribers = new Map<string, Set<Subscriber>>();
@@ -21,6 +37,7 @@ export class CallService {
 
   constructor(
     readonly repository: CallRepository,
+    readonly telephonyProvider: TelephonyProvider = new MockTelephonyProvider(),
     onBackgroundError: (error: unknown) => void = console.error
   ) {
     this.#onBackgroundError = onBackgroundError;
@@ -58,33 +75,107 @@ export class CallService {
     const current = await this.#require(id);
     if (current.brief.status !== "ready") return current;
 
-    const snapshot = await this.#updateStatus(id, "dialing");
-    this.#schedule(id, 900, () => this.#updateStatus(id, "in_progress"));
-    this.#schedule(id, 1_900, async () => {
-      const call = await this.#require(id);
-      await this.#addTranscript(
-        id,
-        "assistant",
-        getMockCopy(call.brief.locale).greeting
-      );
+    const reserved = await this.repository.startAttempt(id, {
+      provider: this.telephonyProvider.mode
     });
-    this.#schedule(id, 3_800, async () => {
-      const call = await this.#require(id);
-      await this.#addTranscript(
-        id,
-        "recipient",
-        getMockCopy(call.brief.locale).recipientReply
-      );
+    this.#publish(id, {
+      type: "call.updated",
+      brief: reserved.snapshot.brief
     });
-    this.#schedule(id, 5_200, () => this.#requestApproval(id));
+
+    let started;
+    try {
+      started = await this.telephonyProvider.startCall(current.brief);
+    } catch (error) {
+      await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
+      this.#onBackgroundError(error);
+      throw new CallServiceError("TELEPHONY_START_FAILED", { cause: error });
+    }
+
+    let snapshot: CallSnapshot;
+    try {
+      if (!started.providerCallId) {
+        throw new CallServiceError("TELEPHONY_START_FAILED");
+      }
+      snapshot = await this.repository.attachProviderCall(
+        reserved.attempt.id,
+        started.providerCallId,
+        started.providerStatus
+      );
+    } catch (error) {
+      if (started.providerCallId) {
+        await this.telephonyProvider
+          .stopCall(started.providerCallId)
+          .catch(this.#onBackgroundError);
+      }
+      await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
+      throw error;
+    }
+
+    if (["completed", "failed", "stopped"].includes(snapshot.brief.status)) {
+      await this.telephonyProvider
+        .stopCall(started.providerCallId)
+        .catch(this.#onBackgroundError);
+      return snapshot;
+    }
+
+    if (this.telephonyProvider.mode === "mock") {
+      this.#schedule(id, 900, () => this.#updateStatus(id, "in_progress"));
+      this.#schedule(id, 1_900, async () => {
+        const call = await this.#require(id);
+        await this.#addTranscript(
+          id,
+          "assistant",
+          getMockCopy(call.brief.locale).greeting
+        );
+      });
+      this.#schedule(id, 3_800, async () => {
+        const call = await this.#require(id);
+        await this.#addTranscript(
+          id,
+          "recipient",
+          getMockCopy(call.brief.locale).recipientReply
+        );
+      });
+      this.#schedule(id, 5_200, () => this.#requestApproval(id));
+    }
     return snapshot;
   }
 
   async stop(id: string) {
     this.#clearTimers(id);
+    const attempt = await this.repository.getLatestAttempt(id);
+    if (attempt?.providerCallId) {
+      try {
+        await this.telephonyProvider.stopCall(attempt.providerCallId);
+      } catch (error) {
+        this.#onBackgroundError(error);
+        throw new CallServiceError("TELEPHONY_STOP_FAILED", { cause: error });
+      }
+    }
     const snapshot = await this.repository.stop(id);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
+  }
+
+  async handleTwilioStatus(
+    providerCallId: string,
+    status: TwilioCallStatus,
+    callBriefId?: string
+  ) {
+    const result = await this.repository.applyProviderStatus(
+      providerCallId,
+      status,
+      mapTwilioStatusToCallStatus(status),
+      callBriefId
+    );
+    if (result) {
+      this.#publish(result.callId, {
+        type: "call.updated",
+        brief: result.snapshot.brief
+      });
+    }
+    return result?.snapshot ?? null;
   }
 
   async resolveApproval(
@@ -154,6 +245,14 @@ export class CallService {
     const snapshot = await this.repository.updateStatus(id, status);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
+  }
+
+  async #markFailedIfActive(id: string) {
+    const snapshot = await this.#require(id);
+    if (["completed", "failed", "stopped"].includes(snapshot.brief.status)) {
+      return snapshot;
+    }
+    return this.#updateStatus(id, "failed");
   }
 
   #schedule(id: string, delay: number, operation: () => Promise<unknown>) {

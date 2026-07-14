@@ -31,8 +31,27 @@ describeWithDatabase("PostgresCallRepository", () => {
       allowedFacts: ["email: private@example.com"]
     });
 
-    await repository.updateStatus(brief.id, "dialing");
-    await repository.updateStatus(brief.id, "in_progress");
+    const started = await repository.startAttempt(brief.id, {
+      provider: "mock"
+    });
+    const providerCallId = `mock-${brief.id}`;
+    await repository.attachProviderCall(
+      started.attempt.id,
+      providerCallId,
+      "dialing"
+    );
+    await repository.applyProviderStatus(
+      providerCallId,
+      "in-progress",
+      "in_progress",
+      brief.id
+    );
+    await repository.applyProviderStatus(
+      providerCallId,
+      "ringing",
+      "dialing",
+      brief.id
+    );
     await repository.addTranscript(
       brief.id,
       "assistant",
@@ -66,6 +85,11 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(snapshot?.brief.allowedFacts).toEqual(["email: private@example.com"]);
     expect(snapshot?.transcript).toHaveLength(1);
     expect(snapshot?.pendingApproval).toBeNull();
+    const attempt = await repository.getLatestAttempt(brief.id);
+    expect(attempt?.provider).toBe("mock");
+    expect(attempt?.providerCallId).toBe(providerCallId);
+    expect(attempt?.status).toBe("in_progress");
+    expect(attempt?.providerStatus).toBe("ringing");
     expect(resolved.approval.status).toBe("approved");
     expect(resolved.snapshot.brief.status).toBe("in_progress");
 
