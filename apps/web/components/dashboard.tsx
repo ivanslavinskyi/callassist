@@ -94,8 +94,8 @@ export function Dashboard() {
             <div className="privacy-note">
               <span aria-hidden="true">⌁</span>
               <p>
-                <strong>Аудиозапись выключена.</strong> Сейчас работает только локальная
-                mock-сессия без Twilio и OpenAI.
+                <strong>Аудиозапись выключена.</strong> В реальном звонке аудиопоток
+                подключается к ИИ только после согласия собеседника.
               </p>
             </div>
           </aside>

@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
+import websocket from "@fastify/websocket";
 import {
   approvalDecisionSchema,
   createCallBriefInputSchema,
@@ -7,6 +8,7 @@ import {
 } from "@callassist/contracts";
 import Fastify from "fastify";
 import { CallServiceError, type CallService } from "./call-service";
+import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import { CallRepositoryError } from "./storage/call-repository";
 import {
   isTwilioCallStatus,
@@ -23,6 +25,7 @@ type BuildAppOptions = {
 type BuildWebhookAppOptions = {
   service: CallService;
   twilioProvider: TwilioTelephonyProvider;
+  realtimeBridge: OpenAIRealtimeBridge;
   logger?: boolean;
 };
 
@@ -172,56 +175,103 @@ function resolveWebOrigins(value?: string | string[]) {
 export function buildWebhookApp({
   service,
   twilioProvider,
+  realtimeBridge,
   logger = true
 }: BuildWebhookAppOptions) {
   const app = Fastify({ logger });
-  void app.register(formbody);
+  void app.register(async (routes) => {
+    await routes.register(websocket);
+    await routes.register(formbody);
 
-  app.post<{ Querystring: { callBriefId?: string } }>(
-    "/webhooks/twilio/voice",
-    async (request, reply) => {
-      const parameters = normalizeTwilioParameters(request.body);
-      if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
-        return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+    routes.post<{ Querystring: { callBriefId?: string } }>(
+      "/webhooks/twilio/voice",
+      async (request, reply) => {
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+
+        const callBriefId = request.query.callBriefId;
+        if (!callBriefId) {
+          return reply.status(400).send({ error: "CALL_BRIEF_ID_REQUIRED" });
+        }
+        const snapshot = await service.get(callBriefId);
+        if (!snapshot) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+
+        return reply
+          .type("text/xml; charset=utf-8")
+          .send(twilioProvider.createVoiceTwiml(snapshot.brief));
       }
+    );
 
-      const callBriefId = request.query.callBriefId;
-      if (!callBriefId) {
-        return reply.status(400).send({ error: "CALL_BRIEF_ID_REQUIRED" });
+    routes.post<{ Querystring: { callBriefId?: string } }>(
+      "/webhooks/twilio/consent",
+      async (request, reply) => {
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+
+        const callBriefId = request.query.callBriefId;
+        if (!callBriefId) {
+          return reply.status(400).send({ error: "CALL_BRIEF_ID_REQUIRED" });
+        }
+        const snapshot = await service.get(callBriefId);
+        if (!snapshot) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+
+        return reply
+          .type("text/xml; charset=utf-8")
+          .send(
+            twilioProvider.createConsentTwiml(
+              snapshot.brief,
+              parameters.Digits === "1"
+            )
+          );
       }
-      const snapshot = await service.get(callBriefId);
-      if (!snapshot) {
-        return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+    );
+
+    routes.get(
+      "/webhooks/twilio/media",
+      {
+        websocket: true,
+        preValidation: (request, reply, done) => {
+          if (!isValidTwilioWebhook(request, twilioProvider, {})) {
+            void reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+            return;
+          }
+          done();
+        }
+      },
+      (socket) => realtimeBridge.handleTwilioSocket(socket)
+    );
+
+    routes.post<{ Querystring: { callBriefId?: string } }>(
+      "/webhooks/twilio/status",
+      async (request, reply) => {
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+
+        const providerCallId = parameters.CallSid;
+        const status = parameters.CallStatus;
+        if (!providerCallId || !status || !isTwilioCallStatus(status)) {
+          return reply.status(400).send({ error: "INVALID_TWILIO_STATUS" });
+        }
+
+        await service.handleTwilioStatus(
+          providerCallId,
+          status as TwilioCallStatus,
+          request.query.callBriefId
+        );
+        return reply.status(204).send();
       }
-
-      return reply
-        .type("text/xml; charset=utf-8")
-        .send(twilioProvider.createVoiceTwiml(snapshot.brief));
-    }
-  );
-
-  app.post<{ Querystring: { callBriefId?: string } }>(
-    "/webhooks/twilio/status",
-    async (request, reply) => {
-      const parameters = normalizeTwilioParameters(request.body);
-      if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
-        return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
-      }
-
-      const providerCallId = parameters.CallSid;
-      const status = parameters.CallStatus;
-      if (!providerCallId || !status || !isTwilioCallStatus(status)) {
-        return reply.status(400).send({ error: "INVALID_TWILIO_STATUS" });
-      }
-
-      await service.handleTwilioStatus(
-        providerCallId,
-        status as TwilioCallStatus,
-        request.query.callBriefId
-      );
-      return reply.status(204).send();
-    }
-  );
+    );
+  });
 
   return app;
 }

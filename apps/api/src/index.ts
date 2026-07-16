@@ -1,6 +1,7 @@
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
 import { CallService } from "./call-service";
+import { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import { createCallRepositoryFromEnv } from "./storage/create-call-repository";
 import { createTelephonyProviderFromEnv } from "./telephony/create-telephony-provider";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
@@ -11,9 +12,26 @@ const service = new CallService(repository, telephonyProvider, (error) => {
   app.log.error(error, "Background call operation failed");
 });
 const app = buildApp({ service });
-const webhookApp =
+const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
-    ? buildWebhookApp({ service, twilioProvider: telephonyProvider })
+    ? new OpenAIRealtimeBridge({
+        apiKey: requireEnvironmentVariable("OPENAI_API_KEY"),
+        service,
+        validateStreamToken: (callBriefId, token) =>
+          telephonyProvider.validateMediaStreamToken(callBriefId, token),
+        model: process.env.OPENAI_REALTIME_MODEL,
+        transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL,
+        voice: process.env.OPENAI_REALTIME_VOICE,
+        logger: app.log
+      })
+    : null;
+const webhookApp =
+  telephonyProvider instanceof TwilioTelephonyProvider && realtimeBridge
+    ? buildWebhookApp({
+        service,
+        twilioProvider: telephonyProvider,
+        realtimeBridge
+      })
     : null;
 if (webhookApp) {
   app.addHook("onClose", async () => {
@@ -35,4 +53,10 @@ if (webhookApp) {
 
 if (recoveredCalls > 0) {
   app.log.warn({ recoveredCalls }, "Interrupted calls were marked as failed");
+}
+
+function requireEnvironmentVariable(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required when TELEPHONY_DRIVER=twilio`);
+  return value;
 }

@@ -178,6 +178,27 @@ export class CallService {
     return result?.snapshot ?? null;
   }
 
+  async addTranscript(
+    id: string,
+    role: TranscriptSegment["role"],
+    text: string
+  ) {
+    const normalized = text.trim();
+    if (!normalized) return this.#require(id);
+    return this.#addTranscript(id, role, normalized);
+  }
+
+  publishTranscriptDelta(
+    id: string,
+    key: string,
+    role: "assistant" | "recipient",
+    delta: string,
+    locale: CallBrief["locale"]
+  ) {
+    if (!delta) return;
+    this.#publish(id, { type: "transcript.delta", key, role, delta, locale });
+  }
+
   async resolveApproval(
     id: string,
     approvalId: string,

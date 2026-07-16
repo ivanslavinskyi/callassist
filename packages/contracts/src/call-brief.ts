@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+export const DEFAULT_AGENT_NAME = "Sebastian";
+export const DEFAULT_REPRESENTED_PERSON = "Ivan Slavinskyi";
+export const DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE =
+  "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt und nutzt mich deshalb, um Gespräche in seinem Auftrag zu führen.";
+
 export const SUPPORTED_CALL_LANGUAGES = [
   { locale: "de-CH", label: "Deutsch (Schweiz)", shortLabel: "DE-CH" },
   { locale: "de-DE", label: "Deutsch (Deutschland)", shortLabel: "DE" },
@@ -37,6 +42,22 @@ const callBriefInputBaseSchema = z.object({
     .trim()
     .regex(/^\+[1-9]\d{7,14}$/, "Используйте международный формат, например +41710000000"),
   objective: z.string().trim().min(10, "Опишите цель звонка подробнее"),
+  agentName: z
+    .string()
+    .trim()
+    .min(2, "Укажите имя ассистента")
+    .default(DEFAULT_AGENT_NAME),
+  representedPerson: z
+    .string()
+    .trim()
+    .min(2, "Укажите, кого представляет ассистент")
+    .default(DEFAULT_REPRESENTED_PERSON),
+  speechImpairmentDisclosure: z
+    .string()
+    .trim()
+    .min(10, "Опишите причину использования ассистента")
+    .default(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE),
+  context: z.string().trim().default(""),
   locale: callLocaleSchema,
   allowLanguageSwitch: z.boolean().default(false),
   fallbackLocale: callLocaleSchema.optional(),

@@ -1,7 +1,9 @@
 import twilio from "twilio";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 import { buildWebhookApp } from "./app";
 import { CallService } from "./call-service";
+import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
@@ -31,14 +33,21 @@ function createHarness() {
     new InMemoryCallRepository(),
     provider
   );
+  const handleTwilioSocket = vi.fn(
+    (socket: { close: () => void; on: (...args: unknown[]) => unknown }) =>
+      socket.close()
+  );
   const app = buildWebhookApp({
     service,
     twilioProvider: provider,
+    realtimeBridge: {
+      handleTwilioSocket
+    } as unknown as OpenAIRealtimeBridge,
     logger: false
   });
   apps.push(app);
   services.push(service);
-  return { app, service };
+  return { app, handleTwilioSocket, service };
 }
 
 async function createBrief(service: CallService) {
@@ -74,6 +83,26 @@ describe("Twilio webhooks", () => {
     expect(response.statusCode).toBe(403);
   });
 
+  it("upgrades a signed media request to a WebSocket", async () => {
+    const { app, handleTwilioSocket } = createHarness();
+    const path = "/webhooks/twilio/media";
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      {}
+    );
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(`${address.replace("http:", "ws:")}${path}`, {
+      headers: { "x-twilio-signature": signature }
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("close", () => resolve());
+      socket.once("error", reject);
+    });
+    expect(handleTwilioSocket).toHaveBeenCalledOnce();
+    expect(typeof handleTwilioSocket.mock.calls[0]?.[0].on).toBe("function");
+  });
+
   it("returns localized TwiML and applies signed status callbacks", async () => {
     const { app, service } = createHarness();
     const brief = await createBrief(service);
@@ -100,6 +129,28 @@ describe("Twilio webhooks", () => {
     expect(voiceResponse.statusCode).toBe(200);
     expect(voiceResponse.headers["content-type"]).toContain("text/xml");
     expect(voiceResponse.body).toContain('<Say language="de-DE">');
+    expect(voiceResponse.body).toContain("Sprechbehinderung");
+    expect(voiceResponse.body).toContain("<Gather");
+
+    const consentParameters = { CallSid: "CA123", Digits: "1" };
+    const consentPath = `/webhooks/twilio/consent?callBriefId=${brief.id}`;
+    const consentSignature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${consentPath}`,
+      consentParameters
+    );
+    const consentResponse = await app.inject({
+      method: "POST",
+      url: consentPath,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-twilio-signature": consentSignature
+      },
+      payload: new URLSearchParams(consentParameters).toString()
+    });
+    expect(consentResponse.statusCode).toBe(200);
+    expect(consentResponse.body).toContain("<Connect>");
+    expect(consentResponse.body).toContain("wss://calls.example.test");
 
     const statusParameters = {
       CallSid: "CA123",

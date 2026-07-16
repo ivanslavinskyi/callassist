@@ -2,6 +2,7 @@
 
 import {
   SUPPORTED_CALL_LANGUAGES,
+  type CallEvent,
   type CallBriefStatus,
   type CallSnapshot
 } from "@callassist/contracts";
@@ -37,6 +38,12 @@ export function LiveCall({ callId }: { callId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [partialTranscript, setPartialTranscript] = useState<
+    Record<
+      string,
+      { role: "assistant" | "recipient"; text: string; locale: string }
+    >
+  >({});
 
   const refresh = useCallback(async () => {
     try {
@@ -52,7 +59,37 @@ export function LiveCall({ callId }: { callId: string }) {
   useEffect(() => {
     void refresh();
     const events = new EventSource(callEventsUrl(callId));
-    events.onmessage = () => void refresh();
+    events.onmessage = (message) => {
+      let event: CallEvent;
+      try {
+        event = JSON.parse(message.data) as CallEvent;
+      } catch {
+        return;
+      }
+
+      if (event.type === "transcript.delta") {
+        setPartialTranscript((current) => ({
+          ...current,
+          [event.key]: {
+            role: event.role,
+            locale: event.locale,
+            text: `${current[event.key]?.text ?? ""}${event.delta}`
+          }
+        }));
+        return;
+      }
+
+      if (event.type === "transcript.added") {
+        setPartialTranscript((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(
+              ([, partial]) => partial.role !== event.segment.role
+            )
+          )
+        );
+      }
+      void refresh();
+    };
     events.onerror = () => setError("Live-канал переподключается…");
     return () => events.close();
   }, [callId, refresh]);
@@ -132,7 +169,7 @@ export function LiveCall({ callId }: { callId: string }) {
                 type="button"
               >
                 <span className="button-signal" aria-hidden="true">◖</span>
-                Запустить симуляцию
+                Начать звонок
               </button>
             ) : null}
             {isActive ? (
@@ -163,16 +200,18 @@ export function LiveCall({ callId }: { callId: string }) {
             </div>
 
             <div className="transcript-list" aria-live="polite">
-              {transcript.length === 0 ? (
+              {transcript.length === 0 &&
+              Object.keys(partialTranscript).length === 0 ? (
                 <div className="transcript-empty">
                   <span className="wave-placeholder" aria-hidden="true">
                     <i /><i /><i /><i /><i />
                   </span>
                   <strong>Транскрипт появится здесь</strong>
-                  <p>Запустите симуляцию — mock-диалог начнётся через несколько секунд.</p>
+                  <p>После согласия собеседника реплики будут появляться здесь в реальном времени.</p>
                 </div>
               ) : (
-                transcript.map((segment) => (
+                <>
+                  {transcript.map((segment) => (
                   <article className={`transcript-line role-${segment.role}`} key={segment.id}>
                     <div className="speaker-mark">
                       {segment.role === "assistant" ? "AI" : "GE"}
@@ -194,7 +233,30 @@ export function LiveCall({ callId }: { callId: string }) {
                       <span className="locale-tag">{segment.locale}</span>
                     </div>
                   </article>
-                ))
+                  ))}
+                  {Object.entries(partialTranscript).map(([key, segment]) => (
+                    <article
+                      className={`transcript-line role-${segment.role}`}
+                      key={key}
+                    >
+                      <div className="speaker-mark">
+                        {segment.role === "assistant" ? "AI" : "GE"}
+                      </div>
+                      <div>
+                        <div className="speaker-row">
+                          <strong>
+                            {segment.role === "assistant"
+                              ? brief.agentName
+                              : brief.recipientName}
+                          </strong>
+                          <time>live</time>
+                        </div>
+                        <p>{segment.text}…</p>
+                        <span className="locale-tag">{segment.locale}</span>
+                      </div>
+                    </article>
+                  ))}
+                </>
               )}
             </div>
           </section>
@@ -257,7 +319,7 @@ export function LiveCall({ callId }: { callId: string }) {
                   <dt>Смена языка</dt>
                   <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : "Запрещена"}</dd>
                 </div>
-                <div><dt>Режим</dt><dd>Симуляция</dd></div>
+                <div><dt>Ассистент</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>
           </aside>

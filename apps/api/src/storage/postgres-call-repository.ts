@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
   createCallBriefInputSchema,
   type ApprovalDecision,
   type ApprovalRequest,
@@ -27,6 +28,11 @@ type CallBriefRow = {
   recipientName: string;
   phoneNumber: string;
   objective: string;
+  agentName: string;
+  representedPerson: string;
+  speechImpairmentDisclosure: string | null;
+  speechImpairmentDisclosureCiphertext: string | null;
+  contextCiphertext: string | null;
   locale: CallBrief["locale"];
   allowLanguageSwitch: boolean;
   fallbackLocale: CallBrief["fallbackLocale"];
@@ -103,6 +109,11 @@ export class PostgresCallRepository implements CallRepository {
     const id = randomUUID();
     const now = new Date();
     const encryptedFacts = encryptJson(parsed.allowedFacts, this.#encryptionKey);
+    const encryptedContext = encryptJson(parsed.context, this.#encryptionKey);
+    const encryptedDisclosure = encryptJson(
+      parsed.speechImpairmentDisclosure,
+      this.#encryptionKey
+    );
 
     await this.#sql.begin(async (transaction) => {
       await transaction`
@@ -111,6 +122,11 @@ export class PostgresCallRepository implements CallRepository {
           recipient_name,
           phone_number,
           objective,
+          agent_name,
+          represented_person,
+          speech_impairment_disclosure,
+          speech_impairment_disclosure_ciphertext,
+          context_ciphertext,
           locale,
           allow_language_switch,
           fallback_locale,
@@ -123,6 +139,11 @@ export class PostgresCallRepository implements CallRepository {
           ${parsed.recipientName},
           ${parsed.phoneNumber},
           ${parsed.objective},
+          ${parsed.agentName},
+          ${parsed.representedPerson},
+          ${null},
+          ${encryptedDisclosure},
+          ${encryptedContext},
           ${parsed.locale},
           ${parsed.allowLanguageSwitch},
           ${parsed.fallbackLocale ?? null},
@@ -594,6 +615,11 @@ export class PostgresCallRepository implements CallRepository {
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
         objective,
+        agent_name AS "agentName",
+        represented_person AS "representedPerson",
+        speech_impairment_disclosure AS "speechImpairmentDisclosure",
+        speech_impairment_disclosure_ciphertext AS "speechImpairmentDisclosureCiphertext",
+        context_ciphertext AS "contextCiphertext",
         locale,
         allow_language_switch AS "allowLanguageSwitch",
         fallback_locale AS "fallbackLocale",
@@ -611,6 +637,18 @@ export class PostgresCallRepository implements CallRepository {
       recipientName: row.recipientName,
       phoneNumber: row.phoneNumber,
       objective: row.objective,
+      agentName: row.agentName,
+      representedPerson: row.representedPerson,
+      speechImpairmentDisclosure: row.speechImpairmentDisclosureCiphertext
+        ? decryptJson<string>(
+            row.speechImpairmentDisclosureCiphertext,
+            this.#encryptionKey
+          )
+        : row.speechImpairmentDisclosure ??
+          DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
+      context: row.contextCiphertext
+        ? decryptJson<string>(row.contextCiphertext, this.#encryptionKey)
+        : "",
       locale: row.locale,
       allowLanguageSwitch: row.allowLanguageSwitch,
       ...(row.fallbackLocale ? { fallbackLocale: row.fallbackLocale } : {}),

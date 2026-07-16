@@ -12,7 +12,12 @@ const validBrief = {
 
 describe("createCallBriefInputSchema", () => {
   it("accepts a supported Swiss German call brief", () => {
-    expect(createCallBriefInputSchema.safeParse(validBrief).success).toBe(true);
+    const result = createCallBriefInputSchema.safeParse(validBrief);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agentName).toBe("Sebastian");
+      expect(result.data.speechImpairmentDisclosure).toContain("Sprechbehinderung");
+    }
   });
 
   it("requires a fallback locale when language switching is enabled", () => {

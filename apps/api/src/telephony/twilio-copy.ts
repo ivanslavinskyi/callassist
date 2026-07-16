@@ -1,37 +1,57 @@
-import type { CallLocale } from "@callassist/contracts";
+import type { CallBrief, CallLocale } from "@callassist/contracts";
 
-type TwilioGreeting = {
+type TwilioCopy = {
   language: "de-DE" | "en-GB" | "en-US" | "fr-FR" | "it-IT";
-  text: string;
+  introduction: (brief: CallBrief) => string;
+  noConsent: string;
+  thanks: string;
 };
 
-const greetings: Record<CallLocale, TwilioGreeting> = {
+const copy: Record<CallLocale, TwilioCopy> = {
   "de-CH": {
     language: "de-DE",
-    text: "Guten Tag. Ich bin der digitale Assistent von Ivan. Dieser Testanruf bestätigt die Telefonverbindung. Der Gesprächsassistent wird im nächsten Schritt aktiviert. Auf Wiederhören."
+    introduction: (brief) =>
+      `Guten Tag. Mein Name ist ${brief.agentName}. Ich bin ein KI-Assistent von ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} Dieses Gespräch wird live transkribiert, aber nicht als Audio aufgezeichnet. Wenn Sie damit einverstanden sind, drücken Sie bitte die 1.`,
+    noConsent: "Ohne Ihre Zustimmung kann ich das Gespräch nicht fortsetzen. Auf Wiederhören.",
+    thanks: "Vielen Dank."
   },
   "de-DE": {
     language: "de-DE",
-    text: "Guten Tag. Ich bin der digitale Assistent von Ivan. Dieser Testanruf bestätigt die Telefonverbindung. Der Gesprächsassistent wird im nächsten Schritt aktiviert. Auf Wiederhören."
+    introduction: (brief) =>
+      `Guten Tag. Mein Name ist ${brief.agentName}. Ich bin ein KI-Assistent von ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} Dieses Gespräch wird live transkribiert, aber nicht als Audio aufgezeichnet. Wenn Sie damit einverstanden sind, drücken Sie bitte die 1.`,
+    noConsent: "Ohne Ihre Zustimmung kann ich das Gespräch nicht fortsetzen. Auf Wiederhören.",
+    thanks: "Vielen Dank."
   },
   "fr-CH": {
     language: "fr-FR",
-    text: "Bonjour. Je suis l’assistant numérique d’Ivan. Cet appel de test confirme la connexion téléphonique. L’assistant conversationnel sera activé à l’étape suivante. Au revoir."
+    introduction: (brief) =>
+      `Bonjour. Je m’appelle ${brief.agentName}. Je suis un assistant IA de ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} Cette conversation sera transcrite en direct, mais l’audio ne sera pas enregistré. Si vous êtes d’accord, appuyez sur la touche 1.`,
+    noConsent: "Sans votre accord, je ne peux pas poursuivre cette conversation. Au revoir.",
+    thanks: "Merci."
   },
   "it-CH": {
     language: "it-IT",
-    text: "Buongiorno. Sono l’assistente digitale di Ivan. Questa chiamata di prova conferma la connessione telefonica. L’assistente conversazionale sarà attivato nella fase successiva. Arrivederci."
+    introduction: (brief) =>
+      `Buongiorno. Mi chiamo ${brief.agentName}. Sono un assistente IA di ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} Questa conversazione verrà trascritta in diretta, ma l’audio non verrà registrato. Se acconsente, prema il tasto 1.`,
+    noConsent: "Senza il suo consenso non posso proseguire la conversazione. Arrivederci.",
+    thanks: "Grazie."
   },
   "en-GB": {
     language: "en-GB",
-    text: "Hello. I am Ivan’s digital assistant. This test call confirms the telephone connection. The conversational assistant will be enabled in the next step. Goodbye."
+    introduction: (brief) =>
+      `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} This conversation will be transcribed live, but the audio will not be recorded. If you consent, please press 1.`,
+    noConsent: "I cannot continue without your consent. Goodbye.",
+    thanks: "Thank you."
   },
   "en-US": {
     language: "en-US",
-    text: "Hello. I am Ivan’s digital assistant. This test call confirms the telephone connection. The conversational assistant will be enabled in the next step. Goodbye."
+    introduction: (brief) =>
+      `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} This conversation will be transcribed live, but the audio will not be recorded. If you consent, please press 1.`,
+    noConsent: "I cannot continue without your consent. Goodbye.",
+    thanks: "Thank you."
   }
 };
 
-export function getTwilioGreeting(locale: CallLocale) {
-  return greetings[locale];
+export function getTwilioCopy(locale: CallLocale) {
+  return copy[locale];
 }

@@ -1,6 +1,7 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { CallBrief } from "@callassist/contracts";
 import twilio from "twilio";
-import { getTwilioGreeting } from "./twilio-copy";
+import { getTwilioCopy } from "./twilio-copy";
 import type { TelephonyProvider } from "./telephony-provider";
 
 type TwilioClient = ReturnType<typeof twilio>;
@@ -73,12 +74,61 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   createVoiceTwiml(brief: CallBrief) {
-    const greeting = getTwilioGreeting(brief.locale);
+    const copy = getTwilioCopy(brief.locale);
     const response = new twilio.twiml.VoiceResponse();
-    response.say({ language: greeting.language }, greeting.text);
-    response.pause({ length: 1 });
+    const gather = response.gather({
+      action: this.webhookUrl(
+        `/webhooks/twilio/consent?callBriefId=${encodeURIComponent(brief.id)}`
+      ),
+      input: ["dtmf"],
+      method: "POST",
+      numDigits: 1,
+      timeout: 8
+    });
+    gather.say({ language: copy.language }, copy.introduction(brief));
+    response.say({ language: copy.language }, copy.noConsent);
     response.hangup();
     return response.toString();
+  }
+
+  createConsentTwiml(brief: CallBrief, consented: boolean) {
+    const copy = getTwilioCopy(brief.locale);
+    const response = new twilio.twiml.VoiceResponse();
+    if (!consented) {
+      response.say({ language: copy.language }, copy.noConsent);
+      response.hangup();
+      return response.toString();
+    }
+
+    response.say({ language: copy.language }, copy.thanks);
+    const connect = response.connect();
+    const stream = connect.stream({ url: this.mediaStreamUrl() });
+    stream.parameter({ name: "callBriefId", value: brief.id });
+    stream.parameter({
+      name: "streamToken",
+      value: this.createMediaStreamToken(brief.id)
+    });
+    return response.toString();
+  }
+
+  createMediaStreamToken(callBriefId: string) {
+    return createHmac("sha256", this.#authToken)
+      .update(`callassist-media:${callBriefId}`)
+      .digest("base64url");
+  }
+
+  validateMediaStreamToken(callBriefId: string, token: string) {
+    const expected = Buffer.from(this.createMediaStreamToken(callBriefId));
+    const received = Buffer.from(token);
+    return (
+      expected.length === received.length && timingSafeEqual(expected, received)
+    );
+  }
+
+  mediaStreamUrl() {
+    const url = new URL("/webhooks/twilio/media", this.#publicBaseUrl);
+    url.protocol = "wss:";
+    return url.toString();
   }
 
   webhookUrl(path: string) {

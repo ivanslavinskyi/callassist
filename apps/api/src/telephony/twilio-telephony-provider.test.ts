@@ -8,6 +8,11 @@ const brief: CallBrief = {
   recipientName: "Gemeinde Aadorf",
   phoneNumber: "+41523686688",
   objective: "Verify a real outbound Twilio connection",
+  agentName: "Sebastian",
+  representedPerson: "Ivan Slavinskyi",
+  speechImpairmentDisclosure:
+    "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt.",
+  context: "Application context",
   locale: "de-CH",
   allowLanguageSwitch: false,
   allowedFacts: [],
@@ -76,11 +81,16 @@ describe("TwilioTelephonyProvider", () => {
     expect(update).toHaveBeenCalledWith({ status: "completed" });
   });
 
-  it("renders localized TwiML and validates the exact webhook URL", () => {
+  it("requests consent after the disability disclosure and validates the exact webhook URL", () => {
     const { provider } = createProvider();
     const xml = provider.createVoiceTwiml(brief);
     expect(xml).toContain('<Say language="de-DE">');
-    expect(xml).toContain("digitale Assistent");
+    expect(xml).toContain("KI-Assistent");
+    expect(xml).toContain("Sprechbehinderung");
+    expect(xml.indexOf("Sprechbehinderung")).toBeLessThan(
+      xml.indexOf("live transkribiert")
+    );
+    expect(xml).toContain("<Gather");
     expect(xml).toContain("<Hangup/>");
 
     const parameters = { CallSid: "CA123", CallStatus: "in-progress" };
@@ -100,5 +110,20 @@ describe("TwilioTelephonyProvider", () => {
     expect(
       provider.validateWebhook("invalid", "/webhooks/twilio/status", parameters)
     ).toBe(false);
+  });
+
+  it("opens a signed bidirectional media stream only after consent", () => {
+    const { provider } = createProvider();
+    const xml = provider.createConsentTwiml(brief, true);
+    expect(xml).toContain("<Connect>");
+    expect(xml).toContain(
+      '<Stream url="wss://calls.example.test/webhooks/twilio/media">'
+    );
+    expect(xml).toContain(`name="callBriefId" value="${brief.id}"`);
+
+    const token = provider.createMediaStreamToken(brief.id);
+    expect(provider.validateMediaStreamToken(brief.id, token)).toBe(true);
+    expect(provider.validateMediaStreamToken(brief.id, `${token}x`)).toBe(false);
+    expect(provider.createConsentTwiml(brief, false)).not.toContain("<Stream");
   });
 });
