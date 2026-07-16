@@ -11,7 +11,8 @@ export const SUPPORTED_CALL_LANGUAGES = [
   { locale: "fr-CH", label: "Français (Suisse)", shortLabel: "FR-CH" },
   { locale: "it-CH", label: "Italiano (Svizzera)", shortLabel: "IT-CH" },
   { locale: "en-GB", label: "English (United Kingdom)", shortLabel: "EN-GB" },
-  { locale: "en-US", label: "English (United States)", shortLabel: "EN-US" }
+  { locale: "en-US", label: "English (United States)", shortLabel: "EN-US" },
+  { locale: "ru-RU", label: "Русский", shortLabel: "RU" }
 ] as const;
 
 export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
@@ -23,6 +24,28 @@ export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
 
 export const callLocaleSchema = z.enum(SUPPORTED_CALL_LOCALES);
 export type CallLocale = z.infer<typeof callLocaleSchema>;
+
+export const DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES: Record<
+  CallLocale,
+  string
+> = {
+  "de-CH": DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
+  "de-DE": DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
+  "fr-CH":
+    "Monsieur Slavinskyi éprouve des difficultés à téléphoner en raison d’un trouble de la parole et m’utilise donc pour mener des conversations en son nom.",
+  "it-CH":
+    "Il signor Slavinskyi ha difficoltà a parlare al telefono a causa di un disturbo del linguaggio e pertanto mi utilizza per condurre conversazioni per suo conto.",
+  "en-GB":
+    "Mr Slavinskyi has difficulty speaking on the telephone because of a speech impairment, so he uses me to conduct conversations on his behalf.",
+  "en-US":
+    "Mr. Slavinskyi has difficulty speaking on the telephone because of a speech impairment, so he uses me to conduct conversations on his behalf.",
+  "ru-RU":
+    "Господин Славинский испытывает затруднения при телефонных разговорах из-за нарушения речи, поэтому использует меня для ведения разговоров от своего имени."
+};
+
+export function getDefaultSpeechImpairmentDisclosure(locale: CallLocale) {
+  return DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[locale];
+}
 
 export const callBriefStatusSchema = z.enum([
   "ready",

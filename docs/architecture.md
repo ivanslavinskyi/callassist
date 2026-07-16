@@ -42,13 +42,13 @@ API использует интерфейс `CallRepository`. Локальный
 
 ```ts
 type CallLanguage = {
-  locale: string;           // BCP 47: de-CH, de-DE, en-GB, fr-CH, it-CH
+  locale: string;           // BCP 47: de-CH, de-DE, en-GB, fr-CH, it-CH, ru-RU
   fallbackLocale?: string;  // только при явном разрешении пользователя
   allowSwitch: boolean;     // по умолчанию false
 };
 ```
 
-Первый интерфейс предложит allow-list: `de-CH`, `de-DE`, `en-GB`, `en-US`, `fr-CH`, `it-CH`. На сервере сохраняется BCP 47 locale, поэтому список можно расширить без миграции схемы.
+Первый интерфейс предлагает allow-list: `de-CH`, `de-DE`, `en-GB`, `en-US`, `fr-CH`, `it-CH`, `ru-RU`. На сервере сохраняется BCP 47 locale, поэтому список можно расширить без миграции схемы.
 
 Правила:
 

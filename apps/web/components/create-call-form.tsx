@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
   SUPPORTED_CALL_LANGUAGES,
   type CallBrief,
   type CallLocale,
@@ -15,8 +16,7 @@ const initialForm: CreateCallBriefInput = {
   objective: "Уточнить, можно ли отправить запрошенные документы по электронной почте",
   agentName: "Sebastian",
   representedPerson: "Ivan Slavinskyi",
-  speechImpairmentDisclosure:
-    "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt und nutzt mich deshalb, um Gespräche in seinem Auftrag zu führen.",
+  speechImpairmentDisclosure: DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["de-CH"],
   context: "",
   locale: "de-CH",
   allowLanguageSwitch: false,
@@ -101,7 +101,22 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
           <span>Язык звонка</span>
           <select
             value={form.locale}
-            onChange={(event) => update("locale", event.target.value as CallLocale)}
+            onChange={(event) => {
+              const locale = event.target.value as CallLocale;
+              setForm((current) => {
+                const disclosure = current.speechImpairmentDisclosure ?? "";
+                const usesDefaultDisclosure = Object.values(
+                  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES
+                ).includes(disclosure);
+                return {
+                  ...current,
+                  locale,
+                  speechImpairmentDisclosure: usesDefaultDisclosure
+                    ? DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[locale]
+                    : disclosure
+                };
+              });
+            }}
           >
             {SUPPORTED_CALL_LANGUAGES.map(({ locale, label }) => (
               <option key={locale} value={locale}>

@@ -44,7 +44,8 @@ const languageNames: Record<CallLocale, string> = {
   "fr-CH": "Swiss French",
   "it-CH": "Swiss Italian",
   "en-GB": "British English",
-  "en-US": "American English"
+  "en-US": "American English",
+  "ru-RU": "Russian"
 };
 
 const initialInstructions: Record<CallLocale, string> = {
@@ -53,7 +54,8 @@ const initialInstructions: Record<CallLocale, string> = {
   "fr-CH": "Remercie brièvement la personne pour son accord, puis aborde directement l’objectif de l’appel.",
   "it-CH": "Ringrazia brevemente la persona per il consenso, poi passa direttamente all’obiettivo della chiamata.",
   "en-GB": "Briefly thank the person for consenting, then move directly to the objective of the call.",
-  "en-US": "Briefly thank the person for consenting, then move directly to the objective of the call."
+  "en-US": "Briefly thank the person for consenting, then move directly to the objective of the call.",
+  "ru-RU": "Кратко поблагодари собеседника за согласие, затем сразу перейди к цели звонка."
 };
 
 const noopLogger: BridgeLogger = {

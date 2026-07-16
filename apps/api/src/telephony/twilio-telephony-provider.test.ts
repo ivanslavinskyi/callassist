@@ -126,4 +126,20 @@ describe("TwilioTelephonyProvider", () => {
     expect(provider.validateMediaStreamToken(brief.id, `${token}x`)).toBe(false);
     expect(provider.createConsentTwiml(brief, false)).not.toContain("<Stream");
   });
+
+  it("renders the complete pre-consent announcement in Russian", () => {
+    const { provider } = createProvider();
+    const xml = provider.createVoiceTwiml({
+      ...brief,
+      locale: "ru-RU",
+      speechImpairmentDisclosure:
+        "Господин Славинский испытывает затруднения при телефонных разговорах из-за нарушения речи."
+    });
+    expect(xml).toContain('<Say language="ru-RU">');
+    expect(xml).toContain("нарушения речи");
+    expect(xml.indexOf("нарушения речи")).toBeLessThan(
+      xml.indexOf("транскрибироваться")
+    );
+    expect(xml).toContain("нажмите 1");
+  });
 });

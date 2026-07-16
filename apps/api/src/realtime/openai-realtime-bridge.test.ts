@@ -35,6 +35,11 @@ describe("buildRealtimeInstructions", () => {
     expect(prompt).toContain("Never invent or infer missing facts");
     expect(prompt).toContain("Do not switch to another language");
   });
+
+  it("instructs the realtime model to speak Russian", () => {
+    const prompt = buildRealtimeInstructions({ ...brief, locale: "ru-RU" });
+    expect(prompt).toContain("Speak Russian naturally and politely");
+  });
 });
 
 class FakeSocket extends EventEmitter {

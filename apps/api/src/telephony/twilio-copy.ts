@@ -1,7 +1,11 @@
-import type { CallBrief, CallLocale } from "@callassist/contracts";
+import {
+  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
+  type CallBrief,
+  type CallLocale
+} from "@callassist/contracts";
 
 type TwilioCopy = {
-  language: "de-DE" | "en-GB" | "en-US" | "fr-FR" | "it-IT";
+  language: "de-DE" | "en-GB" | "en-US" | "fr-FR" | "it-IT" | "ru-RU";
   introduction: (brief: CallBrief) => string;
   noConsent: string;
   thanks: string;
@@ -49,9 +53,25 @@ const copy: Record<CallLocale, TwilioCopy> = {
       `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${brief.speechImpairmentDisclosure} This conversation will be transcribed live, but the audio will not be recorded. If you consent, please press 1.`,
     noConsent: "I cannot continue without your consent. Goodbye.",
     thanks: "Thank you."
+  },
+  "ru-RU": {
+    language: "ru-RU",
+    introduction: (brief) =>
+      `Добрый день. Меня зовут ${brief.agentName}. Я ИИ-ассистент ${brief.representedPerson}. ${resolveDisclosure(brief)} Этот разговор будет транскрибироваться в реальном времени, но аудиозапись не ведётся. Если вы согласны, нажмите 1.`,
+    noConsent: "Без вашего согласия я не могу продолжить разговор. До свидания.",
+    thanks: "Спасибо."
   }
 };
 
 export function getTwilioCopy(locale: CallLocale) {
   return copy[locale];
+}
+
+function resolveDisclosure(brief: CallBrief) {
+  const disclosure = brief.speechImpairmentDisclosure;
+  return Object.values(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES).includes(
+    disclosure
+  )
+    ? DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[brief.locale]
+    : disclosure;
 }

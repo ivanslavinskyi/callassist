@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createCallBriefInputSchema } from "./call-brief";
+import {
+  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
+  createCallBriefInputSchema
+} from "./call-brief";
 
 const validBrief = {
   recipientName: "Gemeinde Aadorf",
@@ -41,9 +44,23 @@ describe("createCallBriefInputSchema", () => {
   it("rejects an unsupported locale", () => {
     const result = createCallBriefInputSchema.safeParse({
       ...validBrief,
-      locale: "ru-RU"
+      locale: "es-ES"
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it("accepts Russian and provides a localized disclosure", () => {
+    const result = createCallBriefInputSchema.safeParse({
+      ...validBrief,
+      locale: "ru-RU",
+      speechImpairmentDisclosure:
+        DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["ru-RU"]
+    });
+
+    expect(result.success).toBe(true);
+    expect(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["ru-RU"]).toContain(
+      "нарушения речи"
+    );
   });
 });
