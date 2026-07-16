@@ -103,7 +103,7 @@ describe("Twilio webhooks", () => {
     expect(typeof handleTwilioSocket.mock.calls[0]?.[0].on).toBe("function");
   });
 
-  it("returns localized TwiML and applies signed status callbacks", async () => {
+  it("returns direct Media Stream TwiML and applies signed status callbacks", async () => {
     const { app, service } = createHarness();
     const brief = await createBrief(service);
     const reserved = await service.repository.startAttempt(brief.id, {
@@ -128,29 +128,10 @@ describe("Twilio webhooks", () => {
     });
     expect(voiceResponse.statusCode).toBe(200);
     expect(voiceResponse.headers["content-type"]).toContain("text/xml");
-    expect(voiceResponse.body).toContain('<Say language="de-DE">');
-    expect(voiceResponse.body).toContain("Sprechbehinderung");
-    expect(voiceResponse.body).toContain("<Gather");
-
-    const consentParameters = { CallSid: "CA123", Digits: "1" };
-    const consentPath = `/webhooks/twilio/consent?callBriefId=${brief.id}`;
-    const consentSignature = twilio.getExpectedTwilioSignature(
-      "test-auth-token",
-      `https://calls.example.test${consentPath}`,
-      consentParameters
-    );
-    const consentResponse = await app.inject({
-      method: "POST",
-      url: consentPath,
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        "x-twilio-signature": consentSignature
-      },
-      payload: new URLSearchParams(consentParameters).toString()
-    });
-    expect(consentResponse.statusCode).toBe(200);
-    expect(consentResponse.body).toContain("<Connect>");
-    expect(consentResponse.body).toContain("wss://calls.example.test");
+    expect(voiceResponse.body).toContain("<Connect>");
+    expect(voiceResponse.body).toContain("wss://calls.example.test");
+    expect(voiceResponse.body).not.toContain("<Say");
+    expect(voiceResponse.body).not.toContain("<Gather");
 
     const statusParameters = {
       CallSid: "CA123",

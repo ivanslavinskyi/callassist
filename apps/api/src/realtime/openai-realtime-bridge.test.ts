@@ -6,6 +6,7 @@ import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import {
   OpenAIRealtimeBridge,
+  buildConsentAnnouncementInstructions,
   buildInitialResponseInstructions,
   buildRealtimeInstructions
 } from "./openai-realtime-bridge";
@@ -61,6 +62,25 @@ describe("buildInitialResponseInstructions", () => {
     expect(prompt).toContain("Do not announce, summarize, or generically paraphrase");
     expect(prompt).toContain("Do not introduce current tasks");
     expect(prompt).toContain("Speak Russian");
+  });
+});
+
+describe("buildConsentAnnouncementInstructions", () => {
+  it("keeps the complete Russian disability disclosure before consent", () => {
+    const prompt = buildConsentAnnouncementInstructions({
+      ...brief,
+      locale: "ru-RU",
+      speechImpairmentDisclosure:
+        "Господин Славинский испытывает затруднения при телефонных разговорах из-за нарушения речи."
+    });
+
+    expect(prompt).toContain("ИИ-ассистент");
+    expect(prompt).toContain("нарушения речи");
+    expect(prompt.indexOf("нарушения речи")).toBeLessThan(
+      prompt.indexOf("транскрибироваться")
+    );
+    expect(prompt).toContain("нажмите 1");
+    expect(prompt).toContain("Do not begin the call objective");
   });
 });
 
@@ -145,8 +165,81 @@ describe("OpenAIRealtimeBridge", () => {
     );
     expect(openAISocket.sent[1]).toMatchObject({
       type: "response.create",
-      response: { instructions: expect.stringContaining(brief.objective) }
+      response: {
+        instructions: expect.stringContaining(brief.speechImpairmentDisclosure)
+      }
     });
+    expect(
+      JSON.stringify(openAISocket.sent[1])
+    ).not.toContain(brief.objective);
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({ event: "media", media: { payload: "before-consent" } })
+      )
+    );
+    expect(openAISocket.sent).not.toContainEqual({
+      type: "input_audio_buffer.append",
+      audio: "before-consent"
+    });
+    openAISocket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "response.done" }))
+    );
+    expect(twilioSocket.sent).toContainEqual({
+      event: "mark",
+      streamSid: "MZ123",
+      mark: { name: "callassist-consent-prompt-complete" }
+    });
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "mark",
+          mark: { name: "callassist-consent-prompt-complete" }
+        })
+      )
+    );
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "dtmf",
+          dtmf: { track: "inbound_track", digit: "1" }
+        })
+      )
+    );
+    expect(openAISocket.sent).toContainEqual({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: expect.stringContaining("Verified consent")
+          }
+        ]
+      }
+    });
+    expect(openAISocket.sent).toContainEqual({
+      type: "response.create",
+      response: {
+        output_modalities: ["audio"],
+        instructions: expect.stringContaining(brief.objective)
+      }
+    });
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({ event: "media", media: { payload: "audio-in" } })
+      )
+    );
+    expect(openAISocket.sent).toContainEqual({
+      type: "input_audio_buffer.append",
+      audio: "audio-in"
+    });
+
     openAISocket.emit(
       "message",
       Buffer.from(JSON.stringify({ type: "response.done" }))
@@ -172,16 +265,6 @@ describe("OpenAIRealtimeBridge", () => {
           }
         ]
       }
-    });
-    twilioSocket.emit(
-      "message",
-      Buffer.from(
-        JSON.stringify({ event: "media", media: { payload: "audio-in" } })
-      )
-    );
-    expect(openAISocket.sent).toContainEqual({
-      type: "input_audio_buffer.append",
-      audio: "audio-in"
     });
 
     openAISocket.emit(
@@ -233,6 +316,7 @@ describe("OpenAIRealtimeBridge", () => {
 
     const snapshot = await service.get(created.id);
     expect(snapshot?.transcript.map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: "recipient", text: "Taste 1 — Zustimmung erteilt" },
       { role: "recipient", text: "Taste 1 — Ja" },
       { role: "recipient", text: "Guten Tag" },
       { role: "assistant", text: "Vielen Dank" }
@@ -240,6 +324,98 @@ describe("OpenAIRealtimeBridge", () => {
     expect(events).toContain("transcript.delta");
     unsubscribe();
     twilioSocket.close();
+    await service.close();
+  });
+
+  it("ends the stream in the same OpenAI voice when consent times out", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      agentName: brief.agentName,
+      representedPerson: brief.representedPerson,
+      speechImpairmentDisclosure: brief.speechImpairmentDisclosure,
+      context: brief.context,
+      locale: brief.locale,
+      voiceGender: brief.voiceGender,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    const twilioSocket = new FakeSocket();
+    const openAISocket = new FakeSocket();
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: (_id, token) => token === "valid",
+      consentTimeoutMs: 1,
+      createOpenAISocket: () => openAISocket as unknown as WebSocket
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "start",
+          start: {
+            streamSid: "MZ456",
+            customParameters: {
+              callBriefId: created.id,
+              streamToken: "valid"
+            }
+          }
+        })
+      )
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    openAISocket.emit("open");
+    openAISocket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "session.updated" }))
+    );
+    openAISocket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "response.done" }))
+    );
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "mark",
+          mark: { name: "callassist-consent-prompt-complete" }
+        })
+      )
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(openAISocket.sent).toContainEqual({
+      type: "response.create",
+      response: {
+        output_modalities: ["audio"],
+        instructions: expect.stringContaining("Ohne Ihre Zustimmung")
+      }
+    });
+    openAISocket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "response.done" }))
+    );
+    expect(twilioSocket.sent).toContainEqual({
+      event: "mark",
+      streamSid: "MZ456",
+      mark: { name: "callassist-no-consent-complete" }
+    });
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "mark",
+          mark: { name: "callassist-no-consent-complete" }
+        })
+      )
+    );
+    expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    expect(openAISocket.readyState).toBe(WebSocket.CLOSED);
     await service.close();
   });
 });

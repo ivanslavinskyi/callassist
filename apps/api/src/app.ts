@@ -206,34 +206,6 @@ export function buildWebhookApp({
       }
     );
 
-    routes.post<{ Querystring: { callBriefId?: string } }>(
-      "/webhooks/twilio/consent",
-      async (request, reply) => {
-        const parameters = normalizeTwilioParameters(request.body);
-        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
-          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
-        }
-
-        const callBriefId = request.query.callBriefId;
-        if (!callBriefId) {
-          return reply.status(400).send({ error: "CALL_BRIEF_ID_REQUIRED" });
-        }
-        const snapshot = await service.get(callBriefId);
-        if (!snapshot) {
-          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
-        }
-
-        return reply
-          .type("text/xml; charset=utf-8")
-          .send(
-            twilioProvider.createConsentTwiml(
-              snapshot.brief,
-              parameters.Digits === "1"
-            )
-          );
-      }
-    );
-
     routes.get(
       "/webhooks/twilio/media",
       {

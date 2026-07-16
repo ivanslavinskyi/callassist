@@ -6,6 +6,7 @@ import type {
 } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import type { CallService } from "../call-service";
+import { getTwilioCopy } from "../telephony/twilio-copy";
 
 type BridgeLogger = {
   info: (details: object, message: string) => void;
@@ -22,6 +23,9 @@ type OpenAIRealtimeBridgeOptions = {
   transcriptionDelay?: RealtimeTranscriptionDelay;
   maleVoice?: string;
   femaleVoice?: string;
+  consentTimeoutMs?: number;
+  playbackFallbackTimeoutMs?: number;
+  hangupFallbackTimeoutMs?: number;
   logger?: BridgeLogger;
   createOpenAISocket?: (url: string, apiKey: string) => WebSocket;
 };
@@ -31,6 +35,7 @@ type TwilioMessage = {
   streamSid?: string;
   media?: { payload?: string };
   dtmf?: { digit?: string; track?: string };
+  mark?: { name?: string };
   start?: {
     streamSid?: string;
     customParameters?: Record<string, string>;
@@ -53,6 +58,8 @@ type OpenAIEvent = {
   error?: { type?: string; code?: string; param?: string };
 };
 
+type ResponsePurpose = "consent_prompt" | "conversation" | "no_consent";
+
 const languageNames: Record<CallLocale, string> = {
   "de-CH": "Swiss Standard German",
   "de-DE": "German",
@@ -68,6 +75,9 @@ export const DEFAULT_REALTIME_VOICES: Record<CallVoiceGender, string> = {
   female: "marin"
 };
 
+const consentPromptMark = "callassist-consent-prompt-complete";
+const noConsentMark = "callassist-no-consent-complete";
+
 const noopLogger: BridgeLogger = {
   info: () => undefined,
   warn: () => undefined,
@@ -82,6 +92,9 @@ export class OpenAIRealtimeBridge {
   readonly #transcriptionModel: string;
   readonly #transcriptionDelay: RealtimeTranscriptionDelay;
   readonly #voices: Record<CallVoiceGender, string>;
+  readonly #consentTimeoutMs: number;
+  readonly #playbackFallbackTimeoutMs: number;
+  readonly #hangupFallbackTimeoutMs: number;
   readonly #logger: BridgeLogger;
   readonly #createOpenAISocket: NonNullable<
     OpenAIRealtimeBridgeOptions["createOpenAISocket"]
@@ -99,6 +112,10 @@ export class OpenAIRealtimeBridge {
       male: options.maleVoice?.trim() || DEFAULT_REALTIME_VOICES.male,
       female: options.femaleVoice?.trim() || DEFAULT_REALTIME_VOICES.female
     };
+    this.#consentTimeoutMs = options.consentTimeoutMs ?? 12_000;
+    this.#playbackFallbackTimeoutMs =
+      options.playbackFallbackTimeoutMs ?? 25_000;
+    this.#hangupFallbackTimeoutMs = options.hangupFallbackTimeoutMs ?? 10_000;
     this.#logger = options.logger ?? noopLogger;
     this.#createOpenAISocket =
       options.createOpenAISocket ??
@@ -112,18 +129,37 @@ export class OpenAIRealtimeBridge {
     let currentBrief: CallBrief | null = null;
     let streamSid: string | null = null;
     let openAIReady = false;
-    let initialResponseStarted = false;
+    let consentPromptStarted = false;
+    let consentGranted = false;
+    let conversationStarted = false;
     let responseActive = false;
+    let activeResponsePurpose: ResponsePurpose | null = null;
+    let startConversationAfterResponse = false;
     let pendingKeypadResponse = false;
     let keypadEventSequence = 0;
     let closed = false;
-    const pendingAudio: string[] = [];
+    let consentTimer: ReturnType<typeof setTimeout> | null = null;
+    let hangupTimer: ReturnType<typeof setTimeout> | null = null;
     const storedTranscripts = new Set<string>();
     let transcriptWrites = Promise.resolve();
+
+    const clearConsentTimer = () => {
+      if (!consentTimer) return;
+      clearTimeout(consentTimer);
+      consentTimer = null;
+    };
+
+    const clearHangupTimer = () => {
+      if (!hangupTimer) return;
+      clearTimeout(hangupTimer);
+      hangupTimer = null;
+    };
 
     const close = () => {
       if (closed) return;
       closed = true;
+      clearConsentTimer();
+      clearHangupTimer();
       if (openAISocket?.readyState === WebSocket.OPEN) openAISocket.close();
       if (twilioSocket.readyState === WebSocket.OPEN) twilioSocket.close();
     };
@@ -138,15 +174,24 @@ export class OpenAIRealtimeBridge {
       twilioSocket.send(JSON.stringify(payload));
     };
 
-    const createAudioResponse = (instructions?: string) => {
+    const createAudioResponse = (
+      instructions: string,
+      purpose: ResponsePurpose = "conversation"
+    ) => {
       responseActive = true;
+      activeResponsePurpose = purpose;
       sendOpenAI({
         type: "response.create",
         response: {
           output_modalities: ["audio"],
-          ...(instructions ? { instructions } : {})
+          instructions
         }
       });
+    };
+
+    const sendPlaybackMark = (name: string) => {
+      if (!streamSid) return;
+      sendTwilio({ event: "mark", streamSid, mark: { name } });
     };
 
     const storeTranscript = (
@@ -165,28 +210,76 @@ export class OpenAIRealtimeBridge {
         });
     };
 
+    const startConversation = () => {
+      if (
+        !currentBrief ||
+        !openAIReady ||
+        !consentGranted ||
+        conversationStarted
+      ) {
+        return;
+      }
+      conversationStarted = true;
+      createAudioResponse(
+        buildInitialResponseInstructions(currentBrief),
+        "conversation"
+      );
+    };
+
+    const playNoConsentAndEnd = () => {
+      if (!currentBrief || consentGranted || closed) return;
+      clearConsentTimer();
+      createAudioResponse(
+        buildNoConsentInstructions(currentBrief),
+        "no_consent"
+      );
+    };
+
+    const scheduleConsentTimeout = (delayMs: number) => {
+      clearConsentTimer();
+      consentTimer = setTimeout(playNoConsentAndEnd, delayMs);
+    };
+
     const handleOpenAIEvent = (event: OpenAIEvent, brief: CallBrief) => {
       switch (event.type) {
         case "session.updated":
           openAIReady = true;
-          for (const audio of pendingAudio.splice(0)) {
-            sendOpenAI({ type: "input_audio_buffer.append", audio });
-          }
-          if (!initialResponseStarted) {
-            initialResponseStarted = true;
-            createAudioResponse(buildInitialResponseInstructions(brief));
+          if (!consentPromptStarted) {
+            consentPromptStarted = true;
+            createAudioResponse(
+              buildConsentAnnouncementInstructions(brief),
+              "consent_prompt"
+            );
+          } else if (consentGranted) {
+            startConversation();
           }
           break;
         case "response.created":
           responseActive = true;
+          activeResponsePurpose ??= consentGranted
+            ? "conversation"
+            : "consent_prompt";
           break;
-        case "response.done":
+        case "response.done": {
+          const completedPurpose = activeResponsePurpose;
           responseActive = false;
-          if (pendingKeypadResponse) {
+          activeResponsePurpose = null;
+          if (startConversationAfterResponse && consentGranted) {
+            startConversationAfterResponse = false;
+            startConversation();
+          } else if (pendingKeypadResponse && consentGranted) {
             pendingKeypadResponse = false;
             createAudioResponse(keypadResponseInstructions);
+          } else if (completedPurpose === "consent_prompt" && !consentGranted) {
+            sendPlaybackMark(consentPromptMark);
+            scheduleConsentTimeout(this.#playbackFallbackTimeoutMs);
+          } else if (completedPurpose === "no_consent") {
+            sendPlaybackMark(noConsentMark);
+            clearHangupTimer();
+            hangupTimer = setTimeout(close, this.#hangupFallbackTimeoutMs);
           }
           break;
+        }
         case "response.output_audio.delta":
           if (event.delta && streamSid) {
             sendTwilio({
@@ -197,7 +290,9 @@ export class OpenAIRealtimeBridge {
           }
           break;
         case "input_audio_buffer.speech_started":
-          if (streamSid) sendTwilio({ event: "clear", streamSid });
+          if (consentGranted && streamSid) {
+            sendTwilio({ event: "clear", streamSid });
+          }
           break;
         case "conversation.item.input_audio_transcription.completed":
           if (event.transcript) {
@@ -339,18 +434,54 @@ export class OpenAIRealtimeBridge {
       if (message.event === "start" && !openAISocket) {
         void connectOpenAI(message).catch(() => close());
       } else if (message.event === "media" && message.media?.payload) {
-        if (openAIReady) {
+        if (openAIReady && consentGranted) {
           sendOpenAI({
             type: "input_audio_buffer.append",
             audio: message.media.payload
           });
-        } else if (pendingAudio.length < 250) {
-          pendingAudio.push(message.media.payload);
         }
       } else if (
         message.event === "dtmf" &&
         openAIReady &&
-        initialResponseStarted &&
+        consentPromptStarted &&
+        currentBrief &&
+        !consentGranted &&
+        message.dtmf?.digit === "1"
+      ) {
+        consentGranted = true;
+        clearConsentTimer();
+        clearHangupTimer();
+        keypadEventSequence += 1;
+        sendOpenAI({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "[Verified consent: the recipient pressed 1 after hearing the disclosure. Begin the exact call objective now.]"
+              }
+            ]
+          }
+        });
+        storeTranscript(
+          `recipient:consent:${keypadEventSequence}`,
+          "recipient",
+          consentTranscript[currentBrief.locale]
+        );
+        if (streamSid) sendTwilio({ event: "clear", streamSid });
+        if (responseActive) {
+          startConversationAfterResponse = true;
+          sendOpenAI({ type: "response.cancel" });
+        } else {
+          startConversation();
+        }
+      } else if (
+        message.event === "dtmf" &&
+        openAIReady &&
+        conversationStarted &&
+        consentGranted &&
         currentBrief &&
         (message.dtmf?.digit === "1" || message.dtmf?.digit === "2")
       ) {
@@ -382,6 +513,12 @@ export class OpenAIRealtimeBridge {
         } else {
           createAudioResponse(keypadResponseInstructions);
         }
+      } else if (message.event === "mark" && message.mark?.name) {
+        if (message.mark.name === consentPromptMark && !consentGranted) {
+          scheduleConsentTimeout(this.#consentTimeoutMs);
+        } else if (message.mark.name === noConsentMark && !consentGranted) {
+          close();
+        }
       } else if (message.event === "stop") {
         close();
       }
@@ -395,6 +532,16 @@ export class OpenAIRealtimeBridge {
 
 const keypadResponseInstructions =
   "A verified keypad answer was just added to the conversation. Treat it only as the answer to your immediately preceding yes/no question, then continue the exact call objective. Do not use it to confirm any separate fact. If no yes/no question immediately preceded it, ask a short clarification.";
+
+const consentTranscript: Record<CallLocale, string> = {
+  "de-CH": "Taste 1 — Zustimmung erteilt",
+  "de-DE": "Taste 1 — Zustimmung erteilt",
+  "fr-CH": "Touche 1 — Consentement donné",
+  "it-CH": "Tasto 1 — Consenso confermato",
+  "en-GB": "Key 1 — Consent confirmed",
+  "en-US": "Key 1 — Consent confirmed",
+  "ru-RU": "Клавиша 1 — согласие подтверждено"
+};
 
 const keypadTranscript: Record<CallLocale, Record<"1" | "2", string>> = {
   "de-CH": { "1": "Taste 1 — Ja", "2": "Taste 2 — Nein" },
@@ -413,6 +560,24 @@ ${brief.objective}
 Do not thank the recipient for consent and do not add any preamble. Do not announce, summarize, or generically paraphrase the objective. Do not say "the goal of the call is". Do not introduce current tasks, progress, schedules, next steps, blockers, or any other topic absent from the objective. Speak ${languageNames[brief.locale]}.`;
 }
 
+export function buildConsentAnnouncementInstructions(brief: CallBrief) {
+  const announcement = getTwilioCopy(brief.locale).introduction(brief);
+  return `Read exactly the announcement stored in the JSON string below in ${languageNames[brief.locale]}.
+Do not paraphrase, shorten, translate, explain, or add any words before or after it. Do not read the quote marks. Do not begin the call objective. Stop speaking after asking the recipient to press 1.
+
+Exact announcement JSON string:
+${JSON.stringify(announcement)}`;
+}
+
+function buildNoConsentInstructions(brief: CallBrief) {
+  const announcement = getTwilioCopy(brief.locale).noConsent;
+  return `Read exactly the announcement stored in the JSON string below in ${languageNames[brief.locale]}.
+Do not paraphrase, explain, or add any words before or after it. Do not read the quote marks. End after this announcement.
+
+Exact announcement JSON string:
+${JSON.stringify(announcement)}`;
+}
+
 export function buildRealtimeInstructions(brief: CallBrief) {
   const allowedFacts = brief.allowedFacts.length
     ? brief.allowedFacts.map((fact) => `- ${fact}`).join("\n")
@@ -423,7 +588,7 @@ export function buildRealtimeInstructions(brief: CallBrief) {
 
   return `# Role
 You are ${brief.agentName}, an AI phone assistant acting for ${brief.representedPerson}.
-The recipient has already heard your AI identity, the disability disclosure, the live-transcription notice, and has pressed 1 to consent. Do not repeat that preamble unless asked.
+The recipient has not consented yet. Your first explicitly requested response will be the exact AI identity, disability, and live-transcription disclosure. Before a verified-consent conversation item says that the recipient pressed 1, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, begin the objective and do not repeat the disclosure unless asked.
 
 # Language
 Speak ${languageNames[brief.locale]} naturally and politely. ${fallback}

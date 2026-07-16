@@ -82,18 +82,25 @@ describe("TwilioTelephonyProvider", () => {
     expect(update).toHaveBeenCalledWith({ status: "completed" });
   });
 
-  it("requests consent after the disability disclosure and validates the exact webhook URL", () => {
+  it("opens the signed bidirectional media stream immediately", () => {
     const { provider } = createProvider();
     const xml = provider.createVoiceTwiml(brief);
-    expect(xml).toContain('<Say language="de-DE">');
-    expect(xml).toContain("KI-Assistent");
-    expect(xml).toContain("Sprechbehinderung");
-    expect(xml.indexOf("Sprechbehinderung")).toBeLessThan(
-      xml.indexOf("live transkribiert")
+    expect(xml).toContain("<Connect>");
+    expect(xml).toContain(
+      '<Stream url="wss://calls.example.test/webhooks/twilio/media">'
     );
-    expect(xml).toContain("<Gather");
+    expect(xml).toContain(`name="callBriefId" value="${brief.id}"`);
+    expect(xml).not.toContain("<Say");
+    expect(xml).not.toContain("<Gather");
     expect(xml).toContain("<Hangup/>");
 
+    const token = provider.createMediaStreamToken(brief.id);
+    expect(provider.validateMediaStreamToken(brief.id, token)).toBe(true);
+    expect(provider.validateMediaStreamToken(brief.id, `${token}x`)).toBe(false);
+  });
+
+  it("validates the exact signed webhook URL", () => {
+    const { provider } = createProvider();
     const parameters = { CallSid: "CA123", CallStatus: "in-progress" };
     const url = "https://calls.example.test/webhooks/twilio/status";
     const signature = twilio.getExpectedTwilioSignature(
@@ -113,21 +120,6 @@ describe("TwilioTelephonyProvider", () => {
     ).toBe(false);
   });
 
-  it("opens a signed bidirectional media stream only after consent", () => {
-    const { provider } = createProvider();
-    const xml = provider.createConsentTwiml(brief, true);
-    expect(xml).toContain("<Connect>");
-    expect(xml).toContain(
-      '<Stream url="wss://calls.example.test/webhooks/twilio/media">'
-    );
-    expect(xml).toContain(`name="callBriefId" value="${brief.id}"`);
-
-    const token = provider.createMediaStreamToken(brief.id);
-    expect(provider.validateMediaStreamToken(brief.id, token)).toBe(true);
-    expect(provider.validateMediaStreamToken(brief.id, `${token}x`)).toBe(false);
-    expect(provider.createConsentTwiml(brief, false)).not.toContain("<Stream");
-  });
-
   it("validates Media Stream handshakes against the public WSS URL", () => {
     const { provider } = createProvider();
     const path = "/webhooks/twilio/media";
@@ -144,21 +136,5 @@ describe("TwilioTelephonyProvider", () => {
       {}
     );
     expect(provider.validateMediaStreamWebhook(httpsSignature, path)).toBe(false);
-  });
-
-  it("renders the complete pre-consent announcement in Russian", () => {
-    const { provider } = createProvider();
-    const xml = provider.createVoiceTwiml({
-      ...brief,
-      locale: "ru-RU",
-      speechImpairmentDisclosure:
-        "Господин Славинский испытывает затруднения при телефонных разговорах из-за нарушения речи."
-    });
-    expect(xml).toContain('<Say language="ru-RU">');
-    expect(xml).toContain("нарушения речи");
-    expect(xml.indexOf("нарушения речи")).toBeLessThan(
-      xml.indexOf("транскрибироваться")
-    );
-    expect(xml).toContain("нажмите 1");
   });
 });
