@@ -8,9 +8,9 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:test:prepare": "tsx src/db/prepare-test-database.ts",
-    "dev": "tsx watch src/index.ts",
+    "dev": "node --use-system-ca --watch --import tsx src/index.ts",
     "lint": "tsc --noEmit",
-    "start": "node dist/index.js",
+    "start": "node --use-system-ca dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
