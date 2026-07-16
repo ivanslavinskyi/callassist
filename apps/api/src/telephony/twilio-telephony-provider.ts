@@ -73,6 +73,17 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     );
   }
 
+  validateMediaStreamWebhook(signature: string, rawRequestUrl: string) {
+    const requestUrl = new URL(rawRequestUrl, this.#publicBaseUrl);
+    requestUrl.protocol = "wss:";
+    return twilio.validateRequest(
+      this.#authToken,
+      signature,
+      requestUrl.toString(),
+      {}
+    );
+  }
+
   createVoiceTwiml(brief: CallBrief) {
     const copy = getTwilioCopy(brief.locale);
     const response = new twilio.twiml.VoiceResponse();

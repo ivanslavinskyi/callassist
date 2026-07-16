@@ -239,7 +239,7 @@ export function buildWebhookApp({
       {
         websocket: true,
         preValidation: (request, reply, done) => {
-          if (!isValidTwilioWebhook(request, twilioProvider, {})) {
+          if (!isValidTwilioMediaStream(request, twilioProvider)) {
             void reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
             return;
           }
@@ -293,6 +293,15 @@ function isValidTwilioWebhook(
   const signature = request.headers["x-twilio-signature"];
   if (typeof signature !== "string" || !request.raw.url) return false;
   return provider.validateWebhook(signature, request.raw.url, parameters);
+}
+
+function isValidTwilioMediaStream(
+  request: { headers: Record<string, unknown>; raw: { url?: string } },
+  provider: TwilioTelephonyProvider
+) {
+  const signature = request.headers["x-twilio-signature"];
+  if (typeof signature !== "string" || !request.raw.url) return false;
+  return provider.validateMediaStreamWebhook(signature, request.raw.url);
 }
 
 function sendRepositoryError(

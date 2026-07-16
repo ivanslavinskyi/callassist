@@ -88,7 +88,7 @@ describe("Twilio webhooks", () => {
     const path = "/webhooks/twilio/media";
     const signature = twilio.getExpectedTwilioSignature(
       "test-auth-token",
-      `https://calls.example.test${path}`,
+      `wss://calls.example.test${path}`,
       {}
     );
     const address = await app.listen({ host: "127.0.0.1", port: 0 });

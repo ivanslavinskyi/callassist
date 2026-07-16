@@ -127,6 +127,24 @@ describe("TwilioTelephonyProvider", () => {
     expect(provider.createConsentTwiml(brief, false)).not.toContain("<Stream");
   });
 
+  it("validates Media Stream handshakes against the public WSS URL", () => {
+    const { provider } = createProvider();
+    const path = "/webhooks/twilio/media";
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `wss://calls.example.test${path}`,
+      {}
+    );
+    expect(provider.validateMediaStreamWebhook(signature, path)).toBe(true);
+
+    const httpsSignature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      {}
+    );
+    expect(provider.validateMediaStreamWebhook(httpsSignature, path)).toBe(false);
+  });
+
   it("renders the complete pre-consent announcement in Russian", () => {
     const { provider } = createProvider();
     const xml = provider.createVoiceTwiml({
