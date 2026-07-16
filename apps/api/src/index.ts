@@ -27,7 +27,8 @@ const realtimeBridge =
         transcriptionDelay: parseTranscriptionDelay(
           process.env.OPENAI_TRANSCRIPTION_DELAY
         ),
-        voice: process.env.OPENAI_REALTIME_VOICE,
+        maleVoice: process.env.OPENAI_REALTIME_MALE_VOICE,
+        femaleVoice: process.env.OPENAI_REALTIME_FEMALE_VOICE,
         logger: app.log
       })
     : null;

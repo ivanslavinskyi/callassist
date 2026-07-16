@@ -20,6 +20,7 @@ const brief: CallBrief = {
   speechImpairmentDisclosure: "Disability disclosure",
   context: "The company works in logistics. An unverified salary note says CHF 99,999.",
   locale: "de-CH",
+  voiceGender: "female",
   allowLanguageSwitch: false,
   allowedFacts: ["Application sent: 12 July", "Applicant: Ivan Slavinskyi"],
   status: "ready",
@@ -90,6 +91,7 @@ describe("OpenAIRealtimeBridge", () => {
       speechImpairmentDisclosure: brief.speechImpairmentDisclosure,
       context: brief.context,
       locale: brief.locale,
+      voiceGender: brief.voiceGender,
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
@@ -132,7 +134,7 @@ describe("OpenAIRealtimeBridge", () => {
             format: { type: "audio/pcmu" },
             transcription: { delay: "high", language: "de" }
           },
-          output: { format: { type: "audio/pcmu" } }
+          output: { format: { type: "audio/pcmu" }, voice: "marin" }
         }
       }
     });

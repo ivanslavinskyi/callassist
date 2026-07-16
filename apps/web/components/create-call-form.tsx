@@ -5,6 +5,7 @@ import {
   SUPPORTED_CALL_LANGUAGES,
   type CallBrief,
   type CallLocale,
+  type CallVoiceGender,
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { useMemo, useState, type FormEvent } from "react";
@@ -19,6 +20,7 @@ const initialForm: CreateCallBriefInput = {
   speechImpairmentDisclosure: DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["de-CH"],
   context: "",
   locale: "de-CH",
+  voiceGender: "male",
   allowLanguageSwitch: false,
   allowedFacts: ["Имя владельца", "Место проживания", "Предпочтение письменного ответа"]
 };
@@ -148,6 +150,20 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
         </label>
 
         <label className="field">
+          <span>Голос ассистента</span>
+          <select
+            value={form.voiceGender ?? "male"}
+            onChange={(event) =>
+              update("voiceGender", event.target.value as CallVoiceGender)
+            }
+          >
+            <option value="male">Мужской</option>
+            <option value="female">Женский</option>
+          </select>
+          <small>Применяется к диалогу после согласия</small>
+        </label>
+
+        <label className="field field-wide">
           <span>Кого представляет</span>
           <input
             value={form.representedPerson ?? ""}

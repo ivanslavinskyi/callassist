@@ -19,8 +19,19 @@ describe("createCallBriefInputSchema", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.agentName).toBe("Sebastian");
+      expect(result.data.voiceGender).toBe("male");
       expect(result.data.speechImpairmentDisclosure).toContain("Sprechbehinderung");
     }
+  });
+
+  it("accepts a female assistant voice", () => {
+    const result = createCallBriefInputSchema.safeParse({
+      ...validBrief,
+      voiceGender: "female"
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.voiceGender).toBe("female");
   });
 
   it("requires a fallback locale when language switching is enabled", () => {

@@ -27,6 +27,7 @@ describeWithDatabase("PostgresCallRepository", () => {
       phoneNumber: "+41710000000",
       objective: "Verify the PostgreSQL persistence and approval lifecycle",
       locale: "en-GB",
+      voiceGender: "female",
       allowLanguageSwitch: false,
       allowedFacts: ["email: private@example.com"]
     });
@@ -82,6 +83,7 @@ describeWithDatabase("PostgresCallRepository", () => {
     await repository.close();
     repository = new PostgresCallRepository(databaseUrl!, encryptionKey);
     const snapshot = await repository.get(brief.id);
+    expect(snapshot?.brief.voiceGender).toBe("female");
     expect(snapshot?.brief.allowedFacts).toEqual(["email: private@example.com"]);
     expect(snapshot?.transcript).toHaveLength(1);
     expect(snapshot?.pendingApproval).toBeNull();

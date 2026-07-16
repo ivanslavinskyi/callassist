@@ -25,6 +25,9 @@ export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
 export const callLocaleSchema = z.enum(SUPPORTED_CALL_LOCALES);
 export type CallLocale = z.infer<typeof callLocaleSchema>;
 
+export const callVoiceGenderSchema = z.enum(["male", "female"]);
+export type CallVoiceGender = z.infer<typeof callVoiceGenderSchema>;
+
 export const DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES: Record<
   CallLocale,
   string
@@ -82,6 +85,7 @@ const callBriefInputBaseSchema = z.object({
     .default(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE),
   context: z.string().trim().default(""),
   locale: callLocaleSchema,
+  voiceGender: callVoiceGenderSchema.default("male"),
   allowLanguageSwitch: z.boolean().default(false),
   fallbackLocale: callLocaleSchema.optional(),
   allowedFacts: z.array(z.string().trim().min(1)).default([])

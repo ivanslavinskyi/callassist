@@ -1,4 +1,9 @@
-import type { CallBrief, CallLocale, TranscriptSegment } from "@callassist/contracts";
+import type {
+  CallBrief,
+  CallLocale,
+  CallVoiceGender,
+  TranscriptSegment
+} from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import type { CallService } from "../call-service";
 
@@ -15,7 +20,8 @@ type OpenAIRealtimeBridgeOptions = {
   model?: string;
   transcriptionModel?: string;
   transcriptionDelay?: RealtimeTranscriptionDelay;
-  voice?: string;
+  maleVoice?: string;
+  femaleVoice?: string;
   logger?: BridgeLogger;
   createOpenAISocket?: (url: string, apiKey: string) => WebSocket;
 };
@@ -57,6 +63,11 @@ const languageNames: Record<CallLocale, string> = {
   "ru-RU": "Russian"
 };
 
+export const DEFAULT_REALTIME_VOICES: Record<CallVoiceGender, string> = {
+  male: "cedar",
+  female: "marin"
+};
+
 const noopLogger: BridgeLogger = {
   info: () => undefined,
   warn: () => undefined,
@@ -70,7 +81,7 @@ export class OpenAIRealtimeBridge {
   readonly #model: string;
   readonly #transcriptionModel: string;
   readonly #transcriptionDelay: RealtimeTranscriptionDelay;
-  readonly #voice: string;
+  readonly #voices: Record<CallVoiceGender, string>;
   readonly #logger: BridgeLogger;
   readonly #createOpenAISocket: NonNullable<
     OpenAIRealtimeBridgeOptions["createOpenAISocket"]
@@ -84,7 +95,10 @@ export class OpenAIRealtimeBridge {
     this.#transcriptionModel =
       options.transcriptionModel ?? "gpt-realtime-whisper";
     this.#transcriptionDelay = options.transcriptionDelay ?? "high";
-    this.#voice = options.voice ?? "marin";
+    this.#voices = {
+      male: options.maleVoice?.trim() || DEFAULT_REALTIME_VOICES.male,
+      female: options.femaleVoice?.trim() || DEFAULT_REALTIME_VOICES.female
+    };
     this.#logger = options.logger ?? noopLogger;
     this.#createOpenAISocket =
       options.createOpenAISocket ??
@@ -296,7 +310,7 @@ export class OpenAIRealtimeBridge {
               },
               output: {
                 format: { type: "audio/pcmu" },
-                voice: this.#voice
+                voice: this.#voices[brief.voiceGender]
               }
             }
           }

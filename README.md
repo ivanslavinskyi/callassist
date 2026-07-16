@@ -61,10 +61,13 @@ OPENAI_API_KEY=sk-...
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_TRANSCRIPTION_MODEL=gpt-realtime-whisper
 OPENAI_TRANSCRIPTION_DELAY=high
-OPENAI_REALTIME_VOICE=marin
+OPENAI_REALTIME_MALE_VOICE=cedar
+OPENAI_REALTIME_FEMALE_VOICE=marin
 ```
 
 Оставьте туннель запущенным, выполните `pnpm db:migrate` и перезапустите API. Quick Tunnel выдаёт новый адрес после перезапуска, поэтому тогда нужно обновить `PUBLIC_BASE_URL` и ещё раз перезапустить API. URL для TwiML, callback-ов статуса и Media Stream передаются Twilio автоматически при создании звонка. Запись звонка отключена. Язык объявления и разговора берётся из `CallBrief`; русский использует `ru-RU`, а для `de-CH`, `fr-CH` и `it-CH` в Twilio TTS используются варианты `de-DE`, `fr-FR` и `it-IT`, при этом исходный locale задания не меняется.
+
+Голос Realtime-диалога выбирается в каждом задании: мужской вариант использует `cedar`, женский — `marin`. Предварительное объявление и запрос согласия озвучиваются стандартным голосом Twilio.
 
 Quick Tunnel предназначен только для разработки и не имеет гарантии доступности. Если выданный адрес временно не резолвится, перезапустите туннель позже или используйте `ngrok http 4001` как альтернативу.
 

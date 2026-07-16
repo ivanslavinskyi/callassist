@@ -28,6 +28,7 @@ describe("call API", () => {
         phoneNumber: "+41225550123",
         objective: "Prendre un rendez-vous de controle la semaine prochaine",
         locale: "fr-CH",
+        voiceGender: "female",
         allowLanguageSwitch: true,
         fallbackLocale: "de-CH",
         allowedFacts: []
@@ -35,8 +36,13 @@ describe("call API", () => {
     });
 
     expect(createResponse.statusCode).toBe(201);
-    const created = createResponse.json<{ id: string; locale: string }>();
+    const created = createResponse.json<{
+      id: string;
+      locale: string;
+      voiceGender: string;
+    }>();
     expect(created.locale).toBe("fr-CH");
+    expect(created.voiceGender).toBe("female");
 
     const getResponse = await app.inject({
       method: "GET",

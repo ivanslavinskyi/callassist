@@ -34,6 +34,7 @@ type CallBriefRow = {
   speechImpairmentDisclosureCiphertext: string | null;
   contextCiphertext: string | null;
   locale: CallBrief["locale"];
+  voiceGender: CallBrief["voiceGender"];
   allowLanguageSwitch: boolean;
   fallbackLocale: CallBrief["fallbackLocale"];
   allowedFactsCiphertext: string;
@@ -128,6 +129,7 @@ export class PostgresCallRepository implements CallRepository {
           speech_impairment_disclosure_ciphertext,
           context_ciphertext,
           locale,
+          voice_gender,
           allow_language_switch,
           fallback_locale,
           allowed_facts_ciphertext,
@@ -145,6 +147,7 @@ export class PostgresCallRepository implements CallRepository {
           ${encryptedDisclosure},
           ${encryptedContext},
           ${parsed.locale},
+          ${parsed.voiceGender},
           ${parsed.allowLanguageSwitch},
           ${parsed.fallbackLocale ?? null},
           ${encryptedFacts},
@@ -621,6 +624,7 @@ export class PostgresCallRepository implements CallRepository {
         speech_impairment_disclosure_ciphertext AS "speechImpairmentDisclosureCiphertext",
         context_ciphertext AS "contextCiphertext",
         locale,
+        voice_gender AS "voiceGender",
         allow_language_switch AS "allowLanguageSwitch",
         fallback_locale AS "fallbackLocale",
         allowed_facts_ciphertext AS "allowedFactsCiphertext",
@@ -650,6 +654,7 @@ export class PostgresCallRepository implements CallRepository {
         ? decryptJson<string>(row.contextCiphertext, this.#encryptionKey)
         : "",
       locale: row.locale,
+      voiceGender: row.voiceGender,
       allowLanguageSwitch: row.allowLanguageSwitch,
       ...(row.fallbackLocale ? { fallbackLocale: row.fallbackLocale } : {}),
       allowedFacts: decryptJson<string[]>(

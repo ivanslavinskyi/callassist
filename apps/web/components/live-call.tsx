@@ -319,6 +319,10 @@ export function LiveCall({ callId }: { callId: string }) {
                   <dt>Смена языка</dt>
                   <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : "Запрещена"}</dd>
                 </div>
+                <div>
+                  <dt>Голос</dt>
+                  <dd>{brief.voiceGender === "female" ? "Женский" : "Мужской"}</dd>
+                </div>
                 <div><dt>Ассистент</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>

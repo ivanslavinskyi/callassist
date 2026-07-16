@@ -14,6 +14,7 @@ const brief: CallBrief = {
     "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt.",
   context: "Application context",
   locale: "de-CH",
+  voiceGender: "male",
   allowLanguageSwitch: false,
   allowedFacts: [],
   status: "ready",
