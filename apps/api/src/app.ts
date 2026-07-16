@@ -17,7 +17,7 @@ import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provi
 type BuildAppOptions = {
   service: CallService;
   logger?: boolean;
-  webOrigin?: string;
+  webOrigin?: string | string[];
 };
 
 type BuildWebhookAppOptions = {
@@ -29,11 +29,12 @@ type BuildWebhookAppOptions = {
 export function buildApp({
   service,
   logger = true,
-  webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000"
+  webOrigin = process.env.WEB_ORIGIN
 }: BuildAppOptions) {
   const app = Fastify({ logger });
+  const webOrigins = resolveWebOrigins(webOrigin);
 
-  void app.register(cors, { origin: webOrigin });
+  void app.register(cors, { origin: webOrigins });
 
   app.get("/health", async (_request, reply) => {
     try {
@@ -124,12 +125,17 @@ export function buildApp({
       if (!snapshot) return reply.status(404).send({ error: "CALL_NOT_FOUND" });
 
       reply.hijack();
-      reply.raw.writeHead(200, {
-        "Access-Control-Allow-Origin": webOrigin,
+      const headers: Record<string, string> = {
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "Content-Type": "text/event-stream"
-      });
+      };
+      const requestOrigin = request.headers.origin;
+      if (requestOrigin && webOrigins.includes(requestOrigin)) {
+        headers["Access-Control-Allow-Origin"] = requestOrigin;
+        headers.Vary = "Origin";
+      }
+      reply.raw.writeHead(200, headers);
       reply.raw.write(": connected\n\n");
 
       const send = (event: CallEvent) => {
@@ -153,6 +159,14 @@ export function buildApp({
   });
 
   return app;
+}
+
+function resolveWebOrigins(value?: string | string[]) {
+  const configured = Array.isArray(value) ? value : value?.split(",");
+  const origins = configured?.map((origin) => origin.trim()).filter(Boolean);
+  return origins?.length
+    ? origins
+    : ["http://localhost:3000", "http://127.0.0.1:3000"];
 }
 
 export function buildWebhookApp({

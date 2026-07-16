@@ -58,6 +58,25 @@ describe("call API", () => {
     });
   });
 
+  it.each(["http://localhost:3000", "http://127.0.0.1:3000"])(
+    "allows the local web origin %s",
+    async (origin) => {
+      const app = createApp();
+      const response = await app.inject({
+        method: "OPTIONS",
+        url: "/api/call-briefs",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type"
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-origin"]).toBe(origin);
+    }
+  );
+
   it("does not expose Twilio webhooks on the internal API", async () => {
     const app = createApp();
     const response = await app.inject({
