@@ -6,6 +6,7 @@ import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import {
   OpenAIRealtimeBridge,
+  buildInitialResponseInstructions,
   buildRealtimeInstructions
 } from "./openai-realtime-bridge";
 
@@ -34,11 +35,31 @@ describe("buildRealtimeInstructions", () => {
     expect(prompt).toContain("Application sent: 12 July");
     expect(prompt).toContain("Never invent or infer missing facts");
     expect(prompt).toContain("Do not switch to another language");
+    expect(prompt).toContain("Only if the repeated answer is still unclear");
+    expect(prompt).toContain("something was bought does not confirm that it was sent");
   });
 
   it("instructs the realtime model to speak Russian", () => {
     const prompt = buildRealtimeInstructions({ ...brief, locale: "ru-RU" });
     expect(prompt).toContain("Speak Russian naturally and politely");
+  });
+});
+
+describe("buildInitialResponseInstructions", () => {
+  it("anchors the first turn to the exact objective and forbids generic filler", () => {
+    const objective =
+      "Уточнить, купил ли Иван билеты жене и детям для поездки в Констанс";
+    const prompt = buildInitialResponseInstructions({
+      ...brief,
+      locale: "ru-RU",
+      objective
+    });
+
+    expect(prompt).toContain(objective);
+    expect(prompt).toContain("Do not thank the recipient for consent");
+    expect(prompt).toContain("Do not announce, summarize, or generically paraphrase");
+    expect(prompt).toContain("Do not introduce current tasks");
+    expect(prompt).toContain("Speak Russian");
   });
 });
 
@@ -107,7 +128,10 @@ describe("OpenAIRealtimeBridge", () => {
       type: "session.update",
       session: {
         audio: {
-          input: { format: { type: "audio/pcmu" } },
+          input: {
+            format: { type: "audio/pcmu" },
+            transcription: { delay: "high", language: "de" }
+          },
           output: { format: { type: "audio/pcmu" } }
         }
       }
@@ -117,6 +141,36 @@ describe("OpenAIRealtimeBridge", () => {
       "message",
       Buffer.from(JSON.stringify({ type: "session.updated" }))
     );
+    expect(openAISocket.sent[1]).toMatchObject({
+      type: "response.create",
+      response: { instructions: expect.stringContaining(brief.objective) }
+    });
+    openAISocket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "response.done" }))
+    );
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "dtmf",
+          dtmf: { track: "inbound_track", digit: "1" }
+        })
+      )
+    );
+    expect(openAISocket.sent).toContainEqual({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: expect.stringContaining("Verified telephone keypad input: YES")
+          }
+        ]
+      }
+    });
     twilioSocket.emit(
       "message",
       Buffer.from(
@@ -177,6 +231,7 @@ describe("OpenAIRealtimeBridge", () => {
 
     const snapshot = await service.get(created.id);
     expect(snapshot?.transcript.map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: "recipient", text: "Taste 1 — Ja" },
       { role: "recipient", text: "Guten Tag" },
       { role: "assistant", text: "Vielen Dank" }
     ]);

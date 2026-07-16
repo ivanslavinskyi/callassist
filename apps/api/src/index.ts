@@ -1,7 +1,10 @@
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
 import { CallService } from "./call-service";
-import { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
+import {
+  OpenAIRealtimeBridge,
+  type RealtimeTranscriptionDelay
+} from "./realtime/openai-realtime-bridge";
 import { createCallRepositoryFromEnv } from "./storage/create-call-repository";
 import { createTelephonyProviderFromEnv } from "./telephony/create-telephony-provider";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
@@ -21,6 +24,9 @@ const realtimeBridge =
           telephonyProvider.validateMediaStreamToken(callBriefId, token),
         model: process.env.OPENAI_REALTIME_MODEL,
         transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL,
+        transcriptionDelay: parseTranscriptionDelay(
+          process.env.OPENAI_TRANSCRIPTION_DELAY
+        ),
         voice: process.env.OPENAI_REALTIME_VOICE,
         logger: app.log
       })
@@ -59,4 +65,16 @@ function requireEnvironmentVariable(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required when TELEPHONY_DRIVER=twilio`);
   return value;
+}
+
+function parseTranscriptionDelay(
+  value: string | undefined
+): RealtimeTranscriptionDelay | undefined {
+  if (!value) return undefined;
+  if (["minimal", "low", "medium", "high", "xhigh"].includes(value)) {
+    return value as RealtimeTranscriptionDelay;
+  }
+  throw new Error(
+    "OPENAI_TRANSCRIPTION_DELAY must be minimal, low, medium, high, or xhigh"
+  );
 }
