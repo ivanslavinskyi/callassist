@@ -1,12 +1,18 @@
 import { z } from "zod";
 
+export const DEFAULT_AGENT_NAME = "Sebastian";
+export const DEFAULT_REPRESENTED_PERSON = "Ivan Slavinskyi";
+export const DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE =
+  "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt und nutzt mich deshalb, um Gespräche in seinem Auftrag zu führen.";
+
 export const SUPPORTED_CALL_LANGUAGES = [
-  { locale: "de-CH", label: "Deutsch (Schweiz)", shortLabel: "DE-CH" },
-  { locale: "de-DE", label: "Deutsch (Deutschland)", shortLabel: "DE" },
-  { locale: "fr-CH", label: "Français (Suisse)", shortLabel: "FR-CH" },
-  { locale: "it-CH", label: "Italiano (Svizzera)", shortLabel: "IT-CH" },
+  { locale: "de-CH", label: "German (Switzerland)", shortLabel: "DE-CH" },
+  { locale: "de-DE", label: "German (Germany)", shortLabel: "DE" },
+  { locale: "fr-CH", label: "French (Switzerland)", shortLabel: "FR-CH" },
+  { locale: "it-CH", label: "Italian (Switzerland)", shortLabel: "IT-CH" },
   { locale: "en-GB", label: "English (United Kingdom)", shortLabel: "EN-GB" },
-  { locale: "en-US", label: "English (United States)", shortLabel: "EN-US" }
+  { locale: "en-US", label: "English (United States)", shortLabel: "EN-US" },
+  { locale: "ru-RU", label: "Russian", shortLabel: "RU" }
 ] as const;
 
 export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
@@ -18,6 +24,31 @@ export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
 
 export const callLocaleSchema = z.enum(SUPPORTED_CALL_LOCALES);
 export type CallLocale = z.infer<typeof callLocaleSchema>;
+
+export const callVoiceGenderSchema = z.enum(["male", "female"]);
+export type CallVoiceGender = z.infer<typeof callVoiceGenderSchema>;
+
+export const DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES: Record<
+  CallLocale,
+  string
+> = {
+  "de-CH": DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
+  "de-DE": DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
+  "fr-CH":
+    "Monsieur Slavinskyi éprouve des difficultés à téléphoner en raison d’un trouble de la parole et m’utilise donc pour mener des conversations en son nom.",
+  "it-CH":
+    "Il signor Slavinskyi ha difficoltà a parlare al telefono a causa di un disturbo del linguaggio e pertanto mi utilizza per condurre conversazioni per suo conto.",
+  "en-GB":
+    "Mr Slavinskyi has difficulty speaking on the telephone because of a speech impairment, so he uses me to conduct conversations on his behalf.",
+  "en-US":
+    "Mr. Slavinskyi has difficulty speaking on the telephone because of a speech impairment, so he uses me to conduct conversations on his behalf.",
+  "ru-RU":
+    "Господин Славинский испытывает затруднения при телефонных разговорах из-за нарушения речи, поэтому использует меня для ведения разговоров от своего имени."
+};
+
+export function getDefaultSpeechImpairmentDisclosure(locale: CallLocale) {
+  return DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[locale];
+}
 
 export const callBriefStatusSchema = z.enum([
   "ready",
@@ -31,13 +62,30 @@ export const callBriefStatusSchema = z.enum([
 export type CallBriefStatus = z.infer<typeof callBriefStatusSchema>;
 
 const callBriefInputBaseSchema = z.object({
-  recipientName: z.string().trim().min(2, "Укажите адресата"),
+  recipientName: z.string().trim().min(2, "Enter a recipient"),
   phoneNumber: z
     .string()
     .trim()
-    .regex(/^\+[1-9]\d{7,14}$/, "Используйте международный формат, например +41710000000"),
-  objective: z.string().trim().min(10, "Опишите цель звонка подробнее"),
+    .regex(/^\+[1-9]\d{7,14}$/, "Use international format, for example +41710000000"),
+  objective: z.string().trim().min(10, "Describe the call objective in more detail"),
+  agentName: z
+    .string()
+    .trim()
+    .min(2, "Enter the assistant name")
+    .default(DEFAULT_AGENT_NAME),
+  representedPerson: z
+    .string()
+    .trim()
+    .min(2, "Enter the person represented by the assistant")
+    .default(DEFAULT_REPRESENTED_PERSON),
+  speechImpairmentDisclosure: z
+    .string()
+    .trim()
+    .min(10, "Explain why the assistant is being used")
+    .default(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE),
+  context: z.string().trim().default(""),
   locale: callLocaleSchema,
+  voiceGender: callVoiceGenderSchema.default("male"),
   allowLanguageSwitch: z.boolean().default(false),
   fallbackLocale: callLocaleSchema.optional(),
   allowedFacts: z.array(z.string().trim().min(1)).default([])
@@ -50,7 +98,7 @@ function validateLanguagePolicy(
   if (input.allowLanguageSwitch && !input.fallbackLocale) {
     context.addIssue({
       code: "custom",
-      message: "Выберите резервный язык",
+      message: "Select a fallback language",
       path: ["fallbackLocale"]
     });
   }
@@ -58,7 +106,7 @@ function validateLanguagePolicy(
   if (!input.allowLanguageSwitch && input.fallbackLocale) {
     context.addIssue({
       code: "custom",
-      message: "Резервный язык доступен только при разрешённой смене языка",
+      message: "A fallback language is available only when language switching is enabled",
       path: ["fallbackLocale"]
     });
   }
@@ -66,7 +114,7 @@ function validateLanguagePolicy(
   if (input.fallbackLocale === input.locale) {
     context.addIssue({
       code: "custom",
-      message: "Резервный язык должен отличаться от основного",
+      message: "The fallback language must differ from the primary language",
       path: ["fallbackLocale"]
     });
   }

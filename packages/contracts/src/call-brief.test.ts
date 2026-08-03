@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createCallBriefInputSchema } from "./call-brief";
+import {
+  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
+  createCallBriefInputSchema
+} from "./call-brief";
 
 const validBrief = {
   recipientName: "Gemeinde Aadorf",
@@ -12,7 +15,23 @@ const validBrief = {
 
 describe("createCallBriefInputSchema", () => {
   it("accepts a supported Swiss German call brief", () => {
-    expect(createCallBriefInputSchema.safeParse(validBrief).success).toBe(true);
+    const result = createCallBriefInputSchema.safeParse(validBrief);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agentName).toBe("Sebastian");
+      expect(result.data.voiceGender).toBe("male");
+      expect(result.data.speechImpairmentDisclosure).toContain("Sprechbehinderung");
+    }
+  });
+
+  it("accepts a female assistant voice", () => {
+    const result = createCallBriefInputSchema.safeParse({
+      ...validBrief,
+      voiceGender: "female"
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.voiceGender).toBe("female");
   });
 
   it("requires a fallback locale when language switching is enabled", () => {
@@ -36,9 +55,23 @@ describe("createCallBriefInputSchema", () => {
   it("rejects an unsupported locale", () => {
     const result = createCallBriefInputSchema.safeParse({
       ...validBrief,
-      locale: "ru-RU"
+      locale: "es-ES"
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it("accepts Russian and provides a localized disclosure", () => {
+    const result = createCallBriefInputSchema.safeParse({
+      ...validBrief,
+      locale: "ru-RU",
+      speechImpairmentDisclosure:
+        DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["ru-RU"]
+    });
+
+    expect(result.success).toBe(true);
+    expect(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["ru-RU"]).toContain(
+      "нарушения речи"
+    );
   });
 });

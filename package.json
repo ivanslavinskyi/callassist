@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.12.4",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19"
   },
   "scripts": {
     "build": "turbo build",
@@ -17,6 +17,7 @@
     "env:init": "node scripts/init-env.mjs",
     "lint": "turbo lint",
     "test": "turbo test",
+    "tunnel:twilio": "node scripts/start-twilio-tunnel.mjs",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {

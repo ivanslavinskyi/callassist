@@ -1,9 +1,11 @@
 "use client";
 
 import {
+  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
   SUPPORTED_CALL_LANGUAGES,
   type CallBrief,
   type CallLocale,
+  type CallVoiceGender,
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { useMemo, useState, type FormEvent } from "react";
@@ -12,14 +14,22 @@ import { createCallBrief } from "@/lib/api";
 const initialForm: CreateCallBriefInput = {
   recipientName: "Gemeinde Aadorf",
   phoneNumber: "+41523686688",
-  objective: "Уточнить, можно ли отправить запрошенные документы по электронной почте",
+  objective: "Ask whether the requested documents may be sent by email",
+  agentName: "Sebastian",
+  representedPerson: "Ivan Slavinskyi",
+  speechImpairmentDisclosure: DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["de-CH"],
+  context: "",
   locale: "de-CH",
+  voiceGender: "male",
   allowLanguageSwitch: false,
-  allowedFacts: ["Имя владельца", "Место проживания", "Предпочтение письменного ответа"]
+  allowedFacts: ["Owner's full name", "Place of residence", "Preference for a written reply"]
 };
 
 export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) => void }) {
   const [form, setForm] = useState<CreateCallBriefInput>(initialForm);
+  const [factsText, setFactsText] = useState(
+    (initialForm.allowedFacts ?? []).join("\n")
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,10 +51,16 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
     setError(null);
 
     try {
-      const brief = await createCallBrief(form);
+      const brief = await createCallBrief({
+        ...form,
+        allowedFacts: factsText
+          .split("\n")
+          .map((fact) => fact.trim())
+          .filter(Boolean)
+      });
       onCreated(brief);
     } catch {
-      setError("Не удалось создать задание. Проверьте поля и доступность API.");
+      setError("Could not create the call brief. Check the fields and API availability.");
     } finally {
       setSubmitting(false);
     }
@@ -54,15 +70,15 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
     <form className="call-form" onSubmit={handleSubmit}>
       <div className="form-heading">
         <div>
-          <span className="eyebrow">Новое задание</span>
-          <h2>Кому и зачем звоним?</h2>
+          <span className="eyebrow">New call brief</span>
+          <h2>Who are we calling, and why?</h2>
         </div>
-        <span className="mode-badge">Mock mode</span>
+        <span className="mode-badge">AI call</span>
       </div>
 
       <div className="form-grid">
         <label className="field field-wide">
-          <span>Организация или адресат</span>
+          <span>Organisation or recipient</span>
           <input
             value={form.recipientName}
             onChange={(event) => update("recipientName", event.target.value)}
@@ -72,7 +88,7 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
         </label>
 
         <label className="field">
-          <span>Телефон</span>
+          <span>Phone number</span>
           <input
             value={form.phoneNumber}
             onChange={(event) => update("phoneNumber", event.target.value)}
@@ -80,14 +96,29 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
             inputMode="tel"
             required
           />
-          <small>Международный формат E.164</small>
+          <small>International E.164 format</small>
         </label>
 
         <label className="field">
-          <span>Язык звонка</span>
+          <span>Call language</span>
           <select
             value={form.locale}
-            onChange={(event) => update("locale", event.target.value as CallLocale)}
+            onChange={(event) => {
+              const locale = event.target.value as CallLocale;
+              setForm((current) => {
+                const disclosure = current.speechImpairmentDisclosure ?? "";
+                const usesDefaultDisclosure = Object.values(
+                  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES
+                ).includes(disclosure);
+                return {
+                  ...current,
+                  locale,
+                  speechImpairmentDisclosure: usesDefaultDisclosure
+                    ? DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[locale]
+                    : disclosure
+                };
+              });
+            }}
           >
             {SUPPORTED_CALL_LANGUAGES.map(({ locale, label }) => (
               <option key={locale} value={locale}>
@@ -95,17 +126,79 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
               </option>
             ))}
           </select>
-          <small>Фиксируется в задании и транскрипте</small>
+          <small>Stored with the brief and transcript</small>
         </label>
 
         <label className="field field-wide">
-          <span>Цель звонка</span>
+          <span>Call objective</span>
           <textarea
             value={form.objective}
             onChange={(event) => update("objective", event.target.value)}
             rows={4}
             required
           />
+        </label>
+
+        <label className="field">
+          <span>AI assistant name</span>
+          <input
+            value={form.agentName ?? ""}
+            onChange={(event) => update("agentName", event.target.value)}
+            placeholder="Sebastian"
+            required
+          />
+        </label>
+
+        <label className="field">
+          <span>Assistant voice</span>
+          <select
+            value={form.voiceGender ?? "male"}
+            onChange={(event) =>
+              update("voiceGender", event.target.value as CallVoiceGender)
+            }
+          >
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+          <small>Used for both the disclosure and conversation</small>
+        </label>
+
+        <label className="field field-wide">
+          <span>Represented person</span>
+          <input
+            value={form.representedPerson ?? ""}
+            onChange={(event) => update("representedPerson", event.target.value)}
+            placeholder="Ivan Slavinskyi"
+            required
+          />
+        </label>
+
+        <label className="field field-wide">
+          <span>Disclosure before consent</span>
+          <textarea
+            value={form.speechImpairmentDisclosure ?? ""}
+            onChange={(event) =>
+              update("speechImpairmentDisclosure", event.target.value)
+            }
+            rows={3}
+            required
+          />
+          <small>
+            This statement is spoken before the transcription notice and the request to press 1.
+          </small>
+        </label>
+
+        <label className="field field-wide">
+          <span>Assistant context</span>
+          <textarea
+            value={form.context ?? ""}
+            onChange={(event) => update("context", event.target.value)}
+            rows={6}
+            placeholder="CV, cover letter, company details, and communication history…"
+          />
+          <small>
+            Context guides the conversation. List any facts approved for disclosure below.
+          </small>
         </label>
       </div>
 
@@ -127,14 +220,14 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
           />
           <span className="switch-control" aria-hidden="true" />
           <span>
-            <strong>Разрешить смену языка</strong>
-            <small>Ассистент сможет перейти только на выбранный резервный язык</small>
+            <strong>Allow language switching</strong>
+            <small>The assistant may switch only to the selected fallback language</small>
           </span>
         </label>
 
         {form.allowLanguageSwitch ? (
           <label className="field fallback-field">
-            <span>Резервный язык</span>
+            <span>Fallback language</span>
             <select
               value={form.fallbackLocale}
               onChange={(event) =>
@@ -153,22 +246,24 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
 
       <div className="allowed-facts">
         <div>
-          <span className="section-label">Разрешено сообщить без подтверждения</span>
-          <p>Чувствительные значения в этот список не входят.</p>
+          <span className="section-label">Approved for disclosure without confirmation</span>
+          <p>Enter one verified fact per line. The assistant must not infer missing information.</p>
         </div>
-        <div className="fact-list">
-          {(form.allowedFacts ?? []).map((fact) => (
-            <span className="fact-chip" key={fact}>
-              <span aria-hidden="true">✓</span> {fact}
-            </span>
-          ))}
-        </div>
+        <label className="field field-wide">
+          <span>Approved facts</span>
+          <textarea
+            value={factsText}
+            onChange={(event) => setFactsText(event.target.value)}
+            rows={6}
+            placeholder={"Full name: Ivan Slavinskyi\nApplication sent: 12 July 2026"}
+          />
+        </label>
       </div>
 
       {error ? <p className="form-error">{error}</p> : null}
 
       <button className="primary-button" disabled={submitting} type="submit">
-        <span>{submitting ? "Создаём…" : "Создать задание"}</span>
+        <span>{submitting ? "Creating…" : "Create call brief"}</span>
         <span aria-hidden="true">→</span>
       </button>
     </form>

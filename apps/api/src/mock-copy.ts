@@ -69,6 +69,18 @@ const copy: Record<CallLocale, MockCopy> = {
     approvalReason: "The office needs an email address for its written response.",
     proposedSpeech: "You can send the response to ivan@example.com.",
     declinedSpeech: "I’m not authorized to share the email address right now."
+  },
+  "ru-RU": {
+    greeting:
+      "Добрый день. Я голосовой ИИ-ассистент Ивана Славинского. У меня есть короткий вопрос по поводу документов.",
+    recipientReply:
+      "Добрый день. Сообщите, пожалуйста, адрес электронной почты для письменного ответа.",
+    approvalTitle: "Сообщить адрес электронной почты?",
+    approvalReason:
+      "Организации нужен адрес электронной почты для письменного ответа.",
+    proposedSpeech: "Ответ можно отправить на ivan@example.com.",
+    declinedSpeech:
+      "Сейчас я не могу сообщить адрес электронной почты."
   }
 };
 

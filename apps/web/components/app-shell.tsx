@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export function Brand() {
   return (
-    <Link className="brand" href="/" aria-label="CallAssist — на главную">
+    <Link className="brand" href="/" aria-label="CallAssist — home">
       <span className="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32" fill="none">
           <path d="M7.5 10.2a8.6 8.6 0 0 1 14.4-2.5" />
@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Brand />
         <div className="topbar-meta">
           <span className="secure-dot" aria-hidden="true" />
-          Личный защищённый пульт
+          Private call console
         </div>
       </header>
       {children}

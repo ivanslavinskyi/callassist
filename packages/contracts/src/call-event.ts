@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   approvalRequestSchema,
   callBriefSchema,
+  callLocaleSchema,
   transcriptSegmentSchema
 } from "./call-brief";
 
@@ -13,6 +14,13 @@ export const callEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("transcript.added"),
     segment: transcriptSegmentSchema
+  }),
+  z.object({
+    type: z.literal("transcript.delta"),
+    key: z.string().min(1),
+    role: z.enum(["assistant", "recipient"]),
+    delta: z.string(),
+    locale: callLocaleSchema
   }),
   z.object({
     type: z.literal("approval.requested"),

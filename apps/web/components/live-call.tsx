@@ -2,6 +2,7 @@
 
 import {
   SUPPORTED_CALL_LANGUAGES,
+  type CallEvent,
   type CallBriefStatus,
   type CallSnapshot
 } from "@callassist/contracts";
@@ -17,13 +18,13 @@ import {
 } from "@/lib/api";
 
 const statusLabels: Record<CallBriefStatus, string> = {
-  ready: "Готов к запуску",
-  dialing: "Набираем номер",
-  in_progress: "Разговор идёт",
-  awaiting_approval: "Ожидает решения",
-  completed: "Звонок завершён",
-  stopped: "Звонок остановлен",
-  failed: "Ошибка звонка"
+  ready: "Ready to start",
+  dialing: "Dialing",
+  in_progress: "Call in progress",
+  awaiting_approval: "Awaiting decision",
+  completed: "Call completed",
+  stopped: "Call stopped",
+  failed: "Call failed"
 };
 
 const activeStatuses = new Set<CallBriefStatus>([
@@ -37,13 +38,19 @@ export function LiveCall({ callId }: { callId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [partialTranscript, setPartialTranscript] = useState<
+    Record<
+      string,
+      { role: "assistant" | "recipient"; text: string; locale: string }
+    >
+  >({});
 
   const refresh = useCallback(async () => {
     try {
       setSnapshot(await getCallSnapshot(callId));
       setError(null);
     } catch {
-      setError("Задание не найдено или API недоступен.");
+      setError("The call brief was not found or the API is unavailable.");
     } finally {
       setLoading(false);
     }
@@ -52,8 +59,38 @@ export function LiveCall({ callId }: { callId: string }) {
   useEffect(() => {
     void refresh();
     const events = new EventSource(callEventsUrl(callId));
-    events.onmessage = () => void refresh();
-    events.onerror = () => setError("Live-канал переподключается…");
+    events.onmessage = (message) => {
+      let event: CallEvent;
+      try {
+        event = JSON.parse(message.data) as CallEvent;
+      } catch {
+        return;
+      }
+
+      if (event.type === "transcript.delta") {
+        setPartialTranscript((current) => ({
+          ...current,
+          [event.key]: {
+            role: event.role,
+            locale: event.locale,
+            text: `${current[event.key]?.text ?? ""}${event.delta}`
+          }
+        }));
+        return;
+      }
+
+      if (event.type === "transcript.added") {
+        setPartialTranscript((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(
+              ([, partial]) => partial.role !== event.segment.role
+            )
+          )
+        );
+      }
+      void refresh();
+    };
+    events.onerror = () => setError("The live connection is reconnecting…");
     return () => events.close();
   }, [callId, refresh]);
 
@@ -71,7 +108,7 @@ export function LiveCall({ callId }: { callId: string }) {
     try {
       setSnapshot(await action());
     } catch {
-      setError("Команда не выполнена. Попробуйте ещё раз.");
+      setError("The action could not be completed. Try again.");
     } finally {
       setBusy(false);
     }
@@ -80,7 +117,7 @@ export function LiveCall({ callId }: { callId: string }) {
   if (loading) {
     return (
       <AppShell>
-        <main className="live-page"><div className="loading-card">Загружаем задание…</div></main>
+        <main className="live-page"><div className="loading-card">Loading call brief…</div></main>
       </AppShell>
     );
   }
@@ -90,9 +127,9 @@ export function LiveCall({ callId }: { callId: string }) {
       <AppShell>
         <main className="live-page">
           <div className="loading-card">
-            <strong>Задание недоступно</strong>
+            <strong>Call brief unavailable</strong>
             <p>{error}</p>
-            <Link href="/">Вернуться в пульт</Link>
+            <Link href="/">Return to dashboard</Link>
           </div>
         </main>
       </AppShell>
@@ -106,7 +143,7 @@ export function LiveCall({ callId }: { callId: string }) {
     <AppShell>
       <main className="live-page">
         <div className="live-nav">
-          <Link className="back-link" href="/">← Все задания</Link>
+          <Link className="back-link" href="/">← All call briefs</Link>
           <span className={`status-pill status-${brief.status}`}>
             <span aria-hidden="true" /> {statusLabels[brief.status]}
           </span>
@@ -114,7 +151,7 @@ export function LiveCall({ callId }: { callId: string }) {
 
         <section className="call-hero">
           <div>
-            <span className="eyebrow">Активное задание</span>
+            <span className="eyebrow">Active call brief</span>
             <h1>{brief.recipientName}</h1>
             <div className="call-meta">
               <span>{brief.phoneNumber}</span>
@@ -132,7 +169,7 @@ export function LiveCall({ callId }: { callId: string }) {
                 type="button"
               >
                 <span className="button-signal" aria-hidden="true">◖</span>
-                Запустить симуляцию
+                Start call
               </button>
             ) : null}
             {isActive ? (
@@ -142,7 +179,7 @@ export function LiveCall({ callId }: { callId: string }) {
                 onClick={() => runAction(() => stopCall(callId))}
                 type="button"
               >
-                <span aria-hidden="true">■</span> Остановить
+                <span aria-hidden="true">■</span> Stop call
               </button>
             ) : null}
           </div>
@@ -155,7 +192,7 @@ export function LiveCall({ callId }: { callId: string }) {
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">Live transcript</span>
-                <h2>Разговор</h2>
+                <h2>Conversation</h2>
               </div>
               {isActive ? (
                 <div className="live-indicator"><span /><span /><span /></div>
@@ -163,19 +200,21 @@ export function LiveCall({ callId }: { callId: string }) {
             </div>
 
             <div className="transcript-list" aria-live="polite">
-              {transcript.length === 0 ? (
+              {transcript.length === 0 &&
+              Object.keys(partialTranscript).length === 0 ? (
                 <div className="transcript-empty">
                   <span className="wave-placeholder" aria-hidden="true">
                     <i /><i /><i /><i /><i />
                   </span>
-                  <strong>Транскрипт появится здесь</strong>
-                  <p>Запустите симуляцию — mock-диалог начнётся через несколько секунд.</p>
+                  <strong>The transcript will appear here</strong>
+                  <p>After the recipient consents, each turn will appear here in real time.</p>
                 </div>
               ) : (
-                transcript.map((segment) => (
+                <>
+                  {transcript.map((segment) => (
                   <article className={`transcript-line role-${segment.role}`} key={segment.id}>
                     <div className="speaker-mark">
-                      {segment.role === "assistant" ? "AI" : "GE"}
+                      {segment.role === "assistant" ? "AI" : "RE"}
                     </div>
                     <div>
                       <div className="speaker-row">
@@ -183,7 +222,7 @@ export function LiveCall({ callId }: { callId: string }) {
                           {segment.role === "assistant" ? "CallAssist" : brief.recipientName}
                         </strong>
                         <time>
-                          {new Date(segment.createdAt).toLocaleTimeString("ru-RU", {
+                          {new Date(segment.createdAt).toLocaleTimeString("en-GB", {
                             hour: "2-digit",
                             minute: "2-digit",
                             second: "2-digit"
@@ -194,7 +233,30 @@ export function LiveCall({ callId }: { callId: string }) {
                       <span className="locale-tag">{segment.locale}</span>
                     </div>
                   </article>
-                ))
+                  ))}
+                  {Object.entries(partialTranscript).map(([key, segment]) => (
+                    <article
+                      className={`transcript-line role-${segment.role}`}
+                      key={key}
+                    >
+                      <div className="speaker-mark">
+                        {segment.role === "assistant" ? "AI" : "RE"}
+                      </div>
+                      <div>
+                        <div className="speaker-row">
+                          <strong>
+                            {segment.role === "assistant"
+                              ? brief.agentName
+                              : brief.recipientName}
+                          </strong>
+                          <time>live</time>
+                        </div>
+                        <p>{segment.text}…</p>
+                        <span className="locale-tag">{segment.locale}</span>
+                      </div>
+                    </article>
+                  ))}
+                </>
               )}
             </div>
           </section>
@@ -203,12 +265,12 @@ export function LiveCall({ callId }: { callId: string }) {
             {pendingApproval ? (
               <section className="approval-card">
                 <div className="approval-icon" aria-hidden="true">!</div>
-                <span className="eyebrow">Требуется решение</span>
+                <span className="eyebrow">Decision required</span>
                 <h2>{pendingApproval.title}</h2>
                 <p>{pendingApproval.reason}</p>
                 <div className="speech-preview">
-                  <span>Ассистент произнесёт</span>
-                  <blockquote>«{pendingApproval.proposedSpeech}»</blockquote>
+                  <span>The assistant will say</span>
+                  <blockquote>“{pendingApproval.proposedSpeech}”</blockquote>
                 </div>
                 <div className="approval-actions">
                   <button
@@ -221,7 +283,7 @@ export function LiveCall({ callId }: { callId: string }) {
                     }
                     type="button"
                   >
-                    Разрешить
+                    Approve
                   </button>
                   <button
                     className="decline-button"
@@ -233,7 +295,7 @@ export function LiveCall({ callId }: { callId: string }) {
                     }
                     type="button"
                   >
-                    Не сообщать
+                    Do not disclose
                   </button>
                 </div>
               </section>
@@ -242,22 +304,26 @@ export function LiveCall({ callId }: { callId: string }) {
                 <div className="guard-visual" aria-hidden="true">
                   <span>✓</span>
                 </div>
-                <h2>Контур безопасности активен</h2>
-                <p>Личные данные не попадут в диалог без вашего решения.</p>
+                <h2>Safety gate active</h2>
+                <p>Private data cannot enter the conversation without your approval.</p>
               </section>
             )}
 
             <section className="brief-card">
               <span className="eyebrow">Call brief</span>
-              <h2>Цель разговора</h2>
+              <h2>Call objective</h2>
               <p>{brief.objective}</p>
               <dl>
-                <div><dt>Основной язык</dt><dd>{brief.locale}</dd></div>
+                <div><dt>Primary language</dt><dd>{brief.locale}</dd></div>
                 <div>
-                  <dt>Смена языка</dt>
-                  <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : "Запрещена"}</dd>
+                  <dt>Language switching</dt>
+                  <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : "Disabled"}</dd>
                 </div>
-                <div><dt>Режим</dt><dd>Симуляция</dd></div>
+                <div>
+                  <dt>Voice</dt>
+                  <dd>{brief.voiceGender === "female" ? "Female" : "Male"}</dd>
+                </div>
+                <div><dt>Assistant</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>
           </aside>

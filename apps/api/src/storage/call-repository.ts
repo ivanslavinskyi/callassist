@@ -18,11 +18,51 @@ export type ApprovalMutationResult = {
   snapshot: CallSnapshot;
 };
 
+export type CallAttemptRecord = {
+  id: string;
+  callBriefId: string;
+  provider: "mock" | "twilio";
+  providerCallId: string | null;
+  status: CallBrief["status"];
+  providerStatus: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  failureReason: string | null;
+};
+
+export type StartAttemptInput = Pick<
+  CallAttemptRecord,
+  "provider"
+>;
+
+export type StartAttemptResult = {
+  attempt: CallAttemptRecord;
+  snapshot: CallSnapshot;
+};
+
+export type ProviderStatusResult = {
+  callId: string;
+  snapshot: CallSnapshot;
+};
+
 export interface CallRepository {
   readonly mode: "memory" | "postgres";
   list(): Promise<CallBrief[]>;
   create(input: CreateCallBriefInput): Promise<CallBrief>;
   get(id: string): Promise<CallSnapshot | null>;
+  getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
+  startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
+  attachProviderCall(
+    attemptId: string,
+    providerCallId: string,
+    providerStatus: string
+  ): Promise<CallSnapshot>;
+  applyProviderStatus(
+    providerCallId: string,
+    providerStatus: string,
+    callStatus: CallBrief["status"],
+    callBriefId?: string
+  ): Promise<ProviderStatusResult | null>;
   updateStatus(
     id: string,
     status: CallBrief["status"]
@@ -50,10 +90,33 @@ export interface CallRepository {
 
 export class CallRepositoryError extends Error {
   constructor(
-    readonly code: "CALL_NOT_FOUND" | "APPROVAL_NOT_FOUND",
+    readonly code:
+      | "CALL_NOT_FOUND"
+      | "APPROVAL_NOT_FOUND"
+      | "CALL_NOT_READY"
+      | "CALL_ATTEMPT_NOT_FOUND",
     message = code
   ) {
     super(message);
     this.name = "CallRepositoryError";
   }
+}
+
+const terminalStatuses = new Set<CallBrief["status"]>([
+  "completed",
+  "stopped",
+  "failed"
+]);
+
+export function shouldApplyProviderCallStatus(
+  current: CallBrief["status"],
+  next: CallBrief["status"]
+) {
+  if (terminalStatuses.has(current)) return false;
+  if (terminalStatuses.has(next)) return true;
+  if (current === "ready") return next === "dialing";
+  if (current === "dialing") {
+    return next === "dialing" || next === "in_progress";
+  }
+  return current === next;
 }
