@@ -18,13 +18,13 @@ import {
 } from "@/lib/api";
 
 const statusLabels: Record<CallBriefStatus, string> = {
-  ready: "Готов к запуску",
-  dialing: "Набираем номер",
-  in_progress: "Разговор идёт",
-  awaiting_approval: "Ожидает решения",
-  completed: "Звонок завершён",
-  stopped: "Звонок остановлен",
-  failed: "Ошибка звонка"
+  ready: "Ready to start",
+  dialing: "Dialing",
+  in_progress: "Call in progress",
+  awaiting_approval: "Awaiting decision",
+  completed: "Call completed",
+  stopped: "Call stopped",
+  failed: "Call failed"
 };
 
 const activeStatuses = new Set<CallBriefStatus>([
@@ -50,7 +50,7 @@ export function LiveCall({ callId }: { callId: string }) {
       setSnapshot(await getCallSnapshot(callId));
       setError(null);
     } catch {
-      setError("Задание не найдено или API недоступен.");
+      setError("The call brief was not found or the API is unavailable.");
     } finally {
       setLoading(false);
     }
@@ -90,7 +90,7 @@ export function LiveCall({ callId }: { callId: string }) {
       }
       void refresh();
     };
-    events.onerror = () => setError("Live-канал переподключается…");
+    events.onerror = () => setError("The live connection is reconnecting…");
     return () => events.close();
   }, [callId, refresh]);
 
@@ -108,7 +108,7 @@ export function LiveCall({ callId }: { callId: string }) {
     try {
       setSnapshot(await action());
     } catch {
-      setError("Команда не выполнена. Попробуйте ещё раз.");
+      setError("The action could not be completed. Try again.");
     } finally {
       setBusy(false);
     }
@@ -117,7 +117,7 @@ export function LiveCall({ callId }: { callId: string }) {
   if (loading) {
     return (
       <AppShell>
-        <main className="live-page"><div className="loading-card">Загружаем задание…</div></main>
+        <main className="live-page"><div className="loading-card">Loading call brief…</div></main>
       </AppShell>
     );
   }
@@ -127,9 +127,9 @@ export function LiveCall({ callId }: { callId: string }) {
       <AppShell>
         <main className="live-page">
           <div className="loading-card">
-            <strong>Задание недоступно</strong>
+            <strong>Call brief unavailable</strong>
             <p>{error}</p>
-            <Link href="/">Вернуться в пульт</Link>
+            <Link href="/">Return to dashboard</Link>
           </div>
         </main>
       </AppShell>
@@ -143,7 +143,7 @@ export function LiveCall({ callId }: { callId: string }) {
     <AppShell>
       <main className="live-page">
         <div className="live-nav">
-          <Link className="back-link" href="/">← Все задания</Link>
+          <Link className="back-link" href="/">← All call briefs</Link>
           <span className={`status-pill status-${brief.status}`}>
             <span aria-hidden="true" /> {statusLabels[brief.status]}
           </span>
@@ -151,7 +151,7 @@ export function LiveCall({ callId }: { callId: string }) {
 
         <section className="call-hero">
           <div>
-            <span className="eyebrow">Активное задание</span>
+            <span className="eyebrow">Active call brief</span>
             <h1>{brief.recipientName}</h1>
             <div className="call-meta">
               <span>{brief.phoneNumber}</span>
@@ -169,7 +169,7 @@ export function LiveCall({ callId }: { callId: string }) {
                 type="button"
               >
                 <span className="button-signal" aria-hidden="true">◖</span>
-                Начать звонок
+                Start call
               </button>
             ) : null}
             {isActive ? (
@@ -179,7 +179,7 @@ export function LiveCall({ callId }: { callId: string }) {
                 onClick={() => runAction(() => stopCall(callId))}
                 type="button"
               >
-                <span aria-hidden="true">■</span> Остановить
+                <span aria-hidden="true">■</span> Stop call
               </button>
             ) : null}
           </div>
@@ -192,7 +192,7 @@ export function LiveCall({ callId }: { callId: string }) {
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">Live transcript</span>
-                <h2>Разговор</h2>
+                <h2>Conversation</h2>
               </div>
               {isActive ? (
                 <div className="live-indicator"><span /><span /><span /></div>
@@ -206,15 +206,15 @@ export function LiveCall({ callId }: { callId: string }) {
                   <span className="wave-placeholder" aria-hidden="true">
                     <i /><i /><i /><i /><i />
                   </span>
-                  <strong>Транскрипт появится здесь</strong>
-                  <p>После согласия собеседника реплики будут появляться здесь в реальном времени.</p>
+                  <strong>The transcript will appear here</strong>
+                  <p>After the recipient consents, each turn will appear here in real time.</p>
                 </div>
               ) : (
                 <>
                   {transcript.map((segment) => (
                   <article className={`transcript-line role-${segment.role}`} key={segment.id}>
                     <div className="speaker-mark">
-                      {segment.role === "assistant" ? "AI" : "GE"}
+                      {segment.role === "assistant" ? "AI" : "RE"}
                     </div>
                     <div>
                       <div className="speaker-row">
@@ -222,7 +222,7 @@ export function LiveCall({ callId }: { callId: string }) {
                           {segment.role === "assistant" ? "CallAssist" : brief.recipientName}
                         </strong>
                         <time>
-                          {new Date(segment.createdAt).toLocaleTimeString("ru-RU", {
+                          {new Date(segment.createdAt).toLocaleTimeString("en-GB", {
                             hour: "2-digit",
                             minute: "2-digit",
                             second: "2-digit"
@@ -240,7 +240,7 @@ export function LiveCall({ callId }: { callId: string }) {
                       key={key}
                     >
                       <div className="speaker-mark">
-                        {segment.role === "assistant" ? "AI" : "GE"}
+                        {segment.role === "assistant" ? "AI" : "RE"}
                       </div>
                       <div>
                         <div className="speaker-row">
@@ -265,12 +265,12 @@ export function LiveCall({ callId }: { callId: string }) {
             {pendingApproval ? (
               <section className="approval-card">
                 <div className="approval-icon" aria-hidden="true">!</div>
-                <span className="eyebrow">Требуется решение</span>
+                <span className="eyebrow">Decision required</span>
                 <h2>{pendingApproval.title}</h2>
                 <p>{pendingApproval.reason}</p>
                 <div className="speech-preview">
-                  <span>Ассистент произнесёт</span>
-                  <blockquote>«{pendingApproval.proposedSpeech}»</blockquote>
+                  <span>The assistant will say</span>
+                  <blockquote>“{pendingApproval.proposedSpeech}”</blockquote>
                 </div>
                 <div className="approval-actions">
                   <button
@@ -283,7 +283,7 @@ export function LiveCall({ callId }: { callId: string }) {
                     }
                     type="button"
                   >
-                    Разрешить
+                    Approve
                   </button>
                   <button
                     className="decline-button"
@@ -295,7 +295,7 @@ export function LiveCall({ callId }: { callId: string }) {
                     }
                     type="button"
                   >
-                    Не сообщать
+                    Do not disclose
                   </button>
                 </div>
               </section>
@@ -304,26 +304,26 @@ export function LiveCall({ callId }: { callId: string }) {
                 <div className="guard-visual" aria-hidden="true">
                   <span>✓</span>
                 </div>
-                <h2>Контур безопасности активен</h2>
-                <p>Личные данные не попадут в диалог без вашего решения.</p>
+                <h2>Safety gate active</h2>
+                <p>Private data cannot enter the conversation without your approval.</p>
               </section>
             )}
 
             <section className="brief-card">
               <span className="eyebrow">Call brief</span>
-              <h2>Цель разговора</h2>
+              <h2>Call objective</h2>
               <p>{brief.objective}</p>
               <dl>
-                <div><dt>Основной язык</dt><dd>{brief.locale}</dd></div>
+                <div><dt>Primary language</dt><dd>{brief.locale}</dd></div>
                 <div>
-                  <dt>Смена языка</dt>
-                  <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : "Запрещена"}</dd>
+                  <dt>Language switching</dt>
+                  <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : "Disabled"}</dd>
                 </div>
                 <div>
-                  <dt>Голос</dt>
-                  <dd>{brief.voiceGender === "female" ? "Женский" : "Мужской"}</dd>
+                  <dt>Voice</dt>
+                  <dd>{brief.voiceGender === "female" ? "Female" : "Male"}</dd>
                 </div>
-                <div><dt>Ассистент</dt><dd>{brief.agentName}</dd></div>
+                <div><dt>Assistant</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>
           </aside>

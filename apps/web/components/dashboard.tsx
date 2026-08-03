@@ -7,13 +7,13 @@ import { CreateCallForm } from "./create-call-form";
 import { listCallBriefs } from "@/lib/api";
 
 const statusLabels: Record<CallBrief["status"], string> = {
-  ready: "Готов",
-  dialing: "Набор номера",
-  in_progress: "Разговор",
-  awaiting_approval: "Нужно решение",
-  completed: "Завершён",
-  stopped: "Остановлен",
-  failed: "Ошибка"
+  ready: "Ready",
+  dialing: "Dialing",
+  in_progress: "In progress",
+  awaiting_approval: "Decision required",
+  completed: "Completed",
+  stopped: "Stopped",
+  failed: "Failed"
 };
 
 export function Dashboard() {
@@ -34,21 +34,21 @@ export function Dashboard() {
       <main className="dashboard-page">
         <section className="hero-block">
           <div>
-            <span className="eyebrow">Личный голосовой агент</span>
+            <span className="eyebrow">Personal voice agent</span>
             <h1>
-              Звонок под вашим
-              <span> контролем.</span>
+              Every call under
+              <span> your control.</span>
             </h1>
             <p>
-              Задайте цель и язык. CallAssist проведёт разговор, покажет транскрипт
-              и остановится перед раскрытием личных данных.
+              Set the objective and language. CallAssist handles the conversation,
+              streams the transcript, and pauses before disclosing private data.
             </p>
           </div>
           <div className="trust-card">
             <span className="trust-icon" aria-hidden="true">◎</span>
             <div>
               <strong>Default deny</strong>
-              <span>Нет подтверждения — нет раскрытия</span>
+              <span>No approval, no disclosure</span>
             </div>
           </div>
         </section>
@@ -59,8 +59,8 @@ export function Dashboard() {
           <aside className="activity-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">История</span>
-                <h2>Последние задания</h2>
+                <span className="eyebrow">History</span>
+                <h2>Recent call briefs</h2>
               </div>
               <span className="counter">{briefs.length}</span>
             </div>
@@ -68,8 +68,8 @@ export function Dashboard() {
             {briefs.length === 0 ? (
               <div className="empty-state">
                 <span aria-hidden="true">↗</span>
-                <strong>Здесь появятся звонки</strong>
-                <p>Первое задание уже заполнено — выберите язык и создайте его.</p>
+                <strong>Your calls will appear here</strong>
+                <p>The first brief is pre-filled. Choose a language and create it.</p>
               </div>
             ) : (
               <div className="brief-list">
@@ -94,8 +94,8 @@ export function Dashboard() {
             <div className="privacy-note">
               <span aria-hidden="true">⌁</span>
               <p>
-                <strong>Аудиозапись выключена.</strong> В реальном звонке аудиопоток
-                подключается к ИИ только после согласия собеседника.
+                <strong>Audio recording is off.</strong> Recipient audio is not sent
+                to the model until consent is confirmed.
               </p>
             </div>
           </aside>

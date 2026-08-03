@@ -1,39 +1,49 @@
-# План MVP
+# MVP Roadmap
 
-Текущий статус: пульт, PostgreSQL, шифрование, Twilio Media Stream и OpenAI Realtime bridge реализованы. Realtime выбранным голосом запрашивает DTMF-согласие; до нажатия `1` входящее аудио не передаётся модели, после чего транскрипт обеих сторон публикуется в пульт. Следующий этап — сквозная приёмка на реальном звонке и перенос чувствительных действий из prompt-правил в детерминированный server-side policy gate. Redis/BullMQ отложены до появления планирования и фоновых повторов.
+Current status: the operator console, PostgreSQL persistence, encryption, Twilio Media Stream, and OpenAI Realtime bridge are implemented. Realtime requests DTMF consent in the selected voice; recipient audio is not sent to the model before consent. Both sides of the conversation are then transcribed into the console.
 
-## 0. Спецификация и тестовые сценарии
+The next milestone is representative end-to-end evaluation and moving sensitive operations from prompt rules into a deterministic server-side policy gate. Redis/BullMQ remains deferred until scheduling and durable retries are introduced.
 
-- Определить первые три безопасных типа звонков и тестовые номера.
-- Описать обязательное представление ассистента, границы задачи, типы запрещённых данных и критерии остановки.
-- Подготовить тестовые диалоги для всех поддерживаемых языков, начиная с `de-CH`.
+## 0. Specification and test scenarios
 
-## 1. Пульт без телефонии
+- [ ] Define the first three low-risk call types and test recipients.
+- [x] Define the assistant disclosure, task boundary, prohibited data, and stop criteria.
+- [ ] Prepare test dialogues for every supported language, starting with `de-CH`.
 
-- Создание и список `CallBrief`.
-- Выбор языка звонка, fallback locale и разрешения на смену языка.
-- Экран активного звонка с имитацией транскрипта, user approval и stop.
-- Контракт событий между API и web-пультом.
+## 1. Operator console
 
-## 2. Серверная основа
+- [x] Create and list `CallBrief` records.
+- [x] Select the call language, optional fallback locale, and language-switch permission.
+- [x] Show a live-call screen with transcripts, approval controls, and stop control.
+- [x] Define shared event contracts between the API and console.
 
-- PostgreSQL-схема, миграции, encrypted private facts и audit events.
-- SSE-поток для UI; HTTP-команды `approve`, `decline`, `stop`.
-- Redis/BullMQ для фоновых задач и таймаутов.
+## 2. Server foundation
 
-## 3. Тестовая телефония
+- [x] Add the PostgreSQL schema, migrations, encrypted private fields, and audit events.
+- [x] Stream UI events over SSE and expose approve, decline, start, and stop commands.
+- [ ] Add Redis/BullMQ for background jobs and durable timeouts.
 
-- Реализовано: Twilio webhook verification, исходящий звонок, согласие, статусы, остановка и двунаправленный Media Stream.
-- Осталось: сквозной прогон диалога на тестовом номере и проверка восстановления после разрыва.
+## 3. Telephony
 
-## 4. Realtime и политика
+- [x] Verify Twilio webhook signatures.
+- [x] Place and stop outbound calls and synchronize provider statuses.
+- [x] Run a bidirectional Media Stream with DTMF consent.
+- [ ] Validate disconnect recovery and failure behaviour in repeated real calls.
 
-- Реализовано: server-side audio bridge, Realtime session и финальные сегменты транскрипта, привязанные к конкретному `CallBrief`.
-- Function tools и отдельный policy gate для approvals и завершения звонка.
-- Частичные сегменты транскрипта, безопасный timeout и подтверждение чувствительных действий.
+## 4. Realtime and policy
 
-## 5. Приёмка и PWA
+- [x] Bridge Twilio PCMU audio to an OpenAI Realtime session.
+- [x] Publish partial and final transcript segments for a specific `CallBrief`.
+- [x] Keep one selected voice across disclosure and conversation.
+- [x] Restrict the agent to the objective, context, and approved facts.
+- [ ] Implement server-side function tools and a deterministic approval gate.
+- [ ] Add structured call outcomes and explicit unresolved-state handling.
 
-- Прогон сценариев с шумом, перебиваниями, неверным номером, требованием чувствительных данных и сменой языка.
-- Проверка хранения данных, резервного копирования и полного audit trail.
-- После стабильных звонков: адаптивный PWA-пульт.
+## 5. Evaluation and release readiness
+
+- [ ] Measure end-of-turn latency and transcription accuracy on representative PSTN audio.
+- [ ] Test Swiss German, supported languages, accents, noise, interruptions, and code-switching.
+- [ ] Test wrong numbers, voicemail, sensitive-data requests, and unclear answers.
+- [ ] Verify backup, retention, recovery, and the complete audit trail.
+- [ ] Deploy the isolated webhook gateway and API in a production environment.
+- [ ] Harden the responsive console as a PWA after call quality is stable.

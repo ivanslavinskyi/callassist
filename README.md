@@ -1,28 +1,61 @@
 # CallAssist
 
-Личный голосовой ассистент для контролируемых исходящих звонков. Пользователь создаёт краткое задание на звонок, наблюдает за разговором в веб-пульте и подтверждает любое раскрытие чувствительных данных.
+CallAssist is a privacy-conscious AI voice assistant for controlled outbound phone calls. A user prepares a structured call brief, chooses the language and voice, monitors a live transcript, and retains control over sensitive disclosures.
 
-## Принципы MVP
+> **Project status:** working MVP for supervised testing. It is not yet intended for unattended or production-critical calling.
 
-- Web-first: сначала защищённый веб-пульт, затем PWA; нативное Android-приложение не входит в первый релиз.
-- Язык звонка задаётся явно в каждом `CallBrief` как BCP 47 locale, например `de-CH`.
-- Агент не получает чувствительные значения до явного подтверждения пользователя.
-- По умолчанию аудиозапись выключена; транскрипты и аудит доступны только владельцу.
-- Первый транспорт: Twilio Programmable Voice и двунаправленный Media Stream. SIP остаётся последующим адаптером.
+## What it does
 
-Подробности: [архитектура](docs/architecture.md) и [план MVP](docs/mvp-plan.md).
+- Places outbound PSTN calls through Twilio Programmable Voice.
+- Runs a natural speech-to-speech conversation through OpenAI Realtime.
+- Uses one selected voice for the disclosure, consent request, and conversation.
+- Requires DTMF consent before recipient audio is sent to the model.
+- Streams partial and final transcript segments to the web console over SSE.
+- Keeps the agent within an explicit objective, context, and allow-list of facts.
+- Lets the operator stop an active call and resolve disclosure requests.
+- Persists briefs, attempts, transcripts, approvals, and audit events in PostgreSQL.
+- Encrypts private context and approved facts with AES-256-GCM at rest.
 
-## Текущий вертикальный срез
+Supported call locales: `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB`, `en-US`, and `ru-RU`.
 
-- `apps/web` — Next.js-пульт создания задания и наблюдения за звонком.
-- `apps/api` — Fastify API, PostgreSQL или in-memory storage, SSE-события, Twilio webhooks и мост OpenAI Realtime.
-- `packages/contracts` — общие Zod-контракты, включая обязательный язык звонка и опциональный резервный язык.
+## Architecture
 
-В режиме `mock` звонок симулируется локально. Режим `twilio` создаёт реальный исходящий звонок, проверяет подпись входящих webhook-ов, синхронизирует статусы и позволяет остановить звонок из пульта. Voice webhook сразу открывает OpenAI Realtime Media Stream: выбранный голос сообщает имя ассистента, кого он представляет, причину использования ассистента и правила транскрипции, а после нажатия `1` без смены голоса начинает разговор. До подтверждения согласия входящее аудио отбрасывается на сервере и не передаётся в OpenAI; аудиозапись в Twilio отключена. Реплики обеих сторон транскрибируются и появляются в веб-пульте через SSE. Задания, попытки, транскрипты, подтверждения и аудит сохраняются в PostgreSQL, а контекст и разрешённые факты шифруются AES-256-GCM перед записью.
+```text
+Next.js console ── HTTP / SSE ──► Fastify API ──► PostgreSQL
+                                      │
+                                      ├── Twilio REST API
+                                      │
+Twilio PSTN call ◄── bidirectional Media Stream ──► Realtime bridge
+                                                       │
+                                                       └── OpenAI Realtime
+```
 
-## Локальный запуск
+The public Twilio surface is isolated on a dedicated listener. The main API, SSE endpoints, and decrypted application data are not exposed through the development tunnel.
 
-Требуется Node.js 22.19 или новее. API запускается с системным хранилищем доверенных CA, чтобы HTTPS-запросы работали и в сетях с локальным TLS inspection.
+## Security model
+
+- Twilio call recording is disabled.
+- Recipient audio is discarded until consent is confirmed by pressing `1`.
+- Twilio HTTP and WebSocket requests are signature-validated.
+- Every media stream carries an additional call-scoped HMAC token.
+- Private fields are encrypted before PostgreSQL persistence.
+- The model is instructed to use only the call objective and explicitly approved facts.
+- Sensitive actions remain server-owned; a deterministic production policy gate is still on the roadmap.
+
+See [Architecture](docs/architecture.md) for the detailed boundaries and data model.
+
+## Repository layout
+
+```text
+apps/web            Next.js operator console
+apps/api            Fastify API, storage, Twilio gateway, Realtime bridge
+packages/contracts  Shared Zod schemas and TypeScript contracts
+docs                Architecture and MVP roadmap
+```
+
+## Local development
+
+Requirements: Node.js 22.19+, Corepack/pnpm, and Docker.
 
 ```powershell
 corepack enable
@@ -34,21 +67,19 @@ pnpm db:migrate
 pnpm dev
 ```
 
-`env:init` создаёт локальный `.env` и уникальный ключ шифрования, не перезаписывая существующий файл. PostgreSQL слушает `localhost:55432`, чтобы не конфликтовать с локальными установками на стандартном порту.
+The console runs at `http://localhost:3000`; the API runs at `http://localhost:4000`. PostgreSQL is exposed on `localhost:55432`. Set `STORAGE_DRIVER=memory` for a temporary run without PostgreSQL.
 
-Веб-пульт откроется на `http://localhost:3000`, API — на `http://localhost:4000`. Для временного запуска без PostgreSQL установите `STORAGE_DRIVER=memory`.
+`pnpm env:init` creates `.env` with a unique encryption key and never overwrites an existing file.
 
-## Тестовый звонок через Twilio
+## Test a real Twilio call
 
-По умолчанию используется безопасный локальный режим `TELEPHONY_DRIVER=mock`. Для реального тестового звонка Twilio должен видеть публичный HTTPS URL, но основной API открывать наружу не требуется. В режиме `twilio` приложение поднимает отдельный webhook-gateway на `127.0.0.1:4001`; на нём зарегистрированы только Twilio voice/status webhook-и и WebSocket Media Stream. HTTP-запросы и WebSocket handshake проверяют подпись Twilio, а сам stream дополнительно использует подписанный параметр задания.
-
-Для теста без домена запустите в отдельном терминале Cloudflare Quick Tunnel:
+The default `TELEPHONY_DRIVER=mock` mode is safe for local UI development. For a real test call, start a temporary tunnel to the Twilio-only gateway:
 
 ```powershell
 pnpm tunnel:twilio
 ```
 
-Туннель направлен только на gateway-порт `4001`, поэтому `/api/*`, SSE и расшифрованные данные через него недоступны. Скопируйте выданный адрес вида `https://random-name.trycloudflare.com` и укажите в `.env`:
+Set the generated HTTPS URL and credentials in `.env`:
 
 ```dotenv
 TELEPHONY_DRIVER=twilio
@@ -65,13 +96,9 @@ OPENAI_REALTIME_MALE_VOICE=cedar
 OPENAI_REALTIME_FEMALE_VOICE=marin
 ```
 
-Оставьте туннель запущенным, выполните `pnpm db:migrate` и перезапустите API. Quick Tunnel выдаёт новый адрес после перезапуска, поэтому тогда нужно обновить `PUBLIC_BASE_URL` и ещё раз перезапустить API. URL для TwiML, callback-ов статуса и Media Stream передаются Twilio автоматически при создании звонка. Запись звонка отключена. Язык объявления и разговора берётся из `CallBrief`; дисклеймер, отказ при таймауте согласия и основной разговор озвучиваются одной Realtime-сессией.
+Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick Tunnel URLs change between sessions, so update `PUBLIC_BASE_URL` whenever a new tunnel is created. Quick Tunnel is for development only and has no uptime guarantee.
 
-Голос всего звонка выбирается в каждом задании: мужской вариант использует `cedar`, женский — `marin`. Дисклеймер произносится тем же голосом, что и основной разговор.
-
-Quick Tunnel предназначен только для разработки и не имеет гарантии доступности. Если выданный адрес временно не резолвится, перезапустите туннель позже или используйте `ngrok http 4001` как альтернативу.
-
-Проверки проекта:
+## Quality checks
 
 ```powershell
 pnpm lint
@@ -80,9 +107,12 @@ pnpm test
 pnpm build
 ```
 
-PostgreSQL-интеграционный тест запускается при наличии `TEST_DATABASE_URL`:
+The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` configures for the local Docker database.
 
-```powershell
-$env:TEST_DATABASE_URL='postgresql://callassist:callassist-dev@localhost:55432/callassist_test'
-pnpm --filter @callassist/api test
-```
+## Roadmap
+
+- Measure end-of-turn latency and transcription quality with representative PSTN audio and Swiss German speakers.
+- Move all sensitive actions from prompt rules into a deterministic policy gate.
+- Add production deployment, background scheduling/retries, and PWA hardening.
+
+See the [MVP roadmap](docs/mvp-plan.md) for the implementation sequence.

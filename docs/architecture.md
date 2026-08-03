@@ -1,81 +1,90 @@
-# Архитектура CallAssist
+# CallAssist Architecture
 
-## Цель
+## Purpose
 
-CallAssist — личный ассистент, который совершает исходящие звонки по чётко ограниченному заданию. Во время разговора пользователь видит транскрипт, может остановить звонок и обязан подтвердить раскрытие чувствительных данных или любое юридически значимое действие.
+CallAssist is a personal assistant that places outbound calls under a narrowly scoped call brief. During a call, the operator can monitor the transcript, stop the call, and approve or reject sensitive disclosures.
 
-## Стартовая архитектура
+## System overview
 
 ```text
-Next.js dashboard -- HTTPS/SSE --> Fastify API -- PostgreSQL
-                                      |              |
-                                      |              +-- encrypted private facts
-                                      +-- Redis/BullMQ
-                                      |
-                             Twilio Programmable Voice
-                                      |
+Next.js console ── HTTPS / SSE ──► Fastify API ──► PostgreSQL
+                                         │              │
+                                         │              └── encrypted private fields
+                                         │
+                                Twilio Programmable Voice
+                                         │
                               bidirectional Media Stream
-                                      |
-                           server-side Realtime bridge
-                                      |
-                            OpenAI Realtime session
+                                         │
+                              server-side Realtime bridge
+                                         │
+                                OpenAI Realtime session
 ```
 
-- `apps/web`: защищённый Next.js-пульт.
-- `apps/api`: Node.js/TypeScript + Fastify. Владеет webhook-ами, политикой, очередями и server-side Realtime connection.
-- PostgreSQL: задания, попытки звонков, транскрипты, подтверждения и аудит.
-- Redis/BullMQ: планирование звонка, повторные попытки и ограниченные по времени операции.
-- Twilio: исходящий PSTN-звонок, подписанные webhooks и двунаправленный Media Stream с DTMF-согласием внутри потока.
-- OpenAI Realtime: голосовой диалог. Модель не выполняет внешние действия напрямую; сервер исполняет строго ограниченные function tools.
+- `apps/web`: the Next.js operator console.
+- `apps/api`: the Node.js/TypeScript Fastify API, policy boundary, Twilio gateway, and server-side Realtime connection.
+- PostgreSQL: call briefs, attempts, transcripts, approvals, and audit events.
+- Twilio: outbound PSTN calls, signed webhooks, DTMF consent, and a bidirectional Media Stream.
+- OpenAI Realtime: direct speech-to-speech conversation. External actions remain under server control.
+- Redis/BullMQ: planned for scheduling, retries, and time-bounded background work.
 
-API использует интерфейс `CallRepository`. Локальный mock и PostgreSQL реализуют одинаковый контракт, поэтому телефония и Realtime не зависят от способа хранения. SQL-миграции версионируются вместе с API. Контекст и разрешённые факты сохраняются только в зашифрованном виде; audit events не содержат транскрипт или значения фактов и защищены от изменения и удаления на уровне PostgreSQL.
+## Storage boundary
 
-Телефония изолирована интерфейсом `TelephonyProvider`: локальная реализация сохраняет детерминированный mock-сценарий, а Twilio-адаптер создаёт и останавливает реальный вызов. Provider call SID и сырой статус сохраняются в `CallAttempt`; подписанные status callbacks переводятся в доменные статусы и публикуются в SSE. Voice webhook сразу открывает двунаправленный Media Stream. OpenAI Realtime выбранным голосом сообщает личность ИИ, представляемого человека, причину использования ассистента и правила транскрипции. До DTMF `1` сервер отбрасывает входящие media frames и не отправляет их в OpenAI; после подтверждения тот же голос без повторного webhook начинает выполнение цели звонка.
+The API depends on a `CallRepository` interface. The in-memory and PostgreSQL repositories implement the same contract, keeping telephony and Realtime independent from storage. SQL migrations are versioned with the API.
 
-Основной HTTP API слушает порт `4000`. В режиме Twilio webhook-и и Media Stream вынесены в отдельный Fastify listener на `127.0.0.1:4001`, где отсутствуют `/api/*`, SSE и health endpoint. Локальный HTTPS-туннель направляется только на этот listener; неподписанные Twilio-запросы и stream без корректного HMAC-параметра отклоняются. В production ту же границу следует сохранить отдельным ingress route или сервисом.
+Context and approved facts are encrypted before persistence. Audit events do not include transcript content or private fact values and are protected against mutation and deletion at the PostgreSQL layer.
 
-При перезапуске API незавершённые звонки переводятся в `failed`, ожидающие подтверждения истекают, а восстановление фиксируется в аудите. Межпроцессный event bus и фоновые повторы появятся вместе с Redis/BullMQ до добавления планирования и автоматических повторных звонков.
+On API startup, unfinished calls are marked as failed, pending approvals expire, and recovery is recorded in the audit trail. A cross-process event bus and durable retries remain planned alongside Redis/BullMQ.
 
-## Язык звонка
+## Telephony and consent boundary
 
-Язык является обязательным свойством `CallBrief`, а не настройкой профиля по умолчанию. Это позволяет одному владельцу создавать, например, немецкий и французский звонки без смешивания инструкций и транскриптов.
+`TelephonyProvider` isolates the transport. The mock provider supplies deterministic local scenarios; the Twilio provider creates and terminates real calls. Provider call identifiers and raw statuses are stored with each `CallAttempt`, while signed status callbacks map them into domain statuses and SSE events.
+
+The Twilio voice webhook immediately opens a bidirectional Media Stream. OpenAI Realtime uses the selected voice to disclose the AI identity, represented person, accessibility context, and live-transcription policy. Before the recipient presses `1`, the server discards inbound media frames and does not forward them to OpenAI. After consent, the same Realtime session begins the call objective without changing voice or making another webhook round trip.
+
+The main API listens on port `4000`. In Twilio mode, a separate Fastify listener on `127.0.0.1:4001` exposes only voice/status webhooks and the Media Stream WebSocket. It does not expose `/api/*`, SSE, or a health endpoint. HTTP and WebSocket requests require valid Twilio signatures, and the stream also requires a call-scoped HMAC token.
+
+Production should preserve this boundary with a dedicated ingress route or service rather than exposing the main API.
+
+## Call language
+
+Language is a required `CallBrief` property rather than a profile default. One operator can therefore create calls in different languages without mixing instructions or transcripts.
 
 ```ts
 type CallLanguage = {
   locale: string;           // BCP 47: de-CH, de-DE, en-GB, fr-CH, it-CH, ru-RU
-  fallbackLocale?: string;  // только при явном разрешении пользователя
-  allowSwitch: boolean;     // по умолчанию false
+  fallbackLocale?: string;  // only with explicit operator permission
+  allowSwitch: boolean;     // false by default
 };
 ```
 
-Первый интерфейс предлагает allow-list: `de-CH`, `de-DE`, `en-GB`, `en-US`, `fr-CH`, `it-CH`, `ru-RU`. На сервере сохраняется BCP 47 locale, поэтому список можно расширить без миграции схемы.
+The current allow-list is `de-CH`, `de-DE`, `en-GB`, `en-US`, `fr-CH`, `it-CH`, and `ru-RU`. The server stores the BCP 47 locale, so the list can grow without a schema migration.
 
-Правила:
+Rules:
 
-1. Перед стартом звонка пользователь выбирает язык и видит его на карточке задания и странице активного звонка.
-2. В server-side инструкции Realtime передаётся выбранный locale, требуемый стиль и запрет самовольно менять язык.
-3. Если собеседник говорит на другом языке, ассистент вежливо просит продолжить на выбранном языке. Смена допускается только при `allowSwitch: true` и фиксируется как событие аудита.
-4. Каждый сегмент транскрипта хранит фактически использованный locale. Частичные сегменты не считаются окончательной записью.
-5. Текст для user approval формируется на языке текущего звонка; пользователь видит точную фразу, которую агент произнесёт после подтверждения.
+1. The operator selects the language before starting and sees it on the brief and live-call pages.
+2. Realtime instructions receive the locale, required speaking style, and the language-switch policy.
+3. If the recipient uses another language, the assistant asks them to continue in the selected language. Switching is allowed only when `allowSwitch` is true.
+4. Every transcript segment stores the locale used for that segment. Partial text is not an authoritative final record.
+5. Approval prompts use the active call language and show the exact proposed disclosure to the operator.
 
-`de-CH` означает швейцарский вариант стандартного немецкого. Диалект и конкретный голос — отдельные будущие настройки; их нельзя выводить только из locale.
+`de-CH` means Swiss Standard German. Dialect handling and voice selection are separate concerns and must not be inferred from the locale alone.
 
-## Модель данных MVP
+## MVP data model
 
-- `CallBrief`: адресат, цель, язык, разрешённые факты, категории требующие подтверждения, версия сценария.
-- `CallAttempt`: статус, Twilio call SID, время начала и окончания, причина остановки.
-- `TranscriptSegment`: роль говорящего, текст, locale, временные метки, `partial | final`.
-- `ApprovalRequest`: категория данных/действия, точный предполагаемый текст, статус, срок действия, решение пользователя.
-- `AuditEvent`: неизменяемая цепочка событий управления, без секретов и лишнего содержимого транскрипта.
+- `CallBrief`: recipient, objective, language, context, approved facts, and policy settings.
+- `CallAttempt`: provider call ID, raw and domain status, timestamps, and stop reason.
+- `TranscriptSegment`: speaker role, text, locale, timestamp, and partial/final state.
+- `ApprovalRequest`: category, proposed speech, reason, expiry, and operator decision.
+- `AuditEvent`: append-only control event without secrets or unnecessary transcript content.
 
-## Политика раскрытия данных
+## Sensitive-data policy
 
-Чувствительные данные хранятся отдельно и зашифрованно. До одобрения значение не включается в prompt или историю Realtime-сессии.
+Private values are stored separately and encrypted. A value must not enter the model prompt or Realtime conversation history before approval.
 
-Для данных вроде адреса, даты рождения, медицинской информации, email или согласия агент вызывает `request_approval`. API создаёт одноразовый запрос, публикует его в пульт и ждёт решения. Отказ либо истечение срока означают отсутствие раскрытия. Юридические обязательства всегда требуют того же механизма.
+For addresses, dates of birth, medical information, contact details, or legal commitments, the intended production flow is a server-owned `request_approval` action. The API creates a one-time request, publishes it to the console, and waits for the operator. Rejection or expiry means no disclosure.
 
-Функции `stop_call`, `request_approval` и `end_call` остаются server-owned. MCP и сторонние интеграции в MVP не используются.
+`stop_call`, `request_approval`, and `end_call` remain server-owned capabilities. The current Realtime MVP still relies partly on prompt rules; moving these guarantees into a deterministic policy gate is required before production use.
 
-## Границы первого релиза
+## MVP exclusions
 
-В MVP не входят: публичная регистрация, браузерный softphone, native Android, автоматическая смена языка, CRM/календарные интеграции, RAG и аудиозапись по умолчанию.
+The first release does not include public registration, a browser softphone, a native Android app, automatic language switching, CRM/calendar integrations, RAG, or default audio recording.
