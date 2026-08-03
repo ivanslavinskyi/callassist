@@ -55,6 +55,14 @@ function validateLanguagePolicy(
     });
   }
 
+  if (!input.allowLanguageSwitch && input.fallbackLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "Резервный язык доступен только при разрешённой смене языка",
+      path: ["fallbackLocale"]
+    });
+  }
+
   if (input.fallbackLocale === input.locale) {
     context.addIssue({
       code: "custom",

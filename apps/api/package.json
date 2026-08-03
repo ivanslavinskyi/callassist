@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/copy-migrations.mjs",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:prod": "node dist/db/migrate.js",
+    "db:test:prepare": "tsx src/db/prepare-test-database.ts",
     "dev": "tsx watch src/index.ts",
     "lint": "tsc --noEmit",
     "start": "node dist/index.js",
@@ -14,12 +17,14 @@
   "dependencies": {
     "@callassist/contracts": "workspace:*",
     "@fastify/cors": "^11.0.0",
-    "fastify": "^5.4.0"
+    "dotenv": "^17.4.2",
+    "fastify": "^5.4.0",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "tsx": "^4.20.0",
     "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }

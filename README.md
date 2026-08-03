@@ -15,10 +15,10 @@
 ## Текущий вертикальный срез
 
 - `apps/web` — Next.js-пульт создания задания и наблюдения за mock-звонком.
-- `apps/api` — Fastify API, in-memory состояние, SSE-события и запрос подтверждения.
+- `apps/api` — Fastify API, PostgreSQL или in-memory storage, SSE-события и запрос подтверждения.
 - `packages/contracts` — общие Zod-контракты, включая обязательный язык звонка и опциональный резервный язык.
 
-Сейчас звонок симулируется локально. Подключение Twilio и OpenAI Realtime начинается после фиксации UX и контрактов этого среза.
+Сейчас звонок симулируется локально, но задания, попытки, транскрипты, подтверждения и аудит уже могут сохраняться в PostgreSQL. Разрешённые факты шифруются AES-256-GCM перед записью. Подключение Twilio и OpenAI Realtime — следующий этап.
 
 ## Локальный запуск
 
@@ -27,14 +27,29 @@
 ```powershell
 corepack enable
 pnpm install
+pnpm env:init
+pnpm db:up
+pnpm db:test:prepare
+pnpm db:migrate
 pnpm dev
 ```
 
-Веб-пульт откроется на `http://localhost:3000`, API — на `http://localhost:4000`. Проверки проекта:
+`env:init` создаёт локальный `.env` и уникальный ключ шифрования, не перезаписывая существующий файл. PostgreSQL слушает `localhost:55432`, чтобы не конфликтовать с локальными установками на стандартном порту.
+
+Веб-пульт откроется на `http://localhost:3000`, API — на `http://localhost:4000`. Для временного запуска без PostgreSQL установите `STORAGE_DRIVER=memory`.
+
+Проверки проекта:
 
 ```powershell
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
+```
+
+PostgreSQL-интеграционный тест запускается при наличии `TEST_DATABASE_URL`:
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://callassist:callassist-dev@localhost:55432/callassist_test'
+pnpm --filter @callassist/api test
 ```

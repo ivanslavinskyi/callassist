@@ -24,6 +24,15 @@ describe("createCallBriefInputSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects a fallback locale when language switching is disabled", () => {
+    const result = createCallBriefInputSchema.safeParse({
+      ...validBrief,
+      fallbackLocale: "fr-CH"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("rejects an unsupported locale", () => {
     const result = createCallBriefInputSchema.safeParse({
       ...validBrief,
