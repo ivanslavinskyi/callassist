@@ -2,9 +2,12 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   CallBrief,
+  CallRecording,
   CallLocale,
   CallSnapshot,
   CreateCallBriefInput,
+  FinalTranscript,
+  FinalTranscriptSegment,
   TranscriptSegment
 } from "@callassist/contracts";
 
@@ -42,6 +45,36 @@ export type StartAttemptResult = {
 
 export type ProviderStatusResult = {
   callId: string;
+  snapshot: CallSnapshot;
+};
+
+export type BeginRecordingResult = {
+  providerCallId: string;
+  recording: CallRecording;
+  snapshot: CallSnapshot;
+};
+
+export type RecordingStatusInput = {
+  recordingId: string;
+  callBriefId: string;
+  providerCallId: string;
+  providerRecordingId: string;
+  providerStatus: "in-progress" | "completed" | "absent";
+  durationSeconds?: number;
+  channels?: number;
+  startedAt?: string;
+  failureReason?: string;
+};
+
+export type RecordingMutationResult = {
+  callId: string;
+  recording: CallRecording;
+  snapshot: CallSnapshot;
+};
+
+export type FinalTranscriptMutationResult = {
+  callId: string;
+  finalTranscript: FinalTranscript;
   snapshot: CallSnapshot;
 };
 
@@ -83,7 +116,38 @@ export interface CallRepository {
     decision: ApprovalDecision["decision"]
   ): Promise<ApprovalMutationResult>;
   stop(id: string): Promise<CallSnapshot>;
+  beginRecording(id: string): Promise<BeginRecordingResult>;
+  attachProviderRecording(
+    recordingId: string,
+    providerRecordingId: string,
+    providerStatus: string
+  ): Promise<RecordingMutationResult>;
+  failRecording(
+    recordingId: string,
+    failureReason: string
+  ): Promise<RecordingMutationResult>;
+  applyRecordingStatus(
+    input: RecordingStatusInput
+  ): Promise<RecordingMutationResult | null>;
+  claimFinalTranscript(
+    recordingId: string,
+    model: string,
+    force?: boolean
+  ): Promise<FinalTranscriptMutationResult | null>;
+  completeFinalTranscript(
+    recordingId: string,
+    text: string,
+    segments: FinalTranscriptSegment[]
+  ): Promise<FinalTranscriptMutationResult>;
+  failFinalTranscript(
+    recordingId: string,
+    failureReason: string
+  ): Promise<FinalTranscriptMutationResult>;
+  listTranscriptionCandidates(): Promise<string[]>;
+  listExpiredRecordingCallIds(now: string): Promise<string[]>;
+  markRecordingDeleted(id: string): Promise<RecordingMutationResult>;
   recoverInterruptedCalls(): Promise<number>;
+  recoverInterruptedTranscriptions(): Promise<number>;
   ping(): Promise<void>;
   close(): Promise<void>;
 }
@@ -94,7 +158,9 @@ export class CallRepositoryError extends Error {
       | "CALL_NOT_FOUND"
       | "APPROVAL_NOT_FOUND"
       | "CALL_NOT_READY"
-      | "CALL_ATTEMPT_NOT_FOUND",
+      | "CALL_ATTEMPT_NOT_FOUND"
+      | "RECORDING_NOT_FOUND"
+      | "RECORDING_NOT_AVAILABLE",
     message = code
   ) {
     super(message);

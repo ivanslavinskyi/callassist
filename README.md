@@ -9,8 +9,12 @@ CallAssist is a privacy-conscious AI voice assistant for controlled outbound pho
 - Places outbound PSTN calls through Twilio Programmable Voice.
 - Runs a natural speech-to-speech conversation through OpenAI Realtime.
 - Uses one selected voice for the disclosure, consent request, and conversation.
-- Requires DTMF consent before recipient audio is sent to the model.
-- Streams partial and final transcript segments to the web console over SSE.
+- Requires DTMF consent before recipient audio is sent to the model or recorded.
+- Starts a dual-channel Twilio recording only after consent is confirmed.
+- Streams a fast draft transcript to the web console over SSE.
+- Separates the two Twilio call legs and creates a speaker-labelled post-call
+  transcript with timestamps, `gpt-transcribe`, and bounded call context.
+- Supports immediate, 7-day, or 30-day audio retention and manual deletion.
 - Keeps the agent within an explicit objective, context, and allow-list of facts.
 - Lets the operator stop an active call and resolve disclosure requests.
 - Persists briefs, attempts, transcripts, approvals, and audit events in PostgreSQL.
@@ -28,14 +32,24 @@ Next.js console ── HTTP / SSE ──► Fastify API ──► PostgreSQL
 Twilio PSTN call ◄── bidirectional Media Stream ──► Realtime bridge
                                                        │
                                                        └── OpenAI Realtime
+
+Twilio recording ── authenticated dual-channel download
+                                      │
+                                      └── turn segmentation ──► post-call transcription
+                                                                        │
+                                                                        └── encrypted final turns
 ```
 
 The public Twilio surface is isolated on a dedicated listener. The main API, SSE endpoints, and decrypted application data are not exposed through the development tunnel.
 
 ## Security model
 
-- Twilio call recording is disabled.
+- Twilio call recording is disabled when the call is created.
 - Recipient audio is discarded until consent is confirmed by pressing `1`.
+- After consent, the conversation starts only when Twilio confirms recording
+  startup; otherwise the assistant announces the failure and ends the call.
+- Recording URLs and Twilio credentials are never exposed to the browser.
+- Provider audio is deleted on demand or at the configured retention deadline.
 - Twilio HTTP and WebSocket requests are signature-validated.
 - Every media stream carries an additional call-scoped HMAC token.
 - Private fields are encrypted before PostgreSQL persistence.
@@ -69,6 +83,10 @@ pnpm dev
 
 The console runs at `http://localhost:3000`; the API runs at `http://localhost:4000`. PostgreSQL is exposed on `localhost:55432`. Set `STORAGE_DRIVER=memory` for a temporary run without PostgreSQL.
 
+The API development process intentionally does not auto-restart when source
+files change. Restart it manually between edits: an automatic restart during an
+active PSTN call would terminate the Twilio Media Stream.
+
 `pnpm env:init` creates `.env` with a unique encryption key and never overwrites an existing file.
 
 ## Test a real Twilio call
@@ -92,6 +110,7 @@ OPENAI_API_KEY=sk-...
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_TRANSCRIPTION_MODEL=gpt-realtime-whisper
 OPENAI_TRANSCRIPTION_DELAY=high
+OPENAI_POST_CALL_TRANSCRIPTION_MODEL=gpt-transcribe
 OPENAI_REALTIME_MALE_VOICE=cedar
 OPENAI_REALTIME_FEMALE_VOICE=marin
 ```
@@ -112,6 +131,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 ## Roadmap
 
 - Measure end-of-turn latency and transcription quality with representative PSTN audio and Swiss German speakers.
+- Benchmark post-call turn segmentation and transcription on longer calls,
+  overlapping speech, background noise, and Swiss German speakers.
 - Move all sensitive actions from prompt rules into a deterministic policy gate.
 - Add production deployment, background scheduling/retries, and PWA hardening.
 

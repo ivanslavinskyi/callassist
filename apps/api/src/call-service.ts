@@ -14,15 +14,24 @@ import {
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
 import {
   mapTwilioStatusToCallStatus,
+  type RecordingMedia,
   type TelephonyProvider,
   type TwilioCallStatus
 } from "./telephony/telephony-provider";
+import {
+  PostCallTranscriptionError,
+  type PostCallTranscriber
+} from "./transcription/openai-post-call-transcriber";
 
 type Subscriber = (event: CallEvent) => void;
 
 export class CallServiceError extends Error {
   constructor(
-    readonly code: "TELEPHONY_START_FAILED" | "TELEPHONY_STOP_FAILED",
+    readonly code:
+      | "TELEPHONY_START_FAILED"
+      | "TELEPHONY_STOP_FAILED"
+      | "RECORDING_START_FAILED"
+      | "RECORDING_NOT_AVAILABLE",
     options?: { cause?: unknown }
   ) {
     super(code, options);
@@ -33,19 +42,41 @@ export class CallServiceError extends Error {
 export class CallService {
   readonly #subscribers = new Map<string, Set<Subscriber>>();
   readonly #timers = new Map<string, Set<NodeJS.Timeout>>();
+  readonly #backgroundJobs = new Set<Promise<unknown>>();
+  readonly #processingRecordings = new Set<string>();
   readonly #onBackgroundError: (error: unknown) => void;
+  readonly #postCallTranscriber?: PostCallTranscriber;
+  #retentionTimer: NodeJS.Timeout | null = null;
 
   constructor(
     readonly repository: CallRepository,
     readonly telephonyProvider: TelephonyProvider = new MockTelephonyProvider(),
-    onBackgroundError: (error: unknown) => void = console.error
+    onBackgroundError: (error: unknown) => void = console.error,
+    postCallTranscriber?: PostCallTranscriber
   ) {
     this.#onBackgroundError = onBackgroundError;
+    this.#postCallTranscriber = postCallTranscriber;
   }
 
   async initialize() {
     await this.repository.ping();
-    return this.repository.recoverInterruptedCalls();
+    const [recoveredCalls] = await Promise.all([
+      this.repository.recoverInterruptedCalls(),
+      this.repository.recoverInterruptedTranscriptions()
+    ]);
+    if (this.#postCallTranscriber) {
+      const candidates = await this.repository.listTranscriptionCandidates();
+      for (const recordingId of candidates) {
+        this.#runBackground(() => this.#processRecording(recordingId));
+      }
+      this.#runBackground(() => this.#purgeExpiredRecordings());
+      this.#retentionTimer = setInterval(
+        () => this.#runBackground(() => this.#purgeExpiredRecordings()),
+        60 * 60 * 1_000
+      );
+      this.#retentionTimer.unref();
+    }
+    return recoveredCalls;
   }
 
   list() {
@@ -155,6 +186,12 @@ export class CallService {
     }
     const snapshot = await this.repository.stop(id);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
+    if (snapshot.recording) {
+      this.#publish(id, {
+        type: "recording.updated",
+        recording: snapshot.recording
+      });
+    }
     return snapshot;
   }
 
@@ -174,6 +211,12 @@ export class CallService {
         type: "call.updated",
         brief: result.snapshot.brief
       });
+      if (result.snapshot.recording) {
+        this.#publish(result.callId, {
+          type: "recording.updated",
+          recording: result.snapshot.recording
+        });
+      }
     }
     return result?.snapshot ?? null;
   }
@@ -186,6 +229,117 @@ export class CallService {
     const normalized = text.trim();
     if (!normalized) return this.#require(id);
     return this.#addTranscript(id, role, normalized);
+  }
+
+  async startRecordingAfterConsent(id: string) {
+    if (this.telephonyProvider.mode !== "twilio") {
+      throw new CallServiceError("RECORDING_START_FAILED");
+    }
+    const begun = await this.repository.beginRecording(id);
+    this.#publish(id, {
+      type: "recording.updated",
+      recording: begun.recording
+    });
+
+    try {
+      const providerRecording = await this.telephonyProvider.startRecording(
+        begun.providerCallId,
+        { callBriefId: id, recordingId: begun.recording.id }
+      );
+      const attached = await this.repository.attachProviderRecording(
+        begun.recording.id,
+        providerRecording.providerRecordingId,
+        providerRecording.providerStatus
+      );
+      this.#publish(id, {
+        type: "recording.updated",
+        recording: attached.recording
+      });
+      return attached.snapshot;
+    } catch (error) {
+      const failed = await this.repository
+        .failRecording(begun.recording.id, "recording_start_failed")
+        .catch(() => null);
+      if (failed) {
+        this.#publish(id, {
+          type: "recording.updated",
+          recording: failed.recording
+        });
+      }
+      this.#onBackgroundError(error);
+      throw new CallServiceError("RECORDING_START_FAILED", { cause: error });
+    }
+  }
+
+  async handleTwilioRecordingStatus(
+    input: Parameters<CallRepository["applyRecordingStatus"]>[0]
+  ) {
+    const result = await this.repository.applyRecordingStatus(input);
+    if (!result) return null;
+    this.#publish(result.callId, {
+      type: "recording.updated",
+      recording: result.recording
+    });
+    if (
+      result.recording.status === "available" &&
+      this.#postCallTranscriber
+    ) {
+      this.#runBackground(() => this.#processRecording(result.recording.id));
+    }
+    return result.snapshot;
+  }
+
+  async getRecordingMedia(id: string): Promise<RecordingMedia> {
+    const snapshot = await this.#require(id);
+    const recording = snapshot.recording;
+    if (
+      recording?.status !== "available" ||
+      !recording.providerRecordingId
+    ) {
+      throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    }
+    return this.telephonyProvider.getRecordingMedia(
+      recording.providerRecordingId
+    );
+  }
+
+  async deleteRecording(id: string) {
+    const snapshot = await this.#require(id);
+    const recording = snapshot.recording;
+    if (!recording) {
+      throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    }
+    if (recording.status === "deleted") return snapshot;
+    if (
+      recording.status !== "available" ||
+      !recording.providerRecordingId ||
+      snapshot.finalTranscript?.status === "processing"
+    ) {
+      throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    }
+    await this.telephonyProvider.deleteRecording(
+      recording.providerRecordingId
+    );
+    const deleted = await this.repository.markRecordingDeleted(id);
+    this.#publish(id, {
+      type: "recording.updated",
+      recording: deleted.recording
+    });
+    return deleted.snapshot;
+  }
+
+  async retryFinalTranscript(id: string) {
+    const snapshot = await this.#require(id);
+    if (
+      snapshot.recording?.status !== "available" ||
+      !this.#postCallTranscriber
+    ) {
+      throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    }
+    this.#runBackground(() =>
+      this.#processRecording(snapshot.recording!.id, true)
+    );
+    return snapshot;
   }
 
   publishTranscriptDelta(
@@ -230,7 +384,84 @@ export class CallService {
 
   async close() {
     for (const id of this.#timers.keys()) this.#clearTimers(id);
+    if (this.#retentionTimer) clearInterval(this.#retentionTimer);
+    this.#retentionTimer = null;
+    await Promise.allSettled(this.#backgroundJobs);
     await this.repository.close();
+  }
+
+  async #processRecording(recordingId: string, force = false) {
+    if (
+      !this.#postCallTranscriber ||
+      this.#processingRecordings.has(recordingId)
+    ) {
+      return;
+    }
+    this.#processingRecordings.add(recordingId);
+    let callId: string | null = null;
+    try {
+      const claimed = await this.repository.claimFinalTranscript(
+        recordingId,
+        this.#postCallTranscriber.model,
+        force
+      );
+      if (!claimed) return;
+      callId = claimed.callId;
+      this.#publish(claimed.callId, {
+        type: "final_transcript.updated",
+        finalTranscript: claimed.finalTranscript
+      });
+      const providerRecordingId = claimed.snapshot.recording?.providerRecordingId;
+      if (!providerRecordingId) {
+        throw new PostCallTranscriptionError("AUDIO_EMPTY");
+      }
+      const media = await this.telephonyProvider.getRecordingMedia(
+        providerRecordingId
+      );
+      const result = await this.#postCallTranscriber.transcribe(
+        media,
+        claimed.snapshot.brief,
+        claimed.snapshot.transcript
+      );
+      const completed = await this.repository.completeFinalTranscript(
+        recordingId,
+        result.text,
+        result.segments
+      );
+      this.#publish(completed.callId, {
+        type: "final_transcript.updated",
+        finalTranscript: completed.finalTranscript
+      });
+      if (completed.snapshot.brief.audioRetentionDays === 0) {
+        await this.deleteRecording(completed.callId).catch(
+          this.#onBackgroundError
+        );
+      }
+    } catch (error) {
+      if (callId) {
+        const failed = await this.repository
+          .failFinalTranscript(recordingId, transcriptionFailureCode(error))
+          .catch(() => null);
+        if (failed) {
+          this.#publish(failed.callId, {
+            type: "final_transcript.updated",
+            finalTranscript: failed.finalTranscript
+          });
+        }
+      }
+      this.#onBackgroundError(error);
+    } finally {
+      this.#processingRecordings.delete(recordingId);
+    }
+  }
+
+  async #purgeExpiredRecordings() {
+    const callIds = await this.repository.listExpiredRecordingCallIds(
+      new Date().toISOString()
+    );
+    for (const callId of callIds) {
+      await this.deleteRecording(callId).catch(this.#onBackgroundError);
+    }
   }
 
   async #requestApproval(id: string) {
@@ -296,9 +527,23 @@ export class CallService {
     for (const subscriber of this.#subscribers.get(id) ?? []) subscriber(event);
   }
 
+  #runBackground(operation: () => Promise<unknown>) {
+    const job = operation().finally(() => this.#backgroundJobs.delete(job));
+    this.#backgroundJobs.add(job);
+    void job.catch(this.#onBackgroundError);
+  }
+
   async #require(id: string): Promise<CallSnapshot> {
     const snapshot = await this.repository.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     return snapshot;
   }
+}
+
+function transcriptionFailureCode(error: unknown) {
+  if (error instanceof PostCallTranscriptionError) return error.code;
+  if (error instanceof Error && error.message.startsWith("TWILIO_")) {
+    return error.message.slice(0, 120);
+  }
+  return "POST_CALL_TRANSCRIPTION_FAILED";
 }

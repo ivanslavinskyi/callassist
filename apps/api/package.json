@@ -8,7 +8,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:test:prepare": "tsx src/db/prepare-test-database.ts",
-    "dev": "node --use-system-ca --watch --import tsx src/index.ts",
+    "dev": "node --use-system-ca --import tsx src/index.ts",
     "lint": "tsc --noEmit",
     "start": "node --use-system-ca dist/index.js",
     "test": "vitest run",
@@ -21,6 +21,7 @@
     "@fastify/websocket": "^11.3.0",
     "dotenv": "^17.4.2",
     "fastify": "^5.4.0",
+    "ffmpeg-static": "^5.3.0",
     "postgres": "^3.4.9",
     "twilio": "^6.0.2",
     "ws": "^8.21.1"

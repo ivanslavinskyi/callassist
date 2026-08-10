@@ -109,4 +109,116 @@ describeWithDatabase("PostgresCallRepository", () => {
       `
     ).rejects.toThrow("immutable");
   });
+
+  it("persists consent-gated recording and encrypted final transcript states", async () => {
+    const brief = await repository.create({
+      recipientName: "Recording test office",
+      phoneNumber: "+41710000002",
+      objective: "Verify recording and post-call transcription persistence",
+      locale: "en-GB",
+      audioRetentionDays: 7,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    });
+    const attempt = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    const providerCallId = `CA-${brief.id}`;
+    const providerRecordingId = `RE-${brief.id}`;
+    await repository.attachProviderCall(
+      attempt.attempt.id,
+      providerCallId,
+      "queued"
+    );
+
+    const begun = await repository.beginRecording(brief.id);
+    expect(begun.recording).toMatchObject({
+      status: "starting",
+      providerRecordingId: null
+    });
+    await repository.attachProviderRecording(
+      begun.recording.id,
+      providerRecordingId,
+      "in-progress"
+    );
+    await repository.applyRecordingStatus({
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      providerCallId,
+      providerRecordingId,
+      providerStatus: "completed",
+      durationSeconds: 51,
+      channels: 2
+    });
+    await repository.applyRecordingStatus({
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      providerCallId,
+      providerRecordingId,
+      providerStatus: "in-progress"
+    });
+    expect((await repository.get(brief.id))?.recording?.status).toBe("available");
+
+    const claimed = await repository.claimFinalTranscript(
+      begun.recording.id,
+      "gpt-transcribe"
+    );
+    expect(claimed?.finalTranscript.status).toBe("processing");
+    await expect(
+      repository.claimFinalTranscript(begun.recording.id, "gpt-transcribe")
+    ).resolves.toBeNull();
+    await repository.completeFinalTranscript(
+      begun.recording.id,
+      "The final private transcript.",
+      [
+        {
+          role: "recipient",
+          text: "The final private transcript.",
+          startSeconds: 2.4,
+          endSeconds: 4.8
+        }
+      ]
+    );
+
+    const [stored] = await inspection<
+      {
+        textCiphertext: string;
+        segmentsCiphertext: string;
+        deleteAfter: Date | null;
+      }[]
+    >`
+      SELECT
+        final_transcripts.text_ciphertext AS "textCiphertext",
+        final_transcripts.segments_ciphertext AS "segmentsCiphertext",
+        call_recordings.delete_after AS "deleteAfter"
+      FROM final_transcripts
+      JOIN call_recordings
+        ON call_recordings.id = final_transcripts.call_recording_id
+      WHERE call_recordings.id = ${begun.recording.id}
+    `;
+    expect(stored?.textCiphertext).not.toContain("final private transcript");
+    expect(stored?.segmentsCiphertext).not.toContain("final private transcript");
+    expect(stored?.deleteAfter).toBeInstanceOf(Date);
+
+    const snapshot = await repository.get(brief.id);
+    expect(snapshot?.recording).toMatchObject({
+      status: "available",
+      providerRecordingId,
+      durationSeconds: 51,
+      channels: 2
+    });
+    expect(snapshot?.finalTranscript).toMatchObject({
+      status: "completed",
+      text: "The final private transcript.",
+      segments: [
+        expect.objectContaining({ role: "recipient", startSeconds: 2.4 })
+      ],
+      model: "gpt-transcribe"
+    });
+
+    await repository.markRecordingDeleted(brief.id);
+    const deleted = await repository.get(brief.id);
+    expect(deleted?.recording?.status).toBe("deleted");
+    expect(deleted?.finalTranscript?.text).toBe("The final private transcript.");
+  });
 });

@@ -1,6 +1,6 @@
 import type { CallBrief } from "@callassist/contracts";
 import twilio from "twilio";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TwilioTelephonyProvider } from "./twilio-telephony-provider";
 
 const brief: CallBrief = {
@@ -15,6 +15,7 @@ const brief: CallBrief = {
   context: "Application context",
   locale: "de-CH",
   voiceGender: "male",
+  audioRetentionDays: 7,
   allowLanguageSwitch: false,
   allowedFacts: [],
   status: "ready",
@@ -24,8 +25,16 @@ const brief: CallBrief = {
 
 function createProvider() {
   const update = vi.fn().mockResolvedValue({ sid: "CA123" });
+  const createRecording = vi.fn().mockResolvedValue({
+    sid: "RE123",
+    status: "in-progress"
+  });
+  const removeRecording = vi.fn().mockResolvedValue(true);
   const calls = Object.assign(
-    vi.fn(() => ({ update })),
+    vi.fn(() => ({
+      update,
+      recordings: { create: createRecording }
+    })),
     {
       create: vi.fn().mockResolvedValue({
         sid: "CA123",
@@ -33,17 +42,27 @@ function createProvider() {
       })
     }
   );
+  const recordings = vi.fn(() => ({ remove: removeRecording }));
   const provider = new TwilioTelephonyProvider({
     accountSid: "AC123",
     authToken: "test-auth-token",
     fromNumber: "+41710000001",
     publicBaseUrl: "https://calls.example.test",
-    client: { calls } as unknown as ReturnType<typeof twilio>
+    client: { calls, recordings } as unknown as ReturnType<typeof twilio>
   });
-  return { calls, provider, update };
+  return {
+    calls,
+    createRecording,
+    provider,
+    recordings,
+    removeRecording,
+    update
+  };
 }
 
 describe("TwilioTelephonyProvider", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("requires an HTTPS public webhook base URL", () => {
     expect(
       () =>
@@ -80,6 +99,84 @@ describe("TwilioTelephonyProvider", () => {
     const { provider, update } = createProvider();
     await provider.stopCall("CA123");
     expect(update).toHaveBeenCalledWith({ status: "completed" });
+  });
+
+  it("starts dual-channel recording on an active call after consent", async () => {
+    const { createRecording, provider } = createProvider();
+    const result = await provider.startRecording("CA123", {
+      callBriefId: brief.id,
+      recordingId: "bdbefacf-715b-45d5-9ee8-8524d69f0cea"
+    });
+
+    expect(result).toEqual({
+      providerRecordingId: "RE123",
+      providerStatus: "in-progress"
+    });
+    expect(createRecording).toHaveBeenCalledWith({
+      recordingChannels: "dual",
+      recordingTrack: "both",
+      recordingStatusCallback:
+        "https://calls.example.test/webhooks/twilio/recording?callBriefId=" +
+        `${brief.id}&recordingId=bdbefacf-715b-45d5-9ee8-8524d69f0cea`,
+      recordingStatusCallbackEvent: ["in-progress", "completed", "absent"],
+      recordingStatusCallbackMethod: "POST"
+    });
+  });
+
+  it("deletes provider audio by recording SID", async () => {
+    const { provider, recordings, removeRecording } = createProvider();
+    await provider.deleteRecording("RE123");
+    expect(recordings).toHaveBeenCalledWith("RE123");
+    expect(removeRecording).toHaveBeenCalledOnce();
+  });
+
+  it("downloads the original dual-channel recording", async () => {
+    const fetchImplementation = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchImplementation);
+    const { provider } = createProvider();
+
+    await expect(provider.getRecordingMedia("RE123")).resolves.toMatchObject({
+      bytes: new Uint8Array([1, 2, 3]),
+      channels: 2,
+      fileName: "RE123.mp3"
+    });
+    expect(String(fetchImplementation.mock.calls[0][0])).toContain(
+      "RequestedChannels=2"
+    );
+  });
+
+  it("falls back to mono for an older recording", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 400 }))
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([4]), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchImplementation);
+    const { provider } = createProvider();
+
+    await expect(provider.getRecordingMedia("RE123")).resolves.toMatchObject({
+      channels: 1
+    });
+    expect(String(fetchImplementation.mock.calls[1][0])).toContain(
+      "RequestedChannels=1"
+    );
+  });
+
+  it("treats an already-deleted provider recording as deleted", async () => {
+    const { provider, removeRecording } = createProvider();
+    removeRecording.mockRejectedValueOnce(
+      Object.assign(new Error("not found"), { status: 404 })
+    );
+    await expect(provider.deleteRecording("RE123")).resolves.toBeUndefined();
   });
 
   it("opens the signed bidirectional media stream immediately", () => {

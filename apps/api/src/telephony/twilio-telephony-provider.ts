@@ -1,7 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { CallBrief } from "@callassist/contracts";
 import twilio from "twilio";
-import type { TelephonyProvider } from "./telephony-provider";
+import type {
+  StartCallRecordingInput,
+  TelephonyProvider
+} from "./telephony-provider";
 
 type TwilioClient = ReturnType<typeof twilio>;
 
@@ -14,6 +17,7 @@ type TwilioTelephonyOptions = {
 };
 
 export class TwilioTelephonyProvider implements TelephonyProvider {
+  readonly #accountSid: string;
   readonly mode = "twilio" as const;
   readonly #authToken: string;
   readonly #client: TwilioClient;
@@ -21,6 +25,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   readonly #publicBaseUrl: URL;
 
   constructor(options: TwilioTelephonyOptions) {
+    this.#accountSid = options.accountSid;
     this.#authToken = options.authToken;
     this.#fromNumber = options.fromNumber;
     this.#publicBaseUrl = new URL(options.publicBaseUrl);
@@ -56,6 +61,74 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
 
   async stopCall(providerCallId: string) {
     await this.#client.calls(providerCallId).update({ status: "completed" });
+  }
+
+  async startRecording(
+    providerCallId: string,
+    input: StartCallRecordingInput
+  ) {
+    const recording = await this.#client
+      .calls(providerCallId)
+      .recordings.create({
+        recordingChannels: "dual",
+        recordingTrack: "both",
+        recordingStatusCallback: this.webhookUrl(
+          `/webhooks/twilio/recording?callBriefId=${encodeURIComponent(
+            input.callBriefId
+          )}&recordingId=${encodeURIComponent(input.recordingId)}`
+        ),
+        recordingStatusCallbackEvent: ["in-progress", "completed", "absent"],
+        recordingStatusCallbackMethod: "POST"
+      });
+
+    return {
+      providerRecordingId: recording.sid,
+      providerStatus: recording.status
+    };
+  }
+
+  async getRecordingMedia(providerRecordingId: string) {
+    let channels: 1 | 2 = 2;
+    let response = await this.#downloadRecording(providerRecordingId, channels);
+    if (response.status === 400) {
+      channels = 1;
+      response = await this.#downloadRecording(providerRecordingId, channels);
+    }
+    if (!response.ok) {
+      throw new Error(`TWILIO_RECORDING_DOWNLOAD_${response.status}`);
+    }
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get("content-type") ?? "audio/mpeg",
+      fileName: `${providerRecordingId}.mp3`,
+      channels
+    };
+  }
+
+  #downloadRecording(providerRecordingId: string, channels: 1 | 2) {
+    const url = new URL(
+      `/2010-04-01/Accounts/${encodeURIComponent(
+        this.#accountSid
+      )}/Recordings/${encodeURIComponent(providerRecordingId)}.mp3`,
+      "https://api.twilio.com"
+    );
+    url.searchParams.set("RequestedChannels", String(channels));
+    return fetch(url, {
+      headers: {
+        Authorization: `Basic ${Buffer.from(
+          `${this.#accountSid}:${this.#authToken}`
+        ).toString("base64")}`
+      }
+    });
+  }
+
+  async deleteRecording(providerRecordingId: string) {
+    try {
+      const removed = await this.#client.recordings(providerRecordingId).remove();
+      if (!removed) throw new Error("TWILIO_RECORDING_DELETE_FAILED");
+    } catch (error) {
+      if (twilioErrorStatus(error) !== 404) throw error;
+    }
   }
 
   validateWebhook(
@@ -119,4 +192,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   webhookUrl(path: string) {
     return new URL(path, this.#publicBaseUrl).toString();
   }
+}
+
+function twilioErrorStatus(error: unknown) {
+  if (!error || typeof error !== "object" || !("status" in error)) return null;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
 }

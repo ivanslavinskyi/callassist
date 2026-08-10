@@ -5,9 +5,12 @@ import {
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
+  type CallRecording,
   type CallLocale,
   type CallSnapshot,
   type CreateCallBriefInput,
+  type FinalTranscript,
+  type FinalTranscriptSegment,
   type TranscriptSegment
 } from "@callassist/contracts";
 import postgres from "postgres";
@@ -18,6 +21,7 @@ import {
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
+  type RecordingStatusInput,
   type StartAttemptInput
 } from "./call-repository";
 
@@ -35,6 +39,7 @@ type CallBriefRow = {
   contextCiphertext: string | null;
   locale: CallBrief["locale"];
   voiceGender: CallBrief["voiceGender"];
+  audioRetentionDays: CallBrief["audioRetentionDays"];
   allowLanguageSwitch: boolean;
   fallbackLocale: CallBrief["fallbackLocale"];
   allowedFactsCiphertext: string;
@@ -72,6 +77,32 @@ type CallAttemptRow = {
   startedAt: DatabaseDate;
   endedAt: DatabaseDate | null;
   failureReason: string | null;
+};
+
+type CallRecordingRow = {
+  id: string;
+  status: CallRecording["status"];
+  providerRecordingId: string | null;
+  consentGrantedAt: DatabaseDate;
+  startedAt: DatabaseDate | null;
+  completedAt: DatabaseDate | null;
+  durationSeconds: number | null;
+  channels: number | null;
+  deleteAfter: DatabaseDate | null;
+  deletedAt: DatabaseDate | null;
+  failureReason: string | null;
+};
+
+type FinalTranscriptRow = {
+  id: string;
+  status: FinalTranscript["status"];
+  textCiphertext: string | null;
+  segmentsCiphertext: string | null;
+  model: string;
+  failureReason: string | null;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  completedAt: DatabaseDate | null;
 };
 
 const terminalStatuses = new Set<CallBrief["status"]>([
@@ -130,6 +161,7 @@ export class PostgresCallRepository implements CallRepository {
           context_ciphertext,
           locale,
           voice_gender,
+          audio_retention_days,
           allow_language_switch,
           fallback_locale,
           allowed_facts_ciphertext,
@@ -148,6 +180,7 @@ export class PostgresCallRepository implements CallRepository {
           ${encryptedContext},
           ${parsed.locale},
           ${parsed.voiceGender},
+          ${parsed.audioRetentionDays},
           ${parsed.allowLanguageSwitch},
           ${parsed.fallbackLocale ?? null},
           ${encryptedFacts},
@@ -173,7 +206,8 @@ export class PostgresCallRepository implements CallRepository {
     `;
     if (!briefRow) return null;
 
-    const [transcriptRows, approvalRows] = await Promise.all([
+    const [transcriptRows, approvalRows, recordingRows, finalTranscriptRows] =
+      await Promise.all([
       this.#sql<TranscriptRow[]>`
         SELECT
           id,
@@ -186,7 +220,7 @@ export class PostgresCallRepository implements CallRepository {
         WHERE call_brief_id = ${id}
         ORDER BY created_at ASC
       `,
-      this.#sql<ApprovalRow[]>`
+        this.#sql<ApprovalRow[]>`
         SELECT
           id,
           category,
@@ -199,14 +233,42 @@ export class PostgresCallRepository implements CallRepository {
         WHERE call_brief_id = ${id} AND status = 'pending'
         ORDER BY created_at DESC
         LIMIT 1
-      `
-    ]);
+        `,
+        this.#sql<CallRecordingRow[]>`
+          ${this.#recordingSelect()}
+          WHERE call_brief_id = ${id}
+          LIMIT 1
+        `,
+        this.#sql<FinalTranscriptRow[]>`
+          SELECT
+            final_transcripts.id,
+            final_transcripts.status,
+            final_transcripts.text_ciphertext AS "textCiphertext",
+            final_transcripts.segments_ciphertext AS "segmentsCiphertext",
+            final_transcripts.model,
+            final_transcripts.failure_reason AS "failureReason",
+            final_transcripts.created_at AS "createdAt",
+            final_transcripts.updated_at AS "updatedAt",
+            final_transcripts.completed_at AS "completedAt"
+          FROM final_transcripts
+          JOIN call_recordings
+            ON call_recordings.id = final_transcripts.call_recording_id
+          WHERE call_recordings.call_brief_id = ${id}
+          LIMIT 1
+        `
+      ]);
 
     return {
       brief: this.#mapBrief(briefRow),
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
       pendingApproval: approvalRows[0]
         ? this.#mapApproval(approvalRows[0])
+        : null,
+      recording: recordingRows[0]
+        ? this.#mapRecording(recordingRows[0])
+        : null,
+      finalTranscript: finalTranscriptRows[0]
+        ? this.#mapFinalTranscript(finalTranscriptRows[0])
         : null
     };
   }
@@ -368,6 +430,14 @@ export class PostgresCallRepository implements CallRepository {
           UPDATE call_briefs
           SET status = ${callStatus}, updated_at = ${now}
           WHERE id = ${row.callId}
+        `;
+      }
+      if (terminal) {
+        await transaction`
+          UPDATE call_recordings
+          SET status = 'processing', updated_at = ${now}
+          WHERE call_brief_id = ${row.callId}
+            AND status IN ('starting', 'recording')
         `;
       }
       await this.#audit(transaction, row.callId, "call.provider_status", {
@@ -556,11 +626,465 @@ export class PostgresCallRepository implements CallRepository {
         WHERE id = ${id}
       `;
       await this.#syncAttempt(transaction, id, "stopped", now);
+      await transaction`
+        UPDATE call_recordings
+        SET status = 'processing', updated_at = ${now}
+        WHERE call_brief_id = ${id}
+          AND status IN ('starting', 'recording')
+      `;
       await this.#audit(transaction, id, "call.status_changed", {
         status: "stopped"
       });
     });
     return this.#require(id);
+  }
+
+  async beginRecording(id: string) {
+    const recordingId = randomUUID();
+    const now = new Date();
+    const providerCallId = await this.#sql.begin(async (transaction) => {
+      const [attempt] = await transaction<
+        {
+          attemptId: string;
+          provider: CallAttemptRecord["provider"];
+          providerCallId: string | null;
+          attemptStatus: CallBrief["status"];
+        }[]
+      >`
+        SELECT
+          id AS "attemptId",
+          provider,
+          provider_call_id AS "providerCallId",
+          status AS "attemptStatus"
+        FROM call_attempts
+        WHERE call_brief_id = ${id}
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+      if (
+        !attempt?.providerCallId ||
+        attempt.provider !== "twilio" ||
+        terminalStatuses.has(attempt.attemptStatus)
+      ) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+
+      const existing = await transaction`
+        SELECT id FROM call_recordings WHERE call_brief_id = ${id}
+      `;
+      if (existing.count > 0) {
+        throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+      }
+
+      await transaction`
+        INSERT INTO call_recordings (
+          id,
+          call_brief_id,
+          call_attempt_id,
+          provider,
+          provider_call_id,
+          status,
+          consent_granted_at,
+          created_at,
+          updated_at
+        ) VALUES (
+          ${recordingId},
+          ${id},
+          ${attempt.attemptId},
+          'twilio',
+          ${attempt.providerCallId},
+          'starting',
+          ${now},
+          ${now},
+          ${now}
+        )
+      `;
+      await this.#audit(transaction, id, "recording.consent_granted", {
+        recordingId
+      });
+      return attempt.providerCallId;
+    });
+
+    const snapshot = await this.#require(id);
+    if (!snapshot.recording) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    return { providerCallId, recording: snapshot.recording, snapshot };
+  }
+
+  async attachProviderRecording(
+    recordingId: string,
+    providerRecordingId: string,
+    providerStatus: string
+  ) {
+    const now = new Date();
+    const [row] = await this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ callId: string }[]>`
+        UPDATE call_recordings
+        SET
+          provider_recording_id = COALESCE(
+            provider_recording_id,
+            ${providerRecordingId}
+          ),
+          status = CASE
+            WHEN status = 'starting' THEN 'recording'
+            ELSE status
+          END,
+          started_at = COALESCE(started_at, ${now}),
+          failure_reason = CASE
+            WHEN status = 'failed' THEN failure_reason
+            ELSE NULL
+          END,
+          updated_at = ${now}
+        WHERE id = ${recordingId}
+          AND status IN ('starting', 'recording', 'processing', 'available')
+          AND (
+            provider_recording_id IS NULL
+            OR provider_recording_id = ${providerRecordingId}
+          )
+        RETURNING call_brief_id AS "callId"
+      `;
+      const updated = rows[0];
+      if (updated) {
+        await this.#audit(transaction, updated.callId, "recording.started", {
+          providerRecordingId,
+          providerStatus,
+          recordingId
+        });
+      }
+      return rows;
+    });
+    if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    return this.#recordingMutation(row.callId);
+  }
+
+  async failRecording(recordingId: string, failureReason: string) {
+    const now = new Date();
+    const [row] = await this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ callId: string }[]>`
+        UPDATE call_recordings
+        SET
+          status = 'failed',
+          failure_reason = ${failureReason},
+          updated_at = ${now}
+        WHERE id = ${recordingId} AND status IN ('starting', 'recording')
+        RETURNING call_brief_id AS "callId"
+      `;
+      const updated = rows[0];
+      if (updated) {
+        await this.#audit(transaction, updated.callId, "recording.failed", {
+          failureReason,
+          recordingId
+        });
+      }
+      return rows;
+    });
+    if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    return this.#recordingMutation(row.callId);
+  }
+
+  async applyRecordingStatus(input: RecordingStatusInput) {
+    const now = new Date();
+    const callId = await this.#sql.begin(async (transaction) => {
+      const [row] = await transaction<
+        {
+          callId: string;
+          providerRecordingId: string | null;
+          recordingStatus: CallRecording["status"];
+        }[]
+      >`
+        SELECT
+          call_recordings.call_brief_id AS "callId",
+          call_recordings.provider_recording_id AS "providerRecordingId",
+          call_recordings.status AS "recordingStatus"
+        FROM call_recordings
+        JOIN call_attempts
+          ON call_attempts.id = call_recordings.call_attempt_id
+        WHERE call_recordings.id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_attempts.provider_call_id = ${input.providerCallId}
+        FOR UPDATE OF call_recordings
+      `;
+      if (!row) return null;
+      if (
+        row.providerRecordingId &&
+        row.providerRecordingId !== input.providerRecordingId
+      ) {
+        return null;
+      }
+
+      let status = row.recordingStatus;
+      if (status !== "deleted" && input.providerStatus === "completed") {
+        status = "available";
+      } else if (
+        status !== "deleted" &&
+        status !== "available" &&
+        input.providerStatus === "absent"
+      ) {
+        status = "failed";
+      } else if (
+        status !== "deleted" &&
+        status !== "available" &&
+        status !== "processing" &&
+        input.providerStatus === "in-progress"
+      ) {
+        status = "recording";
+      }
+      const startedAt = input.startedAt ? new Date(input.startedAt) : now;
+      await transaction`
+        UPDATE call_recordings
+        SET
+          provider_recording_id = COALESCE(
+            provider_recording_id,
+            ${input.providerRecordingId}
+          ),
+          status = ${status},
+          started_at = CASE
+            WHEN ${input.providerStatus === "in-progress"}
+              THEN COALESCE(started_at, ${startedAt})
+            ELSE started_at
+          END,
+          completed_at = CASE
+            WHEN ${input.providerStatus === "completed"}
+              THEN COALESCE(completed_at, ${now})
+            ELSE completed_at
+          END,
+          duration_seconds = COALESCE(
+            ${input.durationSeconds ?? null},
+            duration_seconds
+          ),
+          channels = COALESCE(${input.channels ?? null}, channels),
+          failure_reason = CASE
+            WHEN ${input.providerStatus === "absent" && status === "failed"}
+              THEN ${input.failureReason ?? "recording_absent"}
+            ELSE failure_reason
+          END,
+          updated_at = ${now}
+        WHERE id = ${input.recordingId}
+      `;
+      await this.#audit(transaction, row.callId, "recording.provider_status", {
+        providerRecordingId: input.providerRecordingId,
+        providerStatus: input.providerStatus,
+        recordingId: input.recordingId
+      });
+      return row.callId;
+    });
+    return callId ? this.#recordingMutation(callId) : null;
+  }
+
+  async claimFinalTranscript(recordingId: string, model: string, force = false) {
+    const now = new Date();
+    const callId = await this.#sql.begin(async (transaction) => {
+      const [recording] = await transaction<
+        {
+          callId: string;
+          recordingStatus: CallRecording["status"];
+        }[]
+      >`
+        SELECT
+          call_recordings.call_brief_id AS "callId",
+          call_recordings.status AS "recordingStatus"
+        FROM call_recordings
+        WHERE call_recordings.id = ${recordingId}
+        FOR UPDATE
+      `;
+      if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const [transcript] = await transaction<
+        {
+          transcriptId: string;
+          transcriptStatus: FinalTranscript["status"];
+        }[]
+      >`
+        SELECT
+          id AS "transcriptId",
+          status AS "transcriptStatus"
+        FROM final_transcripts
+        WHERE call_recording_id = ${recordingId}
+        FOR UPDATE
+      `;
+      if (
+        recording.recordingStatus !== "available" ||
+        transcript?.transcriptStatus === "processing" ||
+        (transcript?.transcriptStatus === "completed" && !force)
+      ) {
+        return null;
+      }
+
+      if (transcript) {
+        await transaction`
+          UPDATE final_transcripts
+          SET
+            status = 'processing',
+            model = ${model},
+            text_ciphertext = NULL,
+            segments_ciphertext = NULL,
+            failure_reason = NULL,
+            updated_at = ${now},
+            completed_at = NULL
+          WHERE id = ${transcript.transcriptId}
+        `;
+      } else {
+        await transaction`
+          INSERT INTO final_transcripts (
+            id,
+            call_recording_id,
+            status,
+            model,
+            created_at,
+            updated_at
+          ) VALUES (
+            ${randomUUID()},
+            ${recordingId},
+            'processing',
+            ${model},
+            ${now},
+            ${now}
+          )
+        `;
+      }
+      await this.#audit(transaction, recording.callId, "final_transcript.started", {
+        model,
+        recordingId
+      });
+      return recording.callId;
+    });
+    return callId ? this.#finalTranscriptMutation(callId) : null;
+  }
+
+  async completeFinalTranscript(
+    recordingId: string,
+    text: string,
+    segments: FinalTranscriptSegment[]
+  ) {
+    const now = new Date();
+    const ciphertext = encryptJson(text, this.#encryptionKey);
+    const segmentsCiphertext = encryptJson(segments, this.#encryptionKey);
+    const callId = await this.#sql.begin(async (transaction) => {
+      const [row] = await transaction<
+        { callId: string; retentionDays: number }[]
+      >`
+        SELECT
+          call_recordings.call_brief_id AS "callId",
+          call_briefs.audio_retention_days AS "retentionDays"
+        FROM call_recordings
+        JOIN call_briefs ON call_briefs.id = call_recordings.call_brief_id
+        JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        WHERE call_recordings.id = ${recordingId}
+          AND final_transcripts.status = 'processing'
+        FOR UPDATE OF call_recordings, final_transcripts
+      `;
+      if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      await transaction`
+        UPDATE final_transcripts
+        SET
+          status = 'completed',
+          text_ciphertext = ${ciphertext},
+          segments_ciphertext = ${segmentsCiphertext},
+          failure_reason = NULL,
+          updated_at = ${now},
+          completed_at = ${now}
+        WHERE call_recording_id = ${recordingId}
+      `;
+      await transaction`
+        UPDATE call_recordings
+        SET
+          delete_after = ${new Date(
+            now.getTime() + row.retentionDays * 86_400_000
+          )},
+          updated_at = ${now}
+        WHERE id = ${recordingId}
+      `;
+      await this.#audit(transaction, row.callId, "final_transcript.completed", {
+        recordingId
+      });
+      return row.callId;
+    });
+    return this.#finalTranscriptMutation(callId);
+  }
+
+  async failFinalTranscript(recordingId: string, failureReason: string) {
+    const now = new Date();
+    const [row] = await this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ callId: string }[]>`
+        UPDATE final_transcripts
+        SET
+          status = 'failed',
+          text_ciphertext = NULL,
+          segments_ciphertext = NULL,
+          failure_reason = ${failureReason},
+          updated_at = ${now},
+          completed_at = NULL
+        WHERE call_recording_id = ${recordingId}
+        RETURNING (
+          SELECT call_brief_id
+          FROM call_recordings
+          WHERE id = ${recordingId}
+        ) AS "callId"
+      `;
+      const updated = rows[0];
+      if (updated) {
+        await this.#audit(transaction, updated.callId, "final_transcript.failed", {
+          failureReason,
+          recordingId
+        });
+      }
+      return rows;
+    });
+    if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    return this.#finalTranscriptMutation(row.callId);
+  }
+
+  async listTranscriptionCandidates() {
+    const rows = await this.#sql<{ recordingId: string }[]>`
+      SELECT call_recordings.id AS "recordingId"
+      FROM call_recordings
+      LEFT JOIN final_transcripts
+        ON final_transcripts.call_recording_id = call_recordings.id
+      WHERE call_recordings.status = 'available'
+        AND (
+          final_transcripts.id IS NULL
+          OR final_transcripts.status = 'failed'
+        )
+      ORDER BY call_recordings.completed_at ASC
+    `;
+    return rows.map((row) => row.recordingId);
+  }
+
+  async listExpiredRecordingCallIds(now: string) {
+    const rows = await this.#sql<{ callId: string }[]>`
+      SELECT call_brief_id AS "callId"
+      FROM call_recordings
+      WHERE status = 'available'
+        AND delete_after IS NOT NULL
+        AND delete_after <= ${new Date(now)}
+      ORDER BY delete_after ASC
+    `;
+    return rows.map((row) => row.callId);
+  }
+
+  async markRecordingDeleted(id: string) {
+    const now = new Date();
+    await this.#sql.begin(async (transaction) => {
+      const updated = await transaction`
+        UPDATE call_recordings
+        SET status = 'deleted', deleted_at = ${now}, updated_at = ${now}
+        WHERE call_brief_id = ${id} AND status <> 'deleted'
+        RETURNING id
+      `;
+      if (updated.count === 0) {
+        const existing = await transaction`
+          SELECT id FROM call_recordings WHERE call_brief_id = ${id}
+        `;
+        if (existing.count === 0) {
+          throw new CallRepositoryError("RECORDING_NOT_FOUND");
+        }
+        return;
+      }
+      await this.#audit(transaction, id, "recording.deleted", {});
+    });
+    return this.#recordingMutation(id);
   }
 
   async recoverInterruptedCalls() {
@@ -603,6 +1127,37 @@ export class PostgresCallRepository implements CallRepository {
     });
   }
 
+  async recoverInterruptedTranscriptions() {
+    const now = new Date();
+    return this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ callId: string; recordingId: string }[]>`
+        UPDATE final_transcripts
+        SET
+          status = 'failed',
+          failure_reason = 'server_restarted',
+          updated_at = ${now},
+          completed_at = NULL
+        WHERE status = 'processing'
+        RETURNING
+          (
+            SELECT call_brief_id
+            FROM call_recordings
+            WHERE call_recordings.id = final_transcripts.call_recording_id
+          ) AS "callId",
+          call_recording_id AS "recordingId"
+      `;
+      for (const row of rows) {
+        await this.#audit(
+          transaction,
+          row.callId,
+          "final_transcript.recovered_after_restart",
+          { recordingId: row.recordingId }
+        );
+      }
+      return rows.length;
+    });
+  }
+
   async ping() {
     await this.#sql`SELECT 1`;
   }
@@ -625,6 +1180,7 @@ export class PostgresCallRepository implements CallRepository {
         context_ciphertext AS "contextCiphertext",
         locale,
         voice_gender AS "voiceGender",
+        audio_retention_days AS "audioRetentionDays",
         allow_language_switch AS "allowLanguageSwitch",
         fallback_locale AS "fallbackLocale",
         allowed_facts_ciphertext AS "allowedFactsCiphertext",
@@ -655,6 +1211,7 @@ export class PostgresCallRepository implements CallRepository {
         : "",
       locale: row.locale,
       voiceGender: row.voiceGender,
+      audioRetentionDays: row.audioRetentionDays,
       allowLanguageSwitch: row.allowLanguageSwitch,
       ...(row.fallbackLocale ? { fallbackLocale: row.fallbackLocale } : {}),
       allowedFacts: decryptJson<string[]>(
@@ -689,10 +1246,80 @@ export class PostgresCallRepository implements CallRepository {
     };
   }
 
+  #recordingSelect() {
+    return this.#sql`
+      SELECT
+        id,
+        status,
+        provider_recording_id AS "providerRecordingId",
+        consent_granted_at AS "consentGrantedAt",
+        started_at AS "startedAt",
+        completed_at AS "completedAt",
+        duration_seconds AS "durationSeconds",
+        channels,
+        delete_after AS "deleteAfter",
+        deleted_at AS "deletedAt",
+        failure_reason AS "failureReason"
+      FROM call_recordings
+    `;
+  }
+
+  #mapRecording(row: CallRecordingRow): CallRecording {
+    return {
+      ...row,
+      consentGrantedAt: toIso(row.consentGrantedAt),
+      startedAt: row.startedAt ? toIso(row.startedAt) : null,
+      completedAt: row.completedAt ? toIso(row.completedAt) : null,
+      deleteAfter: row.deleteAfter ? toIso(row.deleteAfter) : null,
+      deletedAt: row.deletedAt ? toIso(row.deletedAt) : null
+    };
+  }
+
+  #mapFinalTranscript(row: FinalTranscriptRow): FinalTranscript {
+    return {
+      id: row.id,
+      status: row.status,
+      text: row.textCiphertext
+        ? decryptJson<string>(row.textCiphertext, this.#encryptionKey)
+        : null,
+      segments: row.segmentsCiphertext
+        ? decryptJson<FinalTranscriptSegment[]>(
+            row.segmentsCiphertext,
+            this.#encryptionKey
+          )
+        : [],
+      model: row.model,
+      failureReason: row.failureReason,
+      createdAt: toIso(row.createdAt),
+      updatedAt: toIso(row.updatedAt),
+      completedAt: row.completedAt ? toIso(row.completedAt) : null
+    };
+  }
+
   async #require(id: string) {
     const snapshot = await this.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     return snapshot;
+  }
+
+  async #recordingMutation(callId: string) {
+    const snapshot = await this.#require(callId);
+    if (!snapshot.recording) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    return { callId, recording: snapshot.recording, snapshot };
+  }
+
+  async #finalTranscriptMutation(callId: string) {
+    const snapshot = await this.#require(callId);
+    if (!snapshot.finalTranscript) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    return {
+      callId,
+      finalTranscript: snapshot.finalTranscript,
+      snapshot
+    };
   }
 
   async #syncAttempt(

@@ -21,6 +21,7 @@ const initialForm: CreateCallBriefInput = {
   context: "",
   locale: "de-CH",
   voiceGender: "male",
+  audioRetentionDays: 7,
   allowLanguageSwitch: false,
   allowedFacts: ["Owner's full name", "Place of residence", "Preference for a written reply"]
 };
@@ -163,6 +164,24 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
           <small>Used for both the disclosure and conversation</small>
         </label>
 
+        <label className="field">
+          <span>Audio retention</span>
+          <select
+            value={form.audioRetentionDays ?? 7}
+            onChange={(event) =>
+              update(
+                "audioRetentionDays",
+                Number(event.target.value) as 0 | 7 | 30
+              )
+            }
+          >
+            <option value={0}>Delete after final transcript</option>
+            <option value={7}>Keep for 7 days</option>
+            <option value={30}>Keep for 30 days</option>
+          </select>
+          <small>Recording starts only after the recipient presses 1</small>
+        </label>
+
         <label className="field field-wide">
           <span>Represented person</span>
           <input
@@ -184,7 +203,7 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
             required
           />
           <small>
-            This statement is spoken before the transcription notice and the request to press 1.
+            This statement is spoken before the recording notice and the request to press 1.
           </small>
         </label>
 

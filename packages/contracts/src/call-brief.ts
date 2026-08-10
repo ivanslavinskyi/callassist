@@ -28,6 +28,13 @@ export type CallLocale = z.infer<typeof callLocaleSchema>;
 export const callVoiceGenderSchema = z.enum(["male", "female"]);
 export type CallVoiceGender = z.infer<typeof callVoiceGenderSchema>;
 
+export const audioRetentionDaysSchema = z.union([
+  z.literal(0),
+  z.literal(7),
+  z.literal(30)
+]);
+export type AudioRetentionDays = z.infer<typeof audioRetentionDaysSchema>;
+
 export const DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES: Record<
   CallLocale,
   string
@@ -86,6 +93,7 @@ const callBriefInputBaseSchema = z.object({
   context: z.string().trim().default(""),
   locale: callLocaleSchema,
   voiceGender: callVoiceGenderSchema.default("male"),
+  audioRetentionDays: audioRetentionDaysSchema.default(7),
   allowLanguageSwitch: z.boolean().default(false),
   fallbackLocale: callLocaleSchema.optional(),
   allowedFacts: z.array(z.string().trim().min(1)).default([])
@@ -146,6 +154,63 @@ export const transcriptSegmentSchema = z.object({
 });
 export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 
+export const callRecordingStatusSchema = z.enum([
+  "starting",
+  "recording",
+  "processing",
+  "available",
+  "failed",
+  "deleted"
+]);
+export type CallRecordingStatus = z.infer<typeof callRecordingStatusSchema>;
+
+export const callRecordingSchema = z.object({
+  id: z.string().uuid(),
+  status: callRecordingStatusSchema,
+  providerRecordingId: z.string().nullable(),
+  consentGrantedAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  durationSeconds: z.number().int().nonnegative().nullable(),
+  channels: z.number().int().positive().nullable(),
+  deleteAfter: z.string().datetime().nullable(),
+  deletedAt: z.string().datetime().nullable(),
+  failureReason: z.string().nullable()
+});
+export type CallRecording = z.infer<typeof callRecordingSchema>;
+
+export const finalTranscriptStatusSchema = z.enum([
+  "processing",
+  "completed",
+  "failed"
+]);
+export type FinalTranscriptStatus = z.infer<
+  typeof finalTranscriptStatusSchema
+>;
+
+export const finalTranscriptSegmentSchema = z.object({
+  role: z.enum(["assistant", "recipient", "unknown"]),
+  text: z.string().min(1),
+  startSeconds: z.number().nonnegative(),
+  endSeconds: z.number().nonnegative()
+});
+export type FinalTranscriptSegment = z.infer<
+  typeof finalTranscriptSegmentSchema
+>;
+
+export const finalTranscriptSchema = z.object({
+  id: z.string().uuid(),
+  status: finalTranscriptStatusSchema,
+  text: z.string().nullable(),
+  segments: z.array(finalTranscriptSegmentSchema).default([]),
+  model: z.string(),
+  failureReason: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable()
+});
+export type FinalTranscript = z.infer<typeof finalTranscriptSchema>;
+
 export const approvalRequestSchema = z.object({
   id: z.string().uuid(),
   category: z.enum(["contact_email", "postal_address", "date_of_birth", "legal_commitment"]),
@@ -160,7 +225,9 @@ export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 export const callSnapshotSchema = z.object({
   brief: callBriefSchema,
   transcript: z.array(transcriptSegmentSchema),
-  pendingApproval: approvalRequestSchema.nullable()
+  pendingApproval: approvalRequestSchema.nullable(),
+  recording: callRecordingSchema.nullable(),
+  finalTranscript: finalTranscriptSchema.nullable()
 });
 export type CallSnapshot = z.infer<typeof callSnapshotSchema>;
 

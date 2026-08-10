@@ -1,6 +1,6 @@
 import type { CallBrief } from "@callassist/contracts";
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
@@ -22,6 +22,7 @@ const brief: CallBrief = {
   context: "The company works in logistics. An unverified salary note says CHF 99,999.",
   locale: "de-CH",
   voiceGender: "female",
+  audioRetentionDays: 7,
   allowLanguageSwitch: false,
   allowedFacts: ["Application sent: 12 July", "Applicant: Ivan Slavinskyi"],
   status: "ready",
@@ -77,7 +78,7 @@ describe("buildConsentAnnouncementInstructions", () => {
     expect(prompt).toContain("ИИ-ассистент");
     expect(prompt).toContain("нарушения речи");
     expect(prompt.indexOf("нарушения речи")).toBeLessThan(
-      prompt.indexOf("транскрибироваться")
+      prompt.indexOf("записан и автоматически расшифрован")
     );
     expect(prompt).toContain("нажмите 1");
     expect(prompt).toContain("Do not begin the call objective");
@@ -120,6 +121,9 @@ describe("OpenAIRealtimeBridge", () => {
     const events: string[] = [];
     const unsubscribe = service.subscribe(created.id, (event) =>
       events.push(event.type)
+    );
+    vi.spyOn(service, "startRecordingAfterConsent").mockImplementation(
+      async (id) => (await service.get(id))!
     );
     const bridge = new OpenAIRealtimeBridge({
       apiKey: "test-key",
@@ -209,6 +213,7 @@ describe("OpenAIRealtimeBridge", () => {
         })
       )
     );
+    await new Promise((resolve) => setImmediate(resolve));
     expect(openAISocket.sent).toContainEqual({
       type: "conversation.item.create",
       item: {

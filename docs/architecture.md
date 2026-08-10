@@ -18,13 +18,22 @@ Next.js console ── HTTPS / SSE ──► Fastify API ──► PostgreSQL
                               server-side Realtime bridge
                                          │
                                 OpenAI Realtime session
+
+Twilio dual-channel recording ──► authenticated API download
+                                             │
+                                             └── channel split + voice activity turns
+                                                               │
+                                                               └── OpenAI post-call transcription
+                                                                             │
+                                                                             └── encrypted final turns
 ```
 
 - `apps/web`: the Next.js operator console.
 - `apps/api`: the Node.js/TypeScript Fastify API, policy boundary, Twilio gateway, and server-side Realtime connection.
-- PostgreSQL: call briefs, attempts, transcripts, approvals, and audit events.
-- Twilio: outbound PSTN calls, signed webhooks, DTMF consent, and a bidirectional Media Stream.
+- PostgreSQL: call briefs, attempts, draft transcripts, recordings, final transcripts, approvals, and audit events.
+- Twilio: outbound PSTN calls, signed webhooks, DTMF consent, a bidirectional Media Stream, and temporary consent-gated recordings.
 - OpenAI Realtime: direct speech-to-speech conversation. External actions remain under server control.
+- OpenAI file transcription: post-call processing of the complete recording with bounded call context.
 - Redis/BullMQ: planned for scheduling, retries, and time-bounded background work.
 
 ## Storage boundary
@@ -39,7 +48,11 @@ On API startup, unfinished calls are marked as failed, pending approvals expire,
 
 `TelephonyProvider` isolates the transport. The mock provider supplies deterministic local scenarios; the Twilio provider creates and terminates real calls. Provider call identifiers and raw statuses are stored with each `CallAttempt`, while signed status callbacks map them into domain statuses and SSE events.
 
-The Twilio voice webhook immediately opens a bidirectional Media Stream. OpenAI Realtime uses the selected voice to disclose the AI identity, represented person, accessibility context, and live-transcription policy. Before the recipient presses `1`, the server discards inbound media frames and does not forward them to OpenAI. After consent, the same Realtime session begins the call objective without changing voice or making another webhook round trip.
+The Twilio voice webhook immediately opens a bidirectional Media Stream with call recording disabled. OpenAI Realtime uses the selected voice to disclose the AI identity, represented person, accessibility context, recording purpose, and retention period. Before the recipient presses `1`, the server discards inbound media frames and does not forward them to OpenAI.
+
+After DTMF consent, the API persists the consent timestamp and asks Twilio to start a dual-channel recording of both tracks on the active call. Recipient media remains blocked until Twilio confirms recording startup. Only then does the same Realtime session begin the call objective. A failed recording start produces a same-voice technical notice and terminates the call.
+
+Twilio sends recording lifecycle events to a signed webhook. A completed callback starts an idempotent post-call transcription job. The API downloads the original dual-channel media with server-side Twilio credentials. A bundled FFmpeg process separates the call legs, detects and normalises individual voice turns, and deletes its temporary working directory when processing ends. Each turn is sent to the configured OpenAI transcription model with bounded names, locale, objective, context, and keywords. The physical channels are mapped to assistant/recipient roles by similarity to the independently stored live role references; live wording is never promoted into the final transcript. The encrypted final turns keep recording-relative start/end timestamps and remain separate from the Realtime draft. Browser audio playback is proxied through the main API; the Twilio media URL and credentials remain server-side.
 
 The main API listens on port `4000`. In Twilio mode, a separate Fastify listener on `127.0.0.1:4001` exposes only voice/status webhooks and the Media Stream WebSocket. It does not expose `/api/*`, SSE, or a health endpoint. HTTP and WebSocket requests require valid Twilio signatures, and the stream also requires a call-scoped HMAC token.
 
@@ -74,6 +87,8 @@ Rules:
 - `CallBrief`: recipient, objective, language, context, approved facts, and policy settings.
 - `CallAttempt`: provider call ID, raw and domain status, timestamps, and stop reason.
 - `TranscriptSegment`: speaker role, text, locale, timestamp, and partial/final state.
+- `CallRecording`: consent timestamp, provider IDs, lifecycle, duration, channels, and deletion deadline.
+- `FinalTranscript`: encrypted recording-based turns, roles, timestamps, compatibility text, model, lifecycle, and failure metadata.
 - `ApprovalRequest`: category, proposed speech, reason, expiry, and operator decision.
 - `AuditEvent`: append-only control event without secrets or unnecessary transcript content.
 
@@ -87,4 +102,4 @@ For addresses, dates of birth, medical information, contact details, or legal co
 
 ## MVP exclusions
 
-The first release does not include public registration, a browser softphone, a native Android app, automatic language switching, CRM/calendar integrations, RAG, or default audio recording.
+The first release does not include public registration, a browser softphone, a native Android app, automatic language switching, CRM/calendar integrations, RAG, click-to-seek transcript/audio alignment, operator-verified transcript revisions, or indefinite audio retention.

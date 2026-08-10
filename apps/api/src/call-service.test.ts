@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallService } from "./call-service";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import type { TelephonyProvider } from "./telephony/telephony-provider";
+import type { PostCallTranscriber } from "./transcription/openai-post-call-transcriber";
 
 const services: CallService[] = [];
 
@@ -58,7 +59,14 @@ describe("CallService", () => {
     const provider: TelephonyProvider = {
       mode: "twilio",
       startCall,
-      async stopCall() {}
+      async stopCall() {},
+      async startRecording() {
+        return { providerRecordingId: "RE-concurrent", providerStatus: "in-progress" };
+      },
+      async getRecordingMedia() {
+        return { bytes: new Uint8Array(), contentType: "audio/mpeg", fileName: "call.mp3" };
+      },
+      async deleteRecording() {}
     };
     const service = new CallService(new InMemoryCallRepository(), provider);
     services.push(service);
@@ -95,7 +103,14 @@ describe("CallService", () => {
     const provider: TelephonyProvider = {
       mode: "twilio",
       startCall,
-      stopCall
+      stopCall,
+      async startRecording() {
+        return { providerRecordingId: "RE-late", providerStatus: "in-progress" };
+      },
+      async getRecordingMedia() {
+        return { bytes: new Uint8Array(), contentType: "audio/mpeg", fileName: "call.mp3" };
+      },
+      async deleteRecording() {}
     };
     const service = new CallService(new InMemoryCallRepository(), provider);
     services.push(service);
@@ -117,5 +132,174 @@ describe("CallService", () => {
     expect(stopCall).toHaveBeenCalledWith("CA-late");
     expect(snapshot.brief.status).toBe("stopped");
     expect((await service.get(brief.id))?.brief.status).toBe("stopped");
+  });
+
+  it("records only after consent and creates an idempotent final transcript", async () => {
+    const startRecording = vi.fn().mockResolvedValue({
+      providerRecordingId: "RE123",
+      providerStatus: "in-progress"
+    });
+    const getRecordingMedia = vi.fn().mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/mpeg",
+      fileName: "RE123.mp3"
+    });
+    const deleteRecording = vi.fn().mockResolvedValue(undefined);
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return { providerCallId: "CA123", providerStatus: "queued" };
+      },
+      async stopCall() {},
+      startRecording,
+      getRecordingMedia,
+      deleteRecording
+    };
+    const transcribe = vi.fn().mockResolvedValue({
+      text: "The application was received.",
+      segments: [
+        {
+          role: "recipient",
+          text: "The application was received.",
+          startSeconds: 3,
+          endSeconds: 5
+        }
+      ],
+      model: "gpt-transcribe"
+    });
+    const transcriber: PostCallTranscriber = {
+      model: "gpt-transcribe",
+      transcribe
+    };
+    const service = new CallService(
+      new InMemoryCallRepository(),
+      provider,
+      () => undefined,
+      transcriber
+    );
+    services.push(service);
+    const brief = await service.create({
+      recipientName: "Example office",
+      phoneNumber: "+442079460000",
+      objective: "Confirm that the submitted application was received",
+      locale: "en-GB",
+      audioRetentionDays: 7,
+      allowLanguageSwitch: false,
+      allowedFacts: ["Application sent: 12 July"]
+    });
+
+    await service.start(brief.id);
+    expect((await service.get(brief.id))?.recording).toBeNull();
+
+    const recordingStarted = await service.startRecordingAfterConsent(brief.id);
+    expect(startRecording).toHaveBeenCalledOnce();
+    expect(recordingStarted.recording).toMatchObject({
+      providerRecordingId: "RE123",
+      status: "recording"
+    });
+
+    await service.handleTwilioRecordingStatus({
+      callBriefId: brief.id,
+      recordingId: recordingStarted.recording!.id,
+      providerCallId: "CA123",
+      providerRecordingId: "RE123",
+      providerStatus: "completed",
+      durationSeconds: 42,
+      channels: 2
+    });
+
+    await vi.waitFor(async () => {
+      expect((await service.get(brief.id))?.finalTranscript).toMatchObject({
+        status: "completed",
+        text: "The application was received.",
+        segments: [expect.objectContaining({ role: "recipient" })],
+        model: "gpt-transcribe"
+      });
+    });
+    expect(transcribe).toHaveBeenCalledOnce();
+    expect(getRecordingMedia).toHaveBeenCalledWith("RE123");
+
+    await service.handleTwilioRecordingStatus({
+      callBriefId: brief.id,
+      recordingId: recordingStarted.recording!.id,
+      providerCallId: "CA123",
+      providerRecordingId: "RE123",
+      providerStatus: "completed",
+      durationSeconds: 42,
+      channels: 2
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(transcribe).toHaveBeenCalledOnce();
+
+    await service.retryFinalTranscript(brief.id);
+    await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2));
+    await vi.waitFor(async () =>
+      expect((await service.get(brief.id))?.finalTranscript?.status).toBe(
+        "completed"
+      )
+    );
+
+    const deleted = await service.deleteRecording(brief.id);
+    expect(deleteRecording).toHaveBeenCalledWith("RE123");
+    expect(deleted.recording?.status).toBe("deleted");
+    expect(deleted.finalTranscript?.text).toBe("The application was received.");
+  });
+
+  it("does not downgrade a completed recording when its start request resolves late", async () => {
+    let resolveRecordingStart!: (value: {
+      providerRecordingId: string;
+      providerStatus: string;
+    }) => void;
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return { providerCallId: "CA-race", providerStatus: "queued" };
+      },
+      async stopCall() {},
+      startRecording: () =>
+        new Promise((resolve) => {
+          resolveRecordingStart = resolve;
+        }),
+      async getRecordingMedia() {
+        return {
+          bytes: new Uint8Array([1]),
+          contentType: "audio/mpeg",
+          fileName: "RE-race.mp3"
+        };
+      },
+      async deleteRecording() {}
+    };
+    const service = new CallService(new InMemoryCallRepository(), provider);
+    services.push(service);
+    const brief = await service.create({
+      recipientName: "Example office",
+      phoneNumber: "+442079460000",
+      objective: "Verify out-of-order recording lifecycle callbacks",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    });
+    await service.start(brief.id);
+
+    const starting = service.startRecordingAfterConsent(brief.id);
+    await vi.waitFor(async () => {
+      expect((await service.get(brief.id))?.recording?.status).toBe("starting");
+    });
+    const recordingId = (await service.get(brief.id))!.recording!.id;
+    await service.handleTwilioRecordingStatus({
+      callBriefId: brief.id,
+      recordingId,
+      providerCallId: "CA-race",
+      providerRecordingId: "RE-race",
+      providerStatus: "completed"
+    });
+    resolveRecordingStart({
+      providerRecordingId: "RE-race",
+      providerStatus: "in-progress"
+    });
+
+    await expect(starting).resolves.toMatchObject({
+      recording: { status: "available", providerRecordingId: "RE-race" }
+    });
   });
 });

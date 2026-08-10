@@ -12,7 +12,9 @@ import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import { CallRepositoryError } from "./storage/call-repository";
 import {
   isTwilioCallStatus,
-  type TwilioCallStatus
+  isTwilioRecordingStatus,
+  type TwilioCallStatus,
+  type TwilioRecordingStatus
 } from "./telephony/telephony-provider";
 import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
@@ -76,6 +78,49 @@ export function buildApp({
       const snapshot = await service.get(request.params.id);
       if (!snapshot) return reply.status(404).send({ error: "CALL_NOT_FOUND" });
       return snapshot;
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/recording",
+    async (request, reply) => {
+      try {
+        const media = await service.getRecordingMedia(request.params.id);
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .header(
+            "Content-Disposition",
+            `inline; filename=${JSON.stringify(media.fileName)}`
+          )
+          .type(media.contentType)
+          .send(Buffer.from(media.bytes));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/recording",
+    async (request, reply) => {
+      try {
+        return await service.deleteRecording(request.params.id);
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/final-transcript/retry",
+    async (request, reply) => {
+      try {
+        return reply
+          .status(202)
+          .send(await service.retryFinalTranscript(request.params.id));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
     }
   );
 
@@ -243,9 +288,64 @@ export function buildWebhookApp({
         return reply.status(204).send();
       }
     );
+
+    routes.post<{
+      Querystring: { callBriefId?: string; recordingId?: string };
+    }>("/webhooks/twilio/recording", async (request, reply) => {
+      const parameters = normalizeTwilioParameters(request.body);
+      if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+        return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+      }
+
+      const providerCallId = parameters.CallSid;
+      const providerRecordingId = parameters.RecordingSid;
+      const providerStatus = parameters.RecordingStatus;
+      const callBriefId = request.query.callBriefId;
+      const recordingId = request.query.recordingId;
+      if (
+        !providerCallId ||
+        !providerRecordingId ||
+        !providerStatus ||
+        !callBriefId ||
+        !recordingId ||
+        !isTwilioRecordingStatus(providerStatus)
+      ) {
+        return reply.status(400).send({ error: "INVALID_TWILIO_RECORDING_STATUS" });
+      }
+
+      await service.handleTwilioRecordingStatus({
+        callBriefId,
+        recordingId,
+        providerCallId,
+        providerRecordingId,
+        providerStatus: providerStatus as TwilioRecordingStatus,
+        durationSeconds: optionalNonNegativeNumber(parameters.RecordingDuration),
+        channels: optionalPositiveNumber(parameters.RecordingChannels),
+        startedAt: optionalIsoDate(parameters.RecordingStartTime),
+        failureReason: parameters.RecordingErrorCode
+      });
+      return reply.status(204).send();
+    });
   });
 
   return app;
+}
+
+function optionalNonNegativeNumber(value: string | undefined) {
+  if (value === undefined || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function optionalPositiveNumber(value: string | undefined) {
+  const parsed = optionalNonNegativeNumber(value);
+  return parsed !== undefined && parsed > 0 ? parsed : undefined;
+}
+
+function optionalIsoDate(value: string | undefined) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 function normalizeTwilioParameters(body: unknown) {
@@ -281,7 +381,8 @@ function sendRepositoryError(
   error: unknown
 ) {
   if (error instanceof CallServiceError) {
-    return reply.status(502).send({ error: error.code });
+    const status = error.code === "RECORDING_NOT_AVAILABLE" ? 409 : 502;
+    return reply.status(status).send({ error: error.code });
   }
 
   if (error instanceof CallRepositoryError) {

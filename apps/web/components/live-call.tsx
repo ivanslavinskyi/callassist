@@ -10,9 +10,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "./app-shell";
 import {
+  callRecordingUrl,
   callEventsUrl,
+  deleteCallRecording,
   decideApproval,
   getCallSnapshot,
+  retryFinalTranscript,
   startCall,
   stopCall
 } from "@/lib/api";
@@ -136,7 +139,9 @@ export function LiveCall({ callId }: { callId: string }) {
     );
   }
 
-  const { brief, transcript, pendingApproval } = snapshot;
+  const { brief, transcript, pendingApproval, recording, finalTranscript } =
+    snapshot;
+  const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
 
   return (
@@ -188,11 +193,16 @@ export function LiveCall({ callId }: { callId: string }) {
         {error ? <div className="inline-notice">{error}</div> : null}
 
         <div className="live-grid">
-          <section className="transcript-card">
+          <div className="transcript-column">
+            <section className="transcript-card">
             <div className="transcript-heading">
               <div>
-                <span className="eyebrow">Live transcript</span>
-                <h2>Conversation</h2>
+                <span className="eyebrow">Live transcript · realtime draft</span>
+                <h2>Live captions</h2>
+                <p className="transcript-subtitle">
+                  Appears during the call. Fast, provisional, and may contain
+                  recognition errors.
+                </p>
               </div>
               {isActive ? (
                 <div className="live-indicator"><span /><span /><span /></div>
@@ -207,7 +217,10 @@ export function LiveCall({ callId }: { callId: string }) {
                     <i /><i /><i /><i /><i />
                   </span>
                   <strong>The transcript will appear here</strong>
-                  <p>After the recipient consents, each turn will appear here in real time.</p>
+                  <p>
+                    After the recipient consents, each turn will appear here in
+                    real time. This fast transcript may contain recognition errors.
+                  </p>
                 </div>
               ) : (
                 <>
@@ -259,7 +272,172 @@ export function LiveCall({ callId }: { callId: string }) {
                 </>
               )}
             </div>
-          </section>
+            </section>
+
+            <section className="final-transcript-card">
+              <div className="final-transcript-heading">
+                <div>
+                  <span className="eyebrow">
+                    Final transcript · recording-based
+                  </span>
+                  <h2>Post-call transcription</h2>
+                  <p className="transcript-subtitle">
+                    Created after the call from the consented dual-channel
+                    recording.
+                  </p>
+                </div>
+                {finalTranscript ? (
+                  <span
+                    className={`processing-badge final-${finalTranscript.status}`}
+                  >
+                    {finalTranscript.status}
+                  </span>
+                ) : null}
+              </div>
+
+              {finalTranscript?.status === "completed" &&
+              (finalTranscript.text || finalSegments.length > 0) ? (
+                <div className="final-transcript-body">
+                  {finalSegments.length > 0 ? (
+                    <div className="final-transcript-list">
+                      {finalSegments.map((segment, index) => (
+                        <article
+                          className={`final-transcript-line role-${segment.role}`}
+                          key={`${segment.startSeconds}-${segment.role}-${index}`}
+                        >
+                          <div className="speaker-mark">
+                            {segment.role === "assistant"
+                              ? "AI"
+                              : segment.role === "recipient"
+                                ? "RE"
+                                : "?"}
+                          </div>
+                          <div>
+                            <div className="speaker-row">
+                              <strong>
+                                {segment.role === "assistant"
+                                  ? brief.agentName
+                                  : segment.role === "recipient"
+                                    ? brief.recipientName
+                                    : "Unassigned speaker"}
+                              </strong>
+                              <time>{formatOffset(segment.startSeconds)}</time>
+                            </div>
+                            <p>{segment.text}</p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="legacy-final-transcript">
+                      <strong>Legacy unstructured transcript</strong>
+                      <p>{finalTranscript.text}</p>
+                    </div>
+                  )}
+                  <small>
+                    Speaker roles come from the separate Twilio audio channels;
+                    the wording comes from post-call speech recognition. It is
+                    independent from the live draft, but remains AI-generated.
+                    Check critical details against the audio.
+                  </small>
+                  {recording?.status === "available" ? (
+                    <button
+                      className="secondary-button regenerate-button"
+                      disabled={busy}
+                      onClick={() =>
+                        runAction(() => retryFinalTranscript(callId))
+                      }
+                      type="button"
+                    >
+                      {finalSegments.length > 0
+                        ? "Regenerate final transcript"
+                        : "Regenerate with speakers and timestamps"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : finalTranscript?.status === "failed" ? (
+                <div className="final-transcript-state state-error">
+                  <strong>Final transcription failed</strong>
+                  <p>The recording is still available. You can retry safely.</p>
+                  <button
+                    className="secondary-button"
+                    disabled={busy || recording?.status !== "available"}
+                    onClick={() => runAction(() => retryFinalTranscript(callId))}
+                    type="button"
+                  >
+                    Retry transcription
+                  </button>
+                </div>
+              ) : finalTranscript?.status === "processing" ||
+                recording?.status === "processing" ||
+                recording?.status === "available" ? (
+                <div className="final-transcript-state">
+                  <span className="processing-spinner" aria-hidden="true" />
+                  <strong>Creating the final transcript</strong>
+                  <p>The complete recording is being processed after the call.</p>
+                </div>
+              ) : recording?.status === "failed" ? (
+                <div className="final-transcript-state state-error">
+                  <strong>Recording was not started</strong>
+                  <p>The conversation did not continue after consent.</p>
+                </div>
+              ) :
+                !recording &&
+                ["completed", "stopped", "failed"].includes(brief.status) ? (
+                <div className="final-transcript-state">
+                  <strong>No recording available</strong>
+                  <p>
+                    The call ended before a consent-gated recording was started.
+                  </p>
+                </div>
+              ) : (
+                <div className="final-transcript-state">
+                  <strong>Available after the call</strong>
+                  <p>
+                    Recording begins only after consent. The final transcript is
+                    generated when Twilio finishes the recording.
+                  </p>
+                </div>
+              )}
+
+              {recording ? (
+                <div className="recording-panel">
+                  <div>
+                    <strong>Consent-gated audio</strong>
+                    <span>
+                      {recording.status === "deleted"
+                        ? "Deleted"
+                        : recording.status === "available"
+                          ? `Available${recording.durationSeconds !== null ? ` · ${formatDuration(recording.durationSeconds)}` : ""}`
+                          : recording.status}
+                    </span>
+                  </div>
+                  {recording.status === "available" ? (
+                    <>
+                      <audio controls preload="metadata" src={callRecordingUrl(callId)}>
+                        Your browser does not support audio playback.
+                      </audio>
+                      <button
+                        className="text-button danger-text"
+                        disabled={
+                          busy || finalTranscript?.status === "processing"
+                        }
+                        onClick={() => runAction(() => deleteCallRecording(callId))}
+                        type="button"
+                      >
+                        Delete audio now
+                      </button>
+                    </>
+                  ) : null}
+                  <small>
+                    {recording.status === "deleted"
+                      ? "The provider audio has been permanently deleted."
+                      : retentionLabel(brief.audioRetentionDays, recording.deleteAfter)}
+                  </small>
+                </div>
+              ) : null}
+            </section>
+          </div>
 
           <aside className="call-sidebar">
             {pendingApproval ? (
@@ -323,6 +501,14 @@ export function LiveCall({ callId }: { callId: string }) {
                   <dt>Voice</dt>
                   <dd>{brief.voiceGender === "female" ? "Female" : "Male"}</dd>
                 </div>
+                <div>
+                  <dt>Audio retention</dt>
+                  <dd>
+                    {brief.audioRetentionDays === 0
+                      ? "Until final transcript"
+                      : `${brief.audioRetentionDays} days`}
+                  </dd>
+                </div>
                 <div><dt>Assistant</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>
@@ -331,4 +517,24 @@ export function LiveCall({ callId }: { callId: string }) {
       </main>
     </AppShell>
   );
+}
+
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
+
+function formatOffset(seconds: number) {
+  const rounded = Math.floor(seconds);
+  const minutes = Math.floor(rounded / 60);
+  return `${minutes}:${(rounded % 60).toString().padStart(2, "0")}`;
+}
+
+function retentionLabel(days: number, deleteAfter: string | null) {
+  if (days === 0) return "Deleted automatically after the final transcript is created.";
+  if (deleteAfter) {
+    return `Scheduled for deletion on ${new Date(deleteAfter).toLocaleDateString("en-GB")}.`;
+  }
+  return `Deleted automatically ${days} days after the final transcript is created.`;
 }

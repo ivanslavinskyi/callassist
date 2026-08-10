@@ -56,6 +56,23 @@ export async function stopCall(id: string) {
   });
 }
 
+export function callRecordingUrl(id: string) {
+  return `${API_URL}/api/call-briefs/${id}/recording`;
+}
+
+export async function deleteCallRecording(id: string) {
+  return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/recording`, {
+    method: "DELETE"
+  });
+}
+
+export async function retryFinalTranscript(id: string) {
+  return apiRequest<CallSnapshot>(
+    `/api/call-briefs/${id}/final-transcript/retry`,
+    { method: "POST", body: "{}" }
+  );
+}
+
 export async function decideApproval(
   callId: string,
   approvalId: string,

@@ -101,7 +101,14 @@ describe("call API", () => {
       async startCall() {
         throw new Error("Twilio unavailable");
       },
-      async stopCall() {}
+      async stopCall() {},
+      async startRecording() {
+        throw new Error("Twilio unavailable");
+      },
+      async getRecordingMedia() {
+        throw new Error("Twilio unavailable");
+      },
+      async deleteRecording() {}
     };
     const service = new CallService(
       new InMemoryCallRepository(),

@@ -41,7 +41,8 @@ export function Dashboard() {
             </h1>
             <p>
               Set the objective and language. CallAssist handles the conversation,
-              streams the transcript, and pauses before disclosing private data.
+              streams a live draft, and creates a more accurate transcript after
+              the call.
             </p>
           </div>
           <div className="trust-card">
@@ -94,8 +95,9 @@ export function Dashboard() {
             <div className="privacy-note">
               <span aria-hidden="true">⌁</span>
               <p>
-                <strong>Audio recording is off.</strong> Recipient audio is not sent
-                to the model until consent is confirmed.
+                <strong>Consent first.</strong> Audio recording starts only after the
+                recipient presses 1 and is deleted according to the selected
+                retention period.
               </p>
             </div>
           </aside>

@@ -13,15 +13,47 @@ export const TWILIO_CALL_STATUSES = [
 
 export type TwilioCallStatus = (typeof TWILIO_CALL_STATUSES)[number];
 
+export const TWILIO_RECORDING_STATUSES = [
+  "in-progress",
+  "completed",
+  "absent"
+] as const;
+
+export type TwilioRecordingStatus =
+  (typeof TWILIO_RECORDING_STATUSES)[number];
+
 export type StartTelephonyCallResult = {
   providerCallId: string | null;
   providerStatus: string;
+};
+
+export type StartCallRecordingInput = {
+  callBriefId: string;
+  recordingId: string;
+};
+
+export type StartCallRecordingResult = {
+  providerRecordingId: string;
+  providerStatus: string;
+};
+
+export type RecordingMedia = {
+  bytes: Uint8Array;
+  contentType: string;
+  fileName: string;
+  channels?: 1 | 2;
 };
 
 export interface TelephonyProvider {
   readonly mode: "mock" | "twilio";
   startCall(brief: CallBrief): Promise<StartTelephonyCallResult>;
   stopCall(providerCallId: string): Promise<void>;
+  startRecording(
+    providerCallId: string,
+    input: StartCallRecordingInput
+  ): Promise<StartCallRecordingResult>;
+  getRecordingMedia(providerRecordingId: string): Promise<RecordingMedia>;
+  deleteRecording(providerRecordingId: string): Promise<void>;
 }
 
 export function mapTwilioStatusToCallStatus(
@@ -45,4 +77,10 @@ export function mapTwilioStatusToCallStatus(
 
 export function isTwilioCallStatus(value: string): value is TwilioCallStatus {
   return (TWILIO_CALL_STATUSES as readonly string[]).includes(value);
+}
+
+export function isTwilioRecordingStatus(
+  value: string
+): value is TwilioRecordingStatus {
+  return (TWILIO_RECORDING_STATUSES as readonly string[]).includes(value);
 }

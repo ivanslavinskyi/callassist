@@ -8,17 +8,28 @@ import {
 import { createCallRepositoryFromEnv } from "./storage/create-call-repository";
 import { createTelephonyProviderFromEnv } from "./telephony/create-telephony-provider";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
+import { OpenAIPostCallTranscriber } from "./transcription/openai-post-call-transcriber";
 
 const repository = createCallRepositoryFromEnv();
 const telephonyProvider = createTelephonyProviderFromEnv();
+const openAIApiKey =
+  telephonyProvider instanceof TwilioTelephonyProvider
+    ? requireEnvironmentVariable("OPENAI_API_KEY")
+    : null;
+const postCallTranscriber = openAIApiKey
+  ? new OpenAIPostCallTranscriber({
+      apiKey: openAIApiKey,
+      model: process.env.OPENAI_POST_CALL_TRANSCRIPTION_MODEL
+    })
+  : undefined;
 const service = new CallService(repository, telephonyProvider, (error) => {
   app.log.error(error, "Background call operation failed");
-});
+}, postCallTranscriber);
 const app = buildApp({ service });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? new OpenAIRealtimeBridge({
-        apiKey: requireEnvironmentVariable("OPENAI_API_KEY"),
+        apiKey: openAIApiKey!,
         service,
         validateStreamToken: (callBriefId, token) =>
           telephonyProvider.validateMediaStreamToken(callBriefId, token),

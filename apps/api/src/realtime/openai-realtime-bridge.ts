@@ -58,7 +58,11 @@ type OpenAIEvent = {
   error?: { type?: string; code?: string; param?: string };
 };
 
-type ResponsePurpose = "consent_prompt" | "conversation" | "no_consent";
+type ResponsePurpose =
+  | "consent_prompt"
+  | "conversation"
+  | "no_consent"
+  | "recording_failure";
 
 const languageNames: Record<CallLocale, string> = {
   "de-CH": "Swiss Standard German",
@@ -77,6 +81,7 @@ export const DEFAULT_REALTIME_VOICES: Record<CallVoiceGender, string> = {
 
 const consentPromptMark = "callassist-consent-prompt-complete";
 const noConsentMark = "callassist-no-consent-complete";
+const recordingFailureMark = "callassist-recording-failure-complete";
 
 const noopLogger: BridgeLogger = {
   info: () => undefined,
@@ -130,11 +135,13 @@ export class OpenAIRealtimeBridge {
     let streamSid: string | null = null;
     let openAIReady = false;
     let consentPromptStarted = false;
+    let consentStarting = false;
     let consentGranted = false;
     let conversationStarted = false;
     let responseActive = false;
     let activeResponsePurpose: ResponsePurpose | null = null;
     let startConversationAfterResponse = false;
+    let recordingFailureAfterResponse = false;
     let pendingKeypadResponse = false;
     let keypadEventSequence = 0;
     let closed = false;
@@ -227,11 +234,20 @@ export class OpenAIRealtimeBridge {
     };
 
     const playNoConsentAndEnd = () => {
-      if (!currentBrief || consentGranted || closed) return;
+      if (!currentBrief || consentStarting || consentGranted || closed) return;
       clearConsentTimer();
       createAudioResponse(
         buildNoConsentInstructions(currentBrief),
         "no_consent"
+      );
+    };
+
+    const playRecordingFailureAndEnd = () => {
+      if (!currentBrief || closed) return;
+      clearConsentTimer();
+      createAudioResponse(
+        buildRecordingFailureInstructions(currentBrief),
+        "recording_failure"
       );
     };
 
@@ -267,14 +283,25 @@ export class OpenAIRealtimeBridge {
           if (startConversationAfterResponse && consentGranted) {
             startConversationAfterResponse = false;
             startConversation();
+          } else if (recordingFailureAfterResponse) {
+            recordingFailureAfterResponse = false;
+            playRecordingFailureAndEnd();
           } else if (pendingKeypadResponse && consentGranted) {
             pendingKeypadResponse = false;
             createAudioResponse(keypadResponseInstructions);
-          } else if (completedPurpose === "consent_prompt" && !consentGranted) {
+          } else if (
+            completedPurpose === "consent_prompt" &&
+            !consentStarting &&
+            !consentGranted
+          ) {
             sendPlaybackMark(consentPromptMark);
             scheduleConsentTimeout(this.#playbackFallbackTimeoutMs);
           } else if (completedPurpose === "no_consent") {
             sendPlaybackMark(noConsentMark);
+            clearHangupTimer();
+            hangupTimer = setTimeout(close, this.#hangupFallbackTimeoutMs);
+          } else if (completedPurpose === "recording_failure") {
+            sendPlaybackMark(recordingFailureMark);
             clearHangupTimer();
             hangupTimer = setTimeout(close, this.#hangupFallbackTimeoutMs);
           }
@@ -445,38 +472,56 @@ export class OpenAIRealtimeBridge {
         openAIReady &&
         consentPromptStarted &&
         currentBrief &&
+        !consentStarting &&
         !consentGranted &&
         message.dtmf?.digit === "1"
       ) {
-        consentGranted = true;
+        consentStarting = true;
         clearConsentTimer();
         clearHangupTimer();
-        keypadEventSequence += 1;
-        sendOpenAI({
-          type: "conversation.item.create",
-          item: {
-            type: "message",
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: "[Verified consent: the recipient pressed 1 after hearing the disclosure. Begin the exact call objective now.]"
-              }
-            ]
-          }
-        });
-        storeTranscript(
-          `recipient:consent:${keypadEventSequence}`,
-          "recipient",
-          consentTranscript[currentBrief.locale]
-        );
         if (streamSid) sendTwilio({ event: "clear", streamSid });
-        if (responseActive) {
-          startConversationAfterResponse = true;
-          sendOpenAI({ type: "response.cancel" });
-        } else {
-          startConversation();
-        }
+        if (responseActive) sendOpenAI({ type: "response.cancel" });
+        const brief = currentBrief;
+        void this.#service
+          .startRecordingAfterConsent(brief.id)
+          .then(() => {
+            if (closed) return;
+            consentStarting = false;
+            consentGranted = true;
+            keypadEventSequence += 1;
+            sendOpenAI({
+              type: "conversation.item.create",
+              item: {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "[Verified consent: the recipient pressed 1 after hearing the disclosure. Recording started successfully. Begin the exact call objective now.]"
+                  }
+                ]
+              }
+            });
+            storeTranscript(
+              `recipient:consent:${keypadEventSequence}`,
+              "recipient",
+              consentTranscript[brief.locale]
+            );
+            if (responseActive) {
+              startConversationAfterResponse = true;
+            } else {
+              startConversation();
+            }
+          })
+          .catch(() => {
+            if (closed) return;
+            consentStarting = false;
+            if (responseActive) {
+              recordingFailureAfterResponse = true;
+            } else {
+              playRecordingFailureAndEnd();
+            }
+          });
       } else if (
         message.event === "dtmf" &&
         openAIReady &&
@@ -514,9 +559,15 @@ export class OpenAIRealtimeBridge {
           createAudioResponse(keypadResponseInstructions);
         }
       } else if (message.event === "mark" && message.mark?.name) {
-        if (message.mark.name === consentPromptMark && !consentGranted) {
+        if (
+          message.mark.name === consentPromptMark &&
+          !consentStarting &&
+          !consentGranted
+        ) {
           scheduleConsentTimeout(this.#consentTimeoutMs);
         } else if (message.mark.name === noConsentMark && !consentGranted) {
+          close();
+        } else if (message.mark.name === recordingFailureMark) {
           close();
         }
       } else if (message.event === "stop") {
@@ -578,6 +629,15 @@ Exact announcement JSON string:
 ${JSON.stringify(announcement)}`;
 }
 
+function buildRecordingFailureInstructions(brief: CallBrief) {
+  const announcement = getTwilioCopy(brief.locale).recordingFailure;
+  return `Read exactly the announcement stored in the JSON string below in ${languageNames[brief.locale]}.
+Do not paraphrase, explain, or add any words before or after it. Do not read the quote marks. End after this announcement.
+
+Exact announcement JSON string:
+${JSON.stringify(announcement)}`;
+}
+
 export function buildRealtimeInstructions(brief: CallBrief) {
   const allowedFacts = brief.allowedFacts.length
     ? brief.allowedFacts.map((fact) => `- ${fact}`).join("\n")
@@ -588,7 +648,7 @@ export function buildRealtimeInstructions(brief: CallBrief) {
 
   return `# Role
 You are ${brief.agentName}, an AI phone assistant acting for ${brief.representedPerson}.
-The recipient has not consented yet. Your first explicitly requested response will be the exact AI identity, disability, and live-transcription disclosure. Before a verified-consent conversation item says that the recipient pressed 1, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, begin the objective and do not repeat the disclosure unless asked.
+The recipient has not consented yet. Your first explicitly requested response will be the exact AI identity, disability, recording, transcription, and retention disclosure. Before a verified-consent conversation item says that the recipient pressed 1 and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, begin the objective and do not repeat the disclosure unless asked.
 
 # Language
 Speak ${languageNames[brief.locale]} naturally and politely. ${fallback}

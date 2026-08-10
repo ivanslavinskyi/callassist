@@ -20,6 +20,7 @@ describe("createCallBriefInputSchema", () => {
     if (result.success) {
       expect(result.data.agentName).toBe("Sebastian");
       expect(result.data.voiceGender).toBe("male");
+      expect(result.data.audioRetentionDays).toBe(7);
       expect(result.data.speechImpairmentDisclosure).toContain("Sprechbehinderung");
     }
   });
@@ -32,6 +33,21 @@ describe("createCallBriefInputSchema", () => {
 
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.voiceGender).toBe("female");
+  });
+
+  it("accepts only the supported audio retention periods", () => {
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        audioRetentionDays: 30
+      }).success
+    ).toBe(true);
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        audioRetentionDays: 14
+      }).success
+    ).toBe(false);
   });
 
   it("requires a fallback locale when language switching is enabled", () => {

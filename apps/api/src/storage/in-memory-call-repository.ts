@@ -4,9 +4,12 @@ import {
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
+  type CallRecording,
   type CallLocale,
   type CallSnapshot,
   type CreateCallBriefInput,
+  type FinalTranscript,
+  type FinalTranscriptSegment,
   type TranscriptSegment
 } from "@callassist/contracts";
 import {
@@ -15,6 +18,7 @@ import {
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
+  type RecordingStatusInput,
   type StartAttemptInput
 } from "./call-repository";
 
@@ -58,7 +62,9 @@ export class InMemoryCallRepository implements CallRepository {
     this.#calls.set(brief.id, {
       brief,
       transcript: [],
-      pendingApproval: null
+      pendingApproval: null,
+      recording: null,
+      finalTranscript: null
     });
 
     return copy(brief);
@@ -147,6 +153,13 @@ export class InMemoryCallRepository implements CallRepository {
         snapshot.brief.status = callStatus;
         snapshot.brief.updatedAt = now;
       }
+      if (
+        terminalStatuses.has(callStatus) &&
+        (snapshot.recording?.status === "starting" ||
+          snapshot.recording?.status === "recording")
+      ) {
+        snapshot.recording.status = "processing";
+      }
       return { callId, snapshot: copy(snapshot) };
     }
     return null;
@@ -229,7 +242,239 @@ export class InMemoryCallRepository implements CallRepository {
       attempt.status = "stopped";
       attempt.endedAt = snapshot.brief.updatedAt;
     }
+    if (
+      snapshot.recording?.status === "starting" ||
+      snapshot.recording?.status === "recording"
+    ) {
+      snapshot.recording.status = "processing";
+    }
     return copy(snapshot);
+  }
+
+  async beginRecording(id: string) {
+    const snapshot = this.#require(id);
+    const attempts = this.#attempts.get(id) ?? [];
+    const attempt = attempts[attempts.length - 1];
+    if (
+      !attempt?.providerCallId ||
+      attempt.provider !== "twilio" ||
+      terminalStatuses.has(attempt.status)
+    ) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    if (snapshot.recording) {
+      throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    }
+    const consentGrantedAt = new Date().toISOString();
+    const recording: CallRecording = {
+      id: randomUUID(),
+      status: "starting",
+      providerRecordingId: null,
+      consentGrantedAt,
+      startedAt: null,
+      completedAt: null,
+      durationSeconds: null,
+      channels: null,
+      deleteAfter: null,
+      deletedAt: null,
+      failureReason: null
+    };
+    snapshot.recording = recording;
+    return {
+      providerCallId: attempt.providerCallId,
+      recording: copy(recording),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async attachProviderRecording(
+    recordingId: string,
+    providerRecordingId: string,
+    _providerStatus: string
+  ) {
+    const { callId, snapshot, recording } = this.#requireRecording(recordingId);
+    recording.providerRecordingId = providerRecordingId;
+    if (recording.status === "starting") recording.status = "recording";
+    recording.startedAt ??= new Date().toISOString();
+    if (recording.status !== "failed") recording.failureReason = null;
+    return {
+      callId,
+      recording: copy(recording),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async failRecording(recordingId: string, failureReason: string) {
+    const { callId, snapshot, recording } = this.#requireRecording(recordingId);
+    if (recording.status === "starting" || recording.status === "recording") {
+      recording.status = "failed";
+      recording.failureReason = failureReason;
+    }
+    return {
+      callId,
+      recording: copy(recording),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async applyRecordingStatus(input: RecordingStatusInput) {
+    const snapshot = this.#calls.get(input.callBriefId);
+    if (!snapshot?.recording || snapshot.recording.id !== input.recordingId) {
+      return null;
+    }
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      (candidate) => candidate.providerCallId === input.providerCallId
+    );
+    if (!attempt) return null;
+    const recording = snapshot.recording;
+    if (
+      recording.providerRecordingId &&
+      recording.providerRecordingId !== input.providerRecordingId
+    ) {
+      return null;
+    }
+    recording.providerRecordingId = input.providerRecordingId;
+    recording.durationSeconds = input.durationSeconds ?? recording.durationSeconds;
+    recording.channels = input.channels ?? recording.channels;
+    recording.startedAt = input.startedAt ?? recording.startedAt;
+    if (
+      input.providerStatus === "in-progress" &&
+      recording.status !== "available" &&
+      recording.status !== "processing" &&
+      recording.status !== "deleted"
+    ) {
+      recording.status = "recording";
+      recording.startedAt ??= new Date().toISOString();
+    } else if (input.providerStatus === "completed") {
+      if (recording.status !== "deleted") {
+        recording.status = "available";
+        recording.completedAt ??= new Date().toISOString();
+      }
+    } else if (
+      input.providerStatus === "absent" &&
+      recording.status !== "available" &&
+      recording.status !== "deleted"
+    ) {
+      recording.status = "failed";
+      recording.failureReason = input.failureReason ?? "recording_absent";
+    }
+    return {
+      callId: input.callBriefId,
+      recording: copy(recording),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async claimFinalTranscript(recordingId: string, model: string, force = false) {
+    const { callId, snapshot, recording } = this.#requireRecording(recordingId);
+    if (recording.status !== "available") return null;
+    if (snapshot.finalTranscript?.status === "completed" && !force) return null;
+    if (snapshot.finalTranscript?.status === "processing") return null;
+    const now = new Date().toISOString();
+    const finalTranscript: FinalTranscript = snapshot.finalTranscript
+      ? {
+          ...snapshot.finalTranscript,
+          status: "processing",
+          text: null,
+          segments: [],
+          model,
+          failureReason: null,
+          updatedAt: now,
+          completedAt: null
+        }
+      : {
+          id: randomUUID(),
+          status: "processing",
+          text: null,
+          segments: [],
+          model,
+          failureReason: null,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null
+        };
+    snapshot.finalTranscript = finalTranscript;
+    return {
+      callId,
+      finalTranscript: copy(finalTranscript),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async completeFinalTranscript(
+    recordingId: string,
+    text: string,
+    segments: FinalTranscriptSegment[]
+  ) {
+    const { callId, snapshot, recording } = this.#requireRecording(recordingId);
+    const finalTranscript = snapshot.finalTranscript;
+    if (!finalTranscript) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    const now = new Date();
+    finalTranscript.status = "completed";
+    finalTranscript.text = text;
+    finalTranscript.segments = copy(segments);
+    finalTranscript.failureReason = null;
+    finalTranscript.updatedAt = now.toISOString();
+    finalTranscript.completedAt = now.toISOString();
+    recording.deleteAfter = new Date(
+      now.getTime() + snapshot.brief.audioRetentionDays * 86_400_000
+    ).toISOString();
+    return {
+      callId,
+      finalTranscript: copy(finalTranscript),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async failFinalTranscript(recordingId: string, failureReason: string) {
+    const { callId, snapshot } = this.#requireRecording(recordingId);
+    const finalTranscript = snapshot.finalTranscript;
+    if (!finalTranscript) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    finalTranscript.status = "failed";
+    finalTranscript.text = null;
+    finalTranscript.segments = [];
+    finalTranscript.failureReason = failureReason;
+    finalTranscript.updatedAt = new Date().toISOString();
+    return {
+      callId,
+      finalTranscript: copy(finalTranscript),
+      snapshot: copy(snapshot)
+    };
+  }
+
+  async listTranscriptionCandidates() {
+    return [...this.#calls.values()]
+      .filter(
+        (snapshot) =>
+          snapshot.recording?.status === "available" &&
+          snapshot.finalTranscript?.status !== "completed" &&
+          snapshot.finalTranscript?.status !== "processing"
+      )
+      .map((snapshot) => snapshot.recording!.id);
+  }
+
+  async listExpiredRecordingCallIds(now: string) {
+    return [...this.#calls.values()]
+      .filter(
+        (snapshot) =>
+          snapshot.recording?.status === "available" &&
+          snapshot.recording.deleteAfter !== null &&
+          snapshot.recording.deleteAfter <= now
+      )
+      .map((snapshot) => snapshot.brief.id);
+  }
+
+  async markRecordingDeleted(id: string) {
+    const snapshot = this.#require(id);
+    const recording = snapshot.recording;
+    if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    recording.status = "deleted";
+    recording.deletedAt = new Date().toISOString();
+    return { callId: id, recording: copy(recording), snapshot: copy(snapshot) };
   }
 
   async recoverInterruptedCalls() {
@@ -252,6 +497,18 @@ export class InMemoryCallRepository implements CallRepository {
     return recovered;
   }
 
+  async recoverInterruptedTranscriptions() {
+    let recovered = 0;
+    for (const snapshot of this.#calls.values()) {
+      if (snapshot.finalTranscript?.status !== "processing") continue;
+      snapshot.finalTranscript.status = "failed";
+      snapshot.finalTranscript.failureReason = "server_restarted";
+      snapshot.finalTranscript.updatedAt = new Date().toISOString();
+      recovered += 1;
+    }
+    return recovered;
+  }
+
   async ping() {}
 
   async close() {}
@@ -260,5 +517,14 @@ export class InMemoryCallRepository implements CallRepository {
     const snapshot = this.#calls.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     return snapshot;
+  }
+
+  #requireRecording(recordingId: string) {
+    for (const [callId, snapshot] of this.#calls) {
+      if (snapshot.recording?.id === recordingId) {
+        return { callId, snapshot, recording: snapshot.recording };
+      }
+    }
+    throw new CallRepositoryError("RECORDING_NOT_FOUND");
   }
 }

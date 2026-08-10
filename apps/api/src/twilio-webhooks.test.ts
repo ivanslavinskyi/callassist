@@ -165,4 +165,51 @@ describe("Twilio webhooks", () => {
     expect(attempt?.providerCallId).toBe("CA123");
     expect(attempt?.providerStatus).toBe("in-progress");
   });
+
+  it("applies a signed recording callback to the expected call and recording", async () => {
+    const { app, service } = createHarness();
+    const brief = await createBrief(service);
+    const reserved = await service.repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    await service.repository.attachProviderCall(
+      reserved.attempt.id,
+      "CA123",
+      "in-progress"
+    );
+    const begun = await service.repository.beginRecording(brief.id);
+    const parameters = {
+      CallSid: "CA123",
+      RecordingSid: "RE123",
+      RecordingStatus: "completed",
+      RecordingDuration: "37",
+      RecordingChannels: "2"
+    };
+    const path =
+      `/webhooks/twilio/recording?callBriefId=${brief.id}` +
+      `&recordingId=${begun.recording.id}`;
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      parameters
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: path,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-twilio-signature": signature
+      },
+      payload: new URLSearchParams(parameters).toString()
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect((await service.get(brief.id))?.recording).toMatchObject({
+      status: "available",
+      providerRecordingId: "RE123",
+      durationSeconds: 37,
+      channels: 2
+    });
+  });
 });
