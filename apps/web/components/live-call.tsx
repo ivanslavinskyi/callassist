@@ -19,6 +19,12 @@ import {
   startCall,
   stopCall
 } from "@/lib/api";
+import {
+  buildFinalTranscriptCopyText,
+  buildFinalTranscriptPdfDefinition,
+  finalTranscriptPdfFileName,
+  writeTextToClipboard
+} from "@/lib/final-transcript-export";
 
 const statusLabels: Record<CallBriefStatus, string> = {
   ready: "Ready to start",
@@ -41,6 +47,12 @@ export function LiveCall({ callId }: { callId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
+    "idle"
+  );
+  const [pdfStatus, setPdfStatus] = useState<"idle" | "exporting" | "failed">(
+    "idle"
+  );
   const [partialTranscript, setPartialTranscript] = useState<
     Record<
       string,
@@ -114,6 +126,45 @@ export function LiveCall({ callId }: { callId: string }) {
       setError("The action could not be completed. Try again.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyFinalTranscript() {
+    if (!snapshot?.finalTranscript || !language) return;
+    try {
+      await writeTextToClipboard(
+        buildFinalTranscriptCopyText({
+          brief: snapshot.brief,
+          finalTranscript: snapshot.finalTranscript,
+          languageLabel: language.label
+        })
+      );
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
+  }
+
+  async function downloadFinalTranscript() {
+    if (!snapshot?.finalTranscript || !language) return;
+    setPdfStatus("exporting");
+    try {
+      const input = {
+        brief: snapshot.brief,
+        finalTranscript: snapshot.finalTranscript,
+        languageLabel: language.label
+      };
+      const { downloadTranscriptPdf } = await import(
+        "@/lib/download-transcript-pdf"
+      );
+      await downloadTranscriptPdf(
+        buildFinalTranscriptPdfDefinition(input),
+        finalTranscriptPdfFileName(input)
+      );
+      setPdfStatus("idle");
+    } catch (error) {
+      console.error("Final transcript PDF export failed", error);
+      setPdfStatus("failed");
     }
   }
 
@@ -298,6 +349,42 @@ export function LiveCall({ callId }: { callId: string }) {
               {finalTranscript?.status === "completed" &&
               (finalTranscript.text || finalSegments.length > 0) ? (
                 <div className="final-transcript-body">
+                  <div className="final-transcript-actions">
+                    <button
+                      className="transcript-export-button"
+                      onClick={() => void copyFinalTranscript()}
+                      type="button"
+                    >
+                      <CopyIcon />
+                      {copyStatus === "copied"
+                        ? "Copied"
+                        : copyStatus === "failed"
+                          ? "Copy failed — retry"
+                          : "Copy transcript"}
+                    </button>
+                    <button
+                      className="transcript-export-button"
+                      disabled={pdfStatus === "exporting"}
+                      onClick={() => void downloadFinalTranscript()}
+                      type="button"
+                    >
+                      <FileDownloadIcon />
+                      {pdfStatus === "exporting"
+                        ? "Preparing PDF…"
+                        : pdfStatus === "failed"
+                          ? "PDF failed — retry"
+                          : "Download PDF"}
+                    </button>
+                    <span className="sr-only" aria-live="polite">
+                      {copyStatus === "copied"
+                        ? "Final transcript copied to clipboard."
+                        : copyStatus === "failed"
+                          ? "The final transcript could not be copied."
+                          : pdfStatus === "failed"
+                            ? "The PDF could not be created."
+                            : ""}
+                    </span>
+                  </div>
                   {finalSegments.length > 0 ? (
                     <div className="final-transcript-list">
                       {finalSegments.map((segment, index) => (
@@ -537,4 +624,44 @@ function retentionLabel(days: number, deleteAfter: string | null) {
     return `Scheduled for deletion on ${new Date(deleteAfter).toLocaleDateString("en-GB")}.`;
   }
   return `Deleted automatically ${days} days after the final transcript is created.`;
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="transcript-action-icon"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
+      <rect height="13" rx="2" width="13" x="8" y="8" />
+      <path
+        d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"
+      />
+    </svg>
+  );
+}
+
+function FileDownloadIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="transcript-action-icon"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    >
+      <path d="M14 2.75H6.5a2 2 0 0 0-2 2v14.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8.25z" />
+      <path d="M14 2.75v5.5h5.5" />
+      <path d="M12 11.5v6" />
+      <path d="m9.5 15 2.5 2.5 2.5-2.5" />
+    </svg>
+  );
 }
