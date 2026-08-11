@@ -1,35 +1,70 @@
 "use client";
 
 import {
-  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
+  ASSISTANT_PROFILES,
+  DEFAULT_REPRESENTED_PERSON,
   SUPPORTED_CALL_LANGUAGES,
+  getAssistanceDisclosure,
+  type AssistanceReason,
+  type AssistantProfileId,
   type CallBrief,
   type CallLocale,
-  type CallVoiceGender,
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { useMemo, useState, type FormEvent } from "react";
 import { createCallBrief } from "@/lib/api";
 
-const initialForm: CreateCallBriefInput = {
-  recipientName: "Gemeinde Aadorf",
-  phoneNumber: "+41523686688",
-  objective: "Ask whether the requested documents may be sent by email",
-  agentName: "Sebastian",
-  representedPerson: "Ivan Slavinskyi",
-  speechImpairmentDisclosure: DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["de-CH"],
+const emptyForm: CreateCallBriefInput = {
+  recipientName: "",
+  phoneNumber: "",
+  objective: "",
+  assistantProfileId: "sebastian",
+  representedPerson: DEFAULT_REPRESENTED_PERSON,
+  assistanceReason: "speech_impairment",
   context: "",
   locale: "de-CH",
-  voiceGender: "male",
   audioRetentionDays: 7,
   allowLanguageSwitch: false,
-  allowedFacts: ["Owner's full name", "Place of residence", "Preference for a written reply"]
+  allowedFacts: [],
+  resultHandling: "capture_in_callassist",
+  addressingMode: "formal",
+  tonePreference: "auto",
+  voicemailPolicy: "do_not_leave_details",
+  deliveryInstruction: "",
+  clarificationAnswers: []
 };
 
-export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) => void }) {
-  const [form, setForm] = useState<CreateCallBriefInput>(initialForm);
-  const [factsText, setFactsText] = useState(
-    (initialForm.allowedFacts ?? []).join("\n")
+const legacyDemoFacts = [
+  "Owner's full name",
+  "Place of residence",
+  "Preference for a written reply"
+];
+
+type CreateCallFormProps = {
+  onCreated: (brief: CallBrief) => void;
+  initialValue?: CreateCallBriefInput;
+  saveCallBrief?: (input: CreateCallBriefInput) => Promise<CallBrief>;
+  heading?: string;
+  submitLabel?: string;
+  onCancel?: () => void;
+};
+
+export function CreateCallForm({
+  onCreated,
+  initialValue,
+  saveCallBrief = createCallBrief,
+  heading = "Who are we calling, and why?",
+  submitLabel = "Review call",
+  onCancel
+}: CreateCallFormProps) {
+  const [form, setForm] = useState<CreateCallBriefInput>(() => ({
+    ...emptyForm,
+    ...initialValue,
+    allowedFacts: cleanLegacyDemoFacts(initialValue?.allowedFacts),
+    clarificationAnswers: initialValue?.clarificationAnswers ?? []
+  }));
+  const [factsText, setFactsText] = useState(() =>
+    cleanLegacyDemoFacts(initialValue?.allowedFacts).join("\n")
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +72,15 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
   const fallbackLanguages = useMemo(
     () => SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== form.locale),
     [form.locale]
+  );
+  const disclosurePreview = useMemo(
+    () =>
+      getAssistanceDisclosure(
+        form.locale,
+        form.assistanceReason,
+        form.representedPerson ?? ""
+      ),
+    [form.assistanceReason, form.locale, form.representedPerson]
   );
 
   function update<Value extends keyof CreateCallBriefInput>(
@@ -52,7 +96,7 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
     setError(null);
 
     try {
-      const brief = await createCallBrief({
+      const brief = await saveCallBrief({
         ...form,
         allowedFacts: factsText
           .split("\n")
@@ -61,7 +105,7 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
       });
       onCreated(brief);
     } catch {
-      setError("Could not create the call brief. Check the fields and API availability.");
+      setError("Could not prepare the call. Check the fields and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -71,8 +115,8 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
     <form className="call-form" onSubmit={handleSubmit}>
       <div className="form-heading">
         <div>
-          <span className="eyebrow">New call brief</span>
-          <h2>Who are we calling, and why?</h2>
+          <span className="eyebrow">{initialValue ? "Edit call brief" : "New call brief"}</span>
+          <h2>{heading}</h2>
         </div>
         <span className="mode-badge">AI call</span>
       </div>
@@ -83,7 +127,7 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
           <input
             value={form.recipientName}
             onChange={(event) => update("recipientName", event.target.value)}
-            placeholder="Gemeinde Aadorf"
+            placeholder="Elena or Gemeinde Aadorf"
             required
           />
         </label>
@@ -104,82 +148,58 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
           <span>Call language</span>
           <select
             value={form.locale}
-            onChange={(event) => {
-              const locale = event.target.value as CallLocale;
-              setForm((current) => {
-                const disclosure = current.speechImpairmentDisclosure ?? "";
-                const usesDefaultDisclosure = Object.values(
-                  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES
-                ).includes(disclosure);
-                return {
-                  ...current,
-                  locale,
-                  speechImpairmentDisclosure: usesDefaultDisclosure
-                    ? DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[locale]
-                    : disclosure
-                };
-              });
-            }}
+            onChange={(event) => update("locale", event.target.value as CallLocale)}
           >
             {SUPPORTED_CALL_LANGUAGES.map(({ locale, label }) => (
-              <option key={locale} value={locale}>
-                {label}
-              </option>
+              <option key={locale} value={locale}>{label}</option>
             ))}
           </select>
-          <small>Stored with the brief and transcript</small>
         </label>
 
         <label className="field field-wide">
-          <span>Call objective</span>
+          <span>What should the assistant do?</span>
           <textarea
             value={form.objective}
             onChange={(event) => update("objective", event.target.value)}
-            rows={4}
+            placeholder="Describe the goal naturally, in any language."
+            rows={5}
             required
           />
+          <small>Formal addressing, tone, and spoken-answer handling use safe defaults.</small>
         </label>
 
         <label className="field">
-          <span>AI assistant name</span>
-          <input
-            value={form.agentName ?? ""}
-            onChange={(event) => update("agentName", event.target.value)}
-            placeholder="Sebastian"
-            required
-          />
-        </label>
-
-        <label className="field">
-          <span>Assistant voice</span>
+          <span>AI assistant</span>
           <select
-            value={form.voiceGender ?? "male"}
+            value={form.assistantProfileId}
             onChange={(event) =>
-              update("voiceGender", event.target.value as CallVoiceGender)
+              update("assistantProfileId", event.target.value as AssistantProfileId)
             }
           >
-            <option value="male">Male</option>
-            <option value="female">Female</option>
+            <optgroup label="Male voice">
+              {ASSISTANT_PROFILES.filter(({ voiceGender }) => voiceGender === "male").map(
+                ({ id, displayName }) => <option key={id} value={id}>{displayName}</option>
+              )}
+            </optgroup>
+            <optgroup label="Female voice">
+              {ASSISTANT_PROFILES.filter(({ voiceGender }) => voiceGender === "female").map(
+                ({ id, displayName }) => <option key={id} value={id}>{displayName}</option>
+              )}
+            </optgroup>
           </select>
-          <small>Used for both the disclosure and conversation</small>
         </label>
 
         <label className="field">
-          <span>Audio retention</span>
+          <span>Reason for assistance</span>
           <select
-            value={form.audioRetentionDays ?? 7}
+            value={form.assistanceReason}
             onChange={(event) =>
-              update(
-                "audioRetentionDays",
-                Number(event.target.value) as 0 | 7 | 30
-              )
+              update("assistanceReason", event.target.value as AssistanceReason)
             }
           >
-            <option value={0}>Delete after final transcript</option>
-            <option value={7}>Keep for 7 days</option>
-            <option value={30}>Keep for 30 days</option>
+            <option value="speech_impairment">Speech impairment</option>
+            <option value="language_barrier">Language barrier</option>
           </select>
-          <small>Recording starts only after the recipient presses 1</small>
         </label>
 
         <label className="field field-wide">
@@ -191,100 +211,200 @@ export function CreateCallForm({ onCreated }: { onCreated: (brief: CallBrief) =>
             required
           />
         </label>
-
-        <label className="field field-wide">
-          <span>Disclosure before consent</span>
-          <textarea
-            value={form.speechImpairmentDisclosure ?? ""}
-            onChange={(event) =>
-              update("speechImpairmentDisclosure", event.target.value)
-            }
-            rows={3}
-            required
-          />
-          <small>
-            This statement is spoken before the recording notice and the request to press 1.
-          </small>
-        </label>
-
-        <label className="field field-wide">
-          <span>Assistant context</span>
-          <textarea
-            value={form.context ?? ""}
-            onChange={(event) => update("context", event.target.value)}
-            rows={6}
-            placeholder="CV, cover letter, company details, and communication history…"
-          />
-          <small>
-            Context guides the conversation. List any facts approved for disclosure below.
-          </small>
-        </label>
       </div>
 
-      <div className="language-policy">
-        <label className="switch-row">
-          <input
-            type="checkbox"
-            checked={form.allowLanguageSwitch}
-            onChange={(event) => {
-              const enabled = event.target.checked;
-              setForm((current) => ({
-                ...current,
-                allowLanguageSwitch: enabled,
-                fallbackLocale: enabled
-                  ? (current.fallbackLocale ?? fallbackLanguages[0]?.locale)
-                  : undefined
-              }));
-            }}
-          />
-          <span className="switch-control" aria-hidden="true" />
-          <span>
-            <strong>Allow language switching</strong>
-            <small>The assistant may switch only to the selected fallback language</small>
-          </span>
-        </label>
+      <details className="call-options">
+        <summary>Call options</summary>
+        <p>Safe defaults work for most calls. Change only what matters for this conversation.</p>
 
-        {form.allowLanguageSwitch ? (
-          <label className="field fallback-field">
-            <span>Fallback language</span>
+        <div className="form-grid call-options-grid">
+          <label className="field">
+            <span>Result</span>
             <select
-              value={form.fallbackLocale}
+              value={form.resultHandling ?? "capture_in_callassist"}
               onChange={(event) =>
-                update("fallbackLocale", event.target.value as CallLocale)
+                update(
+                  "resultHandling",
+                  event.target.value as NonNullable<CreateCallBriefInput["resultHandling"]>
+                )
               }
             >
-              {fallbackLanguages.map(({ locale, label }) => (
-                <option key={locale} value={locale}>
-                  {label}
-                </option>
-              ))}
+              <option value="capture_in_callassist">Save the spoken answer in CallAssist</option>
+              <option value="request_external_delivery">Ask the recipient to send something</option>
+              <option value="message_only">Deliver a message only</option>
             </select>
           </label>
-        ) : null}
-      </div>
 
-      <div className="allowed-facts">
-        <div>
-          <span className="section-label">Approved for disclosure without confirmation</span>
-          <p>Enter one verified fact per line. The assistant must not infer missing information.</p>
+          <label className="field">
+            <span>Addressing</span>
+            <select
+              value={form.addressingMode ?? "formal"}
+              onChange={(event) =>
+                update(
+                  "addressingMode",
+                  event.target.value as NonNullable<CreateCallBriefInput["addressingMode"]>
+                )
+              }
+            >
+              <option value="formal">Formal (default)</option>
+              <option value="auto">Automatic by relationship</option>
+              <option value="informal">Informal</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Tone</span>
+            <select
+              value={form.tonePreference ?? "auto"}
+              onChange={(event) =>
+                update(
+                  "tonePreference",
+                  event.target.value as NonNullable<CreateCallBriefInput["tonePreference"]>
+                )
+              }
+            >
+              <option value="auto">Automatic</option>
+              <option value="formal">Formal</option>
+              <option value="neutral">Neutral</option>
+              <option value="friendly">Friendly</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Voicemail</span>
+            <select
+              value={form.voicemailPolicy ?? "do_not_leave_details"}
+              onChange={(event) =>
+                update(
+                  "voicemailPolicy",
+                  event.target.value as NonNullable<CreateCallBriefInput["voicemailPolicy"]>
+                )
+              }
+            >
+              <option value="do_not_leave_details">Do not leave call details</option>
+              <option value="leave_neutral_message">Leave a neutral message</option>
+            </select>
+          </label>
+
+          {form.resultHandling === "request_external_delivery" ? (
+            <label className="field field-wide">
+              <span>Delivery instruction</span>
+              <input
+                value={form.deliveryInstruction ?? ""}
+                onChange={(event) => update("deliveryInstruction", event.target.value)}
+                placeholder="For example: ask them to send it to Ivan in Telegram"
+              />
+            </label>
+          ) : null}
+
+          <label className="field">
+            <span>Audio retention</span>
+            <select
+              value={form.audioRetentionDays ?? 7}
+              onChange={(event) =>
+                update("audioRetentionDays", Number(event.target.value) as 0 | 7 | 30)
+              }
+            >
+              <option value={0}>Delete after final transcript</option>
+              <option value={7}>Keep for 7 days</option>
+              <option value={30}>Keep for 30 days</option>
+            </select>
+          </label>
+
+          <label className="field field-wide">
+            <span>Disclosure preview</span>
+            <textarea value={disclosurePreview} rows={3} readOnly />
+          </label>
+
+          <label className="field field-wide">
+            <span>Additional context</span>
+            <textarea
+              value={form.context ?? ""}
+              onChange={(event) => update("context", event.target.value)}
+              rows={5}
+              placeholder="Relevant background, correspondence or organisation details"
+            />
+          </label>
         </div>
-        <label className="field field-wide">
-          <span>Approved facts</span>
-          <textarea
-            value={factsText}
-            onChange={(event) => setFactsText(event.target.value)}
-            rows={6}
-            placeholder={"Full name: Ivan Slavinskyi\nApplication sent: 12 July 2026"}
-          />
-        </label>
-      </div>
+
+        <div className="language-policy">
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={form.allowLanguageSwitch}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setForm((current) => ({
+                  ...current,
+                  allowLanguageSwitch: enabled,
+                  fallbackLocale: enabled
+                    ? (current.fallbackLocale ?? fallbackLanguages[0]?.locale)
+                    : undefined
+                }));
+              }}
+            />
+            <span className="switch-control" aria-hidden="true" />
+            <span>
+              <strong>Allow language switching</strong>
+              <small>The assistant may use one selected fallback language.</small>
+            </span>
+          </label>
+
+          {form.allowLanguageSwitch ? (
+            <label className="field fallback-field">
+              <span>Fallback language</span>
+              <select
+                value={form.fallbackLocale}
+                onChange={(event) => update("fallbackLocale", event.target.value as CallLocale)}
+              >
+                {fallbackLanguages.map(({ locale, label }) => (
+                  <option key={locale} value={locale}>{label}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+
+        <div className="allowed-facts">
+          <div>
+            <span className="section-label">Information the assistant may share</span>
+            <p>Optional. Enter actual verified facts, one per line. Examples are never prefilled.</p>
+          </div>
+          <label className="field field-wide">
+            <span>Approved information</span>
+            <textarea
+              value={factsText}
+              onChange={(event) => setFactsText(event.target.value)}
+              rows={5}
+              placeholder={"Full name: Ivan Slavinskyi\nApplication sent: 12 July 2026"}
+            />
+          </label>
+        </div>
+      </details>
 
       {error ? <p className="form-error">{error}</p> : null}
 
-      <button className="primary-button" disabled={submitting} type="submit">
-        <span>{submitting ? "Creating…" : "Create call brief"}</span>
-        <span aria-hidden="true">→</span>
-      </button>
+      <div className="form-actions">
+        {onCancel ? (
+          <button className="secondary-button" onClick={onCancel} type="button">
+            Cancel
+          </button>
+        ) : null}
+        <button className="primary-button" disabled={submitting} type="submit">
+          <span>{submitting ? "Preparing..." : submitLabel}</span>
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
     </form>
   );
+}
+
+function cleanLegacyDemoFacts(facts: string[] | undefined) {
+  if (
+    facts?.length === legacyDemoFacts.length &&
+    facts.every((fact, index) => fact === legacyDemoFacts[index])
+  ) {
+    return [];
+  }
+  return facts ?? [];
 }

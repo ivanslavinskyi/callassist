@@ -27,8 +27,9 @@ describe("call API", () => {
         recipientName: "Cabinet Medical Geneve",
         phoneNumber: "+41225550123",
         objective: "Prendre un rendez-vous de controle la semaine prochaine",
+        assistantProfileId: "anna",
+        assistanceReason: "language_barrier",
         locale: "fr-CH",
-        voiceGender: "female",
         allowLanguageSwitch: true,
         fallbackLocale: "de-CH",
         allowedFacts: []
@@ -39,10 +40,15 @@ describe("call API", () => {
     const created = createResponse.json<{
       id: string;
       locale: string;
+      assistantProfileId: string;
       voiceGender: string;
+      assistanceReason: string;
     }>();
     expect(created.locale).toBe("fr-CH");
+    expect(created.assistantProfileId).toBe("anna");
     expect(created.voiceGender).toBe("female");
+    expect(created.assistanceReason).toBe("language_barrier");
+    expect(createResponse.json().status).toBe("review_required");
 
     const getResponse = await app.inject({
       method: "GET",
@@ -50,6 +56,55 @@ describe("call API", () => {
     });
     expect(getResponse.statusCode).toBe(200);
     expect(getResponse.json().brief.id).toBe(created.id);
+    expect(getResponse.json().compilation.policyDecision.status).toBe(
+      "ready_for_review"
+    );
+
+    const approveResponse = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${created.id}/approve`
+    });
+    expect(approveResponse.statusCode).toBe(200);
+    expect(approveResponse.json().brief.status).toBe("ready");
+  });
+
+  it("updates an existing brief and approves and starts it with one request", async () => {
+    const app = createApp();
+    const payload = {
+      recipientName: "Elena",
+      phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
+      locale: "de-CH",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload
+    });
+    const id = created.json().id as string;
+
+    const updated = await app.inject({
+      method: "PUT",
+      url: `/api/call-briefs/${id}`,
+      payload: {
+        ...payload,
+        objective: "Ask Elena which book and country she likes most"
+      }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().brief.id).toBe(id);
+    expect(updated.json().compilation.revision).toBe(2);
+
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${id}/approve-and-start`
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().brief.status).toBe("dialing");
   });
 
   it("reports the active storage mode", async () => {
@@ -121,11 +176,14 @@ describe("call API", () => {
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Test a provider failure",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "en-GB",
       allowLanguageSwitch: false,
       allowedFacts: []
     });
 
+    await service.approveCompilation(brief.id);
     const response = await app.inject({
       method: "POST",
       url: `/api/call-briefs/${brief.id}/start`

@@ -9,7 +9,7 @@ Keep the existing Realtime conversation and draft transcript, while adding a con
 ### Before consent
 
 1. Twilio connects the bidirectional media stream with call recording disabled.
-2. The selected OpenAI voice introduces the assistant, explains the represented person's speech impairment, and states the recording purpose and retention period.
+2. The selected OpenAI voice introduces the assistant, explains the server-controlled assistance reason (`speech_impairment` or `language_barrier`) in the call language, and states the recording purpose and retention period.
 3. Recipient audio is discarded and is not sent to OpenAI.
 4. Pressing `1` is the only consent signal accepted by the application.
 5. No response or any other key ends the call without recording.

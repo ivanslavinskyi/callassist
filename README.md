@@ -1,6 +1,6 @@
 # CallAssist
 
-CallAssist is a privacy-conscious AI voice assistant for controlled outbound phone calls. A user prepares a structured call brief, chooses the language and voice, monitors a live transcript, and retains control over sensitive disclosures.
+CallAssist is a privacy-conscious AI voice assistant for controlled outbound phone calls. A user prepares a structured call brief, chooses the call language and a preset assistant profile, monitors a live transcript, and retains control over sensitive disclosures.
 
 > **Project status:** working MVP for supervised testing. It is not yet intended for unattended or production-critical calling.
 
@@ -9,6 +9,16 @@ CallAssist is a privacy-conscious AI voice assistant for controlled outbound pho
 - Places outbound PSTN calls through Twilio Programmable Voice.
 - Runs a natural speech-to-speech conversation through OpenAI Realtime.
 - Uses one selected voice for the disclosure, consent request, and conversation.
+- Offers six server-owned assistant profiles and derives the corresponding voice
+  gender without accepting a free-form assistant identity.
+- Supports two controlled assistance reasons—speech impairment and language
+  barrier—with a localized server-generated disclosure.
+- Moderates and compiles a brief written in any language into a strict,
+  call-language structured plan.
+- Applies documented defaults for routine conversation choices and limits
+  clarification to fixed, material issue codes.
+- Lets the operator review, edit, recompile, and approve-and-call the same versioned
+  brief without re-entering its fields.
 - Requires DTMF consent before recipient audio is sent to the model or recorded.
 - Starts a dual-channel Twilio recording only after consent is confirmed.
 - Streams a fast draft transcript to the web console over SSE.
@@ -54,7 +64,8 @@ The public Twilio surface is isolated on a dedicated listener. The main API, SSE
 - Every media stream carries an additional call-scoped HMAC token.
 - Private fields are encrypted before PostgreSQL persistence.
 - The model is instructed to use only the call objective and explicitly approved facts.
-- Sensitive actions remain server-owned; a deterministic production policy gate is still on the roadmap.
+- Sensitive actions remain server-owned and a deterministic policy gate prevents the
+  compiler from authorizing itself or inventing arbitrary blockers.
 
 See [Architecture](docs/architecture.md) for the detailed boundaries and data model.
 
@@ -107,6 +118,8 @@ TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+...
 OPENAI_API_KEY=sk-...
+BRIEF_COMPILER_DRIVER=openai
+OPENAI_BRIEF_COMPILER_MODEL=gpt-5.6
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_TRANSCRIPTION_MODEL=gpt-realtime-whisper
 OPENAI_TRANSCRIPTION_DELAY=high
@@ -130,10 +143,16 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 
 ## Roadmap
 
-- Measure end-of-turn latency and transcription quality with representative PSTN audio and Swiss German speakers.
-- Benchmark post-call turn segmentation and transcription on longer calls,
-  overlapping speech, background noise, and Swiss German speakers.
-- Move all sensitive actions from prompt rules into a deterministic policy gate.
-- Add production deployment, background scheduling/retries, and PWA hardening.
+- Continue hardening reviewed, versioned multilingual call plans and their
+  deterministic server-side policy boundary.
+- Evaluate semantic preservation, call success, latency, live/final transcription,
+  Swiss German, multilingual input, and adversarial prompts.
+- Add authenticated users, strict data ownership, quotas, recipient opt-out, and
+  abuse controls before accepting public data.
+- Add interface internationalization, an accessible onboarding flow, and a public
+  landing page.
+- Add durable background jobs, production deployment, observability, compliance,
+  and staged invite-only/public beta release gates.
 
-See the [MVP roadmap](docs/mvp-plan.md) for the implementation sequence.
+See the [public MVP roadmap](docs/mvp-plan.md) for the implementation sequence,
+product principles, and launch gates.

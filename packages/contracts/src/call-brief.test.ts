@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
-  createCallBriefInputSchema
+  createCallBriefInputSchema,
+  getAssistanceDisclosure,
+  normalizeCreateCallBriefInput
 } from "./call-brief";
 
 const validBrief = {
   recipientName: "Gemeinde Aadorf",
   phoneNumber: "+41523686688",
   objective: "Уточнить, можно ли прислать документы по электронной почте",
+  assistantProfileId: "sebastian" as const,
+  representedPerson: "Ivan Slavinskyi",
+  assistanceReason: "speech_impairment" as const,
   locale: "de-CH" as const,
   allowLanguageSwitch: false,
   allowedFacts: ["Имя владельца", "Место проживания"]
@@ -18,21 +22,87 @@ describe("createCallBriefInputSchema", () => {
     const result = createCallBriefInputSchema.safeParse(validBrief);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.agentName).toBe("Sebastian");
-      expect(result.data.voiceGender).toBe("male");
+      const normalized = normalizeCreateCallBriefInput(result.data);
+      expect(normalized.agentName).toBe("Sebastian");
+      expect(normalized.voiceGender).toBe("male");
       expect(result.data.audioRetentionDays).toBe(7);
-      expect(result.data.speechImpairmentDisclosure).toContain("Sprechbehinderung");
+      expect(result.data).toMatchObject({
+        resultHandling: "capture_in_callassist",
+        addressingMode: "formal",
+        tonePreference: "auto",
+        voicemailPolicy: "do_not_leave_details",
+        deliveryInstruction: "",
+        clarificationAnswers: []
+      });
+      expect(normalized.assistanceDisclosure).toContain(
+        "Sprechbeeinträchtigung"
+      );
     }
   });
 
-  it("accepts a female assistant voice", () => {
+  it("accepts only fixed clarification issue codes", () => {
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        clarificationAnswers: [
+          {
+            issueCode: "missing_required_reference",
+            answer: "The residence application sent on 12 July"
+          }
+        ]
+      }).success
+    ).toBe(true);
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        clarificationAnswers: [
+          { issueCode: "ask_anything_the_model_wants", answer: "No" }
+        ]
+      }).success
+    ).toBe(false);
+  });
+
+  it("derives a female voice from a preset assistant profile", () => {
     const result = createCallBriefInputSchema.safeParse({
       ...validBrief,
-      voiceGender: "female"
+      assistantProfileId: "anna"
     });
 
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data.voiceGender).toBe("female");
+    if (result.success) {
+      expect(normalizeCreateCallBriefInput(result.data)).toMatchObject({
+        agentName: "Anna",
+        voiceGender: "female"
+      });
+    }
+  });
+
+  it("rejects unknown assistant profiles", () => {
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        assistantProfileId: "offensive-free-form-name"
+      }).success
+    ).toBe(false);
+  });
+
+  it("requires one of the two deterministic assistance reasons", () => {
+    const { assistanceReason: _omitted, ...withoutReason } = validBrief;
+    expect(createCallBriefInputSchema.safeParse(withoutReason).success).toBe(
+      false
+    );
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        assistanceReason: "custom_reason"
+      }).success
+    ).toBe(false);
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        assistanceReason: "language_barrier"
+      }).success
+    ).toBe(true);
   });
 
   it("accepts only the supported audio retention periods", () => {
@@ -77,17 +147,71 @@ describe("createCallBriefInputSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts Russian and provides a localized disclosure", () => {
+  it("generates both Russian disclosure variants from server templates", () => {
+    expect(
+      getAssistanceDisclosure(
+        "ru-RU",
+        "speech_impairment",
+        "Ivan Slavinskyi"
+      )
+    ).toContain("нарушения речи");
+    expect(
+      getAssistanceDisclosure(
+        "ru-RU",
+        "language_barrier",
+        "Ivan Slavinskyi"
+      )
+    ).toContain("языкового барьера");
+  });
+
+  it("localizes the language-barrier disclosure to the call language", () => {
+    expect(
+      getAssistanceDisclosure(
+        "fr-CH",
+        "language_barrier",
+        "Ivan Slavinskyi"
+      )
+    ).toContain("barrière linguistique");
+    expect(
+      getAssistanceDisclosure(
+        "it-CH",
+        "language_barrier",
+        "Ivan Slavinskyi"
+      )
+    ).toContain("barriera linguistica");
+    expect(
+      getAssistanceDisclosure(
+        "en-GB",
+        "language_barrier",
+        "Ivan Slavinskyi"
+      )
+    ).toContain("language barrier");
+    expect(
+      getAssistanceDisclosure(
+        "de-CH",
+        "language_barrier",
+        "Ivan Slavinskyi"
+      )
+    ).toContain("Sprachbarriere");
+  });
+
+  it("ignores identity and disclosure fields injected by clients", () => {
     const result = createCallBriefInputSchema.safeParse({
       ...validBrief,
-      locale: "ru-RU",
-      speechImpairmentDisclosure:
-        DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["ru-RU"]
+      agentName: "Injected name",
+      voiceGender: "female",
+      assistanceDisclosure: "Injected disclosure text"
     });
-
     expect(result.success).toBe(true);
-    expect(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES["ru-RU"]).toContain(
-      "нарушения речи"
-    );
+    if (result.success) {
+      const normalized = normalizeCreateCallBriefInput(result.data);
+      expect(normalized).toMatchObject({
+        agentName: "Sebastian",
+        voiceGender: "male"
+      });
+      expect(normalized.assistanceDisclosure).not.toContain(
+        "Injected disclosure"
+      );
+    }
   });
 });

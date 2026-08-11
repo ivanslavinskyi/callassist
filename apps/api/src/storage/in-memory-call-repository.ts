@@ -1,19 +1,22 @@
 import { randomUUID } from "node:crypto";
 import {
-  createCallBriefInputSchema,
+  normalizeCreateCallBriefInput,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
+  type CallCompilation,
   type CallRecording,
   type CallLocale,
   type CallSnapshot,
   type CreateCallBriefInput,
   type FinalTranscript,
   type FinalTranscriptSegment,
+  type NormalizedCallBriefInput,
   type TranscriptSegment
 } from "@callassist/contracts";
 import {
   CallRepositoryError,
+  buildRuntimeBriefFields,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
@@ -28,6 +31,7 @@ const interruptedStatuses = new Set<CallBrief["status"]>([
   "awaiting_approval"
 ]);
 const terminalStatuses = new Set<CallBrief["status"]>([
+  "blocked",
   "completed",
   "stopped",
   "failed"
@@ -48,19 +52,21 @@ export class InMemoryCallRepository implements CallRepository {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  async create(input: CreateCallBriefInput) {
-    const parsed = createCallBriefInputSchema.parse(input);
+  async create(input: CreateCallBriefInput, compilation: CallCompilation) {
+    const parsed = normalizeCreateCallBriefInput(input);
+    const runtime = buildRuntimeBriefFields(compilation);
     const now = new Date().toISOString();
     const brief: CallBrief = {
-      ...parsed,
+      ...storedBriefIdentity(parsed),
+      ...runtime,
       id: randomUUID(),
-      status: "ready",
       createdAt: now,
       updatedAt: now
     };
 
     this.#calls.set(brief.id, {
       brief,
+      compilation: copy(compilation),
       transcript: [],
       pendingApproval: null,
       recording: null,
@@ -70,9 +76,54 @@ export class InMemoryCallRepository implements CallRepository {
     return copy(brief);
   }
 
+  async recompile(
+    id: string,
+    input: CreateCallBriefInput,
+    compilation: CallCompilation
+  ) {
+    const snapshot = this.#require(id);
+    if (
+      !["review_required", "needs_clarification", "blocked", "ready"].includes(
+        snapshot.brief.status
+      ) ||
+      (this.#attempts.get(id)?.length ?? 0) > 0
+    ) {
+      throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
+    }
+    const parsed = normalizeCreateCallBriefInput(input);
+    const runtime = buildRuntimeBriefFields(compilation);
+    const now = new Date().toISOString();
+    snapshot.brief = {
+      ...storedBriefIdentity(parsed),
+      ...runtime,
+      id,
+      createdAt: snapshot.brief.createdAt,
+      updatedAt: now
+    };
+    snapshot.compilation = copy(compilation);
+    snapshot.pendingApproval = null;
+    return copy(snapshot);
+  }
+
   async get(id: string) {
     const snapshot = this.#calls.get(id);
     return snapshot ? copy(snapshot) : null;
+  }
+
+  async approveCompilation(id: string) {
+    const snapshot = this.#require(id);
+    if (
+      snapshot.brief.status !== "review_required" ||
+      snapshot.compilation?.policyDecision.status !== "ready_for_review" ||
+      !snapshot.compilation.compiledBrief
+    ) {
+      throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
+    }
+    const now = new Date().toISOString();
+    snapshot.compilation.approvedAt = now;
+    snapshot.brief.status = "ready";
+    snapshot.brief.updatedAt = now;
+    return copy(snapshot);
   }
 
   async getLatestAttempt(id: string) {
@@ -527,4 +578,21 @@ export class InMemoryCallRepository implements CallRepository {
     }
     throw new CallRepositoryError("RECORDING_NOT_FOUND");
   }
+}
+
+function storedBriefIdentity(parsed: NormalizedCallBriefInput) {
+  return {
+    recipientName: parsed.recipientName,
+    phoneNumber: parsed.phoneNumber,
+    assistantProfileId: parsed.assistantProfileId,
+    agentName: parsed.agentName,
+    representedPerson: parsed.representedPerson,
+    assistanceReason: parsed.assistanceReason,
+    assistanceDisclosure: parsed.assistanceDisclosure,
+    locale: parsed.locale,
+    voiceGender: parsed.voiceGender,
+    audioRetentionDays: parsed.audioRetentionDays,
+    allowLanguageSwitch: parsed.allowLanguageSwitch,
+    ...(parsed.fallbackLocale ? { fallbackLocale: parsed.fallbackLocale } : {})
+  };
 }

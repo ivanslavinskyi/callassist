@@ -4,17 +4,23 @@ import {
   SUPPORTED_CALL_LANGUAGES,
   type CallEvent,
   type CallBriefStatus,
-  type CallSnapshot
+  type CallSnapshot,
+  type ClarificationAnswer,
+  type CreateCallBriefInput
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "./app-shell";
+import { CompilationReview } from "./compilation-review";
+import { CreateCallForm } from "./create-call-form";
 import {
   callRecordingUrl,
   callEventsUrl,
+  approveAndStartCall,
   deleteCallRecording,
   decideApproval,
   getCallSnapshot,
+  recompileCallBrief,
   retryFinalTranscript,
   startCall,
   stopCall
@@ -27,6 +33,9 @@ import {
 } from "@/lib/final-transcript-export";
 
 const statusLabels: Record<CallBriefStatus, string> = {
+  review_required: "Ready to call",
+  needs_clarification: "Needs one detail",
+  blocked: "Blocked by policy",
   ready: "Ready to start",
   dialing: "Dialing",
   in_progress: "Call in progress",
@@ -46,6 +55,7 @@ export function LiveCall({ callId }: { callId: string }) {
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [editingBrief, setEditingBrief] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
     "idle"
@@ -129,6 +139,36 @@ export function LiveCall({ callId }: { callId: string }) {
     }
   }
 
+  async function saveEditedBrief(input: CreateCallBriefInput) {
+    const updated = await recompileCallBrief(callId, input);
+    setSnapshot(updated);
+    setEditingBrief(false);
+    setError(null);
+    return updated.brief;
+  }
+
+  async function answerClarifications(answers: ClarificationAnswer[]) {
+    if (!snapshot?.compilation) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const previousAnswers = snapshot.compilation.rawBrief.clarificationAnswers ?? [];
+      const answerCodes = new Set(answers.map(({ issueCode }) => issueCode));
+      const updated = await recompileCallBrief(callId, {
+        ...snapshot.compilation.rawBrief,
+        clarificationAnswers: [
+          ...previousAnswers.filter(({ issueCode }) => !answerCodes.has(issueCode)),
+          ...answers
+        ]
+      });
+      setSnapshot(updated);
+    } catch {
+      setError("The clarification could not be saved. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyFinalTranscript() {
     if (!snapshot?.finalTranscript || !language) return;
     try {
@@ -190,8 +230,14 @@ export function LiveCall({ callId }: { callId: string }) {
     );
   }
 
-  const { brief, transcript, pendingApproval, recording, finalTranscript } =
-    snapshot;
+  const {
+    brief,
+    compilation,
+    transcript,
+    pendingApproval,
+    recording,
+    finalTranscript
+  } = snapshot;
   const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
 
@@ -243,7 +289,45 @@ export function LiveCall({ callId }: { callId: string }) {
 
         {error ? <div className="inline-notice">{error}</div> : null}
 
-        <div className="live-grid">
+        {compilation && editingBrief ? (
+          <CreateCallForm
+            heading="Update this call"
+            initialValue={compilation.rawBrief}
+            onCancel={() => setEditingBrief(false)}
+            onCreated={() => undefined}
+            saveCallBrief={saveEditedBrief}
+            submitLabel="Update call plan"
+          />
+        ) : compilation ? (
+          <CompilationReview
+            busy={busy}
+            compilation={compilation}
+            onAnswerClarifications={answerClarifications}
+            onApproveAndCall={() =>
+              runAction(() => approveAndStartCall(callId))
+            }
+            onEdit={() => setEditingBrief(true)}
+          />
+        ) : brief.status === "blocked" ? (
+          <section className="compilation-review decision-blocked">
+            <span className="eyebrow">Legacy call brief</span>
+            <h2>This brief cannot be started</h2>
+            <p>
+              It was created before the compiler and policy boundary. Recreate it
+              from the dashboard to generate a reviewable call plan.
+            </p>
+          </section>
+        ) : null}
+
+        <div
+          className={`live-grid ${
+            ["review_required", "needs_clarification", "blocked"].includes(
+              brief.status
+            )
+              ? "precall-hidden"
+              : ""
+          }`}
+        >
           <div className="transcript-column">
             <section className="transcript-card">
             <div className="transcript-heading">
@@ -587,6 +671,14 @@ export function LiveCall({ callId }: { callId: string }) {
                 <div>
                   <dt>Voice</dt>
                   <dd>{brief.voiceGender === "female" ? "Female" : "Male"}</dd>
+                </div>
+                <div>
+                  <dt>Reason for assistance</dt>
+                  <dd>
+                    {brief.assistanceReason === "language_barrier"
+                      ? "Language barrier"
+                      : "Speech impairment"}
+                  </dd>
                 </div>
                 <div>
                   <dt>Audio retention</dt>

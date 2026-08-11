@@ -81,6 +81,24 @@ export function buildApp({
     }
   );
 
+  app.put<{ Params: { id: string } }>(
+    "/api/call-briefs/:id",
+    async (request, reply) => {
+      const parsed = createCallBriefInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "INVALID_CALL_BRIEF",
+          issues: parsed.error.flatten()
+        });
+      }
+      try {
+        return await service.recompile(request.params.id, parsed.data);
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
   app.get<{ Params: { id: string } }>(
     "/api/call-briefs/:id/recording",
     async (request, reply) => {
@@ -118,6 +136,28 @@ export function buildApp({
         return reply
           .status(202)
           .send(await service.retryFinalTranscript(request.params.id));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/approve",
+    async (request, reply) => {
+      try {
+        return await service.approveCompilation(request.params.id);
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/approve-and-start",
+    async (request, reply) => {
+      try {
+        return await service.approveAndStart(request.params.id);
       } catch (error) {
         return sendRepositoryError(reply, error);
       }

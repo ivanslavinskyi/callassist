@@ -8,9 +8,11 @@ const brief: CallBrief = {
   recipientName: "Gemeinde Aadorf",
   phoneNumber: "+41523686688",
   objective: "Verify a real outbound Twilio connection",
+  assistantProfileId: "sebastian",
   agentName: "Sebastian",
   representedPerson: "Ivan Slavinskyi",
-  speechImpairmentDisclosure:
+  assistanceReason: "speech_impairment",
+  assistanceDisclosure:
     "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt.",
   context: "Application context",
   locale: "de-CH",

@@ -100,14 +100,19 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
       throw new PostCallTranscriptionError("AUDIO_EMPTY");
     }
 
-    const transcribed = await mapConcurrent(
-      audioSegments,
-      transcriptionConcurrency,
-      async (segment) => ({
-        ...segment,
-        text: await this.#transcribeSegment(segment, brief)
-      })
-    );
+    const transcribed = (
+      await mapConcurrent(
+        audioSegments,
+        transcriptionConcurrency,
+        async (segment) => ({
+          ...segment,
+          text: await this.#transcribeSegment(segment, brief)
+        })
+      )
+    ).filter(hasTranscribedText);
+    if (transcribed.length === 0) {
+      throw new PostCallTranscriptionError("AUDIO_EMPTY");
+    }
     const roles = assignChannelRoles(transcribed, liveTranscript);
     const segments = transcribed
       .map<FinalTranscriptSegment>((segment) => ({
@@ -163,11 +168,17 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     const payload = (await response.json().catch(() => null)) as
       | { text?: unknown }
       | null;
-    if (!payload || typeof payload.text !== "string" || !payload.text.trim()) {
+    if (!payload || typeof payload.text !== "string") {
       throw new PostCallTranscriptionError("OPENAI_RESPONSE_INVALID");
     }
-    return payload.text.trim();
+    return payload.text.trim() || null;
   }
+}
+
+function hasTranscribedText(
+  segment: ChannelAudioSegment & { text: string | null }
+): segment is ChannelAudioSegment & { text: string } {
+  return segment.text !== null;
 }
 
 export function assignChannelRoles(

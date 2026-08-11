@@ -17,20 +17,64 @@ function createService() {
 }
 
 describe("CallService", () => {
-  it("creates a ready call with the selected locale", async () => {
+  it("requires review before a compiled call becomes ready", async () => {
     const service = createService();
     const brief = await service.create({
       recipientName: "Gemeinde Aadorf",
       phoneNumber: "+41523686688",
       objective: "Уточнить возможность отправки документов по электронной почте",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "de-CH",
       allowLanguageSwitch: false,
       allowedFacts: []
     });
 
-    expect(brief.status).toBe("ready");
+    expect(brief.status).toBe("review_required");
     expect(brief.locale).toBe("de-CH");
-    expect((await service.get(brief.id))?.transcript).toEqual([]);
+    await expect(service.start(brief.id)).rejects.toMatchObject({
+      code: "CALL_NOT_READY"
+    });
+    const reviewed = await service.approveCompilation(brief.id);
+    expect(reviewed.brief.status).toBe("ready");
+    expect(reviewed.compilation?.approvedAt).not.toBeNull();
+    expect(reviewed.transcript).toEqual([]);
+  });
+
+  it("recompiles the same brief revision and can approve and call in one action", async () => {
+    const service = createService();
+    const input = {
+      recipientName: "Elena",
+      phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most",
+      assistantProfileId: "sebastian" as const,
+      assistanceReason: "speech_impairment" as const,
+      locale: "de-CH" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const brief = await service.create(input);
+
+    const updated = await service.recompile(brief.id, {
+      ...input,
+      objective: "Ask Elena which book and country she likes most"
+    });
+
+    expect(updated.brief.id).toBe(brief.id);
+    expect(updated.brief.status).toBe("review_required");
+    expect(updated.compilation).toMatchObject({
+      revision: 2,
+      approvedAt: null,
+      rawBrief: {
+        objective: "Ask Elena which book and country she likes most",
+        resultHandling: "capture_in_callassist",
+        addressingMode: "formal"
+      }
+    });
+
+    const started = await service.approveAndStart(brief.id);
+    expect(started.brief.status).toBe("dialing");
+    expect(started.compilation?.approvedAt).not.toBeNull();
   });
 
   it("stops a call without losing its brief", async () => {
@@ -39,11 +83,14 @@ describe("CallService", () => {
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Ask whether the application can be submitted by email",
+      assistantProfileId: "sebastian",
+      assistanceReason: "language_barrier",
       locale: "en-GB",
       allowLanguageSwitch: false,
       allowedFacts: []
     });
 
+    await service.approveCompilation(brief.id);
     await service.start(brief.id);
     const snapshot = await service.stop(brief.id);
 
@@ -74,11 +121,14 @@ describe("CallService", () => {
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Prevent duplicate outbound calls",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "en-GB",
       allowLanguageSwitch: false,
       allowedFacts: []
     });
 
+    await service.approveCompilation(brief.id);
     await Promise.allSettled([service.start(brief.id), service.start(brief.id)]);
 
     expect(startCall).toHaveBeenCalledTimes(1);
@@ -118,11 +168,14 @@ describe("CallService", () => {
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Stop while the provider is creating a call",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "en-GB",
       allowLanguageSwitch: false,
       allowedFacts: []
     });
 
+    await service.approveCompilation(brief.id);
     const starting = service.start(brief.id);
     await vi.waitFor(() => expect(startCall).toHaveBeenCalledOnce());
     await service.stop(brief.id);
@@ -182,12 +235,15 @@ describe("CallService", () => {
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Confirm that the submitted application was received",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "en-GB",
       audioRetentionDays: 7,
       allowLanguageSwitch: false,
       allowedFacts: ["Application sent: 12 July"]
     });
 
+    await service.approveCompilation(brief.id);
     await service.start(brief.id);
     expect((await service.get(brief.id))?.recording).toBeNull();
 
@@ -275,10 +331,13 @@ describe("CallService", () => {
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Verify out-of-order recording lifecycle callbacks",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "en-GB",
       allowLanguageSwitch: false,
       allowedFacts: []
     });
+    await service.approveCompilation(brief.id);
     await service.start(brief.id);
 
     const starting = service.startRecordingAfterConsent(brief.id);

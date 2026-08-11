@@ -2,6 +2,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   CallBrief,
+  CallCompilation,
   CallRecording,
   CallLocale,
   CallSnapshot,
@@ -81,8 +82,17 @@ export type FinalTranscriptMutationResult = {
 export interface CallRepository {
   readonly mode: "memory" | "postgres";
   list(): Promise<CallBrief[]>;
-  create(input: CreateCallBriefInput): Promise<CallBrief>;
+  create(
+    input: CreateCallBriefInput,
+    compilation: CallCompilation
+  ): Promise<CallBrief>;
+  recompile(
+    id: string,
+    input: CreateCallBriefInput,
+    compilation: CallCompilation
+  ): Promise<CallSnapshot>;
   get(id: string): Promise<CallSnapshot | null>;
+  approveCompilation(id: string): Promise<CallSnapshot>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
   startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
   attachProviderCall(
@@ -158,6 +168,8 @@ export class CallRepositoryError extends Error {
       | "CALL_NOT_FOUND"
       | "APPROVAL_NOT_FOUND"
       | "CALL_NOT_READY"
+      | "CALL_BRIEF_NOT_REVIEWABLE"
+      | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
       | "RECORDING_NOT_FOUND"
       | "RECORDING_NOT_AVAILABLE",
@@ -169,6 +181,7 @@ export class CallRepositoryError extends Error {
 }
 
 const terminalStatuses = new Set<CallBrief["status"]>([
+  "blocked",
   "completed",
   "stopped",
   "failed"
@@ -185,4 +198,68 @@ export function shouldApplyProviderCallStatus(
     return next === "dialing" || next === "in_progress";
   }
   return current === next;
+}
+
+export function buildRuntimeBriefFields(
+  compilation: CallCompilation
+) {
+  const compiled = compilation.compiledBrief;
+  const status: CallBrief["status"] =
+    compilation.policyDecision.status === "ready_for_review"
+      ? "review_required"
+      : compilation.policyDecision.status;
+  if (!compiled) {
+    return {
+      objective: "This call brief did not pass the policy review.",
+      context: "",
+      allowedFacts: [] as string[],
+      status
+    };
+  }
+
+  return {
+    objective: compiled.localizedObjective,
+    context: buildRuntimeContext(compiled),
+    allowedFacts: compiled.approvedFacts.map(
+      ({ callLanguageText }) => callLanguageText
+    ),
+    status
+  };
+}
+
+function buildRuntimeContext(
+  compiled: NonNullable<CallCompilation["compiledBrief"]>
+) {
+  return [
+    compiled.backgroundSummary,
+    "Conversation settings:",
+    `- Addressing: ${compiled.addressingStyle ?? "formal"}`,
+    `- Tone: ${compiled.tone}`,
+    `- Result handling: ${compiled.resultHandling ?? "capture_in_callassist"}`,
+    `- Voicemail: ${compiled.voicemailAction ?? "hang_up"}`,
+    "- If the recipient refuses, respect the refusal and end politely.",
+    "Ordered questions:",
+    ...compiled.orderedQuestions.map(
+      ({ text, required }, index) =>
+        `${index + 1}. ${text}${required ? " (required)" : ""}`
+    ),
+    ...(compiled.conditionalFollowUps.length
+      ? [
+          "Conditional follow-ups:",
+          ...compiled.conditionalFollowUps.map(
+            ({ condition, question }) => `- If ${condition}: ${question}`
+          )
+        ]
+      : []),
+    "Success criteria:",
+    ...compiled.successCriteria.map((criterion) => `- ${criterion}`),
+    "Unresolved criteria:",
+    ...compiled.unresolvedCriteria.map((criterion) => `- ${criterion}`),
+    "Stop conditions:",
+    ...compiled.stopConditions.map((condition) => `- ${condition}`),
+    "Prohibited actions:",
+    ...compiled.prohibitedActions.map((action) => `- ${action}`)
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

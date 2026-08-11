@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  normalizeCreateCallBriefInput,
+  type CreateCallBriefInput
+} from "@callassist/contracts";
 import postgres from "postgres";
+import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { runMigrations } from "../db/migrate";
 import { PostgresCallRepository } from "./postgres-call-repository";
 
@@ -22,15 +27,41 @@ describeWithDatabase("PostgresCallRepository", () => {
   });
 
   it("persists the complete approval lifecycle and decrypts private facts", async () => {
-    const brief = await repository.create({
+    const input: CreateCallBriefInput = {
       recipientName: "Persistence test office",
       phoneNumber: "+41710000000",
       objective: "Verify the PostgreSQL persistence and approval lifecycle",
+      assistantProfileId: "anna",
+      assistanceReason: "language_barrier",
       locale: "en-GB",
-      voiceGender: "female",
       allowLanguageSwitch: false,
       allowedFacts: ["email: private@example.com"]
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation);
+    expect(brief.status).toBe("review_required");
+    const revisedInput = {
+      ...input,
+      objective: "Verify PostgreSQL persistence after editing the same brief"
+    };
+    const revisedCompilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(revisedInput),
+      2
+    );
+    const recompiled = await repository.recompile(
+      brief.id,
+      revisedInput,
+      revisedCompilation
+    );
+    expect(recompiled.brief.id).toBe(brief.id);
+    expect(recompiled.compilation).toMatchObject({
+      revision: 2,
+      approvedAt: null
     });
+    const approved = await repository.approveCompilation(brief.id);
+    expect(approved.brief.status).toBe("ready");
 
     const started = await repository.startAttempt(brief.id, {
       provider: "mock"
@@ -72,18 +103,38 @@ describeWithDatabase("PostgresCallRepository", () => {
     );
 
     const [stored] = await inspection<
-      { allowedFactsCiphertext: string }[]
+      {
+        allowedFactsCiphertext: string;
+        assistanceReasonCiphertext: string;
+        compilationCiphertext: string;
+      }[]
     >`
-      SELECT allowed_facts_ciphertext AS "allowedFactsCiphertext"
+      SELECT
+        allowed_facts_ciphertext AS "allowedFactsCiphertext",
+        assistance_reason_ciphertext AS "assistanceReasonCiphertext",
+        compilation_ciphertext AS "compilationCiphertext"
       FROM call_briefs
       WHERE id = ${brief.id}
     `;
     expect(stored?.allowedFactsCiphertext).not.toContain("private@example.com");
+    expect(stored?.assistanceReasonCiphertext).not.toContain(
+      "language_barrier"
+    );
+    expect(stored?.compilationCiphertext).not.toContain(
+      "Verify the PostgreSQL persistence"
+    );
 
     await repository.close();
     repository = new PostgresCallRepository(databaseUrl!, encryptionKey);
     const snapshot = await repository.get(brief.id);
+    expect(snapshot?.brief.assistantProfileId).toBe("anna");
     expect(snapshot?.brief.voiceGender).toBe("female");
+    expect(snapshot?.brief.assistanceReason).toBe("language_barrier");
+    expect(snapshot?.brief.assistanceDisclosure).toContain("language barrier");
+    expect(snapshot?.compilation?.approvedAt).not.toBeNull();
+    expect(snapshot?.compilation?.compiledBrief?.localizedObjective).toContain(
+      "PostgreSQL persistence"
+    );
     expect(snapshot?.brief.allowedFacts).toEqual(["email: private@example.com"]);
     expect(snapshot?.transcript).toHaveLength(1);
     expect(snapshot?.pendingApproval).toBeNull();
@@ -111,15 +162,22 @@ describeWithDatabase("PostgresCallRepository", () => {
   });
 
   it("persists consent-gated recording and encrypted final transcript states", async () => {
-    const brief = await repository.create({
+    const input: CreateCallBriefInput = {
       recipientName: "Recording test office",
       phoneNumber: "+41710000002",
       objective: "Verify recording and post-call transcription persistence",
+      assistantProfileId: "sebastian",
+      assistanceReason: "speech_impairment",
       locale: "en-GB",
       audioRetentionDays: 7,
       allowLanguageSwitch: false,
       allowedFacts: []
-    });
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation);
+    await repository.approveCompilation(brief.id);
     const attempt = await repository.startAttempt(brief.id, {
       provider: "twilio"
     });

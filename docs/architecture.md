@@ -11,6 +11,14 @@ Next.js console ── HTTPS / SSE ──► Fastify API ──► PostgreSQL
                                          │              │
                                          │              └── encrypted private fields
                                          │
+                              input moderation + Brief Compiler
+                                         │
+                              OpenAI Structured Outputs
+                                         │
+                              deterministic Policy Gate
+                                         │
+                              operator review and approval
+                                         │
                                 Twilio Programmable Voice
                                          │
                               bidirectional Media Stream
@@ -32,6 +40,8 @@ Twilio dual-channel recording ──► authenticated API download
 - `apps/api`: the Node.js/TypeScript Fastify API, policy boundary, Twilio gateway, and server-side Realtime connection.
 - PostgreSQL: call briefs, attempts, draft transcripts, recordings, final transcripts, approvals, and audit events.
 - Twilio: outbound PSTN calls, signed webhooks, DTMF consent, a bidirectional Media Stream, and temporary consent-gated recordings.
+- OpenAI Responses: multilingual brief compilation into a strict JSON schema.
+- OpenAI Moderation: checks both raw input and generated runtime text.
 - OpenAI Realtime: direct speech-to-speech conversation. External actions remain under server control.
 - OpenAI file transcription: post-call processing of the complete recording with bounded call context.
 - Redis/BullMQ: planned for scheduling, retries, and time-bounded background work.
@@ -40,9 +50,48 @@ Twilio dual-channel recording ──► authenticated API download
 
 The API depends on a `CallRepository` interface. The in-memory and PostgreSQL repositories implement the same contract, keeping telephony and Realtime independent from storage. SQL migrations are versioned with the API.
 
-Context and approved facts are encrypted before persistence. Audit events do not include transcript content or private fact values and are protected against mutation and deletion at the PostgreSQL layer.
+Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. Audit events do not include source text, transcript content, or private fact values and are protected against mutation and deletion at the PostgreSQL layer.
 
 On API startup, unfinished calls are marked as failed, pending approvals expire, and recovery is recorded in the audit trail. A cross-process event bus and durable retries remain planned alongside Redis/BullMQ.
+
+## Brief Compiler and policy boundary
+
+Every new application-level call starts as a `RawCallBrief`. Field lengths, phone
+format, locale IDs, assistant profile, assistance reason, and fact counts are
+validated before any model request. Input moderation runs before compilation.
+
+The OpenAI Responses API converts the raw brief into versioned `CompiledCallBrief`
+Structured Output. It contains the detected source language, localized objective,
+task type, tone, ordered questions, conditional follow-ups, success and unresolved
+criteria, stop conditions, fact translations, prohibited actions, named entities,
+risk signals, fixed-code blocking issues, and applied product assumptions. The source text of every approved fact must
+round-trip character-for-character and in the same order; otherwise the server blocks
+the plan. Generated runtime text is moderated separately after compilation.
+
+The model does not make the final authorization decision. A deterministic policy
+gate maps the compiled result to `ready_for_review`, `needs_clarification`, or
+`blocked`. Any supported risk signal, unsupported task type, moderation flag, model
+refusal, fact-integrity failure, or selected-option mismatch prevents approval.
+Ordinary preferences are resolved through explicit product defaults: spoken answers
+are saved in CallAssist, all recipients are addressed formally unless the operator
+explicitly selects automatic or informal addressing, refusals end politely, and
+voicemail does not expose call details. These assumptions never block a call. Clarification is limited to an
+allow-list of fixed issue codes whose answers can materially change the task.
+
+For a reviewable plan, the server stores an encrypted source/compiled snapshot,
+compiler model and version, policy version, response ID, and SHA-256 snapshot hash.
+Editing or answering a clarification recompiles the same call ID, increments the
+compilation revision, resets approval, and records an audit event containing only
+hashes and version metadata. The operator sees a compact call-language plan; source,
+guardrail, policy, and snapshot metadata remain available under technical details.
+The combined approve-and-call action records `approvedAt` before starting Twilio;
+Twilio cannot start from `review_required`, `needs_clarification`, or `blocked`.
+
+The stored runtime `CallBrief` contains only the localized objective, compiled
+background plan, and translated approved facts. Raw objective, context, and facts are
+available for operator review inside the encrypted compilation snapshot but are never
+passed to Realtime or post-call transcription. `deterministic-dev` is a local/test
+compiler only; real evaluation and deployment use the configured OpenAI compiler.
 
 ## Telephony and consent boundary
 
@@ -82,9 +131,58 @@ Rules:
 
 `de-CH` means Swiss Standard German. Dialect handling and voice selection are separate concerns and must not be inferred from the locale alone.
 
+## Assistant identity and assistance reason
+
+The public brief does not accept a free-form assistant identity. The operator selects
+one stable profile ID from the server-owned catalogue:
+
+- male voice: `sebastian`, `daniel`, `martin`;
+- female voice: `anna`, `sofia`, `maria`.
+
+The API derives the spoken display name and voice gender from that profile. Clients
+cannot override either derived value. The brief stores both the stable profile ID and
+the derived name/gender snapshot so historical calls remain reproducible if the
+catalogue changes. Older briefs created before this boundary may have a null profile
+ID while retaining their historical snapshots.
+
+Every new brief also requires one locale-neutral assistance reason:
+
+- `speech_impairment`;
+- `language_barrier`.
+
+The reason is not free-form and is intentionally extensible through versioned contract
+changes. The server combines the reason, represented person, and call locale into a
+controlled disclosure. It stores both the reason and the exact disclosure snapshot
+encrypted at rest. The future Brief Compiler may translate and structure the
+user's objective, but it cannot rename the assistant, invent an assistance reason, or
+modify this disclosure.
+
+These domain values are deliberately independent from presentation copy. Future
+interface locale catalogues will translate profile groups, reason labels, help text,
+validation messages, and preview labels without changing stored IDs or the language
+spoken during the call.
+
+## Multilingual boundaries
+
+Four language concerns remain separate throughout contracts, storage, and UI state:
+
+1. `uiLocale` controls interface copy and formatting.
+2. `sourceLocale` describes or detects the language used to author the raw brief.
+3. `callLocale` controls the disclosure, compiled instructions, speech, and ASR.
+4. `fallbackLocale` is an optional second call language enabled by explicit permission.
+
+The compiler now stores detected source-language metadata with the encrypted snapshot.
+The account/i18n phase will add a persisted UI preference. No domain enum or database
+value may depend on an English UI label, and changing the UI locale must never change
+an approved call plan.
+
 ## MVP data model
 
-- `CallBrief`: recipient, objective, language, context, approved facts, and policy settings.
+- `CallBrief`: recipient, objective, assistant profile, represented person,
+  assistance reason, controlled disclosure snapshot, language, context, approved
+  facts, and policy settings.
+- `CallCompilation`: encrypted raw brief, structured compiled plan, policy decision,
+  compiler/policy versions, response ID, approval time, and immutable snapshot hash.
 - `CallAttempt`: provider call ID, raw and domain status, timestamps, and stop reason.
 - `TranscriptSegment`: speaker role, text, locale, timestamp, and partial/final state.
 - `CallRecording`: consent timestamp, provider IDs, lifecycle, duration, channels, and deletion deadline.
@@ -94,11 +192,16 @@ Rules:
 
 ## Sensitive-data policy
 
-Private values are stored separately and encrypted. A value must not enter the model prompt or Realtime conversation history before approval.
+Private values are stored separately and encrypted. Raw values may enter the isolated
+Brief Compiler and moderation boundary, but they must not enter Realtime, the telephone
+conversation, or post-call ASR context before the compiled snapshot is approved.
 
 For addresses, dates of birth, medical information, contact details, or legal commitments, the intended production flow is a server-owned `request_approval` action. The API creates a one-time request, publishes it to the console, and waits for the operator. Rejection or expiry means no disclosure.
 
-`stop_call`, `request_approval`, and `end_call` remain server-owned capabilities. The current Realtime MVP still relies partly on prompt rules; moving these guarantees into a deterministic policy gate is required before production use.
+`stop_call`, `request_approval`, and `end_call` remain server-owned capabilities. Brief
+authorization is now deterministic, while some in-call disclosure and conversation
+limits still rely partly on Realtime prompt rules and require stronger tool-level
+enforcement before production use.
 
 ## MVP exclusions
 

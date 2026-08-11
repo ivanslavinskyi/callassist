@@ -51,14 +51,18 @@ function createHarness() {
 }
 
 async function createBrief(service: CallService) {
-  return service.create({
+  const brief = await service.create({
     recipientName: "Gemeinde Aadorf",
     phoneNumber: "+41523686688",
     objective: "Verify a real outbound Twilio connection",
+    assistantProfileId: "sebastian",
+    assistanceReason: "speech_impairment",
     locale: "de-CH",
     allowLanguageSwitch: false,
     allowedFacts: []
   });
+  await service.approveCompilation(brief.id);
+  return brief;
 }
 
 describe("Twilio webhooks", () => {

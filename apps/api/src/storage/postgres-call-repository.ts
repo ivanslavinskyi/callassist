@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
 import {
-  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
-  createCallBriefInputSchema,
+  getAssistanceDisclosure,
+  normalizeCreateCallBriefInput,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
+  type CallCompilation,
   type CallRecording,
   type CallLocale,
   type CallSnapshot,
   type CreateCallBriefInput,
+  type AssistantProfileId,
+  type AssistanceReason,
   type FinalTranscript,
   type FinalTranscriptSegment,
   type TranscriptSegment
@@ -17,6 +20,7 @@ import postgres from "postgres";
 import { decryptJson, encryptJson } from "../security/encryption";
 import {
   CallRepositoryError,
+  buildRuntimeBriefFields,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
@@ -32,10 +36,13 @@ type CallBriefRow = {
   recipientName: string;
   phoneNumber: string;
   objective: string;
+  assistantProfileId: AssistantProfileId | null;
   agentName: string;
   representedPerson: string;
-  speechImpairmentDisclosure: string | null;
-  speechImpairmentDisclosureCiphertext: string | null;
+  assistanceReasonCiphertext: string | null;
+  assistanceDisclosure: string | null;
+  assistanceDisclosureCiphertext: string | null;
+  compilationCiphertext: string | null;
   contextCiphertext: string | null;
   locale: CallBrief["locale"];
   voiceGender: CallBrief["voiceGender"];
@@ -106,6 +113,7 @@ type FinalTranscriptRow = {
 };
 
 const terminalStatuses = new Set<CallBrief["status"]>([
+  "blocked",
   "completed",
   "stopped",
   "failed"
@@ -136,14 +144,20 @@ export class PostgresCallRepository implements CallRepository {
     return rows.map((row) => this.#mapBrief(row));
   }
 
-  async create(input: CreateCallBriefInput) {
-    const parsed = createCallBriefInputSchema.parse(input);
+  async create(input: CreateCallBriefInput, compilation: CallCompilation) {
+    const parsed = normalizeCreateCallBriefInput(input);
+    const runtime = buildRuntimeBriefFields(compilation);
     const id = randomUUID();
     const now = new Date();
-    const encryptedFacts = encryptJson(parsed.allowedFacts, this.#encryptionKey);
-    const encryptedContext = encryptJson(parsed.context, this.#encryptionKey);
+    const encryptedFacts = encryptJson(runtime.allowedFacts, this.#encryptionKey);
+    const encryptedContext = encryptJson(runtime.context, this.#encryptionKey);
+    const encryptedCompilation = encryptJson(compilation, this.#encryptionKey);
+    const encryptedReason = encryptJson(
+      parsed.assistanceReason,
+      this.#encryptionKey
+    );
     const encryptedDisclosure = encryptJson(
-      parsed.speechImpairmentDisclosure,
+      parsed.assistanceDisclosure,
       this.#encryptionKey
     );
 
@@ -154,10 +168,13 @@ export class PostgresCallRepository implements CallRepository {
           recipient_name,
           phone_number,
           objective,
+          assistant_profile_id,
           agent_name,
           represented_person,
-          speech_impairment_disclosure,
-          speech_impairment_disclosure_ciphertext,
+          assistance_reason_ciphertext,
+          assistance_disclosure,
+          assistance_disclosure_ciphertext,
+          compilation_ciphertext,
           context_ciphertext,
           locale,
           voice_gender,
@@ -172,11 +189,14 @@ export class PostgresCallRepository implements CallRepository {
           ${id},
           ${parsed.recipientName},
           ${parsed.phoneNumber},
-          ${parsed.objective},
+          ${runtime.objective},
+          ${parsed.assistantProfileId},
           ${parsed.agentName},
           ${parsed.representedPerson},
+          ${encryptedReason},
           ${null},
           ${encryptedDisclosure},
+          ${encryptedCompilation},
           ${encryptedContext},
           ${parsed.locale},
           ${parsed.voiceGender},
@@ -184,19 +204,108 @@ export class PostgresCallRepository implements CallRepository {
           ${parsed.allowLanguageSwitch},
           ${parsed.fallbackLocale ?? null},
           ${encryptedFacts},
-          'ready',
+          ${runtime.status},
           ${now},
           ${now}
         )
       `;
       await this.#audit(transaction, id, "call.created", {
         locale: parsed.locale,
-        status: "ready"
+        status: runtime.status,
+        policyDecision: compilation.policyDecision.status,
+        snapshotHash: compilation.snapshotHash
       });
     });
 
     const snapshot = await this.#require(id);
     return snapshot.brief;
+  }
+
+  async recompile(
+    id: string,
+    input: CreateCallBriefInput,
+    compilation: CallCompilation
+  ) {
+    const parsed = normalizeCreateCallBriefInput(input);
+    const runtime = buildRuntimeBriefFields(compilation);
+    const now = new Date();
+    const encryptedFacts = encryptJson(runtime.allowedFacts, this.#encryptionKey);
+    const encryptedContext = encryptJson(runtime.context, this.#encryptionKey);
+    const encryptedCompilation = encryptJson(compilation, this.#encryptionKey);
+    const encryptedReason = encryptJson(
+      parsed.assistanceReason,
+      this.#encryptionKey
+    );
+    const encryptedDisclosure = encryptJson(
+      parsed.assistanceDisclosure,
+      this.#encryptionKey
+    );
+
+    await this.#sql.begin(async (transaction) => {
+      const [row] = await transaction<
+        {
+          status: CallBrief["status"];
+          compilationCiphertext: string | null;
+          attemptCount: number;
+        }[]
+      >`
+        SELECT
+          status,
+          compilation_ciphertext AS "compilationCiphertext",
+          (SELECT COUNT(*)::int FROM call_attempts WHERE call_brief_id = ${id}) AS "attemptCount"
+        FROM call_briefs
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+      if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
+      if (
+        !["review_required", "needs_clarification", "blocked", "ready"].includes(
+          row.status
+        ) ||
+        row.attemptCount > 0
+      ) {
+        throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
+      }
+      const previousCompilation = row.compilationCiphertext
+        ? decryptJson<CallCompilation>(
+            row.compilationCiphertext,
+            this.#encryptionKey
+          )
+        : null;
+
+      await transaction`
+        UPDATE call_briefs
+        SET
+          recipient_name = ${parsed.recipientName},
+          phone_number = ${parsed.phoneNumber},
+          objective = ${runtime.objective},
+          assistant_profile_id = ${parsed.assistantProfileId},
+          agent_name = ${parsed.agentName},
+          represented_person = ${parsed.representedPerson},
+          assistance_reason_ciphertext = ${encryptedReason},
+          assistance_disclosure = ${null},
+          assistance_disclosure_ciphertext = ${encryptedDisclosure},
+          compilation_ciphertext = ${encryptedCompilation},
+          context_ciphertext = ${encryptedContext},
+          locale = ${parsed.locale},
+          voice_gender = ${parsed.voiceGender},
+          audio_retention_days = ${parsed.audioRetentionDays},
+          allow_language_switch = ${parsed.allowLanguageSwitch},
+          fallback_locale = ${parsed.fallbackLocale ?? null},
+          allowed_facts_ciphertext = ${encryptedFacts},
+          status = ${runtime.status},
+          updated_at = ${now}
+        WHERE id = ${id}
+      `;
+      await this.#audit(transaction, id, "call.compilation_replaced", {
+        previousSnapshotHash: previousCompilation?.snapshotHash ?? "none",
+        snapshotHash: compilation.snapshotHash,
+        revision: String(compilation.revision),
+        status: runtime.status
+      });
+    });
+
+    return this.#require(id);
   }
 
   async get(id: string) {
@@ -260,6 +369,12 @@ export class PostgresCallRepository implements CallRepository {
 
     return {
       brief: this.#mapBrief(briefRow),
+      compilation: briefRow.compilationCiphertext
+        ? decryptJson<CallCompilation>(
+            briefRow.compilationCiphertext,
+            this.#encryptionKey
+          )
+        : null,
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
       pendingApproval: approvalRows[0]
         ? this.#mapApproval(approvalRows[0])
@@ -271,6 +386,53 @@ export class PostgresCallRepository implements CallRepository {
         ? this.#mapFinalTranscript(finalTranscriptRows[0])
         : null
     };
+  }
+
+  async approveCompilation(id: string) {
+    const now = new Date();
+    await this.#sql.begin(async (transaction) => {
+      const [row] = await transaction<
+        { status: CallBrief["status"]; compilationCiphertext: string | null }[]
+      >`
+        SELECT
+          status,
+          compilation_ciphertext AS "compilationCiphertext"
+        FROM call_briefs
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+      if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const compilation = row.compilationCiphertext
+        ? decryptJson<CallCompilation>(
+            row.compilationCiphertext,
+            this.#encryptionKey
+          )
+        : null;
+      if (
+        row.status !== "review_required" ||
+        compilation?.policyDecision.status !== "ready_for_review" ||
+        !compilation.compiledBrief
+      ) {
+        throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
+      }
+      compilation.approvedAt = now.toISOString();
+      await transaction`
+        UPDATE call_briefs
+        SET
+          status = 'ready',
+          compilation_ciphertext = ${encryptJson(
+            compilation,
+            this.#encryptionKey
+          )},
+          updated_at = ${now}
+        WHERE id = ${id}
+      `;
+      await this.#audit(transaction, id, "call.compilation_approved", {
+        snapshotHash: compilation.snapshotHash,
+        status: "ready"
+      });
+    });
+    return this.#require(id);
   }
 
   async getLatestAttempt(id: string) {
@@ -1173,10 +1335,13 @@ export class PostgresCallRepository implements CallRepository {
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
         objective,
+        assistant_profile_id AS "assistantProfileId",
         agent_name AS "agentName",
         represented_person AS "representedPerson",
-        speech_impairment_disclosure AS "speechImpairmentDisclosure",
-        speech_impairment_disclosure_ciphertext AS "speechImpairmentDisclosureCiphertext",
+        assistance_reason_ciphertext AS "assistanceReasonCiphertext",
+        assistance_disclosure AS "assistanceDisclosure",
+        assistance_disclosure_ciphertext AS "assistanceDisclosureCiphertext",
+        compilation_ciphertext AS "compilationCiphertext",
         context_ciphertext AS "contextCiphertext",
         locale,
         voice_gender AS "voiceGender",
@@ -1192,20 +1357,33 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapBrief(row: CallBriefRow): CallBrief {
+    const assistanceReason = row.assistanceReasonCiphertext
+      ? decryptJson<AssistanceReason>(
+          row.assistanceReasonCiphertext,
+          this.#encryptionKey
+        )
+      : "speech_impairment";
+
     return {
       id: row.id,
       recipientName: row.recipientName,
       phoneNumber: row.phoneNumber,
       objective: row.objective,
+      assistantProfileId: row.assistantProfileId,
       agentName: row.agentName,
       representedPerson: row.representedPerson,
-      speechImpairmentDisclosure: row.speechImpairmentDisclosureCiphertext
+      assistanceReason,
+      assistanceDisclosure: row.assistanceDisclosureCiphertext
         ? decryptJson<string>(
-            row.speechImpairmentDisclosureCiphertext,
+            row.assistanceDisclosureCiphertext,
             this.#encryptionKey
           )
-        : row.speechImpairmentDisclosure ??
-          DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURE,
+        : row.assistanceDisclosure ??
+          getAssistanceDisclosure(
+            row.locale,
+            assistanceReason,
+            row.representedPerson
+          ),
       context: row.contextCiphertext
         ? decryptJson<string>(row.contextCiphertext, this.#encryptionKey)
         : "",

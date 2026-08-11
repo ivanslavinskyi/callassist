@@ -162,11 +162,203 @@ a { color: inherit; text-decoration: none; }
   grid-template-columns: minmax(0, 1.5fr) minmax(330px, 0.75fr);
 }
 
-.call-form, .activity-panel, .transcript-card, .final-transcript-card, .approval-card, .guard-card, .brief-card {
+.call-form, .activity-panel, .transcript-card, .final-transcript-card, .approval-card, .guard-card, .brief-card, .compilation-review {
   background: var(--surface);
   border: 1px solid rgba(20, 35, 31, 0.08);
   border-radius: 24px;
   box-shadow: var(--shadow);
+}
+
+.compilation-review {
+  margin: 28px 0;
+  padding: 30px;
+}
+
+.compilation-review.decision-needs_clarification {
+  border-color: #e8c56b;
+}
+
+.compilation-review.decision-blocked {
+  border-color: #e0a4a4;
+}
+
+.compilation-review-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.compilation-review-heading h2 {
+  font-family: var(--font-display), sans-serif;
+  font-size: 28px;
+  letter-spacing: -0.035em;
+  margin: 0;
+}
+
+.call-plan-lead {
+  font-family: var(--font-display), sans-serif;
+  font-size: 21px;
+  line-height: 1.5;
+  margin: 22px 0 0;
+  max-width: 760px;
+}
+
+.plan-setting-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.plan-setting-chips span {
+  background: #edf3ef;
+  border-radius: 999px;
+  color: var(--green-deep);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 8px 11px;
+}
+
+.review-questions {
+  background: #f7faf8;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  margin-top: 20px;
+  padding: 18px;
+}
+
+.review-questions > span {
+  color: var(--green);
+  display: block;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.review-questions ol {
+  line-height: 1.55;
+  margin: 12px 0 0;
+  padding-left: 22px;
+}
+
+.review-questions li + li { margin-top: 8px; }
+
+.review-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.review-actions .primary-button { margin: 0; width: auto; }
+
+.clarification-panel {
+  background: #fff9e8;
+  border: 1px solid #ead18c;
+  border-radius: 15px;
+  margin-top: 20px;
+  padding: 18px;
+}
+
+.clarification-panel > p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 16px;
+}
+
+.clarification-form { display: grid; gap: 14px; }
+.clarification-form .primary-button { margin: 0; width: max-content; }
+
+.technical-details {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.technical-details > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.objective-comparison {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 24px;
+}
+
+.objective-comparison > div,
+.compiled-plan-grid > div,
+.policy-reasons {
+  background: #f7faf8;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  padding: 18px;
+}
+
+.objective-comparison span,
+.compiled-plan-grid span {
+  color: var(--green);
+  display: block;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.objective-comparison p,
+.compiled-plan-grid p {
+  line-height: 1.55;
+  margin: 10px 0 0;
+}
+
+.compiled-plan-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 16px;
+}
+
+.compiled-plan-grid ol,
+.compiled-plan-grid ul,
+.policy-reasons ul {
+  line-height: 1.55;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.compiled-plan-grid li + li,
+.policy-reasons li + li {
+  margin-top: 7px;
+}
+
+.compiled-plan-grid li strong {
+  color: var(--green);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.policy-reasons {
+  margin-top: 16px;
+}
+
+.compilation-meta {
+  color: var(--muted);
+  display: block;
+  margin-top: 18px;
+}
+
+.live-grid.precall-hidden { display: none; }
+
+@media (max-width: 760px) {
+  .objective-comparison,
+  .compiled-plan-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .call-form { padding: 34px; }
@@ -226,6 +418,39 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 0 3px rgba(29, 105, 88, 0.1);
 }
 .field small, .switch-row small { color: #82908b; font-size: 11px; }
+
+.call-options {
+  background: #f7faf8;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  margin-top: 24px;
+  padding: 16px 18px;
+}
+
+.call-options > summary {
+  color: var(--green-deep);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.call-options > p {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 7px 0 0;
+}
+
+.call-options-grid { margin-top: 20px; }
+
+.form-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 28px;
+}
+
+.form-actions .primary-button { margin: 0; width: auto; }
 
 .language-policy {
   align-items: center;
@@ -369,7 +594,8 @@ button:disabled { cursor: wait; opacity: .55; }
 .status-pill { align-items: center; background: #e9f2ed; border-radius: 99px; color: var(--green); display: inline-flex; font-size: 11px; font-weight: 750; gap: 8px; padding: 8px 12px; }
 .status-pill > span { background: currentColor; border-radius: 99px; height: 7px; width: 7px; }
 .status-awaiting_approval { background: #fff2ce; color: #8a6214; }
-.status-stopped, .status-failed { background: #f8e5e5; color: var(--danger); }
+.status-review_required, .status-needs_clarification { background: #fff2ce; color: #8a6214; }
+.status-blocked, .status-stopped, .status-failed { background: #f8e5e5; color: var(--danger); }
 
 .call-hero { align-items: flex-end; display: flex; justify-content: space-between; margin-bottom: 38px; }
 .call-hero h1 { font-size: clamp(38px, 4vw, 56px); }
@@ -619,6 +845,9 @@ button:disabled { cursor: wait; opacity: .55; }
   .fallback-field { min-width: 0; }
   .call-hero { align-items: flex-start; flex-direction: column; gap: 25px; }
   .call-actions, .call-actions button { width: 100%; }
+  .form-actions, .review-actions { align-items: stretch; flex-direction: column-reverse; }
+  .form-actions .primary-button, .review-actions .primary-button,
+  .form-actions .secondary-button, .review-actions .secondary-button { width: 100%; }
   .live-grid { gap: 15px; }
   .call-sidebar { display: flex; }
   .transcript-heading { padding: 22px; }

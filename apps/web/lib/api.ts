@@ -44,10 +44,33 @@ export async function getCallSnapshot(id: string) {
   return apiRequest<CallSnapshot>(`/api/call-briefs/${id}`);
 }
 
+export async function recompileCallBrief(
+  id: string,
+  input: CreateCallBriefInput
+) {
+  return apiRequest<CallSnapshot>(`/api/call-briefs/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+}
+
 export async function startCall(id: string) {
   return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/start`, {
     method: "POST"
   });
+}
+
+export async function approveCallBrief(id: string) {
+  return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/approve`, {
+    method: "POST"
+  });
+}
+
+export async function approveAndStartCall(id: string) {
+  return apiRequest<CallSnapshot>(
+    `/api/call-briefs/${id}/approve-and-start`,
+    { method: "POST" }
+  );
 }
 
 export async function stopCall(id: string) {

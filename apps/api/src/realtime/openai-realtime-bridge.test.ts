@@ -16,9 +16,11 @@ const brief: CallBrief = {
   recipientName: "Example AG",
   phoneNumber: "+41710000001",
   objective: "Ask whether the application sent on 12 July was received",
-  agentName: "Sebastian",
+  assistantProfileId: "anna",
+  agentName: "Anna",
   representedPerson: "Ivan Slavinskyi",
-  speechImpairmentDisclosure: "Disability disclosure",
+  assistanceReason: "speech_impairment",
+  assistanceDisclosure: "Disability disclosure",
   context: "The company works in logistics. An unverified salary note says CHF 99,999.",
   locale: "de-CH",
   voiceGender: "female",
@@ -71,7 +73,7 @@ describe("buildConsentAnnouncementInstructions", () => {
     const prompt = buildConsentAnnouncementInstructions({
       ...brief,
       locale: "ru-RU",
-      speechImpairmentDisclosure:
+      assistanceDisclosure:
         "Господин Славинский испытывает затруднения при телефонных разговорах из-за нарушения речи."
     });
 
@@ -107,12 +109,11 @@ describe("OpenAIRealtimeBridge", () => {
       recipientName: brief.recipientName,
       phoneNumber: brief.phoneNumber,
       objective: brief.objective,
-      agentName: brief.agentName,
+      assistantProfileId: brief.assistantProfileId!,
       representedPerson: brief.representedPerson,
-      speechImpairmentDisclosure: brief.speechImpairmentDisclosure,
+      assistanceReason: brief.assistanceReason,
       context: brief.context,
       locale: brief.locale,
-      voiceGender: brief.voiceGender,
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
@@ -170,9 +171,12 @@ describe("OpenAIRealtimeBridge", () => {
     expect(openAISocket.sent[1]).toMatchObject({
       type: "response.create",
       response: {
-        instructions: expect.stringContaining(brief.speechImpairmentDisclosure)
+        instructions: expect.stringContaining(created.assistanceDisclosure)
       }
     });
+    expect(JSON.stringify(openAISocket.sent[1])).toContain(
+      "eine KI-Assistentin"
+    );
     expect(
       JSON.stringify(openAISocket.sent[1])
     ).not.toContain(brief.objective);
@@ -338,12 +342,11 @@ describe("OpenAIRealtimeBridge", () => {
       recipientName: brief.recipientName,
       phoneNumber: brief.phoneNumber,
       objective: brief.objective,
-      agentName: brief.agentName,
+      assistantProfileId: brief.assistantProfileId!,
       representedPerson: brief.representedPerson,
-      speechImpairmentDisclosure: brief.speechImpairmentDisclosure,
+      assistanceReason: brief.assistanceReason,
       context: brief.context,
       locale: brief.locale,
-      voiceGender: brief.voiceGender,
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });

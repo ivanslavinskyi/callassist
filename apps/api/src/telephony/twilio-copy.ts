@@ -1,8 +1,4 @@
-import {
-  DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES,
-  type CallBrief,
-  type CallLocale
-} from "@callassist/contracts";
+import type { CallBrief, CallLocale } from "@callassist/contracts";
 
 type TwilioCopy = {
   language: "de-DE" | "en-GB" | "en-US" | "fr-FR" | "it-IT" | "ru-RU";
@@ -15,7 +11,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "de-CH": {
     language: "de-DE",
     introduction: (brief) =>
-      `Guten Tag. Mein Name ist ${brief.agentName}. Ich bin ein KI-Assistent von ${brief.representedPerson}. ${resolveDisclosure(brief)} Nach Ihrer Zustimmung wird dieses Gespräch aufgezeichnet und automatisch transkribiert. ${retentionSentence(brief, "de")} Wenn Sie einverstanden sind, drücken Sie bitte die 1.`,
+      `Guten Tag. Mein Name ist ${brief.agentName}. Ich bin ${brief.voiceGender === "female" ? "eine KI-Assistentin" : "ein KI-Assistent"} von ${brief.representedPerson}. ${brief.assistanceDisclosure} Nach Ihrer Zustimmung wird dieses Gespräch aufgezeichnet und automatisch transkribiert. ${retentionSentence(brief, "de")} Wenn Sie einverstanden sind, drücken Sie bitte die 1.`,
     noConsent:
       "Ohne Ihre Zustimmung kann ich das Gespräch nicht fortsetzen. Auf Wiederhören.",
     recordingFailure:
@@ -24,7 +20,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "de-DE": {
     language: "de-DE",
     introduction: (brief) =>
-      `Guten Tag. Mein Name ist ${brief.agentName}. Ich bin ein KI-Assistent von ${brief.representedPerson}. ${resolveDisclosure(brief)} Nach Ihrer Zustimmung wird dieses Gespräch aufgezeichnet und automatisch transkribiert. ${retentionSentence(brief, "de")} Wenn Sie einverstanden sind, drücken Sie bitte die 1.`,
+      `Guten Tag. Mein Name ist ${brief.agentName}. Ich bin ${brief.voiceGender === "female" ? "eine KI-Assistentin" : "ein KI-Assistent"} von ${brief.representedPerson}. ${brief.assistanceDisclosure} Nach Ihrer Zustimmung wird dieses Gespräch aufgezeichnet und automatisch transkribiert. ${retentionSentence(brief, "de")} Wenn Sie einverstanden sind, drücken Sie bitte die 1.`,
     noConsent:
       "Ohne Ihre Zustimmung kann ich das Gespräch nicht fortsetzen. Auf Wiederhören.",
     recordingFailure:
@@ -33,7 +29,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "fr-CH": {
     language: "fr-FR",
     introduction: (brief) =>
-      `Bonjour. Je m’appelle ${brief.agentName}. Je suis un assistant IA de ${brief.representedPerson}. ${resolveDisclosure(brief)} Après votre consentement, cette conversation sera enregistrée et transcrite automatiquement. ${retentionSentence(brief, "fr")} Si vous êtes d’accord, appuyez sur la touche 1.`,
+      `Bonjour. Je m’appelle ${brief.agentName}. Je suis ${brief.voiceGender === "female" ? "une assistante IA" : "un assistant IA"} de ${brief.representedPerson}. ${brief.assistanceDisclosure} Après votre consentement, cette conversation sera enregistrée et transcrite automatiquement. ${retentionSentence(brief, "fr")} Si vous êtes d’accord, appuyez sur la touche 1.`,
     noConsent:
       "Sans votre accord, je ne peux pas poursuivre cette conversation. Au revoir.",
     recordingFailure:
@@ -42,7 +38,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "it-CH": {
     language: "it-IT",
     introduction: (brief) =>
-      `Buongiorno. Mi chiamo ${brief.agentName}. Sono un assistente IA di ${brief.representedPerson}. ${resolveDisclosure(brief)} Dopo il suo consenso, questa conversazione verrà registrata e trascritta automaticamente. ${retentionSentence(brief, "it")} Se acconsente, prema il tasto 1.`,
+      `Buongiorno. Mi chiamo ${brief.agentName}. Sono ${brief.voiceGender === "female" ? "un’assistente IA" : "un assistente IA"} di ${brief.representedPerson}. ${brief.assistanceDisclosure} Dopo il suo consenso, questa conversazione verrà registrata e trascritta automaticamente. ${retentionSentence(brief, "it")} Se acconsente, prema il tasto 1.`,
     noConsent:
       "Senza il suo consenso non posso proseguire la conversazione. Arrivederci.",
     recordingFailure:
@@ -51,7 +47,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "en-GB": {
     language: "en-GB",
     introduction: (brief) =>
-      `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${resolveDisclosure(brief)} After you consent, this conversation will be recorded and transcribed automatically. ${retentionSentence(brief, "en")} If you consent, please press 1.`,
+      `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${brief.assistanceDisclosure} After you consent, this conversation will be recorded and transcribed automatically. ${retentionSentence(brief, "en")} If you consent, please press 1.`,
     noConsent: "I cannot continue without your consent. Goodbye.",
     recordingFailure:
       "The recording could not be started, so I cannot continue this conversation. Goodbye."
@@ -59,7 +55,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "en-US": {
     language: "en-US",
     introduction: (brief) =>
-      `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${resolveDisclosure(brief)} After you consent, this conversation will be recorded and transcribed automatically. ${retentionSentence(brief, "en")} If you consent, please press 1.`,
+      `Hello. My name is ${brief.agentName}. I am an AI assistant for ${brief.representedPerson}. ${brief.assistanceDisclosure} After you consent, this conversation will be recorded and transcribed automatically. ${retentionSentence(brief, "en")} If you consent, please press 1.`,
     noConsent: "I cannot continue without your consent. Goodbye.",
     recordingFailure:
       "The recording could not be started, so I cannot continue this conversation. Goodbye."
@@ -67,7 +63,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "ru-RU": {
     language: "ru-RU",
     introduction: (brief) =>
-      `Добрый день. Меня зовут ${brief.agentName}. Я ИИ-ассистент ${brief.representedPerson}. ${resolveDisclosure(brief)} После вашего согласия этот разговор будет записан и автоматически расшифрован. ${retentionSentence(brief, "ru")} Если вы согласны, нажмите 1.`,
+      `Добрый день. Меня зовут ${brief.agentName}. Я ${brief.voiceGender === "female" ? "ИИ-ассистентка" : "ИИ-ассистент"} ${brief.representedPerson}. ${brief.assistanceDisclosure} После вашего согласия этот разговор будет записан и автоматически расшифрован. ${retentionSentence(brief, "ru")} Если вы согласны, нажмите 1.`,
     noConsent:
       "Без вашего согласия я не могу продолжить разговор. До свидания.",
     recordingFailure:
@@ -77,15 +73,6 @@ const copy: Record<CallLocale, TwilioCopy> = {
 
 export function getTwilioCopy(locale: CallLocale) {
   return copy[locale];
-}
-
-function resolveDisclosure(brief: CallBrief) {
-  const disclosure = brief.speechImpairmentDisclosure;
-  return Object.values(DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES).includes(
-    disclosure
-  )
-    ? DEFAULT_SPEECH_IMPAIRMENT_DISCLOSURES[brief.locale]
-    : disclosure;
 }
 
 function retentionSentence(

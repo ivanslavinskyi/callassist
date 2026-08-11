@@ -13,9 +13,11 @@ const brief: CallBrief = {
   recipientName: "Gemeinde Aadorf",
   phoneNumber: "+41523686688",
   objective: "Ask whether Ivan Slavinskyi's application was received",
+  assistantProfileId: "sebastian",
   agentName: "Sebastian",
   representedPerson: "Ivan Slavinskyi",
-  speechImpairmentDisclosure: "Mr Slavinskyi has a speech impairment.",
+  assistanceReason: "speech_impairment",
+  assistanceDisclosure: "Mr Slavinskyi has a speech impairment.",
   context: "The application concerns the Einwohnerdienste in Aadorf.",
   locale: "de-CH",
   voiceGender: "male",
@@ -148,6 +150,158 @@ describe("OpenAIPostCallTranscriber", () => {
     ).rejects.toMatchObject({ code: "AUDIO_EMPTY" });
     expect(audioSegmenter.segment).not.toHaveBeenCalled();
     expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("skips an empty noise segment without failing the complete transcript", async () => {
+    const audioSegmenter = {
+      segment: vi.fn().mockResolvedValue([
+        {
+          channel: 1,
+          bytes: new Uint8Array([1]),
+          contentType: "audio/wav" as const,
+          fileName: "noise.wav",
+          startSeconds: 0.4,
+          endSeconds: 0.6
+        },
+        {
+          channel: 2,
+          bytes: new Uint8Array([2]),
+          contentType: "audio/wav" as const,
+          fileName: "assistant.wav",
+          startSeconds: 1.2,
+          endSeconds: 3.8
+        },
+        {
+          channel: 1,
+          bytes: new Uint8Array([3]),
+          contentType: "audio/wav" as const,
+          fileName: "recipient.wav",
+          startSeconds: 4.1,
+          endSeconds: 5.7
+        }
+      ])
+    };
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ text: "   " }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ text: "Ist die Bewerbung angekommen?" }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ text: "Ja, sie ist angekommen." }), {
+          status: 200
+        })
+      );
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      audioSegmenter,
+      fetchImplementation: fetchImplementation as typeof fetch
+    });
+
+    await expect(
+      transcriber.transcribe(
+        {
+          bytes: new Uint8Array([1, 2, 3]),
+          contentType: "audio/mpeg",
+          fileName: "RE123.mp3",
+          channels: 2
+        },
+        brief,
+        liveTranscript
+      )
+    ).resolves.toMatchObject({
+      text: "Ist die Bewerbung angekommen? Ja, sie ist angekommen.",
+      segments: [
+        expect.objectContaining({ role: "assistant", startSeconds: 1.2 }),
+        expect.objectContaining({ role: "recipient", startSeconds: 4.1 })
+      ]
+    });
+  });
+
+  it("fails only when every detected segment contains no speech", async () => {
+    const audioSegmenter = {
+      segment: vi.fn().mockResolvedValue([
+        {
+          channel: 1,
+          bytes: new Uint8Array([1]),
+          contentType: "audio/wav" as const,
+          fileName: "noise-1.wav",
+          startSeconds: 0.4,
+          endSeconds: 0.6
+        },
+        {
+          channel: 2,
+          bytes: new Uint8Array([2]),
+          contentType: "audio/wav" as const,
+          fileName: "noise-2.wav",
+          startSeconds: 1.2,
+          endSeconds: 1.4
+        }
+      ])
+    };
+    const fetchImplementation = vi
+      .fn()
+      .mockImplementation(async () =>
+        new Response(JSON.stringify({ text: "" }), { status: 200 })
+      );
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      audioSegmenter,
+      fetchImplementation: fetchImplementation as typeof fetch
+    });
+
+    await expect(
+      transcriber.transcribe(
+        {
+          bytes: new Uint8Array([1, 2, 3]),
+          contentType: "audio/mpeg",
+          fileName: "RE123.mp3",
+          channels: 2
+        },
+        brief,
+        liveTranscript
+      )
+    ).rejects.toMatchObject({ code: "AUDIO_EMPTY" });
+  });
+
+  it("still rejects a malformed OpenAI response", async () => {
+    const audioSegmenter = {
+      segment: vi.fn().mockResolvedValue([
+        {
+          channel: 1,
+          bytes: new Uint8Array([1]),
+          contentType: "audio/wav" as const,
+          fileName: "speech.wav",
+          startSeconds: 0.4,
+          endSeconds: 1.6
+        }
+      ])
+    };
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      audioSegmenter,
+      fetchImplementation: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ unexpected: true }), { status: 200 })
+        ) as typeof fetch
+    });
+
+    await expect(
+      transcriber.transcribe(
+        {
+          bytes: new Uint8Array([1]),
+          contentType: "audio/mpeg",
+          fileName: "RE123.mp3",
+          channels: 1
+        },
+        brief
+      )
+    ).rejects.toMatchObject({ code: "OPENAI_RESPONSE_INVALID" });
   });
 });
 

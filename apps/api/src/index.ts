@@ -1,5 +1,9 @@
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
+import {
+  DeterministicBriefCompiler,
+  OpenAIBriefCompiler
+} from "./brief-compiler/brief-compiler";
 import { CallService } from "./call-service";
 import {
   OpenAIRealtimeBridge,
@@ -12,24 +16,25 @@ import { OpenAIPostCallTranscriber } from "./transcription/openai-post-call-tran
 
 const repository = createCallRepositoryFromEnv();
 const telephonyProvider = createTelephonyProviderFromEnv();
-const openAIApiKey =
+const realtimeApiKey =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? requireEnvironmentVariable("OPENAI_API_KEY")
     : null;
-const postCallTranscriber = openAIApiKey
+const postCallTranscriber = realtimeApiKey
   ? new OpenAIPostCallTranscriber({
-      apiKey: openAIApiKey,
+      apiKey: realtimeApiKey,
       model: process.env.OPENAI_POST_CALL_TRANSCRIPTION_MODEL
     })
   : undefined;
+const briefCompiler = createBriefCompiler();
 const service = new CallService(repository, telephonyProvider, (error) => {
   app.log.error(error, "Background call operation failed");
-}, postCallTranscriber);
+}, postCallTranscriber, briefCompiler);
 const app = buildApp({ service });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? new OpenAIRealtimeBridge({
-        apiKey: openAIApiKey!,
+        apiKey: realtimeApiKey!,
         service,
         validateStreamToken: (callBriefId, token) =>
           telephonyProvider.validateMediaStreamToken(callBriefId, token),
@@ -77,6 +82,21 @@ function requireEnvironmentVariable(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required when TELEPHONY_DRIVER=twilio`);
   return value;
+}
+
+function createBriefCompiler() {
+  const configuredKey = process.env.OPENAI_API_KEY?.trim();
+  const driver =
+    process.env.BRIEF_COMPILER_DRIVER?.trim() ||
+    (configuredKey ? "openai" : "mock");
+  if (driver === "mock") return new DeterministicBriefCompiler();
+  if (driver === "openai") {
+    return new OpenAIBriefCompiler({
+      apiKey: requireEnvironmentVariable("OPENAI_API_KEY"),
+      model: process.env.OPENAI_BRIEF_COMPILER_MODEL
+    });
+  }
+  throw new Error(`Unsupported BRIEF_COMPILER_DRIVER: ${driver}`);
 }
 
 function parseTranscriptionDelay(

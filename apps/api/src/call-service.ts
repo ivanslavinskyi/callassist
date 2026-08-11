@@ -1,11 +1,17 @@
-import type {
-  ApprovalDecision,
-  CallBrief,
-  CallEvent,
-  CallSnapshot,
-  CreateCallBriefInput,
-  TranscriptSegment
+import {
+  normalizeCreateCallBriefInput,
+  type ApprovalDecision,
+  type CallBrief,
+  type CallEvent,
+  type CallSnapshot,
+  type CreateCallBriefInput,
+  type TranscriptSegment
 } from "@callassist/contracts";
+import {
+  BriefCompilerError,
+  DeterministicBriefCompiler,
+  type BriefCompiler
+} from "./brief-compiler/brief-compiler";
 import { getMockCopy } from "./mock-copy";
 import {
   CallRepositoryError,
@@ -31,7 +37,8 @@ export class CallServiceError extends Error {
       | "TELEPHONY_START_FAILED"
       | "TELEPHONY_STOP_FAILED"
       | "RECORDING_START_FAILED"
-      | "RECORDING_NOT_AVAILABLE",
+      | "RECORDING_NOT_AVAILABLE"
+      | "BRIEF_COMPILATION_FAILED",
     options?: { cause?: unknown }
   ) {
     super(code, options);
@@ -46,16 +53,19 @@ export class CallService {
   readonly #processingRecordings = new Set<string>();
   readonly #onBackgroundError: (error: unknown) => void;
   readonly #postCallTranscriber?: PostCallTranscriber;
+  readonly #briefCompiler: BriefCompiler;
   #retentionTimer: NodeJS.Timeout | null = null;
 
   constructor(
     readonly repository: CallRepository,
     readonly telephonyProvider: TelephonyProvider = new MockTelephonyProvider(),
     onBackgroundError: (error: unknown) => void = console.error,
-    postCallTranscriber?: PostCallTranscriber
+    postCallTranscriber?: PostCallTranscriber,
+    briefCompiler: BriefCompiler = new DeterministicBriefCompiler()
   ) {
     this.#onBackgroundError = onBackgroundError;
     this.#postCallTranscriber = postCallTranscriber;
+    this.#briefCompiler = briefCompiler;
   }
 
   async initialize() {
@@ -83,12 +93,62 @@ export class CallService {
     return this.repository.list();
   }
 
-  create(input: CreateCallBriefInput) {
-    return this.repository.create(input);
+  async create(input: CreateCallBriefInput) {
+    try {
+      const compilation = await this.#briefCompiler.compile(
+        normalizeCreateCallBriefInput(input)
+      );
+      return this.repository.create(input, compilation);
+    } catch (error) {
+      if (error instanceof BriefCompilerError) {
+        throw new CallServiceError("BRIEF_COMPILATION_FAILED", {
+          cause: error
+        });
+      }
+      throw error;
+    }
+  }
+
+  async recompile(id: string, input: CreateCallBriefInput) {
+    const current = await this.#require(id);
+    const revision = current.compilation
+      ? (current.compilation.revision ?? 1) + 1
+      : 1;
+    try {
+      const compilation = await this.#briefCompiler.compile(
+        normalizeCreateCallBriefInput(input),
+        revision
+      );
+      const snapshot = await this.repository.recompile(
+        id,
+        input,
+        compilation
+      );
+      this.#publish(id, { type: "call.updated", brief: snapshot.brief });
+      return snapshot;
+    } catch (error) {
+      if (error instanceof BriefCompilerError) {
+        throw new CallServiceError("BRIEF_COMPILATION_FAILED", {
+          cause: error
+        });
+      }
+      throw error;
+    }
   }
 
   get(id: string) {
     return this.repository.get(id);
+  }
+
+  async approveCompilation(id: string) {
+    const snapshot = await this.repository.approveCompilation(id);
+    this.#publish(id, { type: "call.updated", brief: snapshot.brief });
+    return snapshot;
+  }
+
+  async approveAndStart(id: string) {
+    await this.approveCompilation(id);
+    return this.start(id);
   }
 
   subscribe(id: string, subscriber: Subscriber) {
@@ -104,6 +164,14 @@ export class CallService {
 
   async start(id: string) {
     const current = await this.#require(id);
+    if (
+      ["review_required", "needs_clarification", "blocked"].includes(
+        current.brief.status
+      ) ||
+      (current.brief.status === "ready" && !current.compilation?.approvedAt)
+    ) {
+      throw new CallRepositoryError("CALL_NOT_READY");
+    }
     if (current.brief.status !== "ready") return current;
 
     const reserved = await this.repository.startAttempt(id, {

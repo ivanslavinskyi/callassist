@@ -7,6 +7,9 @@ import { CreateCallForm } from "./create-call-form";
 import { listCallBriefs } from "@/lib/api";
 
 const statusLabels: Record<CallBrief["status"], string> = {
+  review_required: "Ready to call",
+  needs_clarification: "Needs one detail",
+  blocked: "Blocked",
   ready: "Ready",
   dialing: "Dialing",
   in_progress: "In progress",
