@@ -93,10 +93,23 @@ function createBriefCompiler() {
   if (driver === "openai") {
     return new OpenAIBriefCompiler({
       apiKey: requireEnvironmentVariable("OPENAI_API_KEY"),
-      model: process.env.OPENAI_BRIEF_COMPILER_MODEL
+      model: process.env.OPENAI_BRIEF_COMPILER_MODEL,
+      timeoutMs: parsePositiveInteger(
+        process.env.OPENAI_BRIEF_COMPILER_TIMEOUT_MS,
+        "OPENAI_BRIEF_COMPILER_TIMEOUT_MS"
+      )
     });
   }
   throw new Error(`Unsupported BRIEF_COMPILER_DRIVER: ${driver}`);
+}
+
+function parsePositiveInteger(value: string | undefined, name: string) {
+  if (!value?.trim()) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function parseTranscriptionDelay(

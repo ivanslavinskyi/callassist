@@ -195,6 +195,7 @@ describe("OpenAIBriefCompiler", () => {
     expect(body).toMatchObject({
       model: "gpt-test",
       store: false,
+      reasoning: { effort: "low" },
       text: {
         format: {
           type: "json_schema",
@@ -214,7 +215,126 @@ describe("OpenAIBriefCompiler", () => {
     expect(body.text.format.schema.required).not.toContain(
       "materialAmbiguities"
     );
+    expect(body.text.format.schema.properties.sourceLanguage.pattern).toBe(
+      "^[A-Za-z0-9-]{2,35}$"
+    );
+    expect(body.text.format.schema.properties.orderedQuestions).toMatchObject({
+      minItems: 1,
+      maxItems: 12
+    });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses one total timeout budget and does not retry a timed-out request", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          signal?.addEventListener(
+            "abort",
+            () => reject(signal.reason),
+            { once: true }
+          );
+        })
+    );
+
+    await expect(
+      new OpenAIBriefCompiler({
+        apiKey: "test-key",
+        timeoutMs: 10,
+        fetchImplementation: fetchMock
+      }).compile(normalizeCreateCallBriefInput(rawInput))
+    ).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries once with validation feedback when model output violates the local schema", async () => {
+    const invalidOutput = {
+      ...modelOutput,
+      sourceLanguage: "Russian language inferred from the original objective",
+      orderedQuestions: []
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "resp_invalid",
+            output_text: JSON.stringify(invalidOutput)
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "resp_corrected",
+            output_text: JSON.stringify(modelOutput)
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      );
+
+    const result = await new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    }).compile(normalizeCreateCallBriefInput(rawInput));
+
+    expect(result.compilerResponseId).toBe("resp_corrected");
+    const retryBody = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body)
+    );
+    expect(retryBody.input[0].content).toContain("sourceLanguage");
+    expect(retryBody.input[0].content).toContain("orderedQuestions");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns safe diagnostics after two invalid compiler responses", async () => {
+    const invalidOutput = { ...modelOutput, orderedQuestions: [] };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ output_text: JSON.stringify(invalidOutput) }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "resp_still_invalid",
+            output_text: JSON.stringify(invalidOutput)
+          }),
+          { status: 200 }
+        )
+      );
+
+    await expect(
+      new OpenAIBriefCompiler({
+        apiKey: "test-key",
+        fetchImplementation: fetchMock
+      }).compile(normalizeCreateCallBriefInput(rawInput))
+    ).rejects.toMatchObject({
+      code: "OPENAI_RESPONSE_INVALID",
+      responseId: "resp_still_invalid",
+      validationPaths: ["orderedQuestions"]
+    });
   });
 
   it("ignores an external-delivery blocker when spoken answers are captured", async () => {

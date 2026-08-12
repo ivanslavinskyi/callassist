@@ -32,17 +32,29 @@ import {
 type Subscriber = (event: CallEvent) => void;
 
 export class CallServiceError extends Error {
+  readonly diagnostic: {
+    compilerCode: BriefCompilerError["code"];
+    responseId: string | null;
+    validationPaths: string[];
+    statusCode: number | null;
+  } | null;
+
   constructor(
     readonly code:
       | "TELEPHONY_START_FAILED"
       | "TELEPHONY_STOP_FAILED"
       | "RECORDING_START_FAILED"
       | "RECORDING_NOT_AVAILABLE"
-      | "BRIEF_COMPILATION_FAILED",
-    options?: { cause?: unknown }
+      | "BRIEF_COMPILER_UNAVAILABLE"
+      | "BRIEF_COMPILER_RESPONSE_INVALID",
+    options?: {
+      cause?: unknown;
+      diagnostic?: CallServiceError["diagnostic"];
+    }
   ) {
     super(code, options);
     this.name = "CallServiceError";
+    this.diagnostic = options?.diagnostic ?? null;
   }
 }
 
@@ -101,9 +113,7 @@ export class CallService {
       return this.repository.create(input, compilation);
     } catch (error) {
       if (error instanceof BriefCompilerError) {
-        throw new CallServiceError("BRIEF_COMPILATION_FAILED", {
-          cause: error
-        });
+        throw mapBriefCompilerError(error);
       }
       throw error;
     }
@@ -128,9 +138,7 @@ export class CallService {
       return snapshot;
     } catch (error) {
       if (error instanceof BriefCompilerError) {
-        throw new CallServiceError("BRIEF_COMPILATION_FAILED", {
-          cause: error
-        });
+        throw mapBriefCompilerError(error);
       }
       throw error;
     }
@@ -614,4 +622,21 @@ function transcriptionFailureCode(error: unknown) {
     return error.message.slice(0, 120);
   }
   return "POST_CALL_TRANSCRIPTION_FAILED";
+}
+
+function mapBriefCompilerError(error: BriefCompilerError) {
+  return new CallServiceError(
+    error.code === "OPENAI_REQUEST_FAILED"
+      ? "BRIEF_COMPILER_UNAVAILABLE"
+      : "BRIEF_COMPILER_RESPONSE_INVALID",
+    {
+      cause: error,
+      diagnostic: {
+        compilerCode: error.code,
+        responseId: error.responseId,
+        validationPaths: error.validationPaths,
+        statusCode: error.statusCode
+      }
+    }
+  );
 }

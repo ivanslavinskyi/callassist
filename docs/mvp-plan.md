@@ -150,13 +150,18 @@ versioned `CompiledCallBrief` is allowed to enter the call runtime.
 
 - [ ] Add structured call outcomes: `resolved`, `partially_resolved`, `unresolved`,
       `wrong_recipient`, `voicemail`, `declined`, and `technical_failure`.
-- [ ] Add explicit uncertainty to final transcript turns instead of presenting every
-      ASR result as equally reliable.
-- [ ] Validate final ASR output against the selected language and retry suspicious
-      turns with a call-language-only prompt and a longer audio context.
-- [ ] Benchmark isolated turns, overlapping context windows, full per-speaker channels,
-      and alternative transcription models on the same evaluation corpus.
-- [ ] Preserve short legitimate answers while ignoring empty/noise-only segments.
+- [x] Produce the final wording with one context-preserving `gpt-transcribe` request
+      over the complete consented recording.
+- [x] Use only bounded compiled context, literal names, explicit call languages, and
+      the expected writing system as transcription hints.
+- [x] Keep the live draft and final transcript independent. Never copy, align, or
+      reconcile live wording into the recording-derived final text.
+- [x] Omit speaker labels and timestamps from the final MVP instead of presenting
+      uncertain diarization or inferred roles as fact.
+- [ ] Add bounded overlapping-window transcription only for recordings that exceed
+      the upload limit; keep one request as the normal path.
+- [ ] Benchmark full-call transcription and diarization alternatives on a manually
+      checked multilingual audio corpus before adding structure back to the result.
 - [ ] Measure Realtime understanding separately from live transcript accuracy and
       post-call transcript accuracy.
 - [ ] Test Swiss Standard German, Swiss German dialects, supported languages,
@@ -164,6 +169,9 @@ versioned `CompiledCallBrief` is allowed to enter the call runtime.
 - [ ] Add an operator-visible uncertain state and direct audio verification for
       critical details such as names, dates, amounts, addresses, and commitments.
 - [ ] Add regression tests that ensure source-language text cannot bias ASR output.
+
+The decision and deferred test matrix are recorded in
+[the post-call transcription plan](./post-call-transcription-plan.md#stable-mvp-transcription-decision).
 
 ## 4. Accounts, data ownership, and abuse prevention
 

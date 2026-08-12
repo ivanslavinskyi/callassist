@@ -22,8 +22,9 @@ CallAssist is a privacy-conscious AI voice assistant for controlled outbound pho
 - Requires DTMF consent before recipient audio is sent to the model or recorded.
 - Starts a dual-channel Twilio recording only after consent is confirmed.
 - Streams a fast draft transcript to the web console over SSE.
-- Separates the two Twilio call legs and creates a speaker-labelled post-call
-  transcript with timestamps, `gpt-transcribe`, and bounded call context.
+- Creates a context-preserving post-call transcript from the complete consented
+  recording with one `gpt-transcribe` request. It does not mix in the live draft
+  or invent speaker labels and timestamps.
 - Supports immediate, 7-day, or 30-day audio retention and manual deletion.
 - Keeps the agent within an explicit objective, context, and allow-list of facts.
 - Lets the operator stop an active call and resolve disclosure requests.
@@ -43,11 +44,9 @@ Twilio PSTN call ◄── bidirectional Media Stream ──► Realtime bridge
                                                        │
                                                        └── OpenAI Realtime
 
-Twilio recording ── authenticated dual-channel download
-                                      │
-                                      └── turn segmentation ──► post-call transcription
-                                                                        │
-                                                                        └── encrypted final turns
+Twilio recording ── authenticated download ──► one full-call transcription pass
+                                                           │
+                                                           └── encrypted final text
 ```
 
 The public Twilio surface is isolated on a dedicated listener. The main API, SSE endpoints, and decrypted application data are not exposed through the development tunnel.
@@ -120,6 +119,7 @@ TWILIO_PHONE_NUMBER=+...
 OPENAI_API_KEY=sk-...
 BRIEF_COMPILER_DRIVER=openai
 OPENAI_BRIEF_COMPILER_MODEL=gpt-5.6
+OPENAI_BRIEF_COMPILER_TIMEOUT_MS=45000
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_TRANSCRIPTION_MODEL=gpt-realtime-whisper
 OPENAI_TRANSCRIPTION_DELAY=high

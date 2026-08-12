@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
+import {
+  BriefCompilerError,
+  type BriefCompiler
+} from "./brief-compiler/brief-compiler";
 import { CallService } from "./call-service";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import type { TelephonyProvider } from "./telephony/telephony-provider";
@@ -10,8 +14,14 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-function createApp() {
-  const service = new CallService(new InMemoryCallRepository());
+function createApp(briefCompiler?: BriefCompiler) {
+  const service = new CallService(
+    new InMemoryCallRepository(),
+    undefined,
+    () => undefined,
+    undefined,
+    briefCompiler
+  );
   const app = buildApp({ service, logger: false });
   apps.push(app);
   return app;
@@ -135,6 +145,61 @@ describe("call API", () => {
 
       expect(response.statusCode).toBe(204);
       expect(response.headers["access-control-allow-origin"]).toBe(origin);
+    }
+  );
+
+  it.each(["PUT", "DELETE"])(
+    "allows browser preflight for %s requests",
+    async (method) => {
+      const app = createApp();
+      const response = await app.inject({
+        method: "OPTIONS",
+        url: "/api/call-briefs/call-id",
+        headers: {
+          origin: "http://localhost:3000",
+          "access-control-request-method": method,
+          "access-control-request-headers": "content-type"
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-methods"]).toContain(method);
+    }
+  );
+
+  it.each([
+    ["OPENAI_REQUEST_FAILED", "BRIEF_COMPILER_UNAVAILABLE", 503],
+    ["OPENAI_RESPONSE_INVALID", "BRIEF_COMPILER_RESPONSE_INVALID", 502]
+  ] as const)(
+    "returns a typed safe error for %s",
+    async (compilerCode, apiCode, statusCode) => {
+      const compiler: BriefCompiler = {
+        model: "test-compiler",
+        async compile() {
+          throw new BriefCompilerError(compilerCode, {
+            responseId: "resp_test",
+            validationPaths: ["orderedQuestions"]
+          });
+        }
+      };
+      const app = createApp(compiler);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/call-briefs",
+        payload: {
+          recipientName: "Elena",
+          phoneNumber: "+41710000001",
+          objective: "Ask Elena which book she likes most",
+          assistantProfileId: "sebastian",
+          assistanceReason: "speech_impairment",
+          locale: "de-CH",
+          allowLanguageSwitch: false,
+          allowedFacts: []
+        }
+      });
+
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toEqual({ error: apiCode });
     }
   );
 

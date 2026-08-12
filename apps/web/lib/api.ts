@@ -8,6 +8,22 @@ import type {
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
+type ValidationIssues = {
+  formErrors?: string[];
+  fieldErrors?: Record<string, string[] | undefined>;
+};
+
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    readonly issues?: ValidationIssues
+  ) {
+    super(code);
+    this.name = "ApiError";
+  }
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !headers.has("Content-Type")) {
@@ -21,12 +37,52 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as
-      | { error?: string }
+      | { error?: string; issues?: ValidationIssues }
       | null;
-    throw new Error(payload?.error ?? `HTTP_${response.status}`);
+    throw new ApiError(
+      payload?.error ?? `HTTP_${response.status}`,
+      response.status,
+      payload?.issues
+    );
   }
 
   return response.json() as Promise<T>;
+}
+
+export function getCallPreparationErrorMessage(error: unknown) {
+  if (!(error instanceof ApiError)) {
+    return "Could not prepare the call. Your entries are preserved. Try again.";
+  }
+
+  if (error.code === "BRIEF_COMPILER_UNAVAILABLE") {
+    return "The AI call planner is temporarily unavailable. Your entries are preserved. Try again.";
+  }
+  if (error.code === "BRIEF_COMPILER_RESPONSE_INVALID") {
+    return "The AI call planner could not produce a valid plan after retrying. Your entries are preserved. Try again.";
+  }
+  if (error.code === "INVALID_CALL_BRIEF") {
+    const firstFieldError = Object.entries(error.issues?.fieldErrors ?? {}).find(
+      ([, messages]) => messages?.length
+    );
+    if (firstFieldError) {
+      const [field, messages] = firstFieldError;
+      return `Check ${humanizeFieldName(field)}: ${messages?.[0]}`;
+    }
+    return "Some call details are invalid. Check the highlighted fields and try again.";
+  }
+  if (error.code === "CALL_NOT_FOUND") {
+    return "This call brief no longer exists. Return to the list and create a new one.";
+  }
+  if (error.code === "CALL_NOT_EDITABLE") {
+    return "This call brief can no longer be edited.";
+  }
+  return "Could not prepare the call. Your entries are preserved. Try again.";
+}
+
+function humanizeFieldName(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (character) => character.toUpperCase());
 }
 
 export async function listCallBriefs() {

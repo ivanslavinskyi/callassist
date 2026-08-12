@@ -6,7 +6,7 @@ import {
   createCallBriefInputSchema,
   type CallEvent
 } from "@callassist/contracts";
-import Fastify from "fastify";
+import Fastify, { type FastifyBaseLogger } from "fastify";
 import { CallServiceError, type CallService } from "./call-service";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import { CallRepositoryError } from "./storage/call-repository";
@@ -39,7 +39,10 @@ export function buildApp({
   const app = Fastify({ logger });
   const webOrigins = resolveWebOrigins(webOrigin);
 
-  void app.register(cors, { origin: webOrigins });
+  void app.register(cors, {
+    origin: webOrigins,
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
+  });
 
   app.get("/health", async (_request, reply) => {
     try {
@@ -69,7 +72,12 @@ export function buildApp({
       });
     }
 
-    return reply.status(201).send(await service.create(parsed.data));
+    try {
+      return reply.status(201).send(await service.create(parsed.data));
+    } catch (error) {
+      logCallPreparationError(request.log, error);
+      return sendRepositoryError(reply, error);
+    }
   });
 
   app.get<{ Params: { id: string } }>(
@@ -94,6 +102,7 @@ export function buildApp({
       try {
         return await service.recompile(request.params.id, parsed.data);
       } catch (error) {
+        logCallPreparationError(request.log, error);
         return sendRepositoryError(reply, error);
       }
     }
@@ -421,7 +430,12 @@ function sendRepositoryError(
   error: unknown
 ) {
   if (error instanceof CallServiceError) {
-    const status = error.code === "RECORDING_NOT_AVAILABLE" ? 409 : 502;
+    const status =
+      error.code === "RECORDING_NOT_AVAILABLE"
+        ? 409
+        : error.code === "BRIEF_COMPILER_UNAVAILABLE"
+          ? 503
+          : 502;
     return reply.status(status).send({ error: error.code });
   }
 
@@ -431,4 +445,18 @@ function sendRepositoryError(
   }
 
   throw error;
+}
+
+function logCallPreparationError(log: FastifyBaseLogger, error: unknown) {
+  if (!(error instanceof CallServiceError) || !error.diagnostic) return;
+  log.warn(
+    {
+      code: error.code,
+      compilerCode: error.diagnostic.compilerCode,
+      responseId: error.diagnostic.responseId,
+      validationPaths: error.diagnostic.validationPaths,
+      upstreamStatusCode: error.diagnostic.statusCode
+    },
+    "Call brief preparation failed"
+  );
 }

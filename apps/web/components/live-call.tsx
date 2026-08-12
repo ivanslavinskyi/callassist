@@ -19,6 +19,7 @@ import {
   approveAndStartCall,
   deleteCallRecording,
   decideApproval,
+  getCallPreparationErrorMessage,
   getCallSnapshot,
   recompileCallBrief,
   retryFinalTranscript,
@@ -162,8 +163,8 @@ export function LiveCall({ callId }: { callId: string }) {
         ]
       });
       setSnapshot(updated);
-    } catch {
-      setError("The clarification could not be saved. Try again.");
+    } catch (error) {
+      setError(getCallPreparationErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -417,7 +418,7 @@ export function LiveCall({ callId }: { callId: string }) {
                   </span>
                   <h2>Post-call transcription</h2>
                   <p className="transcript-subtitle">
-                    Created after the call from the consented dual-channel
+                    Created after the call from the complete consented
                     recording.
                   </p>
                 </div>
@@ -501,15 +502,16 @@ export function LiveCall({ callId }: { callId: string }) {
                     </div>
                   ) : (
                     <div className="legacy-final-transcript">
-                      <strong>Legacy unstructured transcript</strong>
+                      <strong>Full-recording transcript</strong>
                       <p>{finalTranscript.text}</p>
                     </div>
                   )}
                   <small>
-                    Speaker roles come from the separate Twilio audio channels;
-                    the wording comes from post-call speech recognition. It is
-                    independent from the live draft, but remains AI-generated.
-                    Check critical details against the audio.
+                    This wording comes from one complete-recording pass and is
+                    not merged with the live draft. Speaker labels and
+                    timestamps are intentionally not inferred. The result
+                    remains AI-generated; check critical details against the
+                    audio.
                   </small>
                   {recording?.status === "available" ? (
                     <button
@@ -520,9 +522,7 @@ export function LiveCall({ callId }: { callId: string }) {
                       }
                       type="button"
                     >
-                      {finalSegments.length > 0
-                        ? "Regenerate final transcript"
-                        : "Regenerate with speakers and timestamps"}
+                      Regenerate final transcript
                     </button>
                   ) : null}
                 </div>
