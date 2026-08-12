@@ -23,8 +23,9 @@ CallAssist is a privacy-conscious AI voice assistant for controlled outbound pho
 - Starts a dual-channel Twilio recording only after consent is confirmed.
 - Streams a fast draft transcript to the web console over SSE.
 - Creates a context-preserving post-call transcript from the complete consented
-  recording with one `gpt-transcribe` request. It does not mix in the live draft
-  or invent speaker labels and timestamps.
+  recording with one `gpt-transcribe` request. A conservative local aligner can
+  add approximate roles and timestamps from live event metadata without copying
+  live wording; otherwise the UI falls back to canonical plain text.
 - Supports immediate, 7-day, or 30-day audio retention and manual deletion.
 - Keeps the agent within an explicit objective, context, and allow-list of facts.
 - Lets the operator stop an active call and resolve disclosure requests.

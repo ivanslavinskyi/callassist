@@ -497,7 +497,12 @@ export class CallService {
       const result = await this.#postCallTranscriber.transcribe(
         media,
         claimed.snapshot.brief,
-        claimed.snapshot.transcript
+        claimed.snapshot.transcript,
+        {
+          recordingStartedAt: claimed.snapshot.recording?.startedAt ?? null,
+          durationSeconds:
+            claimed.snapshot.recording?.durationSeconds ?? null
+        }
       );
       const completed = await this.repository.completeFinalTranscript(
         recordingId,

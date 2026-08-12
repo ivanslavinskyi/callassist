@@ -493,7 +493,7 @@ export function LiveCall({ callId }: { callId: string }) {
                                     ? brief.recipientName
                                     : "Unassigned speaker"}
                               </strong>
-                              <time>{formatOffset(segment.startSeconds)}</time>
+                              <time>~{formatOffset(segment.startSeconds)}</time>
                             </div>
                             <p>{segment.text}</p>
                           </div>
@@ -507,11 +507,11 @@ export function LiveCall({ callId }: { callId: string }) {
                     </div>
                   )}
                   <small>
-                    This wording comes from one complete-recording pass and is
-                    not merged with the live draft. Speaker labels and
-                    timestamps are intentionally not inferred. The result
-                    remains AI-generated; check critical details against the
-                    audio.
+                    {finalSegments.length > 0
+                      ? "The wording comes only from one complete-recording pass. Roles and approximate timestamps are aligned from the live event scaffold; live draft words are never copied. A ? marks a speaker that could not be assigned safely."
+                      : "The wording comes from one complete-recording pass and is not merged with the live draft. A reliable role/time alignment was not available for this call."}{" "}
+                    The result remains AI-generated; check critical details
+                    against the audio.
                   </small>
                   {recording?.status === "available" ? (
                     <button

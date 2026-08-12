@@ -46,8 +46,8 @@ describe("final transcript export", () => {
     const text = buildFinalTranscriptCopyText(input);
 
     expect(text).toContain("Recipient: Иван Müller");
-    expect(text).toContain("[00:01] Sebastian: Здравствуйте.");
-    expect(text).toContain("[01:05] Иван Müller: Добрый день.");
+    expect(text).toContain("[~00:01] Sebastian: Здравствуйте.");
+    expect(text).toContain("[~01:05] Иван Müller: Добрый день.");
   });
 
   it("preserves a full-recording transcript without invented speaker data", () => {

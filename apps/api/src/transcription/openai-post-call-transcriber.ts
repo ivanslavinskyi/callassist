@@ -4,6 +4,10 @@ import type {
   TranscriptSegment
 } from "@callassist/contracts";
 import type { RecordingMedia } from "../telephony/telephony-provider";
+import {
+  structureFinalTranscript,
+  type FinalTranscriptTiming
+} from "./final-transcript-structure";
 
 const maximumUploadBytes = 25 * 1024 * 1024;
 const maximumPromptCharacters = 6_000;
@@ -22,7 +26,8 @@ export interface PostCallTranscriber {
   transcribe(
     media: RecordingMedia,
     brief: CallBrief,
-    liveTranscript?: TranscriptSegment[]
+    liveTranscript?: TranscriptSegment[],
+    timing?: FinalTranscriptTiming
   ): Promise<PostCallTranscriptionResult>;
 }
 
@@ -68,7 +73,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
   async transcribe(
     media: RecordingMedia,
     brief: CallBrief,
-    _liveTranscript: TranscriptSegment[] = []
+    liveTranscript: TranscriptSegment[] = [],
+    timing?: FinalTranscriptTiming
   ) {
     if (media.bytes.byteLength === 0) {
       throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -122,7 +128,9 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
 
     return {
       text,
-      segments: [],
+      segments: timing
+        ? structureFinalTranscript(text, liveTranscript, timing)
+        : [],
       model: this.model
     };
   }

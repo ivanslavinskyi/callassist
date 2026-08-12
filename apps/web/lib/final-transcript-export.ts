@@ -158,7 +158,7 @@ function transcriptLines(brief: CallBrief, finalTranscript: FinalTranscript) {
   }
   return finalTranscript.segments.map(
     (segment) =>
-      `[${formatTranscriptOffset(segment.startSeconds)}] ${speakerName(brief, segment.role)}: ${segment.text}`
+      `[~${formatTranscriptOffset(segment.startSeconds)}] ${speakerName(brief, segment.role)}: ${segment.text}`
   );
 }
 
@@ -187,7 +187,7 @@ function transcriptTurn(
       {
         columns: [
           {
-            text: formatTranscriptOffset(segment.startSeconds),
+            text: `~${formatTranscriptOffset(segment.startSeconds)}`,
             width: 46,
             color: "#87948f",
             fontSize: 8.5

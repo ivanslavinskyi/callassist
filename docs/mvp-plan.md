@@ -154,14 +154,14 @@ versioned `CompiledCallBrief` is allowed to enter the call runtime.
       over the complete consented recording.
 - [x] Use only bounded compiled context, literal names, explicit call languages, and
       the expected writing system as transcription hints.
-- [x] Keep the live draft and final transcript independent. Never copy, align, or
-      reconcile live wording into the recording-derived final text.
-- [x] Omit speaker labels and timestamps from the final MVP instead of presenting
-      uncertain diarization or inferred roles as fact.
+- [x] Keep live and final wording independent. Use live events only as a deterministic
+      role/time scaffold and never copy their words into the recording-derived text.
+- [x] Publish approximate speaker labels and timestamps only when conservative local
+      alignment succeeds; mark unresolved spans or fall back to canonical plain text.
 - [ ] Add bounded overlapping-window transcription only for recordings that exceed
       the upload limit; keep one request as the normal path.
-- [ ] Benchmark full-call transcription and diarization alternatives on a manually
-      checked multilingual audio corpus before adding structure back to the result.
+- [ ] Benchmark full-call transcription, local alignment, and diarization alternatives
+      on a manually checked multilingual audio corpus.
 - [ ] Measure Realtime understanding separately from live transcript accuracy and
       post-call transcript accuracy.
 - [ ] Test Swiss Standard German, Swiss German dialects, supported languages,

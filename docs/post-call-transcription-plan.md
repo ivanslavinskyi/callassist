@@ -70,8 +70,9 @@ The conversation gate opens only after the `recording` transition.
 The default is deliberately one complete-recording transcription request.
 
 ```text
-consented recording -> gpt-transcribe -> final plain text
-live Realtime events -----------------> separate draft only
+consented recording -> gpt-transcribe -> canonical final wording
+live Realtime events -> conservative role/time scaffold only
+                                      -> structured display or plain-text fallback
 ```
 
 The final request contains:
@@ -82,8 +83,11 @@ The final request contains:
 - a bounded compiled objective, background context, and literal approved terms;
 - strict instructions not to translate, infer, complete, or reconstruct unclear speech.
 
-The result intentionally has no automatic speaker labels or timestamps in this MVP.
-The application does not segment the audio, align text to live turns, replace final
+After transcription, a deterministic local aligner may attach roles and approximate
+timestamps from the already stored live events. It aligns identical normalized words
+monotonically, never copies live wording, and marks an unresolved span as `unknown`.
+If there is too little alignment evidence, the application publishes the canonical
+plain text without roles. It does not segment audio, run another model, replace final
 words with live candidates, or run per-turn retries.
 
 ### Why this path was selected
@@ -101,9 +105,9 @@ One request is also cheaper and operationally simpler than one full-call request
 many segment requests. Removing reconciliation eliminates a class of silent text and
 speaker-corruption failures.
 
-The trade-off is explicit: the final MVP optimises for faithful wording, not automatic
-structure. The live view remains useful for observation, and retained audio remains
-the verification source for critical details.
+The trade-off is explicit: canonical wording takes priority over structure. Roles and
+timecodes are presentation metadata and are labelled approximate; retained audio
+remains the verification source for critical details.
 
 ## Failure and recovery
 
@@ -121,10 +125,11 @@ the verification source for critical details.
 - Prove that recording and recipient forwarding do not begin before DTMF consent.
 - Verify signed, idempotent Twilio recording callbacks and dual-channel capture.
 - Verify exactly one model request for a normal recording.
-- Verify that live draft wording cannot enter the final transcript.
+- Verify that live draft wording cannot enter the final transcript and that joining
+  structured segments reproduces the canonical recording text.
 - Verify prompts contain bounded compiled context and no secrets or raw untrusted text.
 - Test empty, malformed, failed, oversized, retry, and restart-recovery paths.
-- Test UI, clipboard, and PDF output without invented speakers or timestamps.
+- Test structured and plain-text UI, clipboard, and PDF output.
 - Run lint, typecheck, unit/integration tests, build, migrations, and health checks.
 
 ## Deferred quality work
