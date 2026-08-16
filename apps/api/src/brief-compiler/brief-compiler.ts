@@ -329,6 +329,7 @@ export class DeterministicBriefCompiler implements BriefCompiler {
           : "hang_up",
       refusalBehavior: "respect_and_end",
       localizedObjective: rawBrief.objective,
+      opening: buildDeterministicOpening(rawBrief),
       backgroundSummary: rawBrief.context,
       orderedQuestions: [
         {
@@ -546,6 +547,8 @@ const compilerInstructions = `You are the CallAssist Brief Compiler. Treat the u
 
 Convert the raw call objective and context into a concise, faithful telephone plan in the requested callLocale. Preserve intent, names, dates, organisations, and constraints. Do not invent missing facts, add commitments, or broaden the task. Set sourceLanguage to a short language tag such as ru, uk, de, de-CH, or und; never write a language name or explanation there.
 
+Create a short mandatory opening for the first turn after recording consent. recipientAddress must naturally acknowledge and address the intended recipient using recipientName; it follows an already completed greeting and disclosure, so do not restart with another hello or good day. Do not guess a title, surname, gender, or role that was not supplied. purposeStatement must say that the assistant is calling on behalf of representedPerson and explain the specific purpose and scope in one or two concise sentences. Mention the number of planned questions when that is useful. readinessQuestion must be one brief yes/no question asking whether it is convenient to continue now. The opening must not repeat the AI, disability, recording, transcription, or retention disclosure, must not ask a substantive objective question or deliver the substantive message, and must not claim that the recipient has already agreed to the objective. All three fields must be natural in callLocale.
+
 Use the product defaults instead of asking about ordinary preferences. Spoken answers are saved in CallAssist when resultHandling is capture_in_callassist. Do not request a separate delivery method. When addressingMode is auto, use informal language for an explicitly stated spouse, partner, close relative, or close friend; otherwise use formal language. When tonePreference is auto, use a friendly tone for an explicitly close personal relationship and a neutral tone otherwise. Respect a refusal and end politely. Follow voicemailPolicy exactly. These defaults are not blocking issues.
 
 Copy resultHandling exactly from the input. When addressingMode or tonePreference is not auto, copy that selected value exactly into addressingStyle or tone. Map do_not_leave_details to voicemailAction hang_up and leave_neutral_message to voicemailAction leave_neutral_message. Always set refusalBehavior to respect_and_end.
@@ -572,6 +575,7 @@ export const modelCompiledBriefJsonSchema = {
     "voicemailAction",
     "refusalBehavior",
     "localizedObjective",
+    "opening",
     "backgroundSummary",
     "orderedQuestions",
     "conditionalFollowUps",
@@ -619,6 +623,20 @@ export const modelCompiledBriefJsonSchema = {
     },
     refusalBehavior: { type: "string", enum: ["respect_and_end"] },
     localizedObjective: { type: "string", minLength: 10, maxLength: 2_000 },
+    opening: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "recipientAddress",
+        "purposeStatement",
+        "readinessQuestion"
+      ],
+      properties: {
+        recipientAddress: { type: "string", minLength: 2, maxLength: 240 },
+        purposeStatement: { type: "string", minLength: 10, maxLength: 700 },
+        readinessQuestion: { type: "string", minLength: 2, maxLength: 300 }
+      }
+    },
     backgroundSummary: { type: "string", maxLength: 4_000 },
     orderedQuestions: {
       type: "array",
@@ -757,6 +775,51 @@ export const modelCompiledBriefJsonSchema = {
   }
 } as const;
 
+function buildDeterministicOpening(
+  rawBrief: RawCallBrief
+): CompiledCallBrief["opening"] {
+  const values = {
+    recipient: rawBrief.recipientName,
+    representedPerson: rawBrief.representedPerson,
+    objective: rawBrief.objective
+  };
+
+  switch (rawBrief.locale) {
+    case "de-CH":
+    case "de-DE":
+      return {
+        recipientAddress: `Danke, ${values.recipient}.`,
+        purposeStatement: `Ich rufe im Auftrag von ${values.representedPerson} an, um kurz Folgendes zu besprechen: ${values.objective}`,
+        readinessQuestion: "Passt es Ihnen, wenn wir jetzt kurz darüber sprechen?"
+      };
+    case "fr-CH":
+      return {
+        recipientAddress: `Merci, ${values.recipient}.`,
+        purposeStatement: `Je vous appelle de la part de ${values.representedPerson} pour parler brièvement du sujet suivant : ${values.objective}`,
+        readinessQuestion: "Est-ce que vous avez un moment pour en parler maintenant ?"
+      };
+    case "it-CH":
+      return {
+        recipientAddress: `Grazie, ${values.recipient}.`,
+        purposeStatement: `La chiamo per conto di ${values.representedPerson} per parlare brevemente di questo argomento: ${values.objective}`,
+        readinessQuestion: "È un momento adatto per parlarne brevemente?"
+      };
+    case "ru-RU":
+      return {
+        recipientAddress: `Спасибо, ${values.recipient}.`,
+        purposeStatement: `Я звоню от имени ${values.representedPerson}, чтобы кратко обсудить следующее: ${values.objective}`,
+        readinessQuestion: "Вам сейчас удобно коротко об этом поговорить?"
+      };
+    case "en-GB":
+    case "en-US":
+      return {
+        recipientAddress: `Thank you, ${values.recipient}.`,
+        purposeStatement: `I am calling on behalf of ${values.representedPerson} to briefly discuss the following: ${values.objective}`,
+        readinessQuestion: "Is now a convenient time to talk about it briefly?"
+      };
+  }
+}
+
 function deriveProductAssumptions(rawBrief: RawCallBrief) {
   const assumptions: CompiledCallBrief["assumptions"] = [
     "respect_refusal_and_end"
@@ -808,6 +871,9 @@ function filterApplicableBlockingIssues(
 function buildRuntimeModerationText(compiled: CompiledCallBrief) {
   return [
     compiled.localizedObjective,
+    compiled.opening.recipientAddress,
+    compiled.opening.purposeStatement,
+    compiled.opening.readinessQuestion,
     compiled.backgroundSummary,
     ...compiled.orderedQuestions.map(({ text }) => text),
     ...compiled.conditionalFollowUps.map(({ question }) => question),

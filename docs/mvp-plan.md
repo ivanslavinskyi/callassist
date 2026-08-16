@@ -56,6 +56,7 @@ RawCallBrief (any language)
   -> edit/recompile the same versioned brief when needed
   -> explicit approve-and-call action
   -> immutable CompiledCallBrief
+       -> mandatory reviewed opening: recipient, purpose, scope, readiness
        -> Realtime conversation
        -> bounded ASR hints
        -> audit trail and structured call outcome
@@ -148,6 +149,13 @@ versioned `CompiledCallBrief` is allowed to enter the call runtime.
 
 ## 3. Conversation and transcription quality
 
+- [x] Compile a short call-language opening that addresses the recipient, states the
+      specific purpose and scope, and asks whether it is convenient to continue.
+- [x] Enforce `consent -> opening -> readiness -> objective` in Realtime so the first
+      substantive question cannot be bundled into the opening. No extra form field or
+      separate model request is required, and legacy briefs receive a bounded fallback.
+- [x] Show the exact compiled opening in the pre-call review and include it in output
+      moderation before approval.
 - [ ] Add structured call outcomes: `resolved`, `partially_resolved`, `unresolved`,
       `wrong_recipient`, `voicemail`, `declined`, and `technical_failure`.
 - [x] Produce the final wording with one context-preserving `gpt-transcribe` request

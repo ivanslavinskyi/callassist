@@ -2,6 +2,7 @@ import type {
   CallBrief,
   CallLocale,
   CallVoiceGender,
+  CompiledOpening,
   TranscriptSegment
 } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
@@ -60,6 +61,7 @@ type OpenAIEvent = {
 
 type ResponsePurpose =
   | "consent_prompt"
+  | "opening"
   | "conversation"
   | "no_consent"
   | "recording_failure";
@@ -132,6 +134,7 @@ export class OpenAIRealtimeBridge {
     let openAISocket: WebSocket | null = null;
     let callBriefId: string | null = null;
     let currentBrief: CallBrief | null = null;
+    let currentOpening: CompiledOpening | null = null;
     let streamSid: string | null = null;
     let openAIReady = false;
     let consentPromptStarted = false;
@@ -228,8 +231,8 @@ export class OpenAIRealtimeBridge {
       }
       conversationStarted = true;
       createAudioResponse(
-        buildInitialResponseInstructions(currentBrief),
-        "conversation"
+        buildInitialResponseInstructions(currentBrief, currentOpening),
+        "opening"
       );
     };
 
@@ -402,6 +405,7 @@ export class OpenAIRealtimeBridge {
       streamSid = candidateStreamSid;
       const brief = snapshot.brief;
       currentBrief = brief;
+      currentOpening = snapshot.compilation?.compiledBrief?.opening ?? null;
       openAISocket = this.#createOpenAISocket(
         `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#model)}`,
         this.#apiKey
@@ -497,7 +501,7 @@ export class OpenAIRealtimeBridge {
                 content: [
                   {
                     type: "input_text",
-                    text: "[Verified consent: the recipient pressed 1 after hearing the disclosure. Recording started successfully. Begin the exact call objective now.]"
+                    text: "[Verified consent: the recipient pressed 1 after hearing the disclosure. Recording started successfully. Deliver the mandatory call opening now, then wait for the recipient before beginning the objective.]"
                   }
                 ]
               }
@@ -604,11 +608,29 @@ const keypadTranscript: Record<CallLocale, Record<"1" | "2", string>> = {
   "ru-RU": { "1": "Клавиша 1 — Да", "2": "Клавиша 2 — Нет" }
 };
 
-export function buildInitialResponseInstructions(brief: CallBrief) {
-  return `Immediately ask the first concrete question needed for this exact objective:
-${brief.objective}
+export function buildInitialResponseInstructions(
+  brief: CallBrief,
+  opening?: CompiledOpening | null
+) {
+  if (!opening) {
+    return `This legacy brief has no compiled opening. In ${languageNames[brief.locale]}, give one short natural opening that does all of the following in order:
+1. Address ${brief.recipientName} by the supplied name without inventing a title or surname.
+2. Say that you are calling on behalf of ${brief.representedPerson} and explain this exact purpose in one concise sentence: ${brief.objective}
+3. Ask whether now is a convenient time to continue.
 
-Do not thank the recipient for consent and do not add any preamble. Do not announce, summarize, or generically paraphrase the objective. Do not say "the goal of the call is". Do not introduce current tasks, progress, schedules, next steps, blockers, or any other topic absent from the objective. Speak ${languageNames[brief.locale]}.`;
+Do not repeat the AI, disability, recording, transcription, or retention disclosure. Do not begin the first substantive objective step yet. Stop after the readiness question and wait for the recipient.`;
+  }
+
+  const exactOpening = [
+    opening.recipientAddress,
+    opening.purposeStatement,
+    opening.readinessQuestion
+  ].join(" ");
+  return `Read exactly the complete mandatory opening stored in the JSON string below in ${languageNames[brief.locale]}.
+Do not paraphrase, shorten, translate, explain, or add any words before or after it. Do not read the quote marks. Do not repeat the earlier disclosure. Do not begin any substantive objective question or message yet. Stop after the readiness question and wait for the recipient.
+
+Exact opening JSON string:
+${JSON.stringify(exactOpening)}`;
 }
 
 export function buildConsentAnnouncementInstructions(brief: CallBrief) {
@@ -648,13 +670,21 @@ export function buildRealtimeInstructions(brief: CallBrief) {
 
   return `# Role
 You are ${brief.agentName}, an AI phone assistant acting for ${brief.representedPerson}.
-The recipient has not consented yet. Your first explicitly requested response will be the exact AI identity, disability, recording, transcription, and retention disclosure. Before a verified-consent conversation item says that the recipient pressed 1 and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, begin the objective and do not repeat the disclosure unless asked.
+The recipient has not consented yet. Your first explicitly requested response will be the exact AI identity, disability, recording, transcription, and retention disclosure. Before a verified-consent conversation item says that the recipient pressed 1 and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, deliver the mandatory conversation opening before beginning the objective and do not repeat the disclosure unless asked.
 
 # Language
 Speak ${languageNames[brief.locale]} naturally and politely. ${fallback}
 
 # Call objective
 ${brief.objective}
+
+# Mandatory conversation opening
+- The first response after verified consent must address the intended recipient, state the specific purpose and scope of the call, and ask whether now is a convenient time to continue.
+- End that response after the readiness question. Do not include the first substantive objective question or message in the same response.
+- If the recipient says it is convenient, begin the first concrete objective step: ask the first planned question or deliver the planned neutral message.
+- If the recipient says it is not convenient or declines, acknowledge that briefly and end politely without pursuing the objective.
+- If the recipient immediately starts answering the objective instead of explicitly confirming readiness, accept that as willingness to continue and respond naturally.
+- If the opening is interrupted, briefly complete the missing purpose or readiness question before pursuing the objective. Do not repeat parts the recipient already heard.
 
 # Background context
 ${brief.context || "No additional background context was provided."}

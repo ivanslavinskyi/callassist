@@ -35,6 +35,12 @@ const modelOutput = {
   refusalBehavior: "respect_and_end",
   localizedObjective:
     "Klären, ob der am 12. Juli gesendete Antrag eingegangen ist.",
+  opening: {
+    recipientAddress: "Vielen Dank, Gemeinde Aadorf.",
+    purposeStatement:
+      "Ich rufe im Auftrag von Ivan Slavinskyi an, um den Eingang eines am 12. Juli gesendeten Antrags zu klären.",
+    readinessQuestion: "Passt es Ihnen, wenn wir das jetzt kurz besprechen?"
+  },
   backgroundSummary:
     "Der Antrag betrifft die Anmeldung am Wohnort.",
   orderedQuestions: [
@@ -89,6 +95,10 @@ describe("deterministic brief policy", () => {
     expect(result.compiledBrief?.assumptions).toContain(
       "spoken_answers_saved_in_callassist"
     );
+    expect(result.compiledBrief?.opening).toMatchObject({
+      recipientAddress: expect.stringContaining("Gemeinde Aadorf"),
+      readinessQuestion: expect.any(String)
+    });
   });
 
   it("blocks a model that changes the source text of an approved fact", () => {
@@ -212,6 +222,15 @@ describe("OpenAIBriefCompiler", () => {
       voicemailPolicy: "do_not_leave_details"
     });
     expect(body.text.format.schema.required).toContain("blockingIssues");
+    expect(body.text.format.schema.required).toContain("opening");
+    expect(body.text.format.schema.properties.opening).toMatchObject({
+      additionalProperties: false,
+      required: [
+        "recipientAddress",
+        "purposeStatement",
+        "readinessQuestion"
+      ]
+    });
     expect(body.text.format.schema.required).not.toContain(
       "materialAmbiguities"
     );
@@ -222,6 +241,9 @@ describe("OpenAIBriefCompiler", () => {
       minItems: 1,
       maxItems: 12
     });
+    expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain(
+      modelOutput.opening.purposeStatement
+    );
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 

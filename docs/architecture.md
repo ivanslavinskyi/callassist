@@ -62,7 +62,7 @@ validated before any model request. Input moderation runs before compilation.
 
 The OpenAI Responses API converts the raw brief into versioned `CompiledCallBrief`
 Structured Output. It contains the detected source language, localized objective,
-task type, tone, ordered questions, conditional follow-ups, success and unresolved
+task type, tone, a mandatory recipient-and-purpose opening, ordered questions, conditional follow-ups, success and unresolved
 criteria, stop conditions, fact translations, prohibited actions, named entities,
 risk signals, fixed-code blocking issues, and applied product assumptions. The source text of every approved fact must
 round-trip character-for-character and in the same order; otherwise the server blocks
@@ -82,8 +82,9 @@ For a reviewable plan, the server stores an encrypted source/compiled snapshot,
 compiler model and version, policy version, response ID, and SHA-256 snapshot hash.
 Editing or answering a clarification recompiles the same call ID, increments the
 compilation revision, resets approval, and records an audit event containing only
-hashes and version metadata. The operator sees a compact call-language plan; source,
-guardrail, policy, and snapshot metadata remain available under technical details.
+hashes and version metadata. The operator sees a compact call-language plan, including
+the exact opening spoken after consent; source, guardrail, policy, and snapshot metadata
+remain available under technical details.
 The combined approve-and-call action records `approvedAt` before starting Twilio;
 Twilio cannot start from `review_required`, `needs_clarification`, or `blocked`.
 
@@ -99,7 +100,7 @@ compiler only; real evaluation and deployment use the configured OpenAI compiler
 
 The Twilio voice webhook immediately opens a bidirectional Media Stream with call recording disabled. OpenAI Realtime uses the selected voice to disclose the AI identity, represented person, accessibility context, recording purpose, and retention period. Before the recipient presses `1`, the server discards inbound media frames and does not forward them to OpenAI.
 
-After DTMF consent, the API persists the consent timestamp and asks Twilio to start a dual-channel recording of both tracks on the active call. Recipient media remains blocked until Twilio confirms recording startup. Only then does the same Realtime session begin the call objective. A failed recording start produces a same-voice technical notice and terminates the call.
+After DTMF consent, the API persists the consent timestamp and asks Twilio to start a dual-channel recording of both tracks on the active call. Recipient media remains blocked until Twilio confirms recording startup. Only then does the same Realtime session read the approved opening in the same voice: it addresses the intended recipient, states the specific purpose and scope, and asks whether it is convenient to continue. The response stops there. An affirmative answer advances to the first objective question, an immediate substantive answer is treated as willingness to continue, and a refusal ends the call politely. A failed recording start produces a same-voice technical notice and terminates the call.
 
 Twilio sends recording lifecycle events to a signed webhook. A completed callback starts an idempotent post-call transcription job. The API downloads the complete consented media with server-side Twilio credentials and sends it once to the configured OpenAI transcription model. The request includes only bounded compiled context, literal names, the selected call language, any explicitly allowed fallback language, and the expected writing system. The final wording comes only from this recording request; it is never replaced or merged with the live draft. A deterministic local aligner may use already stored live events as a role/time scaffold without copying their words. It emits approximate structured segments only when the evidence is sufficient, marks unresolved spans as `unknown`, and otherwise keeps the canonical result as plain text. Browser audio playback is proxied through the main API so critical details can be checked while the Twilio recording is retained; the media URL and credentials remain server-side.
 
