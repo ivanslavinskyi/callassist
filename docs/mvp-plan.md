@@ -56,6 +56,7 @@ RawCallBrief (any language)
   -> edit/recompile the same versioned brief when needed
   -> explicit approve-and-call action
   -> immutable CompiledCallBrief
+       -> mandatory reviewed opening: recipient, purpose, scope, readiness
        -> Realtime conversation
        -> bounded ASR hints
        -> audit trail and structured call outcome
@@ -148,15 +149,27 @@ versioned `CompiledCallBrief` is allowed to enter the call runtime.
 
 ## 3. Conversation and transcription quality
 
+- [x] Compile a short call-language opening that addresses the recipient, states the
+      specific purpose and scope, and asks whether it is convenient to continue.
+- [x] Enforce `consent -> opening -> readiness -> objective` in Realtime so the first
+      substantive question cannot be bundled into the opening. No extra form field or
+      separate model request is required, and legacy briefs receive a bounded fallback.
+- [x] Show the exact compiled opening in the pre-call review and include it in output
+      moderation before approval.
 - [ ] Add structured call outcomes: `resolved`, `partially_resolved`, `unresolved`,
       `wrong_recipient`, `voicemail`, `declined`, and `technical_failure`.
-- [ ] Add explicit uncertainty to final transcript turns instead of presenting every
-      ASR result as equally reliable.
-- [ ] Validate final ASR output against the selected language and retry suspicious
-      turns with a call-language-only prompt and a longer audio context.
-- [ ] Benchmark isolated turns, overlapping context windows, full per-speaker channels,
-      and alternative transcription models on the same evaluation corpus.
-- [ ] Preserve short legitimate answers while ignoring empty/noise-only segments.
+- [x] Produce the final wording with one context-preserving `gpt-transcribe` request
+      over the complete consented recording.
+- [x] Use only bounded compiled context, literal names, explicit call languages, and
+      the expected writing system as transcription hints.
+- [x] Keep live and final wording independent. Use live events only as a deterministic
+      role/time scaffold and never copy their words into the recording-derived text.
+- [x] Publish approximate speaker labels and timestamps only when conservative local
+      alignment succeeds; mark unresolved spans or fall back to canonical plain text.
+- [ ] Add bounded overlapping-window transcription only for recordings that exceed
+      the upload limit; keep one request as the normal path.
+- [ ] Benchmark full-call transcription, local alignment, and diarization alternatives
+      on a manually checked multilingual audio corpus.
 - [ ] Measure Realtime understanding separately from live transcript accuracy and
       post-call transcript accuracy.
 - [ ] Test Swiss Standard German, Swiss German dialects, supported languages,
@@ -164,6 +177,9 @@ versioned `CompiledCallBrief` is allowed to enter the call runtime.
 - [ ] Add an operator-visible uncertain state and direct audio verification for
       critical details such as names, dates, amounts, addresses, and commitments.
 - [ ] Add regression tests that ensure source-language text cannot bias ASR output.
+
+The decision and deferred test matrix are recorded in
+[the post-call transcription plan](./post-call-transcription-plan.md#stable-mvp-transcription-decision).
 
 ## 4. Accounts, data ownership, and abuse prevention
 

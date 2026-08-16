@@ -46,11 +46,11 @@ describe("final transcript export", () => {
     const text = buildFinalTranscriptCopyText(input);
 
     expect(text).toContain("Recipient: Иван Müller");
-    expect(text).toContain("[00:01] Sebastian: Здравствуйте.");
-    expect(text).toContain("[01:05] Иван Müller: Добрый день.");
+    expect(text).toContain("[~00:01] Sebastian: Здравствуйте.");
+    expect(text).toContain("[~01:05] Иван Müller: Добрый день.");
   });
 
-  it("preserves a legacy transcript without speaker data", () => {
+  it("preserves a full-recording transcript without invented speaker data", () => {
     const text = buildFinalTranscriptCopyText({
       ...input,
       finalTranscript: {
@@ -60,9 +60,8 @@ describe("final transcript export", () => {
       }
     });
 
-    expect(text).toContain(
-      "[00:00] Unassigned speaker: Legacy transcript text"
-    );
+    expect(text).toContain("\n\nLegacy transcript text");
+    expect(text).not.toContain("Unassigned speaker");
   });
 
   it("builds a searchable Unicode PDF definition", () => {

@@ -12,7 +12,10 @@ import {
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { useMemo, useState, type FormEvent } from "react";
-import { createCallBrief } from "@/lib/api";
+import {
+  createCallBrief,
+  getCallPreparationErrorMessage
+} from "@/lib/api";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -104,8 +107,8 @@ export function CreateCallForm({
           .filter(Boolean)
       });
       onCreated(brief);
-    } catch {
-      setError("Could not prepare the call. Check the fields and try again.");
+    } catch (error) {
+      setError(getCallPreparationErrorMessage(error));
     } finally {
       setSubmitting(false);
     }

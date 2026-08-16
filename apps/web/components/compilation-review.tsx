@@ -51,6 +51,17 @@ export function CompilationReview({
             </span>
           </div>
 
+          {compiled.opening ? (
+            <div className="review-opening">
+              <span>How the assistant will open the call</span>
+              <p>
+                {compiled.opening.recipientAddress}{" "}
+                {compiled.opening.purposeStatement}{" "}
+                {compiled.opening.readinessQuestion}
+              </p>
+            </div>
+          ) : null}
+
           <div className="review-questions">
             <span>What the assistant will ask or say</span>
             <ol>

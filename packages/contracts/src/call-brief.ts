@@ -287,8 +287,8 @@ export type NormalizedCallBriefInput = ReturnType<
   typeof normalizeCreateCallBriefInput
 >;
 
-export const CALL_BRIEF_SCHEMA_VERSION = "2" as const;
-export const BRIEF_COMPILER_VERSION = "brief-compiler-2" as const;
+export const CALL_BRIEF_SCHEMA_VERSION = "3" as const;
+export const BRIEF_COMPILER_VERSION = "brief-compiler-3" as const;
 export const CALL_POLICY_VERSION = "callassist-policy-2" as const;
 
 export const callTaskTypeSchema = z.enum([
@@ -338,6 +338,13 @@ export const compiledFollowUpSchema = z.object({
 });
 export type CompiledFollowUp = z.infer<typeof compiledFollowUpSchema>;
 
+export const compiledOpeningSchema = z.object({
+  recipientAddress: z.string().trim().min(2).max(240),
+  purposeStatement: z.string().trim().min(10).max(700),
+  readinessQuestion: z.string().trim().min(2).max(300)
+});
+export type CompiledOpening = z.infer<typeof compiledOpeningSchema>;
+
 export const compiledNamedEntitySchema = z.object({
   type: z.enum([
     "person",
@@ -380,6 +387,7 @@ export const compiledCallBriefSchema = z.object({
   voicemailAction: z.enum(["hang_up", "leave_neutral_message"]),
   refusalBehavior: z.literal("respect_and_end"),
   localizedObjective: z.string().trim().min(10).max(2_000),
+  opening: compiledOpeningSchema,
   backgroundSummary: z.string().trim().max(4_000),
   orderedQuestions: z.array(compiledQuestionSchema).min(1).max(12),
   conditionalFollowUps: z.array(compiledFollowUpSchema).max(12),

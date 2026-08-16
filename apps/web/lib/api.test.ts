@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ApiError,
   approveAndStartCall,
   createCallBrief,
+  getCallPreparationErrorMessage,
   recompileCallBrief,
   startCall
 } from "./api";
@@ -87,5 +89,44 @@ describe("API client headers", () => {
         "Content-Type"
       )
     ).toBe(false);
+  });
+
+  it("preserves typed API errors and maps call-planner failures to actionable copy", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: "BRIEF_COMPILER_RESPONSE_INVALID" }),
+        {
+          status: 502,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    let caught: unknown;
+    try {
+      await createCallBrief({
+        recipientName: "Elena",
+        phoneNumber: "+41710000001",
+        objective: "Ask Elena which book she likes most",
+        assistantProfileId: "sebastian",
+        assistanceReason: "speech_impairment",
+        locale: "de-CH",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({
+      code: "BRIEF_COMPILER_RESPONSE_INVALID",
+      status: 502
+    });
+    expect(getCallPreparationErrorMessage(caught)).toContain("after retrying");
+    expect(getCallPreparationErrorMessage(caught)).toContain(
+      "entries are preserved"
+    );
   });
 });

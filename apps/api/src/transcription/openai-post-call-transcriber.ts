@@ -5,17 +5,15 @@ import type {
 } from "@callassist/contracts";
 import type { RecordingMedia } from "../telephony/telephony-provider";
 import {
-  FfmpegRecordingAudioSegmenter,
-  type ChannelAudioSegment,
-  type RecordingAudioSegmenter
-} from "./ffmpeg-audio-segmenter";
+  structureFinalTranscript,
+  type FinalTranscriptTiming
+} from "./final-transcript-structure";
 
 const maximumUploadBytes = 25 * 1024 * 1024;
-const maximumPromptCharacters = 3_000;
+const maximumPromptCharacters = 6_000;
 const maximumContextCharacters = 1_500;
 const maximumKeywords = 24;
 const maximumKeywordCharacters = 80;
-const transcriptionConcurrency = 4;
 
 export type PostCallTranscriptionResult = {
   text: string;
@@ -28,7 +26,8 @@ export interface PostCallTranscriber {
   transcribe(
     media: RecordingMedia,
     brief: CallBrief,
-    liveTranscript?: TranscriptSegment[]
+    liveTranscript?: TranscriptSegment[],
+    timing?: FinalTranscriptTiming
   ): Promise<PostCallTranscriptionResult>;
 }
 
@@ -37,7 +36,6 @@ export class PostCallTranscriptionError extends Error {
     readonly code:
       | "AUDIO_EMPTY"
       | "AUDIO_TOO_LARGE"
-      | "AUDIO_SEGMENTATION_FAILED"
       | "OPENAI_REQUEST_FAILED"
       | "OPENAI_RESPONSE_INVALID",
     options?: { cause?: unknown }
@@ -53,7 +51,6 @@ type OpenAIPostCallTranscriberOptions = {
   endpoint?: string;
   timeoutMs?: number;
   fetchImplementation?: typeof fetch;
-  audioSegmenter?: RecordingAudioSegmenter;
 };
 
 export class OpenAIPostCallTranscriber implements PostCallTranscriber {
@@ -62,7 +59,6 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
   readonly #endpoint: string;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
-  readonly #audioSegmenter: RecordingAudioSegmenter;
 
   constructor(options: OpenAIPostCallTranscriberOptions) {
     this.#apiKey = options.apiKey;
@@ -70,16 +66,15 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     this.#endpoint =
       options.endpoint?.trim() ||
       "https://api.openai.com/v1/audio/transcriptions";
-    this.#timeoutMs = options.timeoutMs ?? 120_000;
+    this.#timeoutMs = options.timeoutMs ?? 180_000;
     this.#fetch = options.fetchImplementation ?? fetch;
-    this.#audioSegmenter =
-      options.audioSegmenter ?? new FfmpegRecordingAudioSegmenter();
   }
 
   async transcribe(
     media: RecordingMedia,
     brief: CallBrief,
-    liveTranscript: TranscriptSegment[] = []
+    liveTranscript: TranscriptSegment[] = [],
+    timing?: FinalTranscriptTiming
   ) {
     if (media.bytes.byteLength === 0) {
       throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -88,55 +83,12 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
       throw new PostCallTranscriptionError("AUDIO_TOO_LARGE");
     }
 
-    let audioSegments: ChannelAudioSegment[];
-    try {
-      audioSegments = await this.#audioSegmenter.segment(media);
-    } catch (error) {
-      throw new PostCallTranscriptionError("AUDIO_SEGMENTATION_FAILED", {
-        cause: error
-      });
-    }
-    if (audioSegments.length === 0) {
-      throw new PostCallTranscriptionError("AUDIO_EMPTY");
-    }
-
-    const transcribed = (
-      await mapConcurrent(
-        audioSegments,
-        transcriptionConcurrency,
-        async (segment) => ({
-          ...segment,
-          text: await this.#transcribeSegment(segment, brief)
-        })
-      )
-    ).filter(hasTranscribedText);
-    if (transcribed.length === 0) {
-      throw new PostCallTranscriptionError("AUDIO_EMPTY");
-    }
-    const roles = assignChannelRoles(transcribed, liveTranscript);
-    const segments = transcribed
-      .map<FinalTranscriptSegment>((segment) => ({
-        role: roles.get(segment.channel) ?? "unknown",
-        text: segment.text,
-        startSeconds: segment.startSeconds,
-        endSeconds: segment.endSeconds
-      }))
-      .sort((left, right) => left.startSeconds - right.startSeconds);
-
-    return {
-      text: segments.map((segment) => segment.text).join(" "),
-      segments,
-      model: this.model
-    };
-  }
-
-  async #transcribeSegment(segment: ChannelAudioSegment, brief: CallBrief) {
     const form = new FormData();
-    const bytes = new Uint8Array(segment.bytes).buffer;
+    const bytes = new Uint8Array(media.bytes).buffer;
     form.append(
       "file",
-      new Blob([bytes], { type: segment.contentType }),
-      segment.fileName
+      new Blob([bytes], { type: media.contentType }),
+      media.fileName
     );
     form.append("model", this.model);
     form.append("prompt", buildPostCallTranscriptionPrompt(brief));
@@ -171,85 +123,32 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     if (!payload || typeof payload.text !== "string") {
       throw new PostCallTranscriptionError("OPENAI_RESPONSE_INVALID");
     }
-    return payload.text.trim() || null;
+    const text = payload.text.trim();
+    if (!text) throw new PostCallTranscriptionError("AUDIO_EMPTY");
+
+    return {
+      text,
+      segments: timing
+        ? structureFinalTranscript(text, liveTranscript, timing)
+        : [],
+      model: this.model
+    };
   }
-}
-
-function hasTranscribedText(
-  segment: ChannelAudioSegment & { text: string | null }
-): segment is ChannelAudioSegment & { text: string } {
-  return segment.text !== null;
-}
-
-export function assignChannelRoles(
-  segments: Array<Pick<ChannelAudioSegment, "channel"> & { text: string }>,
-  liveTranscript: TranscriptSegment[]
-) {
-  const channels = [...new Set(segments.map((segment) => segment.channel))];
-  const roles = new Map<number, FinalTranscriptSegment["role"]>();
-  if (channels.length !== 2) {
-    for (const channel of channels) roles.set(channel, "unknown");
-    return roles;
-  }
-
-  const textByChannel = new Map(
-    channels.map((channel) => [
-      channel,
-      segments
-        .filter((segment) => segment.channel === channel)
-        .map((segment) => segment.text)
-        .join(" ")
-    ])
-  );
-  const liveAssistant = liveTranscript
-    .filter((segment) => segment.role === "assistant" && segment.final)
-    .map((segment) => segment.text)
-    .join(" ");
-  const liveRecipient = liveTranscript
-    .filter((segment) => segment.role === "recipient" && segment.final)
-    .map((segment) => segment.text)
-    .join(" ");
-  const [first, second] = channels;
-  const directScore =
-    textSimilarity(textByChannel.get(first) ?? "", liveAssistant) +
-    textSimilarity(textByChannel.get(second) ?? "", liveRecipient);
-  const swappedScore =
-    textSimilarity(textByChannel.get(second) ?? "", liveAssistant) +
-    textSimilarity(textByChannel.get(first) ?? "", liveRecipient);
-  const assistantChannel =
-    directScore === swappedScore
-      ? [...channels].sort(
-          (left, right) =>
-            (textByChannel.get(right)?.length ?? 0) -
-            (textByChannel.get(left)?.length ?? 0)
-        )[0]
-      : directScore > swappedScore
-        ? first
-        : second;
-  roles.set(assistantChannel, "assistant");
-  roles.set(
-    channels.find((channel) => channel !== assistantChannel)!,
-    "recipient"
-  );
-  return roles;
 }
 
 export function buildPostCallTranscriptionPrompt(brief: CallBrief) {
-  const fallback = brief.allowLanguageSwitch
-    ? ` A fallback language may be ${brief.fallbackLocale}.`
-    : "";
-  const context = brief.context
-    .replace(/[<>\r\n]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, maximumContextCharacters);
+  const context = sanitizePromptText(brief.context, maximumContextCharacters);
   const prompt = [
-    "This is one isolated speaker turn from a telephone call. Transcribe only speech that is audible. Do not add, infer, complete, or summarise anything from the metadata below. Use it only to spell words that were actually spoken.",
-    `Telephone call in ${brief.locale}.${fallback}`,
-    `AI assistant: ${brief.agentName}.`,
-    `Represented person: ${brief.representedPerson}.`,
-    `Recipient or organisation: ${brief.recipientName}.`,
-    `Call objective: ${brief.objective}.`,
+    "This audio is the complete consented recording of one telephone conversation. Transcribe every audible utterance faithfully and in chronological order.",
+    "Do not translate, add, infer, reconstruct, complete, or summarise unclear speech. Omit speech that is not intelligible.",
+    languageInstruction(brief),
+    `Use ${preferredWritingSystem(brief)}. Do not render speech phonetically in another alphabet.`,
+    "Preserve short replies, questions, names, dates, and numbers exactly as spoken.",
+    "The metadata below is spelling context only and is not proof that a word was spoken.",
+    `AI assistant: ${sanitizePromptText(brief.agentName, 160)}.`,
+    `Represented person: ${sanitizePromptText(brief.representedPerson, 160)}.`,
+    `Recipient or organisation: ${sanitizePromptText(brief.recipientName, 160)}.`,
+    `Call objective: ${sanitizePromptText(brief.objective, 2_000)}.`,
     context ? `Background context: ${context}` : ""
   ]
     .filter(Boolean)
@@ -267,12 +166,8 @@ export function buildPostCallTranscriptionKeywords(brief: CallBrief) {
   const seen = new Set<string>();
   const keywords: string[] = [];
   for (const candidate of candidates) {
-    const keyword = candidate
-      .replace(/[<>\r\n]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, maximumKeywordCharacters);
-    const normalized = keyword.toLocaleLowerCase("en");
+    const keyword = sanitizePromptText(candidate, maximumKeywordCharacters);
+    const normalized = keyword.toLocaleLowerCase("und");
     if (!keyword || seen.has(normalized)) continue;
     seen.add(normalized);
     keywords.push(keyword);
@@ -289,42 +184,33 @@ export function buildPostCallTranscriptionLanguages(brief: CallBrief) {
   return [...new Set(languages)];
 }
 
-function textSimilarity(left: string, right: string) {
-  const leftTokens = new Set(tokenize(left));
-  const rightTokens = new Set(tokenize(right));
-  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
-  let intersection = 0;
-  for (const token of leftTokens) {
-    if (rightTokens.has(token)) intersection += 1;
+function languageInstruction(brief: CallBrief) {
+  if (brief.allowLanguageSwitch && brief.fallbackLocale) {
+    return `The primary call language is ${brief.locale}. The only permitted fallback language is ${brief.fallbackLocale}.`;
   }
-  return (2 * intersection) / (leftTokens.size + rightTokens.size);
+  return `The call language is ${brief.locale}. No language switch is permitted.`;
 }
 
-function tokenize(value: string) {
-  return value
-    .normalize("NFKD")
-    .toLocaleLowerCase("de")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .split(/\s+/)
-    .filter((token) => token.length > 1);
-}
-
-async function mapConcurrent<Input, Output>(
-  items: Input[],
-  concurrency: number,
-  operation: (item: Input) => Promise<Output>
-) {
-  const results = new Array<Output>(items.length);
-  let nextIndex = 0;
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex++;
-        results[index] = await operation(items[index]);
-      }
-    }
+function preferredWritingSystem(brief: CallBrief) {
+  const languages = buildPostCallTranscriptionLanguages(brief);
+  const usesLatin = languages.some((language) =>
+    ["de", "en", "fr", "it"].includes(language)
   );
-  await Promise.all(workers);
-  return results;
+  const usesCyrillic = languages.some((language) =>
+    ["ru", "uk"].includes(language)
+  );
+  if (usesLatin && usesCyrillic) {
+    return "the conventional Latin or Cyrillic writing system of the language actually spoken";
+  }
+  if (usesCyrillic) return "the Cyrillic alphabet";
+  if (usesLatin) return "the Latin alphabet";
+  return "the conventional writing system of the selected call language";
+}
+
+function sanitizePromptText(value: string, maximum: number) {
+  return value
+    .replace(/[<>\r\n]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maximum);
 }

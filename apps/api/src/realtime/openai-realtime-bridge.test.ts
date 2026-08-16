@@ -42,6 +42,10 @@ describe("buildRealtimeInstructions", () => {
     expect(prompt).toContain("Do not switch to another language");
     expect(prompt).toContain("Only if the repeated answer is still unclear");
     expect(prompt).toContain("something was bought does not confirm that it was sent");
+    expect(prompt).toContain("# Mandatory conversation opening");
+    expect(prompt).toContain(
+      "Do not include the first substantive objective question or message"
+    );
   });
 
   it("instructs the realtime model to speak Russian", () => {
@@ -51,20 +55,36 @@ describe("buildRealtimeInstructions", () => {
 });
 
 describe("buildInitialResponseInstructions", () => {
-  it("anchors the first turn to the exact objective and forbids generic filler", () => {
+  it("reads the compiled opening exactly and waits before the first objective question", () => {
     const objective =
       "Уточнить, купил ли Иван билеты жене и детям для поездки в Констанс";
+    const opening = {
+      recipientAddress: "Спасибо, Елена.",
+      purposeStatement:
+        "Я звоню от имени Ивана Славинского, чтобы уточнить вопрос о билетах для поездки в Констанс.",
+      readinessQuestion: "Вам сейчас удобно коротко поговорить?"
+    };
     const prompt = buildInitialResponseInstructions({
       ...brief,
       locale: "ru-RU",
       objective
-    });
+    }, opening);
 
-    expect(prompt).toContain(objective);
-    expect(prompt).toContain("Do not thank the recipient for consent");
-    expect(prompt).toContain("Do not announce, summarize, or generically paraphrase");
-    expect(prompt).toContain("Do not introduce current tasks");
-    expect(prompt).toContain("Speak Russian");
+    expect(prompt).toContain(JSON.stringify(Object.values(opening).join(" ")));
+    expect(prompt).toContain(
+      "Do not begin any substantive objective question or message yet"
+    );
+    expect(prompt).toContain("wait for the recipient");
+    expect(prompt).not.toContain("Immediately ask");
+  });
+
+  it("provides a bounded opening fallback for legacy briefs", () => {
+    const prompt = buildInitialResponseInstructions(brief, null);
+
+    expect(prompt).toContain(brief.recipientName);
+    expect(prompt).toContain(brief.representedPerson);
+    expect(prompt).toContain(brief.objective);
+    expect(prompt).toContain("Do not begin the first substantive objective step yet");
   });
 });
 
@@ -238,6 +258,9 @@ describe("OpenAIRealtimeBridge", () => {
         instructions: expect.stringContaining(brief.objective)
       }
     });
+    expect(JSON.stringify(openAISocket.sent)).toContain(
+      "Do not begin any substantive objective question or message yet"
+    );
     twilioSocket.emit(
       "message",
       Buffer.from(

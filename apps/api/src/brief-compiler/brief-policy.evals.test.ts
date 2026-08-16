@@ -247,6 +247,11 @@ function buildCompiledBrief(
     voicemailAction: "hang_up",
     refusalBehavior: "respect_and_end",
     localizedObjective: `Localized plan: ${testCase.objective}`,
+    opening: {
+      recipientAddress: `Thank you, ${raw.recipientName}.`,
+      purposeStatement: `I am calling on behalf of ${raw.representedPerson} about the prepared call plan.`,
+      readinessQuestion: "Is now a convenient time to continue?"
+    },
     backgroundSummary: "",
     orderedQuestions: [
       {
