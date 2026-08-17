@@ -245,11 +245,18 @@ describe("OpenAIBriefCompiler", () => {
       modelOutput.opening.purposeStatement
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(
+        new Headers(init?.headers).get("X-Client-Request-Id")
+      ).toMatch(/^[0-9a-f-]{36}$/);
+    }
   });
 
-  it("uses one total timeout budget and does not retry a timed-out request", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
-      async (_input, init) =>
+  it("retries a timed-out request while the total compilation budget remains", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(
+        async (_input, init) =>
         new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal;
           signal?.addEventListener(
@@ -258,17 +265,33 @@ describe("OpenAIBriefCompiler", () => {
             { once: true }
           );
         })
-    );
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ output_text: JSON.stringify(modelOutput) }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      );
 
-    await expect(
-      new OpenAIBriefCompiler({
-        apiKey: "test-key",
-        timeoutMs: 10,
-        fetchImplementation: fetchMock
-      }).compile(normalizeCreateCallBriefInput(rawInput))
-    ).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    const result = await new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      timeoutMs: 200,
+      requestTimeoutMs: 10,
+      fetchImplementation: fetchMock
+    }).compile(normalizeCreateCallBriefInput(rawInput));
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.policyDecision.status).toBe("ready_for_review");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(fetchMock.mock.calls[1]?.[0]);
   });
 
   it("retries once with validation feedback when model output violates the local schema", async () => {

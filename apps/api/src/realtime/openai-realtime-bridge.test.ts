@@ -123,7 +123,7 @@ class FakeSocket extends EventEmitter {
 }
 
 describe("OpenAIRealtimeBridge", () => {
-  it("bridges PCMU audio and persists both finalized transcripts", async () => {
+  it("plays the mandatory opening before accepting audio and persists finalized transcripts", async () => {
     const service = new CallService(new InMemoryCallRepository());
     const created = await service.create({
       recipientName: brief.recipientName,
@@ -264,6 +264,45 @@ describe("OpenAIRealtimeBridge", () => {
     twilioSocket.emit(
       "message",
       Buffer.from(
+        JSON.stringify({ event: "media", media: { payload: "during-opening" } })
+      )
+    );
+    expect(openAISocket.sent).not.toContainEqual({
+      type: "input_audio_buffer.append",
+      audio: "during-opening"
+    });
+
+    openAISocket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "response.done" }))
+    );
+    expect(twilioSocket.sent).toContainEqual({
+      event: "mark",
+      streamSid: "MZ123",
+      mark: { name: "callassist-opening-complete" }
+    });
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({ event: "media", media: { payload: "before-opening-mark" } })
+      )
+    );
+    expect(openAISocket.sent).not.toContainEqual({
+      type: "input_audio_buffer.append",
+      audio: "before-opening-mark"
+    });
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          event: "mark",
+          mark: { name: "callassist-opening-complete" }
+        })
+      )
+    );
+    twilioSocket.emit(
+      "message",
+      Buffer.from(
         JSON.stringify({ event: "media", media: { payload: "audio-in" } })
       )
     );
@@ -271,11 +310,6 @@ describe("OpenAIRealtimeBridge", () => {
       type: "input_audio_buffer.append",
       audio: "audio-in"
     });
-
-    openAISocket.emit(
-      "message",
-      Buffer.from(JSON.stringify({ type: "response.done" }))
-    );
     twilioSocket.emit(
       "message",
       Buffer.from(

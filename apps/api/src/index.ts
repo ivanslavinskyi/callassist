@@ -97,6 +97,10 @@ function createBriefCompiler() {
       timeoutMs: parsePositiveInteger(
         process.env.OPENAI_BRIEF_COMPILER_TIMEOUT_MS,
         "OPENAI_BRIEF_COMPILER_TIMEOUT_MS"
+      ),
+      requestTimeoutMs: parsePositiveInteger(
+        process.env.OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS,
+        "OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS"
       )
     });
   }

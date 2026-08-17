@@ -35,8 +35,10 @@ export class CallServiceError extends Error {
   readonly diagnostic: {
     compilerCode: BriefCompilerError["code"];
     responseId: string | null;
+    clientRequestId: string | null;
     validationPaths: string[];
     statusCode: number | null;
+    stage: BriefCompilerError["stage"];
   } | null;
 
   constructor(
@@ -639,8 +641,10 @@ function mapBriefCompilerError(error: BriefCompilerError) {
       diagnostic: {
         compilerCode: error.code,
         responseId: error.responseId,
+        clientRequestId: error.clientRequestId,
         validationPaths: error.validationPaths,
-        statusCode: error.statusCode
+        statusCode: error.statusCode,
+        stage: error.stage
       }
     }
   );

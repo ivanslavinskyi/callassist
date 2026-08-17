@@ -82,6 +82,7 @@ export const DEFAULT_REALTIME_VOICES: Record<CallVoiceGender, string> = {
 };
 
 const consentPromptMark = "callassist-consent-prompt-complete";
+const openingMark = "callassist-opening-complete";
 const noConsentMark = "callassist-no-consent-complete";
 const recordingFailureMark = "callassist-recording-failure-complete";
 
@@ -141,6 +142,7 @@ export class OpenAIRealtimeBridge {
     let consentStarting = false;
     let consentGranted = false;
     let conversationStarted = false;
+    let openingPlaybackComplete = false;
     let responseActive = false;
     let activeResponsePurpose: ResponsePurpose | null = null;
     let startConversationAfterResponse = false;
@@ -292,6 +294,8 @@ export class OpenAIRealtimeBridge {
           } else if (pendingKeypadResponse && consentGranted) {
             pendingKeypadResponse = false;
             createAudioResponse(keypadResponseInstructions);
+          } else if (completedPurpose === "opening") {
+            sendPlaybackMark(openingMark);
           } else if (
             completedPurpose === "consent_prompt" &&
             !consentStarting &&
@@ -320,7 +324,7 @@ export class OpenAIRealtimeBridge {
           }
           break;
         case "input_audio_buffer.speech_started":
-          if (consentGranted && streamSid) {
+          if (consentGranted && openingPlaybackComplete && streamSid) {
             sendTwilio({ event: "clear", streamSid });
           }
           break;
@@ -465,7 +469,7 @@ export class OpenAIRealtimeBridge {
       if (message.event === "start" && !openAISocket) {
         void connectOpenAI(message).catch(() => close());
       } else if (message.event === "media" && message.media?.payload) {
-        if (openAIReady && consentGranted) {
+        if (openAIReady && consentGranted && openingPlaybackComplete) {
           sendOpenAI({
             type: "input_audio_buffer.append",
             audio: message.media.payload
@@ -531,6 +535,7 @@ export class OpenAIRealtimeBridge {
         openAIReady &&
         conversationStarted &&
         consentGranted &&
+        openingPlaybackComplete &&
         currentBrief &&
         (message.dtmf?.digit === "1" || message.dtmf?.digit === "2")
       ) {
@@ -569,6 +574,8 @@ export class OpenAIRealtimeBridge {
           !consentGranted
         ) {
           scheduleConsentTimeout(this.#consentTimeoutMs);
+        } else if (message.mark.name === openingMark && consentGranted) {
+          openingPlaybackComplete = true;
         } else if (message.mark.name === noConsentMark && !consentGranted) {
           close();
         } else if (message.mark.name === recordingFailureMark) {
