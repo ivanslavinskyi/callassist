@@ -454,6 +454,8 @@ function logCallPreparationError(log: FastifyBaseLogger, error: unknown) {
       code: error.code,
       compilerCode: error.diagnostic.compilerCode,
       responseId: error.diagnostic.responseId,
+      clientRequestId: error.diagnostic.clientRequestId,
+      compilerStage: error.diagnostic.stage,
       validationPaths: error.diagnostic.validationPaths,
       upstreamStatusCode: error.diagnostic.statusCode
     },

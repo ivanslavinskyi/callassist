@@ -107,7 +107,7 @@ Twilio sends recording lifecycle events to a signed webhook. A completed callbac
 The complete decision, constraints, and deferred improvements are documented in
 [the post-call transcription plan](./post-call-transcription-plan.md#stable-mvp-transcription-decision).
 
-The main API listens on port `4000`. In Twilio mode, a separate Fastify listener on `127.0.0.1:4001` exposes only voice/status webhooks and the Media Stream WebSocket. It does not expose `/api/*`, SSE, or a health endpoint. HTTP and WebSocket requests require valid Twilio signatures, and the stream also requires a call-scoped HMAC token.
+The main API listens on port `4000`. In Twilio mode, a separate Fastify listener on `127.0.0.1:4001` exposes only voice/status webhooks and the Media Stream WebSocket. It does not expose `/api/*`, SSE, or a health endpoint. HTTP and WebSocket requests require valid Twilio signatures, and the stream also requires a call-scoped HMAC token. After consent, recipient audio remains gated until Twilio confirms that the complete mandatory opening has played; normal interruption is enabled for the rest of the conversation.
 
 Production should preserve this boundary with a dedicated ingress route or service rather than exposing the main API.
 

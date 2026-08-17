@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   BRIEF_COMPILER_VERSION,
   CALL_BRIEF_SCHEMA_VERSION,
@@ -15,6 +15,13 @@ import {
 const defaultCompilerModel = "gpt-5.6";
 const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
 const defaultModerationEndpoint = "https://api.openai.com/v1/moderations";
+const defaultCompilationTimeoutMs = 90_000;
+const defaultRequestTimeoutMs = 25_000;
+
+type BriefCompilerStage =
+  | "input_moderation"
+  | "compilation"
+  | "output_moderation";
 
 export interface BriefCompiler {
   readonly model: string;
@@ -26,8 +33,10 @@ export interface BriefCompiler {
 
 export class BriefCompilerError extends Error {
   readonly responseId: string | null;
+  readonly clientRequestId: string | null;
   readonly validationPaths: string[];
   readonly statusCode: number | null;
+  readonly stage: BriefCompilerStage | null;
 
   constructor(
     readonly code:
@@ -36,15 +45,19 @@ export class BriefCompilerError extends Error {
     options?: {
       cause?: unknown;
       responseId?: string | null;
+      clientRequestId?: string | null;
       validationPaths?: string[];
       statusCode?: number | null;
+      stage?: BriefCompilerStage | null;
     }
   ) {
     super(code, options);
     this.name = "BriefCompilerError";
     this.responseId = options?.responseId ?? null;
+    this.clientRequestId = options?.clientRequestId ?? null;
     this.validationPaths = options?.validationPaths ?? [];
     this.statusCode = options?.statusCode ?? null;
+    this.stage = options?.stage ?? null;
   }
 }
 
@@ -54,6 +67,7 @@ type OpenAIBriefCompilerOptions = {
   responsesEndpoint?: string;
   moderationEndpoint?: string;
   timeoutMs?: number;
+  requestTimeoutMs?: number;
   fetchImplementation?: typeof fetch;
 };
 
@@ -76,6 +90,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
   readonly #responsesEndpoint: string;
   readonly #moderationEndpoint: string;
   readonly #timeoutMs: number;
+  readonly #requestTimeoutMs: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: OpenAIBriefCompilerOptions) {
@@ -85,7 +100,9 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       options.responsesEndpoint?.trim() || defaultResponsesEndpoint;
     this.#moderationEndpoint =
       options.moderationEndpoint?.trim() || defaultModerationEndpoint;
-    this.#timeoutMs = options.timeoutMs ?? 45_000;
+    this.#timeoutMs = options.timeoutMs ?? defaultCompilationTimeoutMs;
+    this.#requestTimeoutMs =
+      options.requestTimeoutMs ?? defaultRequestTimeoutMs;
     this.#fetch = options.fetchImplementation ?? fetch;
   }
 
@@ -155,7 +172,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 
     const policyDecision = await this.#isFlaggedByModerationText(
       buildRuntimeModerationText(sanitizedBrief),
-      deadline
+      deadline,
+      "output_moderation"
     )
       ? blockedDecision("prohibited_content")
       : evaluateCompiledBrief(rawBrief, sanitizedBrief);
@@ -181,18 +199,24 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         ...rawBrief.clarificationAnswers.map(({ answer }) => answer),
         ...rawBrief.allowedFacts
       ].join("\n"),
-      deadline
+      deadline,
+      "input_moderation"
     );
   }
 
-  async #isFlaggedByModerationText(input: string, deadline: number) {
+  async #isFlaggedByModerationText(
+    input: string,
+    deadline: number,
+    stage: Extract<BriefCompilerStage, "input_moderation" | "output_moderation">
+  ) {
     const response = await this.#request(
       this.#moderationEndpoint,
       {
         model: "omni-moderation-latest",
         input
       },
-      deadline
+      deadline,
+      stage
     );
     const payload = response as {
       results?: Array<{ flagged?: unknown }>;
@@ -253,40 +277,60 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           }
         }
       },
-      deadline
+      deadline,
+      "compilation"
     )) as OpenAIResponsePayload;
   }
 
-  async #request(endpoint: string, body: unknown, deadline: number) {
+  async #request(
+    endpoint: string,
+    body: unknown,
+    deadline: number,
+    stage: BriefCompilerStage
+  ) {
     let lastError: unknown;
+    let lastClientRequestId: string | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
         throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-          cause: new Error("BRIEF_COMPILATION_TIMEOUT")
+          cause: new Error("BRIEF_COMPILATION_TIMEOUT"),
+          clientRequestId: lastClientRequestId,
+          stage
         });
       }
 
+      const clientRequestId = randomUUID();
+      lastClientRequestId = clientRequestId;
       let response: Response;
       try {
         response = await this.#fetch(endpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${this.#apiKey}`,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-Client-Request-Id": clientRequestId
           },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(remainingMs)
+          signal: AbortSignal.timeout(
+            Math.min(this.#requestTimeoutMs, remainingMs)
+          )
         });
       } catch (error) {
         lastError = error;
+        if (attempt === 0 && Date.now() < deadline) continue;
         if (isTimeoutError(error) || Date.now() >= deadline) {
           throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-            cause: error
+            cause: error,
+            clientRequestId,
+            stage
           });
         }
-        if (attempt === 0) continue;
-        throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { cause: error });
+        throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
+          cause: error,
+          clientRequestId,
+          stage
+        });
       }
 
       const responseId = response.headers.get("x-request-id");
@@ -294,7 +338,9 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         if (attempt === 0 && isRetryableOpenAIStatus(response.status)) continue;
         throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
           responseId,
-          statusCode: response.status
+          clientRequestId,
+          statusCode: response.status,
+          stage
         });
       }
 
@@ -302,10 +348,16 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       if (payload && typeof payload === "object") return payload;
       if (attempt === 0) continue;
       throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", {
-        responseId
+        responseId,
+        clientRequestId,
+        stage
       });
     }
-    throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { cause: lastError });
+    throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
+      cause: lastError,
+      clientRequestId: lastClientRequestId,
+      stage
+    });
   }
 }
 
