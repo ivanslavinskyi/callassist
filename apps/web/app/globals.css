@@ -123,6 +123,22 @@ main:focus { outline: none; }
   padding: 0 8px;
 }
 
+.theme-toggle {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 19px;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+.theme-toggle:hover { border-color: var(--green); }
+
 .secure-dot {
   background: #50b983;
   border: 3px solid #d9f2e6;
@@ -177,32 +193,6 @@ main:focus { outline: none; }
   margin: 14px 0 0;
   max-width: 640px;
 }
-
-.trust-card {
-  align-items: center;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(29, 105, 88, 0.13);
-  border-radius: 18px;
-  display: flex;
-  gap: 13px;
-  min-width: 230px;
-  padding: 13px 15px;
-}
-
-.trust-icon {
-  align-items: center;
-  background: var(--accent);
-  border-radius: 12px;
-  display: flex;
-  font-size: 26px;
-  height: 44px;
-  justify-content: center;
-  width: 44px;
-}
-
-.trust-card strong, .trust-card span { display: block; }
-.trust-card strong { font-size: 14px; margin-bottom: 3px; }
-.trust-card div span { color: var(--muted); font-size: 12px; }
 
 .dashboard-grid {
   align-items: start;
@@ -1034,8 +1024,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .confirm-dialog-actions .danger-button { margin: 0; min-height: 48px; width: auto; }
 .terminal-summary .guard-visual { background: #edf1ef; border-color: #f7f9f8; color: var(--muted); }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme="dark"] {
     color-scheme: dark;
     --ink: #e8f1ed;
     --muted: #a7b5af;
@@ -1046,11 +1035,11 @@ button:disabled { cursor: wait; opacity: .55; }
     --green-deep: #b8e5d5;
     --danger: #ff9a92;
     --shadow: 0 24px 70px rgba(0, 0, 0, .28);
-  }
+}
 
-  body { background: radial-gradient(circle at 86% 2%, rgba(133, 196, 84, .11), transparent 24rem), var(--canvas); }
+:root[data-theme="dark"] body { background: radial-gradient(circle at 86% 2%, rgba(133, 196, 84, .11), transparent 24rem), var(--canvas); }
+@scope (:root[data-theme="dark"]) {
   .topbar { border-bottom-color: rgba(232, 241, 237, .09); }
-  .trust-card { background: rgba(21, 33, 29, .76); border-color: #334b42; }
   .call-form, .activity-panel, .transcript-card, .final-transcript-card,
   .approval-card, .guard-card, .brief-card, .compilation-review,
   .confirm-dialog-content, .loading-card { border-color: #2c3c36; }
@@ -1058,7 +1047,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .history-filters select, .locale-picker select, .review-opening,
   .review-questions, .call-options, .required-progress, .disclosure-preview blockquote,
   .language-policy, .compilation-progress, .empty-state,
-  .brief-row, .final-transcript-state, .final-transcript-line,
+  .brief-row, .final-transcript-state,
   .recording-panel, .speech-preview { background: #1a2924; border-color: #34453e; color: var(--ink); }
   .sticky-form-actions { background: rgba(21, 33, 29, .96); }
   .plan-setting-chips span, .mode-badge, .counter, .locale-tag,
@@ -1070,7 +1059,10 @@ button:disabled { cursor: wait; opacity: .55; }
   .status-awaiting_approval, .status-review_required, .status-needs_clarification { background: #3a321d; color: #f0cb73; }
   .status-blocked, .status-stopped, .status-failed, .final-failed { background: #3b2424; }
   .danger-button { background: #3b2424; }
-  .decline-button, .terminal-summary .guard-visual { background: #26342f; color: var(--muted); }
+  .decline-button, .secondary-button, .transcript-export-button,
+  .terminal-summary .guard-visual { background: #26342f; color: #d8e7e1; }
+  .transcript-export-button { border-color: #3b5148; }
+  .transcript-export-button:hover:not(:disabled) { background: #30443c; border-color: #4c665b; }
   .guard-visual { background: #203a30; border-color: #192c25; }
   .approval-icon { background: #3c3218; color: #f0ca6e; }
   .primary-button, .approve-button, .jump-to-latest, .skip-link { background: var(--accent); color: #102019; }
@@ -1083,7 +1075,6 @@ button:disabled { cursor: wait; opacity: .55; }
   .dashboard-grid, .live-grid { grid-template-columns: 1fr; }
   .activity-panel { order: -1; }
   .hero-block { align-items: flex-start; flex-direction: column; gap: 30px; }
-  .trust-card { min-width: 0; }
   .call-sidebar { display: grid; grid-template-columns: 1fr 1fr; }
   .call-sidebar { order: -1; }
 }

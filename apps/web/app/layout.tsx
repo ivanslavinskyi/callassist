@@ -19,7 +19,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const requestedLocale = (await headers()).get("x-callassist-ui-locale") ?? "en";
   const locale = isUiLocale(requestedLocale) ? requestedLocale : "en";
   return (
-    <html lang={locale}>
+    <html lang={locale} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('callassist_theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch(e){document.documentElement.dataset.theme='light'}})()` }} />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -98,13 +98,6 @@ export function Dashboard() {
               {copy.lead}
             </p>
           </div>
-          <div className="trust-card">
-            <span className="trust-icon" aria-hidden="true">◎</span>
-            <div>
-              <strong>{copy.trustTitle}</strong>
-              <span>{copy.trustText}</span>
-            </div>
-          </div>
         </section>
 
         <div className="dashboard-grid">
