@@ -59,6 +59,7 @@ export function LiveCall({ callId }: { callId: string }) {
   const [followLiveTranscript, setFollowLiveTranscript] = useState(true);
   const [showFullObjective, setShowFullObjective] = useState(false);
   const transcriptListRef = useRef<HTMLDivElement>(null);
+  const transcriptCardRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
     "idle"
   );
@@ -156,11 +157,28 @@ export function LiveCall({ callId }: { callId: string }) {
     [snapshot?.brief.locale]
   );
 
-  async function runAction(action: () => Promise<CallSnapshot>) {
+  function revealLiveTranscript() {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        transcriptCardRef.current?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+          block: "start"
+        });
+      });
+    });
+  }
+
+  async function runAction(
+    action: () => Promise<CallSnapshot>,
+    onSuccess?: () => void
+  ) {
     setBusy(true);
     setActionError(null);
     try {
       setSnapshot(await action());
+      onSuccess?.();
     } catch {
       setActionError(messages.live.actionError);
     } finally {
@@ -302,7 +320,7 @@ export function LiveCall({ callId }: { callId: string }) {
               <button
                 className="primary-button compact-button"
                 disabled={busy}
-                onClick={() => runAction(() => startCall(callId))}
+                onClick={() => runAction(() => startCall(callId), revealLiveTranscript)}
                 type="button"
               >
                 <span className="button-signal" aria-hidden="true">◖</span>
@@ -339,7 +357,7 @@ export function LiveCall({ callId }: { callId: string }) {
             compilation={compilation}
             onAnswerClarifications={answerClarifications}
             onApproveAndCall={() =>
-              runAction(() => approveAndStartCall(callId))
+              runAction(() => approveAndStartCall(callId), revealLiveTranscript)
             }
             onEdit={() => setEditingBrief(true)}
             recipientName={brief.recipientName}
@@ -363,7 +381,7 @@ export function LiveCall({ callId }: { callId: string }) {
           }`}
         >
           <div className="transcript-column">
-            <section className="transcript-card">
+            <section className="transcript-card" ref={transcriptCardRef}>
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">{copy.liveTranscriptEyebrow}</span>
