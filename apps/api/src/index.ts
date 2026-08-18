@@ -23,7 +23,10 @@ const realtimeApiKey =
 const postCallTranscriber = realtimeApiKey
   ? new OpenAIPostCallTranscriber({
       apiKey: realtimeApiKey,
-      model: process.env.OPENAI_POST_CALL_TRANSCRIPTION_MODEL
+      model: process.env.OPENAI_POST_CALL_TRANSCRIPTION_MODEL,
+      utteranceModel:
+        process.env.OPENAI_POST_CALL_UTTERANCE_TRANSCRIPTION_MODEL ??
+        "gpt-4o-transcribe"
     })
   : undefined;
 const briefCompiler = createBriefCompiler();

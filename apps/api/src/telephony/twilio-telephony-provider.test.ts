@@ -136,7 +136,7 @@ describe("TwilioTelephonyProvider", () => {
     const fetchImplementation = vi.fn().mockResolvedValue(
       new Response(new Uint8Array([1, 2, 3]), {
         status: 200,
-        headers: { "content-type": "audio/mpeg" }
+        headers: { "content-type": "audio/wav" }
       })
     );
     vi.stubGlobal("fetch", fetchImplementation);
@@ -145,8 +145,9 @@ describe("TwilioTelephonyProvider", () => {
     await expect(provider.getRecordingMedia("RE123")).resolves.toMatchObject({
       bytes: new Uint8Array([1, 2, 3]),
       channels: 2,
-      fileName: "RE123.mp3"
+      fileName: "RE123.wav"
     });
+    expect(String(fetchImplementation.mock.calls[0][0])).toContain(".wav");
     expect(String(fetchImplementation.mock.calls[0][0])).toContain(
       "RequestedChannels=2"
     );
@@ -159,7 +160,7 @@ describe("TwilioTelephonyProvider", () => {
       .mockResolvedValueOnce(
         new Response(new Uint8Array([4]), {
           status: 200,
-          headers: { "content-type": "audio/mpeg" }
+          headers: { "content-type": "audio/wav" }
         })
       );
     vi.stubGlobal("fetch", fetchImplementation);

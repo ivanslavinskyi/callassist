@@ -65,49 +65,51 @@ The conversation gate opens only after the `recording` transition.
 - Browser audio playback is proxied by the main API. Public deployment requires an
   authenticated owner check before any recording or transcript can be returned.
 
-## Stable MVP transcription decision
+## Stable transcription decision
 
-The default is deliberately one complete-recording transcription request.
+The default is channel-aware utterance transcription. See
+`channel-aware-final-transcription-plan.md` for the failure analysis and acceptance
+criteria.
 
 ```text
-consented recording -> gpt-transcribe -> canonical final wording
-live Realtime events -> conservative role/time scaffold only
-                                      -> structured display or plain-text fallback
+dual-channel recording -> local WAV parser and speech detection
+                       -> channel 1: recipient utterances
+                       -> channel 2: assistant utterances
+                       -> gpt-4o-transcribe -> chronological structured transcript
+
+mono/unsupported recording -> gpt-transcribe -> canonical plain text fallback
 ```
 
-The final request contains:
+Each utterance request contains:
 
 - the selected BCP 47 call locale and explicitly allowed fallback locale;
 - the conventional writing system for those languages;
 - assistant, represented-person, recipient, and organisation names;
 - a bounded compiled objective, background context, and literal approved terms;
-- strict instructions not to translate, infer, complete, or reconstruct unclear speech.
+- strict instructions not to translate, infer, complete, or reconstruct unclear speech;
+- the nearest preceding assistant utterance as context for short recipient replies.
 
-After transcription, a deterministic local aligner may attach roles and approximate
-timestamps from the already stored live events. It aligns identical normalized words
-monotonically, never copies live wording, and marks an unresolved span as `unknown`.
-If there is too little alignment evidence, the application publishes the canonical
-plain text without roles. It does not segment audio, run another model, replace final
-words with live candidates, or run per-turn retries.
+Roles come only from the physical recording channel. Realtime events never provide
+final wording or role metadata. Speech regions are normalized, padded, and uploaded
+with bounded concurrency. If channel extraction is unavailable, the application
+publishes canonical full-recording text without roles.
 
 ### Why this path was selected
 
-An experiment on the same retained German call compared the candidate paths:
+Experiments on retained German calls compared the candidate paths:
 
 - full-call diarization retained roles and timestamps but rendered several German
   recipient utterances as Cyrillic phonetics, including with `language=de`;
-- full-call `gpt-transcribe` preserved the conversation context and correctly returned
-  short phrases such as `Wie bitte?`, `Was? Bitte noch einmal.`, and `Land?`;
-- the previous segmentation and ordinal reconciliation could drop short turns and
-  then attach later live text to the wrong audio interval.
+- full-call `gpt-transcribe` preserved wording but did not expose trustworthy roles;
+- aligning that wording to the Realtime draft split `Ja, gern` across roles and
+  produced `unknown` for a question/answer pair and `Gleichfalls`;
+- channel-aware `gpt-4o-transcribe` correctly returned those short replies with
+  deterministic roles on the same retained recording.
 
-One request is also cheaper and operationally simpler than one full-call request plus
-many segment requests. Removing reconciliation eliminates a class of silent text and
-speaker-corruption failures.
-
-The trade-off is explicit: canonical wording takes priority over structure. Roles and
-timecodes are presentation metadata and are labelled approximate; retained audio
-remains the verification source for critical details.
+Only detected speech plus bounded padding is uploaded. On the 78-second validation
+call, ten detected utterances contained approximately 50 seconds of padded audio.
+This increases request count but keeps uploaded duration bounded and removes speaker
+guessing. Retained audio remains the verification source for critical details.
 
 ## Failure and recovery
 
@@ -124,9 +126,9 @@ remains the verification source for critical details.
 
 - Prove that recording and recipient forwarding do not begin before DTMF consent.
 - Verify signed, idempotent Twilio recording callbacks and dual-channel capture.
-- Verify exactly one model request for a normal recording.
-- Verify that live draft wording cannot enter the final transcript and that joining
-  structured segments reproduces the canonical recording text.
+- Verify deterministic channel roles and bounded-concurrency utterance requests.
+- Verify that live draft wording and roles cannot enter the final transcript and that
+  joining structured segments reproduces the stored recording-derived text.
 - Verify prompts contain bounded compiled context and no secrets or raw untrusted text.
 - Test empty, malformed, failed, oversized, retry, and restart-recovery paths.
 - Test structured and plain-text UI, clipboard, and PDF output.

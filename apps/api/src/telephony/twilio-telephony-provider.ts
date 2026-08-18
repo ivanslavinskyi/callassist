@@ -99,8 +99,8 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     }
     return {
       bytes: new Uint8Array(await response.arrayBuffer()),
-      contentType: response.headers.get("content-type") ?? "audio/mpeg",
-      fileName: `${providerRecordingId}.mp3`,
+      contentType: response.headers.get("content-type") ?? "audio/wav",
+      fileName: `${providerRecordingId}.wav`,
       channels
     };
   }
@@ -109,7 +109,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     const url = new URL(
       `/2010-04-01/Accounts/${encodeURIComponent(
         this.#accountSid
-      )}/Recordings/${encodeURIComponent(providerRecordingId)}.mp3`,
+      )}/Recordings/${encodeURIComponent(providerRecordingId)}.wav`,
       "https://api.twilio.com"
     );
     url.searchParams.set("RequestedChannels", String(channels));
