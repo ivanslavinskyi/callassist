@@ -85,8 +85,21 @@ function humanizeFieldName(value: string) {
     .replace(/^./, (character) => character.toUpperCase());
 }
 
-export async function listCallBriefs() {
-  return apiRequest<{ items: CallBrief[] }>("/api/call-briefs");
+export async function listCallBriefs(options: {
+  cursor?: string;
+  limit?: number;
+  search?: string;
+  status?: CallBrief["status"];
+} = {}) {
+  const query = new URLSearchParams();
+  if (options.cursor) query.set("cursor", options.cursor);
+  if (options.limit) query.set("limit", String(options.limit));
+  if (options.search) query.set("search", options.search);
+  if (options.status) query.set("status", options.status);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return apiRequest<{ items: CallBrief[]; nextCursor: string | null }>(
+    `/api/call-briefs${suffix}`
+  );
 }
 
 export async function createCallBrief(input: CreateCallBriefInput) {

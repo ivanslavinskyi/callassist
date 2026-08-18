@@ -44,6 +44,35 @@ export type StartAttemptResult = {
   snapshot: CallSnapshot;
 };
 
+export type CallBriefCursor = { createdAt: string; id: string };
+export type ListCallBriefsInput = {
+  limit: number;
+  cursor?: CallBriefCursor;
+  search?: string;
+  status?: CallBrief["status"];
+};
+export type ListCallBriefsResult = {
+  items: CallBrief[];
+  nextCursor: string | null;
+};
+
+export function encodeCallBriefCursor(cursor: CallBriefCursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function decodeCallBriefCursor(value: string): CallBriefCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const { createdAt, id } = parsed as Record<string, unknown>;
+    if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) return null;
+    if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
 export type ProviderStatusResult = {
   callId: string;
   snapshot: CallSnapshot;
@@ -81,7 +110,7 @@ export type FinalTranscriptMutationResult = {
 
 export interface CallRepository {
   readonly mode: "memory" | "postgres";
-  list(): Promise<CallBrief[]>;
+  list(input: ListCallBriefsInput): Promise<ListCallBriefsResult>;
   create(
     input: CreateCallBriefInput,
     compilation: CallCompilation

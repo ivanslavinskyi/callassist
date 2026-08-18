@@ -145,6 +145,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 
 ## Roadmap
 
+- Complete the accepted operator-console
+  [UI/UX stabilization milestone](docs/ui-ux-stabilization-plan.md), including its
+  internationalization foundation, before adding new product screens.
 - Continue hardening reviewed, versioned multilingual call plans and their
   deterministic server-side policy boundary.
 - Evaluate semantic preservation, call success, latency, live/final transcription,

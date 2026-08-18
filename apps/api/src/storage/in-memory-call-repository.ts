@@ -17,10 +17,12 @@ import {
 import {
   CallRepositoryError,
   buildRuntimeBriefFields,
+  encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
+  type ListCallBriefsInput,
   type RecordingStatusInput,
   type StartAttemptInput
 } from "./call-repository";
@@ -46,10 +48,28 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
 
-  async list() {
-    return [...this.#calls.values()]
+  async list(input: ListCallBriefsInput) {
+    const filtered = [...this.#calls.values()]
       .map(({ brief }) => copy(brief))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      .filter((brief) => !input.status || brief.status === input.status)
+      .filter((brief) =>
+        !input.search || brief.recipientName.toLocaleLowerCase().includes(input.search.toLocaleLowerCase())
+      )
+      .filter((brief) =>
+        !input.cursor || brief.createdAt < input.cursor.createdAt ||
+          (brief.createdAt === input.cursor.createdAt && brief.id < input.cursor.id)
+      )
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+      );
+    const items = filtered.slice(0, input.limit);
+    const last = items.at(-1);
+    return {
+      items,
+      nextCursor: filtered.length > input.limit && last
+        ? encodeCallBriefCursor({ createdAt: last.createdAt, id: last.id })
+        : null
+    };
   }
 
   async create(input: CreateCallBriefInput, compilation: CallCompilation) {

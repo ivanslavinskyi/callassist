@@ -28,6 +28,58 @@ function createApp(briefCompiler?: BriefCompiler) {
 }
 
 describe("call API", () => {
+  it("paginates and searches call briefs with an opaque cursor", async () => {
+    const app = createApp();
+    for (const [index, recipientName] of ["Alpha Office", "Beta Clinic", "Gamma Council"].entries()) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/call-briefs",
+        payload: {
+          recipientName,
+          phoneNumber: `+4171000000${index}`,
+          objective: `Ask ${recipientName} for opening hours`,
+          assistantProfileId: "sebastian",
+          assistanceReason: "speech_impairment",
+          locale: "en-GB",
+          allowLanguageSwitch: false,
+          allowedFacts: []
+        }
+      });
+      expect(response.statusCode).toBe(201);
+    }
+
+    const first = await app.inject({ method: "GET", url: "/api/call-briefs?limit=2" });
+    expect(first.statusCode).toBe(200);
+    const firstPage = first.json<{ items: unknown[]; nextCursor: string | null }>();
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.nextCursor).toBeTypeOf("string");
+
+    const second = await app.inject({
+      method: "GET",
+      url: `/api/call-briefs?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor!)}`
+    });
+    expect(second.json<{ items: unknown[]; nextCursor: null }>().items).toHaveLength(1);
+
+    const searched = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs?search=Beta&status=review_required"
+    });
+    expect(searched.json<{ items: Array<{ recipientName: string }> }>().items)
+      .toHaveLength(1);
+    expect(searched.json<{ items: Array<{ recipientName: string }> }>().items[0]?.recipientName)
+      .toBe("Beta Clinic");
+  });
+
+  it("rejects invalid call-list cursors", async () => {
+    const app = createApp();
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs?cursor=not-a-cursor"
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "INVALID_CALL_LIST_QUERY" });
+  });
+
   it("creates and returns a persisted call brief", async () => {
     const app = createApp();
     const createResponse = await app.inject({

@@ -1,4 +1,4 @@
-import { LiveCall } from "@/components/live-call";
+import { redirect } from "next/navigation";
 
 export default async function CallPage({
   params
@@ -6,5 +6,5 @@ export default async function CallPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <LiveCall callId={id} />;
+  redirect(`/en/calls/${id}`);
 }

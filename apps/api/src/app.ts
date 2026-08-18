@@ -3,13 +3,14 @@ import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import {
   approvalDecisionSchema,
+  callBriefStatusSchema,
   createCallBriefInputSchema,
   type CallEvent
 } from "@callassist/contracts";
 import Fastify, { type FastifyBaseLogger } from "fastify";
 import { CallServiceError, type CallService } from "./call-service";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
-import { CallRepositoryError } from "./storage/call-repository";
+import { CallRepositoryError, decodeCallBriefCursor } from "./storage/call-repository";
 import {
   isTwilioCallStatus,
   isTwilioRecordingStatus,
@@ -61,7 +62,32 @@ export function buildApp({
     }
   });
 
-  app.get("/api/call-briefs", async () => ({ items: await service.list() }));
+  app.get<{
+    Querystring: { limit?: string; cursor?: string; search?: string; status?: string };
+  }>("/api/call-briefs", async (request, reply) => {
+    const limit = request.query.limit === undefined ? 20 : Number(request.query.limit);
+    const search = request.query.search?.trim();
+    const status = request.query.status
+      ? callBriefStatusSchema.safeParse(request.query.status)
+      : null;
+    const cursor = request.query.cursor
+      ? decodeCallBriefCursor(request.query.cursor)
+      : undefined;
+    if (
+      !Number.isInteger(limit) || limit < 1 || limit > 50 ||
+      (search !== undefined && search.length > 100) ||
+      (status !== null && !status.success) ||
+      (request.query.cursor !== undefined && !cursor)
+    ) {
+      return reply.status(400).send({ error: "INVALID_CALL_LIST_QUERY" });
+    }
+    return service.list({
+      limit,
+      ...(cursor ? { cursor } : {}),
+      ...(search ? { search } : {}),
+      ...(status?.success ? { status: status.data } : {})
+    });
+  });
 
   app.post("/api/call-briefs", async (request, reply) => {
     const parsed = createCallBriefInputSchema.safeParse(request.body);

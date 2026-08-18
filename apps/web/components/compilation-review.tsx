@@ -5,35 +5,44 @@ import {
   type ClarificationAnswer
 } from "@callassist/contracts";
 import { useState, type FormEvent } from "react";
+import { ConfirmDialog } from "./confirm-dialog";
+import { useUiLocale } from "./ui-locale-provider";
 
 export function CompilationReview({
   busy,
   compilation,
   onAnswerClarifications,
   onApproveAndCall,
-  onEdit
+  onEdit,
+  recipientName,
+  showActions = true
 }: {
   busy: boolean;
   compilation: CallCompilation;
   onAnswerClarifications: (answers: ClarificationAnswer[]) => Promise<void>;
   onApproveAndCall: () => void;
   onEdit: () => void;
+  recipientName: string;
+  showActions?: boolean;
 }) {
+  const [confirmingCall, setConfirmingCall] = useState(false);
+  const { messages } = useUiLocale();
+  const copy = messages.review;
   const compiled = compilation.compiledBrief;
   const decision = compilation.policyDecision;
   const blockingIssues = compiled?.blockingIssues ?? [];
   const isReady = decision.status === "ready_for_review";
   const stateLabel = isReady
-    ? "Ready to call"
+    ? copy.ready
     : decision.status === "needs_clarification"
-      ? "One detail is needed"
-      : "This call needs changes";
+      ? copy.clarificationNeeded
+      : copy.changesNeeded;
 
   return (
     <section className={`compilation-review decision-${decision.status}`}>
       <div className="compilation-review-heading">
         <div>
-          <span className="eyebrow">Call preview</span>
+          <span className="eyebrow">{copy.preview}</span>
           <h2>{stateLabel}</h2>
         </div>
       </div>
@@ -41,11 +50,11 @@ export function CompilationReview({
       {compiled ? (
         <>
           <p className="call-plan-lead">{compiled.localizedObjective}</p>
-          <div className="plan-setting-chips" aria-label="Conversation settings">
-            <span>{toneLabels[compiled.tone]}</span>
-            <span>{addressingLabels[compiled.addressingStyle ?? "formal"]}</span>
+          <div className="plan-setting-chips" aria-label={copy.conversationSettings}>
+            <span>{copy.tone[compiled.tone]}</span>
+            <span>{copy.addressing[compiled.addressingStyle ?? "formal"]}</span>
             <span>
-              {resultHandlingLabels[
+              {copy.result[
                 compiled.resultHandling ?? "capture_in_callassist"
               ]}
             </span>
@@ -53,7 +62,7 @@ export function CompilationReview({
 
           {compiled.opening ? (
             <div className="review-opening">
-              <span>How the assistant will open the call</span>
+              <span>{copy.opening}</span>
               <p>
                 {compiled.opening.recipientAddress}{" "}
                 {compiled.opening.purposeStatement}{" "}
@@ -63,7 +72,7 @@ export function CompilationReview({
           ) : null}
 
           <div className="review-questions">
-            <span>What the assistant will ask or say</span>
+            <span>{copy.questions}</span>
             <ol>
               {compiled.orderedQuestions.map((question, index) => (
                 <li key={`${index}-${question.text}`}>{question.text}</li>
@@ -75,11 +84,8 @@ export function CompilationReview({
 
       {decision.status === "needs_clarification" ? (
         <div className="clarification-panel">
-          <strong>Add the missing detail here</strong>
-          <p>
-            Your existing brief will be updated. You will not need to fill it in
-            again.
-          </p>
+          <strong>{copy.addMissingDetail}</strong>
+          <p>{copy.clarificationHelp}</p>
           {blockingIssues.length > 0 ? (
             <ClarificationForm
               busy={busy}
@@ -98,45 +104,58 @@ export function CompilationReview({
 
       {decision.status === "blocked" ? (
         <div className="policy-reasons">
-          <strong>Why this cannot be called yet</strong>
+          <strong>{copy.blockedReason}</strong>
           <ul>
             {decision.reasonCodes.map((code) => (
-              <li key={code}>{policyReasonLabels[code]}</li>
+              <li key={code}>{copy.reason[code]}</li>
             ))}
           </ul>
         </div>
       ) : null}
 
-      <div className="review-actions">
+      {showActions ? <div className="review-actions">
         <button
           className="secondary-button"
           disabled={busy}
           onClick={onEdit}
           type="button"
         >
-          Edit brief
+          {copy.edit}
         </button>
         {isReady ? (
           <button
             className="primary-button compact-button"
             disabled={busy}
-            onClick={onApproveAndCall}
+            onClick={() => setConfirmingCall(true)}
             type="button"
           >
-            {busy ? "Starting..." : "Approve & call"}
+            {busy ? copy.starting : copy.approveAndCall}
           </button>
         ) : null}
-      </div>
+      </div> : null}
+
+      <ConfirmDialog
+        busy={busy}
+        confirmLabel={messages.call.approveConfirm}
+        description={messages.call.approveBody(recipientName)}
+        onCancel={() => setConfirmingCall(false)}
+        onConfirm={() => {
+          setConfirmingCall(false);
+          onApproveAndCall();
+        }}
+        open={confirmingCall}
+        title={messages.call.approveTitle}
+      />
 
       <details className="technical-details">
-        <summary>Technical details</summary>
+        <summary>{copy.technicalDetails}</summary>
         <div className="objective-comparison">
           <div>
-            <span>Original objective</span>
+            <span>{copy.originalObjective}</span>
             <p>{compilation.rawBrief.objective}</p>
           </div>
           <div>
-            <span>Success means</span>
+            <span>{copy.successMeans}</span>
             <ul>
               {compiled?.successCriteria.map((criterion) => (
                 <li key={criterion}>{criterion}</li>
@@ -148,15 +167,15 @@ export function CompilationReview({
         {compiled ? (
           <div className="compiled-plan-grid">
             <div>
-              <span>Product defaults used</span>
+              <span>{copy.defaultsUsed}</span>
               <ul>
                 {(compiled.assumptions ?? []).map((assumption) => (
-                  <li key={assumption}>{assumptionLabels[assumption]}</li>
+                  <li key={assumption}>{copy.assumption[assumption]}</li>
                 ))}
               </ul>
             </div>
             <div>
-              <span>Approved information</span>
+              <span>{copy.approvedInformation}</span>
               {compiled.approvedFacts.length > 0 ? (
                 <ul>
                   {compiled.approvedFacts.map((fact) => (
@@ -164,11 +183,11 @@ export function CompilationReview({
                   ))}
                 </ul>
               ) : (
-                <p>None</p>
+                <p>{copy.none}</p>
               )}
             </div>
             <div>
-              <span>Guardrails</span>
+              <span>{copy.guardrails}</span>
               <ul>
                 {compiled.prohibitedActions.map((action) => (
                   <li key={action}>{action}</li>
@@ -179,15 +198,14 @@ export function CompilationReview({
         ) : null}
 
         <small className="compilation-meta">
-          Revision {compilation.revision ?? 1} · Schema {compiled?.schemaVersion ?? "1"} ·
-          Policy {decision.policyVersion} · Compiler {compilation.compilerModel} ·
-          Snapshot {compilation.snapshotHash.slice(0, 12)}
+          {copy.revision} {compilation.revision ?? 1} · {copy.schema} {compiled?.schemaVersion ?? "1"} ·
+          {copy.policy} {decision.policyVersion} · {copy.compiler} {compilation.compilerModel} ·
+          {copy.snapshot} {compilation.snapshotHash.slice(0, 12)}
         </small>
       </details>
     </section>
   );
 }
-
 function ClarificationForm({
   busy,
   issues,
@@ -198,6 +216,7 @@ function ClarificationForm({
   onSubmit: (answers: ClarificationAnswer[]) => Promise<void>;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const { messages } = useUiLocale();
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -232,48 +251,8 @@ function ClarificationForm({
         disabled={busy || !complete}
         type="submit"
       >
-        {busy ? "Updating..." : "Continue"}
+        {busy ? messages.review.updating : messages.review.continue}
       </button>
     </form>
   );
 }
-
-const toneLabels = {
-  formal: "Formal tone",
-  neutral: "Neutral tone",
-  friendly: "Friendly tone"
-} as const;
-
-const addressingLabels = {
-  formal: "Formal addressing",
-  informal: "Informal addressing"
-} as const;
-
-const resultHandlingLabels = {
-  capture_in_callassist: "Answers saved in CallAssist",
-  request_external_delivery: "External delivery requested",
-  message_only: "Message only"
-} as const;
-
-const assumptionLabels = {
-  spoken_answers_saved_in_callassist: "Spoken answers are saved in CallAssist.",
-  addressing_inferred: "Addressing is inferred from the relationship and recipient.",
-  tone_inferred: "Tone is inferred from the relationship and purpose.",
-  no_detailed_voicemail: "No call details are left on voicemail.",
-  neutral_voicemail_only: "Only a neutral voicemail message may be left.",
-  respect_refusal_and_end: "A refusal is respected and the call ends politely."
-} as const;
-
-const policyReasonLabels: Record<
-  CallCompilation["policyDecision"]["reasonCodes"][number],
-  string
-> = {
-  input_moderation_flagged: "The source brief was flagged by input moderation.",
-  model_refusal: "The compiler refused to create an executable plan.",
-  prohibited_content: "The brief contains a category outside the current low-risk scope.",
-  material_ambiguity: "A legacy brief contains an unresolved material ambiguity.",
-  required_information_missing: "Required information is missing.",
-  fact_integrity_failure: "Approved information was not preserved exactly.",
-  plan_constraint_failure: "The generated plan did not preserve a selected call option.",
-  unsupported_task: "This task type is outside the current MVP scope."
-};

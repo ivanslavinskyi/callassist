@@ -103,8 +103,8 @@ export class CallService {
     return recoveredCalls;
   }
 
-  list() {
-    return this.repository.list();
+  list(input: import("./storage/call-repository").ListCallBriefsInput) {
+    return this.repository.list(input);
   }
 
   async create(input: CreateCallBriefInput) {

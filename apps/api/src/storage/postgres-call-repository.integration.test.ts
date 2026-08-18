@@ -7,6 +7,7 @@ import postgres from "postgres";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { runMigrations } from "../db/migrate";
 import { PostgresCallRepository } from "./postgres-call-repository";
+import { decodeCallBriefCursor } from "./call-repository";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
@@ -24,6 +25,37 @@ describeWithDatabase("PostgresCallRepository", () => {
 
   afterAll(async () => {
     await Promise.all([repository?.close(), inspection?.end()]);
+  });
+
+  it("paginates and filters call briefs in PostgreSQL", async () => {
+    const compiler = new DeterministicBriefCompiler();
+    for (const recipientName of ["Cursor test Alpha", "Cursor test Beta"]) {
+      const input: CreateCallBriefInput = {
+        recipientName,
+        phoneNumber: "+41710000009",
+        objective: `Ask ${recipientName} for office hours`,
+        assistantProfileId: "sebastian",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      };
+      await repository.create(input, await compiler.compile(normalizeCreateCallBriefInput(input)));
+    }
+
+    const first = await repository.list({ limit: 1, search: "Cursor test" });
+    expect(first.items).toHaveLength(1);
+    expect(first.nextCursor).toBeTypeOf("string");
+    const cursor = decodeCallBriefCursor(first.nextCursor!);
+    expect(cursor).not.toBeNull();
+    const second = await repository.list({
+      limit: 1,
+      search: "Cursor test",
+      status: "review_required",
+      cursor: cursor!
+    });
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]?.id).not.toBe(first.items[0]?.id);
   });
 
   it("persists the complete approval lifecycle and decrypts private facts", async () => {

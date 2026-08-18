@@ -16,8 +16,12 @@ CallAssist already has a working supervised-call foundation:
 The product is still a supervised technical MVP. The multilingual brief compiler now
 uses explicit product defaults, separates non-blocking assumptions from fixed-code
 blocking issues, supports editing and re-compiling the same brief, and provides a
-compact approve-and-call review. The next milestone is to validate this boundary on
-representative multilingual and adversarial briefs before public registration.
+compact approve-and-call review. Before continuing with new roadmap capabilities, the
+next delivery milestone is the accepted
+[UI/UX stabilization plan](./ui-ux-stabilization-plan.md). It establishes the
+internationalization boundary and closes the audited operator-console usability,
+safety, accessibility, and responsive-layout gaps. Multilingual and adversarial brief
+validation remains the next product-validation milestone after that gate.
 
 ## Product principles
 
@@ -64,6 +68,24 @@ RawCallBrief (any language)
 
 The raw brief remains available for user review and audit, but only the approved,
 versioned `CompiledCallBrief` is allowed to enter the call runtime.
+
+## Pre-roadmap gate: operator UI/UX stabilization
+
+- [ ] Complete the P0 semantic-safety fixes: terminal-state actions, audio-deletion
+      confirmation, and explicit confirmation before approve-and-call starts a call.
+- [ ] Establish locale-aware routing and typed English/German message catalogues before
+      adding new screens; keep UI, source, call, and fallback locales independent.
+- [ ] Complete the P1 operator workflow and feedback fixes for create, review, history,
+      compilation, navigation, and live transcript behavior.
+- [ ] Complete the P2 scale and resilience fixes: paginated searchable history,
+      loading states, inline validation, and separated connection/action errors.
+- [ ] Complete or explicitly re-approve every P3 accessibility, responsive, and visual
+      finding before closing the milestone.
+- [ ] Pass the stabilization plan's automated, keyboard, screen-reader, zoom/reflow,
+      responsive, reduced-motion, bilingual, and production-build acceptance checks.
+
+The accepted scope, issue mapping, implementation slices, and definition of done are
+recorded in the [UI/UX stabilization plan](./ui-ux-stabilization-plan.md).
 
 ## 0. Product scope, policy, and evaluation specification
 

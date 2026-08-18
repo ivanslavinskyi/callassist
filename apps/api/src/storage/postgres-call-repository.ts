@@ -21,10 +21,12 @@ import { decryptJson, encryptJson } from "../security/encryption";
 import {
   CallRepositoryError,
   buildRuntimeBriefFields,
+  encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
+  type ListCallBriefsInput,
   type RecordingStatusInput,
   type StartAttemptInput
 } from "./call-repository";
@@ -136,12 +138,30 @@ export class PostgresCallRepository implements CallRepository {
     });
   }
 
-  async list() {
+  async list(input: ListCallBriefsInput) {
+    const searchPattern = input.search ? `%${input.search}%` : null;
+    const cursorDate = input.cursor ? new Date(input.cursor.createdAt) : null;
+    const cursorId = input.cursor?.id ?? null;
     const rows = await this.#sql<CallBriefRow[]>`
       ${this.#briefSelect()}
-      ORDER BY created_at DESC
+      WHERE (${searchPattern}::text IS NULL OR recipient_name ILIKE ${searchPattern})
+        AND (${input.status ?? null}::text IS NULL OR status = ${input.status ?? null})
+        AND (
+          ${cursorDate}::timestamptz IS NULL
+          OR (created_at, id) < (${cursorDate}, ${cursorId}::uuid)
+        )
+      ORDER BY created_at DESC, id DESC
+      LIMIT ${input.limit + 1}
     `;
-    return rows.map((row) => this.#mapBrief(row));
+    const hasMore = rows.length > input.limit;
+    const items = rows.slice(0, input.limit).map((row) => this.#mapBrief(row));
+    const last = items.at(-1);
+    return {
+      items,
+      nextCursor: hasMore && last
+        ? encodeCallBriefCursor({ createdAt: last.createdAt, id: last.id })
+        : null
+    };
   }
 
   async create(input: CreateCallBriefInput, compilation: CallCompilation) {

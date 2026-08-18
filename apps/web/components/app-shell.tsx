@@ -1,9 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import { useUiLocale } from "./ui-locale-provider";
 
 export function Brand() {
+  const { localizeHref, messages } = useUiLocale();
   return (
-    <Link className="brand" href="/" aria-label="CallAssist — home">
+    <Link className="brand" href={localizeHref("/")} aria-label={messages.app.homeLabel}>
       <span className="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32" fill="none">
           <path d="M7.5 10.2a8.6 8.6 0 0 1 14.4-2.5" />
@@ -19,13 +24,37 @@ export function Brand() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { locale, messages } = useUiLocale();
+
+  function changeLocale(nextLocale: "en" | "de") {
+    document.cookie = `callassist_ui_locale=${nextLocale};path=/;max-age=31536000;samesite=lax`;
+    router.push(pathname.replace(`/${locale}`, `/${nextLocale}`));
+  }
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        {messages.app.skipToContent}
+      </a>
       <header className="topbar">
         <Brand />
-        <div className="topbar-meta">
-          <span className="secure-dot" aria-hidden="true" />
-          Private call console
+        <div className="topbar-actions">
+          <div className="topbar-meta">
+            <span className="secure-dot" aria-hidden="true" />
+            {messages.app.consoleLabel}
+          </div>
+          <label className="locale-picker">
+            <span className="sr-only">{messages.app.interfaceLanguage}</span>
+            <select
+              aria-label={messages.app.interfaceLanguage}
+              onChange={(event) => changeLocale(event.target.value as "en" | "de")}
+              value={locale}
+            >
+              <option value="en">EN</option>
+              <option value="de">DE</option>
+            </select>
+          </label>
         </div>
       </header>
       {children}

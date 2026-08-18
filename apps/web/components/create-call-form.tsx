@@ -16,6 +16,8 @@ import {
   createCallBrief,
   getCallPreparationErrorMessage
 } from "@/lib/api";
+import { useUiLocale } from "./ui-locale-provider";
+import { isE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone-number";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -56,10 +58,14 @@ export function CreateCallForm({
   onCreated,
   initialValue,
   saveCallBrief = createCallBrief,
-  heading = "Who are we calling, and why?",
-  submitLabel = "Review call",
+  heading,
+  submitLabel,
   onCancel
 }: CreateCallFormProps) {
+  const { messages } = useUiLocale();
+  const copy = messages.form.copy;
+  const resolvedHeading = heading ?? copy.defaultHeading;
+  const resolvedSubmitLabel = submitLabel ?? copy.reviewCall;
   const [form, setForm] = useState<CreateCallBriefInput>(() => ({
     ...emptyForm,
     ...initialValue,
@@ -85,6 +91,17 @@ export function CreateCallForm({
       ),
     [form.assistanceReason, form.locale, form.representedPerson]
   );
+  const normalizedPhone = normalizePhoneNumber(form.phoneNumber);
+  const phoneEntered = form.phoneNumber.trim().length > 0;
+  const phoneValid = isE164PhoneNumber(normalizedPhone);
+  const requiredComplete = [
+    form.recipientName.trim().length >= 2,
+    phoneValid,
+    form.objective.trim().length >= 10,
+    (form.representedPerson ?? "").trim().length >= 2
+  ];
+  const completedRequiredCount = requiredComplete.filter(Boolean).length;
+  const requiredRemaining = requiredComplete.length - completedRequiredCount;
 
   function update<Value extends keyof CreateCallBriefInput>(
     field: Value,
@@ -101,6 +118,7 @@ export function CreateCallForm({
     try {
       const brief = await saveCallBrief({
         ...form,
+        phoneNumber: normalizePhoneNumber(form.phoneNumber),
         allowedFacts: factsText
           .split("\n")
           .map((fact) => fact.trim())
@@ -118,37 +136,61 @@ export function CreateCallForm({
     <form className="call-form" onSubmit={handleSubmit}>
       <div className="form-heading">
         <div>
-          <span className="eyebrow">{initialValue ? "Edit call brief" : "New call brief"}</span>
-          <h2>{heading}</h2>
+          <span className="eyebrow">{initialValue ? copy.editBrief : copy.newBrief}</span>
+          <h2>{resolvedHeading}</h2>
         </div>
-        <span className="mode-badge">AI call</span>
+        <span className="mode-badge">{copy.aiCall}</span>
+      </div>
+
+      <div className="required-progress">
+        <div>
+          <span>
+            {requiredRemaining === 0
+              ? messages.form.requiredComplete
+              : messages.form.requiredRemaining(requiredRemaining)}
+          </span>
+          <strong>{completedRequiredCount}/{requiredComplete.length}</strong>
+        </div>
+        <progress
+          aria-label={requiredRemaining === 0
+            ? messages.form.requiredComplete
+            : messages.form.requiredRemaining(requiredRemaining)}
+          max={requiredComplete.length}
+          value={completedRequiredCount}
+        />
       </div>
 
       <div className="form-grid">
         <label className="field field-wide">
-          <span>Organisation or recipient</span>
+          <span>{copy.recipient}</span>
           <input
             value={form.recipientName}
             onChange={(event) => update("recipientName", event.target.value)}
-            placeholder="Elena or Gemeinde Aadorf"
+            placeholder={copy.recipientPlaceholder}
             required
           />
         </label>
 
         <label className="field">
-          <span>Phone number</span>
+          <span>{copy.phone}</span>
           <input
             value={form.phoneNumber}
             onChange={(event) => update("phoneNumber", event.target.value)}
+            onBlur={() => update("phoneNumber", normalizedPhone)}
             placeholder="+41..."
             inputMode="tel"
+            aria-invalid={phoneEntered ? !phoneValid : undefined}
             required
           />
-          <small>International E.164 format</small>
+          <small className={phoneEntered ? (phoneValid ? "field-valid" : "field-invalid") : ""}>
+            {phoneEntered
+              ? (phoneValid ? messages.form.phoneValid : messages.form.phoneInvalid)
+              : messages.form.phoneInvalid}
+          </small>
         </label>
 
         <label className="field">
-          <span>Call language</span>
+          <span>{copy.callLanguage}</span>
           <select
             value={form.locale}
             onChange={(event) => update("locale", event.target.value as CallLocale)}
@@ -160,31 +202,31 @@ export function CreateCallForm({
         </label>
 
         <label className="field field-wide">
-          <span>What should the assistant do?</span>
+          <span>{copy.objective}</span>
           <textarea
             value={form.objective}
             onChange={(event) => update("objective", event.target.value)}
-            placeholder="Describe the goal naturally, in any language."
+            placeholder={copy.objectivePlaceholder}
             rows={5}
             required
           />
-          <small>Formal addressing, tone, and spoken-answer handling use safe defaults.</small>
+          <small>{copy.objectiveHelp}</small>
         </label>
 
         <label className="field">
-          <span>AI assistant</span>
+          <span>{copy.assistant}</span>
           <select
             value={form.assistantProfileId}
             onChange={(event) =>
               update("assistantProfileId", event.target.value as AssistantProfileId)
             }
           >
-            <optgroup label="Male voice">
+            <optgroup label={copy.maleVoice}>
               {ASSISTANT_PROFILES.filter(({ voiceGender }) => voiceGender === "male").map(
                 ({ id, displayName }) => <option key={id} value={id}>{displayName}</option>
               )}
             </optgroup>
-            <optgroup label="Female voice">
+            <optgroup label={copy.femaleVoice}>
               {ASSISTANT_PROFILES.filter(({ voiceGender }) => voiceGender === "female").map(
                 ({ id, displayName }) => <option key={id} value={id}>{displayName}</option>
               )}
@@ -193,36 +235,39 @@ export function CreateCallForm({
         </label>
 
         <label className="field">
-          <span>Reason for assistance</span>
+          <span>{copy.assistanceReason}</span>
           <select
             value={form.assistanceReason}
             onChange={(event) =>
               update("assistanceReason", event.target.value as AssistanceReason)
             }
           >
-            <option value="speech_impairment">Speech impairment</option>
-            <option value="language_barrier">Language barrier</option>
+            <option value="speech_impairment">{copy.speechImpairment}</option>
+            <option value="language_barrier">{copy.languageBarrier}</option>
           </select>
         </label>
 
         <label className="field field-wide">
-          <span>Represented person</span>
+          <span>{copy.representedPerson}</span>
           <input
             value={form.representedPerson ?? ""}
             onChange={(event) => update("representedPerson", event.target.value)}
-            placeholder="Ivan Slavinskyi"
+            placeholder={copy.representedPersonPlaceholder}
             required
           />
         </label>
       </div>
 
       <details className="call-options">
-        <summary>Call options</summary>
-        <p>Safe defaults work for most calls. Change only what matters for this conversation.</p>
+        <summary>
+          <span>{messages.form.callOptions}</span>
+          <span className="details-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <p>{copy.optionsHelp}</p>
 
         <div className="form-grid call-options-grid">
           <label className="field">
-            <span>Result</span>
+            <span>{copy.result}</span>
             <select
               value={form.resultHandling ?? "capture_in_callassist"}
               onChange={(event) =>
@@ -232,14 +277,14 @@ export function CreateCallForm({
                 )
               }
             >
-              <option value="capture_in_callassist">Save the spoken answer in CallAssist</option>
-              <option value="request_external_delivery">Ask the recipient to send something</option>
-              <option value="message_only">Deliver a message only</option>
+              <option value="capture_in_callassist">{copy.captureResult}</option>
+              <option value="request_external_delivery">{copy.externalDelivery}</option>
+              <option value="message_only">{copy.messageOnly}</option>
             </select>
           </label>
 
           <label className="field">
-            <span>Addressing</span>
+            <span>{copy.addressing}</span>
             <select
               value={form.addressingMode ?? "formal"}
               onChange={(event) =>
@@ -249,14 +294,14 @@ export function CreateCallForm({
                 )
               }
             >
-              <option value="formal">Formal (default)</option>
-              <option value="auto">Automatic by relationship</option>
-              <option value="informal">Informal</option>
+              <option value="formal">{copy.formalDefault}</option>
+              <option value="auto">{copy.automaticRelationship}</option>
+              <option value="informal">{copy.informal}</option>
             </select>
           </label>
 
           <label className="field">
-            <span>Tone</span>
+            <span>{copy.tone}</span>
             <select
               value={form.tonePreference ?? "auto"}
               onChange={(event) =>
@@ -266,15 +311,15 @@ export function CreateCallForm({
                 )
               }
             >
-              <option value="auto">Automatic</option>
-              <option value="formal">Formal</option>
-              <option value="neutral">Neutral</option>
-              <option value="friendly">Friendly</option>
+              <option value="auto">{copy.automatic}</option>
+              <option value="formal">{copy.formal}</option>
+              <option value="neutral">{copy.neutral}</option>
+              <option value="friendly">{copy.friendly}</option>
             </select>
           </label>
 
           <label className="field">
-            <span>Voicemail</span>
+            <span>{copy.voicemail}</span>
             <select
               value={form.voicemailPolicy ?? "do_not_leave_details"}
               onChange={(event) =>
@@ -284,48 +329,49 @@ export function CreateCallForm({
                 )
               }
             >
-              <option value="do_not_leave_details">Do not leave call details</option>
-              <option value="leave_neutral_message">Leave a neutral message</option>
+              <option value="do_not_leave_details">{copy.noCallDetails}</option>
+              <option value="leave_neutral_message">{copy.neutralMessage}</option>
             </select>
           </label>
 
           {form.resultHandling === "request_external_delivery" ? (
             <label className="field field-wide">
-              <span>Delivery instruction</span>
+              <span>{copy.deliveryInstruction}</span>
               <input
                 value={form.deliveryInstruction ?? ""}
                 onChange={(event) => update("deliveryInstruction", event.target.value)}
-                placeholder="For example: ask them to send it to Ivan in Telegram"
+                placeholder={copy.deliveryPlaceholder}
               />
             </label>
           ) : null}
 
           <label className="field">
-            <span>Audio retention</span>
+            <span>{copy.audioRetention}</span>
             <select
               value={form.audioRetentionDays ?? 7}
               onChange={(event) =>
                 update("audioRetentionDays", Number(event.target.value) as 0 | 7 | 30)
               }
             >
-              <option value={0}>Delete after final transcript</option>
-              <option value={7}>Keep for 7 days</option>
-              <option value={30}>Keep for 30 days</option>
+              <option value={0}>{copy.deleteAfterTranscript}</option>
+              <option value={7}>{copy.keepSevenDays}</option>
+              <option value={30}>{copy.keepThirtyDays}</option>
             </select>
           </label>
 
-          <label className="field field-wide">
-            <span>Disclosure preview</span>
-            <textarea value={disclosurePreview} rows={3} readOnly />
-          </label>
+          <div className="field field-wide disclosure-preview">
+            <span>{messages.form.disclosurePreview}</span>
+            <blockquote>{disclosurePreview}</blockquote>
+            <small>{messages.form.disclosureHelp}</small>
+          </div>
 
           <label className="field field-wide">
-            <span>Additional context</span>
+            <span>{copy.additionalContext}</span>
             <textarea
               value={form.context ?? ""}
               onChange={(event) => update("context", event.target.value)}
               rows={5}
-              placeholder="Relevant background, correspondence or organisation details"
+              placeholder={copy.contextPlaceholder}
             />
           </label>
         </div>
@@ -334,6 +380,7 @@ export function CreateCallForm({
           <label className="switch-row">
             <input
               type="checkbox"
+              role="switch"
               checked={form.allowLanguageSwitch}
               onChange={(event) => {
                 const enabled = event.target.checked;
@@ -348,14 +395,14 @@ export function CreateCallForm({
             />
             <span className="switch-control" aria-hidden="true" />
             <span>
-              <strong>Allow language switching</strong>
-              <small>The assistant may use one selected fallback language.</small>
+              <strong>{copy.allowLanguageSwitching}</strong>
+              <small>{copy.languageSwitchHelp}</small>
             </span>
           </label>
 
           {form.allowLanguageSwitch ? (
             <label className="field fallback-field">
-              <span>Fallback language</span>
+              <span>{copy.fallbackLanguage}</span>
               <select
                 value={form.fallbackLocale}
                 onChange={(event) => update("fallbackLocale", event.target.value as CallLocale)}
@@ -370,16 +417,16 @@ export function CreateCallForm({
 
         <div className="allowed-facts">
           <div>
-            <span className="section-label">Information the assistant may share</span>
-            <p>Optional. Enter actual verified facts, one per line. Examples are never prefilled.</p>
+            <span className="section-label">{copy.shareableInformation}</span>
+            <p>{copy.shareableInformationHelp}</p>
           </div>
           <label className="field field-wide">
-            <span>Approved information</span>
+            <span>{copy.approvedInformation}</span>
             <textarea
               value={factsText}
               onChange={(event) => setFactsText(event.target.value)}
               rows={5}
-              placeholder={"Full name: Ivan Slavinskyi\nApplication sent: 12 July 2026"}
+              placeholder={copy.approvedInformationPlaceholder}
             />
           </label>
         </div>
@@ -387,14 +434,28 @@ export function CreateCallForm({
 
       {error ? <p className="form-error">{error}</p> : null}
 
-      <div className="form-actions">
+      {submitting ? (
+        <div className="compilation-progress" role="status" aria-live="polite">
+          <span className="processing-spinner" aria-hidden="true" />
+          <div>
+            <strong>{messages.form.preparingTitle}</strong>
+            <p>{messages.form.preparingText}</p>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="form-actions sticky-form-actions">
         {onCancel ? (
           <button className="secondary-button" onClick={onCancel} type="button">
-            Cancel
+            {copy.cancel}
           </button>
         ) : null}
-        <button className="primary-button" disabled={submitting} type="submit">
-          <span>{submitting ? "Preparing..." : submitLabel}</span>
+        <button
+          className="primary-button"
+          disabled={submitting || requiredRemaining > 0}
+          type="submit"
+        >
+          <span>{submitting ? copy.preparing : resolvedSubmitLabel}</span>
           <span aria-hidden="true">→</span>
         </button>
       </div>
