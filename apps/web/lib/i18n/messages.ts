@@ -83,6 +83,8 @@ export type Messages = {
     homeLabel: string;
     consoleLabel: string;
     interfaceLanguage: string;
+    switchToLightTheme: string;
+    switchToDarkTheme: string;
     skipToContent: string;
     defaultTitle: string;
   };
@@ -102,8 +104,6 @@ export type Messages = {
     titleStart: string;
     titleAccent: string;
     lead: string;
-    trustTitle: string;
-    trustText: string;
     historyEyebrow: string;
     historyTitle: string;
     emptyTitle: string;
@@ -262,6 +262,8 @@ const en: Messages = {
     homeLabel: "CallAssist — home",
     consoleLabel: "Private call console",
     interfaceLanguage: "Interface language",
+    switchToLightTheme: "Switch to light theme",
+    switchToDarkTheme: "Switch to dark theme",
     skipToContent: "Skip to main content",
     defaultTitle: "CallAssist — controlled AI phone calls"
   },
@@ -283,8 +285,6 @@ const en: Messages = {
     titleStart: "Every call under",
     titleAccent: " your control.",
     lead: "Set the objective and language. CallAssist handles the conversation, streams a live draft, and creates a more accurate transcript after the call.",
-    trustTitle: "Default deny",
-    trustText: "No approval, no disclosure",
     historyEyebrow: "History",
     historyTitle: "Recent call briefs",
     emptyTitle: "Your calls will appear here",
@@ -366,7 +366,7 @@ const en: Messages = {
     transcriptEmptyHelp: "After the recipient consents, each turn will appear here in real time. This fast transcript may contain recognition errors.",
     liveTime: "live", decisionRequired: "Decision required", assistantWillSay: "The assistant will say",
     approve: "Approve", doNotDisclose: "Do not disclose",
-    terminalHelp: "This call has ended. Live safety approvals are no longer active.",
+    terminalHelp: "This call has ended. Review the call results below.",
     safetyActive: "Safety gate active", safetyHelp: "Private data cannot enter the conversation without your approval.",
     briefEyebrow: "Call brief", objectiveTitle: "Call objective", primaryLanguage: "Primary language",
     languageSwitching: "Language switching", disabled: "Disabled", voice: "Voice",
@@ -402,6 +402,8 @@ const de: Messages = {
     homeLabel: "CallAssist — Startseite",
     consoleLabel: "Private Anrufkonsole",
     interfaceLanguage: "Sprache der Benutzeroberfläche",
+    switchToLightTheme: "Zum hellen Design wechseln",
+    switchToDarkTheme: "Zum dunklen Design wechseln",
     skipToContent: "Zum Hauptinhalt springen",
     defaultTitle: "CallAssist — kontrollierte KI-Telefonanrufe"
   },
@@ -423,8 +425,6 @@ const de: Messages = {
     titleStart: "Jeder Anruf unter",
     titleAccent: " Ihrer Kontrolle.",
     lead: "Legen Sie Ziel und Sprache fest. CallAssist führt das Gespräch, zeigt einen Live-Entwurf und erstellt danach ein genaueres Transkript.",
-    trustTitle: "Standardmässig gesperrt",
-    trustText: "Keine Freigabe, keine Offenlegung",
     historyEyebrow: "Verlauf",
     historyTitle: "Letzte Anrufentwürfe",
     emptyTitle: "Ihre Anrufe erscheinen hier",
@@ -561,7 +561,7 @@ const de: Messages = {
     transcriptEmptyHelp: "Nach der Einwilligung erscheint jeder Gesprächsbeitrag in Echtzeit. Dieses schnelle Transkript kann Erkennungsfehler enthalten.",
     liveTime: "live", decisionRequired: "Entscheidung erforderlich", assistantWillSay: "Der Assistent sagt",
     approve: "Genehmigen", doNotDisclose: "Nicht offenlegen",
-    terminalHelp: "Dieser Anruf ist beendet. Live-Sicherheitsfreigaben sind nicht mehr aktiv.",
+    terminalHelp: "Dieser Anruf ist beendet. Prüfen Sie unten die Ergebnisse des Anrufs.",
     safetyActive: "Sicherheitsfreigabe aktiv", safetyHelp: "Private Daten können ohne Ihre Freigabe nicht in das Gespräch gelangen.",
     briefEyebrow: "Anrufentwurf", objectiveTitle: "Anrufziel", primaryLanguage: "Hauptsprache",
     languageSwitching: "Sprachwechsel", disabled: "Deaktiviert", voice: "Stimme",

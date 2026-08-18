@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useUiLocale } from "./ui-locale-provider";
 
 export function Brand() {
@@ -27,6 +27,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { locale, messages } = useUiLocale();
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem("callassist_theme", nextTheme);
+    setTheme(nextTheme);
+  }
 
   function changeLocale(nextLocale: "en" | "de") {
     document.cookie = `callassist_ui_locale=${nextLocale};path=/;max-age=31536000;samesite=lax`;
@@ -44,6 +56,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="secure-dot" aria-hidden="true" />
             {messages.app.consoleLabel}
           </div>
+          <button
+            aria-label={theme === "dark" ? messages.app.switchToLightTheme : messages.app.switchToDarkTheme}
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === "dark" ? messages.app.switchToLightTheme : messages.app.switchToDarkTheme}
+            type="button"
+          >
+            <span aria-hidden="true">{theme === "dark" ? "☀" : "☾"}</span>
+          </button>
           <label className="locale-picker">
             <span className="sr-only">{messages.app.interfaceLanguage}</span>
             <select
