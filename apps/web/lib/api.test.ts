@@ -4,14 +4,17 @@ import {
   approveAndStartCall,
   confirmRecipientOptOut,
   createCallBrief,
+  createPromoCode,
   getCreditUsage,
   getCallPreparationErrorMessage,
   login,
   liftRecipientSuppressionAsStaff,
   logout,
   registerAccount,
+  redeemPromoCode,
   recompileCallBrief,
   requestRecipientOptOut,
+  grantCreditsAsAdmin,
   suppressRecipientAsStaff,
   startCall
 } from "./api";
@@ -104,6 +107,58 @@ describe("API client headers", () => {
     await expect(getCreditUsage()).resolves.toMatchObject({ balance: 3 });
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/usage");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
+  });
+
+  it("sends promo redemption, promo creation, and manual grants to dedicated routes", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({
+        applied: true,
+        created: true,
+        usage: { balance: 4, activeCallBriefId: null, transactions: [] },
+        promoCode: {
+          id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+          credits: 1,
+          globalRedemptionLimit: 10,
+          perUserLimit: 1,
+          startsAt: null,
+          expiresAt: null,
+          active: true,
+          campaign: "Beta",
+          createdAt: "2026-08-19T10:00:00.000Z"
+        }
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const idempotencyKey = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+
+    await redeemPromoCode({ code: "CALLASSIST25", idempotencyKey });
+    await createPromoCode({
+      code: "CALLASSIST25",
+      credits: 1,
+      globalRedemptionLimit: 10,
+      perUserLimit: 1,
+      startsAt: null,
+      expiresAt: null,
+      active: true,
+      campaign: "Beta",
+      reason: "Approved campaign",
+      idempotencyKey
+    });
+    await grantCreditsAsAdmin({
+      targetEmail: "user@example.com",
+      credits: 1,
+      reason: "Support adjustment",
+      idempotencyKey
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/api/credits/promo-redemptions"),
+      expect.stringContaining("/api/admin/promo-codes"),
+      expect.stringContaining("/api/admin/credit-grants")
+    ]);
+    for (const call of fetchMock.mock.calls) {
+      expect(call[1]).toMatchObject({ method: "POST", credentials: "include" });
+    }
   });
 
   it("sends public opt-out and staff suppression actions to dedicated routes", async () => {

@@ -17,6 +17,7 @@ import {
   type AssistanceReason,
   type FinalTranscript,
   type FinalTranscriptSegment,
+  type PromoCodeSummary,
   type TranscriptSegment
 } from "@callassist/contracts";
 import postgres from "postgres";
@@ -28,12 +29,16 @@ import {
   defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
+  type AdminCreditGrantRepositoryInput,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
+  type CreatePromoCodeRepositoryInput,
+  type PromoCodeCreationResult,
   type ListCallBriefsInput,
   type RecordingStatusInput,
   type RecipientSuppressionInput,
+  type RedeemPromoRepositoryInput,
   type SafetyControlInput,
   type StartAttemptInput
 } from "./call-repository";
@@ -125,6 +130,33 @@ type FinalTranscriptRow = {
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
   createdAt: DatabaseDate;
+};
+
+type PromoCodeRow = Omit<PromoCodeSummary, "createdAt"> & {
+  codeHash: string;
+  actorUserId: string;
+  reason: string;
+  idempotencyKey: string;
+  createdAt: DatabaseDate;
+};
+
+type PromoRedemptionIdempotencyRow = {
+  userId: string;
+  codeHash: string;
+};
+
+type AdminGrantRow = {
+  userId: string;
+  amount: number;
+  adminId: string | null;
+  reason: string | null;
+};
+
+type CreditAdminUserRow = {
+  id: string;
+  role: "user" | "admin" | "superadmin" | "content_editor" | "support";
+  status: "active" | "suspended" | "deleted";
+  phoneVerifiedAt: DatabaseDate | null;
 };
 
 const terminalStatuses = new Set<CallBrief["status"]>([
@@ -327,6 +359,282 @@ export class PostgresCallRepository implements CallRepository {
         ...row,
         createdAt: toIso(row.createdAt)
       }))
+    };
+  }
+
+  async createPromoCode(
+    input: CreatePromoCodeRepositoryInput
+  ): Promise<PromoCodeCreationResult> {
+    let result: { created: boolean; promoCode: PromoCodeSummary } | null = null;
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockOperation(
+        transaction,
+        `promo-create:${input.idempotencyKey}`
+      );
+      await this.#lockOperation(transaction, `promo-code:${input.codeHash}`);
+      const [actor] = await transaction<CreditAdminUserRow[]>`
+        SELECT
+          id, role, status, phone_verified_at AS "phoneVerifiedAt"
+        FROM users
+        WHERE id = ${input.actorUserId}
+        FOR SHARE
+      `;
+      if (
+        !actor ||
+        actor.status !== "active" ||
+        (actor.role !== "admin" && actor.role !== "superadmin")
+      ) {
+        throw new CallRepositoryError("CREDIT_ADMIN_ACTION_FORBIDDEN");
+      }
+      const [previous] = await transaction<PromoCodeRow[]>`
+        SELECT
+          id,
+          code_hash AS "codeHash",
+          credits,
+          global_redemption_limit AS "globalRedemptionLimit",
+          per_user_limit AS "perUserLimit",
+          starts_at AS "startsAt",
+          expires_at AS "expiresAt",
+          active,
+          campaign,
+          created_by_user_id AS "actorUserId",
+          creation_reason AS reason,
+          creation_idempotency_key AS "idempotencyKey",
+          created_at AS "createdAt"
+        FROM promo_codes
+        WHERE creation_idempotency_key = ${input.idempotencyKey}
+      `;
+      if (previous) {
+        if (!samePromoRow(previous, input)) {
+          throw new CallRepositoryError("CREDIT_IDEMPOTENCY_CONFLICT");
+        }
+        result = { created: false, promoCode: mapPromoCode(previous) };
+        return;
+      }
+      const duplicate = await transaction`
+        SELECT 1 FROM promo_codes WHERE code_hash = ${input.codeHash}
+      `;
+      if (duplicate.count > 0) {
+        throw new CallRepositoryError("PROMO_CODE_ALREADY_EXISTS");
+      }
+      const [created] = await transaction<PromoCodeRow[]>`
+        INSERT INTO promo_codes (
+          id, code_hash, credits, global_redemption_limit, per_user_limit,
+          starts_at, expires_at, active, campaign, created_by_user_id,
+          creation_reason, creation_idempotency_key, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.codeHash}, ${input.credits},
+          ${input.globalRedemptionLimit}, ${input.perUserLimit},
+          ${input.startsAt ? new Date(input.startsAt) : null},
+          ${input.expiresAt ? new Date(input.expiresAt) : null},
+          ${input.active}, ${input.campaign}, ${input.actorUserId},
+          ${input.reason}, ${input.idempotencyKey}, ${new Date(input.now)}
+        )
+        RETURNING
+          id,
+          code_hash AS "codeHash",
+          credits,
+          global_redemption_limit AS "globalRedemptionLimit",
+          per_user_limit AS "perUserLimit",
+          starts_at AS "startsAt",
+          expires_at AS "expiresAt",
+          active,
+          campaign,
+          created_by_user_id AS "actorUserId",
+          creation_reason AS reason,
+          creation_idempotency_key AS "idempotencyKey",
+          created_at AS "createdAt"
+      `;
+      if (!created) throw new CallRepositoryError("PROMO_CODE_UNAVAILABLE");
+      result = { created: true, promoCode: mapPromoCode(created) };
+    });
+    if (!result) throw new CallRepositoryError("PROMO_CODE_UNAVAILABLE");
+    return result as PromoCodeCreationResult;
+  }
+
+  async redeemPromo(input: RedeemPromoRepositoryInput) {
+    let applied = false;
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockOperation(
+        transaction,
+        `promo-redeem:${input.idempotencyKey}`
+      );
+      const [previous] = await transaction<PromoRedemptionIdempotencyRow[]>`
+        SELECT
+          promo_redemptions.user_id AS "userId",
+          promo_codes.code_hash AS "codeHash"
+        FROM promo_redemptions
+        JOIN promo_codes ON promo_codes.id = promo_redemptions.promo_code_id
+        WHERE promo_redemptions.idempotency_key = ${input.idempotencyKey}
+      `;
+      if (previous) {
+        if (
+          previous.userId !== input.userId ||
+          previous.codeHash !== input.codeHash
+        ) {
+          throw new CallRepositoryError("CREDIT_IDEMPOTENCY_CONFLICT");
+        }
+        return;
+      }
+      const [promo] = await transaction<PromoCodeRow[]>`
+        SELECT
+          id,
+          code_hash AS "codeHash",
+          credits,
+          global_redemption_limit AS "globalRedemptionLimit",
+          per_user_limit AS "perUserLimit",
+          starts_at AS "startsAt",
+          expires_at AS "expiresAt",
+          active,
+          campaign,
+          created_by_user_id AS "actorUserId",
+          creation_reason AS reason,
+          creation_idempotency_key AS "idempotencyKey",
+          created_at AS "createdAt"
+        FROM promo_codes
+        WHERE code_hash = ${input.codeHash}
+        FOR UPDATE
+      `;
+      const now = new Date(input.now);
+      if (
+        !promo ||
+        !promo.active ||
+        (promo.startsAt && new Date(promo.startsAt) > now) ||
+        (promo.expiresAt && new Date(promo.expiresAt) <= now)
+      ) {
+        throw new CallRepositoryError("PROMO_CODE_UNAVAILABLE");
+      }
+      const [user] = await transaction<CreditAdminUserRow[]>`
+        SELECT
+          id, role, status, phone_verified_at AS "phoneVerifiedAt"
+        FROM users
+        WHERE id = ${input.userId}
+        FOR SHARE
+      `;
+      if (
+        !user ||
+        user.status !== "active" ||
+        !user.phoneVerifiedAt
+      ) {
+        throw new CallRepositoryError("CREDIT_USER_NOT_FOUND");
+      }
+      const [counts] = await transaction<{
+        globalCount: number;
+        userCount: number;
+      }[]>`
+        SELECT
+          count(*)::int AS "globalCount",
+          count(*) FILTER (WHERE user_id = ${input.userId})::int AS "userCount"
+        FROM promo_redemptions
+        WHERE promo_code_id = ${promo.id}
+      `;
+      const globalCount = counts?.globalCount ?? 0;
+      const userCount = counts?.userCount ?? 0;
+      if (
+        promo.globalRedemptionLimit !== null &&
+        globalCount >= promo.globalRedemptionLimit
+      ) {
+        throw new CallRepositoryError("PROMO_GLOBAL_LIMIT_REACHED");
+      }
+      if (userCount >= promo.perUserLimit) {
+        throw new CallRepositoryError("PROMO_USER_LIMIT_REACHED");
+      }
+      await this.#lockCreditAccount(transaction, input.userId);
+      const redemptionId = randomUUID();
+      await transaction`
+        INSERT INTO promo_redemptions (
+          id, promo_code_id, user_id, redemption_number,
+          credits, idempotency_key, redeemed_at
+        ) VALUES (
+          ${redemptionId}, ${promo.id}, ${input.userId}, ${userCount + 1},
+          ${promo.credits}, ${input.idempotencyKey}, ${now}
+        )
+      `;
+      await transaction`
+        INSERT INTO credit_transactions (
+          id, user_id, amount, type, promo_redemption_id,
+          reason, idempotency_key, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.userId}, ${promo.credits}, 'promo_grant',
+          ${redemptionId}, ${`Promo campaign: ${promo.campaign}`},
+          ${`promo:${redemptionId}`}, ${now}
+        )
+      `;
+      applied = true;
+    });
+    return { applied, usage: await this.getCreditUsage(input.userId) };
+  }
+
+  async grantAdminCredits(input: AdminCreditGrantRepositoryInput) {
+    const transactionIdempotencyKey = `admin-grant:${input.idempotencyKey}`;
+    let applied = false;
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockOperation(
+        transaction,
+        `admin-grant:${input.idempotencyKey}`
+      );
+      const users = await transaction<CreditAdminUserRow[]>`
+        SELECT
+          id, role, status, phone_verified_at AS "phoneVerifiedAt"
+        FROM users
+        WHERE id = ${input.actorUserId} OR id = ${input.targetUserId}
+        ORDER BY id
+        FOR UPDATE
+      `;
+      const actor = users.find(({ id }) => id === input.actorUserId);
+      const target = users.find(({ id }) => id === input.targetUserId);
+      if (
+        !actor ||
+        actor.status !== "active" ||
+        (actor.role !== "admin" && actor.role !== "superadmin")
+      ) {
+        throw new CallRepositoryError("CREDIT_ADMIN_ACTION_FORBIDDEN");
+      }
+      if (input.actorUserId === input.targetUserId) {
+        throw new CallRepositoryError("CREDIT_SELF_GRANT_FORBIDDEN");
+      }
+      if (!target || target.status !== "active" || !target.phoneVerifiedAt) {
+        throw new CallRepositoryError("CREDIT_USER_NOT_FOUND");
+      }
+      if (actor.role !== "superadmin" && target.role !== "user") {
+        throw new CallRepositoryError("CREDIT_ADMIN_ACTION_FORBIDDEN");
+      }
+      const [previous] = await transaction<AdminGrantRow[]>`
+        SELECT
+          user_id AS "userId",
+          amount,
+          admin_id AS "adminId",
+          reason
+        FROM credit_transactions
+        WHERE idempotency_key = ${transactionIdempotencyKey}
+      `;
+      if (previous) {
+        if (
+          previous.userId !== input.targetUserId ||
+          previous.amount !== input.credits ||
+          previous.adminId !== input.actorUserId ||
+          previous.reason !== input.reason
+        ) {
+          throw new CallRepositoryError("CREDIT_IDEMPOTENCY_CONFLICT");
+        }
+        return;
+      }
+      await this.#lockCreditAccount(transaction, input.targetUserId);
+      await transaction`
+        INSERT INTO credit_transactions (
+          id, user_id, amount, type, admin_id,
+          reason, idempotency_key, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.targetUserId}, ${input.credits},
+          'admin_grant', ${input.actorUserId}, ${input.reason},
+          ${transactionIdempotencyKey}, ${new Date(input.now)}
+        )
+      `;
+      applied = true;
+    });
+    return {
+      applied,
+      usage: await this.getCreditUsage(input.targetUserId)
     };
   }
 
@@ -1927,6 +2235,17 @@ export class PostgresCallRepository implements CallRepository {
     `;
   }
 
+  async #lockOperation(
+    transaction: postgres.TransactionSql,
+    identifier: string
+  ) {
+    await transaction`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended(${`operation:${identifier}`}, 0)
+      )
+    `;
+  }
+
   async #lockActiveUser(
     transaction: postgres.TransactionSql,
     userId: string
@@ -2012,4 +2331,40 @@ function requireReason(value: string) {
   const reason = value.trim();
   if (!reason) throw new Error("A safety-control reason is required");
   return reason;
+}
+
+function mapPromoCode(row: PromoCodeRow): PromoCodeSummary {
+  return {
+    id: row.id,
+    credits: row.credits,
+    globalRedemptionLimit: row.globalRedemptionLimit,
+    perUserLimit: row.perUserLimit,
+    startsAt: row.startsAt ? toIso(row.startsAt) : null,
+    expiresAt: row.expiresAt ? toIso(row.expiresAt) : null,
+    active: row.active,
+    campaign: row.campaign,
+    createdAt: toIso(row.createdAt)
+  };
+}
+
+function samePromoRow(
+  row: PromoCodeRow,
+  input: CreatePromoCodeRepositoryInput
+) {
+  return (
+    row.codeHash === input.codeHash &&
+    row.credits === input.credits &&
+    row.globalRedemptionLimit === input.globalRedemptionLimit &&
+    row.perUserLimit === input.perUserLimit &&
+    nullableIso(row.startsAt) === input.startsAt &&
+    nullableIso(row.expiresAt) === input.expiresAt &&
+    row.active === input.active &&
+    row.campaign === input.campaign &&
+    row.actorUserId === input.actorUserId &&
+    row.reason === input.reason
+  );
+}
+
+function nullableIso(value: DatabaseDate | null) {
+  return value === null ? null : toIso(value);
 }

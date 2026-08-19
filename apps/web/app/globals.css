@@ -122,6 +122,9 @@ main:focus { outline: none; }
 }
 .safety-form h2 { font-size: 18px; margin: 0 0 8px; }
 .safety-form p { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; }
+.credits-admin-card { max-width: 940px; }
+.credit-checkbox { align-items: center; display: flex; font-size: 12px; gap: 9px; }
+.credit-checkbox input { accent-color: var(--green); height: 16px; width: 16px; }
 
 .topbar {
   align-items: center;

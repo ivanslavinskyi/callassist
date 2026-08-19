@@ -6,6 +6,7 @@ describe("endpoint rate-limit policy", () => {
     expect(endpointRateLimitPolicyFromEnv({})).toEqual({
       briefPreparation: { userLimit: 15, ipLimit: 75, windowMs: 3_600_000 },
       callStart: { userLimit: 10, ipLimit: 50, windowMs: 900_000 },
+      promoRedemption: { userLimit: 10, ipLimit: 50, windowMs: 3_600_000 },
       recordingDownload: { userLimit: 30, ipLimit: 150, windowMs: 3_600_000 },
       transcriptionRetry: { userLimit: 5, ipLimit: 25, windowMs: 86_400_000 }
     });

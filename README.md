@@ -106,7 +106,10 @@ The API development process intentionally does not auto-restart when source
 files change. Restart it manually between edits: an automatic restart during an
 active PSTN call would terminate the Twilio Media Stream.
 
-`pnpm env:init` creates `.env` with a unique encryption key and never overwrites an existing file.
+`pnpm env:init` creates `.env` with independent encryption and keyed promo-code
+hash keys and never overwrites an existing file. Existing deployments may temporarily
+fall back to `DATA_ENCRYPTION_KEY`, but should set and rotate a separate
+`PROMO_CODE_HASH_KEY` before issuing codes.
 
 ## Test a real Twilio call
 
@@ -172,6 +175,16 @@ enforces one active outbound call per user. A credit is charged only after the
 provider confirms a successful connection (`in-progress` or `completed`). Busy,
 unanswered, canceled, and technical failures refund the reservation once.
 
+Authenticated users can redeem a code at `/en/redeem` or `/de/redeem` through
+`POST /api/credits/promo-redemptions`. Active administrators can create bounded
+promo campaigns and issue reasoned grants at `/en/admin/credits` or
+`/de/admin/credits` through `POST /api/admin/promo-codes` and
+`POST /api/admin/credit-grants`. Promo plaintext is never persisted: the server
+stores an HMAC-SHA-256 digest, locks the campaign while applying global/per-user
+limits, and writes the redemption and ledger grant in one transaction. Manual grants
+store the acting administrator and reason. All three mutations require a caller-owned
+UUID idempotency key, so safe retries cannot duplicate credit.
+
 Immediately before reservation, the API also checks the durable global outbound-call
 control, the normalized recipient suppression list, and per-user admission limits.
 Public-beta defaults allow 3 starts per rolling hour, 10 per UTC day, 2 starts to the
@@ -183,7 +196,7 @@ variables in `.env`.
 Expensive authenticated endpoints have a separate process-local fixed-window rate
 limit by hashed user ID and hashed IP. The shared IP budget is five times the user
 budget. Defaults are 15 brief preparations/hour, 10 start requests/15 minutes,
-30 recording downloads/hour, and 5 transcription retries/day. A rejected request
+10 promo redemption attempts/hour, 30 recording downloads/hour, and 5 transcription retries/day. A rejected request
 returns `429 RATE_LIMITED` with `Retry-After`; the limits are configured through the
 `API_RATE_LIMIT_*` variables. Invalid payloads and unauthorized resources are rejected
 before consuming these expensive-operation budgets. Move this state to a shared

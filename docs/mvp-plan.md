@@ -122,8 +122,8 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 
 ### P1 — promo and complaints
 
-- [ ] Add `promo_codes` with hashed code, credits, global/per-user limits, start/expiry, active flag, campaign; add transactional unique `promo_redemptions`.
-- [ ] Issue promo/manual grants only through the ledger with actor, reason, time, idempotency.
+- [x] Add `promo_codes` with keyed HMAC code hash, credits, global/per-user limits, start/expiry, active flag, campaign; add transactional unique and immutable `promo_redemptions`.
+- [x] Issue promo/manual grants only through the ledger with actor, reason, time, idempotency. Redemption and ledger insertion share one locked transaction; admin grants resolve a verified target email and retain the acting administrator.
 - [ ] Add complaint/abuse intake, repeat-call/opt-out/policy review, escalation, and response ownership.
 
 ## 3. Public Product & User Experience
@@ -186,7 +186,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 - [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** backend account-status and force-logout routes already enforce admin/superadmin RBAC, privileged-target rules, self-action denial, and origin checks.
 - [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events and suppression/lift safety events are immutable and include the applicable actor, target/source, reason, and time.
-- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** suspend/unsuspend, force logout, localized suppression actions, and the kill-switch operator command exist; lookup, credit grants, and a consolidated admin UI remain.
+- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** suspend/unsuspend, force logout, localized suppression and credit-grant/promo actions, and the kill-switch operator command exist; general user lookup and a consolidated admin UI remain.
 
 ### P1 — admin areas
 
@@ -194,7 +194,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 - [ ] `/admin/users` and detail: identity/verification, activity/status, ledger/promos, calls/feedback/safety/complaints, and audited grant/suspend/session/delete actions.
 - [ ] `/admin/calls` and detail: user/recipient (controlled), locale, status/outcome, duration, consent, recording/transcription, failure stage, and useful failure/policy/model/language/date filters.
 - [ ] `/admin/safety`: blocks, repeat recipients, no-consent/declines, opt-outs, complaints, suspicious registration/credits, anomaly review and actions. **Partial:** an RBAC-protected localized form now creates staff/complaint suppressions and audited lifts; list/search, anomaly queues, call context, and complaint review remain.
-- [ ] `/admin/credits`: ledger, grants/adjustments, promo/redemption/expiry/campaign; no silent balance edits.
+- [ ] `/admin/credits`: ledger, grants/adjustments, promo/redemption/expiry/campaign; no silent balance edits. **Partial:** localized RBAC-protected promo creation and manual reasoned grant forms exist; ledger/redemption browsing, deactivation, and campaign management remain.
 - [ ] `/admin/audit`: actor/action/target/time/result filters and immutable evidence.
 
 ### P1 — Call Inspector and telemetry
@@ -293,7 +293,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Separate technical telemetry; `audit_events` remains action audit.
 - [ ] Structured outcomes and user feedback measurable.
 - [ ] Admin Users workflows.
-- [ ] Transactional promo codes and ledger grants.
+- [x] Transactional promo codes and ledger grants.
 - [ ] Account/data export/delete and session revocation tested.
 - [ ] Support/complaint/suppression workflow with owners and targets. **Partial:** staff/complaint suppression and lift actions are RBAC-protected and audited, but complaint intake, ownership, escalation, and response targets remain.
 - [ ] CI and `main` branch protection.

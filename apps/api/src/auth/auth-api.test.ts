@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { buildApp } from "../app";
 import { CallService } from "../call-service";
+import { CreditService } from "../credits/credit-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { AuthService } from "./auth-service";
 import { InMemoryAuthRepository } from "./in-memory-auth-repository";
@@ -21,9 +23,15 @@ function createAuthApp() {
     verificationProvider: new MockVerificationProvider("123456"),
     signupCreditGranter: callService
   });
+  const creditService = new CreditService({
+    repository: callRepository,
+    authRepository: repository,
+    hashKey: Buffer.alloc(32, 7)
+  });
   const app = buildApp({
     service: callService,
     authService,
+    creditService,
     logger: false,
     secureCookies: false
   });
@@ -785,4 +793,153 @@ describe("auth API", () => {
       }
     ]);
   });
+
+  it("creates and redeems promo codes exactly once without storing the raw code in usage", async () => {
+    const { app, repository } = createAuthApp();
+    const adminRegistration = {
+      ...registration,
+      email: "credits-admin@example.com",
+      phoneE164: "+41710000008"
+    };
+    const userRegistration = {
+      ...registration,
+      email: "promo-user@example.com",
+      phoneE164: "+41710000009"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const userCookie = await registerAndVerify(app, userRegistration);
+    const admin = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: adminCookie }
+    });
+    await repository.setUserRoleForTest(admin.json().user.id, "admin");
+
+    const forbidden = await app.inject({
+      method: "POST",
+      url: "/api/admin/promo-codes",
+      headers: { cookie: userCookie },
+      payload: promoCreation("CALLASSIST25")
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const creation = promoCreation("CALLASSIST25");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/admin/promo-codes",
+      headers: { cookie: adminCookie },
+      payload: creation
+    });
+    expect(created.statusCode).toBe(200);
+    expect(created.json()).toMatchObject({
+      created: true,
+      promoCode: { credits: 5, campaign: "Beta launch" }
+    });
+    expect(JSON.stringify(created.json())).not.toContain("CALLASSIST25");
+
+    const idempotencyKey = randomUUID();
+    const redeem = () => app.inject({
+      method: "POST",
+      url: "/api/credits/promo-redemptions",
+      headers: { cookie: userCookie },
+      payload: { code: "callassist25", idempotencyKey }
+    });
+    const first = await redeem();
+    const replay = await redeem();
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ applied: true, usage: { balance: 8 } });
+    expect(replay.json()).toMatchObject({ applied: false, usage: { balance: 8 } });
+    expect(first.json().usage.transactions).toContainEqual(expect.objectContaining({
+      type: "promo_grant",
+      amount: 5,
+      promoRedemptionId: expect.any(String)
+    }));
+    expect(JSON.stringify(first.json())).not.toContain("CALLASSIST25");
+
+    const overLimit = await app.inject({
+      method: "POST",
+      url: "/api/credits/promo-redemptions",
+      headers: { cookie: userCookie },
+      payload: { code: "CALLASSIST25", idempotencyKey: randomUUID() }
+    });
+    expect(overLimit.statusCode).toBe(409);
+    expect(overLimit.json()).toEqual({ error: "PROMO_USER_LIMIT_REACHED" });
+  });
+
+  it("records idempotent administrator credit grants with actor and reason", async () => {
+    const { app, repository } = createAuthApp();
+    const adminRegistration = {
+      ...registration,
+      email: "grant-admin@example.com",
+      phoneE164: "+41710000010"
+    };
+    const targetRegistration = {
+      ...registration,
+      email: "grant-target@example.com",
+      phoneE164: "+41710000011"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const targetCookie = await registerAndVerify(app, targetRegistration);
+    const admin = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: adminCookie }
+    });
+    const adminId = admin.json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+    const idempotencyKey = randomUUID();
+    const payload = {
+      targetEmail: targetRegistration.email,
+      credits: 4,
+      reason: "Customer recovery adjustment",
+      idempotencyKey
+    };
+    const grant = () => app.inject({
+      method: "POST",
+      url: "/api/admin/credit-grants",
+      headers: { cookie: adminCookie },
+      payload
+    });
+    const first = await grant();
+    const replay = await grant();
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ applied: true, usage: { balance: 7 } });
+    expect(replay.json()).toMatchObject({ applied: false, usage: { balance: 7 } });
+
+    const usage = await app.inject({
+      method: "GET",
+      url: "/api/usage",
+      headers: { cookie: targetCookie }
+    });
+    expect(usage.json().transactions).toContainEqual(expect.objectContaining({
+      type: "admin_grant",
+      amount: 4,
+      adminId,
+      reason: payload.reason
+    }));
+
+    const selfGrant = await app.inject({
+      method: "POST",
+      url: "/api/admin/credit-grants",
+      headers: { cookie: adminCookie },
+      payload: { ...payload, targetEmail: adminRegistration.email, idempotencyKey: randomUUID() }
+    });
+    expect(selfGrant.statusCode).toBe(403);
+    expect(selfGrant.json()).toEqual({ error: "CREDIT_SELF_GRANT_FORBIDDEN" });
+  });
 });
+
+function promoCreation(code: string) {
+  return {
+    code,
+    credits: 5,
+    globalRedemptionLimit: 10,
+    perUserLimit: 1,
+    startsAt: null,
+    expiresAt: null,
+    active: true,
+    campaign: "Beta launch",
+    reason: "Approved beta campaign",
+    idempotencyKey: randomUUID()
+  };
+}

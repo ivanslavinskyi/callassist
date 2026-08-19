@@ -10,6 +10,7 @@ export type EndpointRateLimitRule = {
 export type EndpointRateLimitPolicy = {
   briefPreparation: EndpointRateLimitRule;
   callStart: EndpointRateLimitRule;
+  promoRedemption: EndpointRateLimitRule;
   recordingDownload: EndpointRateLimitRule;
   transcriptionRetry: EndpointRateLimitRule;
 };
@@ -19,6 +20,7 @@ const ipMultiplier = 5;
 export const defaultEndpointRateLimitPolicy: EndpointRateLimitPolicy = {
   briefPreparation: rule(15, hour),
   callStart: rule(10, 15 * 60 * 1_000),
+  promoRedemption: rule(10, hour),
   recordingDownload: rule(30, hour),
   transcriptionRetry: rule(5, day)
 };
@@ -37,6 +39,11 @@ export function endpointRateLimitPolicyFromEnv(
       "API_RATE_LIMIT_CALL_START_PER_15_MINUTES",
       defaultEndpointRateLimitPolicy.callStart.userLimit
     ), 15 * 60 * 1_000),
+    promoRedemption: rule(positiveInteger(
+      environment.API_RATE_LIMIT_PROMO_REDEMPTION_PER_HOUR,
+      "API_RATE_LIMIT_PROMO_REDEMPTION_PER_HOUR",
+      defaultEndpointRateLimitPolicy.promoRedemption.userLimit
+    ), hour),
     recordingDownload: rule(positiveInteger(
       environment.API_RATE_LIMIT_RECORDING_DOWNLOAD_PER_HOUR,
       "API_RATE_LIMIT_RECORDING_DOWNLOAD_PER_HOUR",

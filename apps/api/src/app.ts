@@ -3,11 +3,14 @@ import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import {
   accountStatusActionSchema,
+  adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
   createCallBriefInputSchema,
   loginInputSchema,
   phoneVerificationInputSchema,
+  promoCodeCreateInputSchema,
+  promoRedemptionInputSchema,
   recipientOptOutConfirmationSchema,
   recipientOptOutRequestSchema,
   registrationInputSchema,
@@ -15,7 +18,8 @@ import {
   staffRecipientSuppressionLiftSchema,
   staffRecipientSuppressionSchema,
   verificationResendInputSchema,
-  type CallEvent
+  type CallEvent,
+  type User
 } from "@callassist/contracts";
 import Fastify, {
   type FastifyBaseLogger,
@@ -25,6 +29,7 @@ import Fastify, {
 import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import { AuthServiceError, type AuthService } from "./auth/auth-service";
 import { CallServiceError, type CallService } from "./call-service";
+import type { CreditService } from "./credits/credit-service";
 import {
   defaultEndpointRateLimitPolicy,
   type EndpointRateLimitPolicy,
@@ -51,6 +56,7 @@ import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provi
 type BuildAppOptions = {
   service: CallService;
   authService?: AuthService;
+  creditService?: CreditService;
   allowAnonymousCallsForTesting?: boolean;
   logger?: boolean;
   secureCookies?: boolean;
@@ -70,6 +76,7 @@ type BuildWebhookAppOptions = {
 export function buildApp({
   service,
   authService,
+  creditService,
   allowAnonymousCallsForTesting = false,
   logger = true,
   secureCookies = process.env.NODE_ENV === "production",
@@ -96,7 +103,7 @@ export function buildApp({
     request: FastifyRequest,
     reply: FastifyReply,
     options: { callId?: string; mutation?: boolean } = {}
-  ): Promise<{ userId: string | null } | null> {
+  ): Promise<{ userId: string | null; user: User | null } | null> {
     if (
       options.mutation &&
       !hasAllowedOrigin(request.headers.origin, webOrigins)
@@ -124,7 +131,7 @@ export function buildApp({
         return null;
       }
     }
-    return { userId };
+    return { userId, user };
   }
 
   async function authorizeAdminMutation(
@@ -333,6 +340,65 @@ export function buildApp({
         .header("Cache-Control", "private, no-store")
         .send(await service.getCreditUsage(access.userId));
     });
+
+    if (creditService) {
+      app.post("/api/credits/promo-redemptions", async (request, reply) => {
+        const access = await authorizeCallAccess(request, reply, {
+          mutation: true
+        });
+        if (!access?.user) return;
+        const parsed = promoRedemptionInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_PROMO_REDEMPTION" });
+        }
+        if (!await enforceEndpointRateLimit(
+          request,
+          reply,
+          access.userId,
+          "promo-redemption",
+          endpointRateLimitPolicy.promoRedemption
+        )) return;
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await creditService.redeem(access.user, parsed.data));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      });
+
+      app.post("/api/admin/promo-codes", async (request, reply) => {
+        const actor = await authorizeAdminMutation(request, reply);
+        if (!actor) return;
+        const parsed = promoCodeCreateInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_PROMO_CODE" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await creditService.createPromoCode(actor, parsed.data));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      });
+
+      app.post("/api/admin/credit-grants", async (request, reply) => {
+        const actor = await authorizeAdminMutation(request, reply);
+        if (!actor) return;
+        const parsed = adminCreditGrantInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_CREDIT_GRANT" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await creditService.grantAdminCredits(actor, parsed.data));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      });
+    }
 
     app.put<{ Params: { userId: string } }>(
       "/api/admin/users/:userId/status",
@@ -1056,10 +1122,19 @@ function sendRepositoryError(
   if (error instanceof CallRepositoryError) {
     const status = error.code === "CALL_NOT_FOUND"
       ? 404
+      : error.code === "CREDIT_USER_NOT_FOUND"
+        ? 404
       : error.code === "OUTBOUND_CALLS_DISABLED"
         ? 503
         : error.code === "RECIPIENT_SUPPRESSED"
           ? 403
+          : [
+              "CREDIT_ADMIN_ACTION_FORBIDDEN",
+              "CREDIT_SELF_GRANT_FORBIDDEN"
+            ].includes(error.code)
+            ? 403
+          : error.code === "PROMO_CODE_UNAVAILABLE"
+            ? 404
           : [
               "HOURLY_CALL_LIMIT",
               "DAILY_CALL_LIMIT",

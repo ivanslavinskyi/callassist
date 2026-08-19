@@ -90,7 +90,9 @@ export type Messages = {
     skipToContent: string;
     defaultTitle: string;
     optOut: string;
+    redeem: string;
     safety: string;
+    creditAdmin: string;
     creditsRemaining: (count: number) => string;
   };
   dialog: {
@@ -279,7 +281,9 @@ const en: Messages = {
     skipToContent: "Skip to main content",
     defaultTitle: "CallAssist — controlled AI phone calls",
     optOut: "Stop calls",
+    redeem: "Redeem",
     safety: "Safety",
+    creditAdmin: "Credits",
     creditsRemaining: (count: number) =>
       `${count} call ${count === 1 ? "credit" : "credits"}`
   },
@@ -430,7 +434,9 @@ const de: Messages = {
     skipToContent: "Zum Hauptinhalt springen",
     defaultTitle: "CallAssist — kontrollierte KI-Telefonanrufe",
     optOut: "Anrufe sperren",
+    redeem: "Code einlösen",
     safety: "Sicherheit",
+    creditAdmin: "Guthaben",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {

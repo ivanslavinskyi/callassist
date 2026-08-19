@@ -30,7 +30,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { locale, localizeHref, messages } = useUiLocale();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
-  const [canManageSafety, setCanManageSafety] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [canManageAdmin, setCanManageAdmin] = useState(false);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -41,11 +42,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     void getCurrentUser()
       .then(({ user }) => {
         if (active) {
-          setCanManageSafety(["admin", "superadmin"].includes(user.role));
+          setIsAuthenticated(true);
+          setCanManageAdmin(["admin", "superadmin"].includes(user.role));
         }
       })
       .catch(() => {
-        if (active) setCanManageSafety(false);
+        if (active) {
+          setIsAuthenticated(false);
+          setCanManageAdmin(false);
+        }
       });
     return () => { active = false; };
   }, []);
@@ -95,11 +100,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Link className="topbar-link" href={localizeHref("/opt-out")}>
             {messages.app.optOut}
           </Link>
-          {canManageSafety ? (
-            <Link className="topbar-link" href={localizeHref("/admin/safety")}>
-              {messages.app.safety}
-            </Link>
-          ) : null}
+          {isAuthenticated ? <Link className="topbar-link" href={localizeHref("/redeem")}>{messages.app.redeem}</Link> : null}
+          {canManageAdmin ? <>
+            <Link className="topbar-link" href={localizeHref("/admin/safety")}>{messages.app.safety}</Link>
+            <Link className="topbar-link" href={localizeHref("/admin/credits")}>{messages.app.creditAdmin}</Link>
+          </> : null}
           {creditBalance !== null ? (
             <span
               aria-label={messages.app.creditsRemaining(creditBalance)}

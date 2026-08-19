@@ -373,6 +373,7 @@ describe("call API", () => {
     const policy: EndpointRateLimitPolicy = {
       briefPreparation: oneRequest,
       callStart: oneRequest,
+      promoRedemption: oneRequest,
       recordingDownload: oneRequest,
       transcriptionRetry: oneRequest
     };

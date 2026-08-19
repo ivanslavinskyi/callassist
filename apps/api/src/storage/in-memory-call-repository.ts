@@ -15,6 +15,7 @@ import {
   type FinalTranscript,
   type FinalTranscriptSegment,
   type NormalizedCallBriefInput,
+  type PromoCodeSummary,
   type TranscriptSegment
 } from "@callassist/contracts";
 import {
@@ -24,15 +25,35 @@ import {
   defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
+  type AdminCreditGrantRepositoryInput,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
+  type CreatePromoCodeRepositoryInput,
   type ListCallBriefsInput,
   type RecordingStatusInput,
   type RecipientSuppressionInput,
+  type RedeemPromoRepositoryInput,
   type SafetyControlInput,
   type StartAttemptInput
 } from "./call-repository";
+
+type StoredPromoCode = PromoCodeSummary & {
+  codeHash: string;
+  actorUserId: string;
+  reason: string;
+  idempotencyKey: string;
+};
+
+type StoredPromoRedemption = {
+  id: string;
+  promoCodeId: string;
+  userId: string;
+  redemptionNumber: number;
+  credits: number;
+  idempotencyKey: string;
+  redeemedAt: string;
+};
 
 const interruptedStatuses = new Set<CallBrief["status"]>([
   "dialing",
@@ -58,6 +79,9 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #creditTransactions: Array<
     CreditTransaction & { userId: string; idempotencyKey: string }
   > = [];
+  readonly #promoCodes = new Map<string, StoredPromoCode>();
+  readonly #promoCreationIdempotency = new Map<string, string>();
+  readonly #promoRedemptions: StoredPromoRedemption[] = [];
   readonly #recipientSuppressions = new Map<
     string,
     RecipientSuppressionInput & { createdAt: string }
@@ -156,6 +180,135 @@ export class InMemoryCallRepository implements CallRepository {
 
   async getCreditUsage(userId: string): Promise<CreditUsage> {
     return this.#buildCreditUsage(userId);
+  }
+
+  async createPromoCode(input: CreatePromoCodeRepositoryInput) {
+    const previousHash = this.#promoCreationIdempotency.get(input.idempotencyKey);
+    if (previousHash) {
+      const previous = this.#promoCodes.get(previousHash)!;
+      if (!samePromoDefinition(previous, input)) {
+        throw new CallRepositoryError("CREDIT_IDEMPOTENCY_CONFLICT");
+      }
+      return { created: false, promoCode: promoSummary(previous) };
+    }
+    if (this.#promoCodes.has(input.codeHash)) {
+      throw new CallRepositoryError("PROMO_CODE_ALREADY_EXISTS");
+    }
+    const promoCode: StoredPromoCode = {
+      id: randomUUID(),
+      codeHash: input.codeHash,
+      credits: input.credits,
+      globalRedemptionLimit: input.globalRedemptionLimit,
+      perUserLimit: input.perUserLimit,
+      startsAt: input.startsAt,
+      expiresAt: input.expiresAt,
+      active: input.active,
+      campaign: input.campaign,
+      actorUserId: input.actorUserId,
+      reason: input.reason,
+      idempotencyKey: input.idempotencyKey,
+      createdAt: input.now
+    };
+    this.#promoCodes.set(input.codeHash, promoCode);
+    this.#promoCreationIdempotency.set(input.idempotencyKey, input.codeHash);
+    return { created: true, promoCode: promoSummary(promoCode) };
+  }
+
+  async redeemPromo(input: RedeemPromoRepositoryInput) {
+    const previous = this.#promoRedemptions.find(
+      ({ idempotencyKey }) => idempotencyKey === input.idempotencyKey
+    );
+    if (previous) {
+      const promo = [...this.#promoCodes.values()].find(
+        ({ id }) => id === previous.promoCodeId
+      );
+      if (!promo || previous.userId !== input.userId || promo.codeHash !== input.codeHash) {
+        throw new CallRepositoryError("CREDIT_IDEMPOTENCY_CONFLICT");
+      }
+      return { applied: false, usage: this.#buildCreditUsage(input.userId) };
+    }
+    const promo = this.#promoCodes.get(input.codeHash);
+    const now = Date.parse(input.now);
+    if (
+      !promo ||
+      !promo.active ||
+      (promo.startsAt !== null && Date.parse(promo.startsAt) > now) ||
+      (promo.expiresAt !== null && Date.parse(promo.expiresAt) <= now)
+    ) {
+      throw new CallRepositoryError("PROMO_CODE_UNAVAILABLE");
+    }
+    const redemptions = this.#promoRedemptions.filter(
+      ({ promoCodeId }) => promoCodeId === promo.id
+    );
+    if (
+      promo.globalRedemptionLimit !== null &&
+      redemptions.length >= promo.globalRedemptionLimit
+    ) {
+      throw new CallRepositoryError("PROMO_GLOBAL_LIMIT_REACHED");
+    }
+    const userRedemptions = redemptions.filter(
+      ({ userId }) => userId === input.userId
+    );
+    if (userRedemptions.length >= promo.perUserLimit) {
+      throw new CallRepositoryError("PROMO_USER_LIMIT_REACHED");
+    }
+    const redemption: StoredPromoRedemption = {
+      id: randomUUID(),
+      promoCodeId: promo.id,
+      userId: input.userId,
+      redemptionNumber: userRedemptions.length + 1,
+      credits: promo.credits,
+      idempotencyKey: input.idempotencyKey,
+      redeemedAt: input.now
+    };
+    this.#promoRedemptions.push(redemption);
+    this.#creditTransactions.push({
+      id: randomUUID(),
+      userId: input.userId,
+      amount: promo.credits,
+      type: "promo_grant",
+      callAttemptId: null,
+      promoRedemptionId: redemption.id,
+      adminId: null,
+      reason: `Promo campaign: ${promo.campaign}`,
+      idempotencyKey: `promo:${redemption.id}`,
+      createdAt: input.now
+    });
+    return { applied: true, usage: this.#buildCreditUsage(input.userId) };
+  }
+
+  async grantAdminCredits(input: AdminCreditGrantRepositoryInput) {
+    const idempotencyKey = `admin-grant:${input.idempotencyKey}`;
+    const previous = this.#creditTransactions.find(
+      (entry) => entry.idempotencyKey === idempotencyKey
+    );
+    if (previous) {
+      if (
+        previous.userId !== input.targetUserId ||
+        previous.adminId !== input.actorUserId ||
+        previous.amount !== input.credits ||
+        previous.reason !== input.reason
+      ) {
+        throw new CallRepositoryError("CREDIT_IDEMPOTENCY_CONFLICT");
+      }
+      return {
+        applied: false,
+        usage: this.#buildCreditUsage(input.targetUserId)
+      };
+    }
+    this.#creditTransactions.push({
+      id: randomUUID(),
+      userId: input.targetUserId,
+      amount: input.credits,
+      type: "admin_grant",
+      callAttemptId: null,
+      promoRedemptionId: null,
+      adminId: input.actorUserId,
+      reason: input.reason,
+      idempotencyKey,
+      createdAt: input.now
+    });
+    return { applied: true, usage: this.#buildCreditUsage(input.targetUserId) };
   }
 
   async suppressRecipient(input: RecipientSuppressionInput) {
@@ -887,6 +1040,36 @@ function requireReason(value: string) {
   const reason = value.trim();
   if (!reason) throw new Error("A safety-control reason is required");
   return reason;
+}
+
+function samePromoDefinition(
+  stored: StoredPromoCode,
+  input: CreatePromoCodeRepositoryInput
+) {
+  return stored.codeHash === input.codeHash &&
+    stored.credits === input.credits &&
+    stored.globalRedemptionLimit === input.globalRedemptionLimit &&
+    stored.perUserLimit === input.perUserLimit &&
+    stored.startsAt === input.startsAt &&
+    stored.expiresAt === input.expiresAt &&
+    stored.active === input.active &&
+    stored.campaign === input.campaign &&
+    stored.actorUserId === input.actorUserId &&
+    stored.reason === input.reason;
+}
+
+function promoSummary(stored: StoredPromoCode): PromoCodeSummary {
+  return {
+    id: stored.id,
+    credits: stored.credits,
+    globalRedemptionLimit: stored.globalRedemptionLimit,
+    perUserLimit: stored.perUserLimit,
+    startsAt: stored.startsAt,
+    expiresAt: stored.expiresAt,
+    active: stored.active,
+    campaign: stored.campaign,
+    createdAt: stored.createdAt
+  };
 }
 
 function storedBriefIdentity(parsed: NormalizedCallBriefInput) {

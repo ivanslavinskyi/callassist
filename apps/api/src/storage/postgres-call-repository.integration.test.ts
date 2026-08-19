@@ -244,6 +244,99 @@ describeWithDatabase("PostgresCallRepository", () => {
     `).rejects.toThrow("immutable");
   });
 
+  it("serializes promo limits and keeps grants and redemptions immutable", async () => {
+    const adminId = randomUUID();
+    const suffix = adminId.replaceAll("-", "");
+    await inspection`
+      INSERT INTO users (
+        id, email, password_hash, phone_e164, phone_verified_at,
+        first_name, last_name, role, status, ui_locale, created_at
+      ) VALUES (
+        ${adminId}, ${`promo-admin-${suffix}@example.com`}, 'test-only',
+        ${`+416${suffix.slice(0, 8)}`}, now(), 'Ada', 'Promo',
+        'admin', 'active', 'en', now()
+      )
+    `;
+    const codeHash = suffix.padEnd(64, "a");
+    const created = await repository.createPromoCode({
+      codeHash,
+      credits: 6,
+      globalRedemptionLimit: 1,
+      perUserLimit: 1,
+      startsAt: null,
+      expiresAt: null,
+      active: true,
+      campaign: "Postgres concurrency",
+      actorUserId: adminId,
+      reason: "Verify atomic promo accounting",
+      idempotencyKey: randomUUID(),
+      now: new Date().toISOString()
+    });
+    expect(created).toMatchObject({
+      created: true,
+      promoCode: { credits: 6, globalRedemptionLimit: 1 }
+    });
+    expect(created.promoCode).not.toHaveProperty("codeHash");
+
+    const requests = [ownerA, ownerB].map((userId) => ({
+      codeHash,
+      userId,
+      idempotencyKey: randomUUID(),
+      now: new Date().toISOString()
+    }));
+    const redemptions = await Promise.allSettled(
+      requests.map((input) => repository.redeemPromo(input))
+    );
+    const successfulIndex = redemptions.findIndex(({ status }) => status === "fulfilled");
+    expect(successfulIndex).toBeGreaterThanOrEqual(0);
+    expect(redemptions.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(redemptions.find(({ status }) => status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ code: "PROMO_GLOBAL_LIMIT_REACHED" })
+    });
+    const successfulRequest = requests[successfulIndex]!;
+    await expect(repository.redeemPromo(successfulRequest)).resolves.toMatchObject({
+      applied: false,
+      usage: { balance: 6 }
+    });
+
+    const [ledger] = await inspection<{ redemptions: number; grants: number }[]>`
+      SELECT
+        (SELECT count(*)::int FROM promo_redemptions WHERE promo_code_id = ${created.promoCode.id}) AS redemptions,
+        (SELECT count(*)::int FROM credit_transactions WHERE type = 'promo_grant' AND promo_redemption_id IN (
+          SELECT id FROM promo_redemptions WHERE promo_code_id = ${created.promoCode.id}
+        )) AS grants
+    `;
+    expect(ledger).toEqual({ redemptions: 1, grants: 1 });
+    await expect(inspection`
+      UPDATE promo_redemptions
+      SET credits = credits + 1
+      WHERE promo_code_id = ${created.promoCode.id}
+    `).rejects.toThrow("immutable");
+
+    const grantKey = randomUUID();
+    const grantInput = {
+      actorUserId: adminId,
+      targetUserId: ownerA,
+      credits: 2,
+      reason: "Documented support adjustment",
+      idempotencyKey: grantKey,
+      now: new Date().toISOString()
+    };
+    const firstGrant = await repository.grantAdminCredits(grantInput);
+    const replayedGrant = await repository.grantAdminCredits(grantInput);
+    expect(firstGrant.applied).toBe(true);
+    expect(replayedGrant.applied).toBe(false);
+    const [storedGrant] = await inspection<{ adminId: string; reason: string }[]>`
+      SELECT admin_id AS "adminId", reason
+      FROM credit_transactions
+      WHERE idempotency_key = ${`admin-grant:${grantKey}`}
+    `;
+    expect(storedGrant).toEqual({
+      adminId,
+      reason: "Documented support adjustment"
+    });
+  });
+
   it("enforces durable recipient suppression and the audited global kill switch", async () => {
     const safetyOwner = randomUUID();
     const suffix = safetyOwner.replaceAll("-", "");

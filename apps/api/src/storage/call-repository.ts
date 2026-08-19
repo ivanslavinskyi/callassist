@@ -11,6 +11,7 @@ import type {
   CreateCallBriefInput,
   FinalTranscript,
   FinalTranscriptSegment,
+  PromoCodeSummary,
   TranscriptSegment
 } from "@callassist/contracts";
 
@@ -74,6 +75,43 @@ export type RecipientSuppressionInput = {
 export type SafetyControlInput = {
   reason: string;
   actorUserId?: string | null;
+};
+
+export type CreatePromoCodeRepositoryInput = Omit<
+  PromoCodeSummary,
+  "id" | "createdAt"
+> & {
+  codeHash: string;
+  actorUserId: string;
+  reason: string;
+  idempotencyKey: string;
+  now: string;
+};
+
+export type PromoCodeCreationResult = {
+  created: boolean;
+  promoCode: PromoCodeSummary;
+};
+
+export type RedeemPromoRepositoryInput = {
+  codeHash: string;
+  userId: string;
+  idempotencyKey: string;
+  now: string;
+};
+
+export type AdminCreditGrantRepositoryInput = {
+  actorUserId: string;
+  targetUserId: string;
+  credits: number;
+  reason: string;
+  idempotencyKey: string;
+  now: string;
+};
+
+export type CreditMutationResult = {
+  applied: boolean;
+  usage: CreditUsage;
 };
 
 export type StartAttemptResult = {
@@ -161,6 +199,15 @@ export interface CallRepository {
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   grantSignupCredits(userId: string): Promise<CreditUsage>;
   getCreditUsage(userId: string): Promise<CreditUsage>;
+  createPromoCode(
+    input: CreatePromoCodeRepositoryInput
+  ): Promise<PromoCodeCreationResult>;
+  redeemPromo(
+    input: RedeemPromoRepositoryInput
+  ): Promise<CreditMutationResult>;
+  grantAdminCredits(
+    input: AdminCreditGrantRepositoryInput
+  ): Promise<CreditMutationResult>;
   suppressRecipient(input: RecipientSuppressionInput): Promise<boolean>;
   liftRecipientSuppression(
     phoneE164: string,
@@ -262,6 +309,14 @@ export class CallRepositoryError extends Error {
       | "HOURLY_CALL_LIMIT"
       | "DAILY_CALL_LIMIT"
       | "RECIPIENT_REPEAT_LIMIT"
+      | "PROMO_CODE_UNAVAILABLE"
+      | "PROMO_GLOBAL_LIMIT_REACHED"
+      | "PROMO_USER_LIMIT_REACHED"
+      | "PROMO_CODE_ALREADY_EXISTS"
+      | "CREDIT_IDEMPOTENCY_CONFLICT"
+      | "CREDIT_ADMIN_ACTION_FORBIDDEN"
+      | "CREDIT_SELF_GRANT_FORBIDDEN"
+      | "CREDIT_USER_NOT_FOUND"
       | "RECORDING_NOT_FOUND"
       | "RECORDING_NOT_AVAILABLE",
     message = code

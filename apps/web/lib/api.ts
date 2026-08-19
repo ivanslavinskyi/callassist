@@ -1,11 +1,15 @@
 import type {
   ApprovalDecision,
+  AdminCreditGrantInput,
   CallBrief,
   CallSnapshot,
   CreditUsage,
   CreateCallBriefInput,
   LoginInput,
   PhoneVerificationInput,
+  PromoCodeCreateInput,
+  PromoCodeSummary,
+  PromoRedemptionInput,
   RecipientOptOutConfirmation,
   RecipientOptOutRequest,
   RegistrationInput,
@@ -95,6 +99,31 @@ export async function getCurrentUser() {
 
 export async function getCreditUsage() {
   return apiRequest<CreditUsage>("/api/usage");
+}
+
+export async function redeemPromoCode(input: PromoRedemptionInput) {
+  const result = await apiRequest<{ applied: boolean; usage: CreditUsage }>(
+    "/api/credits/promo-redemptions",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+  notifyUsageChanged();
+  return result;
+}
+
+export async function createPromoCode(input: PromoCodeCreateInput) {
+  return apiRequest<{ created: boolean; promoCode: PromoCodeSummary }>(
+    "/api/admin/promo-codes",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function grantCreditsAsAdmin(input: AdminCreditGrantInput) {
+  const result = await apiRequest<{ applied: boolean; usage: CreditUsage }>(
+    "/api/admin/credit-grants",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+  notifyUsageChanged();
+  return result;
 }
 
 export async function logout() {
