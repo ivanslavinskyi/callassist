@@ -1737,8 +1737,8 @@ export class PostgresCallRepository implements CallRepository {
         ${type},
         ${attemptId},
         ${type === "call_refund"
-          ? "Call ended before provider dialing"
-          : "Provider dialing confirmed"},
+          ? "Call ended before successful connection"
+          : "Provider connection confirmed"},
         ${`call:${attemptId}:${type === "call_refund" ? "refund" : "charge"}`},
         ${new Date()}
       WHERE NOT EXISTS (

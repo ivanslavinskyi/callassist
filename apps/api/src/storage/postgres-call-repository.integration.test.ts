@@ -162,12 +162,48 @@ describeWithDatabase("PostgresCallRepository", () => {
       "failed",
       fulfilled!.value.attempt.callBriefId
     );
+    const unansweredUsage = await repository.getCreditUsage(creditOwner);
+    expect(unansweredUsage.balance).toBe(3);
+    expect(unansweredUsage.transactions.filter(({ type }) => type === "call_charge"))
+      .toHaveLength(0);
+    expect(unansweredUsage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(1);
+
+    const answered = await createReady("Credit successful connection");
+    const answeredAttempt = await repository.startAttempt(answered.id, {
+      provider: "twilio",
+      userId: creditOwner
+    });
+    const answeredProviderCallId = `CA-answered-${suffix}`;
+    await repository.attachProviderCall(
+      answeredAttempt.attempt.id,
+      answeredProviderCallId,
+      "queued"
+    );
+    await repository.applyProviderStatus(
+      answeredProviderCallId,
+      "in-progress",
+      "in_progress",
+      answered.id
+    );
+    await repository.applyProviderStatus(
+      answeredProviderCallId,
+      "in-progress",
+      "in_progress",
+      answered.id
+    );
+    await repository.applyProviderStatus(
+      answeredProviderCallId,
+      "completed",
+      "completed",
+      answered.id
+    );
     const chargedUsage = await repository.getCreditUsage(creditOwner);
     expect(chargedUsage.balance).toBe(2);
     expect(chargedUsage.transactions.filter(({ type }) => type === "call_charge"))
       .toHaveLength(1);
     expect(chargedUsage.transactions.filter(({ type }) => type === "call_refund"))
-      .toHaveLength(0);
+      .toHaveLength(1);
 
     const preDial = await createReady("Credit pre-dial refund");
     await repository.startAttempt(preDial.id, {
@@ -179,7 +215,7 @@ describeWithDatabase("PostgresCallRepository", () => {
     const refundedUsage = await repository.getCreditUsage(creditOwner);
     expect(refundedUsage.balance).toBe(2);
     expect(refundedUsage.transactions.filter(({ type }) => type === "call_refund"))
-      .toHaveLength(1);
+      .toHaveLength(2);
 
     await expect(inspection`
       UPDATE credit_transactions

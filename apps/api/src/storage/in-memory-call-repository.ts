@@ -723,8 +723,8 @@ export class InMemoryCallRepository implements CallRepository {
       adminId: null,
       reason:
         type === "call_refund"
-          ? "Call ended before provider dialing"
-          : "Provider dialing confirmed",
+          ? "Call ended before successful connection"
+          : "Provider connection confirmed",
       idempotencyKey: `call:${attempt.id}:${type === "call_refund" ? "refund" : "charge"}`,
       createdAt: new Date().toISOString()
     });

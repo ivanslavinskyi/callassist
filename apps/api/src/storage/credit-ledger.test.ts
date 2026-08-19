@@ -66,32 +66,78 @@ describe("credit ledger", () => {
     ]);
   });
 
-  it("charges a dialed no-answer attempt once even when webhooks repeat", async () => {
+  it.each(["busy", "no-answer", "canceled", "failed"] as const)(
+    "refunds %s before connection even when webhooks repeat",
+    async (terminalStatus) => {
+      const repository = new InMemoryCallRepository();
+      const userId = randomUUID();
+      await repository.grantSignupCredits(userId);
+      const brief = await createReadyCall(repository, userId, "charged");
+      const started = await repository.startAttempt(brief.id, {
+        provider: "twilio",
+        userId
+      });
+      const providerCallId = `CA-${terminalStatus}`;
+      await repository.attachProviderCall(
+        started.attempt.id,
+        providerCallId,
+        "queued"
+      );
+      await repository.applyProviderStatus(
+        providerCallId,
+        "ringing",
+        "dialing",
+        brief.id
+      );
+      await repository.applyProviderStatus(
+        providerCallId,
+        terminalStatus,
+        "failed",
+        brief.id
+      );
+      await repository.applyProviderStatus(
+        providerCallId,
+        terminalStatus,
+        "failed",
+        brief.id
+      );
+
+      const usage = await repository.getCreditUsage(userId);
+      expect(usage.balance).toBe(3);
+      expect(usage.activeCallBriefId).toBeNull();
+      expect(usage.transactions.filter(({ type }) => type === "call_charge"))
+        .toHaveLength(0);
+      expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+        .toHaveLength(1);
+    }
+  );
+
+  it("charges exactly once after the recipient answers", async () => {
     const repository = new InMemoryCallRepository();
     const userId = randomUUID();
     await repository.grantSignupCredits(userId);
-    const brief = await createReadyCall(repository, userId, "charged");
+    const brief = await createReadyCall(repository, userId, "answered");
     const started = await repository.startAttempt(brief.id, {
       provider: "twilio",
       userId
     });
-    await repository.attachProviderCall(started.attempt.id, "CA-charge", "queued");
+    await repository.attachProviderCall(started.attempt.id, "CA-answered", "queued");
     await repository.applyProviderStatus(
-      "CA-charge",
-      "ringing",
-      "dialing",
+      "CA-answered",
+      "in-progress",
+      "in_progress",
       brief.id
     );
     await repository.applyProviderStatus(
-      "CA-charge",
-      "no-answer",
-      "failed",
+      "CA-answered",
+      "in-progress",
+      "in_progress",
       brief.id
     );
     await repository.applyProviderStatus(
-      "CA-charge",
-      "no-answer",
-      "failed",
+      "CA-answered",
+      "completed",
+      "completed",
       brief.id
     );
 

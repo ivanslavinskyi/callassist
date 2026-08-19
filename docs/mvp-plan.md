@@ -106,7 +106,7 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 - [x] Support `signup_grant`, `promo_grant`, `admin_grant`, `call_reservation`, `call_charge`, `call_refund`, `adjustment`.
 - [x] Grant exactly `+3 signup_grant` once after verification.
 - [x] Atomically reserve one credit before dialing with transaction/locking or equivalent serializable invariant and idempotency. Enforce one active outbound call per user.
-- [x] Define tested reservation-to-charge/refund transitions. Refund pre-dial internal/provider failure; no-answer/decline after real dialing must not allow infinite free retries.
+- [x] Define tested reservation-to-charge/refund transitions. Charge only after a provider-confirmed successful connection; refund busy, no-answer, cancellation, and technical failure before connection. Control repeated free retries through separate abuse quotas.
 - [x] Derive balance from the ledger (a cache must be rebuildable); never silently edit `calls_remaining`.
 
 Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempotent, and every balance reconciles to entries.

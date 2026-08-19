@@ -222,12 +222,9 @@ export class CallRepositoryError extends Error {
   }
 }
 
-export const dialingProviderStatuses = new Set([
-  "ringing",
+export const connectedProviderStatuses = new Set([
   "in-progress",
-  "completed",
-  "busy",
-  "no-answer"
+  "completed"
 ]);
 
 export function creditSettlementForStatus(
@@ -237,7 +234,7 @@ export function creditSettlementForStatus(
   if (
     callStatus === "in_progress" ||
     callStatus === "completed" ||
-    (providerStatus && dialingProviderStatuses.has(providerStatus))
+    (providerStatus && connectedProviderStatuses.has(providerStatus))
   ) {
     return "call_charge";
   }
