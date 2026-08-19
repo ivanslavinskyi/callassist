@@ -149,6 +149,9 @@ export type Messages = {
     actionError: string;
     insufficientCredits: string;
     concurrentCall: string;
+    recipientSuppressed: string;
+    outboundCallsDisabled: string;
+    callLimitReached: string;
     loadError: string;
     copied: string;
     copyFailed: string;
@@ -339,6 +342,9 @@ const en: Messages = {
     actionError: "The action could not be completed. Try again.",
     insufficientCredits: "You have no call credits remaining.",
     concurrentCall: "Finish your active call before starting another one.",
+    recipientSuppressed: "This recipient has opted out and cannot be called.",
+    outboundCallsDisabled: "New calls are temporarily paused. Try again later.",
+    callLimitReached: "Your public-beta call limit has been reached. Try again later.",
     loadError: "The call brief was not found or the API is unavailable.",
     copied: "Copied",
     copyFailed: "Copy failed — retry",
@@ -539,6 +545,9 @@ const de: Messages = {
     actionError: "Die Aktion konnte nicht abgeschlossen werden. Versuchen Sie es erneut.",
     insufficientCredits: "Sie haben kein Anrufguthaben mehr.",
     concurrentCall: "Beenden Sie den aktiven Anruf, bevor Sie einen weiteren starten.",
+    recipientSuppressed: "Dieser Empfänger hat widersprochen und kann nicht angerufen werden.",
+    outboundCallsDisabled: "Neue Anrufe sind vorübergehend pausiert. Versuchen Sie es später erneut.",
+    callLimitReached: "Ihr Anruflimit für die öffentliche Beta ist erreicht. Versuchen Sie es später erneut.",
     loadError: "Der Anrufentwurf wurde nicht gefunden oder die API ist nicht erreichbar.",
     copied: "Kopiert",
     copyFailed: "Kopieren fehlgeschlagen — erneut versuchen",

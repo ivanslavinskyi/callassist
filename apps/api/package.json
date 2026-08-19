@@ -5,8 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsup && node scripts/copy-migrations.mjs",
+    "calls:disable": "tsx src/db/set-outbound-calls.ts disable",
+    "calls:enable": "tsx src/db/set-outbound-calls.ts enable",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
+    "calls:disable:prod": "node dist/db/set-outbound-calls.js disable",
+    "calls:enable:prod": "node dist/db/set-outbound-calls.js enable",
     "db:test:prepare": "tsx src/db/prepare-test-database.ts",
     "dev": "node --use-system-ca --import tsx src/index.ts",
     "lint": "tsc --noEmit",

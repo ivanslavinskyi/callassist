@@ -16,7 +16,9 @@ import {
 import { getMockCopy } from "./mock-copy";
 import {
   CallRepositoryError,
+  defaultCallAdmissionPolicy,
   isUuid,
+  type CallAdmissionPolicy,
   type CallRepository
 } from "./storage/call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
@@ -71,6 +73,7 @@ export class CallService {
   readonly #onBackgroundError: (error: unknown) => void;
   readonly #postCallTranscriber?: PostCallTranscriber;
   readonly #briefCompiler: BriefCompiler;
+  readonly #admissionPolicy: CallAdmissionPolicy;
   #retentionTimer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -78,11 +81,13 @@ export class CallService {
     readonly telephonyProvider: TelephonyProvider = new MockTelephonyProvider(),
     onBackgroundError: (error: unknown) => void = console.error,
     postCallTranscriber?: PostCallTranscriber,
-    briefCompiler: BriefCompiler = new DeterministicBriefCompiler()
+    briefCompiler: BriefCompiler = new DeterministicBriefCompiler(),
+    admissionPolicy: CallAdmissionPolicy = defaultCallAdmissionPolicy
   ) {
     this.#onBackgroundError = onBackgroundError;
     this.#postCallTranscriber = postCallTranscriber;
     this.#briefCompiler = briefCompiler;
+    this.#admissionPolicy = admissionPolicy;
   }
 
   async initialize() {
@@ -206,7 +211,8 @@ export class CallService {
 
     const reserved = await this.repository.startAttempt(id, {
       provider: this.telephonyProvider.mode,
-      userId
+      userId,
+      admissionPolicy: this.#admissionPolicy
     });
     this.#publish(id, {
       type: "call.updated",
@@ -248,6 +254,19 @@ export class CallService {
         .catch(this.#onBackgroundError);
       return snapshot;
     }
+
+    this.#schedule(
+      id,
+      this.#admissionPolicy.maxDurationSeconds * 1_000,
+      async () => {
+        const call = await this.#require(id);
+        if (["dialing", "in_progress", "awaiting_approval"].includes(
+          call.brief.status
+        )) {
+          await this.stop(id);
+        }
+      }
+    );
 
     if (this.telephonyProvider.mode === "mock") {
       this.#schedule(id, 900, () => this.#updateStatus(id, "in_progress"));
@@ -306,6 +325,9 @@ export class CallService {
       callBriefId
     );
     if (result) {
+      if (["completed", "failed", "stopped"].includes(result.snapshot.brief.status)) {
+        this.#clearTimers(result.callId);
+      }
       this.#publish(result.callId, {
         type: "call.updated",
         brief: result.snapshot.brief
@@ -605,6 +627,9 @@ export class CallService {
 
   async #updateStatus(id: string, status: CallBrief["status"]) {
     const snapshot = await this.repository.updateStatus(id, status);
+    if (["completed", "failed", "stopped"].includes(status)) {
+      this.#clearTimers(id);
+    }
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
   }
@@ -622,6 +647,7 @@ export class CallService {
       this.#timers.get(id)?.delete(timer);
       void operation().catch(this.#onBackgroundError);
     }, delay);
+    timer.unref();
 
     const timers = this.#timers.get(id) ?? new Set<NodeJS.Timeout>();
     timers.add(timer);

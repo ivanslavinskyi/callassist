@@ -5,8 +5,18 @@ import {
 } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
-import { CallRepositoryError } from "./call-repository";
+import {
+  CallRepositoryError,
+  type CallAdmissionPolicy
+} from "./call-repository";
 import { InMemoryCallRepository } from "./in-memory-call-repository";
+
+const ledgerTestPolicy: CallAdmissionPolicy = {
+  maxStartsPerHour: 20,
+  maxStartsPerDay: 20,
+  maxStartsPerRecipientPerDay: 20,
+  maxDurationSeconds: 900
+};
 
 const baseInput: CreateCallBriefInput = {
   recipientName: "Credit test office",
@@ -155,7 +165,11 @@ describe("credit ledger", () => {
     const userId = randomUUID();
     await repository.grantSignupCredits(userId);
     const failedBrief = await createReadyCall(repository, userId, "refunded");
-    await repository.startAttempt(failedBrief.id, { provider: "twilio", userId });
+    await repository.startAttempt(failedBrief.id, {
+      provider: "twilio",
+      userId,
+      admissionPolicy: ledgerTestPolicy
+    });
     await repository.updateStatus(failedBrief.id, "failed");
     await repository.updateStatus(failedBrief.id, "failed");
 
@@ -168,7 +182,8 @@ describe("credit ledger", () => {
       const brief = await createReadyCall(repository, userId, suffix);
       const attempt = await repository.startAttempt(brief.id, {
         provider: "twilio",
-        userId
+        userId,
+        admissionPolicy: ledgerTestPolicy
       });
       await repository.attachProviderCall(
         attempt.attempt.id,
@@ -187,7 +202,11 @@ describe("credit ledger", () => {
 
     const denied = await createReadyCall(repository, userId, "denied");
     await expect(
-      repository.startAttempt(denied.id, { provider: "twilio", userId })
+      repository.startAttempt(denied.id, {
+        provider: "twilio",
+        userId,
+        admissionPolicy: ledgerTestPolicy
+      })
     ).rejects.toEqual(expect.objectContaining<Partial<CallRepositoryError>>({
       code: "INSUFFICIENT_CREDITS"
     }));

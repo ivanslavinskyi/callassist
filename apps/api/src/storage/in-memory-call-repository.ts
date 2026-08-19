@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
+  parseSwissDestinationPhone,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
@@ -20,6 +21,7 @@ import {
   CallRepositoryError,
   buildRuntimeBriefFields,
   creditSettlementForStatus,
+  defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
@@ -27,6 +29,8 @@ import {
   type CallRepository,
   type ListCallBriefsInput,
   type RecordingStatusInput,
+  type RecipientSuppressionInput,
+  type SafetyControlInput,
   type StartAttemptInput
 } from "./call-repository";
 
@@ -54,6 +58,11 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #creditTransactions: Array<
     CreditTransaction & { userId: string; idempotencyKey: string }
   > = [];
+  readonly #recipientSuppressions = new Map<
+    string,
+    RecipientSuppressionInput & { createdAt: string }
+  >();
+  #outboundCallsEnabled = true;
 
   async list(input: ListCallBriefsInput) {
     const filtered = [...this.#calls.values()]
@@ -138,6 +147,35 @@ export class InMemoryCallRepository implements CallRepository {
     return this.#buildCreditUsage(userId);
   }
 
+  async suppressRecipient(input: RecipientSuppressionInput) {
+    const phoneE164 = requireSwissPhone(input.phoneE164);
+    const reason = requireReason(input.reason);
+    if (!this.#recipientSuppressions.has(phoneE164)) {
+      this.#recipientSuppressions.set(phoneE164, {
+        ...input,
+        phoneE164,
+        reason,
+        createdAt: new Date().toISOString()
+      });
+    }
+  }
+
+  async liftRecipientSuppression(
+    phoneE164: string,
+    input: SafetyControlInput
+  ) {
+    requireReason(input.reason);
+    this.#recipientSuppressions.delete(requireSwissPhone(phoneE164));
+  }
+
+  async setOutboundCallsEnabled(
+    enabled: boolean,
+    input: SafetyControlInput
+  ) {
+    requireReason(input.reason);
+    this.#outboundCallsEnabled = enabled;
+  }
+
   #buildCreditUsage(userId: string): CreditUsage {
     const transactions = this.#creditTransactions
       .filter((entry) => entry.userId === userId)
@@ -220,14 +258,20 @@ export class InMemoryCallRepository implements CallRepository {
 
   async startAttempt(id: string, input: StartAttemptInput) {
     const snapshot = this.#require(id);
+    const userId = input.userId ?? null;
+    if (userId !== null && this.#owners.get(id) !== userId) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
     if (snapshot.brief.status !== "ready") {
       throw new CallRepositoryError("CALL_NOT_READY");
     }
-    const userId = input.userId ?? null;
+    if (!this.#outboundCallsEnabled) {
+      throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
+    }
+    if (this.#recipientSuppressions.has(snapshot.brief.phoneNumber)) {
+      throw new CallRepositoryError("RECIPIENT_SUPPRESSED");
+    }
     if (userId !== null) {
-      if (this.#owners.get(id) !== userId) {
-        throw new CallRepositoryError("CALL_NOT_FOUND");
-      }
       const usage = this.#buildCreditUsage(userId);
       if (usage.activeCallBriefId) {
         throw new CallRepositoryError("CONCURRENT_CALL_LIMIT");
@@ -235,6 +279,11 @@ export class InMemoryCallRepository implements CallRepository {
       if (usage.balance < 1) {
         throw new CallRepositoryError("INSUFFICIENT_CREDITS");
       }
+      this.#assertWithinCallLimits(
+        userId,
+        snapshot.brief.phoneNumber,
+        input.admissionPolicy ?? defaultCallAdmissionPolicy
+      );
     }
     const now = new Date().toISOString();
     const attempt: CallAttemptRecord = {
@@ -694,6 +743,48 @@ export class InMemoryCallRepository implements CallRepository {
 
   async close() {}
 
+  #assertWithinCallLimits(
+    userId: string,
+    phoneE164: string,
+    policy: import("./call-repository").CallAdmissionPolicy
+  ) {
+    const now = Date.now();
+    const hourStart = now - 60 * 60 * 1_000;
+    const current = new Date(now);
+    const dayStart = Date.UTC(
+      current.getUTCFullYear(),
+      current.getUTCMonth(),
+      current.getUTCDate()
+    );
+    const attempts = [...this.#attempts.entries()].flatMap(
+      ([callBriefId, callAttempts]) =>
+        this.#owners.get(callBriefId) === userId
+          ? callAttempts.map((attempt) => ({
+              attempt,
+              phoneE164: this.#require(callBriefId).brief.phoneNumber
+            }))
+          : []
+    );
+    if (
+      attempts.filter(({ attempt }) => Date.parse(attempt.startedAt) >= hourStart)
+        .length >= policy.maxStartsPerHour
+    ) {
+      throw new CallRepositoryError("HOURLY_CALL_LIMIT");
+    }
+    const today = attempts.filter(
+      ({ attempt }) => Date.parse(attempt.startedAt) >= dayStart
+    );
+    if (today.length >= policy.maxStartsPerDay) {
+      throw new CallRepositoryError("DAILY_CALL_LIMIT");
+    }
+    if (
+      today.filter((attempt) => attempt.phoneE164 === phoneE164).length >=
+      policy.maxStartsPerRecipientPerDay
+    ) {
+      throw new CallRepositoryError("RECIPIENT_REPEAT_LIMIT");
+    }
+  }
+
   #settleAttempt(
     callBriefId: string,
     attempt: CallAttemptRecord,
@@ -744,6 +835,18 @@ export class InMemoryCallRepository implements CallRepository {
     }
     throw new CallRepositoryError("RECORDING_NOT_FOUND");
   }
+}
+
+function requireSwissPhone(value: string) {
+  const parsed = parseSwissDestinationPhone(value);
+  if (!parsed) throw new Error("A valid Swiss E.164 phone number is required");
+  return parsed;
+}
+
+function requireReason(value: string) {
+  const reason = value.trim();
+  if (!reason) throw new Error("A safety-control reason is required");
+  return reason;
 }
 
 function storedBriefIdentity(parsed: NormalizedCallBriefInput) {

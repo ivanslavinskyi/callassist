@@ -163,6 +163,23 @@ enforces one active outbound call per user. A credit is charged only after the
 provider confirms a successful connection (`in-progress` or `completed`). Busy,
 unanswered, canceled, and technical failures refund the reservation once.
 
+Immediately before reservation, the API also checks the durable global outbound-call
+control, the normalized recipient suppression list, and per-user admission limits.
+Public-beta defaults allow 3 starts per rolling hour, 10 per UTC day, 2 starts to the
+same recipient per UTC day, and a maximum duration of 900 seconds. All starts count
+toward abuse quotas even when their credit is refunded; quota accounting and credit
+charging are deliberately separate. Override these values with the `CALL_MAX_*`
+variables in `.env`.
+
+Operators can pause or resume all new PostgreSQL-backed outbound calls without ending
+an active call. A non-empty reason is mandatory and each change is appended to the
+safety audit log:
+
+```powershell
+corepack pnpm --filter @callassist/api calls:disable -- "Incident reference and reason"
+corepack pnpm --filter @callassist/api calls:enable -- "Incident resolved"
+```
+
 Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick Tunnel URLs change between sessions, so update `PUBLIC_BASE_URL` whenever a new tunnel is created. Quick Tunnel is for development only and has no uptime guarantee.
 
 ## Quality checks
@@ -185,8 +202,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   deterministic server-side policy boundary.
 - Evaluate semantic preservation, call success, latency, live/final transcription,
   Swiss German, multilingual input, and adversarial prompts.
-- Add authenticated users, strict data ownership, quotas, recipient opt-out, and
-  abuse controls before accepting public data.
+- Complete public/staff recipient opt-out workflows, remaining abuse thresholds, and
+  endpoint rate limits before accepting public data.
 - Add interface internationalization, an accessible onboarding flow, and a public
   landing page.
 - Add durable background jobs, production deployment, observability, compliance,

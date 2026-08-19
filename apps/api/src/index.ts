@@ -8,6 +8,7 @@ import {
   OpenAIBriefCompiler
 } from "./brief-compiler/brief-compiler";
 import { CallService } from "./call-service";
+import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
 import {
   OpenAIRealtimeBridge,
   type RealtimeTranscriptionDelay
@@ -35,7 +36,7 @@ const postCallTranscriber = realtimeApiKey
 const briefCompiler = createBriefCompiler();
 const service = new CallService(repository, telephonyProvider, (error) => {
   app.log.error(error, "Background call operation failed");
-}, postCallTranscriber, briefCompiler);
+}, postCallTranscriber, briefCompiler, callAdmissionPolicyFromEnv());
 const authService = new AuthService({
   repository: createAuthRepositoryFromEnv(),
   verificationProvider: createVerificationProviderFromEnv(),

@@ -8,7 +8,17 @@ import postgres from "postgres";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { runMigrations } from "../db/migrate";
 import { PostgresCallRepository } from "./postgres-call-repository";
-import { decodeCallBriefCursor } from "./call-repository";
+import {
+  decodeCallBriefCursor,
+  type CallAdmissionPolicy
+} from "./call-repository";
+
+const ledgerTestPolicy: CallAdmissionPolicy = {
+  maxStartsPerHour: 20,
+  maxStartsPerDay: 20,
+  maxStartsPerRecipientPerDay: 20,
+  maxDurationSeconds: 900
+};
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
@@ -125,8 +135,16 @@ describeWithDatabase("PostgresCallRepository", () => {
     const second = await createReady("Credit concurrency B");
 
     const starts = await Promise.allSettled([
-      repository.startAttempt(first.id, { provider: "twilio", userId: creditOwner }),
-      repository.startAttempt(second.id, { provider: "twilio", userId: creditOwner })
+      repository.startAttempt(first.id, {
+        provider: "twilio",
+        userId: creditOwner,
+        admissionPolicy: ledgerTestPolicy
+      }),
+      repository.startAttempt(second.id, {
+        provider: "twilio",
+        userId: creditOwner,
+        admissionPolicy: ledgerTestPolicy
+      })
     ]);
     const fulfilled = starts.find(
       (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof repository.startAttempt>>> =>
@@ -172,7 +190,8 @@ describeWithDatabase("PostgresCallRepository", () => {
     const answered = await createReady("Credit successful connection");
     const answeredAttempt = await repository.startAttempt(answered.id, {
       provider: "twilio",
-      userId: creditOwner
+      userId: creditOwner,
+      admissionPolicy: ledgerTestPolicy
     });
     const answeredProviderCallId = `CA-answered-${suffix}`;
     await repository.attachProviderCall(
@@ -208,7 +227,8 @@ describeWithDatabase("PostgresCallRepository", () => {
     const preDial = await createReady("Credit pre-dial refund");
     await repository.startAttempt(preDial.id, {
       provider: "twilio",
-      userId: creditOwner
+      userId: creditOwner,
+      admissionPolicy: ledgerTestPolicy
     });
     await repository.updateStatus(preDial.id, "failed");
     await repository.updateStatus(preDial.id, "failed");
@@ -221,6 +241,137 @@ describeWithDatabase("PostgresCallRepository", () => {
       UPDATE credit_transactions
       SET reason = 'tampered'
       WHERE user_id = ${creditOwner}
+    `).rejects.toThrow("immutable");
+  });
+
+  it("enforces durable recipient suppression and the audited global kill switch", async () => {
+    const safetyOwner = randomUUID();
+    const suffix = safetyOwner.replaceAll("-", "");
+    const userPhone = `+4178${[...suffix.slice(0, 7)]
+      .map((digit) => Number.parseInt(digit, 16) % 10)
+      .join("")}`;
+    const phoneE164 = "+41790000021";
+    await inspection`
+      INSERT INTO users (
+        id, email, password_hash, phone_e164, phone_verified_at,
+        first_name, last_name, role, status, ui_locale, created_at
+      ) VALUES (
+        ${safetyOwner}, ${`safety-${suffix}@example.com`}, 'test-only',
+        ${userPhone}, now(), 'Safety', 'Tester',
+        'user', 'active', 'en', now()
+      )
+    `;
+    await repository.grantSignupCredits(safetyOwner);
+    const compiler = new DeterministicBriefCompiler();
+    const createReady = async (recipientName: string, phoneNumber: string) => {
+      const input: CreateCallBriefInput = {
+        recipientName,
+        phoneNumber,
+        objective: "Verify durable PostgreSQL call safety controls",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Safety",
+        representedPersonLastName: "Tester",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      };
+      const brief = await repository.create(
+        input,
+        await compiler.compile(normalizeCreateCallBriefInput(input)),
+        safetyOwner
+      );
+      await repository.approveCompilation(brief.id);
+      return brief;
+    };
+    const suppressedBrief = await createReady("Suppressed recipient", phoneE164);
+
+    await repository.liftRecipientSuppression(phoneE164, {
+      reason: "Integration test cleanup before suppression"
+    });
+    await repository.setOutboundCallsEnabled(true, {
+      reason: "Integration test starts with outbound calls enabled"
+    });
+    await repository.suppressRecipient({
+      phoneE164,
+      source: "recipient_request",
+      reason: "Integration test recipient opt-out",
+      actorUserId: safetyOwner
+    });
+    await expect(repository.startAttempt(suppressedBrief.id, {
+      provider: "twilio",
+      userId: safetyOwner,
+      admissionPolicy: ledgerTestPolicy
+    })).rejects.toMatchObject({ code: "RECIPIENT_SUPPRESSED" });
+    expect((await repository.getCreditUsage(safetyOwner)).balance).toBe(3);
+
+    await repository.liftRecipientSuppression(phoneE164, {
+      reason: "Integration test recipient opt-in",
+      actorUserId: safetyOwner
+    });
+    const active = await repository.startAttempt(suppressedBrief.id, {
+      provider: "twilio",
+      userId: safetyOwner,
+      admissionPolicy: ledgerTestPolicy
+    });
+    const waiting = await createReady("Waiting during emergency pause", "+41790000022");
+    try {
+      await repository.setOutboundCallsEnabled(false, {
+        reason: "Integration test emergency pause",
+        actorUserId: safetyOwner
+      });
+      expect((await repository.get(suppressedBrief.id))?.brief.status).toBe("dialing");
+      await expect(repository.startAttempt(waiting.id, {
+        provider: "twilio",
+        userId: safetyOwner,
+        admissionPolicy: ledgerTestPolicy
+      })).rejects.toMatchObject({ code: "OUTBOUND_CALLS_DISABLED" });
+      expect((await repository.getCreditUsage(safetyOwner)).balance).toBe(2);
+    } finally {
+      await repository.setOutboundCallsEnabled(true, {
+        reason: "Integration test emergency pause cleared",
+        actorUserId: safetyOwner
+      });
+      await repository.updateStatus(active.snapshot.brief.id, "failed");
+    }
+    expect((await repository.getCreditUsage(safetyOwner)).balance).toBe(3);
+
+    const repeatPolicy = {
+      ...ledgerTestPolicy,
+      maxStartsPerRecipientPerDay: 2
+    };
+    for (const index of [0, 1, 2]) {
+      const repeated = await createReady(
+        `Repeated recipient ${index}`,
+        "+41790000023"
+      );
+      if (index < 2) {
+        await repository.startAttempt(repeated.id, {
+          provider: "twilio",
+          userId: safetyOwner,
+          admissionPolicy: repeatPolicy
+        });
+        await repository.updateStatus(repeated.id, "failed");
+      } else {
+        await expect(repository.startAttempt(repeated.id, {
+          provider: "twilio",
+          userId: safetyOwner,
+          admissionPolicy: repeatPolicy
+        })).rejects.toMatchObject({ code: "RECIPIENT_REPEAT_LIMIT" });
+      }
+    }
+    expect((await repository.getCreditUsage(safetyOwner)).balance).toBe(3);
+
+    const eventRows = await inspection<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM safety_events
+      WHERE actor_user_id = ${safetyOwner}
+    `;
+    expect(eventRows[0]?.count).toBeGreaterThanOrEqual(4);
+    await expect(inspection`
+      UPDATE safety_events
+      SET reason = 'tampered'
+      WHERE actor_user_id = ${safetyOwner}
     `).rejects.toThrow("immutable");
   });
 

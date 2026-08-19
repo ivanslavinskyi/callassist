@@ -190,6 +190,66 @@ describe("CallService", () => {
     expect(snapshot.brief.id).toBe(brief.id);
   });
 
+  it("automatically stops an unanswered call at the configured maximum duration", async () => {
+    const userId = "0d908c31-efc4-4f2d-92b9-2f40ec87e898";
+    const repository = new InMemoryCallRepository();
+    await repository.grantSignupCredits(userId);
+    const stopCall = vi.fn().mockResolvedValue(undefined);
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return { providerCallId: "CA-duration-limit", providerStatus: "queued" };
+      },
+      stopCall,
+      async startRecording() {
+        throw new Error("not used");
+      },
+      async getRecordingMedia() {
+        throw new Error("not used");
+      },
+      async deleteRecording() {}
+    };
+    const service = new CallService(
+      repository,
+      provider,
+      () => undefined,
+      undefined,
+      undefined,
+      {
+        maxStartsPerHour: 3,
+        maxStartsPerDay: 10,
+        maxStartsPerRecipientPerDay: 2,
+        maxDurationSeconds: 1
+      }
+    );
+    services.push(service);
+    const brief = await service.create({
+      recipientName: "Duration test office",
+      phoneNumber: "+41523686688",
+      objective: "Verify the hard maximum call duration",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, userId);
+    await service.approveCompilation(brief.id);
+
+    vi.useFakeTimers();
+    try {
+      await service.start(brief.id, userId);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(stopCall).toHaveBeenCalledWith("CA-duration-limit");
+      expect((await service.get(brief.id))?.brief.status).toBe("stopped");
+      expect((await service.getCreditUsage(userId)).balance).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reserves one attempt before concurrent provider starts", async () => {
     const startCall = vi.fn().mockResolvedValue({
       providerCallId: "CA-concurrent",

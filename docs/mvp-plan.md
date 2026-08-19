@@ -113,11 +113,11 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 
 ### P0 — quotas, suppression, and emergency controls
 
-- [ ] Enforce hourly/daily call and duration limits, concurrency, repeat-recipient limits, and thresholds for decline/no-consent/failure/policy blocks.
-- [ ] Add global `recipient_suppressions` with normalized phone, time, source, reason, actor/audit data; check immediately before provider call creation.
+- [ ] Enforce hourly/daily call and duration limits, concurrency, repeat-recipient limits, and thresholds for decline/no-consent/failure/policy blocks. **Partial:** hourly/daily, concurrency, repeat-recipient, and maximum-duration controls are implemented and tested; outcome-specific thresholds remain.
+- [x] Add global `recipient_suppressions` with normalized phone, time, source, reason, actor/audit data; check immediately before provider call creation.
 - [ ] Add public opt-out and staff suppression workflow. Spoken in-call opt-out is P2.
 - [ ] Implement audited account suspension and session blocking/revocation policy.
-- [ ] Add a global kill switch that blocks new calls/reservations without ending active calls unless separately commanded.
+- [x] Add a global kill switch that blocks new calls/reservations without ending active calls unless separately commanded. Changes require a reason and append immutable safety events; an operator CLI is available for PostgreSQL deployments.
 - [ ] Rate-limit registration, auth/recovery, compilation, call create/start, exports, playback, and costly endpoints; detect mass accounts without logging unnecessary PII.
 
 ### P1 — promo and complaints
@@ -268,10 +268,10 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Twilio Voice Geographic Permissions restricted to approved CH destinations.
 - [x] Exactly three signup credits granted once through ledger.
 - [x] Atomic/idempotent/concurrent-safe/reconciliable credit reserve/charge/refund.
-- [ ] Per-user hourly/daily quotas and one-call concurrency.
-- [ ] Recipient suppression/opt-out checked before provider call.
+- [x] Per-user hourly/daily quotas and one-call concurrency.
+- [x] Recipient suppression/opt-out checked before provider call.
 - [ ] Audited admin suspension and session revocation/blocking.
-- [ ] Global kill switch blocks new calls without implicitly ending active calls.
+- [x] Global kill switch blocks new calls without implicitly ending active calls.
 - [ ] Localized landing, auth/onboarding, support, opt-out live.
 - [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live.
 - [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance.

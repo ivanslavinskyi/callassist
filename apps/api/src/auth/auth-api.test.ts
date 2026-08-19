@@ -28,7 +28,7 @@ function createAuthApp() {
     secureCookies: false
   });
   apps.push(app);
-  return { app, repository };
+  return { app, repository, callRepository };
 }
 
 const registration = {
@@ -315,6 +315,60 @@ describe("auth API", () => {
     });
     expect(foreignOrigin.statusCode).toBe(403);
     expect(foreignOrigin.json()).toEqual({ error: "INVALID_ORIGIN" });
+  });
+
+  it("returns explicit API errors for recipient suppression and the global kill switch", async () => {
+    const { app, callRepository } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie },
+      payload: callBrief
+    });
+    const callId = created.json<{ id: string }>().id;
+    await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/approve`,
+      headers: { cookie }
+    });
+
+    await callRepository.suppressRecipient({
+      phoneE164: callBrief.phoneNumber,
+      source: "recipient_request",
+      reason: "Recipient requested no further calls"
+    });
+    const suppressed = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie }
+    });
+    expect(suppressed.statusCode).toBe(403);
+    expect(suppressed.json()).toEqual({ error: "RECIPIENT_SUPPRESSED" });
+
+    await callRepository.liftRecipientSuppression(callBrief.phoneNumber, {
+      reason: "Recipient withdrew the suppression request"
+    });
+    await callRepository.setOutboundCallsEnabled(false, {
+      reason: "Emergency pause test"
+    });
+    const disabled = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie }
+    });
+    expect(disabled.statusCode).toBe(503);
+    expect(disabled.json()).toEqual({ error: "OUTBOUND_CALLS_DISABLED" });
+
+    await callRepository.setOutboundCallsEnabled(true, {
+      reason: "Emergency pause cleared"
+    });
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie }
+    });
+    expect(started.statusCode).toBe(200);
   });
 
   it("rejects an incorrect SMS verification code without creating a session", async () => {

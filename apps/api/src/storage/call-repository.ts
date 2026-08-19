@@ -39,7 +39,42 @@ export type CallAttemptRecord = {
 export type StartAttemptInput = Pick<
   CallAttemptRecord,
   "provider"
-> & { userId?: string | null };
+> & {
+  userId?: string | null;
+  admissionPolicy?: CallAdmissionPolicy;
+};
+
+export type CallAdmissionPolicy = {
+  maxStartsPerHour: number;
+  maxStartsPerDay: number;
+  maxStartsPerRecipientPerDay: number;
+  maxDurationSeconds: number;
+};
+
+export const defaultCallAdmissionPolicy: CallAdmissionPolicy = {
+  maxStartsPerHour: 3,
+  maxStartsPerDay: 10,
+  maxStartsPerRecipientPerDay: 2,
+  maxDurationSeconds: 15 * 60
+};
+
+export type RecipientSuppressionSource =
+  | "recipient_request"
+  | "staff"
+  | "complaint"
+  | "provider";
+
+export type RecipientSuppressionInput = {
+  phoneE164: string;
+  source: RecipientSuppressionSource;
+  reason: string;
+  actorUserId?: string | null;
+};
+
+export type SafetyControlInput = {
+  reason: string;
+  actorUserId?: string | null;
+};
 
 export type StartAttemptResult = {
   attempt: CallAttemptRecord;
@@ -126,6 +161,15 @@ export interface CallRepository {
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   grantSignupCredits(userId: string): Promise<CreditUsage>;
   getCreditUsage(userId: string): Promise<CreditUsage>;
+  suppressRecipient(input: RecipientSuppressionInput): Promise<void>;
+  liftRecipientSuppression(
+    phoneE164: string,
+    input: SafetyControlInput
+  ): Promise<void>;
+  setOutboundCallsEnabled(
+    enabled: boolean,
+    input: SafetyControlInput
+  ): Promise<void>;
   recompile(
     id: string,
     input: CreateCallBriefInput,
@@ -213,6 +257,11 @@ export class CallRepositoryError extends Error {
       | "CALL_ATTEMPT_NOT_FOUND"
       | "INSUFFICIENT_CREDITS"
       | "CONCURRENT_CALL_LIMIT"
+      | "OUTBOUND_CALLS_DISABLED"
+      | "RECIPIENT_SUPPRESSED"
+      | "HOURLY_CALL_LIMIT"
+      | "DAILY_CALL_LIMIT"
+      | "RECIPIENT_REPEAT_LIMIT"
       | "RECORDING_NOT_FOUND"
       | "RECORDING_NOT_AVAILABLE",
     message = code

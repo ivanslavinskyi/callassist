@@ -41,6 +41,8 @@ Twilio dual-channel recording ──► authenticated API download
 - PostgreSQL: call briefs, attempts, draft transcripts, recordings, final transcripts, approvals, and audit events.
 - Identity and tenancy foundation: PostgreSQL users and revocable server-side sessions, scrypt password hashes, explicit first/last names, localized registration/verification/login screens, Twilio Verify phone confirmation, and opaque HttpOnly session cookies. New call briefs store their authenticated owner. Every browser call list/read/write/action/SSE/media route authenticates the session and checks that owner without accepting a browser-supplied user ID; provider webhooks keep their independent signature/provider-ID boundary. Pre-authentication rows remain hidden pending an explicit archive/backfill decision.
 - Usage boundary: an immutable `credit_transactions` ledger grants three credits once after phone verification. A per-user PostgreSQL advisory transaction lock, an active-attempt unique index, and an idempotent attempt settlement constraint serialize starts, prevent negative balances, and allow only one outbound call per user. Reservation is the `-1` balance movement; a zero-amount `call_charge` records that the provider confirmed a successful connection, while a `+1 call_refund` reverses busy, unanswered, canceled, and technical failures before connection. The in-memory repository implements the same transitions for local use and contract tests.
+- Call-admission boundary: under the same serialized start transaction, the API checks the global `outbound_calls` control, an active normalized recipient suppression, rolling-hour and UTC-day user starts, and same-recipient UTC-day starts before inserting an attempt or reserving credit. Refunded failures still count toward abuse quotas but never become charges. A service timer stops calls at the configured maximum duration. Defaults are 3 starts/hour, 10/day, 2/recipient/day, and 900 seconds; all are positive-integer environment settings.
+- Emergency-control boundary: PostgreSQL persists recipient suppression history and an outbound-call singleton control. Suppression/lift and global enable/disable operations require a reason and append immutable `safety_events`. The global switch rejects new reservations without changing calls that are already active.
 - Twilio: outbound PSTN calls, signed webhooks, DTMF consent, a bidirectional Media Stream, and temporary consent-gated recordings.
 - OpenAI Responses: multilingual brief compilation into a strict JSON schema.
 - OpenAI Moderation: checks both raw input and generated runtime text.
@@ -194,6 +196,10 @@ an approved call plan.
 - `CallCompilation`: encrypted raw brief, structured compiled plan, policy decision,
   compiler/policy versions, response ID, approval time, and immutable snapshot hash.
 - `CallAttempt`: provider call ID, raw and domain status, timestamps, and stop reason.
+- `RecipientSuppression`: normalized recipient phone, source, reason, actor, creation,
+  and optional audited lift.
+- `SystemControl` / `SafetyEvent`: durable outbound-call state and immutable reasoned
+  changes for recipient and emergency controls.
 - `TranscriptSegment`: speaker role, text, locale, timestamp, and partial/final state.
 - `CallRecording`: consent timestamp, provider IDs, lifecycle, duration, channels, and deletion deadline.
 - `FinalTranscript`: encrypted recording-based turns, roles, timestamps, compatibility text, model, lifecycle, and failure metadata.

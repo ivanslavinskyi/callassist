@@ -188,6 +188,16 @@ export function LiveCall({ callId }: { callId: string }) {
           ? messages.live.insufficientCredits
           : error instanceof ApiError && error.code === "CONCURRENT_CALL_LIMIT"
             ? messages.live.concurrentCall
+            : error instanceof ApiError && error.code === "RECIPIENT_SUPPRESSED"
+              ? messages.live.recipientSuppressed
+              : error instanceof ApiError && error.code === "OUTBOUND_CALLS_DISABLED"
+                ? messages.live.outboundCallsDisabled
+                : error instanceof ApiError && [
+                    "HOURLY_CALL_LIMIT",
+                    "DAILY_CALL_LIMIT",
+                    "RECIPIENT_REPEAT_LIMIT"
+                  ].includes(error.code)
+                  ? messages.live.callLimitReached
             : messages.live.actionError
       );
     } finally {

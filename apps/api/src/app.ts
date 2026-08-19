@@ -774,7 +774,19 @@ function sendRepositoryError(
   }
 
   if (error instanceof CallRepositoryError) {
-    const status = error.code === "CALL_NOT_FOUND" ? 404 : 409;
+    const status = error.code === "CALL_NOT_FOUND"
+      ? 404
+      : error.code === "OUTBOUND_CALLS_DISABLED"
+        ? 503
+        : error.code === "RECIPIENT_SUPPRESSED"
+          ? 403
+          : [
+              "HOURLY_CALL_LIMIT",
+              "DAILY_CALL_LIMIT",
+              "RECIPIENT_REPEAT_LIMIT"
+            ].includes(error.code)
+            ? 429
+            : 409;
     return reply.status(status).send({ error: error.code });
   }
 

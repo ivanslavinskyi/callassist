@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput,
+  parseSwissDestinationPhone,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
@@ -24,6 +25,7 @@ import {
   CallRepositoryError,
   buildRuntimeBriefFields,
   creditSettlementForStatus,
+  defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
@@ -31,6 +33,8 @@ import {
   type CallRepository,
   type ListCallBriefsInput,
   type RecordingStatusInput,
+  type RecipientSuppressionInput,
+  type SafetyControlInput,
   type StartAttemptInput
 } from "./call-repository";
 
@@ -325,6 +329,91 @@ export class PostgresCallRepository implements CallRepository {
     };
   }
 
+  async suppressRecipient(input: RecipientSuppressionInput) {
+    const phoneE164 = requireSwissPhone(input.phoneE164);
+    const reason = requireReason(input.reason);
+    const now = new Date();
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockRecipient(transaction, phoneE164);
+      const inserted = await transaction`
+        INSERT INTO recipient_suppressions (
+          id, phone_e164, source, reason, created_by_user_id, created_at
+        ) VALUES (
+          ${randomUUID()}, ${phoneE164}, ${input.source}, ${reason},
+          ${input.actorUserId ?? null}, ${now}
+        )
+        ON CONFLICT (phone_e164) WHERE lifted_at IS NULL DO NOTHING
+        RETURNING id
+      `;
+      if (inserted.count === 0) return;
+      await this.#safetyEvent(transaction, {
+        eventType: "recipient.suppressed",
+        actorUserId: input.actorUserId ?? null,
+        phoneE164,
+        reason
+      });
+    });
+  }
+
+  async liftRecipientSuppression(
+    phoneE164Input: string,
+    input: SafetyControlInput
+  ) {
+    const phoneE164 = requireSwissPhone(phoneE164Input);
+    const reason = requireReason(input.reason);
+    const now = new Date();
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockRecipient(transaction, phoneE164);
+      const lifted = await transaction`
+        UPDATE recipient_suppressions
+        SET
+          lifted_at = ${now},
+          lifted_by_user_id = ${input.actorUserId ?? null},
+          lift_reason = ${reason}
+        WHERE phone_e164 = ${phoneE164} AND lifted_at IS NULL
+        RETURNING id
+      `;
+      if (lifted.count === 0) return;
+      await this.#safetyEvent(transaction, {
+        eventType: "recipient.suppression_lifted",
+        actorUserId: input.actorUserId ?? null,
+        phoneE164,
+        reason
+      });
+    });
+  }
+
+  async setOutboundCallsEnabled(
+    enabled: boolean,
+    input: SafetyControlInput
+  ) {
+    const reason = requireReason(input.reason);
+    const now = new Date();
+    await this.#sql.begin(async (transaction) => {
+      await transaction`
+        INSERT INTO system_controls (
+          key, enabled, reason, updated_by_user_id, updated_at
+        ) VALUES (
+          'outbound_calls', ${enabled}, ${reason},
+          ${input.actorUserId ?? null}, ${now}
+        )
+        ON CONFLICT (key) DO UPDATE SET
+          enabled = EXCLUDED.enabled,
+          reason = EXCLUDED.reason,
+          updated_by_user_id = EXCLUDED.updated_by_user_id,
+          updated_at = EXCLUDED.updated_at
+      `;
+      await this.#safetyEvent(transaction, {
+        eventType: enabled
+          ? "outbound_calls.enabled"
+          : "outbound_calls.disabled",
+        actorUserId: input.actorUserId ?? null,
+        phoneE164: null,
+        reason
+      });
+    });
+  }
+
   async recompile(
     id: string,
     input: CreateCallBriefInput,
@@ -570,24 +659,75 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.begin(async (transaction) => {
       if (userId) {
         await this.#lockCreditAccount(transaction, userId);
-        const [call] = await transaction<{ status: CallBrief["status"] }[]>`
-          SELECT status
-          FROM call_briefs
-          WHERE id = ${id} AND user_id = ${userId}
-          FOR UPDATE
+      }
+      const [call] = await transaction<
+        { status: CallBrief["status"]; phoneE164: string }[]
+      >`
+        SELECT status, phone_number AS "phoneE164"
+        FROM call_briefs
+        WHERE id = ${id}
+          AND (${userId}::uuid IS NULL OR user_id = ${userId})
+        FOR UPDATE
+      `;
+      if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+      if (call.status !== "ready") {
+        throw new CallRepositoryError("CALL_NOT_READY");
+      }
+      const [control] = await transaction<{ enabled: boolean }[]>`
+        SELECT enabled
+        FROM system_controls
+        WHERE key = 'outbound_calls'
+        FOR SHARE
+      `;
+      if (!control?.enabled) {
+        throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
+      }
+      await this.#lockRecipient(transaction, call.phoneE164);
+      const suppression = await transaction`
+        SELECT id
+        FROM recipient_suppressions
+        WHERE phone_e164 = ${call.phoneE164} AND lifted_at IS NULL
+        LIMIT 1
+      `;
+      if (suppression.count > 0) {
+        throw new CallRepositoryError("RECIPIENT_SUPPRESSED");
+      }
+      if (userId) {
+        const policy = input.admissionPolicy ?? defaultCallAdmissionPolicy;
+        const hourStart = new Date(now.getTime() - 60 * 60 * 1_000);
+        const dayStart = new Date(Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate()
+        ));
+        const [usage] = await transaction<
+          {
+            active: boolean;
+            hourlyStarts: number;
+            dailyStarts: number;
+            recipientDailyStarts: number;
+          }[]
+        >`
+          SELECT
+            EXISTS(
+              SELECT 1 FROM call_attempts
+              WHERE user_id = ${userId} AND ended_at IS NULL
+            ) AS active,
+            count(*) FILTER (
+              WHERE call_attempts.started_at >= ${hourStart}
+            )::int AS "hourlyStarts",
+            count(*) FILTER (
+              WHERE call_attempts.started_at >= ${dayStart}
+            )::int AS "dailyStarts",
+            count(*) FILTER (
+              WHERE call_attempts.started_at >= ${dayStart}
+                AND call_briefs.phone_number = ${call.phoneE164}
+            )::int AS "recipientDailyStarts"
+          FROM call_attempts
+          JOIN call_briefs ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_attempts.user_id = ${userId}
         `;
-        if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
-        if (call.status !== "ready") {
-          throw new CallRepositoryError("CALL_NOT_READY");
-        }
-        const [active] = await transaction<{ exists: boolean }[]>`
-          SELECT EXISTS(
-            SELECT 1
-            FROM call_attempts
-            WHERE user_id = ${userId} AND ended_at IS NULL
-          ) AS exists
-        `;
-        if (active?.exists) {
+        if (usage?.active) {
           throw new CallRepositoryError("CONCURRENT_CALL_LIMIT");
         }
         const [credits] = await transaction<{ balance: number }[]>`
@@ -597,6 +737,18 @@ export class PostgresCallRepository implements CallRepository {
         `;
         if ((credits?.balance ?? 0) < 1) {
           throw new CallRepositoryError("INSUFFICIENT_CREDITS");
+        }
+        if ((usage?.hourlyStarts ?? 0) >= policy.maxStartsPerHour) {
+          throw new CallRepositoryError("HOURLY_CALL_LIMIT");
+        }
+        if ((usage?.dailyStarts ?? 0) >= policy.maxStartsPerDay) {
+          throw new CallRepositoryError("DAILY_CALL_LIMIT");
+        }
+        if (
+          (usage?.recipientDailyStarts ?? 0) >=
+          policy.maxStartsPerRecipientPerDay
+        ) {
+          throw new CallRepositoryError("RECIPIENT_REPEAT_LIMIT");
         }
       }
       const updated = await transaction`
@@ -1766,6 +1918,45 @@ export class PostgresCallRepository implements CallRepository {
     `;
   }
 
+  async #lockRecipient(
+    transaction: postgres.TransactionSql,
+    phoneE164: string
+  ) {
+    await transaction`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended(${`recipient:${phoneE164}`}, 0)
+      )
+    `;
+  }
+
+  async #safetyEvent(
+    transaction: postgres.TransactionSql,
+    input: {
+      eventType:
+        | "recipient.suppressed"
+        | "recipient.suppression_lifted"
+        | "outbound_calls.enabled"
+        | "outbound_calls.disabled";
+      actorUserId: string | null;
+      phoneE164: string | null;
+      reason: string;
+    }
+  ) {
+    await transaction`
+      INSERT INTO safety_events (
+        id, event_type, actor_user_id, phone_e164, reason, metadata, created_at
+      ) VALUES (
+        ${randomUUID()},
+        ${input.eventType},
+        ${input.actorUserId},
+        ${input.phoneE164},
+        ${input.reason},
+        ${transaction.json({})},
+        ${new Date()}
+      )
+    `;
+  }
+
   async #audit(
     transaction: postgres.TransactionSql,
     callBriefId: string,
@@ -1784,4 +1975,16 @@ export class PostgresCallRepository implements CallRepository {
       )
     `;
   }
+}
+
+function requireSwissPhone(value: string) {
+  const parsed = parseSwissDestinationPhone(value);
+  if (!parsed) throw new Error("A valid Swiss E.164 phone number is required");
+  return parsed;
+}
+
+function requireReason(value: string) {
+  const reason = value.trim();
+  if (!reason) throw new Error("A safety-control reason is required");
+  return reason;
 }
