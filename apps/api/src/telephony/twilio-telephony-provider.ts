@@ -1,5 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { CallBrief } from "@callassist/contracts";
+import {
+  isSwissDestinationPhone,
+  type CallBrief
+} from "@callassist/contracts";
 import twilio from "twilio";
 import type {
   StartCallRecordingInput,
@@ -37,6 +40,9 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   async startCall(brief: CallBrief) {
+    if (!isSwissDestinationPhone(brief.phoneNumber)) {
+      throw new Error("SWISS_DESTINATION_REQUIRED");
+    }
     const call = await this.#client.calls.create({
       from: this.#fromNumber,
       method: "POST",

@@ -193,4 +193,14 @@ describe("API client headers", () => {
       "entries are preserved"
     );
   });
+
+  it("explains the Swiss-only policy for a legacy start rejection", () => {
+    expect(
+      getCallPreparationErrorMessage(
+        new ApiError("SWISS_DESTINATION_REQUIRED", 422)
+      )
+    ).toBe(
+      "During the public beta CallAssist can only call Swiss phone numbers."
+    );
+  });
 });

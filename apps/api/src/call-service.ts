@@ -1,5 +1,6 @@
 import {
   normalizeCreateCallBriefInput,
+  isSwissDestinationPhone,
   type ApprovalDecision,
   type CallBrief,
   type CallEvent,
@@ -48,6 +49,7 @@ export class CallServiceError extends Error {
       | "TELEPHONY_STOP_FAILED"
       | "RECORDING_START_FAILED"
       | "RECORDING_NOT_AVAILABLE"
+      | "SWISS_DESTINATION_REQUIRED"
       | "BRIEF_COMPILER_UNAVAILABLE"
       | "BRIEF_COMPILER_RESPONSE_INVALID",
     options?: {
@@ -181,6 +183,9 @@ export class CallService {
 
   async start(id: string) {
     const current = await this.#require(id);
+    if (!isSwissDestinationPhone(current.brief.phoneNumber)) {
+      throw new CallServiceError("SWISS_DESTINATION_REQUIRED");
+    }
     if (
       ["review_required", "needs_clarification", "blocked"].includes(
         current.brief.status

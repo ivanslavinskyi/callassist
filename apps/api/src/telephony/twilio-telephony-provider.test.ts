@@ -97,6 +97,14 @@ describe("TwilioTelephonyProvider", () => {
     );
   });
 
+  it("defensively rejects a foreign destination before calling Twilio", async () => {
+    const { calls, provider } = createProvider();
+    await expect(
+      provider.startCall({ ...brief, phoneNumber: "+442079460000" })
+    ).rejects.toThrow("SWISS_DESTINATION_REQUIRED");
+    expect(calls.create).not.toHaveBeenCalled();
+  });
+
   it("stops an active Twilio call", async () => {
     const { provider, update } = createProvider();
     await provider.stopCall("CA123");

@@ -32,6 +32,38 @@ function createApp(briefCompiler?: BriefCompiler) {
 }
 
 describe("call API", () => {
+  it("rejects a valid foreign number with the Swiss beta policy message", async () => {
+    const app = createApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload: {
+        recipientName: "London office",
+        phoneNumber: "+442079460000",
+        objective: "Ask the office for its opening hours next Monday",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
+        assistanceReason: "language_barrier",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "INVALID_CALL_BRIEF",
+      issues: {
+        fieldErrors: {
+          phoneNumber: [
+            "During the public beta CallAssist can only call Swiss phone numbers."
+          ]
+        }
+      }
+    });
+  });
+
   it("paginates and searches call briefs with an opaque cursor", async () => {
     const app = createApp();
     for (const [index, recipientName] of ["Alpha Office", "Beta Clinic", "Gamma Council"].entries()) {
@@ -307,7 +339,7 @@ describe("call API", () => {
     apps.push(app);
     const brief = await service.create({
       recipientName: "Example office",
-      phoneNumber: "+442079460000",
+      phoneNumber: "+41523686688",
       objective: "Test a provider failure",
       assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina",

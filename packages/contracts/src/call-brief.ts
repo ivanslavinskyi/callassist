@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { swissDestinationPhoneSchema } from "./phone";
 
 export const personNamePartSchema = z
   .string()
@@ -199,10 +200,7 @@ export type CallBriefStatus = z.infer<typeof callBriefStatusSchema>;
 
 const callBriefStoredFieldsSchema = z.object({
   recipientName: z.string().trim().min(2, "Enter a recipient").max(160),
-  phoneNumber: z
-    .string()
-    .trim()
-    .regex(/^\+[1-9]\d{7,14}$/, "Use international format, for example +41710000000"),
+  phoneNumber: swissDestinationPhoneSchema,
   objective: z
     .string()
     .trim()

@@ -66,8 +66,16 @@ The public Twilio surface is isolated on a dedicated listener. The main API, SSE
 - The model is instructed to use only the call objective and explicitly approved facts.
 - Sensitive actions remain server-owned and a deterministic policy gate prevents the
   compiler from authorizing itself or inventing arbitrary blockers.
+- Public-beta destinations must parse as valid Swiss numbers using maintained phone
+  metadata. They are canonicalized to E.164 and checked at contract, call-start, and
+  Twilio-adapter boundaries; foreign and short-service numbers fail before dialing.
 
 See [Architecture](docs/architecture.md) for the detailed boundaries and data model.
+
+Before any production Twilio traffic is enabled, restrict Voice Geographic
+Permissions to Switzerland (and review the allowed number ranges) in the Twilio
+Console. This external account setting is a release gate and must be captured in the
+deployment evidence; application validation is not a substitute for it.
 
 ## Repository layout
 

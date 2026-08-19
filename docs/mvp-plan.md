@@ -51,7 +51,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - **PARTIAL — data lifecycle:** recording deletion and transcript export exist; account/session/full-data lifecycle does not.
 - **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, and process-local application rate limits exist. Password recovery, distributed rate limits, and authenticated page routing remain.
 - **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen; PostgreSQL integration execution still requires the local database container.
-- **P0 policy gap:** destination validation is generic E.164, not Switzerland-only.
+- **PARTIAL — destination rollout:** shared `libphonenumber-js/max` metadata parses and canonicalizes Swiss national/international input; contracts, call-start policy, and the Twilio adapter reject invalid or non-CH destinations. Production Twilio Voice Geographic Permissions still need to be restricted and captured as deployment evidence.
 
 # Public Beta Foundation
 
@@ -95,10 +95,10 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 
 ### P0 — Switzerland-only destinations
 
-- [ ] Parse/validate server-side with a maintained phone library and require a valid Swiss destination; do not rely on `startsWith("+41")` or frontend checks.
-- [ ] Enforce the same CH-only rule in deterministic policy before credit reservation and provider creation. Explain: “During the public beta CallAssist can only call Swiss phone numbers.”
+- [x] Parse, canonicalize, and validate server-side with `libphonenumber-js/max` metadata and require a valid Swiss destination; do not rely on `startsWith("+41")` or frontend checks.
+- [x] Enforce the same CH-only rule in the shared contract, again in deterministic call-start policy before future credit reservation/provider creation, and defensively in the Twilio adapter. Explain: “During the public beta CallAssist can only call Swiss phone numbers.”
 - [ ] Restrict production Twilio Voice Geographic Permissions to Switzerland and preferably initial low-risk ranges; record this reviewed console setting in deployment evidence.
-- [ ] Test formatting, invalid/country-code edges, risky ranges, and direct API bypass attempts.
+- [x] Test Swiss national, `00` and E.164 formatting; invalid, short-service and foreign country-code edges; direct API bypass; legacy stored foreign briefs; and direct provider bypass.
 
 ### P0 — append-only credits and concurrency
 
@@ -264,7 +264,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Phone verified through Twilio Verify with application-level limits.
 - [x] Cross-user isolation enforced for all browser APIs/SSE/media/actions and tested; database-backed execution remains an environment verification item above.
 - [x] Personal `"Ivan Slavinskyi"` default removed; registration and represented identity use explicit first/last name fields.
-- [ ] Swiss-only restriction enforced server-side and in policy.
+- [x] Swiss-only restriction enforced server-side and in policy.
 - [ ] Twilio Voice Geographic Permissions restricted to approved CH destinations.
 - [ ] Exactly three signup credits granted once through ledger.
 - [ ] Atomic/idempotent/concurrent-safe/reconciliable credit reserve/charge/refund.

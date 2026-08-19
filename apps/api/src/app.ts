@@ -752,7 +752,9 @@ function sendRepositoryError(
 ) {
   if (error instanceof CallServiceError) {
     const status =
-      error.code === "RECORDING_NOT_AVAILABLE"
+      error.code === "SWISS_DESTINATION_REQUIRED"
+        ? 422
+        : error.code === "RECORDING_NOT_AVAILABLE"
         ? 409
         : error.code === "BRIEF_COMPILER_UNAVAILABLE"
           ? 503

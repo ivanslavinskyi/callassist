@@ -43,6 +43,49 @@ describe("CallService", () => {
     expect(reviewed.transcript).toEqual([]);
   });
 
+  it("blocks a legacy foreign destination before reserving or starting a provider call", async () => {
+    const startCall = vi.fn();
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      startCall,
+      async stopCall() {},
+      async startRecording() {
+        throw new Error("not used");
+      },
+      async getRecordingMedia() {
+        throw new Error("not used");
+      },
+      async deleteRecording() {}
+    };
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository, provider);
+    services.push(service);
+    const brief = await service.create({
+      recipientName: "Example office",
+      phoneNumber: "+41523686688",
+      objective: "Verify the destination policy before provider creation",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    });
+    await service.approveCompilation(brief.id);
+    const originalGet = repository.get.bind(repository);
+    vi.spyOn(repository, "get").mockImplementation(async (id) => {
+      const snapshot = await originalGet(id);
+      if (snapshot) snapshot.brief.phoneNumber = "+442079460000";
+      return snapshot;
+    });
+
+    await expect(service.start(brief.id)).rejects.toMatchObject({
+      code: "SWISS_DESTINATION_REQUIRED"
+    });
+    expect(startCall).not.toHaveBeenCalled();
+  });
+
   it("recompiles the same brief revision and can approve and call in one action", async () => {
     const service = createService();
     const input = {
@@ -85,7 +128,7 @@ describe("CallService", () => {
     const service = createService();
     const brief = await service.create({
       recipientName: "Example office",
-      phoneNumber: "+442079460000",
+      phoneNumber: "+41523686688",
       objective: "Ask whether the application can be submitted by email",
       assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina",
@@ -125,7 +168,7 @@ describe("CallService", () => {
     services.push(service);
     const brief = await service.create({
       recipientName: "Example office",
-      phoneNumber: "+442079460000",
+      phoneNumber: "+41523686688",
       objective: "Prevent duplicate outbound calls",
       assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina",
@@ -174,7 +217,7 @@ describe("CallService", () => {
     services.push(service);
     const brief = await service.create({
       recipientName: "Example office",
-      phoneNumber: "+442079460000",
+      phoneNumber: "+41523686688",
       objective: "Stop while the provider is creating a call",
       assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina",
@@ -243,7 +286,7 @@ describe("CallService", () => {
     services.push(service);
     const brief = await service.create({
       recipientName: "Example office",
-      phoneNumber: "+442079460000",
+      phoneNumber: "+41523686688",
       objective: "Confirm that the submitted application was received",
       assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina",
@@ -341,7 +384,7 @@ describe("CallService", () => {
     services.push(service);
     const brief = await service.create({
       recipientName: "Example office",
-      phoneNumber: "+442079460000",
+      phoneNumber: "+41523686688",
       objective: "Verify out-of-order recording lifecycle callbacks",
       assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina",

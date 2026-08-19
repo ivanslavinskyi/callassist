@@ -57,9 +57,13 @@ On API startup, unfinished calls are marked as failed, pending approvals expire,
 
 ## Brief Compiler and policy boundary
 
-Every new application-level call starts as a `RawCallBrief`. Field lengths, phone
-format, locale IDs, assistant profile, assistance reason, and fact counts are
-validated before any model request. Input moderation runs before compilation.
+Every new application-level call starts as a `RawCallBrief`. Field lengths, locale
+IDs, assistant profile, assistance reason, and fact counts are validated before any
+model request. Destination numbers are parsed with maintained `libphonenumber-js/max`
+metadata, must resolve to a valid Swiss number, and are stored as canonical E.164.
+The same deterministic check runs again before an attempt can be reserved or a
+provider call created; the Twilio adapter also fails closed on direct bypass. Input
+moderation runs before compilation.
 
 The OpenAI Responses API converts the raw brief into versioned `CompiledCallBrief`
 Structured Output. It contains the detected source language, localized objective,

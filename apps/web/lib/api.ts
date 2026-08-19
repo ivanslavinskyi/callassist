@@ -119,6 +119,9 @@ export function getCallPreparationErrorMessage(error: unknown) {
   if (error.code === "CALL_NOT_EDITABLE") {
     return "This call brief can no longer be edited.";
   }
+  if (error.code === "SWISS_DESTINATION_REQUIRED") {
+    return "During the public beta CallAssist can only call Swiss phone numbers.";
+  }
   return "Could not prepare the call. Your entries are preserved. Try again.";
 }
 

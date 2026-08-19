@@ -42,6 +42,25 @@ describe("createCallBriefInputSchema", () => {
     }
   });
 
+  it("normalizes Swiss national numbers and rejects foreign destinations", () => {
+    const local = createCallBriefInputSchema.parse({
+      ...validBrief,
+      phoneNumber: "052 368 66 88"
+    });
+    expect(local.phoneNumber).toBe("+41523686688");
+
+    const foreign = createCallBriefInputSchema.safeParse({
+      ...validBrief,
+      phoneNumber: "+442079460000"
+    });
+    expect(foreign.success).toBe(false);
+    if (!foreign.success) {
+      expect(foreign.error.flatten().fieldErrors.phoneNumber?.[0]).toContain(
+        "only call Swiss phone numbers"
+      );
+    }
+  });
+
   it("requires separate represented-person first and last names", () => {
     const { representedPersonLastName: _omitted, ...withoutLastName } = validBrief;
     expect(createCallBriefInputSchema.safeParse(withoutLastName).success).toBe(false);
