@@ -13,6 +13,26 @@ export type UserRole = z.infer<typeof userRoleSchema>;
 export const userStatusSchema = z.enum(["active", "suspended", "deleted"]);
 export type UserStatus = z.infer<typeof userStatusSchema>;
 
+export const administrableUserStatusSchema = z.enum(["active", "suspended"]);
+export type AdministrableUserStatus = z.infer<
+  typeof administrableUserStatusSchema
+>;
+
+const adminActionReasonSchema = z.string().trim().min(3).max(500);
+
+export const accountStatusActionSchema = z.object({
+  status: administrableUserStatusSchema,
+  reason: adminActionReasonSchema
+});
+export type AccountStatusAction = z.infer<typeof accountStatusActionSchema>;
+
+export const sessionRevocationActionSchema = z.object({
+  reason: adminActionReasonSchema
+});
+export type SessionRevocationAction = z.infer<
+  typeof sessionRevocationActionSchema
+>;
+
 export const registrationInputSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
   password: z.string().min(12).max(128),

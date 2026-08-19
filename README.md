@@ -156,6 +156,15 @@ reads, mutations, SSE, recordings, approvals, and transcript retry. Signed provi
 webhooks remain independent of browser sessions. Pre-authentication database rows stay
 hidden until their archive/backfill policy is defined.
 
+The backend exposes narrowly scoped account controls at
+`PUT /api/admin/users/:userId/status` and
+`POST /api/admin/users/:userId/sessions/revoke`. Only active `admin` or
+`superadmin` accounts may use them; ordinary admins can act only on `user`
+accounts, self-actions are rejected, browser origins are checked, and every action
+requires a short reason. Suspension and session revocation are atomic in PostgreSQL.
+Suspension immediately revokes every session, while unsuspension never restores old
+tokens. User lookup and the broader admin UI remain roadmap work.
+
 Phone verification grants exactly three signup credits through the append-only
 credit ledger. `GET /api/usage` returns the authenticated user's reconciled balance,
 active call, and ledger history. Starting a call reserves one credit atomically and

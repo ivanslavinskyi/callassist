@@ -362,6 +362,29 @@ describeWithDatabase("PostgresCallRepository", () => {
     }
     expect((await repository.getCreditUsage(safetyOwner)).balance).toBe(3);
 
+    const suspendedReady = await createReady(
+      "Suspended account call",
+      "+41790000024"
+    );
+    await inspection`
+      UPDATE users SET status = 'suspended' WHERE id = ${safetyOwner}
+    `;
+    try {
+      await expect(repository.startAttempt(suspendedReady.id, {
+        provider: "twilio",
+        userId: safetyOwner,
+        admissionPolicy: ledgerTestPolicy
+      })).rejects.toMatchObject({ code: "CALL_NOT_FOUND" });
+      await expect(createReady(
+        "Suspended account new brief",
+        "+41790000025"
+      )).rejects.toMatchObject({ code: "CALL_NOT_FOUND" });
+    } finally {
+      await inspection`
+        UPDATE users SET status = 'active' WHERE id = ${safetyOwner}
+      `;
+    }
+
     const eventRows = await inspection<{ count: number }[]>`
       SELECT count(*)::int AS count
       FROM safety_events

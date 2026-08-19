@@ -1,4 +1,10 @@
-import type { RegistrationInput, User, UserRole, UserStatus } from "@callassist/contracts";
+import type {
+  AdministrableUserStatus,
+  RegistrationInput,
+  User,
+  UserRole,
+  UserStatus
+} from "@callassist/contracts";
 
 export type AuthUserRecord = User & { passwordHash: string };
 
@@ -17,6 +23,16 @@ export type CreateAuthUserInput = Omit<RegistrationInput, "password"> & {
   passwordHash: string;
 };
 
+export type AccountAdminInput = {
+  actorUserId: string;
+  targetUserId: string;
+  reason: string;
+};
+
+export type ChangeAccountStatusInput = AccountAdminInput & {
+  status: AdministrableUserStatus;
+};
+
 export interface AuthRepository {
   readonly mode: "memory" | "postgres";
   createUser(input: CreateAuthUserInput): Promise<AuthUserRecord>;
@@ -30,12 +46,21 @@ export interface AuthRepository {
   ): Promise<{ user: AuthUserRecord; session: AuthSessionRecord } | null>;
   revokeSession(tokenHash: string, revokedAt: string): Promise<void>;
   revokeUserSessions(userId: string, revokedAt: string): Promise<void>;
+  changeAccountStatus(input: ChangeAccountStatusInput): Promise<AuthUserRecord>;
+  revokeUserSessionsByAdmin(input: AccountAdminInput): Promise<void>;
   close(): Promise<void>;
 }
 
 export class AuthRepositoryError extends Error {
   constructor(
-    readonly code: "USER_ALREADY_EXISTS" | "USER_NOT_FOUND",
+    readonly code:
+      | "USER_ALREADY_EXISTS"
+      | "USER_NOT_FOUND"
+      | "SESSION_CREATION_DENIED"
+      | "ADMIN_ACTION_FORBIDDEN"
+      | "SELF_ADMIN_ACTION_FORBIDDEN"
+      | "ACCOUNT_STATUS_UNCHANGED"
+      | "ACCOUNT_STATUS_TRANSITION_INVALID",
     message = code
   ) {
     super(message);

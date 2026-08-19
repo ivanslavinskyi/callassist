@@ -1,11 +1,32 @@
 import { randomUUID } from "node:crypto";
-import type { AuthRepository, AuthSessionRecord, AuthUserRecord, CreateAuthUserInput } from "./auth-repository";
+import type {
+  AccountAdminInput,
+  AuthRepository,
+  AuthSessionRecord,
+  AuthUserRecord,
+  ChangeAccountStatusInput,
+  CreateAuthUserInput
+} from "./auth-repository";
 import { AuthRepositoryError } from "./auth-repository";
+
+type AccountAdminEvent = {
+  eventType:
+    | "account.suspended"
+    | "account.unsuspended"
+    | "account.sessions_revoked";
+  actorUserId: string;
+  targetUserId: string;
+  previousStatus: "active" | "suspended" | null;
+  newStatus: "active" | "suspended" | null;
+  reason: string;
+  createdAt: string;
+};
 
 export class InMemoryAuthRepository implements AuthRepository {
   readonly mode = "memory" as const;
   readonly #users = new Map<string, AuthUserRecord>();
   readonly #sessions = new Map<string, AuthSessionRecord>();
+  readonly #accountAdminEvents: AccountAdminEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -53,6 +74,10 @@ export class InMemoryAuthRepository implements AuthRepository {
   }
 
   async createSession(input: AuthSessionRecord) {
+    const user = this.#users.get(input.userId);
+    if (!user || user.status !== "active" || !user.phoneVerifiedAt) {
+      throw new AuthRepositoryError("SESSION_CREATION_DENIED");
+    }
     this.#sessions.set(input.tokenHash, structuredClone(input));
   }
 
@@ -60,7 +85,7 @@ export class InMemoryAuthRepository implements AuthRepository {
     const session = this.#sessions.get(tokenHash);
     if (!session || session.revokedAt || session.expiresAt <= now) return null;
     const user = this.#users.get(session.userId);
-    return user
+    return user?.status === "active" && user.phoneVerifiedAt
       ? { user: structuredClone(user), session: structuredClone(session) }
       : null;
   }
@@ -76,8 +101,61 @@ export class InMemoryAuthRepository implements AuthRepository {
     }
   }
 
+  async changeAccountStatus(input: ChangeAccountStatusInput) {
+    const reason = requireAdminReason(input.reason);
+    const { target } = this.#authorizeAdminAction(input);
+    if (target.status === input.status) {
+      throw new AuthRepositoryError("ACCOUNT_STATUS_UNCHANGED");
+    }
+    if (target.status === "deleted") {
+      throw new AuthRepositoryError("ACCOUNT_STATUS_TRANSITION_INVALID");
+    }
+    const previousStatus = target.status;
+    const now = new Date().toISOString();
+    target.status = input.status;
+    if (input.status === "suspended") {
+      this.#revokeSessions(input.targetUserId, now);
+    }
+    this.#accountAdminEvents.push({
+      eventType: input.status === "suspended"
+        ? "account.suspended"
+        : "account.unsuspended",
+      actorUserId: input.actorUserId,
+      targetUserId: input.targetUserId,
+      previousStatus,
+      newStatus: input.status,
+      reason,
+      createdAt: now
+    });
+    return structuredClone(target);
+  }
+
+  async revokeUserSessionsByAdmin(input: AccountAdminInput) {
+    const reason = requireAdminReason(input.reason);
+    this.#authorizeAdminAction(input);
+    const now = new Date().toISOString();
+    this.#revokeSessions(input.targetUserId, now);
+    this.#accountAdminEvents.push({
+      eventType: "account.sessions_revoked",
+      actorUserId: input.actorUserId,
+      targetUserId: input.targetUserId,
+      previousStatus: null,
+      newStatus: null,
+      reason,
+      createdAt: now
+    });
+  }
+
   async setUserStatusForTest(userId: string, status: AuthUserRecord["status"]) {
     this.#requireUser(userId).status = status;
+  }
+
+  async setUserRoleForTest(userId: string, role: AuthUserRecord["role"]) {
+    this.#requireUser(userId).role = role;
+  }
+
+  accountAdminEventsForTest() {
+    return structuredClone(this.#accountAdminEvents);
   }
 
   async close() {}
@@ -87,4 +165,41 @@ export class InMemoryAuthRepository implements AuthRepository {
     if (!user) throw new AuthRepositoryError("USER_NOT_FOUND");
     return user;
   }
+
+  #authorizeAdminAction(input: AccountAdminInput) {
+    if (input.actorUserId === input.targetUserId) {
+      throw new AuthRepositoryError("SELF_ADMIN_ACTION_FORBIDDEN");
+    }
+    const actor = this.#users.get(input.actorUserId);
+    if (
+      !actor ||
+      actor.status !== "active" ||
+      (actor.role !== "admin" && actor.role !== "superadmin")
+    ) {
+      throw new AuthRepositoryError("ADMIN_ACTION_FORBIDDEN");
+    }
+    const target = this.#users.get(input.targetUserId);
+    if (!target) throw new AuthRepositoryError("USER_NOT_FOUND");
+    if (target.status === "deleted") {
+      throw new AuthRepositoryError("ACCOUNT_STATUS_TRANSITION_INVALID");
+    }
+    if (actor.role !== "superadmin" && target.role !== "user") {
+      throw new AuthRepositoryError("ADMIN_ACTION_FORBIDDEN");
+    }
+    return { actor, target };
+  }
+
+  #revokeSessions(userId: string, revokedAt: string) {
+    for (const session of this.#sessions.values()) {
+      if (session.userId === userId) session.revokedAt ??= revokedAt;
+    }
+  }
+}
+
+function requireAdminReason(value: string) {
+  const reason = value.trim();
+  if (reason.length < 3 || reason.length > 500) {
+    throw new Error("An admin action reason between 3 and 500 characters is required");
+  }
+  return reason;
 }

@@ -403,4 +403,191 @@ describe("auth API", () => {
     });
     expect(current.statusCode).toBe(401);
   });
+
+  it("restricts audited suspend, unsuspend, and force logout actions to administrators", async () => {
+    const { app, repository } = createAuthApp();
+    const adminRegistration = {
+      ...registration,
+      email: "admin@example.com",
+      phoneE164: "+41710000003",
+      firstName: "Ada",
+      lastName: "Admin"
+    };
+    const targetRegistration = {
+      ...registration,
+      email: "target@example.com",
+      phoneE164: "+41710000004",
+      firstName: "Tara",
+      lastName: "Target"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const targetCookie = await registerAndVerify(app, targetRegistration);
+    const adminMe = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: adminCookie }
+    });
+    const targetMe = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: targetCookie }
+    });
+    const adminId = adminMe.json().user.id as string;
+    const targetId = targetMe.json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+
+    await repository.setUserRoleForTest(targetId, "support");
+    const privilegedTargetAction = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${targetId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "suspended", reason: "Privilege boundary test" }
+    });
+    expect(privilegedTargetAction.statusCode).toBe(403);
+    expect(privilegedTargetAction.json()).toEqual({
+      error: "ADMIN_ACTION_FORBIDDEN"
+    });
+    await repository.setUserRoleForTest(targetId, "user");
+
+    const secondTargetLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        email: targetRegistration.email,
+        password: targetRegistration.password
+      }
+    });
+    const secondTargetCookie = String(secondTargetLogin.headers["set-cookie"]);
+
+    const foreignOriginAction = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${targetId}/status`,
+      headers: { cookie: adminCookie, origin: "https://attacker.example" },
+      payload: { status: "suspended", reason: "Cross-site action test" }
+    });
+    expect(foreignOriginAction.statusCode).toBe(403);
+    expect(foreignOriginAction.json()).toEqual({ error: "INVALID_ORIGIN" });
+
+    const nonAdminAction = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${adminId}/status`,
+      headers: { cookie: targetCookie },
+      payload: { status: "suspended", reason: "Unauthorized attempt" }
+    });
+    expect(nonAdminAction.statusCode).toBe(403);
+    expect(nonAdminAction.json()).toEqual({ error: "ADMIN_ACTION_FORBIDDEN" });
+
+    const suspended = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${targetId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "suspended", reason: "Repeated abuse reports" }
+    });
+    expect(suspended.statusCode).toBe(200);
+    expect(suspended.json().user).toMatchObject({
+      id: targetId,
+      status: "suspended"
+    });
+    expect(suspended.json().user).not.toHaveProperty("passwordHash");
+    for (const cookie of [targetCookie, secondTargetCookie]) {
+      const current = await app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { cookie }
+      });
+      expect(current.statusCode).toBe(401);
+    }
+    const suspendedLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        email: targetRegistration.email,
+        password: targetRegistration.password
+      }
+    });
+    expect(suspendedLogin.statusCode).toBe(403);
+    expect(suspendedLogin.json()).toEqual({ error: "ACCOUNT_SUSPENDED" });
+
+    const duplicateSuspension = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${targetId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "suspended", reason: "Duplicate action" }
+    });
+    expect(duplicateSuspension.statusCode).toBe(409);
+    expect(duplicateSuspension.json()).toEqual({
+      error: "ACCOUNT_STATUS_UNCHANGED"
+    });
+
+    const unsuspended = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${targetId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "active", reason: "Review completed" }
+    });
+    expect(unsuspended.statusCode).toBe(200);
+    expect(unsuspended.json().user.status).toBe("active");
+    const oldSessionAfterUnsuspend = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: targetCookie }
+    });
+    expect(oldSessionAfterUnsuspend.statusCode).toBe(401);
+
+    const freshLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        email: targetRegistration.email,
+        password: targetRegistration.password
+      }
+    });
+    expect(freshLogin.statusCode).toBe(200);
+    const freshCookie = String(freshLogin.headers["set-cookie"]);
+    const forceLogout = await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${targetId}/sessions/revoke`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "Credential reset requested" }
+    });
+    expect(forceLogout.statusCode).toBe(204);
+    const afterForceLogout = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: freshCookie }
+    });
+    expect(afterForceLogout.statusCode).toBe(401);
+
+    const selfSuspension = await app.inject({
+      method: "PUT",
+      url: `/api/admin/users/${adminId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "suspended", reason: "Self action test" }
+    });
+    expect(selfSuspension.statusCode).toBe(403);
+    expect(selfSuspension.json()).toEqual({
+      error: "SELF_ADMIN_ACTION_FORBIDDEN"
+    });
+
+    expect(repository.accountAdminEventsForTest()).toMatchObject([
+      {
+        eventType: "account.suspended",
+        actorUserId: adminId,
+        targetUserId: targetId,
+        reason: "Repeated abuse reports"
+      },
+      {
+        eventType: "account.unsuspended",
+        actorUserId: adminId,
+        targetUserId: targetId,
+        reason: "Review completed"
+      },
+      {
+        eventType: "account.sessions_revoked",
+        actorUserId: adminId,
+        targetUserId: targetId,
+        reason: "Credential reset requested"
+      }
+    ]);
+  });
 });

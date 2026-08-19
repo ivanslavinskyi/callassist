@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import {
   AuthRepositoryError,
+  type AccountAdminInput,
   type AuthRepository,
   type AuthSessionRecord,
   type AuthUserRecord,
+  type ChangeAccountStatusInput,
   type CreateAuthUserInput
 } from "./auth-repository";
 
@@ -35,6 +37,12 @@ type SessionUserRow = UserRow & {
   sessionCreatedAt: DatabaseDate;
   sessionLastSeenAt: DatabaseDate;
   sessionUserAgent: string | null;
+};
+
+type AdminUserRow = {
+  id: string;
+  role: UserRole;
+  status: UserStatus;
 };
 
 function toIso(value: DatabaseDate) {
@@ -102,16 +110,30 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async createSession(input: AuthSessionRecord) {
-    await this.#sql`
-      INSERT INTO sessions (
-        id, user_id, token_hash, expires_at, revoked_at,
-        created_at, last_seen_at, user_agent
-      ) VALUES (
-        ${input.id}, ${input.userId}, ${input.tokenHash}, ${new Date(input.expiresAt)},
-        ${input.revokedAt ? new Date(input.revokedAt) : null},
-        ${new Date(input.createdAt)}, ${new Date(input.lastSeenAt)}, ${input.userAgent}
-      )
-    `;
+    await this.#sql.begin(async (transaction) => {
+      const [user] = await transaction<{
+        status: UserStatus;
+        phoneVerifiedAt: DatabaseDate | null;
+      }[]>`
+        SELECT status, phone_verified_at AS "phoneVerifiedAt"
+        FROM users
+        WHERE id = ${input.userId}
+        FOR SHARE
+      `;
+      if (user?.status !== "active" || !user.phoneVerifiedAt) {
+        throw new AuthRepositoryError("SESSION_CREATION_DENIED");
+      }
+      await transaction`
+        INSERT INTO sessions (
+          id, user_id, token_hash, expires_at, revoked_at,
+          created_at, last_seen_at, user_agent
+        ) VALUES (
+          ${input.id}, ${input.userId}, ${input.tokenHash}, ${new Date(input.expiresAt)},
+          ${input.revokedAt ? new Date(input.revokedAt) : null},
+          ${new Date(input.createdAt)}, ${new Date(input.lastSeenAt)}, ${input.userAgent}
+        )
+      `;
+    });
   }
 
   async findUserBySessionTokenHash(tokenHash: string, now: string) {
@@ -131,6 +153,8 @@ export class PostgresAuthRepository implements AuthRepository {
       WHERE sessions.token_hash = ${tokenHash}
         AND sessions.revoked_at IS NULL
         AND sessions.expires_at > ${new Date(now)}
+        AND users.status = 'active'
+        AND users.phone_verified_at IS NOT NULL
       LIMIT 1
     `;
     const row = rows[0];
@@ -169,8 +193,127 @@ export class PostgresAuthRepository implements AuthRepository {
     `;
   }
 
+  async changeAccountStatus(input: ChangeAccountStatusInput) {
+    const reason = requireAdminReason(input.reason);
+    return this.#sql.begin(async (transaction) => {
+      const { target } = await this.#authorizeAdminAction(transaction, input);
+      if (target.status === input.status) {
+        throw new AuthRepositoryError("ACCOUNT_STATUS_UNCHANGED");
+      }
+      const now = new Date();
+      const [updated] = await transaction<UserRow[]>`
+        UPDATE users
+        SET status = ${input.status}
+        WHERE id = ${input.targetUserId}
+        RETURNING ${this.#userColumns()}
+      `;
+      if (!updated) throw new AuthRepositoryError("USER_NOT_FOUND");
+      if (input.status === "suspended") {
+        await transaction`
+          UPDATE sessions
+          SET revoked_at = COALESCE(revoked_at, ${now})
+          WHERE user_id = ${input.targetUserId}
+        `;
+      }
+      await this.#accountAdminEvent(transaction, {
+        eventType: input.status === "suspended"
+          ? "account.suspended"
+          : "account.unsuspended",
+        actorUserId: input.actorUserId,
+        targetUserId: input.targetUserId,
+        previousStatus: target.status as "active" | "suspended",
+        newStatus: input.status,
+        reason,
+        now
+      });
+      return this.#mapUser(updated);
+    });
+  }
+
+  async revokeUserSessionsByAdmin(input: AccountAdminInput) {
+    const reason = requireAdminReason(input.reason);
+    await this.#sql.begin(async (transaction) => {
+      await this.#authorizeAdminAction(transaction, input);
+      const now = new Date();
+      await transaction`
+        UPDATE sessions
+        SET revoked_at = COALESCE(revoked_at, ${now})
+        WHERE user_id = ${input.targetUserId}
+      `;
+      await this.#accountAdminEvent(transaction, {
+        eventType: "account.sessions_revoked",
+        actorUserId: input.actorUserId,
+        targetUserId: input.targetUserId,
+        previousStatus: null,
+        newStatus: null,
+        reason,
+        now
+      });
+    });
+  }
+
   async close() {
     await this.#sql.end({ timeout: 5 });
+  }
+
+  async #authorizeAdminAction(
+    transaction: postgres.TransactionSql,
+    input: AccountAdminInput
+  ) {
+    if (input.actorUserId === input.targetUserId) {
+      throw new AuthRepositoryError("SELF_ADMIN_ACTION_FORBIDDEN");
+    }
+    const rows = await transaction<AdminUserRow[]>`
+      SELECT id, role, status
+      FROM users
+      WHERE id = ${input.actorUserId} OR id = ${input.targetUserId}
+      ORDER BY id
+      FOR UPDATE
+    `;
+    const actor = rows.find(({ id }) => id === input.actorUserId);
+    if (
+      !actor ||
+      actor.status !== "active" ||
+      (actor.role !== "admin" && actor.role !== "superadmin")
+    ) {
+      throw new AuthRepositoryError("ADMIN_ACTION_FORBIDDEN");
+    }
+    const target = rows.find(({ id }) => id === input.targetUserId);
+    if (!target) throw new AuthRepositoryError("USER_NOT_FOUND");
+    if (target.status === "deleted") {
+      throw new AuthRepositoryError("ACCOUNT_STATUS_TRANSITION_INVALID");
+    }
+    if (actor.role !== "superadmin" && target.role !== "user") {
+      throw new AuthRepositoryError("ADMIN_ACTION_FORBIDDEN");
+    }
+    return { actor, target };
+  }
+
+  async #accountAdminEvent(
+    transaction: postgres.TransactionSql,
+    input: {
+      eventType:
+        | "account.suspended"
+        | "account.unsuspended"
+        | "account.sessions_revoked";
+      actorUserId: string;
+      targetUserId: string;
+      previousStatus: "active" | "suspended" | null;
+      newStatus: "active" | "suspended" | null;
+      reason: string;
+      now: Date;
+    }
+  ) {
+    await transaction`
+      INSERT INTO account_admin_events (
+        id, event_type, actor_user_id, target_user_id,
+        previous_status, new_status, reason, metadata, created_at
+      ) VALUES (
+        ${randomUUID()}, ${input.eventType}, ${input.actorUserId},
+        ${input.targetUserId}, ${input.previousStatus}, ${input.newStatus},
+        ${input.reason}, ${transaction.json({})}, ${input.now}
+      )
+    `;
   }
 
   #userColumns() {
@@ -222,4 +365,12 @@ function isUniqueViolation(error: unknown) {
   return Boolean(
     error && typeof error === "object" && "code" in error && error.code === "23505"
   );
+}
+
+function requireAdminReason(value: string) {
+  const reason = value.trim();
+  if (reason.length < 3 || reason.length > 500) {
+    throw new Error("An admin action reason between 3 and 500 characters is required");
+  }
+  return reason;
 }

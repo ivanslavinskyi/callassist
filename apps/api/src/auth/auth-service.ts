@@ -1,4 +1,5 @@
 import type {
+  AdministrableUserStatus,
   LoginInput,
   PhoneVerificationInput,
   RegistrationInput,
@@ -166,6 +167,40 @@ export class AuthService {
     }
   }
 
+  async changeAccountStatus(
+    actor: User,
+    targetUserId: string,
+    status: AdministrableUserStatus,
+    reason: string
+  ) {
+    try {
+      return toPublicUser(await this.repository.changeAccountStatus({
+        actorUserId: actor.id,
+        targetUserId,
+        status,
+        reason
+      }));
+    } catch (error) {
+      throw mapAdminRepositoryError(error);
+    }
+  }
+
+  async revokeUserSessionsAsAdmin(
+    actor: User,
+    targetUserId: string,
+    reason: string
+  ) {
+    try {
+      await this.repository.revokeUserSessionsByAdmin({
+        actorUserId: actor.id,
+        targetUserId,
+        reason
+      });
+    } catch (error) {
+      throw mapAdminRepositoryError(error);
+    }
+  }
+
   async close() {
     await this.repository.close();
   }
@@ -177,16 +212,26 @@ export class AuthService {
     const now = this.#now();
     const expiresAt = new Date(now.getTime() + this.#sessionTtlMs).toISOString();
     const token = randomBytes(32).toString("base64url");
-    await this.repository.createSession({
-      id: randomUUID(),
-      userId: user.id,
-      tokenHash: hashSessionToken(token),
-      expiresAt,
-      revokedAt: null,
-      createdAt: now.toISOString(),
-      lastSeenAt: now.toISOString(),
-      userAgent: context.userAgent?.slice(0, 300) ?? null
-    });
+    try {
+      await this.repository.createSession({
+        id: randomUUID(),
+        userId: user.id,
+        tokenHash: hashSessionToken(token),
+        expiresAt,
+        revokedAt: null,
+        createdAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+        userAgent: context.userAgent?.slice(0, 300) ?? null
+      });
+    } catch (error) {
+      if (
+        error instanceof AuthRepositoryError &&
+        error.code === "SESSION_CREATION_DENIED"
+      ) {
+        throw new AuthServiceError("ACCOUNT_SUSPENDED");
+      }
+      throw error;
+    }
     await this.repository.updateLastLogin(user.id, now.toISOString());
     return { user: toPublicUser(user), token, expiresAt };
   }
@@ -211,7 +256,12 @@ export class AuthServiceError extends Error {
       | "ACCOUNT_SUSPENDED"
       | "INVALID_VERIFICATION"
       | "VERIFICATION_UNAVAILABLE"
-      | "RATE_LIMITED",
+      | "RATE_LIMITED"
+      | "ADMIN_ACTION_FORBIDDEN"
+      | "SELF_ADMIN_ACTION_FORBIDDEN"
+      | "USER_NOT_FOUND"
+      | "ACCOUNT_STATUS_UNCHANGED"
+      | "ACCOUNT_STATUS_TRANSITION_INVALID",
     options?: { cause?: unknown; retryAfterSeconds?: number }
   ) {
     super(code, options?.cause === undefined ? undefined : { cause: options.cause });
@@ -222,4 +272,18 @@ export class AuthServiceError extends Error {
 
 export function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("base64url");
+}
+
+function mapAdminRepositoryError(error: unknown) {
+  if (!(error instanceof AuthRepositoryError)) return error;
+  switch (error.code) {
+    case "ADMIN_ACTION_FORBIDDEN":
+    case "SELF_ADMIN_ACTION_FORBIDDEN":
+    case "USER_NOT_FOUND":
+    case "ACCOUNT_STATUS_UNCHANGED":
+    case "ACCOUNT_STATUS_TRANSITION_INVALID":
+      return new AuthServiceError(error.code, { cause: error });
+    default:
+      return error;
+  }
 }

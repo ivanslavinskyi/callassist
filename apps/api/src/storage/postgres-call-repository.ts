@@ -200,6 +200,7 @@ export class PostgresCallRepository implements CallRepository {
     );
 
     await this.#sql.begin(async (transaction) => {
+      if (userId) await this.#lockActiveUser(transaction, userId);
       await transaction`
         INSERT INTO call_briefs (
           id,
@@ -659,6 +660,7 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.begin(async (transaction) => {
       if (userId) {
         await this.#lockCreditAccount(transaction, userId);
+        await this.#lockActiveUser(transaction, userId);
       }
       const [call] = await transaction<
         { status: CallBrief["status"]; phoneE164: string }[]
@@ -1916,6 +1918,21 @@ export class PostgresCallRepository implements CallRepository {
     await transaction`
       SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))
     `;
+  }
+
+  async #lockActiveUser(
+    transaction: postgres.TransactionSql,
+    userId: string
+  ) {
+    const user = await transaction`
+      SELECT id
+      FROM users
+      WHERE id = ${userId}
+        AND status = 'active'
+        AND phone_verified_at IS NOT NULL
+      FOR SHARE
+    `;
+    if (user.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
   }
 
   async #lockRecipient(

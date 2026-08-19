@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountStatusActionSchema,
   creditUsageSchema,
   loginInputSchema,
   phoneVerificationInputSchema,
-  registrationInputSchema
+  registrationInputSchema,
+  sessionRevocationActionSchema
 } from "./account";
 
 const validRegistration = {
@@ -68,5 +70,18 @@ describe("registrationInputSchema", () => {
     });
     expect(usage.balance).toBe(2);
     expect(creditUsageSchema.safeParse({ ...usage, balance: -1 }).success).toBe(false);
+  });
+
+  it("allows only reversible account statuses and requires an audit reason", () => {
+    expect(accountStatusActionSchema.parse({
+      status: "suspended",
+      reason: "Repeated abuse report"
+    })).toEqual({ status: "suspended", reason: "Repeated abuse report" });
+    expect(accountStatusActionSchema.safeParse({
+      status: "deleted",
+      reason: "Not a reversible operation"
+    }).success).toBe(false);
+    expect(sessionRevocationActionSchema.safeParse({ reason: "  " }).success)
+      .toBe(false);
   });
 });

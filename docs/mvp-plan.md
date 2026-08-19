@@ -60,7 +60,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 ### P0 — users, authentication, and sessions
 
 - [x] Add `users`: `id`, unique normalized `email`, password credential, unique normalized `phone_e164`, `phone_verified_at`, required `first_name` and `last_name`, `role`, `status`, `ui_locale`, `created_at`, `last_login_at`. Build any display label from the two name fields; do not use a single ambiguous `display_name` as the source of identity.
-- [x] Support `active`, `suspended`, `deleted` in storage and session authentication; define role values `user`, `admin`, `superadmin`, `content_editor`, `support`. Route-level RBAC remains in the admin phase.
+- [x] Support `active`, `suspended`, `deleted` in storage and session authentication; define role values `user`, `admin`, `superadmin`, `content_editor`, `support`. Narrow account-status/session-revocation routes enforce server-side admin/superadmin RBAC; the complete admin permission matrix remains in the admin phase.
 - [x] Add revocable server-side `sessions` with hashed opaque token, user, expiry, revocation, creation and last-use data. Issue HttpOnly, SameSite=Lax cookies and add Secure in production.
 - [x] Implement backend registration, phone verification/resend, login, logout, and current-user endpoints with email, scrypt password, phone, and Twilio Verify SMS **phone verification/OTP**. Registration OTP is not 2FA.
 - [ ] Add password/account recovery after defining its anti-enumeration and step-up verification policy.
@@ -116,7 +116,7 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 - [ ] Enforce hourly/daily call and duration limits, concurrency, repeat-recipient limits, and thresholds for decline/no-consent/failure/policy blocks. **Partial:** hourly/daily, concurrency, repeat-recipient, and maximum-duration controls are implemented and tested; outcome-specific thresholds remain.
 - [x] Add global `recipient_suppressions` with normalized phone, time, source, reason, actor/audit data; check immediately before provider call creation.
 - [ ] Add public opt-out and staff suppression workflow. Spoken in-call opt-out is P2.
-- [ ] Implement audited account suspension and session blocking/revocation policy.
+- [x] Implement audited account suspension and session blocking/revocation policy. Suspension atomically revokes all sessions; unsuspension never restores them; concurrent session creation and PostgreSQL call creation/reservation are blocked; force logout is a separate audited action.
 - [x] Add a global kill switch that blocks new calls/reservations without ending active calls unless separately commanded. Changes require a reason and append immutable safety events; an operator CLI is available for PostgreSQL deployments.
 - [ ] Rate-limit registration, auth/recovery, compilation, call create/start, exports, playback, and costly endpoints; detect mass accounts without logging unnecessary PII.
 
@@ -184,9 +184,9 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — minimum safe operations
 
-- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit.
-- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access.
-- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta.
+- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** backend account-status and force-logout routes already enforce admin/superadmin RBAC, privileged-target rules, self-action denial, and origin checks.
+- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events are immutable and include actor, target, transition, reason, and time.
+- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** suspend/unsuspend, force logout, suppression storage, and the kill-switch operator command exist; lookup, credit grants, and consolidated admin UI remain.
 
 ### P1 — admin areas
 
@@ -270,7 +270,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Atomic/idempotent/concurrent-safe/reconciliable credit reserve/charge/refund.
 - [x] Per-user hourly/daily quotas and one-call concurrency.
 - [x] Recipient suppression/opt-out checked before provider call.
-- [ ] Audited admin suspension and session revocation/blocking.
+- [x] Audited admin suspension and session revocation/blocking.
 - [x] Global kill switch blocks new calls without implicitly ending active calls.
 - [ ] Localized landing, auth/onboarding, support, opt-out live.
 - [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live.

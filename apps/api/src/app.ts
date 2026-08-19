@@ -2,12 +2,14 @@ import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import {
+  accountStatusActionSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
   createCallBriefInputSchema,
   loginInputSchema,
   phoneVerificationInputSchema,
   registrationInputSchema,
+  sessionRevocationActionSchema,
   verificationResendInputSchema,
   type CallEvent
 } from "@callassist/contracts";
@@ -19,7 +21,11 @@ import Fastify, {
 import { AuthServiceError, type AuthService } from "./auth/auth-service";
 import { CallServiceError, type CallService } from "./call-service";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
-import { CallRepositoryError, decodeCallBriefCursor } from "./storage/call-repository";
+import {
+  CallRepositoryError,
+  decodeCallBriefCursor,
+  isUuid
+} from "./storage/call-repository";
 import {
   isTwilioCallStatus,
   isTwilioRecordingStatus,
@@ -94,6 +100,28 @@ export function buildApp({
       }
     }
     return { userId };
+  }
+
+  async function authorizeAdminMutation(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+      await reply.status(403).send({ error: "INVALID_ORIGIN" });
+      return null;
+    }
+    if (!authService) {
+      await reply.status(503).send({ error: "AUTHENTICATION_UNAVAILABLE" });
+      return null;
+    }
+    const user = await authService.authenticate(
+      sessionTokenFromHeaders(request.headers)
+    );
+    if (!user) {
+      await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      return null;
+    }
+    return user;
   }
 
   if (authService) {
@@ -204,6 +232,59 @@ export function buildApp({
         .header("Cache-Control", "private, no-store")
         .send(await service.getCreditUsage(access.userId));
     });
+
+    app.put<{ Params: { userId: string } }>(
+      "/api/admin/users/:userId/status",
+      async (request, reply) => {
+        const actor = await authorizeAdminMutation(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.userId)) {
+          return reply.status(404).send({ error: "USER_NOT_FOUND" });
+        }
+        const parsed = accountStatusActionSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_ACCOUNT_STATUS_ACTION" });
+        }
+        try {
+          const user = await authService.changeAccountStatus(
+            actor,
+            request.params.userId,
+            parsed.data.status,
+            parsed.data.reason
+          );
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send({ user });
+        } catch (error) {
+          return sendAuthError(reply, error);
+        }
+      }
+    );
+
+    app.post<{ Params: { userId: string } }>(
+      "/api/admin/users/:userId/sessions/revoke",
+      async (request, reply) => {
+        const actor = await authorizeAdminMutation(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.userId)) {
+          return reply.status(404).send({ error: "USER_NOT_FOUND" });
+        }
+        const parsed = sessionRevocationActionSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_SESSION_REVOCATION_ACTION" });
+        }
+        try {
+          await authService.revokeUserSessionsAsAdmin(
+            actor,
+            request.params.userId,
+            parsed.data.reason
+          );
+          return reply.status(204).send();
+        } catch (error) {
+          return sendAuthError(reply, error);
+        }
+      }
+    );
   }
 
   app.get("/health", async (_request, reply) => {
@@ -586,7 +667,14 @@ function sendAuthError(
     ? 503
     : error.code === "INVALID_CREDENTIALS" || error.code === "INVALID_VERIFICATION"
       ? 401
-      : 403;
+      : error.code === "USER_NOT_FOUND"
+        ? 404
+        : [
+            "ACCOUNT_STATUS_UNCHANGED",
+            "ACCOUNT_STATUS_TRANSITION_INVALID"
+          ].includes(error.code)
+          ? 409
+          : 403;
   return reply.status(status).send({ error: error.code });
 }
 
