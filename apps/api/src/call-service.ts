@@ -130,6 +130,14 @@ export class CallService {
     }
   }
 
+  grantSignupCredits(userId: string) {
+    return this.repository.grantSignupCredits(userId);
+  }
+
+  getCreditUsage(userId: string) {
+    return this.repository.getCreditUsage(userId);
+  }
+
   async recompile(id: string, input: CreateCallBriefInput) {
     const current = await this.#require(id);
     const revision = current.compilation
@@ -165,9 +173,9 @@ export class CallService {
     return snapshot;
   }
 
-  async approveAndStart(id: string) {
+  async approveAndStart(id: string, userId: string | null = null) {
     await this.approveCompilation(id);
-    return this.start(id);
+    return this.start(id, userId);
   }
 
   subscribe(id: string, subscriber: Subscriber) {
@@ -181,7 +189,7 @@ export class CallService {
     };
   }
 
-  async start(id: string) {
+  async start(id: string, userId: string | null = null) {
     const current = await this.#require(id);
     if (!isSwissDestinationPhone(current.brief.phoneNumber)) {
       throw new CallServiceError("SWISS_DESTINATION_REQUIRED");
@@ -197,7 +205,8 @@ export class CallService {
     if (current.brief.status !== "ready") return current;
 
     const reserved = await this.repository.startAttempt(id, {
-      provider: this.telephonyProvider.mode
+      provider: this.telephonyProvider.mode,
+      userId
     });
     this.#publish(id, {
       type: "call.updated",

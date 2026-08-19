@@ -2,6 +2,7 @@ import type {
   ApprovalDecision,
   CallBrief,
   CallSnapshot,
+  CreditUsage,
   CreateCallBriefInput,
   LoginInput,
   PhoneVerificationInput,
@@ -88,6 +89,10 @@ export async function getCurrentUser() {
   return apiRequest<{ user: User }>("/api/auth/me");
 }
 
+export async function getCreditUsage() {
+  return apiRequest<CreditUsage>("/api/usage");
+}
+
 export async function logout() {
   return apiRequest<void>("/api/auth/logout", { method: "POST" });
 }
@@ -170,9 +175,11 @@ export async function recompileCallBrief(
 }
 
 export async function startCall(id: string) {
-  return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/start`, {
+  const snapshot = await apiRequest<CallSnapshot>(`/api/call-briefs/${id}/start`, {
     method: "POST"
   });
+  notifyUsageChanged();
+  return snapshot;
 }
 
 export async function approveCallBrief(id: string) {
@@ -182,16 +189,26 @@ export async function approveCallBrief(id: string) {
 }
 
 export async function approveAndStartCall(id: string) {
-  return apiRequest<CallSnapshot>(
+  const snapshot = await apiRequest<CallSnapshot>(
     `/api/call-briefs/${id}/approve-and-start`,
     { method: "POST" }
   );
+  notifyUsageChanged();
+  return snapshot;
 }
 
 export async function stopCall(id: string) {
-  return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/stop`, {
+  const snapshot = await apiRequest<CallSnapshot>(`/api/call-briefs/${id}/stop`, {
     method: "POST"
   });
+  notifyUsageChanged();
+  return snapshot;
+}
+
+function notifyUsageChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("callassist:usage-changed"));
+  }
 }
 
 export function callRecordingUrl(id: string) {

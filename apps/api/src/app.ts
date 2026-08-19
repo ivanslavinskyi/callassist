@@ -193,6 +193,17 @@ export function buildApp({
         .header("Cache-Control", "private, no-store")
         .send({ user });
     });
+
+    app.get("/api/usage", async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply);
+      if (!access) return;
+      if (!access.userId) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(await service.getCreditUsage(access.userId));
+    });
   }
 
   app.get("/health", async (_request, reply) => {
@@ -382,7 +393,7 @@ export function buildApp({
       });
       if (!access) return;
       try {
-        return await service.approveAndStart(request.params.id);
+        return await service.approveAndStart(request.params.id, access.userId);
       } catch (error) {
         return sendRepositoryError(reply, error);
       }
@@ -398,7 +409,7 @@ export function buildApp({
       });
       if (!access) return;
       try {
-        return await service.start(request.params.id);
+        return await service.start(request.params.id, access.userId);
       } catch (error) {
         return sendRepositoryError(reply, error);
       }

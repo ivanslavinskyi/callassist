@@ -6,6 +6,8 @@ import {
   type ApprovalRequest,
   type CallBrief,
   type CallCompilation,
+  type CreditTransaction,
+  type CreditUsage,
   type CallRecording,
   type CallLocale,
   type CallSnapshot,
@@ -21,6 +23,7 @@ import { decryptJson, encryptJson } from "../security/encryption";
 import {
   CallRepositoryError,
   buildRuntimeBriefFields,
+  creditSettlementForStatus,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
@@ -114,6 +117,10 @@ type FinalTranscriptRow = {
   createdAt: DatabaseDate;
   updatedAt: DatabaseDate;
   completedAt: DatabaseDate | null;
+};
+
+type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
+  createdAt: DatabaseDate;
 };
 
 const terminalStatuses = new Set<CallBrief["status"]>([
@@ -262,6 +269,60 @@ export class PostgresCallRepository implements CallRepository {
         AND user_id IS NOT DISTINCT FROM ${userId}::uuid
     `;
     return Boolean(row);
+  }
+
+  async grantSignupCredits(userId: string) {
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockCreditAccount(transaction, userId);
+      const user = await transaction`
+        SELECT id FROM users WHERE id = ${userId} AND phone_verified_at IS NOT NULL
+      `;
+      if (user.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
+      await transaction`
+        INSERT INTO credit_transactions (
+          id, user_id, amount, type, reason, idempotency_key, created_at
+        ) VALUES (
+          ${randomUUID()}, ${userId}, 3, 'signup_grant',
+          'Phone verification signup grant', ${`signup:${userId}`}, ${new Date()}
+        )
+        ON CONFLICT (idempotency_key) DO NOTHING
+      `;
+    });
+    return this.getCreditUsage(userId);
+  }
+
+  async getCreditUsage(userId: string): Promise<CreditUsage> {
+    const [activeRows, transactionRows] = await Promise.all([
+      this.#sql<{ callBriefId: string }[]>`
+        SELECT call_brief_id AS "callBriefId"
+        FROM call_attempts
+        WHERE user_id = ${userId} AND ended_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      this.#sql<CreditTransactionRow[]>`
+        SELECT
+          id,
+          amount,
+          type,
+          call_attempt_id AS "callAttemptId",
+          promo_redemption_id AS "promoRedemptionId",
+          admin_id AS "adminId",
+          reason,
+          created_at AS "createdAt"
+        FROM credit_transactions
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC, id DESC
+      `
+    ]);
+    return {
+      balance: transactionRows.reduce((total, row) => total + row.amount, 0),
+      activeCallBriefId: activeRows[0]?.callBriefId ?? null,
+      transactions: transactionRows.map((row) => ({
+        ...row,
+        createdAt: toIso(row.createdAt)
+      }))
+    };
   }
 
   async recompile(
@@ -505,11 +566,45 @@ export class PostgresCallRepository implements CallRepository {
   async startAttempt(id: string, input: StartAttemptInput) {
     const now = new Date();
     const attemptId = randomUUID();
+    const userId = input.userId ?? null;
     await this.#sql.begin(async (transaction) => {
+      if (userId) {
+        await this.#lockCreditAccount(transaction, userId);
+        const [call] = await transaction<{ status: CallBrief["status"] }[]>`
+          SELECT status
+          FROM call_briefs
+          WHERE id = ${id} AND user_id = ${userId}
+          FOR UPDATE
+        `;
+        if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+        if (call.status !== "ready") {
+          throw new CallRepositoryError("CALL_NOT_READY");
+        }
+        const [active] = await transaction<{ exists: boolean }[]>`
+          SELECT EXISTS(
+            SELECT 1
+            FROM call_attempts
+            WHERE user_id = ${userId} AND ended_at IS NULL
+          ) AS exists
+        `;
+        if (active?.exists) {
+          throw new CallRepositoryError("CONCURRENT_CALL_LIMIT");
+        }
+        const [credits] = await transaction<{ balance: number }[]>`
+          SELECT COALESCE(sum(amount), 0)::int AS balance
+          FROM credit_transactions
+          WHERE user_id = ${userId}
+        `;
+        if ((credits?.balance ?? 0) < 1) {
+          throw new CallRepositoryError("INSUFFICIENT_CREDITS");
+        }
+      }
       const updated = await transaction`
         UPDATE call_briefs
         SET status = 'dialing', updated_at = ${now}
-        WHERE id = ${id} AND status = 'ready'
+        WHERE id = ${id}
+          AND status = 'ready'
+          AND (${userId}::uuid IS NULL OR user_id = ${userId})
         RETURNING id
       `;
       if (updated.count === 0) {
@@ -524,6 +619,7 @@ export class PostgresCallRepository implements CallRepository {
         INSERT INTO call_attempts (
           id,
           call_brief_id,
+          user_id,
           provider,
           provider_call_id,
           status,
@@ -533,6 +629,7 @@ export class PostgresCallRepository implements CallRepository {
         ) VALUES (
           ${attemptId},
           ${id},
+          ${userId},
           ${input.provider},
           ${null},
           'dialing',
@@ -541,6 +638,18 @@ export class PostgresCallRepository implements CallRepository {
           ${now}
         )
       `;
+      if (userId) {
+        await transaction`
+          INSERT INTO credit_transactions (
+            id, user_id, amount, type, call_attempt_id, reason,
+            idempotency_key, created_at
+          ) VALUES (
+            ${randomUUID()}, ${userId}, -1, 'call_reservation', ${attemptId},
+            'Outbound call credit reservation',
+            ${`call:${attemptId}:reservation`}, ${now}
+          )
+        `;
+      }
       await this.#audit(transaction, id, "call.attempt_started", {
         provider: input.provider
       });
@@ -560,18 +669,27 @@ export class PostgresCallRepository implements CallRepository {
     providerCallId: string,
     providerStatus: string
   ) {
-    const [row] = await this.#sql<{ callId: string }[]>`
-      UPDATE call_attempts
-      SET
-        provider_call_id = ${providerCallId},
-        provider_status = CASE
-          WHEN provider_call_id IS NULL THEN ${providerStatus}
-          ELSE provider_status
-        END
-      WHERE id = ${attemptId}
-        AND (provider_call_id IS NULL OR provider_call_id = ${providerCallId})
-      RETURNING call_brief_id AS "callId"
-    `;
+    const row = await this.#sql.begin(async (transaction) => {
+      const [updated] = await transaction<{ callId: string }[]>`
+        UPDATE call_attempts
+        SET
+          provider_call_id = ${providerCallId},
+          provider_status = CASE
+            WHEN provider_call_id IS NULL THEN ${providerStatus}
+            ELSE provider_status
+          END
+        WHERE id = ${attemptId}
+          AND (provider_call_id IS NULL OR provider_call_id = ${providerCallId})
+        RETURNING call_brief_id AS "callId"
+      `;
+      if (!updated) return null;
+      await this.#settleAttempt(
+        transaction,
+        attemptId,
+        creditSettlementForStatus("dialing", providerStatus)
+      );
+      return updated;
+    });
     if (!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
     return this.#require(row.callId);
   }
@@ -631,6 +749,11 @@ export class PostgresCallRepository implements CallRepository {
           END
         WHERE id = ${row.attemptId}
       `;
+      await this.#settleAttempt(
+        transaction,
+        row.attemptId,
+        creditSettlementForStatus(callStatus, providerStatus)
+      );
 
       if (applyCallStatus) {
         await transaction`
@@ -674,6 +797,11 @@ export class PostgresCallRepository implements CallRepository {
       `;
       if (updated.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
       await this.#syncAttempt(transaction, id, status, now);
+      await this.#settleLatestAttempt(
+        transaction,
+        id,
+        creditSettlementForStatus(status)
+      );
       await this.#audit(transaction, id, "call.status_changed", { status });
     });
     return this.#require(id);
@@ -833,6 +961,7 @@ export class PostgresCallRepository implements CallRepository {
         WHERE id = ${id}
       `;
       await this.#syncAttempt(transaction, id, "stopped", now);
+      await this.#settleLatestAttempt(transaction, id, "call_refund");
       await transaction`
         UPDATE call_recordings
         SET status = 'processing', updated_at = ${now}
@@ -1325,6 +1454,7 @@ export class PostgresCallRepository implements CallRepository {
             LIMIT 1
           )
         `;
+        await this.#settleLatestAttempt(transaction, id, "call_refund");
         await this.#audit(transaction, id, "call.recovered_after_restart", {
           status: "failed"
         });
@@ -1563,6 +1693,76 @@ export class PostgresCallRepository implements CallRepository {
         ORDER BY created_at DESC
         LIMIT 1
       )
+    `;
+  }
+
+  async #settleLatestAttempt(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    type: "call_charge" | "call_refund" | null
+  ) {
+    if (!type) return;
+    const [attempt] = await transaction<{ id: string }[]>`
+      SELECT id
+      FROM call_attempts
+      WHERE call_brief_id = ${callBriefId}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    if (attempt) await this.#settleAttempt(transaction, attempt.id, type);
+  }
+
+  async #settleAttempt(
+    transaction: postgres.TransactionSql,
+    attemptId: string,
+    type: "call_charge" | "call_refund" | null
+  ) {
+    if (!type) return;
+    const [attempt] = await transaction<{ userId: string | null }[]>`
+      SELECT user_id AS "userId"
+      FROM call_attempts
+      WHERE id = ${attemptId}
+    `;
+    if (!attempt?.userId) return;
+    await this.#lockCreditAccount(transaction, attempt.userId);
+    await transaction`
+      INSERT INTO credit_transactions (
+        id, user_id, amount, type, call_attempt_id, reason,
+        idempotency_key, created_at
+      )
+      SELECT
+        ${randomUUID()},
+        ${attempt.userId},
+        ${type === "call_refund" ? 1 : 0},
+        ${type},
+        ${attemptId},
+        ${type === "call_refund"
+          ? "Call ended before provider dialing"
+          : "Provider dialing confirmed"},
+        ${`call:${attemptId}:${type === "call_refund" ? "refund" : "charge"}`},
+        ${new Date()}
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM credit_transactions
+        WHERE call_attempt_id = ${attemptId}
+          AND type IN ('call_charge', 'call_refund')
+      )
+        AND EXISTS (
+          SELECT 1
+          FROM credit_transactions
+          WHERE call_attempt_id = ${attemptId}
+            AND type = 'call_reservation'
+        )
+      ON CONFLICT DO NOTHING
+    `;
+  }
+
+  async #lockCreditAccount(
+    transaction: postgres.TransactionSql,
+    userId: string
+  ) {
+    await transaction`
+      SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))
     `;
   }
 

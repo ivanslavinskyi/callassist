@@ -3,6 +3,7 @@ import {
   ApiError,
   approveAndStartCall,
   createCallBrief,
+  getCreditUsage,
   getCallPreparationErrorMessage,
   login,
   logout,
@@ -84,6 +85,21 @@ describe("API client headers", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(request).toMatchObject({ method: "POST", credentials: "include" });
     expect(new Headers(request.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("loads authenticated credit usage", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        balance: 3,
+        activeCallBriefId: null,
+        transactions: []
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getCreditUsage()).resolves.toMatchObject({ balance: 3 });
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/usage");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
   });
 
   it("declares JSON when a request has a body", async () => {

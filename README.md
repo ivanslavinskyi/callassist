@@ -156,6 +156,13 @@ reads, mutations, SSE, recordings, approvals, and transcript retry. Signed provi
 webhooks remain independent of browser sessions. Pre-authentication database rows stay
 hidden until their archive/backfill policy is defined.
 
+Phone verification grants exactly three signup credits through the append-only
+credit ledger. `GET /api/usage` returns the authenticated user's reconciled balance,
+active call, and ledger history. Starting a call reserves one credit atomically and
+enforces one active outbound call per user. A provider-confirmed dialing attempt is
+charged even when it ends busy or unanswered; an internal/provider failure before
+dialing refunds the reservation once.
+
 Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick Tunnel URLs change between sessions, so update `PUBLIC_BASE_URL` whenever a new tunnel is created. Quick Tunnel is for development only and has no uptime guarantee.
 
 ## Quality checks

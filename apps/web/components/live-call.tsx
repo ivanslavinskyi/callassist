@@ -28,7 +28,8 @@ import {
   recompileCallBrief,
   retryFinalTranscript,
   startCall,
-  stopCall
+  stopCall,
+  ApiError
 } from "@/lib/api";
 import {
   buildFinalTranscriptCopyText,
@@ -181,8 +182,14 @@ export function LiveCall({ callId }: { callId: string }) {
     try {
       setSnapshot(await action());
       onSuccess?.();
-    } catch {
-      setActionError(messages.live.actionError);
+    } catch (error) {
+      setActionError(
+        error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS"
+          ? messages.live.insufficientCredits
+          : error instanceof ApiError && error.code === "CONCURRENT_CALL_LIMIT"
+            ? messages.live.concurrentCall
+            : messages.live.actionError
+      );
     } finally {
       setBusy(false);
     }

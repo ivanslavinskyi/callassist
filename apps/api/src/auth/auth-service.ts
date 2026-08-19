@@ -30,12 +30,17 @@ export type AuthenticatedSession = {
   expiresAt: string;
 };
 
+export type SignupCreditGranter = {
+  grantSignupCredits(userId: string): Promise<unknown>;
+};
+
 export class AuthService {
   readonly repository: AuthRepository;
   readonly verificationProvider: VerificationProvider;
   readonly #rateLimiter: ApplicationRateLimiter;
   readonly #now: () => Date;
   readonly #sessionTtlMs: number;
+  readonly #signupCreditGranter: SignupCreditGranter;
 
   constructor(options: {
     repository: AuthRepository;
@@ -43,12 +48,14 @@ export class AuthService {
     rateLimiter?: ApplicationRateLimiter;
     now?: () => Date;
     sessionTtlMs?: number;
+    signupCreditGranter: SignupCreditGranter;
   }) {
     this.repository = options.repository;
     this.verificationProvider = options.verificationProvider;
     this.#rateLimiter = options.rateLimiter ?? new ApplicationRateLimiter();
     this.#now = options.now ?? (() => new Date());
     this.#sessionTtlMs = options.sessionTtlMs ?? 30 * 24 * 60 * minute;
+    this.#signupCreditGranter = options.signupCreditGranter;
   }
 
   async register(input: RegistrationInput, context: AuthRequestContext) {
@@ -113,6 +120,7 @@ export class AuthService {
       user.id,
       this.#now().toISOString()
     );
+    await this.#signupCreditGranter.grantSignupCredits(verified.id);
     return this.#createSession(verified, context);
   }
 
@@ -133,6 +141,7 @@ export class AuthService {
     if (!user.phoneVerifiedAt) {
       throw new AuthServiceError("PHONE_VERIFICATION_REQUIRED");
     }
+    await this.#signupCreditGranter.grantSignupCredits(user.id);
     return this.#createSession(user, context);
   }
 

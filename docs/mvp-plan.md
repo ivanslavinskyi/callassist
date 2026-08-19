@@ -102,12 +102,12 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 
 ### P0 — append-only credits and concurrency
 
-- [ ] Add `credit_transactions`: `id`, `user_id`, signed `amount`, `type`, optional `call_attempt_id`, `promo_redemption_id`, `admin_id`, `reason`, unique `idempotency_key`, `created_at`.
-- [ ] Support `signup_grant`, `promo_grant`, `admin_grant`, `call_reservation`, `call_charge`, `call_refund`, `adjustment`.
-- [ ] Grant exactly `+3 signup_grant` once after verification.
-- [ ] Atomically reserve one credit before dialing with transaction/locking or equivalent serializable invariant and idempotency. Enforce one active outbound call per user.
-- [ ] Define tested reservation-to-charge/refund transitions. Refund pre-dial internal/provider failure; no-answer/decline after real dialing must not allow infinite free retries.
-- [ ] Derive balance from the ledger (a cache must be rebuildable); never silently edit `calls_remaining`.
+- [x] Add `credit_transactions`: `id`, `user_id`, signed `amount`, `type`, optional `call_attempt_id`, `promo_redemption_id`, `admin_id`, `reason`, unique `idempotency_key`, `created_at`.
+- [x] Support `signup_grant`, `promo_grant`, `admin_grant`, `call_reservation`, `call_charge`, `call_refund`, `adjustment`.
+- [x] Grant exactly `+3 signup_grant` once after verification.
+- [x] Atomically reserve one credit before dialing with transaction/locking or equivalent serializable invariant and idempotency. Enforce one active outbound call per user.
+- [x] Define tested reservation-to-charge/refund transitions. Refund pre-dial internal/provider failure; no-answer/decline after real dialing must not allow infinite free retries.
+- [x] Derive balance from the ledger (a cache must be rebuildable); never silently edit `calls_remaining`.
 
 Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempotent, and every balance reconciles to entries.
 
@@ -266,8 +266,8 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Personal `"Ivan Slavinskyi"` default removed; registration and represented identity use explicit first/last name fields.
 - [x] Swiss-only restriction enforced server-side and in policy.
 - [ ] Twilio Voice Geographic Permissions restricted to approved CH destinations.
-- [ ] Exactly three signup credits granted once through ledger.
-- [ ] Atomic/idempotent/concurrent-safe/reconciliable credit reserve/charge/refund.
+- [x] Exactly three signup credits granted once through ledger.
+- [x] Atomic/idempotent/concurrent-safe/reconciliable credit reserve/charge/refund.
 - [ ] Per-user hourly/daily quotas and one-call concurrency.
 - [ ] Recipient suppression/opt-out checked before provider call.
 - [ ] Audited admin suspension and session revocation/blocking.

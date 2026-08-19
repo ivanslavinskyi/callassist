@@ -14,12 +14,15 @@ afterEach(async () => {
 
 function createAuthApp() {
   const repository = new InMemoryAuthRepository();
+  const callRepository = new InMemoryCallRepository();
+  const callService = new CallService(callRepository);
   const authService = new AuthService({
     repository,
-    verificationProvider: new MockVerificationProvider("123456")
+    verificationProvider: new MockVerificationProvider("123456"),
+    signupCreditGranter: callService
   });
   const app = buildApp({
-    service: new CallService(new InMemoryCallRepository()),
+    service: callService,
     authService,
     logger: false,
     secureCookies: false
@@ -117,6 +120,33 @@ describe("auth API", () => {
     expect(current.statusCode).toBe(200);
     expect(current.json().user.email).toBe(registration.email);
 
+    const usage = await app.inject({
+      method: "GET",
+      url: "/api/usage",
+      headers: { cookie }
+    });
+    expect(usage.statusCode).toBe(200);
+    expect(usage.json()).toMatchObject({
+      balance: 3,
+      activeCallBriefId: null,
+      transactions: [{ amount: 3, type: "signup_grant" }]
+    });
+
+    const verifiedAgain = await app.inject({
+      method: "POST",
+      url: "/api/auth/verify-phone",
+      payload: { email: registration.email, code: "123456" }
+    });
+    expect(verifiedAgain.statusCode).toBe(200);
+    const usageAfterRetry = await app.inject({
+      method: "GET",
+      url: "/api/usage",
+      headers: { cookie: verifiedAgain.headers["set-cookie"] }
+    });
+    expect(usageAfterRetry.json()).toMatchObject({ balance: 3 });
+    expect(usageAfterRetry.json<{ transactions: unknown[] }>().transactions)
+      .toHaveLength(1);
+
     const loggedOut = await app.inject({
       method: "POST",
       url: "/api/auth/logout",
@@ -154,6 +184,8 @@ describe("auth API", () => {
 
     const anonymousList = await app.inject({ method: "GET", url: "/api/call-briefs" });
     expect(anonymousList.statusCode).toBe(401);
+    const anonymousUsage = await app.inject({ method: "GET", url: "/api/usage" });
+    expect(anonymousUsage.statusCode).toBe(401);
 
     const invalidOrigin = await app.inject({
       method: "POST",
@@ -217,6 +249,28 @@ describe("auth API", () => {
       headers: { cookie: userACookie }
     });
     expect(ownerRead.statusCode).toBe(200);
+
+    const approved = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/approve`,
+      headers: { cookie: userACookie }
+    });
+    expect(approved.statusCode).toBe(200);
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie: userACookie }
+    });
+    expect(started.statusCode).toBe(200);
+    const ownerUsage = await app.inject({
+      method: "GET",
+      url: "/api/usage",
+      headers: { cookie: userACookie }
+    });
+    expect(ownerUsage.json()).toMatchObject({
+      balance: 2,
+      activeCallBriefId: callId
+    });
   });
 
   it("uses a generic response for duplicate registration and generic login errors", async () => {

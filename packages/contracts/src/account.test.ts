@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  creditUsageSchema,
   loginInputSchema,
   phoneVerificationInputSchema,
   registrationInputSchema
@@ -46,5 +47,26 @@ describe("registrationInputSchema", () => {
         code: "123456"
       }).email
     ).toBe("nina.keller@example.com");
+  });
+
+  it("validates reconciled credit usage without exposing idempotency keys", () => {
+    const usage = creditUsageSchema.parse({
+      balance: 2,
+      activeCallBriefId: null,
+      transactions: [
+        {
+          id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+          amount: 3,
+          type: "signup_grant",
+          callAttemptId: null,
+          promoRedemptionId: null,
+          adminId: null,
+          reason: "Phone verification signup grant",
+          createdAt: "2026-08-19T10:00:00.000Z"
+        }
+      ]
+    });
+    expect(usage.balance).toBe(2);
+    expect(creditUsageSchema.safeParse({ ...usage, balance: -1 }).success).toBe(false);
   });
 });

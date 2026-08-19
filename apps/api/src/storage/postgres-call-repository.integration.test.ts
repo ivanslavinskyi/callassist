@@ -84,6 +84,110 @@ describeWithDatabase("PostgresCallRepository", () => {
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
 
+  it("keeps credit reservations and settlements atomic in PostgreSQL", async () => {
+    const creditOwner = randomUUID();
+    const suffix = creditOwner.replaceAll("-", "");
+    await inspection`
+      INSERT INTO users (
+        id, email, password_hash, phone_e164, phone_verified_at,
+        first_name, last_name, role, status, ui_locale, created_at
+      ) VALUES (
+        ${creditOwner}, ${`credit-${suffix}@example.com`}, 'test-only',
+        ${`+419${suffix.slice(0, 8)}`}, now(), 'Ada', 'Ledger',
+        'user', 'active', 'en', now()
+      )
+    `;
+    await repository.grantSignupCredits(creditOwner);
+    await repository.grantSignupCredits(creditOwner);
+    const compiler = new DeterministicBriefCompiler();
+    const createReady = async (recipientName: string) => {
+      const input: CreateCallBriefInput = {
+        recipientName,
+        phoneNumber: "+41710000008",
+        objective: "Verify atomic PostgreSQL credit accounting",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Ada",
+        representedPersonLastName: "Ledger",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      };
+      const brief = await repository.create(
+        input,
+        await compiler.compile(normalizeCreateCallBriefInput(input)),
+        creditOwner
+      );
+      await repository.approveCompilation(brief.id);
+      return brief;
+    };
+    const first = await createReady("Credit concurrency A");
+    const second = await createReady("Credit concurrency B");
+
+    const starts = await Promise.allSettled([
+      repository.startAttempt(first.id, { provider: "twilio", userId: creditOwner }),
+      repository.startAttempt(second.id, { provider: "twilio", userId: creditOwner })
+    ]);
+    const fulfilled = starts.find(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof repository.startAttempt>>> =>
+        result.status === "fulfilled"
+    );
+    expect(fulfilled).toBeDefined();
+    expect(starts.find(({ status }) => status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ code: "CONCURRENT_CALL_LIMIT" })
+    });
+    expect((await repository.getCreditUsage(creditOwner)).balance).toBe(2);
+
+    const providerCallId = `CA-credit-${suffix}`;
+    await repository.attachProviderCall(
+      fulfilled!.value.attempt.id,
+      providerCallId,
+      "queued"
+    );
+    await repository.applyProviderStatus(
+      providerCallId,
+      "ringing",
+      "dialing",
+      fulfilled!.value.attempt.callBriefId
+    );
+    await repository.applyProviderStatus(
+      providerCallId,
+      "no-answer",
+      "failed",
+      fulfilled!.value.attempt.callBriefId
+    );
+    await repository.applyProviderStatus(
+      providerCallId,
+      "no-answer",
+      "failed",
+      fulfilled!.value.attempt.callBriefId
+    );
+    const chargedUsage = await repository.getCreditUsage(creditOwner);
+    expect(chargedUsage.balance).toBe(2);
+    expect(chargedUsage.transactions.filter(({ type }) => type === "call_charge"))
+      .toHaveLength(1);
+    expect(chargedUsage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(0);
+
+    const preDial = await createReady("Credit pre-dial refund");
+    await repository.startAttempt(preDial.id, {
+      provider: "twilio",
+      userId: creditOwner
+    });
+    await repository.updateStatus(preDial.id, "failed");
+    await repository.updateStatus(preDial.id, "failed");
+    const refundedUsage = await repository.getCreditUsage(creditOwner);
+    expect(refundedUsage.balance).toBe(2);
+    expect(refundedUsage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(1);
+
+    await expect(inspection`
+      UPDATE credit_transactions
+      SET reason = 'tampered'
+      WHERE user_id = ${creditOwner}
+    `).rejects.toThrow("immutable");
+  });
+
   it("persists the complete approval lifecycle and decrypts private facts", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "Persistence test office",

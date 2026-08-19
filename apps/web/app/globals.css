@@ -156,6 +156,21 @@ main:focus { outline: none; }
 
 .topbar-actions { align-items: center; display: flex; gap: 14px; }
 
+.credit-balance {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 750;
+  gap: 7px;
+  padding: 8px 11px;
+}
+
+.credit-balance span { color: var(--green); font-size: 8px; }
+
 .locale-picker select {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1133,6 +1148,8 @@ button:disabled { cursor: wait; opacity: .55; }
 @media (max-width: 680px) {
   .topbar { height: 66px; padding: 0 20px; }
   .topbar-meta { display: none; }
+  .credit-balance { font-size: 0; gap: 5px; padding: 7px 9px; }
+  .credit-balance::after { content: attr(data-balance); font-size: 11px; }
   .auth-page { min-height: calc(100vh - 66px); padding: 30px 16px 50px; }
   .auth-card { border-radius: 19px; padding: 25px 22px; }
   .auth-name-grid { grid-template-columns: 1fr; }

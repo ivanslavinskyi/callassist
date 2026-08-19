@@ -40,6 +40,7 @@ Twilio dual-channel recording ──► authenticated API download
 - `apps/api`: the Node.js/TypeScript Fastify API, policy boundary, Twilio gateway, and server-side Realtime connection.
 - PostgreSQL: call briefs, attempts, draft transcripts, recordings, final transcripts, approvals, and audit events.
 - Identity and tenancy foundation: PostgreSQL users and revocable server-side sessions, scrypt password hashes, explicit first/last names, localized registration/verification/login screens, Twilio Verify phone confirmation, and opaque HttpOnly session cookies. New call briefs store their authenticated owner. Every browser call list/read/write/action/SSE/media route authenticates the session and checks that owner without accepting a browser-supplied user ID; provider webhooks keep their independent signature/provider-ID boundary. Pre-authentication rows remain hidden pending an explicit archive/backfill decision.
+- Usage boundary: an immutable `credit_transactions` ledger grants three credits once after phone verification. A per-user PostgreSQL advisory transaction lock, an active-attempt unique index, and an idempotent attempt settlement constraint serialize starts, prevent negative balances, and allow only one outbound call per user. Reservation is the `-1` balance movement; a zero-amount `call_charge` records that provider dialing was confirmed, while a `+1 call_refund` reverses only a pre-dial failure. The in-memory repository implements the same transitions for local use and contract tests.
 - Twilio: outbound PSTN calls, signed webhooks, DTMF consent, a bidirectional Media Stream, and temporary consent-gated recordings.
 - OpenAI Responses: multilingual brief compilation into a strict JSON schema.
 - OpenAI Moderation: checks both raw input and generated runtime text.
@@ -51,7 +52,7 @@ Twilio dual-channel recording ──► authenticated API download
 
 The API depends on a `CallRepository` interface. The in-memory and PostgreSQL repositories implement the same contract, keeping telephony and Realtime independent from storage. SQL migrations are versioned with the API.
 
-Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. Audit events do not include source text, transcript content, or private fact values and are protected against mutation and deletion at the PostgreSQL layer.
+Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. Audit events do not include source text, transcript content, or private fact values. Audit events and credit transactions are protected against mutation and deletion at the PostgreSQL layer.
 
 On API startup, unfinished calls are marked as failed, pending approvals expire, and recovery is recorded in the audit trail. A cross-process event bus and durable retries remain planned alongside Redis/BullMQ.
 

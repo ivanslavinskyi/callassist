@@ -18,10 +18,6 @@ import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 import { OpenAIPostCallTranscriber } from "./transcription/openai-post-call-transcriber";
 
 const repository = createCallRepositoryFromEnv();
-const authService = new AuthService({
-  repository: createAuthRepositoryFromEnv(),
-  verificationProvider: createVerificationProviderFromEnv()
-});
 const telephonyProvider = createTelephonyProviderFromEnv();
 const realtimeApiKey =
   telephonyProvider instanceof TwilioTelephonyProvider
@@ -40,6 +36,11 @@ const briefCompiler = createBriefCompiler();
 const service = new CallService(repository, telephonyProvider, (error) => {
   app.log.error(error, "Background call operation failed");
 }, postCallTranscriber, briefCompiler);
+const authService = new AuthService({
+  repository: createAuthRepositoryFromEnv(),
+  verificationProvider: createVerificationProviderFromEnv(),
+  signupCreditGranter: service
+});
 const app = buildApp({ service, authService });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider

@@ -69,3 +69,35 @@ export const sessionSchema = z.object({
   lastSeenAt: z.iso.datetime()
 });
 export type Session = z.infer<typeof sessionSchema>;
+
+export const creditTransactionTypeSchema = z.enum([
+  "signup_grant",
+  "promo_grant",
+  "admin_grant",
+  "call_reservation",
+  "call_charge",
+  "call_refund",
+  "adjustment"
+]);
+export type CreditTransactionType = z.infer<
+  typeof creditTransactionTypeSchema
+>;
+
+export const creditTransactionSchema = z.object({
+  id: z.uuid(),
+  amount: z.number().int(),
+  type: creditTransactionTypeSchema,
+  callAttemptId: z.uuid().nullable(),
+  promoRedemptionId: z.uuid().nullable(),
+  adminId: z.uuid().nullable(),
+  reason: z.string().nullable(),
+  createdAt: z.iso.datetime()
+});
+export type CreditTransaction = z.infer<typeof creditTransactionSchema>;
+
+export const creditUsageSchema = z.object({
+  balance: z.number().int().nonnegative(),
+  activeCallBriefId: z.uuid().nullable(),
+  transactions: z.array(creditTransactionSchema)
+});
+export type CreditUsage = z.infer<typeof creditUsageSchema>;

@@ -86,6 +86,49 @@ describe("CallService", () => {
     expect(startCall).not.toHaveBeenCalled();
   });
 
+  it("refunds a reserved credit when the provider fails before dialing", async () => {
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const repository = new InMemoryCallRepository();
+    await repository.grantSignupCredits(userId);
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        throw new Error("provider unavailable");
+      },
+      async stopCall() {},
+      async startRecording() {
+        throw new Error("not used");
+      },
+      async getRecordingMedia() {
+        throw new Error("not used");
+      },
+      async deleteRecording() {}
+    };
+    const service = new CallService(repository, provider, () => undefined);
+    services.push(service);
+    const brief = await service.create({
+      recipientName: "Example office",
+      phoneNumber: "+41523686688",
+      objective: "Verify a provider failure refunds the reserved call credit",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, userId);
+    await service.approveCompilation(brief.id);
+
+    await expect(service.start(brief.id, userId)).rejects.toMatchObject({
+      code: "TELEPHONY_START_FAILED"
+    });
+    const usage = await service.getCreditUsage(userId);
+    expect(usage.balance).toBe(3);
+    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(1);
+  });
+
   it("recompiles the same brief revision and can approve and call in one action", async () => {
     const service = createService();
     const input = {

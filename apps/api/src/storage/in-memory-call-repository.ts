@@ -5,6 +5,8 @@ import {
   type ApprovalRequest,
   type CallBrief,
   type CallCompilation,
+  type CreditTransaction,
+  type CreditUsage,
   type CallRecording,
   type CallLocale,
   type CallSnapshot,
@@ -17,6 +19,7 @@ import {
 import {
   CallRepositoryError,
   buildRuntimeBriefFields,
+  creditSettlementForStatus,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type ApprovalRequestDraft,
@@ -48,6 +51,9 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #owners = new Map<string, string | null>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
+  readonly #creditTransactions: Array<
+    CreditTransaction & { userId: string; idempotencyKey: string }
+  > = [];
 
   async list(input: ListCallBriefsInput) {
     const filtered = [...this.#calls.values()]
@@ -107,6 +113,53 @@ export class InMemoryCallRepository implements CallRepository {
 
   async isOwnedBy(id: string, userId: string | null) {
     return this.#calls.has(id) && this.#owners.get(id) === userId;
+  }
+
+  async grantSignupCredits(userId: string) {
+    const idempotencyKey = `signup:${userId}`;
+    if (!this.#creditTransactions.some((entry) => entry.idempotencyKey === idempotencyKey)) {
+      this.#creditTransactions.push({
+        id: randomUUID(),
+        userId,
+        amount: 3,
+        type: "signup_grant",
+        callAttemptId: null,
+        promoRedemptionId: null,
+        adminId: null,
+        reason: "Phone verification signup grant",
+        idempotencyKey,
+        createdAt: new Date().toISOString()
+      });
+    }
+    return this.#buildCreditUsage(userId);
+  }
+
+  async getCreditUsage(userId: string): Promise<CreditUsage> {
+    return this.#buildCreditUsage(userId);
+  }
+
+  #buildCreditUsage(userId: string): CreditUsage {
+    const transactions = this.#creditTransactions
+      .filter((entry) => entry.userId === userId)
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+      )
+      .map(({ userId: _userId, idempotencyKey: _key, ...entry }) => copy(entry));
+    let activeCallBriefId: string | null = null;
+    for (const [callBriefId, attempts] of this.#attempts) {
+      if (
+        this.#owners.get(callBriefId) === userId &&
+        attempts.some((attempt) => attempt.endedAt === null)
+      ) {
+        activeCallBriefId = callBriefId;
+        break;
+      }
+    }
+    return {
+      balance: transactions.reduce((total, entry) => total + entry.amount, 0),
+      activeCallBriefId,
+      transactions
+    };
   }
 
   async recompile(
@@ -170,6 +223,19 @@ export class InMemoryCallRepository implements CallRepository {
     if (snapshot.brief.status !== "ready") {
       throw new CallRepositoryError("CALL_NOT_READY");
     }
+    const userId = input.userId ?? null;
+    if (userId !== null) {
+      if (this.#owners.get(id) !== userId) {
+        throw new CallRepositoryError("CALL_NOT_FOUND");
+      }
+      const usage = this.#buildCreditUsage(userId);
+      if (usage.activeCallBriefId) {
+        throw new CallRepositoryError("CONCURRENT_CALL_LIMIT");
+      }
+      if (usage.balance < 1) {
+        throw new CallRepositoryError("INSUFFICIENT_CREDITS");
+      }
+    }
     const now = new Date().toISOString();
     const attempt: CallAttemptRecord = {
       id: randomUUID(),
@@ -185,6 +251,20 @@ export class InMemoryCallRepository implements CallRepository {
     const attempts = this.#attempts.get(id) ?? [];
     attempts.push(attempt);
     this.#attempts.set(id, attempts);
+    if (userId !== null) {
+      this.#creditTransactions.push({
+        id: randomUUID(),
+        userId,
+        amount: -1,
+        type: "call_reservation",
+        callAttemptId: attempt.id,
+        promoRedemptionId: null,
+        adminId: null,
+        reason: "Outbound call credit reservation",
+        idempotencyKey: `call:${attempt.id}:reservation`,
+        createdAt: now
+      });
+    }
     snapshot.brief.status = "dialing";
     snapshot.brief.updatedAt = now;
     return { attempt: copy(attempt), snapshot: copy(snapshot) };
@@ -208,6 +288,11 @@ export class InMemoryCallRepository implements CallRepository {
         attempt.providerCallId = providerCallId;
         attempt.providerStatus = providerStatus;
       }
+      this.#settleAttempt(
+        callId,
+        attempt,
+        creditSettlementForStatus(attempt.status, providerStatus)
+      );
       return copy(this.#require(callId));
     }
     throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
@@ -232,6 +317,11 @@ export class InMemoryCallRepository implements CallRepository {
       attempt.providerStatus = providerStatus;
       if (terminalStatuses.has(callStatus)) attempt.endedAt ??= now;
       if (callStatus === "failed") attempt.failureReason ??= providerStatus;
+      this.#settleAttempt(
+        callId,
+        attempt,
+        creditSettlementForStatus(callStatus, providerStatus)
+      );
       if (shouldApplyProviderCallStatus(snapshot.brief.status, callStatus)) {
         attempt.status = callStatus;
         snapshot.brief.status = callStatus;
@@ -258,6 +348,11 @@ export class InMemoryCallRepository implements CallRepository {
     if (attempt) {
       attempt.status = status;
       if (terminalStatuses.has(status)) attempt.endedAt = snapshot.brief.updatedAt;
+      this.#settleAttempt(
+        id,
+        attempt,
+        creditSettlementForStatus(status)
+      );
     }
     return copy(snapshot);
   }
@@ -325,6 +420,7 @@ export class InMemoryCallRepository implements CallRepository {
     if (attempt) {
       attempt.status = "stopped";
       attempt.endedAt = snapshot.brief.updatedAt;
+      this.#settleAttempt(id, attempt, "call_refund");
     }
     if (
       snapshot.recording?.status === "starting" ||
@@ -575,6 +671,7 @@ export class InMemoryCallRepository implements CallRepository {
         attempt.status = "failed";
         attempt.endedAt = snapshot.brief.updatedAt;
         attempt.failureReason = "server_restarted";
+        this.#settleAttempt(snapshot.brief.id, attempt, "call_refund");
       }
       recovered += 1;
     }
@@ -596,6 +693,42 @@ export class InMemoryCallRepository implements CallRepository {
   async ping() {}
 
   async close() {}
+
+  #settleAttempt(
+    callBriefId: string,
+    attempt: CallAttemptRecord,
+    type: "call_charge" | "call_refund" | null
+  ) {
+    if (!type) return;
+    const userId = this.#owners.get(callBriefId);
+    if (!userId) return;
+    const hasReservation = this.#creditTransactions.some(
+      (entry) =>
+        entry.callAttemptId === attempt.id && entry.type === "call_reservation"
+    );
+    if (!hasReservation) return;
+    const alreadySettled = this.#creditTransactions.some(
+      (entry) =>
+        entry.callAttemptId === attempt.id &&
+        (entry.type === "call_charge" || entry.type === "call_refund")
+    );
+    if (alreadySettled) return;
+    this.#creditTransactions.push({
+      id: randomUUID(),
+      userId,
+      amount: type === "call_refund" ? 1 : 0,
+      type,
+      callAttemptId: attempt.id,
+      promoRedemptionId: null,
+      adminId: null,
+      reason:
+        type === "call_refund"
+          ? "Call ended before provider dialing"
+          : "Provider dialing confirmed",
+      idempotencyKey: `call:${attempt.id}:${type === "call_refund" ? "refund" : "charge"}`,
+      createdAt: new Date().toISOString()
+    });
+  }
 
   #require(id: string) {
     const snapshot = this.#calls.get(id);

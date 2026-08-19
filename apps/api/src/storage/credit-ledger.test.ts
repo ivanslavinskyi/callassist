@@ -1,0 +1,150 @@
+import { randomUUID } from "node:crypto";
+import {
+  normalizeCreateCallBriefInput,
+  type CreateCallBriefInput
+} from "@callassist/contracts";
+import { describe, expect, it } from "vitest";
+import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { CallRepositoryError } from "./call-repository";
+import { InMemoryCallRepository } from "./in-memory-call-repository";
+
+const baseInput: CreateCallBriefInput = {
+  recipientName: "Credit test office",
+  phoneNumber: "+41710000004",
+  objective: "Verify credit accounting before making the outbound call",
+  assistantProfileId: "sebastian",
+  representedPersonFirstName: "Nina",
+  representedPersonLastName: "Keller",
+  assistanceReason: "speech_impairment",
+  locale: "en-GB",
+  allowLanguageSwitch: false,
+  allowedFacts: []
+};
+
+async function createReadyCall(
+  repository: InMemoryCallRepository,
+  userId: string,
+  suffix: string
+) {
+  const input = {
+    ...baseInput,
+    recipientName: `${baseInput.recipientName} ${suffix}`
+  };
+  const compilation = await new DeterministicBriefCompiler().compile(
+    normalizeCreateCallBriefInput(input)
+  );
+  const brief = await repository.create(input, compilation, userId);
+  await repository.approveCompilation(brief.id);
+  return brief;
+}
+
+describe("credit ledger", () => {
+  it("grants exactly three signup credits once and serializes active calls", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    await repository.grantSignupCredits(userId);
+    await repository.grantSignupCredits(userId);
+    const first = await createReadyCall(repository, userId, "A");
+    const second = await createReadyCall(repository, userId, "B");
+
+    const results = await Promise.allSettled([
+      repository.startAttempt(first.id, { provider: "twilio", userId }),
+      repository.startAttempt(second.id, { provider: "twilio", userId })
+    ]);
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    const rejection = results.find(({ status }) => status === "rejected");
+    expect(rejection).toMatchObject({
+      reason: expect.objectContaining({ code: "CONCURRENT_CALL_LIMIT" })
+    });
+    const usage = await repository.getCreditUsage(userId);
+    expect(usage).toMatchObject({ balance: 2 });
+    expect(usage.activeCallBriefId).not.toBeNull();
+    expect(usage.transactions.map(({ type }) => type)).toEqual([
+      "call_reservation",
+      "signup_grant"
+    ]);
+  });
+
+  it("charges a dialed no-answer attempt once even when webhooks repeat", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    await repository.grantSignupCredits(userId);
+    const brief = await createReadyCall(repository, userId, "charged");
+    const started = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId
+    });
+    await repository.attachProviderCall(started.attempt.id, "CA-charge", "queued");
+    await repository.applyProviderStatus(
+      "CA-charge",
+      "ringing",
+      "dialing",
+      brief.id
+    );
+    await repository.applyProviderStatus(
+      "CA-charge",
+      "no-answer",
+      "failed",
+      brief.id
+    );
+    await repository.applyProviderStatus(
+      "CA-charge",
+      "no-answer",
+      "failed",
+      brief.id
+    );
+
+    const usage = await repository.getCreditUsage(userId);
+    expect(usage.balance).toBe(2);
+    expect(usage.activeCallBriefId).toBeNull();
+    expect(usage.transactions.filter(({ type }) => type === "call_charge"))
+      .toHaveLength(1);
+    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(0);
+  });
+
+  it("refunds a pre-dial failure exactly once and never allows a negative balance", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    await repository.grantSignupCredits(userId);
+    const failedBrief = await createReadyCall(repository, userId, "refunded");
+    await repository.startAttempt(failedBrief.id, { provider: "twilio", userId });
+    await repository.updateStatus(failedBrief.id, "failed");
+    await repository.updateStatus(failedBrief.id, "failed");
+
+    let usage = await repository.getCreditUsage(userId);
+    expect(usage.balance).toBe(3);
+    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(1);
+
+    for (const suffix of ["one", "two", "three"]) {
+      const brief = await createReadyCall(repository, userId, suffix);
+      const attempt = await repository.startAttempt(brief.id, {
+        provider: "twilio",
+        userId
+      });
+      await repository.attachProviderCall(
+        attempt.attempt.id,
+        `CA-${suffix}`,
+        "ringing"
+      );
+      await repository.applyProviderStatus(
+        `CA-${suffix}`,
+        "completed",
+        "completed",
+        brief.id
+      );
+    }
+    usage = await repository.getCreditUsage(userId);
+    expect(usage.balance).toBe(0);
+
+    const denied = await createReadyCall(repository, userId, "denied");
+    await expect(
+      repository.startAttempt(denied.id, { provider: "twilio", userId })
+    ).rejects.toEqual(expect.objectContaining<Partial<CallRepositoryError>>({
+      code: "INSUFFICIENT_CREDITS"
+    }));
+    expect((await repository.getCreditUsage(userId)).balance).toBe(0);
+  });
+});

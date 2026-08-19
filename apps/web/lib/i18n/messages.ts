@@ -89,6 +89,7 @@ export type Messages = {
     switchToDarkTheme: string;
     skipToContent: string;
     defaultTitle: string;
+    creditsRemaining: (count: number) => string;
   };
   dialog: {
     cancel: string;
@@ -146,6 +147,8 @@ export type Messages = {
     reconnecting: string;
     jumpToLatest: string;
     actionError: string;
+    insufficientCredits: string;
+    concurrentCall: string;
     loadError: string;
     copied: string;
     copyFailed: string;
@@ -267,7 +270,9 @@ const en: Messages = {
     switchToLightTheme: "Switch to light theme",
     switchToDarkTheme: "Switch to dark theme",
     skipToContent: "Skip to main content",
-    defaultTitle: "CallAssist — controlled AI phone calls"
+    defaultTitle: "CallAssist — controlled AI phone calls",
+    creditsRemaining: (count: number) =>
+      `${count} call ${count === 1 ? "credit" : "credits"}`
   },
   dialog: {
     cancel: "Cancel"
@@ -332,6 +337,8 @@ const en: Messages = {
     reconnecting: "Live updates interrupted — reconnecting…",
     jumpToLatest: "Jump to latest",
     actionError: "The action could not be completed. Try again.",
+    insufficientCredits: "You have no call credits remaining.",
+    concurrentCall: "Finish your active call before starting another one.",
     loadError: "The call brief was not found or the API is unavailable.",
     copied: "Copied",
     copyFailed: "Copy failed — retry",
@@ -407,7 +414,8 @@ const de: Messages = {
     switchToLightTheme: "Zum hellen Design wechseln",
     switchToDarkTheme: "Zum dunklen Design wechseln",
     skipToContent: "Zum Hauptinhalt springen",
-    defaultTitle: "CallAssist — kontrollierte KI-Telefonanrufe"
+    defaultTitle: "CallAssist — kontrollierte KI-Telefonanrufe",
+    creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {
     cancel: "Abbrechen"
@@ -529,6 +537,8 @@ const de: Messages = {
     reconnecting: "Live-Verbindung unterbrochen — Verbindung wird wiederhergestellt…",
     jumpToLatest: "Zum neuesten Beitrag",
     actionError: "Die Aktion konnte nicht abgeschlossen werden. Versuchen Sie es erneut.",
+    insufficientCredits: "Sie haben kein Anrufguthaben mehr.",
+    concurrentCall: "Beenden Sie den aktiven Anruf, bevor Sie einen weiteren starten.",
     loadError: "Der Anrufentwurf wurde nicht gefunden oder die API ist nicht erreichbar.",
     copied: "Kopiert",
     copyFailed: "Kopieren fehlgeschlagen — erneut versuchen",

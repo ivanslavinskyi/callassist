@@ -3,6 +3,8 @@ import type {
   ApprovalRequest,
   CallBrief,
   CallCompilation,
+  CreditTransaction,
+  CreditUsage,
   CallRecording,
   CallLocale,
   CallSnapshot,
@@ -37,7 +39,7 @@ export type CallAttemptRecord = {
 export type StartAttemptInput = Pick<
   CallAttemptRecord,
   "provider"
->;
+> & { userId?: string | null };
 
 export type StartAttemptResult = {
   attempt: CallAttemptRecord;
@@ -122,6 +124,8 @@ export interface CallRepository {
     userId?: string | null
   ): Promise<CallBrief>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
+  grantSignupCredits(userId: string): Promise<CreditUsage>;
+  getCreditUsage(userId: string): Promise<CreditUsage>;
   recompile(
     id: string,
     input: CreateCallBriefInput,
@@ -207,6 +211,8 @@ export class CallRepositoryError extends Error {
       | "CALL_BRIEF_NOT_REVIEWABLE"
       | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
+      | "INSUFFICIENT_CREDITS"
+      | "CONCURRENT_CALL_LIMIT"
       | "RECORDING_NOT_FOUND"
       | "RECORDING_NOT_AVAILABLE",
     message = code
@@ -214,6 +220,28 @@ export class CallRepositoryError extends Error {
     super(message);
     this.name = "CallRepositoryError";
   }
+}
+
+export const dialingProviderStatuses = new Set([
+  "ringing",
+  "in-progress",
+  "completed",
+  "busy",
+  "no-answer"
+]);
+
+export function creditSettlementForStatus(
+  callStatus: CallBrief["status"],
+  providerStatus?: string | null
+): Extract<CreditTransaction["type"], "call_charge" | "call_refund"> | null {
+  if (
+    callStatus === "in_progress" ||
+    callStatus === "completed" ||
+    (providerStatus && dialingProviderStatuses.has(providerStatus))
+  ) {
+    return "call_charge";
+  }
+  return terminalStatuses.has(callStatus) ? "call_refund" : null;
 }
 
 const terminalStatuses = new Set<CallBrief["status"]>([

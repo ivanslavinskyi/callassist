@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { getCreditUsage } from "@/lib/api";
 import { useUiLocale } from "./ui-locale-provider";
 
 export function Brand() {
@@ -28,9 +29,33 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { locale, messages } = useUiLocale();
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const usage = await getCreditUsage();
+        if (active) setCreditBalance(usage.balance);
+      } catch {
+        if (active) setCreditBalance(null);
+      }
+    };
+    const onUsageChanged = () => void refresh();
+    void refresh();
+    window.addEventListener("callassist:usage-changed", onUsageChanged);
+    window.addEventListener("focus", onUsageChanged);
+    const interval = window.setInterval(refresh, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("callassist:usage-changed", onUsageChanged);
+      window.removeEventListener("focus", onUsageChanged);
+    };
   }, []);
 
   function toggleTheme() {
@@ -52,6 +77,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
+          {creditBalance !== null ? (
+            <span
+              aria-label={messages.app.creditsRemaining(creditBalance)}
+              className="credit-balance"
+              data-balance={creditBalance}
+            >
+              <span aria-hidden="true">●</span>
+              {messages.app.creditsRemaining(creditBalance)}
+            </span>
+          ) : null}
           <div className="topbar-meta">
             <span className="secure-dot" aria-hidden="true" />
             {messages.app.consoleLabel}
