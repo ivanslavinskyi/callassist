@@ -22,7 +22,11 @@ function createApp(briefCompiler?: BriefCompiler) {
     undefined,
     briefCompiler
   );
-  const app = buildApp({ service, logger: false });
+  const app = buildApp({
+    service,
+    allowAnonymousCallsForTesting: true,
+    logger: false
+  });
   apps.push(app);
   return app;
 }
@@ -39,6 +43,8 @@ describe("call API", () => {
           phoneNumber: `+4171000000${index}`,
           objective: `Ask ${recipientName} for opening hours`,
           assistantProfileId: "sebastian",
+          representedPersonFirstName: "Nina",
+          representedPersonLastName: "Keller",
           assistanceReason: "speech_impairment",
           locale: "en-GB",
           allowLanguageSwitch: false,
@@ -90,6 +96,8 @@ describe("call API", () => {
         phoneNumber: "+41225550123",
         objective: "Prendre un rendez-vous de controle la semaine prochaine",
         assistantProfileId: "anna",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
         assistanceReason: "language_barrier",
         locale: "fr-CH",
         allowLanguageSwitch: true,
@@ -137,6 +145,8 @@ describe("call API", () => {
       phoneNumber: "+41710000001",
       objective: "Ask Elena which book she likes most",
       assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
       assistanceReason: "speech_impairment",
       locale: "de-CH",
       allowLanguageSwitch: false,
@@ -243,6 +253,8 @@ describe("call API", () => {
           phoneNumber: "+41710000001",
           objective: "Ask Elena which book she likes most",
           assistantProfileId: "sebastian",
+          representedPersonFirstName: "Nina",
+          representedPersonLastName: "Keller",
           assistanceReason: "speech_impairment",
           locale: "de-CH",
           allowLanguageSwitch: false,
@@ -287,13 +299,19 @@ describe("call API", () => {
       failingProvider,
       () => undefined
     );
-    const app = buildApp({ service, logger: false });
+    const app = buildApp({
+      service,
+      allowAnonymousCallsForTesting: true,
+      logger: false
+    });
     apps.push(app);
     const brief = await service.create({
       recipientName: "Example office",
       phoneNumber: "+442079460000",
       objective: "Test a provider failure",
       assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
       assistanceReason: "speech_impairment",
       locale: "en-GB",
       allowLanguageSwitch: false,

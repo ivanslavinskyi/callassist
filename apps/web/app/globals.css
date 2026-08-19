@@ -69,6 +69,49 @@ main:focus { outline: none; }
 
 .app-shell { min-height: 100vh; }
 
+.auth-page {
+  align-items: flex-start;
+  display: flex;
+  justify-content: center;
+  min-height: calc(100vh - 76px);
+  padding: 64px 24px 80px;
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid rgba(20, 35, 31, 0.08);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  max-width: 680px;
+  padding: 38px;
+  width: 100%;
+}
+
+.auth-card h1 {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(30px, 5vw, 42px);
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  margin: 0;
+}
+
+.auth-intro {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 16px 0 28px;
+  max-width: 580px;
+}
+
+.auth-form { display: grid; gap: 19px; }
+.auth-name-grid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+.auth-submit { margin-top: 4px; }
+.auth-text-button { justify-self: center; }
+.auth-success { color: var(--green); font-size: 13px; margin: 0; }
+.auth-inline-link { color: var(--green); font-size: 13px; font-weight: 750; width: max-content; }
+.auth-alternative { color: var(--muted); font-size: 13px; margin: 24px 0 0; text-align: center; }
+.auth-alternative a { color: var(--green); font-weight: 750; }
+
 .topbar {
   align-items: center;
   border-bottom: 1px solid rgba(20, 35, 31, 0.08);
@@ -1050,7 +1093,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .topbar { border-bottom-color: rgba(232, 241, 237, .09); }
   .call-form, .activity-panel, .transcript-card, .final-transcript-card,
   .approval-card, .guard-card, .brief-card, .compilation-review,
-  .confirm-dialog-content, .loading-card { border-color: #2c3c36; }
+  .confirm-dialog-content, .loading-card, .auth-card { border-color: #2c3c36; }
   .field input, .field textarea, .field select, .history-filters input,
   .history-filters select, .locale-picker select, .review-opening,
   .review-questions, .call-options, .required-progress, .disclosure-preview blockquote,
@@ -1090,6 +1133,9 @@ button:disabled { cursor: wait; opacity: .55; }
 @media (max-width: 680px) {
   .topbar { height: 66px; padding: 0 20px; }
   .topbar-meta { display: none; }
+  .auth-page { min-height: calc(100vh - 66px); padding: 30px 16px 50px; }
+  .auth-card { border-radius: 19px; padding: 25px 22px; }
+  .auth-name-grid { grid-template-columns: 1fr; }
   .dashboard-page, .live-page { padding: 38px 18px 60px; }
   .hero-block { margin-bottom: 30px; }
   .hero-block h1 { font-size: 36px; }

@@ -2,7 +2,12 @@ import type {
   ApprovalDecision,
   CallBrief,
   CallSnapshot,
-  CreateCallBriefInput
+  CreateCallBriefInput,
+  LoginInput,
+  PhoneVerificationInput,
+  RegistrationInput,
+  User,
+  VerificationResendInput
 } from "@callassist/contracts";
 
 export const API_URL =
@@ -32,6 +37,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
+    credentials: "include",
     headers
   });
 
@@ -46,7 +52,44 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export async function registerAccount(input: RegistrationInput) {
+  return apiRequest<{ status: "verification_required" }>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function resendPhoneVerification(input: VerificationResendInput) {
+  return apiRequest<{ status: "verification_required" }>(
+    "/api/auth/verification/resend",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function verifyPhone(input: PhoneVerificationInput) {
+  return apiRequest<{ user: User }>("/api/auth/verify-phone", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function login(input: LoginInput) {
+  return apiRequest<{ user: User }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function getCurrentUser() {
+  return apiRequest<{ user: User }>("/api/auth/me");
+}
+
+export async function logout() {
+  return apiRequest<void>("/api/auth/logout", { method: "POST" });
 }
 
 export function getCallPreparationErrorMessage(error: unknown) {

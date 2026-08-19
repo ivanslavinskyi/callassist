@@ -15,6 +15,7 @@ import {
 import { getMockCopy } from "./mock-copy";
 import {
   CallRepositoryError,
+  isUuid,
   type CallRepository
 } from "./storage/call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
@@ -107,17 +108,23 @@ export class CallService {
     return this.repository.list(input);
   }
 
-  async create(input: CreateCallBriefInput) {
+  async create(input: CreateCallBriefInput, userId: string | null = null) {
     try {
       const compilation = await this.#briefCompiler.compile(
         normalizeCreateCallBriefInput(input)
       );
-      return this.repository.create(input, compilation);
+      return this.repository.create(input, compilation, userId);
     } catch (error) {
       if (error instanceof BriefCompilerError) {
         throw mapBriefCompilerError(error);
       }
       throw error;
+    }
+  }
+
+  async assertOwned(id: string, userId: string | null) {
+    if (!isUuid(id) || !(await this.repository.isOwnedBy(id, userId))) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
     }
   }
 
@@ -235,7 +242,7 @@ export class CallService {
         await this.#addTranscript(
           id,
           "assistant",
-          getMockCopy(call.brief.locale).greeting
+          getMockCopy(call.brief.locale, call.brief.representedPerson).greeting
         );
       });
       this.#schedule(id, 3_800, async () => {
@@ -243,7 +250,7 @@ export class CallService {
         await this.#addTranscript(
           id,
           "recipient",
-          getMockCopy(call.brief.locale).recipientReply
+          getMockCopy(call.brief.locale, call.brief.representedPerson).recipientReply
         );
       });
       this.#schedule(id, 5_200, () => this.#requestApproval(id));
@@ -444,7 +451,10 @@ export class CallService {
     this.#publish(id, { type: "approval.resolved", approval });
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
 
-    const copy = getMockCopy(snapshot.brief.locale);
+    const copy = getMockCopy(
+      snapshot.brief.locale,
+      snapshot.brief.representedPerson
+    );
     this.#schedule(id, 650, () =>
       this.#addTranscript(
         id,
@@ -549,7 +559,10 @@ export class CallService {
 
   async #requestApproval(id: string) {
     const snapshot = await this.#require(id);
-    const copy = getMockCopy(snapshot.brief.locale);
+    const copy = getMockCopy(
+      snapshot.brief.locale,
+      snapshot.brief.representedPerson
+    );
     const result = await this.repository.requestApproval(id, {
       category: "contact_email",
       title: copy.approvalTitle,

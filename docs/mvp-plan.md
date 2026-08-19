@@ -1,293 +1,311 @@
-# Public MVP Roadmap
+# CallAssist Public Beta Roadmap
 
-## Current status
+## Current state
 
-CallAssist already has a working supervised-call foundation:
+CallAssist is a working supervised telephony/AI MVP. It already compiles a multilingual brief into a versioned plan, lets the operator review and approve it, places an outbound PSTN call through Twilio, discloses the AI identity, obtains DTMF consent, bridges the conversation to OpenAI Realtime, streams a live transcript, records both channels after consent, and produces a separate whole-recording final transcript. PostgreSQL persistence, encrypted private fields, audit events, recording retention (0/7/30 days), manual recording deletion, and the current EN/DE Dashboard, call-detail, registration, phone-verification, and login experience are also present.
 
-- a Next.js operator console and shared API contracts;
-- PostgreSQL persistence, encrypted private fields, and audit events;
-- outbound Twilio calls with signed webhooks and a bidirectional Media Stream;
-- a same-voice AI disclosure and DTMF consent flow;
-- recording disabled before consent and dual-channel recording after consent;
-- an OpenAI Realtime conversation in the selected call language;
-- a live draft transcript and a separate recording-based final transcript;
-- immediate, 7-day, and 30-day audio retention controls.
+The objective is **not to rebuild the call workflow**. It is to turn the supervised MVP into a safe, observable, supportable, and deliberately limited public beta. Until the **Public Beta Foundation** milestone is complete, do not actively expand the AI agent. The dominant risks are identity, authorization, abuse and cost control, operational visibility, public/legal content, privacy, and production operations.
 
-The product is still a supervised technical MVP. The multilingual brief compiler now
-uses explicit product defaults, separates non-blocking assumptions from fixed-code
-blocking issues, supports editing and re-compiling the same brief, and provides a
-compact approve-and-call review. Before continuing with new roadmap capabilities, the
-next delivery milestone is the accepted
-[UI/UX stabilization plan](./ui-ux-stabilization-plan.md). It establishes the
-internationalization boundary and closes the audited operator-console usability,
-safety, accessibility, and responsive-layout gaps. Multilingual and adversarial brief
-validation remains the next product-validation milestone after that gate.
+## Status and priority legend
 
-## Product principles
+- **DONE** — verified in the current repository; maintain and regression-test it.
+- **PARTIAL** — useful implementation exists, but beta acceptance criteria are not met.
+- **P0** — mandatory for limited public beta.
+- **P1** — required before broadening beta; waivable only for a controlled invite alpha with a named owner, compensating control, and expiry.
+- **P2** — post-beta or future/monetization scope.
 
-1. CallAssist is an accessibility and language-barrier product, not only a tool
-   for users with speech impairments.
-2. The interface language, the language in which the user writes the brief, and
-   the call language are independent settings. A permitted fallback call language
-   is a fourth, explicit setting.
-3. Free-form user input is untrusted source material. It must not be passed
-   directly to Realtime or post-call transcription in the public product.
-4. The system must preserve the user's intent while applying documented safe defaults
-   for ordinary preferences. Clarification is required only when a fixed blocking issue
-   can materially change the task or its permitted scope.
-5. A model may classify and propose, but it may not authorize itself. Safety and
-   disclosure boundaries are enforced by deterministic server-side policy.
-6. The user must be able to review what the assistant will do, what it may disclose,
-   and what it must not do before approving a call.
-7. Live transcription is an operational draft. The final transcript is derived
-   independently from consent-gated audio and may explicitly mark uncertain turns.
-8. Public release starts with narrowly defined, low-risk call types and expands
-   only after evaluation.
+Unchecked items are work to do. Completed implementation is recorded once rather than duplicated in later phases.
 
-## Target brief lifecycle
+## Product and release boundaries
 
-```text
-RawCallBrief (any language)
-  -> field validation and input moderation
-  -> multilingual Brief Compiler
-  -> product-specific risk classification
-  -> deterministic Policy Gate
-       -> assumptions (non-blocking defaults)
-       -> needs_clarification (fixed blocking codes only)
-       -> blocked
-       -> ready_for_review
-  -> compact user preview with optional technical details
-  -> edit/recompile the same versioned brief when needed
-  -> explicit approve-and-call action
-  -> immutable CompiledCallBrief
-       -> mandatory reviewed opening: recipient, purpose, scope, readiness
-       -> Realtime conversation
-       -> bounded ASR hints
-       -> audit trail and structured call outcome
-```
+1. CallAssist primarily serves people with speech impairments and people facing a local language barrier.
+2. Website/UI locale, SEO locale, brief source language, call language, and permitted fallback call language are independent.
+3. Free-form input is untrusted. Only an approved, versioned `CompiledCallBrief` may enter the runtime; deterministic policy, not a model, authorizes calls.
+4. Preserve `AI disclosure -> DTMF consent -> recording/model processing`.
+5. Beta allows Swiss destinations, low-risk tasks, one concurrent call per user, and three signup credits. There are no payments.
+6. Expand access only after invite-alpha telemetry, failure, abuse, cost, privacy, and support reviews meet written thresholds.
 
-The raw brief remains available for user review and audit, but only the approved,
-versioned `CompiledCallBrief` is allowed to enter the call runtime.
+## Verified implementation baseline — DONE
 
-## Pre-roadmap gate: operator UI/UX stabilization
+- [x] Create, compile, edit/recompile, review, approve-and-call, list, search, filter, paginate, start, stop, and monitor call briefs.
+- [x] Versioned `RawCallBrief`, `CompiledCallBrief`, `PolicyDecision`, compiler snapshots, fixed clarification codes, moderation, and deterministic policy.
+- [x] Supported low-risk task classification, controlled assistance reasons, six server-owned assistant profiles, represented-person disclosure, and approved-fact boundary.
+- [x] Twilio outbound PSTN, signed HTTP/WebSocket callbacks, call-scoped stream token, provider status sync, and isolated Twilio ingress listener.
+- [x] Same-voice disclosure, DTMF consent before recipient processing, dual-channel recording after consent, and consent/opening/readiness/objective sequencing.
+- [x] OpenAI Realtime, SSE live events/transcript, operator stop, and sensitive disclosure approvals.
+- [x] Whole-recording post-call transcription, conservative optional role/time alignment, playback proxy, export, and transcription retry.
+- [x] PostgreSQL persistence for briefs, attempts, transcripts, approvals, recordings, final transcripts, compilations, and immutable audit events.
+- [x] AES-256-GCM protection for private context/facts and encrypted compilation/final transcript data.
+- [x] Audio retention choices of 0, 7, or 30 days and manual provider recording deletion.
+- [x] Current responsive Dashboard and LiveCall/call-detail, history search/filter/pagination, confirmations, loading/error states, and EN/DE typed UI catalogues.
+- [x] Locale negotiation/cookie, localized roots and call details, and routing/i18n tests.
+- [x] Represented-person input uses explicit first/last name fields; the personal default has been removed from contracts and the call form.
+- [x] Local lint, typecheck, unit/integration tests, builds, and migration commands.
 
-- [ ] Complete the P0 semantic-safety fixes: terminal-state actions, audio-deletion
-      confirmation, and explicit confirmation before approve-and-call starts a call.
-- [ ] Establish locale-aware routing and typed English/German message catalogues before
-      adding new screens; keep UI, source, call, and fallback locales independent.
-- [ ] Complete the P1 operator workflow and feedback fixes for create, review, history,
-      compilation, navigation, and live transcript behavior.
-- [ ] Complete the P2 scale and resilience fixes: paginated searchable history,
-      loading states, inline validation, and separated connection/action errors.
-- [ ] Complete or explicitly re-approve every P3 accessibility, responsive, and visual
-      finding before closing the milestone.
-- [ ] Pass the stabilization plan's automated, keyboard, screen-reader, zoom/reflow,
-      responsive, reduced-motion, bilingual, and production-build acceptance checks.
+## Known partial implementation and beta gaps
 
-The accepted scope, issue mapping, implementation slices, and definition of done are
-recorded in the [UI/UX stabilization plan](./ui-ux-stabilization-plan.md).
+- **PARTIAL — product UI:** Dashboard and call detail are the application foundation, but occupy localized roots rather than an authenticated `/app` area.
+- **PARTIAL — localization:** operational UI is EN/DE; localized public content, publishing, metadata, and translation freshness are absent.
+- **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
+- **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
+- **PARTIAL — data lifecycle:** recording deletion and transcript export exist; account/session/full-data lifecycle does not.
+- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, and process-local application rate limits exist. Password recovery, distributed rate limits, and authenticated page routing remain.
+- **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen; PostgreSQL integration execution still requires the local database container.
+- **P0 policy gap:** destination validation is generic E.164, not Switzerland-only.
 
-## 0. Product scope, policy, and evaluation specification
+# Public Beta Foundation
 
-- [ ] Define the first low-risk call categories, starting with information requests,
-      receipt confirmations, appointment coordination, document requirements, and
-      neutral message delivery.
-- [ ] Define prohibited or human-review-only categories, including legal, financial,
-      medical, contractual, coercive, deceptive, and impersonation scenarios.
-- [x] Define the AI identity disclosure, recording boundary, basic fact allow-list,
-      and stop criteria.
-- [ ] Define product-specific abuse categories: harassment, disguised insults,
-      threats, manipulation, identity misrepresentation, repeated unwanted calls,
-      prompt injection, and attempts to obtain or expose unrelated private data.
-- [ ] Define a jurisdiction and provider compliance checklist for AI disclosure,
-      recording consent, retention, outbound calling, and recipient opt-out.
-- [ ] Build a versioned evaluation corpus covering every supported call language,
-      different source languages, accents, Swiss German, code-switching, noise,
-      interruptions, wrong numbers, voicemail, unclear answers, and adversarial briefs.
-- [ ] Establish release metrics for semantic preservation, task success, hallucinated
-      facts, correct refusal, false-positive blocking, end-of-turn latency, live ASR,
-      final ASR, and unresolved-answer handling.
+## 1. Identity & Tenancy
 
-## 1. Existing supervised-call foundation
+### P0 — users, authentication, and sessions
 
-- [x] Create, list, start, stop, and monitor `CallBrief` records.
-- [x] Select the call language, optional fallback locale, language-switch permission,
-      and one of six server-owned assistant profiles.
-- [x] Require one of two deterministic assistance reasons (`speech_impairment` or
-      `language_barrier`) and generate the localized disclosure server-side.
-- [x] Stream UI events over SSE and publish role-labelled transcript segments.
-- [x] Place and stop Twilio calls and synchronize provider statuses.
-- [x] Verify Twilio HTTP and Media Stream requests.
-- [x] Require DTMF consent before recipient media reaches OpenAI or recording starts.
-- [x] Start a dual-channel recording only after consent and process recording callbacks.
-- [x] Keep one selected Realtime voice across disclosure and conversation.
-- [x] Separate the live draft, final transcript, and temporary consent-gated audio.
-- [x] Encrypt private context, approved facts, transcript turns, and audit-sensitive data.
-- [ ] Validate disconnect recovery, callback reordering, and provider failure behaviour
-      across repeated real calls.
+- [x] Add `users`: `id`, unique normalized `email`, password credential, unique normalized `phone_e164`, `phone_verified_at`, required `first_name` and `last_name`, `role`, `status`, `ui_locale`, `created_at`, `last_login_at`. Build any display label from the two name fields; do not use a single ambiguous `display_name` as the source of identity.
+- [x] Support `active`, `suspended`, `deleted` in storage and session authentication; define role values `user`, `admin`, `superadmin`, `content_editor`, `support`. Route-level RBAC remains in the admin phase.
+- [x] Add revocable server-side `sessions` with hashed opaque token, user, expiry, revocation, creation and last-use data. Issue HttpOnly, SameSite=Lax cookies and add Secure in production.
+- [x] Implement backend registration, phone verification/resend, login, logout, and current-user endpoints with email, scrypt password, phone, and Twilio Verify SMS **phone verification/OTP**. Registration OTP is not 2FA.
+- [ ] Add password/account recovery after defining its anti-enumeration and step-up verification policy.
+- [x] Rate-limit verification sends/attempts, login, and account creation in the application process by IP plus phone/email. Twilio limits are defense-in-depth, not the sole control.
+- [ ] Move rate-limit state to a shared durable store before running multiple API instances.
+- [ ] Define re-verification for number changes and step-up verification for recovery, suspicious activity, and sensitive operations.
 
-## 2. Brief Compiler and policy boundary — current hardening milestone
+Acceptance: unverified, suspended, deleted, expired-session, and revoked-session users cannot create/start calls; auth, session, OTP, status, and abuse paths have automated tests.
 
-- [x] Introduce separate `RawCallBrief`, `CompiledCallBrief`, and `PolicyDecision`
-      contracts with schema and policy versioning.
-- [x] Validate field types, length, phone number, selected locales, identities, and
-      allowed facts before invoking a model.
-- [x] Add general input/output moderation plus a CallAssist-specific risk classifier.
-- [x] Compile free-form input into a strict structured output containing:
-      task type, localized objective, ordered questions, conditional follow-ups,
-      success criteria, unresolved criteria, stop conditions, approved facts,
-      prohibited commitments, tone/register, and named entities.
-- [x] Return `needs_clarification`, `blocked`, or `ready_for_review`; apply safe
-      defaults for ordinary preferences but never guess a material fact or silently
-      rewrite an unsafe objective into an executable one.
-- [x] Enforce a deterministic server policy after compilation. The compiler cannot
-      override prohibited scenarios, disclosure rules, identity rules, or call limits.
-- [x] Restrict assistant identity to a safe six-profile allow-list and derive its
-      display name and voice gender server-side.
-- [x] Block misleading affiliation or impersonation in represented-person and brief
-      content through compilation and policy checks.
-- [x] Separate non-blocking assumptions from fixed-code blocking issues. Tone,
-      addressing, spoken-answer capture, refusal handling, and safe voicemail behaviour
-      have documented product defaults and cannot become arbitrary model blockers.
-      Formal addressing is the default; automatic relationship-based and informal
-      addressing require an explicit operator choice.
-- [x] Show a compact pre-call review with the call-language plan and hide policy,
-      guardrail, schema, and snapshot metadata under optional technical details.
-- [x] Allow the operator to edit and recompile the same brief or answer a fixed-code
-      clarification inline. Each replacement increments the encrypted compilation
-      revision and writes an audit event without exposing source text.
-- [x] Combine explicit approval and call start into one operator action while retaining
-      the server-side approval timestamp and immutable approved snapshot.
-- [x] Remove all demonstration recipient, phone, objective, and approved-fact values
-      from the live form; examples are placeholders only.
-- [x] Add an offline multilingual policy-eval corpus covering routine questions,
-      personal and organisational addressing, external delivery, scheduling,
-      missing references, conflicting instructions, sensitive disclosure, high-stakes
-      requests, harassment, and prompt injection. Live model/audio evals remain pending.
-- [x] Stop passing raw objective/context text to Realtime and transcription for all
-      newly compiled briefs.
-- [ ] Generate ASR hints only from bounded names, organisations, dates, addresses,
-      and relevant literal terms in the compiled brief.
+### P0 — ownership and tenant isolation
 
-## 3. Conversation and transcription quality
+- [x] Add indexed `user_id` ownership to call briefs; derive attempts, transcripts, recordings, approvals, final transcripts, compilations, and events through their existing call-brief relationships.
+- [x] Scope every browser operation by the authenticated owner: list/get/update, compile, approve/start/stop, SSE, playback/delete, client-side export source data, and transcription retry. Mutations also enforce the configured browser origin.
+- [x] Keep provider webhooks authorized by signature and provider IDs; never trust a browser-supplied user ID.
+- [x] Add an automated cross-user API matrix for every read/write/action/SSE/media endpoint and return indistinguishable `CALL_NOT_FOUND` responses for foreign IDs.
+- [ ] Execute the PostgreSQL ownership integration suite in the database-enabled environment, then define the archive/backfill policy for nullable pre-authentication records before validating a final `NOT NULL` constraint.
 
-- [x] Compile a short call-language opening that addresses the recipient, states the
-      specific purpose and scope, and asks whether it is convenient to continue.
-- [x] Enforce `consent -> opening -> readiness -> objective` in Realtime so the first
-      substantive question cannot be bundled into the opening. No extra form field or
-      separate model request is required, and legacy briefs receive a bounded fallback.
-- [x] Show the exact compiled opening in the pre-call review and include it in output
-      moderation before approval.
-- [ ] Add structured call outcomes: `resolved`, `partially_resolved`, `unresolved`,
-      `wrong_recipient`, `voicemail`, `declined`, and `technical_failure`.
-- [x] Produce the final wording with one context-preserving `gpt-transcribe` request
-      over the complete consented recording.
-- [x] Use only bounded compiled context, literal names, explicit call languages, and
-      the expected writing system as transcription hints.
-- [x] Keep live and final wording independent. Use live events only as a deterministic
-      role/time scaffold and never copy their words into the recording-derived text.
-- [x] Publish approximate speaker labels and timestamps only when conservative local
-      alignment succeeds; mark unresolved spans or fall back to canonical plain text.
-- [ ] Add bounded overlapping-window transcription only for recordings that exceed
-      the upload limit; keep one request as the normal path.
-- [ ] Benchmark full-call transcription, local alignment, and diarization alternatives
-      on a manually checked multilingual audio corpus.
-- [ ] Measure Realtime understanding separately from live transcript accuracy and
-      post-call transcript accuracy.
-- [ ] Test Swiss Standard German, Swiss German dialects, supported languages,
-      non-native accents, code-switching, packet loss, noise, and interruptions.
-- [ ] Add an operator-visible uncertain state and direct audio verification for
-      critical details such as names, dates, amounts, addresses, and commitments.
-- [ ] Add regression tests that ensure source-language text cannot bias ASR output.
+Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play, delete, or retry user B's resource.
 
-The decision and deferred test matrix are recorded in
-[the post-call transcription plan](./post-call-transcription-plan.md#stable-mvp-transcription-decision).
+### P0 — represented identity defect
 
-## 4. Accounts, data ownership, and abuse prevention
+- [x] Remove `DEFAULT_REPRESENTED_PERSON = "Ivan Slavinskyi"` and all implicit personal defaults. Require separate represented-person first and last names; store their combined value only as a compatible call snapshot.
+- [x] Test that call brief validation rejects a missing first or last name and never supplies another person's name.
+- [ ] Copy the authenticated user's `first_name` and `last_name` only as visible/editable suggestions; both represented-person fields remain an explicit choice.
 
-- [ ] Add users, secure authentication, session management, account recovery, and
-      verified contact details.
-- [ ] Add `user_id` ownership and authorization checks to every call, transcript,
-      recording, approval, export, and audit operation before accepting public data.
-- [ ] Define tenant-safe database access and tests that prevent cross-user reads.
-- [ ] Add per-user call, duration, concurrency, destination-country, and cost limits.
-- [ ] Add global and per-user recipient opt-out/do-not-call controls.
-- [ ] Stop repeated calls after rejection, opt-out, excessive failures, or complaints.
-- [ ] Add abuse reports, administrative suspension, policy-decision review, and a
-      minimal support workflow.
-- [ ] Add user-facing data export, transcript deletion, recording deletion, and
-      account deletion.
-- [ ] Send a stable privacy-preserving safety identifier with model requests once
-      user identities exist.
+### P1 — acceptance and lifecycle
 
-## 5. Multilingual product experience and landing page
+- [ ] Record accepted Terms/AUP revision IDs and timestamps; support required re-acceptance.
+- [ ] Provide session listing/revocation, user data export, transcript/data deletion, and account deletion/anonymization with documented audit, suppression, backup, provider, and retention behavior.
 
-- [ ] Introduce an i18n framework before adding more authenticated screens.
-- [ ] Keep UI locale, source/authoring language, call locale, and optional fallback
-      locale separate throughout contracts, storage, analytics, and the interface.
-- [ ] Move all interface copy, validation errors, email copy, status labels, exports,
-      and accessibility text into locale catalogues.
-- [ ] Add language selection, localized routing, locale persistence, and fallback
-      behaviour for missing translations.
-- [ ] Build an accessible onboarding flow that explains the call, consent, recording,
-      retention, limitations, and allowed use cases in the user's interface language.
-- [ ] Build a concise public landing page with the product promise, supported use
-      cases, limitations, privacy model, example workflow, and beta entry point.
-- [ ] Publish localized documentation, privacy information, terms of use, acceptable
-      use policy, subprocessors, retention rules, and contact/complaint channels.
+## 2. Usage & Abuse Prevention
 
-## 6. Production infrastructure and operational readiness
+### P0 — Switzerland-only destinations
 
-- [ ] Add Redis/BullMQ or an equivalent durable job system for post-call processing,
-      retries, retention deletion, timeouts, and scheduled maintenance.
-- [ ] Make provider webhooks and background jobs idempotent across restarts and
-      multiple API instances.
-- [ ] Deploy the isolated Twilio webhook/Media Stream gateway separately from the
-      authenticated application API.
-- [ ] Add production secrets management, database migrations, TLS, backup, restore,
-      and disaster-recovery procedures.
-- [ ] Add PII-safe structured logging, traces, health checks, error monitoring,
-      provider alerts, latency metrics, and cost alerts.
-- [ ] Verify encryption, retention, deletion, export, backup expiry, and the complete
-      audit trail in the deployed environment.
-- [ ] Add rate limiting, request-size limits, CSRF/session protections, secure headers,
-      dependency scanning, and a production security review.
-- [ ] Define incident response, abuse response, support ownership, and a rollback plan.
+- [ ] Parse/validate server-side with a maintained phone library and require a valid Swiss destination; do not rely on `startsWith("+41")` or frontend checks.
+- [ ] Enforce the same CH-only rule in deterministic policy before credit reservation and provider creation. Explain: “During the public beta CallAssist can only call Swiss phone numbers.”
+- [ ] Restrict production Twilio Voice Geographic Permissions to Switzerland and preferably initial low-risk ranges; record this reviewed console setting in deployment evidence.
+- [ ] Test formatting, invalid/country-code edges, risky ranges, and direct API bypass attempts.
 
-## 7. Release sequence
+### P0 — append-only credits and concurrency
 
-- [ ] Run internal dogfooding against the versioned evaluation corpus.
-- [ ] Run an invite-only alpha with fixed call credits, supported destinations, and
-      low-risk use cases only.
-- [ ] Review failed calls, policy decisions, ASR uncertainty, complaints, deletion,
-      and provider costs during the alpha.
-- [ ] Run multilingual safety red-teaming and resolve all release-blocking findings.
-- [ ] Complete the legal/privacy review for the initial launch jurisdictions.
-- [ ] Launch a limited public beta with quotas, abuse controls, monitoring, support,
-      and an emergency disable switch.
-- [ ] Expand languages, destinations, use cases, and autonomy only after measured
-      quality and safety thresholds are met.
+- [ ] Add `credit_transactions`: `id`, `user_id`, signed `amount`, `type`, optional `call_attempt_id`, `promo_redemption_id`, `admin_id`, `reason`, unique `idempotency_key`, `created_at`.
+- [ ] Support `signup_grant`, `promo_grant`, `admin_grant`, `call_reservation`, `call_charge`, `call_refund`, `adjustment`.
+- [ ] Grant exactly `+3 signup_grant` once after verification.
+- [ ] Atomically reserve one credit before dialing with transaction/locking or equivalent serializable invariant and idempotency. Enforce one active outbound call per user.
+- [ ] Define tested reservation-to-charge/refund transitions. Refund pre-dial internal/provider failure; no-answer/decline after real dialing must not allow infinite free retries.
+- [ ] Derive balance from the ledger (a cache must be rebuildable); never silently edit `calls_remaining`.
 
-## Public beta launch gates
+Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempotent, and every balance reconciles to entries.
 
-Public beta is blocked until all of the following are true:
+### P0 — quotas, suppression, and emergency controls
 
-- raw free-form input can no longer reach the call runtime or ASR directly;
-- every call uses an approved, versioned compiled brief and policy decision;
-- cross-user authorization and encrypted data boundaries have automated tests;
-- recipient consent, opt-out, retention, deletion, and complaint flows work end to end;
-- transcription uncertainty is visible and critical facts can be checked against audio;
-- durable retries, monitoring, cost controls, backups, and rollback are operational;
-- the multilingual quality and adversarial evaluation suite meets defined thresholds;
-- no unresolved critical security, safety, provider-policy, or launch-jurisdiction issue remains.
+- [ ] Enforce hourly/daily call and duration limits, concurrency, repeat-recipient limits, and thresholds for decline/no-consent/failure/policy blocks.
+- [ ] Add global `recipient_suppressions` with normalized phone, time, source, reason, actor/audit data; check immediately before provider call creation.
+- [ ] Add public opt-out and staff suppression workflow. Spoken in-call opt-out is P2.
+- [ ] Implement audited account suspension and session blocking/revocation policy.
+- [ ] Add a global kill switch that blocks new calls/reservations without ending active calls unless separately commanded.
+- [ ] Rate-limit registration, auth/recovery, compilation, call create/start, exports, playback, and costly endpoints; detect mass accounts without logging unnecessary PII.
 
-## Deferred until after the public MVP
+### P1 — promo and complaints
 
-- unattended high-risk legal, financial, medical, immigration, employment, or
-  contractual negotiations;
-- automatic bulk calling and marketing campaigns;
-- unrestricted custom agent identities;
-- automatic language switching without explicit user permission;
-- CRM, calendar, email, and messaging integrations that create external side effects;
-- indefinite audio retention;
-- native mobile applications and PWA hardening beyond the responsive web experience.
+- [ ] Add `promo_codes` with hashed code, credits, global/per-user limits, start/expiry, active flag, campaign; add transactional unique `promo_redemptions`.
+- [ ] Issue promo/manual grants only through the ledger with actor, reason, time, idempotency.
+- [ ] Add complaint/abuse intake, repeat-call/opt-out/policy review, escalation, and response ownership.
+
+## 3. Public Product & User Experience
+
+### P0 — routing and authenticated shell
+
+- [ ] Make `/en` and `/de` public landing pages and redirect `/` through current locale negotiation.
+- [ ] Move—not rewrite—the Dashboard to `/en/app` and `/de/app`; move call detail to `/en/app/calls/[id]` and `/de/app/calls/[id]`, preserving current review, LiveCall, transcript, recording, history, search/filter/pagination, and accessibility behavior.
+- [x] Add localized EN/DE login, registration, and phone-verification screens with separate required first and last names.
+- [ ] Add `/app/account` and optionally separate `/app/usage`; protect all app routes server-side.
+- [ ] Add localized How it works, Privacy, Terms, Acceptable Use, Support, and Opt-out. App/admin/auth routes are `noindex` (not a security control).
+- [ ] Show credits, New call, History, and account/session actions in the app header.
+
+### P0 — landing and onboarding
+
+- [ ] Publish EN/DE Hero: AI phone assistant acting for the user, focused on speech accessibility/language barriers; CTA “Try the beta”; “Free public beta”, “3 calls included”, “Switzerland only”.
+- [ ] Explain: describe -> compile -> review/approve -> call -> result.
+- [ ] Explain disclosure, consent-gated processing/recording, retention/deletion control, and beta fallibility.
+- [ ] List supported information/appointment/document/status/neutral-message cases and prohibit emergencies, harassment, deception, spam/bulk marketing, political persuasion, and high-stakes legal/medical/financial negotiation.
+- [ ] Separate website languages from call languages; FAQ covers disclosure, consent, recording, transcripts, retention/deletion, Swiss numbers, and credits.
+- [ ] Add accessible onboarding with current Terms/AUP acceptance and explicit consent/retention/use/credit explanations.
+
+### P1 — outcomes and feedback
+
+- [ ] Persist versioned/provenanced outcomes: `resolved`, `partially_resolved`, `unresolved`, `wrong_recipient`, `voicemail`, `declined`, `technical_failure`.
+- [ ] Ask goal result (Yes/Partly/No), final transcript quality (Good/Some errors/Poor), and optional bounded comment.
+- [ ] Ownership-scope feedback and make it available as privacy-safe beta metrics.
+
+## 4. Content / CMS / SEO
+
+Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels in typed code catalogues. CMS manages public editorial content only.
+
+### P0 — localized CMS and publishing
+
+- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`.
+- [ ] Model logical `content_pages` (`key`, `page_type`, status/timestamps) separately from `content_page_localizations` (locale, slug, title/content, SEO/OG, canonical override, robots, timestamps), allowing `/en/privacy` and `/de/datenschutz`.
+- [ ] Support `page`, `landing`, future `article`; no blog or universal builder for beta.
+- [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment.
+- [ ] Model Landing as ordered/enabled localized Hero, How it works, Use cases, Safety & Privacy, Languages, FAQ, CTA blocks; model reusable localized FAQ items.
+- [ ] Prefer navigation references to known internal entities and validate broken links.
+- [ ] Add media metadata: file/MIME/dimensions/size, EN/DE alt, uploader/time, usage references.
+
+### P0 — legal/localization/SEO correctness
+
+- [ ] Let Terms/AUP revisions require account re-acceptance.
+- [ ] Track source revision and translation-source revision; flag stale legal, FAQ, and claims.
+- [ ] Never silently serve English at a German public URL. Unpublished locale means no route, sitemap entry, or hreflang.
+- [ ] Generate localized title, description, slug, OG, robots, canonical; validate advanced canonical override.
+- [ ] Generate hreflang automatically from published localizations of one logical page.
+- [ ] Sitemap only published/public/indexable pages; exclude app/admin/auth/preview. Add matching robots behavior.
+- [ ] Add global site/canonical/title/description/OG/verification and structured organization/product settings. Generate JSON-LD from structured fields, not arbitrary JSON.
+
+### P1 — SEO audit
+
+- [ ] Report each public URL's locale, publication/index state, title/description, canonical, hreflang, and OG image with a compact error overview.
+
+## 5. Admin & Observability
+
+### P0 — minimum safe operations
+
+- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit.
+- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access.
+- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta.
+
+### P1 — admin areas
+
+- [ ] `/admin`: user, call, outcome/consent/failure, cost, and system-health metrics.
+- [ ] `/admin/users` and detail: identity/verification, activity/status, ledger/promos, calls/feedback/safety/complaints, and audited grant/suspend/session/delete actions.
+- [ ] `/admin/calls` and detail: user/recipient (controlled), locale, status/outcome, duration, consent, recording/transcription, failure stage, and useful failure/policy/model/language/date filters.
+- [ ] `/admin/safety`: blocks, repeat recipients, no-consent/declines, opt-outs, complaints, suspicious registration/credits, anomaly review and actions.
+- [ ] `/admin/credits`: ledger, grants/adjustments, promo/redemption/expiry/campaign; no silent balance edits.
+- [ ] `/admin/audit`: actor/action/target/time/result filters and immutable evidence.
+
+### P1 — Call Inspector and telemetry
+
+- [ ] Keep human/action `audit_events` separate. Add append-only `call_events`: call/attempt/user, time, source/name/stage/severity, trace/correlation, duration, provider status/error, model/version, bounded metadata, schema version. Add rebuildable `call_metrics` only if needed.
+- [ ] Instrument brief/compiler/policy/approval/credit/Twilio/ringing/answer/disclosure/consent/recording/Realtime/first-audio/conversation/completion/transcription/outcome, including latency, retries, reconnects, provider IDs/status, model/version, channels/duration, feedback.
+- [ ] Build `/admin/calls/[id]`: summary, timeline, technical metadata, separately permissioned sensitive content. Never show secrets; audit sensitive views.
+- [ ] Define metadata allow-lists excluding phone/name/brief/transcript text, credentials, cookies, OTPs, and raw provider payloads from generic logs/events.
+- [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch.
+
+## 6. Production & Compliance
+
+### P0 — deployment and recovery
+
+- [ ] Deploy stable web/API/Twilio ingress on production domain/TLS; Quick Tunnel is development-only. Preserve isolation of main authenticated API/SSE from Twilio ingress.
+- [ ] Provision production Postgres, managed secrets, least privilege, repeatable migrations, encrypted backups/retention, and documented successful restore test/recovery targets.
+- [ ] Add PII-safe structured logs, error and uptime/health monitoring, provider/cost dashboards and alerts.
+- [ ] Enforce request limits, endpoint rate limits, secure headers, session security, CSRF where applicable, dependency scanning, configuration validation, and a focused security review.
+- [ ] Document rollback, incident, provider outage, abuse, complaint, kill-switch, and support procedures with owners.
+
+### P0 — privacy and Swiss launch review
+
+- [ ] Publish reviewed EN/DE Privacy, Terms, AUP, Support/contact, Opt-out, retention/deletion, and subprocessors information.
+- [ ] Perform formal privacy/security risk assessment for phone numbers, names, recordings, transcripts, possible health/speech-disability data, and provider/AI processing. Obtain Swiss legal/privacy review and separately assess DPIA necessity without predetermining the conclusion.
+- [ ] Verify consent evidence, retention/deletion, data requests, provider deletion, backup expiry, sensitive staff access audit, encryption, and key management end to end.
+- [ ] Preserve the conservative consent boundary in production.
+
+### P1 — durable jobs and CI
+
+- [ ] Use durable idempotent jobs for final transcription, retries, recording processing, retention deletion, provider reconciliation/status sync, and cleanup. Redis/BullMQ or an equivalent proven approach is acceptable.
+- [ ] Test restart, duplicate webhook, concurrent worker, and partial provider failure; expose stuck/dead-letter work.
+- [ ] Add CI for clean install, lint, typecheck, tests, build, and safe migration validation; protect `main` with required checks/review.
+
+## Validation retained from the supervised MVP roadmap — P1
+
+- [ ] Define thresholds for semantic preservation, task success, hallucinated facts, correct refusal, false-positive blocking, consent, latency, Realtime understanding, live/final ASR, and unresolved answers.
+- [ ] Maintain a versioned corpus across call/source languages, Swiss German, accents, code-switching, noise, interruptions, voicemail/wrong recipient, unclear answers, failures, and adversarial prompts.
+- [ ] Validate callback reordering, reconnect/recovery, repeated real calls, recording/transcript failure and uncertainty, and audio verification of critical details.
+- [ ] Add overlapping-window transcription only if recordings exceed upload limits; retain one whole-recording request normally.
+
+# Recommended delivery sequence
+
+1. **Identity & isolation:** users, auth, Verify, sessions, RBAC/status, ownership/tests, personal-default removal.
+2. **Beta safety & usage:** CH controls, ledger/reservations, quotas/concurrency, promo foundation, suppression, suspension, rate limits, kill switch.
+3. **Public shell:** move existing screens under `/app`; add landing, auth, onboarding, account/usage, legal/support/opt-out.
+4. **CMS & SEO:** localized content/blocks, revisions/acceptance, FAQ/navigation/media, freshness, metadata/hreflang/sitemap, preview/publish/audit.
+5. **Observability:** outcomes/feedback, `call_events`, admin overview/users/calls/Inspector/safety/credits/system, cost and access audit.
+6. **Production hardening:** durable jobs, CI, deployment, monitoring, backup/restore, security/privacy/legal/operations reviews.
+7. **Invite alpha -> limited beta:** small tester cap; review telemetry, failures, abuse, costs, transcript quality, complaints, privacy operations, and support load before expanding.
+
+# P2 / Future / Monetization
+
+- Payments, subscriptions, Stripe, billing plans, paid credits.
+- Organisations/teams, enterprise tenancy, native apps.
+- Sophisticated ML fraud, large analytics warehouse, advanced marketing automation.
+- Complex blog/editorial platform or universal builder (`article` may exist in the model).
+- Broad international/bulk/marketing/high-risk calls, unrestricted identities, automatic language switching.
+- Spoken in-call opt-out, external side-effect integrations, and FR/IT website locales after EN/DE stabilizes.
+
+# Public Beta GO / NO-GO Checklist
+
+Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled invite alpha and must name an owner, compensating control, and expiry.
+
+## P0 — mandatory
+
+- [x] Users/auth/secure server-side sessions/roles/status implemented.
+- [x] Phone verified through Twilio Verify with application-level limits.
+- [x] Cross-user isolation enforced for all browser APIs/SSE/media/actions and tested; database-backed execution remains an environment verification item above.
+- [x] Personal `"Ivan Slavinskyi"` default removed; registration and represented identity use explicit first/last name fields.
+- [ ] Swiss-only restriction enforced server-side and in policy.
+- [ ] Twilio Voice Geographic Permissions restricted to approved CH destinations.
+- [ ] Exactly three signup credits granted once through ledger.
+- [ ] Atomic/idempotent/concurrent-safe/reconciliable credit reserve/charge/refund.
+- [ ] Per-user hourly/daily quotas and one-call concurrency.
+- [ ] Recipient suppression/opt-out checked before provider call.
+- [ ] Audited admin suspension and session revocation/blocking.
+- [ ] Global kill switch blocks new calls without implicitly ending active calls.
+- [ ] Localized landing, auth/onboarding, support, opt-out live.
+- [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live.
+- [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance.
+- [ ] Localized metadata, canonical, hreflang, robots, sitemap verified.
+- [ ] Production domain/TLS, stable hosting, isolated Twilio ingress, production DB.
+- [ ] Secrets/keys managed with least privilege and rotation procedure.
+- [ ] Backups configured and restore-tested.
+- [ ] PII-safe logs, error/health/uptime monitoring, provider/cost alerts.
+- [ ] Sensitive text, credentials, sessions, OTPs, raw provider payloads excluded from generic logs/telemetry.
+- [ ] Security/privacy risk and Swiss legal/privacy launch reviews complete.
+- [ ] Disclosure and consent precede recording/model processing in production tests.
+- [ ] Incident/abuse/complaint/outage/rollback/support procedures and owners ready.
+
+## P1 — broad-beta requirement; invite-alpha waiver only
+
+- [ ] Durable jobs and recovery/dead-letter visibility.
+- [ ] Admin Calls and failure-stage filters.
+- [ ] Call Inspector timeline and sensitive-access audit.
+- [ ] Separate technical telemetry; `audit_events` remains action audit.
+- [ ] Structured outcomes and user feedback measurable.
+- [ ] Admin Users workflows.
+- [ ] Transactional promo codes and ledger grants.
+- [ ] Account/data export/delete and session revocation tested.
+- [ ] Support/complaint/suppression workflow with owners and targets.
+- [ ] CI and `main` branch protection.
+- [ ] SEO audit.
+- [ ] Quality/safety evaluation meets thresholds.
+
+## Release decision record
+
+- Decision: **GO / NO-GO**
+- Release scope and tester cap:
+- Date and approvers:
+- Metrics observation window:
+- P1 waivers, owners, controls, expiry:
+- Open incident/legal/security/privacy findings:
+- Rollback/kill-switch owner:

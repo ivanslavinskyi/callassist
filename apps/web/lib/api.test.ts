@@ -4,6 +4,9 @@ import {
   approveAndStartCall,
   createCallBrief,
   getCallPreparationErrorMessage,
+  login,
+  logout,
+  registerAccount,
   recompileCallBrief,
   startCall
 } from "./api";
@@ -26,6 +29,61 @@ describe("API client headers", () => {
 
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(request.headers).has("Content-Type")).toBe(false);
+    expect(request.credentials).toBe("include");
+  });
+
+  it("sends registration and login data with credentialed requests", async () => {
+    const user = {
+      id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+      email: "nina@example.com",
+      phoneE164: "+41791234567",
+      phoneVerifiedAt: "2026-08-19T10:00:00.000Z",
+      firstName: "Nina",
+      lastName: "Keller",
+      role: "user",
+      status: "active",
+      uiLocale: "de",
+      createdAt: "2026-08-19T09:00:00.000Z",
+      lastLoginAt: "2026-08-19T10:00:00.000Z"
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ status: "verification_required" }),
+        { status: 202, headers: { "Content-Type": "application/json" } }
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ user }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registerAccount({
+      email: "nina@example.com",
+      password: "correct horse battery staple",
+      phoneE164: "+41791234567",
+      firstName: "Nina",
+      lastName: "Keller",
+      uiLocale: "de"
+    });
+    await login({ email: "nina@example.com", password: "correct horse battery staple" });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/auth/register");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/auth/login");
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).credentials).toBe("include");
+      expect(new Headers((call[1] as RequestInit).headers).get("Content-Type")).toBe("application/json");
+    }
+  });
+
+  it("handles a bodyless logout response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(logout()).resolves.toBeUndefined();
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request).toMatchObject({ method: "POST", credentials: "include" });
+    expect(new Headers(request.headers).has("Content-Type")).toBe(false);
   });
 
   it("declares JSON when a request has a body", async () => {
@@ -42,6 +100,8 @@ describe("API client headers", () => {
       phoneNumber: "+41710000000",
       objective: "Einen Termin fuer naechste Woche vereinbaren",
       assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
       assistanceReason: "language_barrier",
       locale: "de-CH",
       allowLanguageSwitch: false,
@@ -67,6 +127,8 @@ describe("API client headers", () => {
       phoneNumber: "+41710000001",
       objective: "Ask Elena which book she likes most",
       assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
       assistanceReason: "speech_impairment" as const,
       locale: "de-CH" as const,
       allowLanguageSwitch: false,
@@ -110,6 +172,8 @@ describe("API client headers", () => {
         phoneNumber: "+41710000001",
         objective: "Ask Elena which book she likes most",
         assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
         assistanceReason: "speech_impairment",
         locale: "de-CH",
         allowLanguageSwitch: false,

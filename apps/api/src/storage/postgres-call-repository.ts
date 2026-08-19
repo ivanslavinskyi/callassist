@@ -41,6 +41,8 @@ type CallBriefRow = {
   assistantProfileId: AssistantProfileId | null;
   agentName: string;
   representedPerson: string;
+  representedPersonFirstName: string;
+  representedPersonLastName: string;
   assistanceReasonCiphertext: string | null;
   assistanceDisclosure: string | null;
   assistanceDisclosureCiphertext: string | null;
@@ -144,7 +146,8 @@ export class PostgresCallRepository implements CallRepository {
     const cursorId = input.cursor?.id ?? null;
     const rows = await this.#sql<CallBriefRow[]>`
       ${this.#briefSelect()}
-      WHERE (${searchPattern}::text IS NULL OR recipient_name ILIKE ${searchPattern})
+      WHERE user_id IS NOT DISTINCT FROM ${input.userId ?? null}::uuid
+        AND (${searchPattern}::text IS NULL OR recipient_name ILIKE ${searchPattern})
         AND (${input.status ?? null}::text IS NULL OR status = ${input.status ?? null})
         AND (
           ${cursorDate}::timestamptz IS NULL
@@ -164,7 +167,11 @@ export class PostgresCallRepository implements CallRepository {
     };
   }
 
-  async create(input: CreateCallBriefInput, compilation: CallCompilation) {
+  async create(
+    input: CreateCallBriefInput,
+    compilation: CallCompilation,
+    userId: string | null = null
+  ) {
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
     const id = randomUUID();
@@ -185,12 +192,15 @@ export class PostgresCallRepository implements CallRepository {
       await transaction`
         INSERT INTO call_briefs (
           id,
+          user_id,
           recipient_name,
           phone_number,
           objective,
           assistant_profile_id,
           agent_name,
           represented_person,
+          represented_person_first_name,
+          represented_person_last_name,
           assistance_reason_ciphertext,
           assistance_disclosure,
           assistance_disclosure_ciphertext,
@@ -207,12 +217,15 @@ export class PostgresCallRepository implements CallRepository {
           updated_at
         ) VALUES (
           ${id},
+          ${userId},
           ${parsed.recipientName},
           ${parsed.phoneNumber},
           ${runtime.objective},
           ${parsed.assistantProfileId},
           ${parsed.agentName},
           ${parsed.representedPerson},
+          ${parsed.representedPersonFirstName},
+          ${parsed.representedPersonLastName},
           ${encryptedReason},
           ${null},
           ${encryptedDisclosure},
@@ -239,6 +252,16 @@ export class PostgresCallRepository implements CallRepository {
 
     const snapshot = await this.#require(id);
     return snapshot.brief;
+  }
+
+  async isOwnedBy(id: string, userId: string | null) {
+    const [row] = await this.#sql`
+      SELECT 1
+      FROM call_briefs
+      WHERE id = ${id}
+        AND user_id IS NOT DISTINCT FROM ${userId}::uuid
+    `;
+    return Boolean(row);
   }
 
   async recompile(
@@ -302,6 +325,8 @@ export class PostgresCallRepository implements CallRepository {
           assistant_profile_id = ${parsed.assistantProfileId},
           agent_name = ${parsed.agentName},
           represented_person = ${parsed.representedPerson},
+          represented_person_first_name = ${parsed.representedPersonFirstName},
+          represented_person_last_name = ${parsed.representedPersonLastName},
           assistance_reason_ciphertext = ${encryptedReason},
           assistance_disclosure = ${null},
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
@@ -1358,6 +1383,8 @@ export class PostgresCallRepository implements CallRepository {
         assistant_profile_id AS "assistantProfileId",
         agent_name AS "agentName",
         represented_person AS "representedPerson",
+        represented_person_first_name AS "representedPersonFirstName",
+        represented_person_last_name AS "representedPersonLastName",
         assistance_reason_ciphertext AS "assistanceReasonCiphertext",
         assistance_disclosure AS "assistanceDisclosure",
         assistance_disclosure_ciphertext AS "assistanceDisclosureCiphertext",

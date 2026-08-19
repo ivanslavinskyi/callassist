@@ -10,7 +10,8 @@ const validBrief = {
   phoneNumber: "+41523686688",
   objective: "Уточнить, можно ли прислать документы по электронной почте",
   assistantProfileId: "sebastian" as const,
-  representedPerson: "Ivan Slavinskyi",
+  representedPersonFirstName: "Nina",
+  representedPersonLastName: "Keller",
   assistanceReason: "speech_impairment" as const,
   locale: "de-CH" as const,
   allowLanguageSwitch: false,
@@ -25,6 +26,7 @@ describe("createCallBriefInputSchema", () => {
       const normalized = normalizeCreateCallBriefInput(result.data);
       expect(normalized.agentName).toBe("Sebastian");
       expect(normalized.voiceGender).toBe("male");
+      expect(normalized.representedPerson).toBe("Nina Keller");
       expect(result.data.audioRetentionDays).toBe(7);
       expect(result.data).toMatchObject({
         resultHandling: "capture_in_callassist",
@@ -38,6 +40,18 @@ describe("createCallBriefInputSchema", () => {
         "Sprechbeeinträchtigung"
       );
     }
+  });
+
+  it("requires separate represented-person first and last names", () => {
+    const { representedPersonLastName: _omitted, ...withoutLastName } = validBrief;
+    expect(createCallBriefInputSchema.safeParse(withoutLastName).success).toBe(false);
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        representedPersonFirstName: "",
+        representedPersonLastName: "Keller"
+      }).success
+    ).toBe(false);
   });
 
   it("accepts only fixed clarification issue codes", () => {

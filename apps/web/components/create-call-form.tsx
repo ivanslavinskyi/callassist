@@ -2,8 +2,8 @@
 
 import {
   ASSISTANT_PROFILES,
-  DEFAULT_REPRESENTED_PERSON,
   SUPPORTED_CALL_LANGUAGES,
+  formatPersonName,
   getAssistanceDisclosure,
   type AssistanceReason,
   type AssistantProfileId,
@@ -24,7 +24,8 @@ const emptyForm: CreateCallBriefInput = {
   phoneNumber: "",
   objective: "",
   assistantProfileId: "sebastian",
-  representedPerson: DEFAULT_REPRESENTED_PERSON,
+  representedPersonFirstName: "",
+  representedPersonLastName: "",
   assistanceReason: "speech_impairment",
   context: "",
   locale: "de-CH",
@@ -87,9 +88,17 @@ export function CreateCallForm({
       getAssistanceDisclosure(
         form.locale,
         form.assistanceReason,
-        form.representedPerson ?? ""
+        formatPersonName(
+          form.representedPersonFirstName,
+          form.representedPersonLastName
+        )
       ),
-    [form.assistanceReason, form.locale, form.representedPerson]
+    [
+      form.assistanceReason,
+      form.locale,
+      form.representedPersonFirstName,
+      form.representedPersonLastName
+    ]
   );
   const normalizedPhone = normalizePhoneNumber(form.phoneNumber);
   const phoneEntered = form.phoneNumber.trim().length > 0;
@@ -98,7 +107,8 @@ export function CreateCallForm({
     form.recipientName.trim().length >= 2,
     phoneValid,
     form.objective.trim().length >= 10,
-    (form.representedPerson ?? "").trim().length >= 2
+    form.representedPersonFirstName.trim().length >= 1,
+    form.representedPersonLastName.trim().length >= 1
   ];
   const completedRequiredCount = requiredComplete.filter(Boolean).length;
   const requiredRemaining = requiredComplete.length - completedRequiredCount;
@@ -247,12 +257,24 @@ export function CreateCallForm({
           </select>
         </label>
 
-        <label className="field field-wide">
-          <span>{copy.representedPerson}</span>
+        <label className="field">
+          <span>{copy.representedPersonFirstName}</span>
           <input
-            value={form.representedPerson ?? ""}
-            onChange={(event) => update("representedPerson", event.target.value)}
-            placeholder={copy.representedPersonPlaceholder}
+            value={form.representedPersonFirstName}
+            onChange={(event) => update("representedPersonFirstName", event.target.value)}
+            autoComplete="given-name"
+            placeholder={copy.representedPersonFirstNamePlaceholder}
+            required
+          />
+        </label>
+
+        <label className="field">
+          <span>{copy.representedPersonLastName}</span>
+          <input
+            value={form.representedPersonLastName}
+            onChange={(event) => update("representedPersonLastName", event.target.value)}
+            autoComplete="family-name"
+            placeholder={copy.representedPersonLastNamePlaceholder}
             required
           />
         </label>

@@ -117,6 +117,8 @@ TWILIO_WEBHOOK_PORT=4001
 TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+...
+TWILIO_VERIFY_SERVICE_SID=VA...
+VERIFICATION_DRIVER=twilio
 OPENAI_API_KEY=sk-...
 BRIEF_COMPILER_DRIVER=openai
 OPENAI_BRIEF_COMPILER_MODEL=gpt-5.6
@@ -129,6 +131,22 @@ OPENAI_POST_CALL_TRANSCRIPTION_MODEL=gpt-transcribe
 OPENAI_REALTIME_MALE_VOICE=cedar
 OPENAI_REALTIME_FEMALE_VOICE=marin
 ```
+
+The API includes the identity foundation endpoints under `/api/auth`: registration,
+phone verification/resend, login, logout, and current-session lookup. Registration
+requires separate first and last names and a Twilio Verify SMS confirmation. Local
+development uses `VERIFICATION_DRIVER=mock` and `MOCK_VERIFICATION_CODE=000000`;
+never use the mock driver in a public environment.
+
+The web app exposes the corresponding localized flows at `/en/register`, `/en/verify`,
+`/en/login` and their `/de` equivalents. Browser API requests include credentials so
+the opaque HttpOnly session cookie is used without exposing its token to JavaScript.
+All browser call routes now require the session when the production auth service is
+configured. New briefs are assigned to that authenticated user, list queries are
+owner-scoped, and foreign IDs receive the same `CALL_NOT_FOUND` response across normal
+reads, mutations, SSE, recordings, approvals, and transcript retry. Signed provider
+webhooks remain independent of browser sessions. Pre-authentication database rows stay
+hidden until their archive/backfill policy is defined.
 
 Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick Tunnel URLs change between sessions, so update `PUBLIC_BASE_URL` whenever a new tunnel is created. Quick Tunnel is for development only and has no uptime guarantee.
 

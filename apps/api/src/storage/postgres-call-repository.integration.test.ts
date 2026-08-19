@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
   type CreateCallBriefInput
@@ -16,11 +17,22 @@ describeWithDatabase("PostgresCallRepository", () => {
   const encryptionKey = Buffer.alloc(32, 7);
   let repository: PostgresCallRepository;
   let inspection: postgres.Sql;
+  const ownerA = randomUUID();
+  const ownerB = randomUUID();
 
   beforeAll(async () => {
     await runMigrations(databaseUrl);
     repository = new PostgresCallRepository(databaseUrl!, encryptionKey);
     inspection = postgres(databaseUrl!, { max: 1 });
+    const suffix = ownerA.replaceAll("-", "");
+    await inspection`
+      INSERT INTO users (
+        id, email, password_hash, phone_e164, phone_verified_at,
+        first_name, last_name, role, status, ui_locale, created_at
+      ) VALUES
+        (${ownerA}, ${`owner-a-${suffix}@example.com`}, 'test-only', ${`+417${suffix.slice(0, 8)}`}, now(), 'Nina', 'Keller', 'user', 'active', 'en', now()),
+        (${ownerB}, ${`owner-b-${suffix}@example.com`}, 'test-only', ${`+418${suffix.slice(0, 8)}`}, now(), 'Leo', 'Meier', 'user', 'active', 'en', now())
+    `;
   });
 
   afterAll(async () => {
@@ -35,15 +47,21 @@ describeWithDatabase("PostgresCallRepository", () => {
         phoneNumber: "+41710000009",
         objective: `Ask ${recipientName} for office hours`,
         assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
         assistanceReason: "speech_impairment",
         locale: "en-GB",
         allowLanguageSwitch: false,
         allowedFacts: []
       };
-      await repository.create(input, await compiler.compile(normalizeCreateCallBriefInput(input)));
+      await repository.create(
+        input,
+        await compiler.compile(normalizeCreateCallBriefInput(input)),
+        ownerA
+      );
     }
 
-    const first = await repository.list({ limit: 1, search: "Cursor test" });
+    const first = await repository.list({ limit: 1, search: "Cursor test", userId: ownerA });
     expect(first.items).toHaveLength(1);
     expect(first.nextCursor).toBeTypeOf("string");
     const cursor = decodeCallBriefCursor(first.nextCursor!);
@@ -51,11 +69,19 @@ describeWithDatabase("PostgresCallRepository", () => {
     const second = await repository.list({
       limit: 1,
       search: "Cursor test",
+      userId: ownerA,
       status: "review_required",
       cursor: cursor!
     });
     expect(second.items).toHaveLength(1);
     expect(second.items[0]?.id).not.toBe(first.items[0]?.id);
+    await expect(repository.list({
+      limit: 10,
+      search: "Cursor test",
+      userId: ownerB
+    })).resolves.toMatchObject({ items: [] });
+    await expect(repository.isOwnedBy(first.items[0]!.id, ownerA)).resolves.toBe(true);
+    await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
 
   it("persists the complete approval lifecycle and decrypts private facts", async () => {
@@ -64,6 +90,8 @@ describeWithDatabase("PostgresCallRepository", () => {
       phoneNumber: "+41710000000",
       objective: "Verify the PostgreSQL persistence and approval lifecycle",
       assistantProfileId: "anna",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
       assistanceReason: "language_barrier",
       locale: "en-GB",
       allowLanguageSwitch: false,
@@ -72,7 +100,7 @@ describeWithDatabase("PostgresCallRepository", () => {
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
-    const brief = await repository.create(input, compilation);
+    const brief = await repository.create(input, compilation, ownerA);
     expect(brief.status).toBe("review_required");
     const revisedInput = {
       ...input,
@@ -119,7 +147,7 @@ describeWithDatabase("PostgresCallRepository", () => {
     await repository.addTranscript(
       brief.id,
       "assistant",
-      "Hello, I am calling on behalf of Ivan.",
+      "Hello, I am calling on behalf of Nina Keller.",
       "en-GB"
     );
     const requested = await repository.requestApproval(brief.id, {
@@ -139,12 +167,18 @@ describeWithDatabase("PostgresCallRepository", () => {
         allowedFactsCiphertext: string;
         assistanceReasonCiphertext: string;
         compilationCiphertext: string;
+        representedPersonFirstName: string;
+        representedPersonLastName: string;
+        userId: string;
       }[]
     >`
       SELECT
         allowed_facts_ciphertext AS "allowedFactsCiphertext",
         assistance_reason_ciphertext AS "assistanceReasonCiphertext",
-        compilation_ciphertext AS "compilationCiphertext"
+        compilation_ciphertext AS "compilationCiphertext",
+        represented_person_first_name AS "representedPersonFirstName",
+        represented_person_last_name AS "representedPersonLastName",
+        user_id AS "userId"
       FROM call_briefs
       WHERE id = ${brief.id}
     `;
@@ -155,6 +189,9 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(stored?.compilationCiphertext).not.toContain(
       "Verify the PostgreSQL persistence"
     );
+    expect(stored?.representedPersonFirstName).toBe("Nina");
+    expect(stored?.representedPersonLastName).toBe("Keller");
+    expect(stored?.userId).toBe(ownerA);
 
     await repository.close();
     repository = new PostgresCallRepository(databaseUrl!, encryptionKey);
@@ -199,6 +236,8 @@ describeWithDatabase("PostgresCallRepository", () => {
       phoneNumber: "+41710000002",
       objective: "Verify recording and post-call transcription persistence",
       assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
       assistanceReason: "speech_impairment",
       locale: "en-GB",
       audioRetentionDays: 7,
@@ -208,7 +247,7 @@ describeWithDatabase("PostgresCallRepository", () => {
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
-    const brief = await repository.create(input, compilation);
+    const brief = await repository.create(input, compilation, ownerA);
     await repository.approveCompilation(brief.id);
     const attempt = await repository.startAttempt(brief.id, {
       provider: "twilio"

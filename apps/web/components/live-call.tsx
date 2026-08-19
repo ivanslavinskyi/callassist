@@ -86,7 +86,9 @@ export function LiveCall({ callId }: { callId: string }) {
 
   useEffect(() => {
     void refresh();
-    const events = new EventSource(callEventsUrl(callId));
+    const events = new EventSource(callEventsUrl(callId), {
+      withCredentials: true
+    });
     events.onopen = () => setConnectionStatus("connected");
     events.onmessage = (message) => {
       let event: CallEvent;
@@ -651,7 +653,7 @@ export function LiveCall({ callId }: { callId: string }) {
                   </div>
                   {recording.status === "available" ? (
                     <>
-                      <audio controls preload="metadata" src={callRecordingUrl(callId)}>
+                      <audio controls crossOrigin="use-credentials" preload="metadata" src={callRecordingUrl(callId)}>
                         {copy.audioUnsupported}
                       </audio>
                       <button

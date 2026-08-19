@@ -1,5 +1,8 @@
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
+import { AuthService } from "./auth/auth-service";
+import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
+import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
 import {
   DeterministicBriefCompiler,
   OpenAIBriefCompiler
@@ -15,6 +18,10 @@ import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 import { OpenAIPostCallTranscriber } from "./transcription/openai-post-call-transcriber";
 
 const repository = createCallRepositoryFromEnv();
+const authService = new AuthService({
+  repository: createAuthRepositoryFromEnv(),
+  verificationProvider: createVerificationProviderFromEnv()
+});
 const telephonyProvider = createTelephonyProviderFromEnv();
 const realtimeApiKey =
   telephonyProvider instanceof TwilioTelephonyProvider
@@ -33,7 +40,7 @@ const briefCompiler = createBriefCompiler();
 const service = new CallService(repository, telephonyProvider, (error) => {
   app.log.error(error, "Background call operation failed");
 }, postCallTranscriber, briefCompiler);
-const app = buildApp({ service });
+const app = buildApp({ service, authService });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? new OpenAIRealtimeBridge({

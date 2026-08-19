@@ -47,6 +47,7 @@ export type StartAttemptResult = {
 export type CallBriefCursor = { createdAt: string; id: string };
 export type ListCallBriefsInput = {
   limit: number;
+  userId?: string | null;
   cursor?: CallBriefCursor;
   search?: string;
   status?: CallBrief["status"];
@@ -66,11 +67,15 @@ export function decodeCallBriefCursor(value: string): CallBriefCursor | null {
     if (!parsed || typeof parsed !== "object") return null;
     const { createdAt, id } = parsed as Record<string, unknown>;
     if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) return null;
-    if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+    if (typeof id !== "string" || !isUuid(id)) return null;
     return { createdAt, id };
   } catch {
     return null;
   }
+}
+
+export function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export type ProviderStatusResult = {
@@ -113,8 +118,10 @@ export interface CallRepository {
   list(input: ListCallBriefsInput): Promise<ListCallBriefsResult>;
   create(
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    userId?: string | null
   ): Promise<CallBrief>;
+  isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   recompile(
     id: string,
     input: CreateCallBriefInput,

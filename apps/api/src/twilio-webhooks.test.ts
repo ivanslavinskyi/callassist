@@ -56,6 +56,8 @@ async function createBrief(service: CallService) {
     phoneNumber: "+41523686688",
     objective: "Verify a real outbound Twilio connection",
     assistantProfileId: "sebastian",
+    representedPersonFirstName: "Nina",
+    representedPersonLastName: "Keller",
     assistanceReason: "speech_impairment",
     locale: "de-CH",
     allowLanguageSwitch: false,

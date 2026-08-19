@@ -39,6 +39,7 @@ Twilio dual-channel recording ──► authenticated API download
 - `apps/web`: the Next.js operator console.
 - `apps/api`: the Node.js/TypeScript Fastify API, policy boundary, Twilio gateway, and server-side Realtime connection.
 - PostgreSQL: call briefs, attempts, draft transcripts, recordings, final transcripts, approvals, and audit events.
+- Identity and tenancy foundation: PostgreSQL users and revocable server-side sessions, scrypt password hashes, explicit first/last names, localized registration/verification/login screens, Twilio Verify phone confirmation, and opaque HttpOnly session cookies. New call briefs store their authenticated owner. Every browser call list/read/write/action/SSE/media route authenticates the session and checks that owner without accepting a browser-supplied user ID; provider webhooks keep their independent signature/provider-ID boundary. Pre-authentication rows remain hidden pending an explicit archive/backfill decision.
 - Twilio: outbound PSTN calls, signed webhooks, DTMF consent, a bidirectional Media Stream, and temporary consent-gated recordings.
 - OpenAI Responses: multilingual brief compilation into a strict JSON schema.
 - OpenAI Moderation: checks both raw input and generated runtime text.
@@ -209,4 +210,4 @@ enforcement before production use.
 
 ## MVP exclusions
 
-The first release does not include public registration, a browser softphone, a native Android app, automatic language switching, CRM/calendar integrations, RAG, click-to-seek transcript/audio alignment, operator-verified transcript revisions, or indefinite audio retention.
+The first release does not include a browser softphone, a native Android app, automatic language switching, CRM/calendar integrations, RAG, click-to-seek transcript/audio alignment, operator-verified transcript revisions, or indefinite audio retention.

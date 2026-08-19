@@ -5,9 +5,18 @@ import {
   approvalDecisionSchema,
   callBriefStatusSchema,
   createCallBriefInputSchema,
+  loginInputSchema,
+  phoneVerificationInputSchema,
+  registrationInputSchema,
+  verificationResendInputSchema,
   type CallEvent
 } from "@callassist/contracts";
-import Fastify, { type FastifyBaseLogger } from "fastify";
+import Fastify, {
+  type FastifyBaseLogger,
+  type FastifyReply,
+  type FastifyRequest
+} from "fastify";
+import { AuthServiceError, type AuthService } from "./auth/auth-service";
 import { CallServiceError, type CallService } from "./call-service";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import { CallRepositoryError, decodeCallBriefCursor } from "./storage/call-repository";
@@ -21,7 +30,10 @@ import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provi
 
 type BuildAppOptions = {
   service: CallService;
+  authService?: AuthService;
+  allowAnonymousCallsForTesting?: boolean;
   logger?: boolean;
+  secureCookies?: boolean;
   webOrigin?: string | string[];
 };
 
@@ -34,7 +46,10 @@ type BuildWebhookAppOptions = {
 
 export function buildApp({
   service,
+  authService,
+  allowAnonymousCallsForTesting = false,
   logger = true,
+  secureCookies = process.env.NODE_ENV === "production",
   webOrigin = process.env.WEB_ORIGIN
 }: BuildAppOptions) {
   const app = Fastify({ logger });
@@ -42,8 +57,143 @@ export function buildApp({
 
   void app.register(cors, {
     origin: webOrigins,
+    credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
   });
+
+  async function authorizeCallAccess(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    options: { callId?: string; mutation?: boolean } = {}
+  ): Promise<{ userId: string | null } | null> {
+    if (
+      options.mutation &&
+      !hasAllowedOrigin(request.headers.origin, webOrigins)
+    ) {
+      await reply.status(403).send({ error: "INVALID_ORIGIN" });
+      return null;
+    }
+    if (!authService && !allowAnonymousCallsForTesting) {
+      await reply.status(503).send({ error: "AUTHENTICATION_UNAVAILABLE" });
+      return null;
+    }
+    const user = authService
+      ? await authService.authenticate(sessionTokenFromHeaders(request.headers))
+      : null;
+    if (authService && !user) {
+      await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      return null;
+    }
+    const userId = user?.id ?? null;
+    if (options.callId) {
+      try {
+        await service.assertOwned(options.callId, userId);
+      } catch (error) {
+        await sendRepositoryError(reply, error);
+        return null;
+      }
+    }
+    return { userId };
+  }
+
+  if (authService) {
+    app.post("/api/auth/register", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = registrationInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "INVALID_REGISTRATION",
+          issues: parsed.error.flatten()
+        });
+      }
+      try {
+        return reply
+          .status(202)
+          .send(await authService.register(parsed.data, authContext(request)));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/verification/resend", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = verificationResendInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_VERIFICATION_REQUEST" });
+      }
+      try {
+        return reply.status(202).send(
+          await authService.resendVerification(parsed.data, authContext(request))
+        );
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/verify-phone", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = phoneVerificationInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_VERIFICATION_REQUEST" });
+      }
+      try {
+        const session = await authService.verifyPhone(
+          parsed.data,
+          authContext(request)
+        );
+        setSessionCookie(reply, session.token, session.expiresAt, secureCookies);
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send({ user: session.user });
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/login", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = loginInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_LOGIN" });
+      }
+      try {
+        const session = await authService.login(parsed.data, authContext(request));
+        setSessionCookie(reply, session.token, session.expiresAt, secureCookies);
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send({ user: session.user });
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/logout", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      await authService.logout(sessionTokenFromHeaders(request.headers));
+      clearSessionCookie(reply, secureCookies);
+      return reply.status(204).send();
+    });
+
+    app.get("/api/auth/me", async (request, reply) => {
+      const user = await authService.authenticate(
+        sessionTokenFromHeaders(request.headers)
+      );
+      if (!user) return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send({ user });
+    });
+  }
 
   app.get("/health", async (_request, reply) => {
     try {
@@ -65,6 +215,8 @@ export function buildApp({
   app.get<{
     Querystring: { limit?: string; cursor?: string; search?: string; status?: string };
   }>("/api/call-briefs", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply);
+    if (!access) return;
     const limit = request.query.limit === undefined ? 20 : Number(request.query.limit);
     const search = request.query.search?.trim();
     const status = request.query.status
@@ -83,6 +235,7 @@ export function buildApp({
     }
     return service.list({
       limit,
+      userId: access.userId,
       ...(cursor ? { cursor } : {}),
       ...(search ? { search } : {}),
       ...(status?.success ? { status: status.data } : {})
@@ -90,6 +243,8 @@ export function buildApp({
   });
 
   app.post("/api/call-briefs", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply, { mutation: true });
+    if (!access) return;
     const parsed = createCallBriefInputSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -99,7 +254,9 @@ export function buildApp({
     }
 
     try {
-      return reply.status(201).send(await service.create(parsed.data));
+      return reply.status(201).send(
+        await service.create(parsed.data, access.userId)
+      );
     } catch (error) {
       logCallPreparationError(request.log, error);
       return sendRepositoryError(reply, error);
@@ -109,6 +266,10 @@ export function buildApp({
   app.get<{ Params: { id: string } }>(
     "/api/call-briefs/:id",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id
+      });
+      if (!access) return;
       const snapshot = await service.get(request.params.id);
       if (!snapshot) return reply.status(404).send({ error: "CALL_NOT_FOUND" });
       return snapshot;
@@ -118,6 +279,11 @@ export function buildApp({
   app.put<{ Params: { id: string } }>(
     "/api/call-briefs/:id",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       const parsed = createCallBriefInputSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
@@ -137,6 +303,10 @@ export function buildApp({
   app.get<{ Params: { id: string } }>(
     "/api/call-briefs/:id/recording",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id
+      });
+      if (!access) return;
       try {
         const media = await service.getRecordingMedia(request.params.id);
         return reply
@@ -156,6 +326,11 @@ export function buildApp({
   app.delete<{ Params: { id: string } }>(
     "/api/call-briefs/:id/recording",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       try {
         return await service.deleteRecording(request.params.id);
       } catch (error) {
@@ -167,6 +342,11 @@ export function buildApp({
   app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/final-transcript/retry",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       try {
         return reply
           .status(202)
@@ -180,6 +360,11 @@ export function buildApp({
   app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/approve",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       try {
         return await service.approveCompilation(request.params.id);
       } catch (error) {
@@ -191,6 +376,11 @@ export function buildApp({
   app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/approve-and-start",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       try {
         return await service.approveAndStart(request.params.id);
       } catch (error) {
@@ -202,6 +392,11 @@ export function buildApp({
   app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/start",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       try {
         return await service.start(request.params.id);
       } catch (error) {
@@ -213,6 +408,11 @@ export function buildApp({
   app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/stop",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       try {
         return await service.stop(request.params.id);
       } catch (error) {
@@ -224,6 +424,11 @@ export function buildApp({
   app.post<{ Params: { id: string; approvalId: string } }>(
     "/api/call-briefs/:id/approvals/:approvalId",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
       const parsed = approvalDecisionSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_DECISION" });
@@ -244,6 +449,10 @@ export function buildApp({
   app.get<{ Params: { id: string } }>(
     "/api/call-briefs/:id/events",
     async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id
+      });
+      if (!access) return;
       const snapshot = await service.get(request.params.id);
       if (!snapshot) return reply.status(404).send({ error: "CALL_NOT_FOUND" });
 
@@ -256,6 +465,7 @@ export function buildApp({
       const requestOrigin = request.headers.origin;
       if (requestOrigin && webOrigins.includes(requestOrigin)) {
         headers["Access-Control-Allow-Origin"] = requestOrigin;
+        headers["Access-Control-Allow-Credentials"] = "true";
         headers.Vary = "Origin";
       }
       reply.raw.writeHead(200, headers);
@@ -278,10 +488,95 @@ export function buildApp({
   );
 
   app.addHook("onClose", async () => {
-    await service.close();
+    await Promise.all([service.close(), authService?.close()]);
   });
 
   return app;
+}
+
+const sessionCookieName = "callassist_session";
+
+function authContext(request: {
+  ip: string;
+  headers: { "user-agent"?: string };
+}) {
+  return { ip: request.ip, userAgent: request.headers["user-agent"] };
+}
+
+function hasAllowedOrigin(origin: string | undefined, webOrigins: string[]) {
+  return origin === undefined || webOrigins.includes(origin);
+}
+
+function sessionTokenFromHeaders(headers: { cookie?: string }) {
+  const cookie = headers.cookie;
+  if (!cookie) return undefined;
+  for (const part of cookie.split(";")) {
+    const [name, ...valueParts] = part.trim().split("=");
+    if (name === sessionCookieName) return valueParts.join("=") || undefined;
+  }
+  return undefined;
+}
+
+function setSessionCookie(
+  reply: { header(name: string, value: string): unknown },
+  token: string,
+  expiresAt: string,
+  secure: boolean
+) {
+  const maxAge = Math.max(
+    0,
+    Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1_000)
+  );
+  reply.header(
+    "Set-Cookie",
+    [
+      `${sessionCookieName}=${token}`,
+      "Path=/",
+      "HttpOnly",
+      "SameSite=Lax",
+      `Max-Age=${maxAge}`,
+      `Expires=${new Date(expiresAt).toUTCString()}`,
+      ...(secure ? ["Secure"] : [])
+    ].join("; ")
+  );
+}
+
+function clearSessionCookie(
+  reply: { header(name: string, value: string): unknown },
+  secure: boolean
+) {
+  reply.header(
+    "Set-Cookie",
+    [
+      `${sessionCookieName}=`,
+      "Path=/",
+      "HttpOnly",
+      "SameSite=Lax",
+      "Max-Age=0",
+      "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+      ...(secure ? ["Secure"] : [])
+    ].join("; ")
+  );
+}
+
+function sendAuthError(
+  reply: {
+    header(name: string, value: string): unknown;
+    status(code: number): { send(payload: unknown): unknown };
+  },
+  error: unknown
+) {
+  if (!(error instanceof AuthServiceError)) throw error;
+  if (error.code === "RATE_LIMITED") {
+    reply.header("Retry-After", String(error.retryAfterSeconds ?? 1));
+    return reply.status(429).send({ error: error.code });
+  }
+  const status = error.code === "VERIFICATION_UNAVAILABLE"
+    ? 503
+    : error.code === "INVALID_CREDENTIALS" || error.code === "INVALID_VERIFICATION"
+      ? 401
+      : 403;
+  return reply.status(status).send({ error: error.code });
 }
 
 function resolveWebOrigins(value?: string | string[]) {

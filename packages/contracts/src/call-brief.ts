@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-export const DEFAULT_REPRESENTED_PERSON = "Ivan Slavinskyi";
+export const personNamePartSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a name")
+  .max(80);
+
+export function formatPersonName(firstName: string, lastName: string) {
+  return `${firstName.trim()} ${lastName.trim()}`;
+}
 
 export const SUPPORTED_CALL_LANGUAGES = [
   { locale: "de-CH", label: "German (Switzerland)", shortLabel: "DE-CH" },
@@ -205,8 +213,7 @@ const callBriefStoredFieldsSchema = z.object({
     .string()
     .trim()
     .min(2, "Enter the person represented by the assistant")
-    .max(160)
-    .default(DEFAULT_REPRESENTED_PERSON),
+    .max(161),
   assistanceReason: assistanceReasonSchema,
   context: z.string().trim().max(12_000).default(""),
   locale: callLocaleSchema,
@@ -219,14 +226,25 @@ const callBriefStoredFieldsSchema = z.object({
     .default([])
 });
 
-const callBriefInputBaseSchema = callBriefStoredFieldsSchema.extend({
-  resultHandling: callResultHandlingSchema.default("capture_in_callassist"),
-  addressingMode: callAddressingModeSchema.default("formal"),
-  tonePreference: callTonePreferenceSchema.default("auto"),
-  voicemailPolicy: voicemailPolicySchema.default("do_not_leave_details"),
-  deliveryInstruction: z.string().trim().max(1_000).default(""),
-  clarificationAnswers: z.array(clarificationAnswerSchema).max(10).default([])
-});
+const callBriefInputBaseSchema = callBriefStoredFieldsSchema
+  .omit({ representedPerson: true })
+  .extend({
+    representedPersonFirstName: personNamePartSchema,
+    representedPersonLastName: personNamePartSchema,
+    resultHandling: callResultHandlingSchema.default("capture_in_callassist"),
+    addressingMode: callAddressingModeSchema.default("formal"),
+    tonePreference: callTonePreferenceSchema.default("auto"),
+    voicemailPolicy: voicemailPolicySchema.default("do_not_leave_details"),
+    deliveryInstruction: z.string().trim().max(1_000).default(""),
+    clarificationAnswers: z.array(clarificationAnswerSchema).max(10).default([])
+  })
+  .transform((input) => ({
+    ...input,
+    representedPerson: formatPersonName(
+      input.representedPersonFirstName,
+      input.representedPersonLastName
+    )
+  }));
 
 function validateLanguagePolicy(
   input: {

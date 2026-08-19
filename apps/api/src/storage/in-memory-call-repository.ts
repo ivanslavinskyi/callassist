@@ -46,10 +46,14 @@ function copy<T>(value: T): T {
 export class InMemoryCallRepository implements CallRepository {
   readonly mode = "memory" as const;
   readonly #calls = new Map<string, CallSnapshot>();
+  readonly #owners = new Map<string, string | null>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
 
   async list(input: ListCallBriefsInput) {
     const filtered = [...this.#calls.values()]
+      .filter(({ brief }) =>
+        this.#owners.get(brief.id) === (input.userId ?? null)
+      )
       .map(({ brief }) => copy(brief))
       .filter((brief) => !input.status || brief.status === input.status)
       .filter((brief) =>
@@ -72,7 +76,11 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
-  async create(input: CreateCallBriefInput, compilation: CallCompilation) {
+  async create(
+    input: CreateCallBriefInput,
+    compilation: CallCompilation,
+    userId: string | null = null
+  ) {
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
     const now = new Date().toISOString();
@@ -92,8 +100,13 @@ export class InMemoryCallRepository implements CallRepository {
       recording: null,
       finalTranscript: null
     });
+    this.#owners.set(brief.id, userId);
 
     return copy(brief);
+  }
+
+  async isOwnedBy(id: string, userId: string | null) {
+    return this.#calls.has(id) && this.#owners.get(id) === userId;
   }
 
   async recompile(
