@@ -371,6 +371,201 @@ describe("auth API", () => {
     expect(started.statusCode).toBe(200);
   });
 
+  it("accepts a public opt-out only after SMS proof and blocks future calls", async () => {
+    const { app, callRepository } = createAuthApp();
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/recipient-opt-out/verification",
+      payload: { phoneE164: "not-a-phone" }
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const foreignOrigin = await app.inject({
+      method: "POST",
+      url: "/api/recipient-opt-out/verification",
+      headers: { origin: "https://attacker.example" },
+      payload: { phoneE164: callBrief.phoneNumber }
+    });
+    expect(foreignOrigin.statusCode).toBe(403);
+
+    const requested = await app.inject({
+      method: "POST",
+      url: "/api/recipient-opt-out/verification",
+      payload: { phoneE164: callBrief.phoneNumber }
+    });
+    expect(requested.statusCode).toBe(202);
+    expect(requested.json()).toEqual({ status: "verification_required" });
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/recipient-opt-out/confirm",
+      payload: { phoneE164: callBrief.phoneNumber, code: "999999" }
+    });
+    expect(rejected.statusCode).toBe(401);
+    expect(rejected.json()).toEqual({ error: "INVALID_OPT_OUT_VERIFICATION" });
+
+    const confirmed = await app.inject({
+      method: "POST",
+      url: "/api/recipient-opt-out/confirm",
+      payload: { phoneE164: callBrief.phoneNumber, code: "123456" }
+    });
+    expect(confirmed.statusCode).toBe(200);
+    expect(confirmed.json()).toEqual({ status: "suppressed" });
+    expect(callRepository.safetyEventsForTest()).toContainEqual({
+      eventType: "recipient.suppressed",
+      actorUserId: null,
+      phoneE164: callBrief.phoneNumber,
+      source: "recipient_request",
+      reason: "Recipient confirmed public opt-out by SMS"
+    });
+
+    const cookie = await registerAndVerify(app, registration);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie },
+      payload: callBrief
+    });
+    const callId = created.json<{ id: string }>().id;
+    await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/approve`,
+      headers: { cookie }
+    });
+    const blocked = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie }
+    });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json()).toEqual({ error: "RECIPIENT_SUPPRESSED" });
+  });
+
+  it("allows only administrators to suppress or lift recipients as staff", async () => {
+    const { app, repository, callRepository } = createAuthApp();
+    const adminRegistration = {
+      ...registration,
+      email: "safety-admin@example.com",
+      phoneE164: "+41710000005"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const userCookie = await registerAndVerify(app, registration);
+    const [adminMe, userMe] = await Promise.all([
+      app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { cookie: adminCookie }
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { cookie: userCookie }
+      })
+    ]);
+    const adminId = adminMe.json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+    await repository.setUserRoleForTest(userMe.json().user.id, "support");
+
+    const forbidden = await app.inject({
+      method: "POST",
+      url: "/api/admin/recipient-suppressions",
+      headers: { cookie: userCookie },
+      payload: {
+        phoneE164: callBrief.phoneNumber,
+        source: "staff",
+        reason: "Support request received"
+      }
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json()).toEqual({ error: "ADMIN_ACTION_FORBIDDEN" });
+
+    const suppressed = await app.inject({
+      method: "POST",
+      url: "/api/admin/recipient-suppressions",
+      headers: { cookie: adminCookie },
+      payload: {
+        phoneE164: callBrief.phoneNumber,
+        source: "complaint",
+        reason: "Complaint verified by support"
+      }
+    });
+    expect(suppressed.statusCode).toBe(200);
+    expect(suppressed.json()).toEqual({ status: "suppressed" });
+    const duplicateSuppression = await app.inject({
+      method: "POST",
+      url: "/api/admin/recipient-suppressions",
+      headers: { cookie: adminCookie },
+      payload: {
+        phoneE164: callBrief.phoneNumber,
+        source: "staff",
+        reason: "Duplicate operator request"
+      }
+    });
+    expect(duplicateSuppression.json()).toEqual({
+      status: "already_suppressed"
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie: userCookie },
+      payload: callBrief
+    });
+    const callId = created.json<{ id: string }>().id;
+    await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/approve`,
+      headers: { cookie: userCookie }
+    });
+    expect((await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie: userCookie }
+    })).statusCode).toBe(403);
+
+    const lifted = await app.inject({
+      method: "POST",
+      url: "/api/admin/recipient-suppressions/lift",
+      headers: { cookie: adminCookie },
+      payload: {
+        phoneE164: callBrief.phoneNumber,
+        reason: "Recipient identity and consent re-verified"
+      }
+    });
+    expect(lifted.statusCode).toBe(200);
+    expect(lifted.json()).toEqual({ status: "lifted" });
+    const duplicateLift = await app.inject({
+      method: "POST",
+      url: "/api/admin/recipient-suppressions/lift",
+      headers: { cookie: adminCookie },
+      payload: {
+        phoneE164: callBrief.phoneNumber,
+        reason: "Duplicate lift request"
+      }
+    });
+    expect(duplicateLift.json()).toEqual({ status: "not_suppressed" });
+    expect(callRepository.safetyEventsForTest().slice(-2)).toEqual([
+      {
+        eventType: "recipient.suppressed",
+        actorUserId: adminId,
+        phoneE164: callBrief.phoneNumber,
+        source: "complaint",
+        reason: "Complaint verified by support"
+      },
+      {
+        eventType: "recipient.suppression_lifted",
+        actorUserId: adminId,
+        phoneE164: callBrief.phoneNumber,
+        reason: "Recipient identity and consent re-verified"
+      }
+    ]);
+    expect((await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`,
+      headers: { cookie: userCookie }
+    })).statusCode).toBe(200);
+  });
+
   it("rejects an incorrect SMS verification code without creating a session", async () => {
     const { app } = createAuthApp();
     await app.inject({ method: "POST", url: "/api/auth/register", payload: registration });

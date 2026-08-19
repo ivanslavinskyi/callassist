@@ -391,6 +391,17 @@ describeWithDatabase("PostgresCallRepository", () => {
       WHERE actor_user_id = ${safetyOwner}
     `;
     expect(eventRows[0]?.count).toBeGreaterThanOrEqual(4);
+    const [suppressionEvent] = await inspection<{ source: string | null }[]>`
+      SELECT metadata ->> 'source' AS source
+      FROM safety_events
+      WHERE
+        actor_user_id = ${safetyOwner}
+        AND phone_e164 = ${phoneE164}
+        AND event_type = 'recipient.suppressed'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    expect(suppressionEvent?.source).toBe("recipient_request");
     await expect(inspection`
       UPDATE safety_events
       SET reason = 'tampered'

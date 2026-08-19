@@ -62,6 +62,17 @@ export class InMemoryCallRepository implements CallRepository {
     string,
     RecipientSuppressionInput & { createdAt: string }
   >();
+  readonly #safetyEvents: Array<{
+    eventType:
+      | "recipient.suppressed"
+      | "recipient.suppression_lifted"
+      | "outbound_calls.enabled"
+      | "outbound_calls.disabled";
+    actorUserId: string | null;
+    phoneE164: string | null;
+    source?: RecipientSuppressionInput["source"];
+    reason: string;
+  }> = [];
   #outboundCallsEnabled = true;
 
   async list(input: ListCallBriefsInput) {
@@ -157,15 +168,34 @@ export class InMemoryCallRepository implements CallRepository {
         reason,
         createdAt: new Date().toISOString()
       });
+      this.#safetyEvents.push({
+        eventType: "recipient.suppressed",
+        actorUserId: input.actorUserId ?? null,
+        phoneE164,
+        source: input.source,
+        reason
+      });
+      return true;
     }
+    return false;
   }
 
   async liftRecipientSuppression(
     phoneE164: string,
     input: SafetyControlInput
   ) {
-    requireReason(input.reason);
-    this.#recipientSuppressions.delete(requireSwissPhone(phoneE164));
+    const reason = requireReason(input.reason);
+    const normalizedPhone = requireSwissPhone(phoneE164);
+    if (this.#recipientSuppressions.delete(normalizedPhone)) {
+      this.#safetyEvents.push({
+        eventType: "recipient.suppression_lifted",
+        actorUserId: input.actorUserId ?? null,
+        phoneE164: normalizedPhone,
+        reason
+      });
+      return true;
+    }
+    return false;
   }
 
   async setOutboundCallsEnabled(
@@ -174,6 +204,16 @@ export class InMemoryCallRepository implements CallRepository {
   ) {
     requireReason(input.reason);
     this.#outboundCallsEnabled = enabled;
+    this.#safetyEvents.push({
+      eventType: enabled ? "outbound_calls.enabled" : "outbound_calls.disabled",
+      actorUserId: input.actorUserId ?? null,
+      phoneE164: null,
+      reason: input.reason.trim()
+    });
+  }
+
+  safetyEventsForTest() {
+    return copy(this.#safetyEvents);
   }
 
   #buildCreditUsage(userId: string): CreditUsage {

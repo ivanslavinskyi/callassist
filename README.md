@@ -198,6 +198,18 @@ corepack pnpm --filter @callassist/api calls:disable -- "Incident reference and 
 corepack pnpm --filter @callassist/api calls:enable -- "Incident resolved"
 ```
 
+Recipients can block future calls to their Swiss number at `/en/opt-out` or
+`/de/opt-out`. The public API sends an SMS through the configured verification
+provider and creates the global suppression only after the code is approved. Sends
+and checks are rate-limited by hashed phone and IP; no CallAssist account is required.
+The resulting immutable safety event records the recipient-request source without a
+staff actor. Active `admin` and `superadmin` accounts can process staff requests or
+reviewed complaints and audited lifts at `/en/admin/safety` or `/de/admin/safety`.
+The API routes are `POST /api/admin/recipient-suppressions` and
+`POST /api/admin/recipient-suppressions/lift`; both require an explicit reason and an
+allowed browser origin. A lift should be used only after identity and renewed consent
+have been verified.
+
 Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick Tunnel URLs change between sessions, so update `PUBLIC_BASE_URL` whenever a new tunnel is created. Quick Tunnel is for development only and has no uptime guarantee.
 
 ## Quality checks
@@ -220,8 +232,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   deterministic server-side policy boundary.
 - Evaluate semantic preservation, call success, latency, live/final transcription,
   Swiss German, multilingual input, and adversarial prompts.
-- Complete public/staff recipient opt-out workflows, remaining abuse thresholds, and
-  endpoint rate limits before accepting public data.
+- Add complaint intake/ownership, remaining abuse thresholds, and distributed
+  endpoint rate limits before accepting public data at multiple API instances.
 - Add interface internationalization, an accessible onboarding flow, and a public
   landing page.
 - Add durable background jobs, production deployment, observability, compliance,

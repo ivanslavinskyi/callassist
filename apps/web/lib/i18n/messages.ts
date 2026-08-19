@@ -89,6 +89,8 @@ export type Messages = {
     switchToDarkTheme: string;
     skipToContent: string;
     defaultTitle: string;
+    optOut: string;
+    safety: string;
     creditsRemaining: (count: number) => string;
   };
   dialog: {
@@ -276,6 +278,8 @@ const en: Messages = {
     switchToDarkTheme: "Switch to dark theme",
     skipToContent: "Skip to main content",
     defaultTitle: "CallAssist — controlled AI phone calls",
+    optOut: "Stop calls",
+    safety: "Safety",
     creditsRemaining: (count: number) =>
       `${count} call ${count === 1 ? "credit" : "credits"}`
   },
@@ -425,6 +429,8 @@ const de: Messages = {
     switchToDarkTheme: "Zum dunklen Design wechseln",
     skipToContent: "Zum Hauptinhalt springen",
     defaultTitle: "CallAssist — kontrollierte KI-Telefonanrufe",
+    optOut: "Anrufe sperren",
+    safety: "Sicherheit",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {

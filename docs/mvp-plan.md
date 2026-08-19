@@ -115,7 +115,7 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 
 - [ ] Enforce hourly/daily call and duration limits, concurrency, repeat-recipient limits, and thresholds for decline/no-consent/failure/policy blocks. **Partial:** hourly/daily, concurrency, repeat-recipient, and maximum-duration controls are implemented and tested; outcome-specific thresholds remain.
 - [x] Add global `recipient_suppressions` with normalized phone, time, source, reason, actor/audit data; check immediately before provider call creation.
-- [ ] Add public opt-out and staff suppression workflow. Spoken in-call opt-out is P2.
+- [x] Add public opt-out and staff suppression workflow. The localized public form requires SMS proof of control and hashed phone/IP rate limits before a global block; the localized safety form and API restrict staff/complaint blocks and audited lifts to active admin/superadmin accounts with an explicit reason. Spoken in-call opt-out remains P2.
 - [x] Implement audited account suspension and session blocking/revocation policy. Suspension atomically revokes all sessions; unsuspension never restores them; concurrent session creation and PostgreSQL call creation/reservation are blocked; force logout is a separate audited action.
 - [x] Add a global kill switch that blocks new calls/reservations without ending active calls unless separately commanded. Changes require a reason and append immutable safety events; an operator CLI is available for PostgreSQL deployments.
 - [ ] Rate-limit registration, auth/recovery, compilation, call create/start, exports, playback, and costly endpoints; detect mass accounts without logging unnecessary PII. **Partial:** registration/auth, shared create/recompile preparation, shared start/approve-and-start, recording download, and transcription retry limits are enforced by hashed user/IP with `Retry-After` and a bounded process-local bucket store. Recovery/export endpoints and durable cross-instance state remain.
@@ -185,15 +185,15 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 ### P0 — minimum safe operations
 
 - [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** backend account-status and force-logout routes already enforce admin/superadmin RBAC, privileged-target rules, self-action denial, and origin checks.
-- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events are immutable and include actor, target, transition, reason, and time.
-- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** suspend/unsuspend, force logout, suppression storage, and the kill-switch operator command exist; lookup, credit grants, and consolidated admin UI remain.
+- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events and suppression/lift safety events are immutable and include the applicable actor, target/source, reason, and time.
+- [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** suspend/unsuspend, force logout, localized suppression actions, and the kill-switch operator command exist; lookup, credit grants, and a consolidated admin UI remain.
 
 ### P1 — admin areas
 
 - [ ] `/admin`: user, call, outcome/consent/failure, cost, and system-health metrics.
 - [ ] `/admin/users` and detail: identity/verification, activity/status, ledger/promos, calls/feedback/safety/complaints, and audited grant/suspend/session/delete actions.
 - [ ] `/admin/calls` and detail: user/recipient (controlled), locale, status/outcome, duration, consent, recording/transcription, failure stage, and useful failure/policy/model/language/date filters.
-- [ ] `/admin/safety`: blocks, repeat recipients, no-consent/declines, opt-outs, complaints, suspicious registration/credits, anomaly review and actions.
+- [ ] `/admin/safety`: blocks, repeat recipients, no-consent/declines, opt-outs, complaints, suspicious registration/credits, anomaly review and actions. **Partial:** an RBAC-protected localized form now creates staff/complaint suppressions and audited lifts; list/search, anomaly queues, call context, and complaint review remain.
 - [ ] `/admin/credits`: ledger, grants/adjustments, promo/redemption/expiry/campaign; no silent balance edits.
 - [ ] `/admin/audit`: actor/action/target/time/result filters and immutable evidence.
 
@@ -272,7 +272,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Recipient suppression/opt-out checked before provider call.
 - [x] Audited admin suspension and session revocation/blocking.
 - [x] Global kill switch blocks new calls without implicitly ending active calls.
-- [ ] Localized landing, auth/onboarding, support, opt-out live.
+- [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** EN/DE registration, verification, login, and SMS-verified public opt-out routes are live; landing, onboarding, and support remain.
 - [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live.
 - [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance.
 - [ ] Localized metadata, canonical, hreflang, robots, sitemap verified.
@@ -295,7 +295,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Admin Users workflows.
 - [ ] Transactional promo codes and ledger grants.
 - [ ] Account/data export/delete and session revocation tested.
-- [ ] Support/complaint/suppression workflow with owners and targets.
+- [ ] Support/complaint/suppression workflow with owners and targets. **Partial:** staff/complaint suppression and lift actions are RBAC-protected and audited, but complaint intake, ownership, escalation, and response targets remain.
 - [ ] CI and `main` branch protection.
 - [ ] SEO audit.
 - [ ] Quality/safety evaluation meets thresholds.

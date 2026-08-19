@@ -6,7 +6,11 @@ import type {
   CreateCallBriefInput,
   LoginInput,
   PhoneVerificationInput,
+  RecipientOptOutConfirmation,
+  RecipientOptOutRequest,
   RegistrationInput,
+  StaffRecipientSuppression,
+  StaffRecipientSuppressionLift,
   User,
   VerificationResendInput
 } from "@callassist/contracts";
@@ -95,6 +99,40 @@ export async function getCreditUsage() {
 
 export async function logout() {
   return apiRequest<void>("/api/auth/logout", { method: "POST" });
+}
+
+export async function requestRecipientOptOut(input: RecipientOptOutRequest) {
+  return apiRequest<{ status: "verification_required" }>(
+    "/api/recipient-opt-out/verification",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function confirmRecipientOptOut(
+  input: RecipientOptOutConfirmation
+) {
+  return apiRequest<{ status: "suppressed" | "already_suppressed" }>(
+    "/api/recipient-opt-out/confirm",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function suppressRecipientAsStaff(
+  input: StaffRecipientSuppression
+) {
+  return apiRequest<{ status: "suppressed" }>(
+    "/api/admin/recipient-suppressions",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function liftRecipientSuppressionAsStaff(
+  input: StaffRecipientSuppressionLift
+) {
+  return apiRequest<{ status: "lifted" | "not_suppressed" }>(
+    "/api/admin/recipient-suppressions/lift",
+    { method: "POST", body: JSON.stringify(input) }
+  );
 }
 
 export function getCallPreparationErrorMessage(

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { getCreditUsage } from "@/lib/api";
+import { getCreditUsage, getCurrentUser } from "@/lib/api";
 import { useUiLocale } from "./ui-locale-provider";
 
 export function Brand() {
@@ -27,12 +27,27 @@ export function Brand() {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { locale, messages } = useUiLocale();
+  const { locale, localizeHref, messages } = useUiLocale();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [canManageSafety, setCanManageSafety] = useState(false);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getCurrentUser()
+      .then(({ user }) => {
+        if (active) {
+          setCanManageSafety(["admin", "superadmin"].includes(user.role));
+        }
+      })
+      .catch(() => {
+        if (active) setCanManageSafety(false);
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -77,6 +92,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
+          <Link className="topbar-link" href={localizeHref("/opt-out")}>
+            {messages.app.optOut}
+          </Link>
+          {canManageSafety ? (
+            <Link className="topbar-link" href={localizeHref("/admin/safety")}>
+              {messages.app.safety}
+            </Link>
+          ) : null}
           {creditBalance !== null ? (
             <span
               aria-label={messages.app.creditsRemaining(creditBalance)}

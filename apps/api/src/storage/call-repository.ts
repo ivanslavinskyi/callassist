@@ -161,11 +161,11 @@ export interface CallRepository {
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   grantSignupCredits(userId: string): Promise<CreditUsage>;
   getCreditUsage(userId: string): Promise<CreditUsage>;
-  suppressRecipient(input: RecipientSuppressionInput): Promise<void>;
+  suppressRecipient(input: RecipientSuppressionInput): Promise<boolean>;
   liftRecipientSuppression(
     phoneE164: string,
     input: SafetyControlInput
-  ): Promise<void>;
+  ): Promise<boolean>;
   setOutboundCallsEnabled(
     enabled: boolean,
     input: SafetyControlInput

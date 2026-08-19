@@ -112,6 +112,17 @@ main:focus { outline: none; }
 .auth-alternative { color: var(--muted); font-size: 13px; margin: 24px 0 0; text-align: center; }
 .auth-alternative a { color: var(--green); font-weight: 750; }
 
+.safety-form-grid { display: grid; gap: 22px; grid-template-columns: 1fr 1fr; }
+.safety-form {
+  align-content: start;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+}
+.safety-form h2 { font-size: 18px; margin: 0 0 8px; }
+.safety-form p { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; }
+
 .topbar {
   align-items: center;
   border-bottom: 1px solid rgba(20, 35, 31, 0.08);
@@ -155,6 +166,15 @@ main:focus { outline: none; }
 }
 
 .topbar-actions { align-items: center; display: flex; gap: 14px; }
+
+.topbar-link {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.topbar-link:hover { color: var(--green-deep); }
 
 .credit-balance {
   align-items: center;
@@ -1153,6 +1173,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .auth-page { min-height: calc(100vh - 66px); padding: 30px 16px 50px; }
   .auth-card { border-radius: 19px; padding: 25px 22px; }
   .auth-name-grid { grid-template-columns: 1fr; }
+  .safety-form-grid { grid-template-columns: 1fr; }
   .dashboard-page, .live-page { padding: 38px 18px 60px; }
   .hero-block { margin-bottom: 30px; }
   .hero-block h1 { font-size: 36px; }

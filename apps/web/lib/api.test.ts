@@ -2,13 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   approveAndStartCall,
+  confirmRecipientOptOut,
   createCallBrief,
   getCreditUsage,
   getCallPreparationErrorMessage,
   login,
+  liftRecipientSuppressionAsStaff,
   logout,
   registerAccount,
   recompileCallBrief,
+  requestRecipientOptOut,
+  suppressRecipientAsStaff,
   startCall
 } from "./api";
 
@@ -100,6 +104,50 @@ describe("API client headers", () => {
     await expect(getCreditUsage()).resolves.toMatchObject({ balance: 3 });
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/usage");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
+  });
+
+  it("sends public opt-out and staff suppression actions to dedicated routes", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ status: "verification_required" }),
+        { status: 202, headers: { "Content-Type": "application/json" } }
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ status: "suppressed" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ status: "suppressed" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ status: "lifted" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestRecipientOptOut({ phoneE164: "+41791234567" });
+    await confirmRecipientOptOut({ phoneE164: "+41791234567", code: "123456" });
+    await suppressRecipientAsStaff({
+      phoneE164: "+41791234567",
+      source: "complaint",
+      reason: "Complaint verified by support"
+    });
+    await liftRecipientSuppressionAsStaff({
+      phoneE164: "+41791234567",
+      reason: "Recipient consent re-verified"
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/api/recipient-opt-out/verification"),
+      expect.stringContaining("/api/recipient-opt-out/confirm"),
+      expect.stringContaining("/api/admin/recipient-suppressions"),
+      expect.stringContaining("/api/admin/recipient-suppressions/lift")
+    ]);
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).method).toBe("POST");
+      expect((call[1] as RequestInit).credentials).toBe("include");
+    }
   });
 
   it("declares JSON when a request has a body", async () => {

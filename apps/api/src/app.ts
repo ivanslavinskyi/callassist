@@ -8,8 +8,12 @@ import {
   createCallBriefInputSchema,
   loginInputSchema,
   phoneVerificationInputSchema,
+  recipientOptOutConfirmationSchema,
+  recipientOptOutRequestSchema,
   registrationInputSchema,
   sessionRevocationActionSchema,
+  staffRecipientSuppressionLiftSchema,
+  staffRecipientSuppressionSchema,
   verificationResendInputSchema,
   type CallEvent
 } from "@callassist/contracts";
@@ -27,6 +31,10 @@ import {
   type EndpointRateLimitRule
 } from "./config/endpoint-rate-limit-policy";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
+import {
+  RecipientOptOutService,
+  RecipientOptOutServiceError
+} from "./safety/recipient-opt-out-service";
 import {
   CallRepositoryError,
   decodeCallBriefCursor,
@@ -49,6 +57,7 @@ type BuildAppOptions = {
   webOrigin?: string | string[];
   endpointRateLimiter?: ApplicationRateLimiter;
   endpointRateLimitPolicy?: EndpointRateLimitPolicy;
+  recipientOptOutService?: RecipientOptOutService;
 };
 
 type BuildWebhookAppOptions = {
@@ -66,7 +75,13 @@ export function buildApp({
   secureCookies = process.env.NODE_ENV === "production",
   webOrigin = process.env.WEB_ORIGIN,
   endpointRateLimiter = new ApplicationRateLimiter(),
-  endpointRateLimitPolicy = defaultEndpointRateLimitPolicy
+  endpointRateLimitPolicy = defaultEndpointRateLimitPolicy,
+  recipientOptOutService = authService
+    ? new RecipientOptOutService({
+        repository: service.repository,
+        verificationProvider: authService.verificationProvider
+      })
+    : undefined
 }: BuildAppOptions) {
   const app = Fastify({ logger });
   const webOrigins = resolveWebOrigins(webOrigin);
@@ -131,6 +146,10 @@ export function buildApp({
       await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
       return null;
     }
+    if (user.role !== "admin" && user.role !== "superadmin") {
+      await reply.status(403).send({ error: "ADMIN_ACTION_FORBIDDEN" });
+      return null;
+    }
     return user;
   }
 
@@ -161,6 +180,49 @@ export function buildApp({
       .status(429)
       .send({ error: "RATE_LIMITED" });
     return false;
+  }
+
+  if (recipientOptOutService) {
+    app.post("/api/recipient-opt-out/verification", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = recipientOptOutRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_OPT_OUT_REQUEST" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "no-store")
+          .status(202)
+          .send(await recipientOptOutService.requestVerification(
+            parsed.data,
+            { ip: request.ip }
+          ));
+      } catch (error) {
+        return sendRecipientOptOutError(reply, error);
+      }
+    });
+
+    app.post("/api/recipient-opt-out/confirm", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = recipientOptOutConfirmationSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_OPT_OUT_CONFIRMATION" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "no-store")
+          .send(await recipientOptOutService.confirm(
+            parsed.data,
+            { ip: request.ip }
+          ));
+      } catch (error) {
+        return sendRecipientOptOutError(reply, error);
+      }
+    });
   }
 
   if (authService) {
@@ -324,6 +386,38 @@ export function buildApp({
         }
       }
     );
+
+    app.post("/api/admin/recipient-suppressions", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      const parsed = staffRecipientSuppressionSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_RECIPIENT_SUPPRESSION" });
+      }
+      const created = await service.repository.suppressRecipient({
+        ...parsed.data,
+        actorUserId: actor.id
+      });
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send({ status: created ? "suppressed" : "already_suppressed" });
+    });
+
+    app.post("/api/admin/recipient-suppressions/lift", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      const parsed = staffRecipientSuppressionLiftSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_RECIPIENT_SUPPRESSION_LIFT" });
+      }
+      const lifted = await service.repository.liftRecipientSuppression(
+        parsed.data.phoneE164,
+        { reason: parsed.data.reason, actorUserId: actor.id }
+      );
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send({ status: lifted ? "lifted" : "not_suppressed" });
+    });
   }
 
   app.get("/health", async (_request, reply) => {
@@ -757,6 +851,23 @@ function sendAuthError(
           ? 409
           : 403;
   return reply.status(status).send({ error: error.code });
+}
+
+function sendRecipientOptOutError(
+  reply: {
+    header(name: string, value: string): unknown;
+    status(code: number): { send(payload: unknown): unknown };
+  },
+  error: unknown
+) {
+  if (!(error instanceof RecipientOptOutServiceError)) throw error;
+  if (error.code === "RATE_LIMITED") {
+    reply.header("Retry-After", String(error.retryAfterSeconds ?? 1));
+    return reply.status(429).send({ error: error.code });
+  }
+  return reply
+    .status(error.code === "VERIFICATION_UNAVAILABLE" ? 503 : 401)
+    .send({ error: error.code });
 }
 
 function resolveWebOrigins(value?: string | string[]) {

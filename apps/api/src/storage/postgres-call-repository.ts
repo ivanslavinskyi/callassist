@@ -334,6 +334,7 @@ export class PostgresCallRepository implements CallRepository {
     const phoneE164 = requireSwissPhone(input.phoneE164);
     const reason = requireReason(input.reason);
     const now = new Date();
+    let created = false;
     await this.#sql.begin(async (transaction) => {
       await this.#lockRecipient(transaction, phoneE164);
       const inserted = await transaction`
@@ -347,13 +348,16 @@ export class PostgresCallRepository implements CallRepository {
         RETURNING id
       `;
       if (inserted.count === 0) return;
+      created = true;
       await this.#safetyEvent(transaction, {
         eventType: "recipient.suppressed",
         actorUserId: input.actorUserId ?? null,
         phoneE164,
-        reason
+        reason,
+        metadata: { source: input.source }
       });
     });
+    return created;
   }
 
   async liftRecipientSuppression(
@@ -363,6 +367,7 @@ export class PostgresCallRepository implements CallRepository {
     const phoneE164 = requireSwissPhone(phoneE164Input);
     const reason = requireReason(input.reason);
     const now = new Date();
+    let changed = false;
     await this.#sql.begin(async (transaction) => {
       await this.#lockRecipient(transaction, phoneE164);
       const lifted = await transaction`
@@ -375,6 +380,7 @@ export class PostgresCallRepository implements CallRepository {
         RETURNING id
       `;
       if (lifted.count === 0) return;
+      changed = true;
       await this.#safetyEvent(transaction, {
         eventType: "recipient.suppression_lifted",
         actorUserId: input.actorUserId ?? null,
@@ -382,6 +388,7 @@ export class PostgresCallRepository implements CallRepository {
         reason
       });
     });
+    return changed;
   }
 
   async setOutboundCallsEnabled(
@@ -1957,6 +1964,7 @@ export class PostgresCallRepository implements CallRepository {
       actorUserId: string | null;
       phoneE164: string | null;
       reason: string;
+      metadata?: Record<string, string>;
     }
   ) {
     await transaction`
@@ -1968,7 +1976,7 @@ export class PostgresCallRepository implements CallRepository {
         ${input.actorUserId},
         ${input.phoneE164},
         ${input.reason},
-        ${transaction.json({})},
+        ${transaction.json(input.metadata ?? {})},
         ${new Date()}
       )
     `;
