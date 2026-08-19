@@ -927,6 +927,109 @@ describe("auth API", () => {
     expect(selfGrant.statusCode).toBe(403);
     expect(selfGrant.json()).toEqual({ error: "CREDIT_SELF_GRANT_FORBIDDEN" });
   });
+
+  it("lets administrators search eligible users and inspect their credit ledger", async () => {
+    const { app, repository } = createAuthApp();
+    const adminRegistration = {
+      ...registration,
+      email: "lookup-admin@example.com",
+      phoneE164: "+41710000012"
+    };
+    const targetRegistration = {
+      ...registration,
+      email: "ledger-target@example.com",
+      phoneE164: "+41710000013",
+      firstName: "Ledger",
+      lastName: "Target"
+    };
+    const staffRegistration = {
+      ...registration,
+      email: "hidden-support@example.com",
+      phoneE164: "+41710000014"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const targetCookie = await registerAndVerify(app, targetRegistration);
+    const staffCookie = await registerAndVerify(app, staffRegistration);
+    const [admin, target, staff] = await Promise.all(
+      [adminCookie, targetCookie, staffCookie].map((cookie) => app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { cookie }
+      }))
+    );
+    const adminId = admin.json().user.id as string;
+    const targetId = target.json().user.id as string;
+    const staffId = staff.json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+    await repository.setUserRoleForTest(staffId, "support");
+
+    const forbidden = await app.inject({
+      method: "GET",
+      url: "/api/admin/users",
+      headers: { cookie: targetCookie }
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: "/api/admin/users?limit=500",
+      headers: { cookie: adminCookie }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toEqual({ error: "INVALID_ADMIN_USER_QUERY" });
+
+    const found = await app.inject({
+      method: "GET",
+      url: "/api/admin/users?search=ledger-target&status=active",
+      headers: { cookie: adminCookie }
+    });
+    expect(found.statusCode).toBe(200);
+    expect(found.headers["cache-control"]).toBe("private, no-store");
+    expect(found.json().items).toEqual([
+      expect.objectContaining({
+        id: targetId,
+        email: targetRegistration.email,
+        firstName: "Ledger",
+        lastName: "Target",
+        phoneVerified: true
+      })
+    ]);
+    expect(found.json().items[0]).not.toHaveProperty("phoneE164");
+    expect(found.json().items[0]).not.toHaveProperty("passwordHash");
+
+    const ledger = await app.inject({
+      method: "GET",
+      url: `/api/admin/users/${targetId}/credits`,
+      headers: { cookie: adminCookie }
+    });
+    expect(ledger.statusCode).toBe(200);
+    expect(ledger.json()).toMatchObject({
+      user: { id: targetId, email: targetRegistration.email },
+      usage: { balance: 3 }
+    });
+    expect(ledger.json().usage.transactions).toContainEqual(
+      expect.objectContaining({ type: "signup_grant", amount: 3 })
+    );
+
+    const hiddenStaff = await app.inject({
+      method: "GET",
+      url: `/api/admin/users/${staffId}/credits`,
+      headers: { cookie: adminCookie }
+    });
+    expect(hiddenStaff.statusCode).toBe(404);
+    expect(hiddenStaff.json()).toEqual({ error: "USER_NOT_FOUND" });
+
+    await repository.setUserRoleForTest(adminId, "superadmin");
+    const privileged = await app.inject({
+      method: "GET",
+      url: "/api/admin/users?role=support",
+      headers: { cookie: adminCookie }
+    });
+    expect(privileged.statusCode).toBe(200);
+    expect(privileged.json().items).toContainEqual(
+      expect.objectContaining({ id: staffId, role: "support" })
+    );
+  });
 });
 
 function promoCreation(code: string) {

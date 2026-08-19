@@ -102,6 +102,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
           {isAuthenticated ? <Link className="topbar-link" href={localizeHref("/redeem")}>{messages.app.redeem}</Link> : null}
           {canManageAdmin ? <>
+            <Link className="topbar-link" href={localizeHref("/admin/users")}>{messages.app.usersAdmin}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/safety")}>{messages.app.safety}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/credits")}>{messages.app.creditAdmin}</Link>
           </> : null}

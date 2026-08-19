@@ -1,4 +1,8 @@
-import type { UserRole, UserStatus } from "@callassist/contracts";
+import type {
+  AdminUserSummary,
+  UserRole,
+  UserStatus
+} from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import {
@@ -8,7 +12,9 @@ import {
   type AuthSessionRecord,
   type AuthUserRecord,
   type ChangeAccountStatusInput,
-  type CreateAuthUserInput
+  type CreateAuthUserInput,
+  type ListAdminUsersInput,
+  encodeAdminUserCursor
 } from "./auth-repository";
 
 type DatabaseDate = Date | string;
@@ -43,6 +49,14 @@ type AdminUserRow = {
   id: string;
   role: UserRole;
   status: UserStatus;
+};
+
+type AdminUserSummaryRow = Omit<
+  AdminUserSummary,
+  "createdAt" | "lastLoginAt"
+> & {
+  createdAt: DatabaseDate;
+  lastLoginAt: DatabaseDate | null;
 };
 
 function toIso(value: DatabaseDate) {
@@ -90,6 +104,68 @@ export class PostgresAuthRepository implements AuthRepository {
       LIMIT 1
     `;
     return row ? this.#mapUser(row) : null;
+  }
+
+  async listUsersForAdmin(input: ListAdminUsersInput) {
+    return this.#sql.begin(async (transaction) => {
+      const actor = await this.#requireAdminRead(
+        transaction,
+        input.actorUserId
+      );
+      const searchTerm = input.search
+        ? input.search.toLowerCase()
+        : null;
+      const cursorCreatedAt = input.cursor
+        ? new Date(input.cursor.createdAt)
+        : null;
+      const cursorId = input.cursor?.id ?? null;
+      const rows = await transaction<AdminUserSummaryRow[]>`
+        SELECT ${this.#adminUserSummaryColumns()}
+        FROM users
+        WHERE (${actor.role === "superadmin"} OR role = 'user')
+          AND (${input.role ?? null}::text IS NULL OR role::text = ${input.role ?? null})
+          AND (${input.status ?? null}::text IS NULL OR status::text = ${input.status ?? null})
+          AND (
+            ${searchTerm}::text IS NULL OR
+            strpos(lower(email), ${searchTerm}) > 0 OR
+            strpos(lower(first_name), ${searchTerm}) > 0 OR
+            strpos(lower(last_name), ${searchTerm}) > 0 OR
+            strpos(lower(first_name || ' ' || last_name), ${searchTerm}) > 0
+          )
+          AND (
+            ${cursorCreatedAt}::timestamptz IS NULL OR
+            (created_at, id) < (${cursorCreatedAt}, ${cursorId}::uuid)
+          )
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${input.limit + 1}
+      `;
+      const hasMore = rows.length > input.limit;
+      const items = rows
+        .slice(0, input.limit)
+        .map((row) => this.#mapAdminUserSummary(row));
+      const last = items.at(-1);
+      return {
+        items,
+        nextCursor: hasMore && last
+          ? encodeAdminUserCursor({ createdAt: last.createdAt, id: last.id })
+          : null
+      };
+    });
+  }
+
+  async findUserByIdForAdmin(actorUserId: string, targetUserId: string) {
+    return this.#sql.begin(async (transaction) => {
+      const actor = await this.#requireAdminRead(transaction, actorUserId);
+      const [row] = await transaction<AdminUserSummaryRow[]>`
+        SELECT ${this.#adminUserSummaryColumns()}
+        FROM users
+        WHERE id = ${targetUserId}
+          AND (${actor.role === "superadmin"} OR role = 'user')
+        LIMIT 1
+      `;
+      if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
+      return this.#mapAdminUserSummary(row);
+    });
   }
 
   async markPhoneVerified(userId: string, verifiedAt: string) {
@@ -289,6 +365,30 @@ export class PostgresAuthRepository implements AuthRepository {
     return { actor, target };
   }
 
+  async #requireAdminRead(
+    transaction: postgres.TransactionSql,
+    actorUserId: string
+  ) {
+    const [actor] = await transaction<(AdminUserRow & {
+      phoneVerifiedAt: DatabaseDate | null;
+    })[]>`
+      SELECT
+        id, role, status, phone_verified_at AS "phoneVerifiedAt"
+      FROM users
+      WHERE id = ${actorUserId}
+      FOR SHARE
+    `;
+    if (
+      !actor ||
+      actor.status !== "active" ||
+      !actor.phoneVerifiedAt ||
+      (actor.role !== "admin" && actor.role !== "superadmin")
+    ) {
+      throw new AuthRepositoryError("ADMIN_ACTION_FORBIDDEN");
+    }
+    return actor;
+  }
+
   async #accountAdminEvent(
     transaction: postgres.TransactionSql,
     input: {
@@ -350,10 +450,32 @@ export class PostgresAuthRepository implements AuthRepository {
     `;
   }
 
+  #adminUserSummaryColumns() {
+    return this.#sql`
+      id AS "id",
+      email AS "email",
+      first_name AS "firstName",
+      last_name AS "lastName",
+      role AS "role",
+      status AS "status",
+      (phone_verified_at IS NOT NULL) AS "phoneVerified",
+      created_at AS "createdAt",
+      last_login_at AS "lastLoginAt"
+    `;
+  }
+
   #mapUser(row: UserRow): AuthUserRecord {
     return {
       ...row,
       phoneVerifiedAt: row.phoneVerifiedAt ? toIso(row.phoneVerifiedAt) : null,
+      createdAt: toIso(row.createdAt),
+      lastLoginAt: row.lastLoginAt ? toIso(row.lastLoginAt) : null
+    };
+  }
+
+  #mapAdminUserSummary(row: AdminUserSummaryRow): AdminUserSummary {
+    return {
+      ...row,
       createdAt: toIso(row.createdAt),
       lastLoginAt: row.lastLoginAt ? toIso(row.lastLoginAt) : null
     };

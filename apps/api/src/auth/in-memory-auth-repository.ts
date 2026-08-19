@@ -5,9 +5,13 @@ import type {
   AuthSessionRecord,
   AuthUserRecord,
   ChangeAccountStatusInput,
-  CreateAuthUserInput
+  CreateAuthUserInput,
+  ListAdminUsersInput
 } from "./auth-repository";
-import { AuthRepositoryError } from "./auth-repository";
+import {
+  AuthRepositoryError,
+  encodeAdminUserCursor
+} from "./auth-repository";
 
 type AccountAdminEvent = {
   eventType:
@@ -61,6 +65,47 @@ export class InMemoryAuthRepository implements AuthRepository {
       (candidate) => candidate.email === email.toLowerCase()
     );
     return user ? structuredClone(user) : null;
+  }
+
+  async listUsersForAdmin(input: ListAdminUsersInput) {
+    const actor = this.#requireAdmin(input.actorUserId);
+    const search = input.search?.toLowerCase();
+    const filtered = [...this.#users.values()]
+      .filter((user) => actor.role === "superadmin" || user.role === "user")
+      .filter((user) => !input.role || user.role === input.role)
+      .filter((user) => !input.status || user.status === input.status)
+      .filter((user) => !search || [
+        user.email,
+        user.firstName,
+        user.lastName,
+        `${user.firstName} ${user.lastName}`
+      ].some((value) => value.toLowerCase().includes(search)))
+      .filter((user) =>
+        !input.cursor ||
+        user.createdAt < input.cursor.createdAt ||
+        (user.createdAt === input.cursor.createdAt && user.id < input.cursor.id)
+      )
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.id.localeCompare(left.id)
+      );
+    const items = filtered.slice(0, input.limit);
+    const last = items.at(-1);
+    return {
+      items: items.map(toAdminUserSummary),
+      nextCursor: filtered.length > input.limit && last
+        ? encodeAdminUserCursor({ createdAt: last.createdAt, id: last.id })
+        : null
+    };
+  }
+
+  async findUserByIdForAdmin(actorUserId: string, targetUserId: string) {
+    const actor = this.#requireAdmin(actorUserId);
+    const target = this.#users.get(targetUserId);
+    if (!target || (actor.role !== "superadmin" && target.role !== "user")) {
+      throw new AuthRepositoryError("USER_NOT_FOUND");
+    }
+    return toAdminUserSummary(target);
   }
 
   async markPhoneVerified(userId: string, verifiedAt: string) {
@@ -189,6 +234,19 @@ export class InMemoryAuthRepository implements AuthRepository {
     return { actor, target };
   }
 
+  #requireAdmin(userId: string) {
+    const actor = this.#users.get(userId);
+    if (
+      !actor ||
+      actor.status !== "active" ||
+      !actor.phoneVerifiedAt ||
+      (actor.role !== "admin" && actor.role !== "superadmin")
+    ) {
+      throw new AuthRepositoryError("ADMIN_ACTION_FORBIDDEN");
+    }
+    return actor;
+  }
+
   #revokeSessions(userId: string, revokedAt: string) {
     for (const session of this.#sessions.values()) {
       if (session.userId === userId) session.revokedAt ??= revokedAt;
@@ -202,4 +260,18 @@ function requireAdminReason(value: string) {
     throw new Error("An admin action reason between 3 and 500 characters is required");
   }
   return reason;
+}
+
+function toAdminUserSummary(record: AuthUserRecord) {
+  return {
+    id: record.id,
+    email: record.email,
+    firstName: record.firstName,
+    lastName: record.lastName,
+    role: record.role,
+    status: record.status,
+    phoneVerified: record.phoneVerifiedAt !== null,
+    createdAt: record.createdAt,
+    lastLoginAt: record.lastLoginAt
+  };
 }

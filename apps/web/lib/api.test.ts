@@ -6,8 +6,10 @@ import {
   createCallBrief,
   createPromoCode,
   getCreditUsage,
+  getAdminUserCreditLedger,
   getCallPreparationErrorMessage,
   login,
+  listAdminUsers,
   liftRecipientSuppressionAsStaff,
   logout,
   registerAccount,
@@ -107,6 +109,39 @@ describe("API client headers", () => {
     await expect(getCreditUsage()).resolves.toMatchObject({ balance: 3 });
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/usage");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
+  });
+
+  it("loads filtered admin users and a selected credit ledger", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [],
+        nextCursor: null
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        user: { id: "72d810e8-106e-4a9d-a49a-9892d860ccbe" },
+        usage: { balance: 3, activeCallBriefId: null, transactions: [] }
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listAdminUsers({
+      limit: 10,
+      search: "nina@example.com",
+      role: "user",
+      status: "active"
+    });
+    await getAdminUserCreditLedger(
+      "72d810e8-106e-4a9d-a49a-9892d860ccbe"
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/admin/users?limit=10&search=nina%40example.com&role=user&status=active"
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      "/api/admin/users/72d810e8-106e-4a9d-a49a-9892d860ccbe/credits"
+    );
+    for (const call of fetchMock.mock.calls) {
+      expect(call[1]).toMatchObject({ credentials: "include" });
+    }
   });
 
   it("sends promo redemption, promo creation, and manual grants to dedicated routes", async () => {

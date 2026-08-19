@@ -166,7 +166,13 @@ The backend exposes narrowly scoped account controls at
 accounts, self-actions are rejected, browser origins are checked, and every action
 requires a short reason. Suspension and session revocation are atomic in PostgreSQL.
 Suspension immediately revokes every session, while unsuspension never restores old
-tokens. User lookup and the broader admin UI remain roadmap work.
+tokens. Administrators can search the accounts visible to their role at
+`GET /api/admin/users` and load a selected append-only ledger at
+`GET /api/admin/users/:userId/credits`; the localized console is available at
+`/en/admin/users` and `/de/admin/users`. Search responses expose verification state,
+but not phone numbers, password hashes, or session credentials. Ordinary admins see
+only `user` accounts, while superadmins may inspect staff roles. Broader user-detail
+and account-action UI remains roadmap work.
 
 Phone verification grants exactly three signup credits through the append-only
 credit ledger. `GET /api/usage` returns the authenticated user's reconciled balance,

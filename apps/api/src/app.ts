@@ -3,6 +3,7 @@ import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import {
   accountStatusActionSchema,
+  adminUserSearchSchema,
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
@@ -17,6 +18,8 @@ import {
   sessionRevocationActionSchema,
   staffRecipientSuppressionLiftSchema,
   staffRecipientSuppressionSchema,
+  userRoleSchema,
+  userStatusSchema,
   verificationResendInputSchema,
   type CallEvent,
   type User
@@ -28,6 +31,7 @@ import Fastify, {
 } from "fastify";
 import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import { AuthServiceError, type AuthService } from "./auth/auth-service";
+import { decodeAdminUserCursor } from "./auth/auth-repository";
 import { CallServiceError, type CallService } from "./call-service";
 import type { CreditService } from "./credits/credit-service";
 import {
@@ -142,6 +146,13 @@ export function buildApp({
       await reply.status(403).send({ error: "INVALID_ORIGIN" });
       return null;
     }
+    return authorizeAdminRead(request, reply);
+  }
+
+  async function authorizeAdminRead(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
     if (!authService) {
       await reply.status(503).send({ error: "AUTHENTICATION_UNAVAILABLE" });
       return null;
@@ -399,6 +410,82 @@ export function buildApp({
         }
       });
     }
+
+    app.get<{
+      Querystring: {
+        limit?: string;
+        cursor?: string;
+        search?: string;
+        role?: string;
+        status?: string;
+      };
+    }>("/api/admin/users", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      const limit = request.query.limit === undefined
+        ? 20
+        : Number(request.query.limit);
+      const searchValue = request.query.search?.trim() || undefined;
+      const search = searchValue
+        ? adminUserSearchSchema.safeParse(searchValue)
+        : null;
+      const role = request.query.role
+        ? userRoleSchema.safeParse(request.query.role)
+        : null;
+      const status = request.query.status
+        ? userStatusSchema.safeParse(request.query.status)
+        : null;
+      const cursor = request.query.cursor
+        ? decodeAdminUserCursor(request.query.cursor)
+        : undefined;
+      if (
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 50 ||
+        (search !== null && !search.success) ||
+        (role !== null && !role.success) ||
+        (status !== null && !status.success) ||
+        (request.query.cursor !== undefined && !cursor)
+      ) {
+        return reply.status(400).send({ error: "INVALID_ADMIN_USER_QUERY" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await authService.listUsersAsAdmin(actor, {
+            limit,
+            ...(search?.success ? { search: search.data } : {}),
+            ...(role?.success ? { role: role.data } : {}),
+            ...(status?.success ? { status: status.data } : {}),
+            ...(cursor ? { cursor } : {})
+          }));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.get<{ Params: { userId: string } }>(
+      "/api/admin/users/:userId/credits",
+      async (request, reply) => {
+        const actor = await authorizeAdminRead(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.userId)) {
+          return reply.status(404).send({ error: "USER_NOT_FOUND" });
+        }
+        try {
+          const user = await authService.findUserAsAdmin(
+            actor,
+            request.params.userId
+          );
+          const usage = await service.getCreditUsage(user.id);
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send({ user, usage });
+        } catch (error) {
+          return sendAuthError(reply, error);
+        }
+      }
+    );
 
     app.put<{ Params: { userId: string } }>(
       "/api/admin/users/:userId/status",

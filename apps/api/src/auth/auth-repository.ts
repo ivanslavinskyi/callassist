@@ -1,5 +1,6 @@
 import type {
   AdministrableUserStatus,
+  AdminUserSummary,
   RegistrationInput,
   User,
   UserRole,
@@ -33,10 +34,33 @@ export type ChangeAccountStatusInput = AccountAdminInput & {
   status: AdministrableUserStatus;
 };
 
+export type AdminUserCursor = { createdAt: string; id: string };
+
+export type ListAdminUsersInput = {
+  actorUserId: string;
+  limit: number;
+  search?: string;
+  role?: UserRole;
+  status?: UserStatus;
+  cursor?: AdminUserCursor;
+};
+
+export type ListAdminUsersResult = {
+  items: AdminUserSummary[];
+  nextCursor: string | null;
+};
+
 export interface AuthRepository {
   readonly mode: "memory" | "postgres";
   createUser(input: CreateAuthUserInput): Promise<AuthUserRecord>;
   findUserByEmail(email: string): Promise<AuthUserRecord | null>;
+  listUsersForAdmin(
+    input: ListAdminUsersInput
+  ): Promise<ListAdminUsersResult>;
+  findUserByIdForAdmin(
+    actorUserId: string,
+    targetUserId: string
+  ): Promise<AdminUserSummary>;
   markPhoneVerified(userId: string, verifiedAt: string): Promise<AuthUserRecord>;
   updateLastLogin(userId: string, loggedInAt: string): Promise<void>;
   createSession(input: AuthSessionRecord): Promise<void>;
@@ -49,6 +73,29 @@ export interface AuthRepository {
   changeAccountStatus(input: ChangeAccountStatusInput): Promise<AuthUserRecord>;
   revokeUserSessionsByAdmin(input: AccountAdminInput): Promise<void>;
   close(): Promise<void>;
+}
+
+export function encodeAdminUserCursor(cursor: AdminUserCursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function decodeAdminUserCursor(value: string): AdminUserCursor | null {
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const { createdAt, id } = parsed as Record<string, unknown>;
+    if (
+      typeof createdAt !== "string" ||
+      !Number.isFinite(Date.parse(createdAt)) ||
+      typeof id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    ) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
 }
 
 export class AuthRepositoryError extends Error {

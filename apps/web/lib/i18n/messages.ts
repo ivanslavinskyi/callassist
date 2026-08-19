@@ -93,6 +93,7 @@ export type Messages = {
     redeem: string;
     safety: string;
     creditAdmin: string;
+    usersAdmin: string;
     creditsRemaining: (count: number) => string;
   };
   dialog: {
@@ -284,6 +285,7 @@ const en: Messages = {
     redeem: "Redeem",
     safety: "Safety",
     creditAdmin: "Credits",
+    usersAdmin: "Users",
     creditsRemaining: (count: number) =>
       `${count} call ${count === 1 ? "credit" : "credits"}`
   },
@@ -437,6 +439,7 @@ const de: Messages = {
     redeem: "Code einlösen",
     safety: "Sicherheit",
     creditAdmin: "Guthaben",
+    usersAdmin: "Benutzer",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {

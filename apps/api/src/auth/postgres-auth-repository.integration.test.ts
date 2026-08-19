@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import { runMigrations } from "../db/migrate";
-import { AuthRepositoryError } from "./auth-repository";
+import {
+  AuthRepositoryError,
+  decodeAdminUserCursor
+} from "./auth-repository";
 import { hashSessionToken } from "./auth-service";
 import { PostgresAuthRepository } from "./postgres-auth-repository";
 
@@ -255,6 +258,81 @@ describeWithDatabase("PostgresAuthRepository", () => {
       SET reason = 'tampered'
       WHERE actor_user_id = ${actor.id}
     `).rejects.toThrow("immutable");
+  });
+
+  it("paginates admin user search and hides privileged targets from ordinary admins", async () => {
+    const actorSuffix = randomUUID();
+    const firstSuffix = randomUUID();
+    const secondSuffix = randomUUID();
+    const staffSuffix = randomUUID();
+    const actor = await repository.createUser({
+      email: `lookup-admin.${actorSuffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(actorSuffix, "61"),
+      firstName: "Lookup",
+      lastName: "Admin",
+      uiLocale: "en"
+    });
+    const first = await repository.createUser({
+      email: `lookup-first.${firstSuffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(firstSuffix, "62"),
+      firstName: "Searchable",
+      lastName: "Customer",
+      uiLocale: "en"
+    });
+    const second = await repository.createUser({
+      email: `lookup-second.${secondSuffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(secondSuffix, "63"),
+      firstName: "Searchable",
+      lastName: "Customer",
+      uiLocale: "de"
+    });
+    const staff = await repository.createUser({
+      email: `lookup-support.${staffSuffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(staffSuffix, "64"),
+      firstName: "Hidden",
+      lastName: "Support",
+      uiLocale: "en"
+    });
+    await Promise.all([actor, first, second, staff].map((user) =>
+      repository.markPhoneVerified(user.id, new Date().toISOString())
+    ));
+    await inspection`UPDATE users SET role = 'admin' WHERE id = ${actor.id}`;
+    await inspection`UPDATE users SET role = 'support' WHERE id = ${staff.id}`;
+
+    const pageOne = await repository.listUsersForAdmin({
+      actorUserId: actor.id,
+      limit: 1,
+      search: "Searchable Customer",
+      role: "user",
+      status: "active"
+    });
+    expect(pageOne.items).toHaveLength(1);
+    expect(pageOne.nextCursor).toBeTypeOf("string");
+    expect(pageOne.items[0]).not.toHaveProperty("phoneE164");
+    expect(pageOne.items[0]).not.toHaveProperty("passwordHash");
+    const pageTwo = await repository.listUsersForAdmin({
+      actorUserId: actor.id,
+      limit: 1,
+      search: "Searchable Customer",
+      cursor: decodeAdminUserCursor(pageOne.nextCursor!)!
+    });
+    expect(pageTwo.items).toHaveLength(1);
+    expect(pageTwo.items[0]?.id).not.toBe(pageOne.items[0]?.id);
+    expect([first.id, second.id]).toContain(pageTwo.items[0]?.id);
+    await expect(
+      repository.findUserByIdForAdmin(actor.id, staff.id)
+    ).rejects.toEqual(expect.objectContaining<Partial<AuthRepositoryError>>({
+      code: "USER_NOT_FOUND"
+    }));
+
+    await inspection`UPDATE users SET role = 'superadmin' WHERE id = ${actor.id}`;
+    await expect(
+      repository.findUserByIdForAdmin(actor.id, staff.id)
+    ).resolves.toMatchObject({ id: staff.id, role: "support" });
   });
 });
 

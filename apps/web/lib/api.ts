@@ -1,6 +1,8 @@
 import type {
   ApprovalDecision,
   AdminCreditGrantInput,
+  AdminUserCreditLedger,
+  AdminUserList,
   CallBrief,
   CallSnapshot,
   CreditUsage,
@@ -16,6 +18,8 @@ import type {
   StaffRecipientSuppression,
   StaffRecipientSuppressionLift,
   User,
+  UserRole,
+  UserStatus,
   VerificationResendInput
 } from "@callassist/contracts";
 
@@ -99,6 +103,29 @@ export async function getCurrentUser() {
 
 export async function getCreditUsage() {
   return apiRequest<CreditUsage>("/api/usage");
+}
+
+export async function listAdminUsers(options: {
+  cursor?: string;
+  limit?: number;
+  search?: string;
+  role?: UserRole;
+  status?: UserStatus;
+} = {}) {
+  const query = new URLSearchParams();
+  if (options.cursor) query.set("cursor", options.cursor);
+  if (options.limit) query.set("limit", String(options.limit));
+  if (options.search) query.set("search", options.search);
+  if (options.role) query.set("role", options.role);
+  if (options.status) query.set("status", options.status);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return apiRequest<AdminUserList>(`/api/admin/users${suffix}`);
+}
+
+export async function getAdminUserCreditLedger(userId: string) {
+  return apiRequest<AdminUserCreditLedger>(
+    `/api/admin/users/${encodeURIComponent(userId)}/credits`
+  );
 }
 
 export async function redeemPromoCode(input: PromoRedemptionInput) {

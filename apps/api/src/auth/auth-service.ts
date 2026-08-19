@@ -11,7 +11,8 @@ import {
   AuthRepositoryError,
   toPublicUser,
   type AuthRepository,
-  type AuthUserRecord
+  type AuthUserRecord,
+  type ListAdminUsersInput
 } from "./auth-repository";
 import { hashPassword, verifyPassword } from "./password";
 import { ApplicationRateLimiter } from "./rate-limiter";
@@ -164,6 +165,32 @@ export class AuthService {
         hashSessionToken(token),
         this.#now().toISOString()
       );
+    }
+  }
+
+  async listUsersAsAdmin(
+    actor: User,
+    input: Omit<ListAdminUsersInput, "actorUserId">
+  ) {
+    try {
+      const result = await this.repository.listUsersForAdmin({
+        ...input,
+        actorUserId: actor.id
+      });
+      return result;
+    } catch (error) {
+      throw mapAdminRepositoryError(error);
+    }
+  }
+
+  async findUserAsAdmin(actor: User, targetUserId: string) {
+    try {
+      return await this.repository.findUserByIdForAdmin(
+        actor.id,
+        targetUserId
+      );
+    } catch (error) {
+      throw mapAdminRepositoryError(error);
     }
   }
 
