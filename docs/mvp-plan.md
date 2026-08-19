@@ -49,7 +49,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
 - **PARTIAL — data lifecycle:** recording deletion and transcript export exist; account/session/full-data lifecycle does not.
-- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, and process-local application rate limits exist. Password recovery, distributed rate limits, and authenticated page routing remain.
+- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, and process-local auth/expensive-endpoint rate limits exist. Password recovery, distributed rate limits, and authenticated page routing remain.
 - **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen; PostgreSQL integration execution still requires the local database container.
 - **PARTIAL — destination rollout:** shared `libphonenumber-js/max` metadata parses and canonicalizes Swiss national/international input; contracts, call-start policy, and the Twilio adapter reject invalid or non-CH destinations. Production Twilio Voice Geographic Permissions still need to be restricted and captured as deployment evidence.
 
@@ -118,7 +118,7 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 - [ ] Add public opt-out and staff suppression workflow. Spoken in-call opt-out is P2.
 - [x] Implement audited account suspension and session blocking/revocation policy. Suspension atomically revokes all sessions; unsuspension never restores them; concurrent session creation and PostgreSQL call creation/reservation are blocked; force logout is a separate audited action.
 - [x] Add a global kill switch that blocks new calls/reservations without ending active calls unless separately commanded. Changes require a reason and append immutable safety events; an operator CLI is available for PostgreSQL deployments.
-- [ ] Rate-limit registration, auth/recovery, compilation, call create/start, exports, playback, and costly endpoints; detect mass accounts without logging unnecessary PII.
+- [ ] Rate-limit registration, auth/recovery, compilation, call create/start, exports, playback, and costly endpoints; detect mass accounts without logging unnecessary PII. **Partial:** registration/auth, shared create/recompile preparation, shared start/approve-and-start, recording download, and transcription retry limits are enforced by hashed user/IP with `Retry-After` and a bounded process-local bucket store. Recovery/export endpoints and durable cross-instance state remain.
 
 ### P1 — promo and complaints
 
@@ -212,7 +212,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 - [ ] Deploy stable web/API/Twilio ingress on production domain/TLS; Quick Tunnel is development-only. Preserve isolation of main authenticated API/SSE from Twilio ingress.
 - [ ] Provision production Postgres, managed secrets, least privilege, repeatable migrations, encrypted backups/retention, and documented successful restore test/recovery targets.
 - [ ] Add PII-safe structured logs, error and uptime/health monitoring, provider/cost dashboards and alerts.
-- [ ] Enforce request limits, endpoint rate limits, secure headers, session security, CSRF where applicable, dependency scanning, configuration validation, and a focused security review.
+- [ ] Enforce request limits, endpoint rate limits, secure headers, session security, CSRF where applicable, dependency scanning, configuration validation, and a focused security review. **Partial:** expensive endpoint rate limits and origin checks are implemented; the remaining headers/scanning/review work is still open.
 - [ ] Document rollback, incident, provider outage, abuse, complaint, kill-switch, and support procedures with owners.
 
 ### P0 — privacy and Swiss launch review

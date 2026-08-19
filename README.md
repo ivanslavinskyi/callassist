@@ -180,6 +180,15 @@ toward abuse quotas even when their credit is refunded; quota accounting and cre
 charging are deliberately separate. Override these values with the `CALL_MAX_*`
 variables in `.env`.
 
+Expensive authenticated endpoints have a separate process-local fixed-window rate
+limit by hashed user ID and hashed IP. The shared IP budget is five times the user
+budget. Defaults are 15 brief preparations/hour, 10 start requests/15 minutes,
+30 recording downloads/hour, and 5 transcription retries/day. A rejected request
+returns `429 RATE_LIMITED` with `Retry-After`; the limits are configured through the
+`API_RATE_LIMIT_*` variables. Invalid payloads and unauthorized resources are rejected
+before consuming these expensive-operation budgets. Move this state to a shared
+durable store before operating more than one API instance.
+
 Operators can pause or resume all new PostgreSQL-backed outbound calls without ending
 an active call. A non-empty reason is mandatory and each change is appended to the
 safety audit log:

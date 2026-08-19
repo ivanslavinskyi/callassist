@@ -219,4 +219,11 @@ describe("API client headers", () => {
       "During the public beta CallAssist can only call Swiss phone numbers."
     );
   });
+
+  it("uses localized copy for expensive endpoint rate limits", () => {
+    expect(getCallPreparationErrorMessage(
+      new ApiError("RATE_LIMITED", 429),
+      { rateLimited: "Bitte kurz warten." }
+    )).toBe("Bitte kurz warten.");
+  });
 });

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
+import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import {
   BriefCompilerError,
   type BriefCompiler
 } from "./brief-compiler/brief-compiler";
 import { CallService } from "./call-service";
+import type { EndpointRateLimitPolicy } from "./config/endpoint-rate-limit-policy";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import type { TelephonyProvider } from "./telephony/telephony-provider";
 
@@ -360,4 +362,103 @@ describe("call API", () => {
     expect(response.json()).toEqual({ error: "TELEPHONY_START_FAILED" });
     expect((await service.get(brief.id))?.brief.status).toBe("failed");
   });
+
+  it("rate-limits expensive endpoint families and returns Retry-After", async () => {
+    const service = new CallService(
+      new InMemoryCallRepository(),
+      undefined,
+      () => undefined
+    );
+    const oneRequest = { userLimit: 1, ipLimit: 1, windowMs: 60_000 };
+    const policy: EndpointRateLimitPolicy = {
+      briefPreparation: oneRequest,
+      callStart: oneRequest,
+      recordingDownload: oneRequest,
+      transcriptionRetry: oneRequest
+    };
+    const app = buildApp({
+      service,
+      allowAnonymousCallsForTesting: true,
+      logger: false,
+      endpointRateLimiter: new ApplicationRateLimiter(() => 1_000),
+      endpointRateLimitPolicy: policy
+    });
+    apps.push(app);
+    const payload = {
+      recipientName: "Rate limit office",
+      phoneNumber: "+41523686688",
+      objective: "Verify expensive endpoint rate limits",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload: { ...payload, phoneNumber: "invalid" }
+    });
+    expect(invalid.statusCode).toBe(400);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload
+    });
+    expect(created.statusCode).toBe(201);
+    const callId = created.json().id as string;
+    const limitedCreate = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload
+    });
+    expectRateLimited(limitedCreate);
+
+    expect((await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/approve`
+    })).statusCode).toBe(200);
+    expect((await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/start`
+    })).statusCode).toBe(200);
+    const limitedStart = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/approve-and-start`
+    });
+    expectRateLimited(limitedStart);
+
+    const unavailableRecording = await app.inject({
+      method: "GET",
+      url: `/api/call-briefs/${callId}/recording`
+    });
+    expect(unavailableRecording.statusCode).toBe(409);
+    expectRateLimited(await app.inject({
+      method: "GET",
+      url: `/api/call-briefs/${callId}/recording`
+    }));
+
+    const unavailableRetry = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/final-transcript/retry`
+    });
+    expect(unavailableRetry.statusCode).toBe(409);
+    expectRateLimited(await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/final-transcript/retry`
+    }));
+  });
 });
+
+function expectRateLimited(response: {
+  statusCode: number;
+  headers: Record<string, string | string[] | number | undefined>;
+  json(): unknown;
+}) {
+  expect(response.statusCode).toBe(429);
+  expect(response.headers["retry-after"]).toBe("60");
+  expect(response.json()).toEqual({ error: "RATE_LIMITED" });
+}

@@ -9,6 +9,7 @@ import {
 } from "./brief-compiler/brief-compiler";
 import { CallService } from "./call-service";
 import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
+import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
 import {
   OpenAIRealtimeBridge,
   type RealtimeTranscriptionDelay
@@ -42,7 +43,11 @@ const authService = new AuthService({
   verificationProvider: createVerificationProviderFromEnv(),
   signupCreditGranter: service
 });
-const app = buildApp({ service, authService });
+const app = buildApp({
+  service,
+  authService,
+  endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv()
+});
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? new OpenAIRealtimeBridge({

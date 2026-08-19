@@ -97,7 +97,10 @@ export async function logout() {
   return apiRequest<void>("/api/auth/logout", { method: "POST" });
 }
 
-export function getCallPreparationErrorMessage(error: unknown) {
+export function getCallPreparationErrorMessage(
+  error: unknown,
+  options: { rateLimited?: string } = {}
+) {
   if (!(error instanceof ApiError)) {
     return "Could not prepare the call. Your entries are preserved. Try again.";
   }
@@ -126,6 +129,9 @@ export function getCallPreparationErrorMessage(error: unknown) {
   }
   if (error.code === "SWISS_DESTINATION_REQUIRED") {
     return "During the public beta CallAssist can only call Swiss phone numbers.";
+  }
+  if (error.code === "RATE_LIMITED") {
+    return options.rateLimited ?? "Too many requests. Wait a moment and try again.";
   }
   return "Could not prepare the call. Your entries are preserved. Try again.";
 }

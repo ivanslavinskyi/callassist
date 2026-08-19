@@ -18,8 +18,14 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest
 } from "fastify";
+import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import { AuthServiceError, type AuthService } from "./auth/auth-service";
 import { CallServiceError, type CallService } from "./call-service";
+import {
+  defaultEndpointRateLimitPolicy,
+  type EndpointRateLimitPolicy,
+  type EndpointRateLimitRule
+} from "./config/endpoint-rate-limit-policy";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import {
   CallRepositoryError,
@@ -41,6 +47,8 @@ type BuildAppOptions = {
   logger?: boolean;
   secureCookies?: boolean;
   webOrigin?: string | string[];
+  endpointRateLimiter?: ApplicationRateLimiter;
+  endpointRateLimitPolicy?: EndpointRateLimitPolicy;
 };
 
 type BuildWebhookAppOptions = {
@@ -56,7 +64,9 @@ export function buildApp({
   allowAnonymousCallsForTesting = false,
   logger = true,
   secureCookies = process.env.NODE_ENV === "production",
-  webOrigin = process.env.WEB_ORIGIN
+  webOrigin = process.env.WEB_ORIGIN,
+  endpointRateLimiter = new ApplicationRateLimiter(),
+  endpointRateLimitPolicy = defaultEndpointRateLimitPolicy
 }: BuildAppOptions) {
   const app = Fastify({ logger });
   const webOrigins = resolveWebOrigins(webOrigin);
@@ -122,6 +132,35 @@ export function buildApp({
       return null;
     }
     return user;
+  }
+
+  async function enforceEndpointRateLimit(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    userId: string | null,
+    scope: string,
+    rule: EndpointRateLimitRule
+  ) {
+    const result = endpointRateLimiter.consumeMany([
+      {
+        scope: `endpoint:${scope}:ip`,
+        identifier: request.ip,
+        limit: rule.ipLimit,
+        windowMs: rule.windowMs
+      },
+      ...(userId ? [{
+        scope: `endpoint:${scope}:user`,
+        identifier: userId,
+        limit: rule.userLimit,
+        windowMs: rule.windowMs
+      }] : [])
+    ]);
+    if (result.allowed) return true;
+    await reply
+      .header("Retry-After", String(result.retryAfterSeconds))
+      .status(429)
+      .send({ error: "RATE_LIMITED" });
+    return false;
   }
 
   if (authService) {
@@ -344,6 +383,13 @@ export function buildApp({
         issues: parsed.error.flatten()
       });
     }
+    if (!(await enforceEndpointRateLimit(
+      request,
+      reply,
+      access.userId,
+      "brief-preparation",
+      endpointRateLimitPolicy.briefPreparation
+    ))) return;
 
     try {
       return reply.status(201).send(
@@ -383,6 +429,13 @@ export function buildApp({
           issues: parsed.error.flatten()
         });
       }
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "brief-preparation",
+        endpointRateLimitPolicy.briefPreparation
+      ))) return;
       try {
         return await service.recompile(request.params.id, parsed.data);
       } catch (error) {
@@ -399,6 +452,13 @@ export function buildApp({
         callId: request.params.id
       });
       if (!access) return;
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "recording-download",
+        endpointRateLimitPolicy.recordingDownload
+      ))) return;
       try {
         const media = await service.getRecordingMedia(request.params.id);
         return reply
@@ -439,6 +499,13 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "transcription-retry",
+        endpointRateLimitPolicy.transcriptionRetry
+      ))) return;
       try {
         return reply
           .status(202)
@@ -473,6 +540,13 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "call-start",
+        endpointRateLimitPolicy.callStart
+      ))) return;
       try {
         return await service.approveAndStart(request.params.id, access.userId);
       } catch (error) {
@@ -489,6 +563,13 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "call-start",
+        endpointRateLimitPolicy.callStart
+      ))) return;
       try {
         return await service.start(request.params.id, access.userId);
       } catch (error) {

@@ -198,7 +198,9 @@ export function LiveCall({ callId }: { callId: string }) {
                     "RECIPIENT_REPEAT_LIMIT"
                   ].includes(error.code)
                   ? messages.live.callLimitReached
-            : messages.live.actionError
+                  : error instanceof ApiError && error.code === "RATE_LIMITED"
+                      ? messages.live.rateLimited
+                      : messages.live.actionError
       );
     } finally {
       setBusy(false);
@@ -229,7 +231,9 @@ export function LiveCall({ callId }: { callId: string }) {
       });
       setSnapshot(updated);
     } catch (error) {
-      setActionError(getCallPreparationErrorMessage(error));
+      setActionError(getCallPreparationErrorMessage(error, {
+        rateLimited: messages.live.rateLimited
+      }));
     } finally {
       setBusy(false);
     }

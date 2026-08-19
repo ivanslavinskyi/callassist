@@ -137,6 +137,7 @@ export type Messages = {
     phoneInvalid: string;
     requiredComplete: string;
     requiredRemaining: (count: number) => string;
+    rateLimited: string;
     callOptions: string;
     copy: FormCopy;
   };
@@ -152,6 +153,7 @@ export type Messages = {
     recipientSuppressed: string;
     outboundCallsDisabled: string;
     callLimitReached: string;
+    rateLimited: string;
     loadError: string;
     copied: string;
     copyFailed: string;
@@ -330,6 +332,7 @@ const en: Messages = {
     phoneInvalid: "During the public beta CallAssist can only call Swiss phone numbers, for example +41710000000",
     requiredComplete: "All required fields complete",
     requiredRemaining: (count: number) => `${count} required ${count === 1 ? "field" : "fields"} remaining`,
+    rateLimited: "Too many call-planning requests. Wait a moment and try again.",
     callOptions: "Call options",
     copy: enFormCopy
   },
@@ -345,6 +348,7 @@ const en: Messages = {
     recipientSuppressed: "This recipient has opted out and cannot be called.",
     outboundCallsDisabled: "New calls are temporarily paused. Try again later.",
     callLimitReached: "Your public-beta call limit has been reached. Try again later.",
+    rateLimited: "Too many requests. Wait a moment and try again.",
     loadError: "The call brief was not found or the API is unavailable.",
     copied: "Copied",
     copyFailed: "Copy failed — retry",
@@ -476,6 +480,7 @@ const de: Messages = {
     phoneInvalid: "Während der öffentlichen Beta kann CallAssist nur Schweizer Telefonnummern anrufen, zum Beispiel +41710000000",
     requiredComplete: "Alle Pflichtfelder sind ausgefüllt",
     requiredRemaining: (count: number) => `${count} ${count === 1 ? "Pflichtfeld ist" : "Pflichtfelder sind"} noch offen`,
+    rateLimited: "Zu viele Anfragen zur Anrufplanung. Warten Sie kurz und versuchen Sie es erneut.",
     callOptions: "Anrufoptionen",
     copy: {
       newBrief: "Neuer Anrufentwurf",
@@ -548,6 +553,7 @@ const de: Messages = {
     recipientSuppressed: "Dieser Empfänger hat widersprochen und kann nicht angerufen werden.",
     outboundCallsDisabled: "Neue Anrufe sind vorübergehend pausiert. Versuchen Sie es später erneut.",
     callLimitReached: "Ihr Anruflimit für die öffentliche Beta ist erreicht. Versuchen Sie es später erneut.",
+    rateLimited: "Zu viele Anfragen. Warten Sie kurz und versuchen Sie es erneut.",
     loadError: "Der Anrufentwurf wurde nicht gefunden oder die API ist nicht erreichbar.",
     copied: "Kopiert",
     copyFailed: "Kopieren fehlgeschlagen — erneut versuchen",
