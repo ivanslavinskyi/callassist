@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACCOUNT_DATA_EXPORT_SCHEMA_VERSION,
+  accountDataExportSchema,
   accountSessionListSchema,
   accountStatusActionSchema,
   creditUsageSchema,
@@ -106,6 +108,40 @@ describe("registrationInputSchema", () => {
     expect(accountSessionListSchema.safeParse({
       ...inventory,
       sessions: Array.from({ length: 51 }, () => inventory.sessions[0])
+    }).success).toBe(false);
+  });
+
+  it("versions strict account exports without authentication secrets", () => {
+    const exported = accountDataExportSchema.parse({
+      schemaVersion: ACCOUNT_DATA_EXPORT_SCHEMA_VERSION,
+      exportId: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+      generatedAt: "2026-08-22T10:00:00.000Z",
+      account: {
+        id: "f4e2bf73-e441-4dd2-976b-f949ad41b674",
+        email: validRegistration.email,
+        phoneE164: validRegistration.phoneE164,
+        phoneVerifiedAt: "2026-08-19T10:00:00.000Z",
+        firstName: validRegistration.firstName,
+        lastName: validRegistration.lastName,
+        role: "user",
+        status: "active",
+        uiLocale: validRegistration.uiLocale,
+        createdAt: "2026-08-19T09:00:00.000Z",
+        lastLoginAt: "2026-08-22T09:00:00.000Z"
+      },
+      activeSessions: { sessions: [], totalActive: 0, truncated: false },
+      credits: { balance: 0, activeCallBriefId: null, transactions: [] },
+      onboardingAcceptances: [],
+      calls: []
+    });
+    expect(exported.schemaVersion).toBe("1");
+    expect(accountDataExportSchema.safeParse({
+      ...exported,
+      tokenHash: "must-not-be-accepted"
+    }).success).toBe(false);
+    expect(accountDataExportSchema.safeParse({
+      ...exported,
+      schemaVersion: "2"
     }).success).toBe(false);
   });
 });

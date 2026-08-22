@@ -27,6 +27,17 @@ const en = {
   noActiveCall: "No active call",
   transactions: "Recent ledger entries",
   noTransactions: "No credit entries yet.",
+  exportTitle: "Download your data",
+  exportText: "Create a versioned JSON file containing the account data currently available to you in CallAssist.",
+  exportIncludes: [
+    "Profile and active session summaries",
+    "Complete credit ledger and legal acceptances",
+    "Your call briefs, compiled plans, consent metadata, transcripts, recordings metadata, outcomes, and feedback"
+  ],
+  exportPrivacy: "The file can contain sensitive personal and call information. Store it securely. Provider credentials, session tokens, raw device details, and internal staff identifiers are excluded.",
+  exportAction: "Download JSON export",
+  exportBusy: "Preparing export…",
+  exportError: "The export could not be prepared. Please wait and try again.",
   credits: (count: number) => `${count} ${count === 1 ? "credit" : "credits"}`,
   sessionsTitle: "Session security",
   sessionsText: "Sign out this browser, or revoke every CallAssist session if a device is lost or your account may be exposed.",
@@ -86,8 +97,10 @@ type AccountMessages = {
       ? Record<CreditTransactionType, string>
       : Key extends "browser"
         ? Record<AccountSessionBrowser, string>
-        : Key extends "platform"
+      : Key extends "platform"
           ? Record<AccountSessionPlatform, string>
+        : Key extends "exportIncludes"
+          ? readonly string[]
       : string;
 };
 
@@ -113,6 +126,17 @@ const de: AccountMessages = {
   noActiveCall: "Kein aktiver Anruf",
   transactions: "Letzte Kontobewegungen",
   noTransactions: "Noch keine Guthabenbewegungen.",
+  exportTitle: "Ihre Daten herunterladen",
+  exportText: "Erstellen Sie eine versionierte JSON-Datei mit den Kontodaten, die Ihnen derzeit in CallAssist zur Verfügung stehen.",
+  exportIncludes: [
+    "Profil und Zusammenfassungen aktiver Sitzungen",
+    "Vollständiges Guthabenjournal und rechtliche Bestätigungen",
+    "Ihre Anrufaufträge, erstellten Pläne, Einwilligungsmetadaten, Transkripte, Aufzeichnungsmetadaten, Ergebnisse und Rückmeldungen"
+  ],
+  exportPrivacy: "Die Datei kann sensible Personen- und Anrufdaten enthalten. Bewahren Sie sie sicher auf. Anbieter-Zugangsdaten, Sitzungstoken, rohe Gerätedaten und interne Mitarbeitenden-Kennungen sind ausgeschlossen.",
+  exportAction: "JSON-Export herunterladen",
+  exportBusy: "Export wird erstellt…",
+  exportError: "Der Export konnte nicht erstellt werden. Bitte warten Sie und versuchen Sie es erneut.",
   credits: (count: number) => `${count} Anrufguthaben`,
   sessionsTitle: "Sitzungssicherheit",
   sessionsText: "Melden Sie diesen Browser ab oder widerrufen Sie alle CallAssist-Sitzungen, wenn ein Gerät verloren ging oder das Konto gefährdet sein könnte.",

@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { personNamePartSchema } from "./call-brief";
+import { callSnapshotSchema, personNamePartSchema } from "./call-brief";
+import { callOutcomeViewSchema } from "./call-outcome";
+import { contentLocaleSchema } from "./content";
 
 export const userRoleSchema = z.enum([
   "user",
@@ -164,3 +166,42 @@ export const creditUsageSchema = z.object({
   transactions: z.array(creditTransactionSchema)
 });
 export type CreditUsage = z.infer<typeof creditUsageSchema>;
+
+export const ACCOUNT_DATA_EXPORT_SCHEMA_VERSION = "1" as const;
+
+export const onboardingAcceptanceRecordSchema = z.strictObject({
+  id: z.uuid(),
+  termsRevisionId: z.uuid(),
+  acceptableUseRevisionId: z.uuid(),
+  acceptedLocale: contentLocaleSchema,
+  acceptedTerms: z.boolean(),
+  acceptedAcceptableUse: z.boolean(),
+  acknowledgedConsent: z.boolean(),
+  acknowledgedRetention: z.boolean(),
+  acknowledgedUseLimits: z.boolean(),
+  acknowledgedCredits: z.boolean(),
+  acceptedAt: z.iso.datetime()
+});
+export type OnboardingAcceptanceRecord = z.infer<
+  typeof onboardingAcceptanceRecordSchema
+>;
+
+export const accountDataExportCallSchema = z.strictObject({
+  snapshot: callSnapshotSchema,
+  outcome: callOutcomeViewSchema
+});
+export type AccountDataExportCall = z.infer<
+  typeof accountDataExportCallSchema
+>;
+
+export const accountDataExportSchema = z.strictObject({
+  schemaVersion: z.literal(ACCOUNT_DATA_EXPORT_SCHEMA_VERSION),
+  exportId: z.uuid(),
+  generatedAt: z.iso.datetime(),
+  account: userSchema,
+  activeSessions: accountSessionListSchema,
+  credits: creditUsageSchema,
+  onboardingAcceptances: z.array(onboardingAcceptanceRecordSchema),
+  calls: z.array(accountDataExportCallSchema)
+});
+export type AccountDataExport = z.infer<typeof accountDataExportSchema>;

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { accountDataExportSchema } from "@callassist/contracts";
 import { buildApp } from "../app";
 import { CallService } from "../call-service";
 import { CreditService } from "../credits/credit-service";
@@ -75,6 +76,36 @@ async function registerAndVerify(
   return String(verified.headers["set-cookie"]);
 }
 
+async function acceptCurrentOnboarding(
+  app: ReturnType<typeof buildApp>,
+  cookie: string,
+  locale: "en" | "de"
+) {
+  const status = await app.inject({
+    method: "GET",
+    url: `/api/onboarding/status?locale=${locale}`,
+    headers: { cookie }
+  });
+  const current = status.json().current;
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/onboarding/accept",
+    headers: { cookie },
+    payload: {
+      locale,
+      termsRevisionId: current.terms.id,
+      acceptableUseRevisionId: current.acceptableUse.id,
+      acceptTerms: true,
+      acceptAcceptableUse: true,
+      acknowledgeConsent: true,
+      acknowledgeRetention: true,
+      acknowledgeUseLimits: true,
+      acknowledgeCredits: true
+    }
+  });
+  expect(accepted.statusCode).toBe(200);
+}
+
 const callBrief = {
   recipientName: "Beta Clinic",
   phoneNumber: "+41710000002",
@@ -89,6 +120,124 @@ const callBrief = {
 };
 
 describe("auth API", () => {
+  it("downloads a rate-limited versioned export containing only the owner's data", async () => {
+    const contentService = new ContentService(new InMemoryContentRepository());
+    await contentService.initialize();
+    const { app, repository } = createAuthApp(contentService);
+    const ownerCookie = await registerAndVerify(app, registration);
+    await acceptCurrentOnboarding(app, ownerCookie, "de");
+    const ownerCall = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie: ownerCookie },
+      payload: {
+        ...callBrief,
+        recipientName: "Owner Clinic",
+        objective: "Ask the owner clinic for private appointment availability",
+        allowedFacts: ["Private member number A-149"]
+      }
+    });
+    expect(ownerCall.statusCode).toBe(201);
+
+    const foreignRegistration = {
+      ...registration,
+      email: "alex.meier@example.com",
+      phoneE164: "+41710000009",
+      firstName: "Alex",
+      lastName: "Meier",
+      uiLocale: "en"
+    };
+    const foreignCookie = await registerAndVerify(app, foreignRegistration);
+    await acceptCurrentOnboarding(app, foreignCookie, "en");
+    const foreignCall = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie: foreignCookie },
+      payload: {
+        ...callBrief,
+        recipientName: "Foreign Council",
+        objective: "Ask the foreign council for private document availability",
+        representedPersonFirstName: "Alex",
+        representedPersonLastName: "Meier",
+        allowedFacts: ["Foreign secret B-882"]
+      }
+    });
+    expect(foreignCall.statusCode).toBe(201);
+
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/api/account/data-export"
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const foreignOrigin = await app.inject({
+      method: "POST",
+      url: "/api/account/data-export",
+      headers: { cookie: ownerCookie, origin: "https://attacker.example" }
+    });
+    expect(foreignOrigin.statusCode).toBe(403);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/account/data-export",
+      headers: { cookie: ownerCookie }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.headers["content-disposition"]).toMatch(
+      /^attachment; filename="callassist-data-\d{4}-\d{2}-\d{2}\.json"$/
+    );
+    const exported = accountDataExportSchema.parse(response.json());
+    expect(exported).toMatchObject({
+      schemaVersion: "1",
+      account: {
+        email: registration.email,
+        firstName: registration.firstName,
+        lastName: registration.lastName
+      },
+      activeSessions: { totalActive: 1 },
+      credits: { balance: 3 },
+      onboardingAcceptances: [{ acceptedLocale: "de" }]
+    });
+    expect(exported.calls).toHaveLength(1);
+    expect(exported.calls[0].snapshot.brief).toMatchObject({
+      recipientName: "Owner Clinic",
+      allowedFacts: ["Private member number A-149"]
+    });
+    expect(exported.calls[0]!.snapshot.compilation).not.toBeNull();
+    expect(
+      exported.calls[0]!.snapshot.compilation!.compilerResponseId
+    ).toBeNull();
+    expect(response.body).not.toContain("Foreign Council");
+    expect(response.body).not.toContain("Foreign secret B-882");
+    expect(response.body).not.toContain("passwordHash");
+    expect(response.body).not.toContain("tokenHash");
+    expect(repository.accountDataExportEventsForTest()).toEqual([
+      expect.objectContaining({
+        exportId: exported.exportId,
+        userId: exported.account.id,
+        schemaVersion: "1",
+        callCount: 1,
+        byteCount: expect.any(Number)
+      })
+    ]);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/account/data-export",
+      headers: { cookie: ownerCookie }
+    });
+    expect(second.statusCode).toBe(200);
+    const limited = await app.inject({
+      method: "POST",
+      url: "/api/account/data-export",
+      headers: { cookie: ownerCookie }
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeDefined();
+    expect(repository.accountDataExportEventsForTest()).toHaveLength(2);
+  });
+
   it("registers, verifies, creates a server-side session, and logs out", async () => {
     const { app } = createAuthApp();
     const registered = await app.inject({

@@ -13,6 +13,7 @@ export type EndpointRateLimitPolicy = {
   promoRedemption: EndpointRateLimitRule;
   recordingDownload: EndpointRateLimitRule;
   transcriptionRetry: EndpointRateLimitRule;
+  dataExport: EndpointRateLimitRule;
 };
 
 const ipMultiplier = 5;
@@ -22,7 +23,8 @@ export const defaultEndpointRateLimitPolicy: EndpointRateLimitPolicy = {
   callStart: rule(10, 15 * 60 * 1_000),
   promoRedemption: rule(10, hour),
   recordingDownload: rule(30, hour),
-  transcriptionRetry: rule(5, day)
+  transcriptionRetry: rule(5, day),
+  dataExport: rule(2, day)
 };
 
 export function endpointRateLimitPolicyFromEnv(
@@ -53,6 +55,11 @@ export function endpointRateLimitPolicyFromEnv(
       environment.API_RATE_LIMIT_TRANSCRIPTION_RETRY_PER_DAY,
       "API_RATE_LIMIT_TRANSCRIPTION_RETRY_PER_DAY",
       defaultEndpointRateLimitPolicy.transcriptionRetry.userLimit
+    ), day),
+    dataExport: rule(positiveInteger(
+      environment.API_RATE_LIMIT_DATA_EXPORT_PER_DAY,
+      "API_RATE_LIMIT_DATA_EXPORT_PER_DAY",
+      defaultEndpointRateLimitPolicy.dataExport.userLimit
     ), day)
   };
 }

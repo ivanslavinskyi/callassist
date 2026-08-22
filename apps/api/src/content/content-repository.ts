@@ -10,6 +10,7 @@ import type {
   EditorialDraftUpdateInput,
   EditorialRevisionSummary,
   OnboardingAcceptanceInput,
+  OnboardingAcceptanceRecord,
   OnboardingStatus,
   PublishedContentIndex,
   PublishedContentPage,
@@ -55,6 +56,9 @@ export interface ContentRepository {
     input: OnboardingAcceptanceInput,
     acceptedAt: string
   ): Promise<void>;
+  listOnboardingAcceptances(
+    userId: string
+  ): Promise<OnboardingAcceptanceRecord[]>;
   listAdminPages(): Promise<AdminContentPageSummary[]>;
   getAdminRevision(
     key: ContentPageKey,

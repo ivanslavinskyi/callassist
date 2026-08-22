@@ -467,7 +467,8 @@ describe("call API", () => {
       callStart: oneRequest,
       promoRedemption: oneRequest,
       recordingDownload: oneRequest,
-      transcriptionRetry: oneRequest
+      transcriptionRetry: oneRequest,
+      dataExport: oneRequest
     };
     const app = buildApp({
       service,

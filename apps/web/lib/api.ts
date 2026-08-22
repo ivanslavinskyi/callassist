@@ -85,18 +85,22 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as
-      | { error?: string; issues?: ValidationIssues }
-      | null;
-    throw new ApiError(
-      payload?.error ?? `HTTP_${response.status}`,
-      response.status,
-      payload?.issues
-    );
+    throw await apiErrorFromResponse(response);
   }
 
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+async function apiErrorFromResponse(response: Response) {
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: string; issues?: ValidationIssues }
+    | null;
+  return new ApiError(
+    payload?.error ?? `HTTP_${response.status}`,
+    response.status,
+    payload?.issues
+  );
 }
 
 export async function registerAccount(input: RegistrationInput) {
@@ -146,6 +150,18 @@ export async function acceptOnboarding(input: OnboardingAcceptanceInput) {
 
 export async function getCreditUsage() {
   return apiRequest<CreditUsage>("/api/usage");
+}
+
+export async function requestAccountDataExport() {
+  const response = await fetch(`${API_URL}/api/account/data-export`, {
+    method: "POST",
+    credentials: "include"
+  });
+  if (!response.ok) throw await apiErrorFromResponse(response);
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/i)?.[1]
+    ?? "callassist-data.json";
+  return { blob: await response.blob(), filename };
 }
 
 export async function getPublishedContentIndex() {

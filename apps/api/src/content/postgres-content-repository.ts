@@ -14,6 +14,7 @@ import type {
   EditorialDraftUpdateInput,
   EditorialRevisionSummary,
   OnboardingAcceptanceInput,
+  OnboardingAcceptanceRecord,
   OnboardingStatus,
   PublishedContentIndex,
   PublishedContentPage,
@@ -57,6 +58,10 @@ type LegalReferenceRow = {
 type AcceptanceRow = {
   termsRevisionId: string;
   acceptableUseRevisionId: string;
+  acceptedAt: DatabaseDate;
+};
+
+type AcceptanceExportRow = Omit<OnboardingAcceptanceRecord, "acceptedAt"> & {
   acceptedAt: DatabaseDate;
 };
 
@@ -503,6 +508,30 @@ export class PostgresContentRepository implements ContentRepository {
         throw error;
       }
     });
+  }
+
+  async listOnboardingAcceptances(userId: string) {
+    const rows = await this.#sql<AcceptanceExportRow[]>`
+      SELECT
+        id,
+        terms_revision_id AS "termsRevisionId",
+        acceptable_use_revision_id AS "acceptableUseRevisionId",
+        accepted_locale AS "acceptedLocale",
+        accepted_terms AS "acceptedTerms",
+        accepted_acceptable_use AS "acceptedAcceptableUse",
+        acknowledged_consent AS "acknowledgedConsent",
+        acknowledged_retention AS "acknowledgedRetention",
+        acknowledged_use_limits AS "acknowledgedUseLimits",
+        acknowledged_credits AS "acknowledgedCredits",
+        accepted_at AS "acceptedAt"
+      FROM user_onboarding_acceptances
+      WHERE user_id = ${userId}
+      ORDER BY accepted_at DESC, id DESC
+    `;
+    return rows.map((row) => ({
+      ...row,
+      acceptedAt: toIso(row.acceptedAt)
+    }));
   }
 
   async listAdminPages(): Promise<AdminContentPageSummary[]> {

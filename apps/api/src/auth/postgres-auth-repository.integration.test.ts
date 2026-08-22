@@ -45,6 +45,39 @@ describeWithDatabase("PostgresAuthRepository", () => {
     );
     expect(verified.phoneVerifiedAt).not.toBeNull();
 
+    const exportId = randomUUID();
+    await repository.recordAccountDataExport({
+      exportId,
+      userId: user.id,
+      schemaVersion: "1",
+      callCount: 2,
+      byteCount: 4096,
+      createdAt: new Date().toISOString()
+    });
+    const exportEvents = await inspection<{
+      id: string;
+      schemaVersion: string;
+      callCount: number;
+      byteCount: number;
+    }[]>`
+      SELECT
+        id::text,
+        schema_version AS "schemaVersion",
+        call_count AS "callCount",
+        byte_count AS "byteCount"
+      FROM account_data_export_events
+      WHERE user_id = ${user.id}
+    `;
+    expect(exportEvents).toEqual([{
+      id: exportId,
+      schemaVersion: "1",
+      callCount: 2,
+      byteCount: 4096
+    }]);
+    await expect(inspection`
+      DELETE FROM account_data_export_events WHERE id = ${exportId}
+    `).rejects.toThrow("immutable");
+
     const tokenHash = hashSessionToken(`test-${suffix}`);
     const now = new Date();
     const sessionId = randomUUID();

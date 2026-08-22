@@ -11,6 +11,7 @@ import type {
   EditorialDraftUpdateInput,
   EditorialRevisionSummary,
   OnboardingAcceptanceInput,
+  OnboardingAcceptanceRecord,
   OnboardingStatus,
   PublishedContentIndex,
   PublishedContentPage,
@@ -305,6 +306,30 @@ export class InMemoryContentRepository implements ContentRepository {
         acceptedAt
       });
     }
+  }
+
+  async listOnboardingAcceptances(
+    userId: string
+  ): Promise<OnboardingAcceptanceRecord[]> {
+    return this.#acceptances
+      .filter((acceptance) => acceptance.userId === userId)
+      .sort((left, right) =>
+        right.acceptedAt.localeCompare(left.acceptedAt) ||
+        right.id.localeCompare(left.id)
+      )
+      .map(({ id, input, acceptedAt }) => ({
+        id,
+        termsRevisionId: input.termsRevisionId,
+        acceptableUseRevisionId: input.acceptableUseRevisionId,
+        acceptedLocale: input.locale,
+        acceptedTerms: input.acceptTerms,
+        acceptedAcceptableUse: input.acceptAcceptableUse,
+        acknowledgedConsent: input.acknowledgeConsent,
+        acknowledgedRetention: input.acknowledgeRetention,
+        acknowledgedUseLimits: input.acknowledgeUseLimits,
+        acknowledgedCredits: input.acknowledgeCredits,
+        acceptedAt
+      }));
   }
 
   async listAdminPages(): Promise<AdminContentPageSummary[]> {

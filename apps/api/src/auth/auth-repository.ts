@@ -39,6 +39,15 @@ export type ChangeAccountStatusInput = AccountAdminInput & {
   status: AdministrableUserStatus;
 };
 
+export type AccountDataExportEventInput = {
+  exportId: string;
+  userId: string;
+  schemaVersion: string;
+  callCount: number;
+  byteCount: number;
+  createdAt: string;
+};
+
 export type AdminUserCursor = { createdAt: string; id: string };
 
 export type ListAdminUsersInput = {
@@ -88,6 +97,9 @@ export interface AuthRepository {
   revokeUserSessions(userId: string, revokedAt: string): Promise<void>;
   changeAccountStatus(input: ChangeAccountStatusInput): Promise<AuthUserRecord>;
   revokeUserSessionsByAdmin(input: AccountAdminInput): Promise<void>;
+  recordAccountDataExport(
+    input: AccountDataExportEventInput
+  ): Promise<void>;
   close(): Promise<void>;
 }
 

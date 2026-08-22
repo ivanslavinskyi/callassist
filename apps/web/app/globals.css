@@ -1434,7 +1434,9 @@ button:disabled { cursor: wait; opacity: .55; }
 .account-transactions time { color: var(--muted); font-size: 10px; }
 .account-transactions li > span { color: var(--danger); font-size: 13px; font-weight: 800; }
 .account-transactions li > span[data-positive="true"] { color: var(--green); }
-.account-sessions { grid-column: 1 / -1; }
+.account-export, .account-sessions { grid-column: 1 / -1; }
+.account-export > p { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 760px; }
+.account-export > ul { color: var(--muted); display: grid; font-size: 13px; gap: 8px; line-height: 1.55; margin: 0; padding-left: 20px; }
 .account-session-heading { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; margin-top: 22px; padding-top: 20px; }
 .account-session-heading h3 { font-size: 13px; margin: 0; }
 .account-session-heading span { color: var(--muted); font-size: 11px; }

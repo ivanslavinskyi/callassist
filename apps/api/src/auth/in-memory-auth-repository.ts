@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   AccountAdminInput,
+  AccountDataExportEventInput,
   AuthRepository,
   AuthSessionRecord,
   AuthUserRecord,
@@ -34,12 +35,15 @@ type AccountSessionEvent = {
   createdAt: string;
 };
 
+type AccountDataExportEvent = AccountDataExportEventInput;
+
 export class InMemoryAuthRepository implements AuthRepository {
   readonly mode = "memory" as const;
   readonly #users = new Map<string, AuthUserRecord>();
   readonly #sessions = new Map<string, AuthSessionRecord>();
   readonly #accountAdminEvents: AccountAdminEvent[] = [];
   readonly #accountSessionEvents: AccountSessionEvent[] = [];
+  readonly #accountDataExportEvents: AccountDataExportEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -264,6 +268,11 @@ export class InMemoryAuthRepository implements AuthRepository {
     });
   }
 
+  async recordAccountDataExport(input: AccountDataExportEventInput) {
+    this.#requireUser(input.userId);
+    this.#accountDataExportEvents.push(structuredClone(input));
+  }
+
   async setUserStatusForTest(userId: string, status: AuthUserRecord["status"]) {
     this.#requireUser(userId).status = status;
   }
@@ -278,6 +287,10 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   accountSessionEventsForTest() {
     return structuredClone(this.#accountSessionEvents);
+  }
+
+  accountDataExportEventsForTest() {
+    return structuredClone(this.#accountDataExportEvents);
   }
 
   async close() {}

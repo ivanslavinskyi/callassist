@@ -273,7 +273,14 @@ It also lists up to 50 active sessions using bounded browser/platform categories
 than raw User-Agent values. Users can revoke one owner-scoped session, end the current
 browser session, or revoke all sessions; revoking the current/all sessions clears the
 cookie. Selective and all-session security actions append immutable, privacy-minimized
-audit evidence.
+audit evidence. The same page can request `POST /api/account/data-export` and download
+a versioned, no-store JSON attachment containing the authenticated user's profile,
+bounded session summaries, complete ledger and legal acceptances, plus owned call,
+consent, transcript, outcome, and feedback data. The server removes authentication
+secrets, raw client details, provider identifiers, and foreign staff IDs; generation
+is rate-limited and records only immutable export ID/count/size/time evidence, never
+the document itself. This self-service file supports data access but is not a substitute
+for the separately required Swiss privacy/legal review and formal request workflow.
 
 Authenticated users can redeem a code at `/en/redeem` or `/de/redeem` through
 `POST /api/credits/promo-redemptions`. Active administrators can create bounded
@@ -296,7 +303,8 @@ variables in `.env`.
 Expensive authenticated endpoints have a separate process-local fixed-window rate
 limit by hashed user ID and hashed IP. The shared IP budget is five times the user
 budget. Defaults are 15 brief preparations/hour, 10 start requests/15 minutes,
-10 promo redemption attempts/hour, 30 recording downloads/hour, and 5 transcription retries/day. A rejected request
+10 promo redemption attempts/hour, 30 recording downloads/hour, 5 transcription
+retries/day, and 2 account-data exports/day. A rejected request
 returns `429 RATE_LIMITED` with `Retry-After`; the limits are configured through the
 `API_RATE_LIMIT_*` variables. Invalid payloads and unauthorized resources are rejected
 before consuming these expensive-operation budgets. Move this state to a shared

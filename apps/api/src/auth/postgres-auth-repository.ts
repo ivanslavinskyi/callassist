@@ -8,6 +8,7 @@ import postgres from "postgres";
 import {
   AuthRepositoryError,
   type AccountAdminInput,
+  type AccountDataExportEventInput,
   type AuthRepository,
   type AuthSessionRecord,
   type AuthUserRecord,
@@ -418,6 +419,17 @@ export class PostgresAuthRepository implements AuthRepository {
         now
       });
     });
+  }
+
+  async recordAccountDataExport(input: AccountDataExportEventInput) {
+    await this.#sql`
+      INSERT INTO account_data_export_events (
+        id, user_id, schema_version, call_count, byte_count, created_at
+      ) VALUES (
+        ${input.exportId}, ${input.userId}, ${input.schemaVersion},
+        ${input.callCount}, ${input.byteCount}, ${new Date(input.createdAt)}
+      )
+    `;
   }
 
   async close() {

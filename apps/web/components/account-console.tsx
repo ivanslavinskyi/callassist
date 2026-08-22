@@ -17,6 +17,7 @@ import {
   getCurrentUser,
   listOwnSessions,
   logout,
+  requestAccountDataExport,
   revokeAllOwnSessions,
   revokeOwnSession
 } from "@/lib/api";
@@ -39,6 +40,8 @@ export function AccountConsole() {
   const [actionError, setActionError] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [selectedSession, setSelectedSession] = useState<AccountSessionSummary | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,6 +108,26 @@ export function AccountConsole() {
     }
   }
 
+  async function downloadDataExport() {
+    setExporting(true);
+    setExportError(false);
+    try {
+      const { blob, filename } = await requestAccountDataExport();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError(true);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const dateFormatter = new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-CH", {
     dateStyle: "medium",
     timeStyle: "short"
@@ -166,6 +189,26 @@ export function AccountConsole() {
                   ))}
                 </ul>
               ) : <p className="account-muted">{copy.noTransactions}</p>}
+            </section>
+
+            <section className="account-card account-export">
+              <h2>{copy.exportTitle}</h2>
+              <p>{copy.exportText}</p>
+              <ul>
+                {copy.exportIncludes.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              <p className="account-muted">{copy.exportPrivacy}</p>
+              <div className="account-actions">
+                <button
+                  className="primary-button"
+                  disabled={exporting}
+                  onClick={() => void downloadDataExport()}
+                  type="button"
+                >
+                  {exporting ? copy.exportBusy : copy.exportAction}
+                </button>
+              </div>
+              {exportError ? <p className="form-error" role="alert">{copy.exportError}</p> : null}
             </section>
 
             <section className="account-card account-sessions">

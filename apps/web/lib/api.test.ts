@@ -39,6 +39,7 @@ import {
   publishAdminEditorialDraft,
   recompileCallBrief,
   requestRecipientOptOut,
+  requestAccountDataExport,
   rollbackAdminContentRevision,
   rollbackAdminEditorialRevision,
   grantCreditsAsAdmin,
@@ -261,6 +262,30 @@ describe("API client headers", () => {
     );
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
       method: "DELETE",
+      credentials: "include"
+    });
+  });
+
+  it("requests the account export as an authenticated attachment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ schemaVersion: "1" }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Disposition": "attachment; filename=\"callassist-data-2026-08-22.json\""
+        }
+      }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await requestAccountDataExport();
+
+    expect(result.filename).toBe("callassist-data-2026-08-22.json");
+    await expect(result.blob.text()).resolves.toContain('"schemaVersion":"1"');
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/account/data-export");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
       credentials: "include"
     });
   });

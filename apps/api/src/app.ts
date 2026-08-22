@@ -47,6 +47,7 @@ import Fastify, {
   type FastifyRequest
 } from "fastify";
 import { ApplicationRateLimiter } from "./auth/rate-limiter";
+import { AccountDataExportService } from "./account-data-export-service";
 import { AuthServiceError, type AuthService } from "./auth/auth-service";
 import { decodeAdminUserCursor } from "./auth/auth-repository";
 import { CallServiceError, type CallService } from "./call-service";
@@ -102,6 +103,7 @@ type BuildAppOptions = {
   endpointRateLimitPolicy?: EndpointRateLimitPolicy;
   recipientOptOutService?: RecipientOptOutService;
   realtimeConfigured?: boolean;
+  accountDataExportService?: AccountDataExportService;
 };
 
 type BuildWebhookAppOptions = {
@@ -125,6 +127,13 @@ export function buildApp({
   endpointRateLimiter = new ApplicationRateLimiter(),
   endpointRateLimitPolicy = defaultEndpointRateLimitPolicy,
   realtimeConfigured = false,
+  accountDataExportService = authService && contentService
+    ? new AccountDataExportService({
+        authService,
+        callRepository: service.repository,
+        contentRepository: contentService.repository
+      })
+    : undefined,
   recipientOptOutService = authService
     ? new RecipientOptOutService({
         repository: service.repository,
@@ -607,6 +616,38 @@ export function buildApp({
         .header("Cache-Control", "private, no-store")
         .send({ user });
     });
+
+    if (accountDataExportService) {
+      app.post("/api/account/data-export", async (request, reply) => {
+        if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+          return reply.status(403).send({ error: "INVALID_ORIGIN" });
+        }
+        const authenticated = await authService.authenticateSession(
+          sessionTokenFromHeaders(request.headers, secureCookies)
+        );
+        if (!authenticated) {
+          return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+        }
+        if (!(await enforceEndpointRateLimit(
+          request,
+          reply,
+          authenticated.user.id,
+          "account-data-export",
+          endpointRateLimitPolicy.dataExport
+        ))) return;
+        const data = await accountDataExportService.generate(
+          authenticated.user,
+          authenticated.sessionId
+        );
+        const date = data.generatedAt.slice(0, 10);
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .header("Content-Disposition", `attachment; filename="callassist-data-${date}.json"`)
+          .header("X-Content-Type-Options", "nosniff")
+          .type("application/json; charset=utf-8")
+          .send(data);
+      });
+    }
 
     if (contentService) {
       app.get<{
