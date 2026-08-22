@@ -2,11 +2,16 @@ import type {
   AccountStatusAction,
   ApprovalDecision,
   AdminCreditGrantInput,
+  AdminContentLocalizedRevision,
+  AdminContentPageSummary,
+  AdminContentRevisionSummary,
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
   CallSnapshot,
   ContentLocale,
+  ContentDraftUpdateInput,
+  ContentPageKey,
   CreditUsage,
   CreateCallBriefInput,
   LoginInput,
@@ -121,6 +126,66 @@ export async function acceptOnboarding(input: OnboardingAcceptanceInput) {
 
 export async function getCreditUsage() {
   return apiRequest<CreditUsage>("/api/usage");
+}
+
+export async function listAdminContentPages() {
+  return apiRequest<{ pages: AdminContentPageSummary[] }>(
+    "/api/admin/content/pages"
+  );
+}
+
+export async function getAdminContentPage(
+  key: ContentPageKey,
+  locale: ContentLocale
+) {
+  return apiRequest<{
+    published: AdminContentLocalizedRevision | null;
+    draft: AdminContentLocalizedRevision | null;
+  }>(`/api/admin/content/pages/${key}?locale=${locale}`);
+}
+
+export async function listAdminContentRevisions(key: ContentPageKey) {
+  return apiRequest<{ revisions: AdminContentRevisionSummary[] }>(
+    `/api/admin/content/pages/${key}/revisions`
+  );
+}
+
+export async function createAdminContentDraft(key: ContentPageKey) {
+  return apiRequest<{ draft: AdminContentRevisionSummary }>(
+    `/api/admin/content/pages/${key}/drafts`,
+    { method: "POST" }
+  );
+}
+
+export async function updateAdminContentDraft(
+  key: ContentPageKey,
+  input: ContentDraftUpdateInput
+) {
+  return apiRequest<{ draft: AdminContentLocalizedRevision }>(
+    `/api/admin/content/pages/${key}/draft`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export async function publishAdminContentDraft(
+  key: ContentPageKey,
+  reason: string
+) {
+  return apiRequest<{ revision: AdminContentRevisionSummary }>(
+    `/api/admin/content/pages/${key}/publish`,
+    { method: "POST", body: JSON.stringify({ reason }) }
+  );
+}
+
+export async function rollbackAdminContentRevision(
+  key: ContentPageKey,
+  revisionNumber: number,
+  reason: string
+) {
+  return apiRequest<{ draft: AdminContentRevisionSummary }>(
+    `/api/admin/content/pages/${key}/revisions/${revisionNumber}/rollback`,
+    { method: "POST", body: JSON.stringify({ reason }) }
+  );
 }
 
 export async function listAdminUsers(options: {

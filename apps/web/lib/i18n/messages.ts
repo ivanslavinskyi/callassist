@@ -104,6 +104,7 @@ export type Messages = {
     safety: string;
     creditAdmin: string;
     usersAdmin: string;
+    contentAdmin: string;
     creditsRemaining: (count: number) => string;
   };
   dialog: {
@@ -306,6 +307,7 @@ const en: Messages = {
     safety: "Safety",
     creditAdmin: "Credits",
     usersAdmin: "Users",
+    contentAdmin: "Content",
     creditsRemaining: (count: number) =>
       `${count} call ${count === 1 ? "credit" : "credits"}`
   },
@@ -470,6 +472,7 @@ const de: Messages = {
     safety: "Sicherheit",
     creditAdmin: "Guthaben",
     usersAdmin: "Benutzer",
+    contentAdmin: "Inhalte",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {

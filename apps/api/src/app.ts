@@ -7,9 +7,12 @@ import {
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
+  contentAdminActionInputSchema,
+  contentDraftUpdateInputSchema,
   createCallBriefInputSchema,
   loginInputSchema,
   contentLocaleSchema,
+  contentPageKeySchema,
   onboardingAcceptanceInputSchema,
   phoneVerificationInputSchema,
   promoCodeCreateInputSchema,
@@ -132,6 +135,10 @@ export function buildApp({
       await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
       return null;
     }
+    if (user?.role === "content_editor") {
+      await reply.status(403).send({ error: "CALL_ACCESS_FORBIDDEN" });
+      return null;
+    }
     if (
       contentService &&
       user &&
@@ -180,6 +187,47 @@ export function buildApp({
     }
     if (user.role !== "admin" && user.role !== "superadmin") {
       await reply.status(403).send({ error: "ADMIN_ACTION_FORBIDDEN" });
+      return null;
+    }
+    if (
+      contentService &&
+      !(await contentService.hasCurrentAcceptance(user.id))
+    ) {
+      await reply.status(403).send({ error: "ONBOARDING_REQUIRED" });
+      return null;
+    }
+    return user;
+  }
+
+  async function authorizeContentMutation(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+      await reply.status(403).send({ error: "INVALID_ORIGIN" });
+      return null;
+    }
+    return authorizeContentRead(request, reply);
+  }
+
+  async function authorizeContentRead(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    if (!authService) {
+      await reply.status(503).send({ error: "AUTHENTICATION_UNAVAILABLE" });
+      return null;
+    }
+    const user = await authService.authenticate(
+      sessionTokenFromHeaders(request.headers)
+    );
+    if (!user) {
+      await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      return null;
+    }
+    if (!(["content_editor", "admin", "superadmin"] as User["role"][])
+      .includes(user.role)) {
+      await reply.status(403).send({ error: "CONTENT_ACTION_FORBIDDEN" });
       return null;
     }
     if (
@@ -440,6 +488,184 @@ export function buildApp({
           return sendContentError(reply, error);
         }
       });
+
+      app.get("/api/admin/content/pages", async (request, reply) => {
+        const actor = await authorizeContentRead(request, reply);
+        if (!actor) return;
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send({ pages: await contentService.listAdminPages() });
+      });
+
+      app.get<{
+        Params: { key: string };
+        Querystring: { locale?: string };
+      }>("/api/admin/content/pages/:key", async (request, reply) => {
+        const actor = await authorizeContentRead(request, reply);
+        if (!actor) return;
+        const key = contentPageKeySchema.safeParse(request.params.key);
+        const locale = contentLocaleSchema.safeParse(request.query.locale);
+        if (!key.success || !locale.success) {
+          return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await contentService.getAdminPage(key.data, locale.data));
+        } catch (error) {
+          return sendContentError(reply, error);
+        }
+      });
+
+      app.get<{
+        Params: { key: string };
+        Querystring: { locale?: string };
+      }>("/api/admin/content/pages/:key/preview", async (request, reply) => {
+        const actor = await authorizeContentRead(request, reply);
+        if (!actor) return;
+        const key = contentPageKeySchema.safeParse(request.params.key);
+        const locale = contentLocaleSchema.safeParse(request.query.locale);
+        if (!key.success || !locale.success) {
+          return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send({
+              page: await contentService.getAdminPreview(key.data, locale.data)
+            });
+        } catch (error) {
+          return sendContentError(reply, error);
+        }
+      });
+
+      app.get<{ Params: { key: string } }>(
+        "/api/admin/content/pages/:key/revisions",
+        async (request, reply) => {
+          const actor = await authorizeContentRead(request, reply);
+          if (!actor) return;
+          const key = contentPageKeySchema.safeParse(request.params.key);
+          if (!key.success) {
+            return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+          }
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send({
+              revisions: await contentService.listAdminRevisions(key.data)
+            });
+        }
+      );
+
+      app.post<{ Params: { key: string } }>(
+        "/api/admin/content/pages/:key/drafts",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = contentPageKeySchema.safeParse(request.params.key);
+          if (!key.success) {
+            return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+          }
+          try {
+            return reply.status(201).send({
+              draft: await contentService.createDraft(actor.id, key.data)
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.put<{ Params: { key: string } }>(
+        "/api/admin/content/pages/:key/draft",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = contentPageKeySchema.safeParse(request.params.key);
+          const input = contentDraftUpdateInputSchema.safeParse(request.body);
+          if (!key.success) {
+            return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+          }
+          if (!input.success) {
+            return reply.status(400).send({
+              error: "INVALID_CONTENT_DRAFT",
+              issues: input.error.flatten()
+            });
+          }
+          try {
+            return reply.send({
+              draft: await contentService.updateDraft(
+                actor.id,
+                key.data,
+                input.data
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.post<{ Params: { key: string } }>(
+        "/api/admin/content/pages/:key/publish",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = contentPageKeySchema.safeParse(request.params.key);
+          const input = contentAdminActionInputSchema.safeParse(request.body);
+          if (!key.success) {
+            return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+          }
+          if (!input.success) {
+            return reply.status(400).send({ error: "INVALID_CONTENT_ACTION" });
+          }
+          try {
+            return reply.send({
+              revision: await contentService.publishDraft(
+                actor.id,
+                key.data,
+                input.data.reason
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.post<{
+        Params: { key: string; revisionNumber: string };
+      }>(
+        "/api/admin/content/pages/:key/revisions/:revisionNumber/rollback",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = contentPageKeySchema.safeParse(request.params.key);
+          const revisionNumber = Number(request.params.revisionNumber);
+          const input = contentAdminActionInputSchema.safeParse(request.body);
+          if (!key.success) {
+            return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+          }
+          if (
+            !Number.isInteger(revisionNumber) ||
+            revisionNumber < 1 ||
+            !input.success
+          ) {
+            return reply.status(400).send({ error: "INVALID_CONTENT_ACTION" });
+          }
+          try {
+            return reply.status(201).send({
+              draft: await contentService.createRollbackDraft(
+                actor.id,
+                key.data,
+                revisionNumber,
+                input.data.reason
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
     }
 
     app.get("/api/usage", async (request, reply) => {
@@ -1255,11 +1481,19 @@ function sendContentError(
   error: unknown
 ) {
   if (error instanceof ContentRepositoryError) {
-    const status = error.code === "LEGAL_REVISION_CHANGED"
+    const status = ["LEGAL_REVISION_CHANGED", "CONTENT_DRAFT_EXISTS"]
+      .includes(error.code)
       ? 409
-      : error.code === "USER_NOT_FOUND"
+      : [
+          "USER_NOT_FOUND",
+          "CONTENT_PAGE_NOT_FOUND",
+          "CONTENT_DRAFT_NOT_FOUND",
+          "CONTENT_REVISION_NOT_FOUND"
+        ].includes(error.code)
         ? 404
-        : 503;
+        : error.code === "CONTENT_REACCEPTANCE_INVALID"
+          ? 400
+          : 503;
     return reply.status(status).send({ error: error.code });
   }
   throw error;

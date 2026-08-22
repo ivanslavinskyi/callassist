@@ -5,25 +5,32 @@ import {
   approveAndStartCall,
   changeAdminUserStatus,
   confirmRecipientOptOut,
+  createAdminContentDraft,
   createCallBrief,
   createPromoCode,
   getCreditUsage,
   getOnboardingStatus,
   getAdminUserCreditLedger,
+  getAdminContentPage,
   getCallPreparationErrorMessage,
   login,
   listAdminUsers,
+  listAdminContentPages,
+  listAdminContentRevisions,
   liftRecipientSuppressionAsStaff,
   logout,
   registerAccount,
   redeemPromoCode,
+  publishAdminContentDraft,
   recompileCallBrief,
   requestRecipientOptOut,
+  rollbackAdminContentRevision,
   grantCreditsAsAdmin,
   revokeAdminUserSessions,
   revokeAllOwnSessions,
   suppressRecipientAsStaff,
-  startCall
+  startCall,
+  updateAdminContentDraft
 } from "./api";
 
 afterEach(() => {
@@ -31,6 +38,46 @@ afterEach(() => {
 });
 
 describe("API client headers", () => {
+  it("uses the protected CMS endpoints for the complete editorial lifecycle", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ pages: [], revisions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listAdminContentPages();
+    await getAdminContentPage("privacy", "de");
+    await listAdminContentRevisions("privacy");
+    await createAdminContentDraft("privacy");
+    await updateAdminContentDraft("privacy", {
+      locale: "de",
+      title: "Datenschutz",
+      summary: "Zusammenfassung",
+      sections: [{ heading: "Daten", paragraphs: ["Details"], bullets: [] }],
+      seoTitle: "Datenschutz",
+      seoDescription: "Beschreibung",
+      sourceRevisionNumber: 2,
+      requiresReacceptance: false
+    });
+    await publishAdminContentDraft("privacy", "Reviewed privacy update");
+    await rollbackAdminContentRevision("privacy", 1, "Restore reviewed revision");
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringMatching(/\/api\/admin\/content\/pages$/),
+      expect.stringContaining("/api/admin/content/pages/privacy?locale=de"),
+      expect.stringContaining("/api/admin/content/pages/privacy/revisions"),
+      expect.stringContaining("/api/admin/content/pages/privacy/drafts"),
+      expect.stringContaining("/api/admin/content/pages/privacy/draft"),
+      expect.stringContaining("/api/admin/content/pages/privacy/publish"),
+      expect.stringContaining("/api/admin/content/pages/privacy/revisions/1/rollback")
+    ]);
+    expect(fetchMock.mock.calls.slice(3).map(([, init]) => init?.method)).toEqual([
+      "POST", "PUT", "POST", "POST"
+    ]);
+  });
+
   it("does not declare JSON for an empty POST request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ brief: { status: "dialing" } }), {

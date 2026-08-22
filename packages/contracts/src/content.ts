@@ -44,6 +44,79 @@ export type PublishedContentPage = z.infer<
   typeof publishedContentPageSchema
 >;
 
+export const contentRevisionStatusSchema = z.enum(["draft", "published"]);
+export type ContentRevisionStatus = z.infer<typeof contentRevisionStatusSchema>;
+
+export const adminContentRevisionSummarySchema = z.object({
+  id: z.uuid(),
+  number: z.number().int().positive(),
+  status: contentRevisionStatusSchema,
+  requiresReacceptance: z.boolean(),
+  createdByUserId: z.uuid().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  publishedAt: z.iso.datetime().nullable(),
+  locales: z.array(contentLocaleSchema).min(1).max(2)
+});
+export type AdminContentRevisionSummary = z.infer<
+  typeof adminContentRevisionSummarySchema
+>;
+
+export const adminContentPageSummarySchema = z.object({
+  key: contentPageKeySchema,
+  pageType: contentPageTypeSchema,
+  sourceLocale: contentLocaleSchema,
+  localizations: z.array(z.object({
+    locale: contentLocaleSchema,
+    slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  })).min(1).max(2),
+  publishedRevision: adminContentRevisionSummarySchema.nullable(),
+  draftRevision: adminContentRevisionSummarySchema.nullable()
+});
+export type AdminContentPageSummary = z.infer<
+  typeof adminContentPageSummarySchema
+>;
+
+export const adminContentLocalizedRevisionSchema = z.object({
+  key: contentPageKeySchema,
+  pageType: contentPageTypeSchema,
+  sourceLocale: contentLocaleSchema,
+  locale: contentLocaleSchema,
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  title: z.string().trim().min(1).max(180),
+  summary: z.string().trim().min(1).max(1000),
+  sections: z.array(contentSectionSchema).min(1).max(40),
+  seoTitle: z.string().trim().min(1).max(180),
+  seoDescription: z.string().trim().min(1).max(500),
+  revision: adminContentRevisionSummarySchema.omit({ locales: true }).extend({
+    sourceRevisionNumber: z.number().int().positive()
+  })
+});
+export type AdminContentLocalizedRevision = z.infer<
+  typeof adminContentLocalizedRevisionSchema
+>;
+
+export const contentDraftUpdateInputSchema = z.object({
+  locale: contentLocaleSchema,
+  title: z.string().trim().min(1).max(180),
+  summary: z.string().trim().min(1).max(1000),
+  sections: z.array(contentSectionSchema).min(1).max(40),
+  seoTitle: z.string().trim().min(1).max(180),
+  seoDescription: z.string().trim().min(1).max(500),
+  sourceRevisionNumber: z.number().int().positive(),
+  requiresReacceptance: z.boolean()
+});
+export type ContentDraftUpdateInput = z.infer<
+  typeof contentDraftUpdateInputSchema
+>;
+
+export const contentAdminActionInputSchema = z.object({
+  reason: z.string().trim().min(3).max(500)
+});
+export type ContentAdminActionInput = z.infer<
+  typeof contentAdminActionInputSchema
+>;
+
 export const legalRevisionReferenceSchema = z.object({
   id: z.uuid(),
   key: z.enum(["terms", "acceptable_use"]),

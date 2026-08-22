@@ -45,8 +45,8 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 ## Known partial implementation and beta gaps
 
-- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, and server route guards exist. CMS administration, reviewed operator/contact details, and production release work remain.
-- **PARTIAL — localization:** operational UI, public landing, and structured legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. CMS publishing, full SEO metadata, and automated translation-freshness flags remain absent.
+- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, and localized CMS Core exist. Landing/navigation/media administration, reviewed operator/contact details, and production release work remain.
+- **PARTIAL — localization:** operational UI, public landing, and CMS-managed structured legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Full SEO metadata and automated translation-freshness flags remain absent.
 - **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
@@ -62,11 +62,15 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [x] Require current acceptance server-side before rendering `/app` or current `/admin` pages and before authorizing call/credit/admin APIs; redirect authenticated users to localized onboarding when re-acceptance is required.
 - [x] Add contract, seed-content, PostgreSQL repository, API, route-boundary, and live-browser coverage; initial acceptance, stale submissions, and forced re-acceptance after a legal revision changes are automated.
 
-## Next checkpoint — CMS publishing and SEO boundary
+## Completed checkpoint — CMS Core
 
-- [ ] Add RBAC-scoped `/admin/content` and `/admin/seo` entry points for `content_editor`, admin, and superadmin without granting call or recording access to content editors.
-- [ ] Add draft creation/editing, immutable publish snapshots, localized preview, history, rollback-as-new-revision, and content/legal audit events.
-- [ ] Move the current seeded pages into the managed publishing workflow while retaining deterministic bootstrap data for clean local environments.
+- [x] Add an RBAC-scoped `/admin/content` entry point for `content_editor`, admin, and superadmin. Content editors are redirected away from `/app` and operational admin routes, and backend call/recording operations reject the role. `/admin/seo` remains the next checkpoint.
+- [x] Add one-draft-per-page creation/editing, immutable publish snapshots, authenticated localized noindex preview, history, rollback-as-new-draft, and immutable content/legal audit events with actor/reason/time.
+- [x] Manage the existing seeded EN/DE pages through the publishing workflow while retaining deterministic bootstrap publication data for clean local environments.
+- [x] Preserve public reads on the latest published snapshot while drafts remain private; material Terms/AUP publication invalidates current onboarding acceptance through the existing revision boundary.
+
+## Next checkpoint — structured SEO and editorial expansion
+
 - [ ] Add structured navigation and reusable FAQ management; defer the media library until a real asset workflow is required.
 - [ ] Generate and test canonical URLs, hreflang, robots, sitemap, localized OG metadata, and translation-staleness indicators from published content.
 
@@ -175,10 +179,10 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — localized CMS and publishing
 
-- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`.
-- [ ] Model logical `content_pages` separately from localized routing/editorial data, allowing `/en/privacy` and `/de/datenschutz`. **Partial:** logical pages, localized slugs, revision-localized structured content, titles/descriptions, and timestamps exist; CMS status, OG/canonical/robots controls, and editor-facing publication state remain.
+- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`. **Partial:** RBAC-scoped EN/DE Page/FAQ editing, preview, publication, and history are implemented; Landing blocks, reusable FAQ/navigation, Media, and `/admin/seo` remain.
+- [x] Model logical `content_pages` separately from localized routing/editorial data, allowing `/en/privacy` and `/de/datenschutz`; expose draft/published state and editor-facing revision metadata.
 - [ ] Support `page`, `landing`, future `article`; no blog or universal builder for beta.
-- [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment. **Partial:** published EN/DE snapshots are versioned and database-immutable, and public reads are cached; editor attribution, draft/preview/history/rollback UI, audit, and targeted revalidation remain.
+- [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment. **Partial:** the full audited editorial lifecycle and database publication are implemented; public reads pick up publication through the existing 60-second revalidation window, while targeted on-publish revalidation remains.
 - [ ] Model Landing as ordered/enabled localized Hero, How it works, Use cases, Safety & Privacy, Languages, FAQ, CTA blocks; model reusable localized FAQ items.
 - [ ] Prefer navigation references to known internal entities and validate broken links.
 - [ ] Add media metadata: file/MIME/dimensions/size, EN/DE alt, uploader/time, usage references.
@@ -201,7 +205,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — minimum safe operations
 
-- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** every current admin page now has a server-side admin/superadmin guard, and backend account-status/force-logout routes enforce matching RBAC, privileged-target rules, self-action denial, and origin checks. Role-specific content-editor/support areas do not exist yet.
+- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** content editors now have a dedicated server- and API-guarded CMS boundary with no app/call/recording or operational-admin access; admin/superadmin permissions remain explicit, while `/admin/seo` and the role-specific support area remain.
 - [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events and suppression/lift safety events are immutable and include the applicable actor, target/source, reason, and time.
 - [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** the localized user console now consolidates paginated role-scoped lookup, ledger inspection, confirmed suspend/unsuspend, force logout, and idempotent manual credit grants; localized suppression controls and the kill-switch operator command also exist, but suppression lookup and in-app kill-switch control remain.
 
@@ -291,7 +295,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Global kill switch blocks new calls without implicitly ending active calls.
 - [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** every route and acceptance boundary is implemented and browser-verified locally; a monitored public support contact and production deployment remain.
 - [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live. **Partial:** localized implementation drafts are live locally, but formal review and final operator/subprocessor/contact details remain.
-- [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance. **Partial:** the EN/DE revision model and legal acceptance/re-acceptance work; CMS editing, preview, history, rollback, and publication audit remain.
+- [x] CMS supports EN/DE drafts/revisions, authenticated noindex preview, immutable publication/history, rollback-as-new-draft, audit, and legal acceptance/re-acceptance.
 - [ ] Localized metadata, canonical, hreflang, robots, sitemap verified.
 - [ ] Production domain/TLS, stable hosting, isolated Twilio ingress, production DB.
 - [ ] Secrets/keys managed with least privilege and rotation procedure.

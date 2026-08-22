@@ -112,6 +112,111 @@ describeWithDatabase("PostgresContentRepository", () => {
         accepted: { termsRevisionId: initial.current.terms.id }
       });
   });
+
+  it("publishes and rolls back through new immutable revisions with append-only audit", async () => {
+    const suffix = randomUUID();
+    const editor = await authRepository.createUser({
+      email: `editor.${suffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(suffix),
+      firstName: "Content",
+      lastName: "Editor",
+      uiLocale: "en"
+    });
+    await authRepository.markPhoneVerified(editor.id, new Date().toISOString());
+    await inspection`
+      UPDATE users SET role = 'content_editor' WHERE id = ${editor.id}
+    `;
+
+    const pages = await contentRepository.listAdminPages();
+    const privacy = pages.find(({ key }) => key === "privacy")!;
+    const sourceNumber = privacy.publishedRevision!.number;
+    const source = await contentRepository.getAdminRevision(
+      "privacy",
+      "de",
+      { revisionNumber: sourceNumber }
+    );
+    expect(source).not.toBeNull();
+
+    const draft = await contentRepository.createDraft(
+      editor.id,
+      "privacy",
+      "2026-08-24T10:00:00.000Z"
+    );
+    expect(draft).toMatchObject({
+      number: sourceNumber + 1,
+      status: "draft",
+      locales: ["de", "en"]
+    });
+    const title = `Datenschutzhinweise ${suffix.slice(0, 8)}`;
+    await contentRepository.updateDraft(editor.id, "privacy", {
+      locale: "de",
+      title,
+      summary: source!.summary,
+      sections: source!.sections,
+      seoTitle: source!.seoTitle,
+      seoDescription: source!.seoDescription,
+      sourceRevisionNumber: source!.revision.sourceRevisionNumber,
+      requiresReacceptance: false
+    }, "2026-08-24T10:05:00.000Z");
+    await expect(contentRepository.getPublishedPage("de", "datenschutz"))
+      .resolves.toMatchObject({ revision: { number: sourceNumber } });
+
+    const published = await contentRepository.publishDraft(
+      editor.id,
+      "privacy",
+      "Publish reviewed integration-test copy",
+      "2026-08-24T10:10:00.000Z"
+    );
+    expect(published).toMatchObject({
+      number: sourceNumber + 1,
+      status: "published"
+    });
+    await expect(contentRepository.getPublishedPage("de", "datenschutz"))
+      .resolves.toMatchObject({ title, revision: { number: sourceNumber + 1 } });
+
+    const rollback = await contentRepository.createRollbackDraft(
+      editor.id,
+      "privacy",
+      sourceNumber,
+      "Restore previous reviewed revision",
+      "2026-08-24T10:15:00.000Z"
+    );
+    expect(rollback).toMatchObject({
+      number: sourceNumber + 2,
+      status: "draft"
+    });
+    await expect(contentRepository.getAdminRevision(
+      "privacy",
+      "de",
+      { status: "draft" }
+    )).resolves.toMatchObject({ title: source!.title });
+    await contentRepository.publishDraft(
+      editor.id,
+      "privacy",
+      "Publish the reviewed rollback revision",
+      "2026-08-24T10:20:00.000Z"
+    );
+
+    const events = await inspection<{ eventType: string }[]>`
+      SELECT event_type AS "eventType"
+      FROM content_admin_events
+      WHERE actor_user_id = ${editor.id}
+      ORDER BY created_at
+    `;
+    expect(events.map(({ eventType }) => eventType)).toEqual([
+      "content.draft_created",
+      "content.draft_updated",
+      "content.revision_published",
+      "content.rollback_draft_created",
+      "content.revision_published"
+    ]);
+    await expect(inspection`
+      UPDATE content_admin_events
+      SET reason = 'tampered'
+      WHERE actor_user_id = ${editor.id}
+    `).rejects.toThrow("immutable");
+  });
 });
 
 function phoneFromUuid(value: string) {

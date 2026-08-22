@@ -1,5 +1,6 @@
 "use client";
 
+import type { UserRole } from "@callassist/contracts";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -35,7 +36,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [canManageAdmin, setCanManageAdmin] = useState(false);
+  const [role, setRole] = useState<UserRole | null>(null);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -47,20 +48,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       .then(({ user }) => {
         if (active) {
           setIsAuthenticated(true);
-          setCanManageAdmin(["admin", "superadmin"].includes(user.role));
+          setRole(user.role);
         }
       })
       .catch(() => {
         if (active) {
           setIsAuthenticated(false);
-          setCanManageAdmin(false);
+          setRole(null);
         }
       });
     return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated !== true) {
+    if (isAuthenticated !== true || role === "content_editor") {
       setCreditBalance(null);
       return;
     }
@@ -84,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener("callassist:usage-changed", onUsageChanged);
       window.removeEventListener("focus", onUsageChanged);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, role]);
 
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";
@@ -108,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
-          {isAuthenticated === true ? <>
+          {isAuthenticated === true && role !== "content_editor" ? <>
             <Link className="topbar-link" href={localizeHref("/app#new-call")}>{messages.app.newCall}</Link>
             <Link className="topbar-link" href={localizeHref("/app#history")}>{messages.app.history}</Link>
             <Link className="topbar-link" href={localizeHref("/app/account")}>{messages.app.account}</Link>
@@ -120,8 +121,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Link className="topbar-link" href={localizeHref("/opt-out")}>
             {messages.app.optOut}
           </Link>
-          {isAuthenticated ? <Link className="topbar-link" href={localizeHref("/redeem")}>{messages.app.redeem}</Link> : null}
-          {canManageAdmin ? <>
+          {isAuthenticated && role !== "content_editor" ? <Link className="topbar-link" href={localizeHref("/redeem")}>{messages.app.redeem}</Link> : null}
+          {role && ["content_editor", "admin", "superadmin"].includes(role) ? (
+            <Link className="topbar-link" href={localizeHref("/admin/content")}>{messages.app.contentAdmin}</Link>
+          ) : null}
+          {role && ["admin", "superadmin"].includes(role) ? <>
             <Link className="topbar-link" href={localizeHref("/admin/users")}>{messages.app.usersAdmin}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/safety")}>{messages.app.safety}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/credits")}>{messages.app.creditAdmin}</Link>

@@ -6,7 +6,10 @@ export function authenticatedAppRedirect(
   locale: string
 ) {
   if (!user) return `/${locale}/login`;
-  return onboarding?.required === false ? null : `/${locale}/onboarding`;
+  if (onboarding?.required !== false) return `/${locale}/onboarding`;
+  return user.role === "content_editor"
+    ? `/${locale}/admin/content`
+    : null;
 }
 
 export function adminAreaRedirect(
@@ -16,9 +19,29 @@ export function adminAreaRedirect(
 ) {
   if (!user) return `/${locale}/login`;
   if (onboarding?.required !== false) return `/${locale}/onboarding`;
-  return user.role === "admin" || user.role === "superadmin"
+  return ["content_editor", "admin", "superadmin"].includes(user.role)
     ? null
     : `/${locale}/app`;
+}
+
+export function operationalAdminRedirect(
+  user: User | null,
+  onboarding: OnboardingStatus | null,
+  locale: string
+) {
+  const sharedDestination = adminAreaRedirect(user, onboarding, locale);
+  if (sharedDestination) return sharedDestination;
+  return user?.role === "content_editor"
+    ? `/${locale}/admin/content`
+    : null;
+}
+
+export function contentAdminRedirect(
+  user: User | null,
+  onboarding: OnboardingStatus | null,
+  locale: string
+) {
+  return adminAreaRedirect(user, onboarding, locale);
 }
 
 export function onboardingPageRedirect(
@@ -27,5 +50,8 @@ export function onboardingPageRedirect(
   locale: string
 ) {
   if (!user) return `/${locale}/login`;
-  return onboarding?.required === false ? `/${locale}/app` : null;
+  if (onboarding?.required !== false) return null;
+  return user.role === "content_editor"
+    ? `/${locale}/admin/content`
+    : `/${locale}/app`;
 }

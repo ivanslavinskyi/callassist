@@ -1,5 +1,10 @@
 import type {
+  AdminContentLocalizedRevision,
+  AdminContentPageSummary,
+  AdminContentRevisionSummary,
+  ContentDraftUpdateInput,
   ContentLocale,
+  ContentPageKey,
   OnboardingAcceptanceInput,
   OnboardingStatus,
   PublishedContentPage
@@ -42,6 +47,57 @@ type AcceptanceRow = {
   acceptedAt: DatabaseDate;
 };
 
+type RevisionSummaryRow = {
+  id: string;
+  number: number;
+  status: "draft" | "published";
+  requiresReacceptance: boolean;
+  createdByUserId: string | null;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  publishedAt: DatabaseDate | null;
+  locales: ContentLocale[];
+};
+
+type AdminPageRow = {
+  key: ContentPageKey;
+  pageType: "page" | "landing";
+  sourceLocale: ContentLocale;
+  localizations: Array<{ locale: ContentLocale; slug: string }> | string;
+};
+
+type AdminRevisionRow = Omit<
+  AdminContentLocalizedRevision,
+  "sections" | "revision"
+> & {
+  sections: AdminContentLocalizedRevision["sections"] | string;
+  revisionId: string;
+  revisionNumber: number;
+  revisionStatus: "draft" | "published";
+  requiresReacceptance: boolean;
+  sourceRevisionNumber: number;
+  createdByUserId: string | null;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  publishedAt: DatabaseDate | null;
+};
+
+type RevisionLocalizationCopyRow = {
+  locale: ContentLocale;
+  title: string;
+  summary: string;
+  sections: AdminContentLocalizedRevision["sections"] | string;
+  seoTitle: string;
+  seoDescription: string;
+  sourceRevisionNumber: number;
+};
+
+type ContentAdminEventType =
+  | "content.draft_created"
+  | "content.draft_updated"
+  | "content.revision_published"
+  | "content.rollback_draft_created";
+
 export class PostgresContentRepository implements ContentRepository {
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
@@ -73,22 +129,23 @@ export class PostgresContentRepository implements ContentRepository {
         await transaction`
           INSERT INTO content_page_revisions (
             id, page_id, revision_number, status, requires_reacceptance,
-            created_by_user_id, created_at, published_at
+            created_by_user_id, created_at, updated_at, published_at
           ) VALUES (
             ${page.revision.id}, ${page.pageId}, ${page.revision.number},
             'published', ${page.revision.requiresReacceptance}, ${null},
-            ${now}, ${now}
+            ${now}, ${now}, ${now}
           ) ON CONFLICT (id) DO NOTHING
         `;
         await transaction`
           INSERT INTO content_page_revision_localizations (
             id, revision_id, locale, title, summary, sections,
-            seo_title, seo_description, source_revision_number, created_at
+            seo_title, seo_description, source_revision_number, created_at,
+            updated_at
           ) VALUES (
             ${page.revisionLocalizationId}, ${page.revision.id}, ${page.locale},
             ${page.title}, ${page.summary}, ${transaction.json(page.sections)},
             ${page.seoTitle}, ${page.seoDescription},
-            ${page.revision.sourceRevisionNumber}, ${now}
+            ${page.revision.sourceRevisionNumber}, ${now}, ${now}
           ) ON CONFLICT (id) DO NOTHING
         `;
       }
@@ -215,8 +272,461 @@ export class PostgresContentRepository implements ContentRepository {
     });
   }
 
+  async listAdminPages(): Promise<AdminContentPageSummary[]> {
+    const rows = await this.#sql<AdminPageRow[]>`
+      SELECT
+        page.key AS "key",
+        page.page_type AS "pageType",
+        page.source_locale AS "sourceLocale",
+        jsonb_agg(
+          jsonb_build_object(
+            'locale', localization.locale,
+            'slug', localization.slug
+          ) ORDER BY localization.locale
+        ) AS "localizations"
+      FROM content_pages page
+      JOIN content_page_localizations localization
+        ON localization.page_id = page.id
+      GROUP BY page.id
+      ORDER BY page.key
+    `;
+    return Promise.all(rows.map(async (row) => {
+      const [publishedRevision, draftRevision] = await Promise.all([
+        this.#revisionSummaryForKey(row.key, "published"),
+        this.#revisionSummaryForKey(row.key, "draft")
+      ]);
+      const localizations = typeof row.localizations === "string"
+        ? JSON.parse(row.localizations) as Array<{
+            locale: ContentLocale;
+            slug: string;
+          }>
+        : row.localizations;
+      return {
+        ...row,
+        localizations,
+        publishedRevision,
+        draftRevision
+      };
+    }));
+  }
+
+  async getAdminRevision(
+    key: ContentPageKey,
+    locale: ContentLocale,
+    selector: { status: "draft" | "published" } | { revisionNumber: number }
+  ) {
+    const byNumber = "revisionNumber" in selector;
+    const status = byNumber ? null : selector.status;
+    const revisionNumber = byNumber ? selector.revisionNumber : null;
+    const rows = await this.#sql<AdminRevisionRow[]>`
+      SELECT
+        page.key AS "key",
+        page.page_type AS "pageType",
+        page.source_locale AS "sourceLocale",
+        localization.locale AS "locale",
+        localization.slug AS "slug",
+        revision_localization.title AS "title",
+        revision_localization.summary AS "summary",
+        revision_localization.sections AS "sections",
+        revision_localization.seo_title AS "seoTitle",
+        revision_localization.seo_description AS "seoDescription",
+        revision.id AS "revisionId",
+        revision.revision_number AS "revisionNumber",
+        revision.status AS "revisionStatus",
+        revision.requires_reacceptance AS "requiresReacceptance",
+        revision_localization.source_revision_number AS "sourceRevisionNumber",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        greatest(revision.updated_at, revision_localization.updated_at) AS "updatedAt",
+        revision.published_at AS "publishedAt"
+      FROM content_pages page
+      JOIN content_page_localizations localization
+        ON localization.page_id = page.id AND localization.locale = ${locale}
+      JOIN content_page_revisions revision ON revision.page_id = page.id
+      JOIN content_page_revision_localizations revision_localization
+        ON revision_localization.revision_id = revision.id
+        AND revision_localization.locale = localization.locale
+      WHERE page.key = ${key}
+        AND (${status}::text IS NULL OR revision.status = ${status})
+        AND (${revisionNumber}::integer IS NULL
+          OR revision.revision_number = ${revisionNumber})
+      ORDER BY revision.revision_number DESC
+      LIMIT 1
+    `;
+    return rows[0] ? mapAdminRevision(rows[0]) : null;
+  }
+
+  async listAdminRevisions(key: ContentPageKey) {
+    const rows = await this.#sql<RevisionSummaryRow[]>`
+      SELECT
+        revision.id AS "id",
+        revision.revision_number AS "number",
+        revision.status AS "status",
+        revision.requires_reacceptance AS "requiresReacceptance",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        revision.updated_at AS "updatedAt",
+        revision.published_at AS "publishedAt",
+        array_agg(revision_localization.locale ORDER BY revision_localization.locale)
+          AS "locales"
+      FROM content_page_revisions revision
+      JOIN content_pages page ON page.id = revision.page_id
+      JOIN content_page_revision_localizations revision_localization
+        ON revision_localization.revision_id = revision.id
+      WHERE page.key = ${key}
+      GROUP BY revision.id
+      ORDER BY revision.revision_number DESC
+    `;
+    return rows.map(mapRevisionSummary);
+  }
+
+  async createDraft(
+    actorUserId: string,
+    key: ContentPageKey,
+    createdAt: string
+  ) {
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [page] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_pages WHERE key = ${key} FOR UPDATE
+      `;
+      if (!page) throw new ContentRepositoryError("CONTENT_PAGE_NOT_FOUND");
+      const [existing] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_page_revisions
+        WHERE page_id = ${page.id} AND status = 'draft'
+      `;
+      if (existing) throw new ContentRepositoryError("CONTENT_DRAFT_EXISTS");
+      const [source] = await transaction<{
+        id: string;
+        number: number;
+        requiresReacceptance: boolean;
+      }[]>`
+        SELECT
+          id,
+          revision_number AS "number",
+          requires_reacceptance AS "requiresReacceptance"
+        FROM content_page_revisions
+        WHERE page_id = ${page.id} AND status = 'published'
+        ORDER BY revision_number DESC
+        LIMIT 1
+      `;
+      if (!source) throw new ContentRepositoryError("CONTENT_REVISION_NOT_FOUND");
+      return this.#copyRevisionToDraft(transaction, {
+        actorUserId,
+        pageId: page.id,
+        sourceRevisionId: source.id,
+        revisionNumber: source.number + 1,
+        requiresReacceptance: source.requiresReacceptance,
+        eventType: "content.draft_created",
+        reason: null,
+        createdAt
+      });
+    });
+    return this.#requireRevisionSummary(revisionId);
+  }
+
+  async updateDraft(
+    actorUserId: string,
+    key: ContentPageKey,
+    input: ContentDraftUpdateInput,
+    updatedAt: string
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      const [draft] = await transaction<{ id: string; pageId: string }[]>`
+        SELECT revision.id, revision.page_id AS "pageId"
+        FROM content_page_revisions revision
+        JOIN content_pages page ON page.id = revision.page_id
+        WHERE page.key = ${key} AND revision.status = 'draft'
+        FOR UPDATE OF revision
+      `;
+      if (!draft) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+      await transaction`
+        UPDATE content_page_revisions
+        SET requires_reacceptance = ${input.requiresReacceptance},
+            updated_at = ${new Date(updatedAt)}
+        WHERE id = ${draft.id}
+      `;
+      const updated = await transaction`
+        UPDATE content_page_revision_localizations
+        SET title = ${input.title},
+            summary = ${input.summary},
+            sections = ${transaction.json(input.sections)},
+            seo_title = ${input.seoTitle},
+            seo_description = ${input.seoDescription},
+            source_revision_number = ${input.sourceRevisionNumber},
+            updated_at = ${new Date(updatedAt)}
+        WHERE revision_id = ${draft.id} AND locale = ${input.locale}
+        RETURNING id
+      `;
+      if (!updated.count) {
+        throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+      }
+      await this.#insertAdminEvent(transaction, {
+        eventType: "content.draft_updated",
+        actorUserId,
+        pageId: draft.pageId,
+        revisionId: draft.id,
+        sourceRevisionId: null,
+        locale: input.locale,
+        reason: null,
+        createdAt: updatedAt
+      });
+    });
+    const draft = await this.getAdminRevision(key, input.locale, { status: "draft" });
+    if (!draft) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+    return draft;
+  }
+
+  async publishDraft(
+    actorUserId: string,
+    key: ContentPageKey,
+    reason: string,
+    publishedAt: string
+  ) {
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [draft] = await transaction<{
+        id: string;
+        pageId: string;
+        expectedLocales: number;
+        actualLocales: number;
+      }[]>`
+        SELECT
+          revision.id,
+          revision.page_id AS "pageId",
+          (SELECT count(*)::integer FROM content_page_localizations route
+            WHERE route.page_id = revision.page_id) AS "expectedLocales",
+          (SELECT count(*)::integer FROM content_page_revision_localizations content
+            WHERE content.revision_id = revision.id) AS "actualLocales"
+        FROM content_page_revisions revision
+        JOIN content_pages page ON page.id = revision.page_id
+        WHERE page.key = ${key} AND revision.status = 'draft'
+        FOR UPDATE OF revision
+      `;
+      if (!draft) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+      if (draft.actualLocales !== draft.expectedLocales) {
+        throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+      }
+      await transaction`
+        UPDATE content_page_revisions
+        SET status = 'published',
+            published_at = ${new Date(publishedAt)},
+            updated_at = ${new Date(publishedAt)}
+        WHERE id = ${draft.id}
+      `;
+      await this.#insertAdminEvent(transaction, {
+        eventType: "content.revision_published",
+        actorUserId,
+        pageId: draft.pageId,
+        revisionId: draft.id,
+        sourceRevisionId: null,
+        locale: null,
+        reason,
+        createdAt: publishedAt
+      });
+      return draft.id;
+    });
+    return this.#requireRevisionSummary(revisionId);
+  }
+
+  async createRollbackDraft(
+    actorUserId: string,
+    key: ContentPageKey,
+    sourceRevisionNumber: number,
+    reason: string,
+    createdAt: string
+  ) {
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [page] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_pages WHERE key = ${key} FOR UPDATE
+      `;
+      if (!page) throw new ContentRepositoryError("CONTENT_PAGE_NOT_FOUND");
+      const [existing] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_page_revisions
+        WHERE page_id = ${page.id} AND status = 'draft'
+      `;
+      if (existing) throw new ContentRepositoryError("CONTENT_DRAFT_EXISTS");
+      const [source] = await transaction<{
+        id: string;
+        requiresReacceptance: boolean;
+      }[]>`
+        SELECT id, requires_reacceptance AS "requiresReacceptance"
+        FROM content_page_revisions
+        WHERE page_id = ${page.id}
+          AND revision_number = ${sourceRevisionNumber}
+          AND status = 'published'
+      `;
+      if (!source) throw new ContentRepositoryError("CONTENT_REVISION_NOT_FOUND");
+      const [numberRow] = await transaction<{ nextNumber: number }[]>`
+        SELECT (max(revision_number) + 1)::integer AS "nextNumber"
+        FROM content_page_revisions WHERE page_id = ${page.id}
+      `;
+      return this.#copyRevisionToDraft(transaction, {
+        actorUserId,
+        pageId: page.id,
+        sourceRevisionId: source.id,
+        revisionNumber: numberRow!.nextNumber,
+        requiresReacceptance: source.requiresReacceptance,
+        eventType: "content.rollback_draft_created",
+        reason,
+        createdAt
+      });
+    });
+    return this.#requireRevisionSummary(revisionId);
+  }
+
   async close() {
     await this.#sql.end({ timeout: 5 });
+  }
+
+  async #copyRevisionToDraft(
+    transaction: postgres.TransactionSql,
+    input: {
+      actorUserId: string;
+      pageId: string;
+      sourceRevisionId: string;
+      revisionNumber: number;
+      requiresReacceptance: boolean;
+      eventType: Extract<
+        ContentAdminEventType,
+        "content.draft_created" | "content.rollback_draft_created"
+      >;
+      reason: string | null;
+      createdAt: string;
+    }
+  ) {
+    const localizations = await transaction<RevisionLocalizationCopyRow[]>`
+      SELECT
+        locale,
+        title,
+        summary,
+        sections,
+        seo_title AS "seoTitle",
+        seo_description AS "seoDescription",
+        source_revision_number AS "sourceRevisionNumber"
+      FROM content_page_revision_localizations
+      WHERE revision_id = ${input.sourceRevisionId}
+      ORDER BY locale
+    `;
+    if (!localizations.length) {
+      throw new ContentRepositoryError("CONTENT_REVISION_NOT_FOUND");
+    }
+    const revisionId = randomUUID();
+    const createdAt = new Date(input.createdAt);
+    await transaction`
+      INSERT INTO content_page_revisions (
+        id, page_id, revision_number, status, requires_reacceptance,
+        created_by_user_id, created_at, updated_at, published_at
+      ) VALUES (
+        ${revisionId}, ${input.pageId}, ${input.revisionNumber}, 'draft',
+        ${input.requiresReacceptance}, ${input.actorUserId}, ${createdAt},
+        ${createdAt}, ${null}
+      )
+    `;
+    for (const localization of localizations) {
+      const sections = typeof localization.sections === "string"
+        ? JSON.parse(localization.sections) as AdminContentLocalizedRevision["sections"]
+        : localization.sections;
+      await transaction`
+        INSERT INTO content_page_revision_localizations (
+          id, revision_id, locale, title, summary, sections,
+          seo_title, seo_description, source_revision_number,
+          created_at, updated_at
+        ) VALUES (
+          ${randomUUID()}, ${revisionId}, ${localization.locale},
+          ${localization.title}, ${localization.summary},
+          ${transaction.json(sections)}, ${localization.seoTitle},
+          ${localization.seoDescription}, ${localization.sourceRevisionNumber},
+          ${createdAt}, ${createdAt}
+        )
+      `;
+    }
+    await this.#insertAdminEvent(transaction, {
+      eventType: input.eventType,
+      actorUserId: input.actorUserId,
+      pageId: input.pageId,
+      revisionId,
+      sourceRevisionId: input.sourceRevisionId,
+      locale: null,
+      reason: input.reason,
+      createdAt: input.createdAt
+    });
+    return revisionId;
+  }
+
+  async #insertAdminEvent(
+    transaction: postgres.TransactionSql,
+    input: {
+      eventType: ContentAdminEventType;
+      actorUserId: string;
+      pageId: string;
+      revisionId: string;
+      sourceRevisionId: string | null;
+      locale: ContentLocale | null;
+      reason: string | null;
+      createdAt: string;
+    }
+  ) {
+    await transaction`
+      INSERT INTO content_admin_events (
+        id, event_type, actor_user_id, page_id, revision_id,
+        source_revision_id, locale, reason, metadata, created_at
+      ) VALUES (
+        ${randomUUID()}, ${input.eventType}, ${input.actorUserId},
+        ${input.pageId}, ${input.revisionId}, ${input.sourceRevisionId},
+        ${input.locale}, ${input.reason},
+        ${transaction.json({ schemaVersion: 1 })}, ${new Date(input.createdAt)}
+      )
+    `;
+  }
+
+  async #revisionSummaryForKey(
+    key: ContentPageKey,
+    status: "draft" | "published"
+  ) {
+    const rows = await this.#sql<RevisionSummaryRow[]>`
+      SELECT
+        revision.id AS "id",
+        revision.revision_number AS "number",
+        revision.status AS "status",
+        revision.requires_reacceptance AS "requiresReacceptance",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        revision.updated_at AS "updatedAt",
+        revision.published_at AS "publishedAt",
+        array_agg(revision_localization.locale ORDER BY revision_localization.locale)
+          AS "locales"
+      FROM content_page_revisions revision
+      JOIN content_pages page ON page.id = revision.page_id
+      JOIN content_page_revision_localizations revision_localization
+        ON revision_localization.revision_id = revision.id
+      WHERE page.key = ${key} AND revision.status = ${status}
+      GROUP BY revision.id
+      ORDER BY revision.revision_number DESC
+      LIMIT 1
+    `;
+    return rows[0] ? mapRevisionSummary(rows[0]) : null;
+  }
+
+  async #requireRevisionSummary(revisionId: string) {
+    const rows = await this.#sql<RevisionSummaryRow[]>`
+      SELECT
+        revision.id AS "id",
+        revision.revision_number AS "number",
+        revision.status AS "status",
+        revision.requires_reacceptance AS "requiresReacceptance",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        revision.updated_at AS "updatedAt",
+        revision.published_at AS "publishedAt",
+        array_agg(revision_localization.locale ORDER BY revision_localization.locale)
+          AS "locales"
+      FROM content_page_revisions revision
+      JOIN content_page_revision_localizations revision_localization
+        ON revision_localization.revision_id = revision.id
+      WHERE revision.id = ${revisionId}
+      GROUP BY revision.id
+    `;
+    if (!rows[0]) throw new ContentRepositoryError("CONTENT_REVISION_NOT_FOUND");
+    return mapRevisionSummary(rows[0]);
   }
 
   async #legalReferences(
@@ -281,6 +791,43 @@ function mapPublishedPage(row: PublishedPageRow): PublishedContentPage {
       sourceRevisionNumber: row.sourceRevisionNumber,
       publishedAt: toIso(row.publishedAt)
     }
+  };
+}
+
+function mapAdminRevision(row: AdminRevisionRow): AdminContentLocalizedRevision {
+  return {
+    key: row.key,
+    pageType: row.pageType,
+    sourceLocale: row.sourceLocale,
+    locale: row.locale,
+    slug: row.slug,
+    title: row.title,
+    summary: row.summary,
+    sections: typeof row.sections === "string"
+      ? JSON.parse(row.sections) as AdminContentLocalizedRevision["sections"]
+      : row.sections,
+    seoTitle: row.seoTitle,
+    seoDescription: row.seoDescription,
+    revision: {
+      id: row.revisionId,
+      number: row.revisionNumber,
+      status: row.revisionStatus,
+      requiresReacceptance: row.requiresReacceptance,
+      sourceRevisionNumber: row.sourceRevisionNumber,
+      createdByUserId: row.createdByUserId,
+      createdAt: toIso(row.createdAt),
+      updatedAt: toIso(row.updatedAt),
+      publishedAt: row.publishedAt ? toIso(row.publishedAt) : null
+    }
+  };
+}
+
+function mapRevisionSummary(row: RevisionSummaryRow): AdminContentRevisionSummary {
+  return {
+    ...row,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    publishedAt: row.publishedAt ? toIso(row.publishedAt) : null
   };
 }
 

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   adminAreaRedirect,
   authenticatedAppRedirect,
+  contentAdminRedirect,
+  operationalAdminRedirect,
   onboardingPageRedirect
 } from "./route-access";
 
@@ -59,21 +61,36 @@ describe("server route access decisions", () => {
     expect(authenticatedAppRedirect(null, null, "de")).toBe("/de/login");
     expect(authenticatedAppRedirect(user, required, "de")).toBe("/de/onboarding");
     expect(authenticatedAppRedirect(user, current, "de")).toBeNull();
+    expect(authenticatedAppRedirect(
+      { ...user, role: "content_editor" }, current, "de"
+    )).toBe("/de/admin/content");
   });
 
-  it("allows only admin and superadmin roles into current admin pages", () => {
+  it("allows content staff into the shared admin tree", () => {
     expect(adminAreaRedirect(null, null, "en")).toBe("/en/login");
     expect(adminAreaRedirect(user, required, "en")).toBe("/en/onboarding");
     expect(adminAreaRedirect(user, current, "en")).toBe("/en/app");
     expect(adminAreaRedirect({ ...user, role: "support" }, current, "en")).toBe("/en/app");
-    expect(adminAreaRedirect({ ...user, role: "content_editor" }, current, "en")).toBe("/en/app");
+    expect(adminAreaRedirect({ ...user, role: "content_editor" }, current, "en")).toBeNull();
     expect(adminAreaRedirect({ ...user, role: "admin" }, current, "en")).toBeNull();
     expect(adminAreaRedirect({ ...user, role: "superadmin" }, current, "en")).toBeNull();
+  });
+
+  it("separates content administration from operational administration", () => {
+    const editor = { ...user, role: "content_editor" as const };
+    expect(contentAdminRedirect(editor, current, "en")).toBeNull();
+    expect(contentAdminRedirect(user, current, "en")).toBe("/en/app");
+    expect(operationalAdminRedirect(editor, current, "en")).toBe("/en/admin/content");
+    expect(operationalAdminRedirect({ ...user, role: "admin" }, current, "en")).toBeNull();
+    expect(operationalAdminRedirect({ ...user, role: "superadmin" }, current, "en")).toBeNull();
   });
 
   it("keeps only users with current acceptance out of onboarding", () => {
     expect(onboardingPageRedirect(null, null, "de")).toBe("/de/login");
     expect(onboardingPageRedirect(user, required, "de")).toBeNull();
     expect(onboardingPageRedirect(user, current, "de")).toBe("/de/app");
+    expect(onboardingPageRedirect(
+      { ...user, role: "content_editor" }, current, "de"
+    )).toBe("/de/admin/content");
   });
 });

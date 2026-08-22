@@ -360,6 +360,150 @@ describe("auth API", () => {
     });
   });
 
+  it("scopes content editors to audited CMS drafts and excludes call operations", async () => {
+    const contentRepository = new InMemoryContentRepository();
+    const contentService = new ContentService(
+      contentRepository,
+      () => new Date("2026-08-25T12:00:00.000Z")
+    );
+    await contentService.initialize();
+    const { app, repository } = createAuthApp(contentService);
+    const cookie = await registerAndVerify(app, registration);
+
+    const onboarding = await app.inject({
+      method: "GET",
+      url: "/api/onboarding/status?locale=de",
+      headers: { cookie }
+    });
+    const current = onboarding.json().current;
+    await app.inject({
+      method: "POST",
+      url: "/api/onboarding/accept",
+      headers: { cookie },
+      payload: {
+        locale: "de",
+        termsRevisionId: current.terms.id,
+        acceptableUseRevisionId: current.acceptableUse.id,
+        acceptTerms: true,
+        acceptAcceptableUse: true,
+        acknowledgeConsent: true,
+        acknowledgeRetention: true,
+        acknowledgeUseLimits: true,
+        acknowledgeCredits: true
+      }
+    });
+
+    const forbiddenUser = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/pages",
+      headers: { cookie }
+    });
+    expect(forbiddenUser.statusCode).toBe(403);
+    expect(forbiddenUser.json()).toEqual({ error: "CONTENT_ACTION_FORBIDDEN" });
+
+    const editor = await repository.findUserByEmail(registration.email);
+    await repository.setUserRoleForTest(editor!.id, "content_editor");
+    const pages = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/pages",
+      headers: { cookie }
+    });
+    expect(pages.statusCode).toBe(200);
+    expect(pages.json<{ pages: unknown[] }>().pages).toHaveLength(5);
+
+    const blockedCalls = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs",
+      headers: { cookie }
+    });
+    expect(blockedCalls.statusCode).toBe(403);
+    expect(blockedCalls.json()).toEqual({ error: "CALL_ACCESS_FORBIDDEN" });
+    const blockedUsers = await app.inject({
+      method: "GET",
+      url: "/api/admin/users",
+      headers: { cookie }
+    });
+    expect(blockedUsers.statusCode).toBe(403);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/admin/content/pages/privacy/drafts",
+      headers: { cookie }
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ draft: { number: 2, status: "draft" } });
+    const detail = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/pages/privacy?locale=de",
+      headers: { cookie }
+    });
+    const draft = detail.json().draft;
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/admin/content/pages/privacy/draft",
+      headers: { cookie },
+      payload: {
+        locale: "de",
+        title: "Datenschutz für die kontrollierte Beta",
+        summary: draft.summary,
+        sections: draft.sections,
+        seoTitle: draft.seoTitle,
+        seoDescription: draft.seoDescription,
+        sourceRevisionNumber: draft.revision.sourceRevisionNumber,
+        requiresReacceptance: false
+      }
+    });
+    expect(saved.statusCode).toBe(200);
+    const preview = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/pages/privacy/preview?locale=de",
+      headers: { cookie }
+    });
+    expect(preview.json()).toMatchObject({
+      page: { title: "Datenschutz für die kontrollierte Beta" }
+    });
+    const publishedBefore = await app.inject({
+      method: "GET",
+      url: "/api/content/pages/datenschutz?locale=de"
+    });
+    expect(publishedBefore.json().page.title).toBe("Datenschutzhinweise");
+
+    const published = await app.inject({
+      method: "POST",
+      url: "/api/admin/content/pages/privacy/publish",
+      headers: { cookie },
+      payload: { reason: "Publish reviewed German privacy copy" }
+    });
+    expect(published.statusCode).toBe(200);
+    const publishedAfter = await app.inject({
+      method: "GET",
+      url: "/api/content/pages/datenschutz?locale=de"
+    });
+    expect(publishedAfter.json()).toMatchObject({
+      page: {
+        title: "Datenschutz für die kontrollierte Beta",
+        revision: { number: 2 }
+      }
+    });
+    const history = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/pages/privacy/revisions",
+      headers: { cookie }
+    });
+    expect(history.json()).toMatchObject({
+      revisions: [
+        { number: 2, status: "published" },
+        { number: 1, status: "published" }
+      ]
+    });
+    expect(contentRepository.adminEventsForTest().map(({ eventType }) => eventType))
+      .toEqual([
+        "content.draft_created",
+        "content.draft_updated",
+        "content.revision_published"
+      ]);
+  });
+
   it("requires a session and hides every call resource from other users", async () => {
     const { app } = createAuthApp();
     const userACookie = await registerAndVerify(app, registration);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  contentDraftUpdateInputSchema,
   onboardingAcceptanceInputSchema,
   publishedContentPageSchema
 } from "./content";
@@ -49,6 +50,28 @@ describe("content and onboarding contracts", () => {
     expect(onboardingAcceptanceInputSchema.safeParse({
       ...valid,
       acknowledgeConsent: false
+    }).success).toBe(false);
+  });
+
+  it("validates bounded structured CMS drafts without accepting HTML blobs", () => {
+    const draft = contentDraftUpdateInputSchema.parse({
+      locale: "de",
+      title: "Datenschutzhinweise",
+      summary: "Wie CallAssist Daten verarbeitet.",
+      sections: [{
+        heading: "Verarbeitete Daten",
+        paragraphs: ["CallAssist verarbeitet Kontodaten."],
+        bullets: ["Telefonnummer", "Transkript"]
+      }],
+      seoTitle: "Datenschutzhinweise | CallAssist",
+      seoDescription: "Datenschutzinformationen für CallAssist.",
+      sourceRevisionNumber: 1,
+      requiresReacceptance: false
+    });
+    expect(draft.sections).toHaveLength(1);
+    expect(contentDraftUpdateInputSchema.safeParse({
+      ...draft,
+      sections: []
     }).success).toBe(false);
   });
 });
