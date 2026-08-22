@@ -37,7 +37,7 @@ import {
   mapTwilioStatusToCallStatus,
   type RecordingMedia,
   type TelephonyProvider,
-  type TwilioCallStatus
+  type TwilioCallStatusCallbackValue
 } from "./telephony/telephony-provider";
 import {
   PostCallTranscriptionError,
@@ -552,7 +552,7 @@ export class CallService {
 
   async handleTwilioStatus(
     providerCallId: string,
-    status: TwilioCallStatus,
+    status: TwilioCallStatusCallbackValue,
     callBriefId?: string,
     lease?: DurableJobLease
   ) {

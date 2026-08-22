@@ -1,6 +1,6 @@
 import type { CallBrief } from "@callassist/contracts";
 
-export const TWILIO_CALL_STATUSES = [
+export const TWILIO_CALL_RESOURCE_STATUSES = [
   "queued",
   "ringing",
   "in-progress",
@@ -11,7 +11,23 @@ export const TWILIO_CALL_STATUSES = [
   "no-answer"
 ] as const;
 
-export type TwilioCallStatus = (typeof TWILIO_CALL_STATUSES)[number];
+export type TwilioCallResourceStatus =
+  (typeof TWILIO_CALL_RESOURCE_STATUSES)[number];
+
+export const TWILIO_CALL_STATUS_CALLBACK_VALUES = [
+  "queued",
+  "initiated",
+  "ringing",
+  "in-progress",
+  "canceled",
+  "completed",
+  "failed",
+  "busy",
+  "no-answer"
+] as const;
+
+export type TwilioCallStatusCallbackValue =
+  (typeof TWILIO_CALL_STATUS_CALLBACK_VALUES)[number];
 
 export const TWILIO_RECORDING_STATUSES = [
   "in-progress",
@@ -46,7 +62,7 @@ export type RecordingMedia = {
 
 export type ProviderCallStatus = {
   providerCallId: string;
-  status: TwilioCallStatus;
+  status: TwilioCallResourceStatus;
 };
 
 export type ProviderRecordingStatus = {
@@ -75,10 +91,11 @@ export interface TelephonyProvider {
 }
 
 export function mapTwilioStatusToCallStatus(
-  status: TwilioCallStatus
+  status: TwilioCallStatusCallbackValue
 ): CallBrief["status"] {
   switch (status) {
     case "queued":
+    case "initiated":
     case "ringing":
       return "dialing";
     case "in-progress":
@@ -93,8 +110,18 @@ export function mapTwilioStatusToCallStatus(
   }
 }
 
-export function isTwilioCallStatus(value: string): value is TwilioCallStatus {
-  return (TWILIO_CALL_STATUSES as readonly string[]).includes(value);
+export function isTwilioCallResourceStatus(
+  value: string
+): value is TwilioCallResourceStatus {
+  return (TWILIO_CALL_RESOURCE_STATUSES as readonly string[]).includes(value);
+}
+
+export function isTwilioCallStatusCallbackValue(
+  value: string
+): value is TwilioCallStatusCallbackValue {
+  return (TWILIO_CALL_STATUS_CALLBACK_VALUES as readonly string[]).includes(
+    value
+  );
 }
 
 export function isTwilioRecordingStatus(

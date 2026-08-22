@@ -68,9 +68,8 @@ import {
   type ProviderWebhookDeliveryInput
 } from "./storage/call-repository";
 import {
-  isTwilioCallStatus,
+  isTwilioCallStatusCallbackValue,
   isTwilioRecordingStatus,
-  type TwilioCallStatus,
   type TwilioRecordingStatus
 } from "./telephony/telephony-provider";
 import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
@@ -1986,7 +1985,11 @@ export function buildWebhookApp({
 
         const providerCallId = parameters.CallSid;
         const status = parameters.CallStatus;
-        if (!providerCallId || !status || !isTwilioCallStatus(status)) {
+        if (
+          !providerCallId ||
+          !status ||
+          !isTwilioCallStatusCallbackValue(status)
+        ) {
           await recordWebhookDelivery(request, {
             kind: "call_status",
             outcome: "rejected",
@@ -1999,7 +2002,7 @@ export function buildWebhookApp({
         try {
           const snapshot = await service.handleTwilioStatus(
             providerCallId,
-            status as TwilioCallStatus,
+            status,
             request.query.callBriefId
           );
           await recordWebhookDelivery(request, snapshot

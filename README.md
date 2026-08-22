@@ -159,6 +159,13 @@ OPENAI_REALTIME_MALE_VOICE=cedar
 OPENAI_REALTIME_FEMALE_VOICE=marin
 ```
 
+Repeatable baseline and external-worker outage drills are available through
+`drill:real-call` and the PII-safe `drill:real-call:inspect` assertions. They require
+explicit recipient authorization and never print the target number or generated test
+credentials. Follow [the real-provider drill procedure](docs/real-provider-drills.md);
+do not run it against an unapproved recipient or expose the mock verification driver
+through a public application endpoint.
+
 The API includes the identity foundation endpoints under `/api/auth`: registration,
 phone verification/resend, login, logout, and current-session lookup. Registration
 requires separate first and last names and a Twilio Verify SMS confirmation. Local
@@ -309,8 +316,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
 - Continue from the completed durable transcription/retention, Twilio status
-  reconciliation, webhook-delivery visibility, and split worker runtime with
-  real-provider crash drills, cross-process live events, and external monitoring.
+  reconciliation, webhook-delivery visibility, split worker runtime, and
+  real-provider crash drills with cross-process live events and externally monitored
+  worker liveness.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

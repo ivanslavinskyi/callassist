@@ -130,6 +130,41 @@ describe("Twilio webhooks", () => {
     expect(response.body).toContain("<Connect>");
   });
 
+  it("accepts Twilio's initiated progress callback as dialing", async () => {
+    const { app, service } = createHarness();
+    const brief = await createBrief(service);
+    await service.repository.startAttempt(brief.id, { provider: "twilio" });
+    const parameters = {
+      CallSid: "CA123",
+      CallStatus: "initiated"
+    };
+    const path = `/webhooks/twilio/status?callBriefId=${brief.id}`;
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      parameters
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: path,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-twilio-signature": signature
+      },
+      payload: new URLSearchParams(parameters).toString()
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect((await service.get(brief.id))?.brief.status).toBe("dialing");
+    expect((await service.repository.getLatestAttempt(brief.id))?.providerStatus)
+      .toBe("initiated");
+    expect((await webhookFacts(service)).call_status).toMatchObject({
+      accepted: 1,
+      rejected: 0
+    });
+  });
+
   it("upgrades a signed media request to a WebSocket", async () => {
     const { app, handleTwilioSocket } = createHarness();
     const path = "/webhooks/twilio/media";

@@ -9,7 +9,7 @@ import type {
   TelephonyProvider
 } from "./telephony-provider";
 import {
-  isTwilioCallStatus,
+  isTwilioCallResourceStatus,
   isTwilioRecordingStatus
 } from "./telephony-provider";
 
@@ -76,7 +76,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   async getCallStatus(providerCallId: string) {
     try {
       const call = await this.#client.calls(providerCallId).fetch();
-      if (!isTwilioCallStatus(call.status)) {
+      if (!isTwilioCallResourceStatus(call.status)) {
         throw new Error("TWILIO_CALL_STATUS_UNSUPPORTED");
       }
       return { providerCallId, status: call.status };
