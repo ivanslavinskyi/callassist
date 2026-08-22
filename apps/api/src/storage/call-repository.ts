@@ -31,6 +31,27 @@ import type {
   EnqueueDurableJobInput
 } from "../jobs/durable-job";
 
+export type ProviderRecordingDeletionDisposition =
+  | "not_present"
+  | "already_deleted"
+  | "deleted";
+
+export type DeleteCallDataInput = {
+  callId: string;
+  userId: string;
+  requestId: string;
+  providerRecordingDisposition: ProviderRecordingDeletionDisposition;
+  deletedAt: string;
+};
+
+export type CallDataDeletionRecord = {
+  requestId: string;
+  callId: string;
+  userId: string;
+  providerRecordingDisposition: ProviderRecordingDeletionDisposition;
+  deletedAt: string;
+};
+
 export type ApprovalRequestDraft = Pick<
   ApprovalRequest,
   "category" | "title" | "reason" | "proposedSpeech"
@@ -377,6 +398,12 @@ export interface CallRepository {
     userId?: string | null
   ): Promise<CallBrief>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
+  findCallDataDeletion(
+    id: string,
+    userId: string,
+    requestId: string
+  ): Promise<CallDataDeletionRecord | null>;
+  deleteCallData(input: DeleteCallDataInput): Promise<CallDataDeletionRecord>;
   grantSignupCredits(userId: string): Promise<CreditUsage>;
   getCreditUsage(userId: string): Promise<CreditUsage>;
   createPromoCode(
@@ -577,6 +604,8 @@ export class CallRepositoryError extends Error {
       | "CREDIT_USER_NOT_FOUND"
       | "RECORDING_NOT_FOUND"
       | "RECORDING_NOT_AVAILABLE"
+      | "CALL_DATA_DELETION_NOT_AVAILABLE"
+      | "CALL_DATA_DELETION_IDEMPOTENCY_CONFLICT"
       | "CALL_FEEDBACK_NOT_AVAILABLE"
       | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
       | "DURABLE_JOB_LEASE_LOST"

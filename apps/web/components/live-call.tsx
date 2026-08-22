@@ -9,6 +9,7 @@ import {
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./app-shell";
 import { CallFeedback } from "./call-feedback";
@@ -22,6 +23,7 @@ import {
   callRecordingUrl,
   callEventsUrl,
   approveAndStartCall,
+  deleteCallData,
   deleteCallRecording,
   decideApproval,
   getCallPreparationErrorMessage,
@@ -46,6 +48,7 @@ const activeStatuses = new Set<CallBriefStatus>([
 ]);
 
 export function LiveCall({ callId }: { callId: string }) {
+  const router = useRouter();
   const { locale: uiLocale, localizeHref, messages } = useUiLocale();
   const copy = messages.live;
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
@@ -53,6 +56,12 @@ export function LiveCall({ callId }: { callId: string }) {
   const [busy, setBusy] = useState(false);
   const [editingBrief, setEditingBrief] = useState(false);
   const [confirmingAudioDelete, setConfirmingAudioDelete] = useState(false);
+  const [deletionPassword, setDeletionPassword] = useState("");
+  const [deletionConfirmation, setDeletionConfirmation] = useState("");
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [deletionError, setDeletionError] = useState<
+    "invalid-password" | "failed" | null
+  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<
@@ -62,6 +71,7 @@ export function LiveCall({ callId }: { callId: string }) {
   const [showFullObjective, setShowFullObjective] = useState(false);
   const transcriptListRef = useRef<HTMLDivElement>(null);
   const transcriptCardRef = useRef<HTMLElement>(null);
+  const deletionRequestIdRef = useRef<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
     "idle"
   );
@@ -276,6 +286,28 @@ export function LiveCall({ callId }: { callId: string }) {
     } catch (error) {
       console.error("Final transcript PDF export failed", error);
       setPdfStatus("failed");
+    }
+  }
+
+  async function permanentlyDeleteCallData() {
+    setDeletionBusy(true);
+    setDeletionError(null);
+    try {
+      deletionRequestIdRef.current ??= crypto.randomUUID();
+      await deleteCallData(callId, {
+        requestId: deletionRequestIdRef.current,
+        password: deletionPassword,
+        confirmation: "DELETE"
+      });
+      router.replace(localizeHref("/app"));
+      router.refresh();
+    } catch (error) {
+      setDeletionError(
+        error instanceof ApiError && error.code === "INVALID_CREDENTIALS"
+          ? "invalid-password"
+          : "failed"
+      );
+      setDeletionBusy(false);
     }
   }
 
@@ -704,6 +736,60 @@ export function LiveCall({ callId }: { callId: string }) {
                 callId={callId}
                 hasCompletedTranscript={finalTranscript?.status === "completed"}
               />
+            ) : null}
+
+            {isTerminalCallStatus(brief.status) || brief.status === "blocked" ? (
+              <section className="call-data-deletion-card" aria-labelledby="call-data-deletion-title">
+                <h2 id="call-data-deletion-title">{copy.dataDeletionTitle}</h2>
+                <p>{copy.dataDeletionText}</p>
+                <p className="account-muted">{copy.dataDeletionRetained}</p>
+                <div className="call-data-deletion-fields">
+                  <label>
+                    <span>{copy.dataDeletionPassword}</span>
+                    <input
+                      autoComplete="current-password"
+                      disabled={deletionBusy}
+                      onChange={(event) => setDeletionPassword(event.target.value)}
+                      type="password"
+                      value={deletionPassword}
+                    />
+                  </label>
+                  <label>
+                    <span>{copy.dataDeletionConfirmation}</span>
+                    <input
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      disabled={deletionBusy}
+                      onChange={(event) => setDeletionConfirmation(event.target.value)}
+                      spellCheck={false}
+                      type="text"
+                      value={deletionConfirmation}
+                    />
+                    <small>{copy.dataDeletionConfirmationHint}</small>
+                  </label>
+                </div>
+                <button
+                  className="danger-button"
+                  disabled={
+                    deletionBusy ||
+                    !deletionPassword ||
+                    deletionConfirmation !== "DELETE"
+                  }
+                  onClick={() => void permanentlyDeleteCallData()}
+                  type="button"
+                >
+                  {deletionBusy
+                    ? copy.dataDeletionBusy
+                    : copy.dataDeletionAction}
+                </button>
+                {deletionError ? (
+                  <p className="form-error" role="alert">
+                    {deletionError === "invalid-password"
+                      ? copy.dataDeletionInvalidPassword
+                      : copy.dataDeletionError}
+                  </p>
+                ) : null}
+              </section>
             ) : null}
           </div>
 

@@ -9,7 +9,8 @@ describe("endpoint rate-limit policy", () => {
       promoRedemption: { userLimit: 10, ipLimit: 50, windowMs: 3_600_000 },
       recordingDownload: { userLimit: 30, ipLimit: 150, windowMs: 3_600_000 },
       transcriptionRetry: { userLimit: 5, ipLimit: 25, windowMs: 86_400_000 },
-      dataExport: { userLimit: 2, ipLimit: 10, windowMs: 86_400_000 }
+      dataExport: { userLimit: 2, ipLimit: 10, windowMs: 86_400_000 },
+      callDataDeletion: { userLimit: 5, ipLimit: 25, windowMs: 86_400_000 }
     });
   });
 
@@ -27,5 +28,8 @@ describe("endpoint rate-limit policy", () => {
       ipLimit: 15,
       windowMs: 86_400_000
     });
+    expect(() => endpointRateLimitPolicyFromEnv({
+      API_RATE_LIMIT_CALL_DATA_DELETION_PER_DAY: "0"
+    })).toThrow("API_RATE_LIMIT_CALL_DATA_DELETION_PER_DAY");
   });
 });

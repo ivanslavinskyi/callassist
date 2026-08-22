@@ -66,7 +66,7 @@ const definitions: SeedDefinition[] = [
           },
           {
             heading: "Retention and deletion",
-            paragraphs: ["Audio retention is selected per call: delete after the final transcript, retain 7 days, or retain 30 days. Retained audio can be deleted manually. Account, transcript, backup, provider, and full-data deletion procedures remain under development and are not yet a public-beta guarantee."],
+            paragraphs: ["Audio retention is selected per call: delete after the final transcript, retain 7 days, or retain 30 days. For a completed call, the account owner can use password-confirmed call-data deletion: provider audio is removed first, then the brief, transcripts, approval text, and feedback comment are redacted from the live service. Minimized credit, consent, safety, technical, and audit evidence remains. Account-wide anonymization and production backup-expiry procedures remain under development."],
             bullets: []
           },
           {
@@ -105,7 +105,7 @@ const definitions: SeedDefinition[] = [
           },
           {
             heading: "Aufbewahrung und Löschung",
-            paragraphs: ["Die Audioaufbewahrung wird pro Anruf gewählt: nach dem Endtranskript löschen, 7 Tage oder 30 Tage behalten. Gespeicherte Aufnahmen können manuell gelöscht werden. Verfahren für Konto-, Transkript-, Backup-, Anbieter- und vollständige Datenlöschung sind noch in Arbeit."],
+            paragraphs: ["Die Audioaufbewahrung wird pro Anruf gewählt: nach dem Endtranskript löschen, 7 Tage oder 30 Tage behalten. Bei einem abgeschlossenen Anruf kann die Kontoinhaberin oder der Kontoinhaber die passwortbestätigte Löschung der Anrufdaten nutzen: Zuerst wird die Anbieter-Aufnahme entfernt, danach werden Anrufentwurf, Transkripte, Freigabetexte und Feedback-Kommentar im aktiven Dienst unkenntlich gemacht. Minimierte Guthaben-, Einwilligungs-, Sicherheits-, technische und Audit-Nachweise bleiben erhalten. Die kontoübergreifende Anonymisierung und die produktiven Backup-Abläufe sind noch in Arbeit."],
             bullets: []
           },
           {

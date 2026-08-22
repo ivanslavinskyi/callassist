@@ -205,3 +205,22 @@ export const accountDataExportSchema = z.strictObject({
   calls: z.array(accountDataExportCallSchema)
 });
 export type AccountDataExport = z.infer<typeof accountDataExportSchema>;
+
+export const CALL_DATA_DELETION_CONFIRMATION = "DELETE" as const;
+
+export const callDataDeletionInputSchema = z.strictObject({
+  requestId: z.uuid(),
+  password: z.string().min(1).max(128),
+  confirmation: z.literal(CALL_DATA_DELETION_CONFIRMATION)
+});
+export type CallDataDeletionInput = z.infer<
+  typeof callDataDeletionInputSchema
+>;
+
+export const callDataDeletionResultSchema = z.strictObject({
+  requestId: z.uuid(),
+  deletedAt: z.iso.datetime()
+});
+export type CallDataDeletionResult = z.infer<
+  typeof callDataDeletionResultSchema
+>;

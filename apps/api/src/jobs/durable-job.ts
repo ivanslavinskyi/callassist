@@ -10,7 +10,8 @@ export type DurableJobStatus =
   | "queued"
   | "running"
   | "succeeded"
-  | "dead_letter";
+  | "dead_letter"
+  | "cancelled";
 
 export type DurableJob = {
   id: string;
@@ -41,7 +42,12 @@ export type DurableJobAttempt = {
   workerId: string;
   startedAt: string;
   completedAt: string;
-  outcome: "succeeded" | "retry_scheduled" | "dead_letter" | "lease_expired";
+  outcome:
+    | "succeeded"
+    | "retry_scheduled"
+    | "dead_letter"
+    | "lease_expired"
+    | "cancelled";
   errorCode: string | null;
 };
 

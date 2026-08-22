@@ -860,4 +860,83 @@ describe("CallService", () => {
       recording: { status: "available", providerRecordingId: "RE-race" }
     });
   });
+
+  it("keeps local call content when provider audio deletion fails, then redacts on retry", async () => {
+    const deleteRecording = vi.fn()
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValue(undefined);
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return { providerCallId: "CA-delete", providerStatus: "queued" };
+      },
+      async stopCall() {},
+      async startRecording() {
+        return {
+          providerRecordingId: "RE-delete",
+          providerStatus: "in-progress"
+        };
+      },
+      async getRecordingMedia() {
+        return {
+          bytes: new Uint8Array([1]),
+          contentType: "audio/wav",
+          fileName: "RE-delete.wav"
+        };
+      },
+      deleteRecording
+    };
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository, provider);
+    services.push(service);
+    const userId = "f4e2bf73-e441-4dd2-976b-f949ad41b674";
+    await repository.grantSignupCredits(userId);
+    const brief = await service.create({
+      recipientName: "Private clinic",
+      phoneNumber: "+41523686688",
+      objective: "Ask whether the private application was received",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      context: "Sensitive private context",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: ["Private reference 149"]
+    }, userId);
+    await service.approveCompilation(brief.id);
+    await service.start(brief.id, userId);
+    const recording = await service.startRecordingAfterConsent(brief.id);
+    await service.handleTwilioRecordingStatus({
+      callBriefId: brief.id,
+      recordingId: recording.recording!.id,
+      providerCallId: "CA-delete",
+      providerRecordingId: "RE-delete",
+      providerStatus: "completed"
+    });
+    await service.handleTwilioStatus("CA-delete", "completed", brief.id);
+    const request = {
+      requestId: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+      password: "not-used-at-service-boundary",
+      confirmation: "DELETE" as const
+    };
+
+    await expect(service.deleteCallData(brief.id, userId, request))
+      .rejects.toMatchObject({ code: "CALL_DATA_DELETION_PROVIDER_FAILED" });
+    const retained = (await repository.get(brief.id))?.brief;
+    expect(retained?.recipientName).toBe("Private clinic");
+    expect(retained?.context).toContain("Sensitive private context");
+
+    const deleted = await service.deleteCallData(brief.id, userId, request);
+    expect(deleted.requestId).toBe(request.requestId);
+    expect(deleteRecording).toHaveBeenCalledTimes(2);
+    expect(await repository.get(brief.id)).toBeNull();
+    expect(await repository.findCallDataDeletion(
+      brief.id,
+      userId,
+      request.requestId
+    )).toMatchObject({ providerRecordingDisposition: "deleted" });
+    await expect(service.deleteCallData(brief.id, userId, request))
+      .resolves.toEqual(deleted);
+  });
 });

@@ -19,6 +19,8 @@ import type {
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
+  CallDataDeletionInput,
+  CallDataDeletionResult,
   CallOutcomeView,
   CallSnapshot,
   ContentLocale,
@@ -625,6 +627,19 @@ export async function deleteCallRecording(id: string) {
   return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/recording`, {
     method: "DELETE"
   });
+}
+
+export async function deleteCallData(
+  id: string,
+  input: CallDataDeletionInput
+) {
+  return apiRequest<CallDataDeletionResult>(
+    `/api/call-briefs/${encodeURIComponent(id)}/data-deletion`,
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    }
+  );
 }
 
 export async function retryFinalTranscript(id: string) {

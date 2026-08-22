@@ -62,7 +62,9 @@ import {
   type CallAttemptRecord,
   type CallChangeSignal,
   type CallRepository,
+  type CallDataDeletionRecord,
   type CreatePromoCodeRepositoryInput,
+  type DeleteCallDataInput,
   type ListCallBriefsInput,
   type ListAdminCallsInput,
   type RecordingStatusInput,
@@ -161,6 +163,7 @@ export class InMemoryCallRepository implements CallRepository {
     string,
     StoredCallFeedbackRevision[]
   >();
+  readonly #callDataDeletions = new Map<string, CallDataDeletionRecord>();
   readonly #sensitiveCallAccessEvents: Array<{
     id: string;
     callBriefId: string;
@@ -212,7 +215,8 @@ export class InMemoryCallRepository implements CallRepository {
   async list(input: ListCallBriefsInput) {
     const filtered = [...this.#calls.values()]
       .filter(({ brief }) =>
-        this.#owners.get(brief.id) === (input.userId ?? null)
+        this.#owners.get(brief.id) === (input.userId ?? null) &&
+        !this.#callDataDeletions.has(brief.id)
       )
       .map(({ brief }) => copy(brief))
       .filter((brief) => !input.status || brief.status === input.status)
@@ -279,7 +283,117 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async isOwnedBy(id: string, userId: string | null) {
-    return this.#calls.has(id) && this.#owners.get(id) === userId;
+    return this.#calls.has(id) &&
+      !this.#callDataDeletions.has(id) &&
+      this.#owners.get(id) === userId;
+  }
+
+  async findCallDataDeletion(
+    id: string,
+    userId: string,
+    requestId: string
+  ) {
+    const deletion = this.#callDataDeletions.get(id);
+    return deletion?.userId === userId && deletion.requestId === requestId
+      ? copy(deletion)
+      : null;
+  }
+
+  async deleteCallData(input: DeleteCallDataInput) {
+    const existing = this.#callDataDeletions.get(input.callId);
+    if (existing) {
+      if (
+        existing.userId === input.userId &&
+        existing.requestId === input.requestId
+      ) return copy(existing);
+      throw new CallRepositoryError(
+        "CALL_DATA_DELETION_IDEMPOTENCY_CONFLICT"
+      );
+    }
+    const snapshot = this.#calls.get(input.callId);
+    if (!snapshot || this.#owners.get(input.callId) !== input.userId) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
+    if (!terminalStatuses.has(snapshot.brief.status)) {
+      throw new CallRepositoryError("CALL_DATA_DELETION_NOT_AVAILABLE");
+    }
+
+    snapshot.brief = {
+      ...snapshot.brief,
+      recipientName: "Deleted call",
+      phoneNumber: "",
+      objective: "Deleted by owner",
+      representedPerson: "Deleted account",
+      assistanceReason: "speech_impairment",
+      assistanceDisclosure: "Deleted by owner",
+      context: "",
+      allowedFacts: [],
+      updatedAt: input.deletedAt
+    };
+    snapshot.compilation = null;
+    snapshot.transcript = [];
+    snapshot.pendingApproval = null;
+    if (snapshot.recording) {
+      snapshot.recording = {
+        ...snapshot.recording,
+        status: "deleted",
+        providerRecordingId: null,
+        deleteAfter: null,
+        deletedAt: input.deletedAt,
+        failureReason: null
+      };
+    }
+    if (snapshot.finalTranscript) {
+      snapshot.finalTranscript = {
+        ...snapshot.finalTranscript,
+        text: null,
+        segments: [],
+        failureReason: null,
+        updatedAt: input.deletedAt
+      };
+    }
+    const attempts = this.#attempts.get(input.callId) ?? [];
+    for (const attempt of attempts) {
+      attempt.providerCallId = null;
+      attempt.failureReason = null;
+    }
+    const feedback = this.#callFeedbackRevisions.get(input.callId) ?? [];
+    for (const item of feedback) item.revision.comment = null;
+    for (const job of this.#durableJobs.values()) {
+      if (
+        job.callId !== input.callId ||
+        ["succeeded", "dead_letter", "cancelled"].includes(job.status)
+      ) continue;
+      if (job.status === "running") {
+        this.#durableJobAttempts.push({
+          id: randomUUID(),
+          jobId: job.id,
+          generation: job.generation,
+          attemptNumber: job.attemptCount,
+          workerId: job.leaseOwner!,
+          startedAt: job.leasedAt!,
+          completedAt: input.deletedAt,
+          outcome: "cancelled",
+          errorCode: "call_data_deleted"
+        });
+      }
+      job.status = "cancelled";
+      job.leaseOwner = null;
+      job.leasedAt = null;
+      job.leaseExpiresAt = null;
+      job.lastErrorCode = "call_data_deleted";
+      job.updatedAt = input.deletedAt;
+      job.completedAt = input.deletedAt;
+    }
+    const deletion: CallDataDeletionRecord = {
+      requestId: input.requestId,
+      callId: input.callId,
+      userId: input.userId,
+      providerRecordingDisposition: input.providerRecordingDisposition,
+      deletedAt: input.deletedAt
+    };
+    this.#callDataDeletions.set(input.callId, deletion);
+    return copy(deletion);
   }
 
   async grantSignupCredits(userId: string) {
@@ -549,6 +663,7 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async get(id: string) {
+    if (this.#callDataDeletions.has(id)) return null;
     const snapshot = this.#calls.get(id);
     return snapshot ? copy(snapshot) : null;
   }

@@ -8,6 +8,8 @@ import {
   type AdminOperationsWindow,
   type ApprovalDecision,
   type CallBrief,
+  type CallDataDeletionInput,
+  type CallDataDeletionResult,
   type CallEvent,
   type CallOutcomeView,
   type CallSnapshot,
@@ -62,6 +64,12 @@ import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
 
 type Subscriber = (event: CallEvent) => void;
 type LiveEventMode = "disabled" | "publish" | "subscribe" | "both";
+const terminalStatuses = new Set<CallBrief["status"]>([
+  "blocked",
+  "completed",
+  "stopped",
+  "failed"
+]);
 
 export class CallServiceError extends Error {
   readonly diagnostic: {
@@ -79,6 +87,7 @@ export class CallServiceError extends Error {
       | "TELEPHONY_STOP_FAILED"
       | "RECORDING_START_FAILED"
       | "RECORDING_NOT_AVAILABLE"
+      | "CALL_DATA_DELETION_PROVIDER_FAILED"
       | "SWISS_DESTINATION_REQUIRED"
       | "BRIEF_COMPILER_UNAVAILABLE"
       | "BRIEF_COMPILER_RESPONSE_INVALID",
@@ -808,6 +817,64 @@ export class CallService {
   close() {
     this.#closePromise ??= this.#close();
     return this.#closePromise;
+  }
+
+  async deleteCallData(
+    id: string,
+    userId: string,
+    input: CallDataDeletionInput
+  ): Promise<CallDataDeletionResult> {
+    const completed = await this.repository.findCallDataDeletion(
+      id,
+      userId,
+      input.requestId
+    );
+    if (completed) {
+      return {
+        requestId: completed.requestId,
+        deletedAt: completed.deletedAt
+      };
+    }
+    if (!(await this.repository.isOwnedBy(id, userId))) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
+    const snapshot = await this.#require(id);
+    if (!terminalStatuses.has(snapshot.brief.status)) {
+      throw new CallRepositoryError("CALL_DATA_DELETION_NOT_AVAILABLE");
+    }
+    const recording = snapshot.recording;
+    const providerRecordingDisposition = !recording?.providerRecordingId
+      ? "not_present" as const
+      : recording.status === "deleted"
+        ? "already_deleted" as const
+        : "deleted" as const;
+    if (
+      providerRecordingDisposition === "deleted" &&
+      recording?.providerRecordingId
+    ) {
+      try {
+        await this.telephonyProvider.deleteRecording(
+          recording.providerRecordingId
+        );
+      } catch (error) {
+        throw new CallServiceError(
+          "CALL_DATA_DELETION_PROVIDER_FAILED",
+          { cause: error }
+        );
+      }
+    }
+    const deleted = await this.repository.deleteCallData({
+      callId: id,
+      userId,
+      requestId: input.requestId,
+      providerRecordingDisposition,
+      deletedAt: new Date().toISOString()
+    });
+    this.#clearTimers(id);
+    return {
+      requestId: deleted.requestId,
+      deletedAt: deleted.deletedAt
+    };
   }
 
   async #close() {

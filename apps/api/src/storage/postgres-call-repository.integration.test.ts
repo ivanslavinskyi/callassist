@@ -95,6 +95,155 @@ describeWithDatabase("PostgresCallRepository", () => {
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
 
+  it("atomically redacts owner call content and preserves immutable minimized evidence", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Deletion test clinic",
+      phoneNumber: "+41710000007",
+      objective: "Ask whether the private deletion test application was received",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      context: "Private deletion context",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: ["Private deletion reference 149"]
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.addTranscript(
+      brief.id,
+      "recipient",
+      "Private realtime transcript",
+      "en-GB"
+    );
+    await repository.updateStatus(brief.id, "completed");
+    await repository.submitOwnerCallFeedback(brief.id, ownerA, {
+      idempotencyKey: randomUUID(),
+      goalResult: "yes",
+      transcriptQuality: null,
+      comment: "Private feedback comment"
+    });
+    const attemptId = randomUUID();
+    const jobId = randomUUID();
+    await inspection`
+      INSERT INTO call_attempts (
+        id, call_brief_id, user_id, provider, provider_call_id,
+        status, provider_status, started_at, ended_at, created_at
+      ) VALUES (
+        ${attemptId}, ${brief.id}, ${ownerA}, 'twilio', 'CA-private-delete',
+        'completed', 'completed', now(), now(), now()
+      )
+    `;
+    await inspection`
+      INSERT INTO durable_jobs (
+        id, job_type, call_attempt_id, status, generation,
+        attempt_count, max_attempts, run_after, force_requested,
+        lease_owner, leased_at, lease_expires_at, created_at, updated_at
+      ) VALUES (
+        ${jobId}, 'provider_call_reconciliation', ${attemptId}, 'running', 1,
+        1, 5, now(), false,
+        'privacy-test-worker', now(), now() + interval '2 minutes', now(), now()
+      )
+    `;
+    const requestId = randomUUID();
+    const deletedAt = "2026-08-22T12:00:00.000Z";
+
+    const deletionInput = {
+      callId: brief.id,
+      userId: ownerA,
+      requestId,
+      providerRecordingDisposition: "not_present" as const,
+      deletedAt
+    };
+    const [deletion, concurrentReplay] = await Promise.all([
+      repository.deleteCallData(deletionInput),
+      repository.deleteCallData(deletionInput)
+    ]);
+    expect(deletion).toEqual({
+      callId: brief.id,
+      userId: ownerA,
+      requestId,
+      providerRecordingDisposition: "not_present",
+      deletedAt
+    });
+    expect(concurrentReplay).toEqual(deletion);
+    await expect(repository.deleteCallData({
+      callId: brief.id,
+      userId: ownerA,
+      requestId,
+      providerRecordingDisposition: "not_present",
+      deletedAt: "2026-08-22T13:00:00.000Z"
+    })).resolves.toEqual(deletion);
+    await expect(repository.get(brief.id)).resolves.toBeNull();
+    await expect(repository.isOwnedBy(brief.id, ownerA)).resolves.toBe(false);
+    await expect(repository.list({ limit: 50, userId: ownerA }))
+      .resolves.not.toMatchObject({
+        items: expect.arrayContaining([expect.objectContaining({ id: brief.id })])
+      });
+
+    const [stored] = await inspection<{
+      recipientName: string;
+      phoneNumber: string;
+      objective: string;
+      compilationCiphertext: string | null;
+      dataDeletedAt: Date;
+      transcriptCount: number;
+      feedbackCommentCiphertext: string | null;
+      deletionEvents: number;
+      providerCallId: string | null;
+      jobStatus: string;
+      jobAttemptOutcome: string;
+    }[]>`
+      SELECT
+        recipient_name AS "recipientName",
+        phone_number AS "phoneNumber",
+        objective,
+        compilation_ciphertext AS "compilationCiphertext",
+        data_deleted_at AS "dataDeletedAt",
+        (SELECT count(*)::int FROM transcript_segments
+          WHERE call_brief_id = call_briefs.id) AS "transcriptCount",
+        (SELECT comment_ciphertext FROM call_feedback_revisions
+          WHERE call_brief_id = call_briefs.id ORDER BY revision DESC LIMIT 1)
+          AS "feedbackCommentCiphertext",
+        (SELECT count(*)::int FROM call_data_deletion_events
+          WHERE call_brief_id = call_briefs.id) AS "deletionEvents"
+        ,(SELECT provider_call_id FROM call_attempts
+          WHERE id = ${attemptId}) AS "providerCallId"
+        ,(SELECT status FROM durable_jobs
+          WHERE id = ${jobId}) AS "jobStatus"
+        ,(SELECT outcome FROM durable_job_attempts
+          WHERE job_id = ${jobId} ORDER BY completed_at DESC LIMIT 1)
+          AS "jobAttemptOutcome"
+      FROM call_briefs
+      WHERE id = ${brief.id}
+    `;
+    expect(stored).toMatchObject({
+      recipientName: "Deleted call",
+      phoneNumber: "",
+      objective: "Deleted by owner",
+      compilationCiphertext: null,
+      transcriptCount: 0,
+      feedbackCommentCiphertext: null,
+      deletionEvents: 1,
+      providerCallId: null,
+      jobStatus: "cancelled",
+      jobAttemptOutcome: "cancelled"
+    });
+    expect(stored?.dataDeletedAt.toISOString()).toBe(deletedAt);
+    await expect(inspection`
+      UPDATE call_feedback_revisions
+      SET goal_result = 'no'
+      WHERE call_brief_id = ${brief.id}
+    `).rejects.toThrow("immutable");
+    await expect(inspection`
+      DELETE FROM call_data_deletion_events
+      WHERE call_brief_id = ${brief.id}
+    `).rejects.toThrow("immutable");
+  });
+
   it("relays bounded call-change signals through PostgreSQL", async () => {
     const publisher = new PostgresCallRepository(databaseUrl!, encryptionKey);
     const sourceId = randomUUID();

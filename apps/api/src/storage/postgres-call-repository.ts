@@ -86,10 +86,12 @@ import {
   type AdminSystemFacts,
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
+  type CallDataDeletionRecord,
   type CallAttemptRecord,
   type CallChangeSignal,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
+  type DeleteCallDataInput,
   type PromoCodeCreationResult,
   type ListCallBriefsInput,
   type ListAdminCallsInput,
@@ -187,6 +189,14 @@ type FinalTranscriptRow = {
   createdAt: DatabaseDate;
   updatedAt: DatabaseDate;
   completedAt: DatabaseDate | null;
+};
+
+type CallDataDeletionRow = {
+  requestId: string;
+  callId: string;
+  userId: string;
+  providerRecordingDisposition: CallDataDeletionRecord["providerRecordingDisposition"];
+  deletedAt: DatabaseDate;
 };
 
 type CallTelemetryEventRow = {
@@ -412,6 +422,7 @@ export class PostgresCallRepository implements CallRepository {
     const rows = await this.#sql<CallBriefRow[]>`
       ${this.#briefSelect()}
       WHERE user_id IS NOT DISTINCT FROM ${input.userId ?? null}::uuid
+        AND data_deleted_at IS NULL
         AND (${searchPattern}::text IS NULL OR recipient_name ILIKE ${searchPattern})
         AND (${input.status ?? null}::text IS NULL OR status = ${input.status ?? null})
         AND (
@@ -544,8 +555,205 @@ export class PostgresCallRepository implements CallRepository {
       FROM call_briefs
       WHERE id = ${id}
         AND user_id IS NOT DISTINCT FROM ${userId}::uuid
+        AND data_deleted_at IS NULL
     `;
     return Boolean(row);
+  }
+
+  async findCallDataDeletion(
+    id: string,
+    userId: string,
+    requestId: string
+  ) {
+    const [row] = await this.#sql<CallDataDeletionRow[]>`
+      SELECT
+        request_id AS "requestId",
+        call_brief_id AS "callId",
+        actor_user_id AS "userId",
+        provider_recording_disposition AS "providerRecordingDisposition",
+        created_at AS "deletedAt"
+      FROM call_data_deletion_events
+      WHERE call_brief_id = ${id}
+        AND actor_user_id = ${userId}
+        AND request_id = ${requestId}
+      LIMIT 1
+    `;
+    return row ? mapCallDataDeletionRow(row) : null;
+  }
+
+  async deleteCallData(input: DeleteCallDataInput) {
+    const encryptedFacts = encryptJson([], this.#encryptionKey);
+    const encryptedContext = encryptJson("", this.#encryptionKey);
+    const encryptedReason = encryptJson(
+      "speech_impairment",
+      this.#encryptionKey
+    );
+    const encryptedDisclosure = encryptJson(
+      "Deleted by owner",
+      this.#encryptionKey
+    );
+    return this.#sql.begin(async (transaction) => {
+      const [call] = await transaction<{
+        status: CallBrief["status"];
+        dataDeletedAt: DatabaseDate | null;
+      }[]>`
+        SELECT status, data_deleted_at AS "dataDeletedAt"
+        FROM call_briefs
+        WHERE id = ${input.callId} AND user_id = ${input.userId}
+        FOR UPDATE
+      `;
+      if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const [sameRequest] = await transaction<CallDataDeletionRow[]>`
+        SELECT
+          request_id AS "requestId",
+          call_brief_id AS "callId",
+          actor_user_id AS "userId",
+          provider_recording_disposition AS "providerRecordingDisposition",
+          created_at AS "deletedAt"
+        FROM call_data_deletion_events
+        WHERE request_id = ${input.requestId}
+        FOR SHARE
+      `;
+      if (sameRequest) {
+        if (
+          sameRequest.callId === input.callId &&
+          sameRequest.userId === input.userId
+        ) return mapCallDataDeletionRow(sameRequest);
+        throw new CallRepositoryError(
+          "CALL_DATA_DELETION_IDEMPOTENCY_CONFLICT"
+        );
+      }
+      if (call.dataDeletedAt) {
+        throw new CallRepositoryError("CALL_NOT_FOUND");
+      }
+      if (!terminalStatuses.has(call.status)) {
+        throw new CallRepositoryError("CALL_DATA_DELETION_NOT_AVAILABLE");
+      }
+
+      await transaction`
+        INSERT INTO durable_job_attempts (
+          id, job_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        )
+        SELECT
+          gen_random_uuid(), durable_jobs.id, durable_jobs.generation,
+          durable_jobs.attempt_count, durable_jobs.lease_owner,
+          durable_jobs.leased_at, ${new Date(input.deletedAt)},
+          'cancelled', 'call_data_deleted'
+        FROM durable_jobs
+        WHERE durable_jobs.status = 'running'
+          AND (
+            durable_jobs.recording_id IN (
+              SELECT id FROM call_recordings
+              WHERE call_brief_id = ${input.callId}
+            )
+            OR durable_jobs.call_attempt_id IN (
+              SELECT id FROM call_attempts
+              WHERE call_brief_id = ${input.callId}
+            )
+          )
+        ON CONFLICT (job_id, generation, attempt_number) DO NOTHING
+      `;
+      await transaction`
+        UPDATE durable_jobs
+        SET
+          status = 'cancelled',
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = 'call_data_deleted',
+          updated_at = ${new Date(input.deletedAt)},
+          completed_at = ${new Date(input.deletedAt)}
+        WHERE status IN ('queued', 'running')
+          AND (
+            recording_id IN (
+              SELECT id FROM call_recordings
+              WHERE call_brief_id = ${input.callId}
+            )
+            OR call_attempt_id IN (
+              SELECT id FROM call_attempts
+              WHERE call_brief_id = ${input.callId}
+            )
+          )
+      `;
+      await transaction`
+        DELETE FROM transcript_segments WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        DELETE FROM approval_requests WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        UPDATE final_transcripts
+        SET
+          text_ciphertext = NULL,
+          segments_ciphertext = NULL,
+          failure_reason = NULL,
+          updated_at = ${new Date(input.deletedAt)}
+        WHERE call_recording_id IN (
+          SELECT id FROM call_recordings
+          WHERE call_brief_id = ${input.callId}
+        )
+      `;
+      await transaction`
+        UPDATE call_feedback_revisions
+        SET comment_ciphertext = NULL
+        WHERE call_brief_id = ${input.callId}
+          AND comment_ciphertext IS NOT NULL
+      `;
+      await transaction`
+        UPDATE call_attempts
+        SET provider_call_id = NULL, failure_reason = NULL
+        WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        UPDATE call_recordings
+        SET
+          provider_call_id = NULL,
+          provider_recording_id = NULL,
+          status = 'deleted',
+          delete_after = NULL,
+          deleted_at = COALESCE(deleted_at, ${new Date(input.deletedAt)}),
+          failure_reason = NULL,
+          updated_at = ${new Date(input.deletedAt)}
+        WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        UPDATE call_briefs
+        SET
+          recipient_name = 'Deleted call',
+          phone_number = '',
+          objective = 'Deleted by owner',
+          represented_person = 'Deleted account',
+          represented_person_first_name = 'Deleted',
+          represented_person_last_name = 'Account',
+          allowed_facts_ciphertext = ${encryptedFacts},
+          context_ciphertext = ${encryptedContext},
+          compilation_ciphertext = NULL,
+          assistance_reason_ciphertext = ${encryptedReason},
+          assistance_disclosure = NULL,
+          assistance_disclosure_ciphertext = ${encryptedDisclosure},
+          data_deleted_at = ${new Date(input.deletedAt)},
+          updated_at = ${new Date(input.deletedAt)}
+        WHERE id = ${input.callId}
+      `;
+      const id = randomUUID();
+      const [created] = await transaction<CallDataDeletionRow[]>`
+        INSERT INTO call_data_deletion_events (
+          id, request_id, call_brief_id, actor_user_id,
+          provider_recording_disposition, created_at
+        ) VALUES (
+          ${id}, ${input.requestId}, ${input.callId}, ${input.userId},
+          ${input.providerRecordingDisposition}, ${new Date(input.deletedAt)}
+        )
+        RETURNING
+          request_id AS "requestId",
+          call_brief_id AS "callId",
+          actor_user_id AS "userId",
+          provider_recording_disposition AS "providerRecordingDisposition",
+          created_at AS "deletedAt"
+      `;
+      return mapCallDataDeletionRow(created!);
+    });
   }
 
   async grantSignupCredits(userId: string) {
@@ -1068,7 +1276,7 @@ export class PostgresCallRepository implements CallRepository {
   async get(id: string) {
     const [briefRow] = await this.#sql<CallBriefRow[]>`
       ${this.#briefSelect()}
-      WHERE id = ${id}
+      WHERE id = ${id} AND data_deleted_at IS NULL
     `;
     if (!briefRow) return null;
 
@@ -5005,6 +5213,18 @@ function mapDurableJobRow(row: DurableJobRow): DurableJob {
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
     completedAt: row.completedAt ? toIso(row.completedAt) : null
+  };
+}
+
+function mapCallDataDeletionRow(
+  row: CallDataDeletionRow
+): CallDataDeletionRecord {
+  return {
+    requestId: row.requestId,
+    callId: row.callId,
+    userId: row.userId,
+    providerRecordingDisposition: row.providerRecordingDisposition,
+    deletedAt: toIso(row.deletedAt)
   };
 }
 

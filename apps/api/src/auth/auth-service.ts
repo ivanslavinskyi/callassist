@@ -170,6 +170,22 @@ export class AuthService {
     };
   }
 
+  async confirmOwnPassword(user: User, password: string) {
+    const record = await this.repository.findUserByEmail(user.email);
+    const matches = await verifyPassword(
+      password,
+      record?.passwordHash ?? (await dummyPasswordHash)
+    );
+    if (
+      !record ||
+      record.id !== user.id ||
+      record.status !== "active" ||
+      !matches
+    ) {
+      throw new AuthServiceError("INVALID_CREDENTIALS");
+    }
+  }
+
   async logout(token: string | undefined) {
     if (token) {
       await this.repository.revokeSession(

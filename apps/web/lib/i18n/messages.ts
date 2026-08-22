@@ -221,6 +221,11 @@ export type Messages = {
     feedbackCommentPlaceholder: string; feedbackCommentHint: string;
     feedbackSave: string; feedbackUpdate: string; feedbackSaving: string;
     feedbackSaved: string; feedbackError: string;
+    dataDeletionTitle: string; dataDeletionText: string;
+    dataDeletionRetained: string; dataDeletionPassword: string;
+    dataDeletionConfirmation: string; dataDeletionConfirmationHint: string;
+    dataDeletionAction: string; dataDeletionBusy: string;
+    dataDeletionInvalidPassword: string; dataDeletionError: string;
   };
 };
 
@@ -481,7 +486,17 @@ const en: Messages = {
     feedbackUpdate: "Update feedback",
     feedbackSaving: "Saving…",
     feedbackSaved: "Feedback saved.",
-    feedbackError: "Feedback could not be saved. Try again."
+    feedbackError: "Feedback could not be saved. Try again.",
+    dataDeletionTitle: "Delete this call's data",
+    dataDeletionText: "Permanently removes the call brief, transcripts, approval text, feedback comment, and provider audio. This call disappears from your history and exports.",
+    dataDeletionRetained: "Minimized credit, consent, safety, technical, and audit evidence is retained without the call content. This cannot be undone.",
+    dataDeletionPassword: "Current password",
+    dataDeletionConfirmation: "Type DELETE to confirm",
+    dataDeletionConfirmationHint: "Enter the exact uppercase word DELETE.",
+    dataDeletionAction: "Delete call data permanently",
+    dataDeletionBusy: "Deleting call data…",
+    dataDeletionInvalidPassword: "The current password is incorrect.",
+    dataDeletionError: "The call data could not be deleted. No success was recorded; wait and retry."
   }
 };
 
@@ -726,7 +741,17 @@ const de: Messages = {
     feedbackUpdate: "Feedback aktualisieren",
     feedbackSaving: "Wird gespeichert…",
     feedbackSaved: "Feedback gespeichert.",
-    feedbackError: "Das Feedback konnte nicht gespeichert werden. Versuchen Sie es erneut."
+    feedbackError: "Das Feedback konnte nicht gespeichert werden. Versuchen Sie es erneut.",
+    dataDeletionTitle: "Daten dieses Anrufs löschen",
+    dataDeletionText: "Entfernt den Anrufentwurf, Transkripte, Freigabetexte, den Feedback-Kommentar und die Anbieter-Aufnahme dauerhaft. Der Anruf verschwindet aus Verlauf und Exporten.",
+    dataDeletionRetained: "Minimierte Guthaben-, Einwilligungs-, Sicherheits-, technische und Audit-Nachweise bleiben ohne Anrufinhalt erhalten. Dies kann nicht rückgängig gemacht werden.",
+    dataDeletionPassword: "Aktuelles Passwort",
+    dataDeletionConfirmation: "Zur Bestätigung DELETE eingeben",
+    dataDeletionConfirmationHint: "Geben Sie das exakte grossgeschriebene Wort DELETE ein.",
+    dataDeletionAction: "Anrufdaten dauerhaft löschen",
+    dataDeletionBusy: "Anrufdaten werden gelöscht…",
+    dataDeletionInvalidPassword: "Das aktuelle Passwort ist falsch.",
+    dataDeletionError: "Die Anrufdaten konnten nicht gelöscht werden. Es wurde kein Erfolg protokolliert; warten Sie und versuchen Sie es erneut."
   }
 };
 

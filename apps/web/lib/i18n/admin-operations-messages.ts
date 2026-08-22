@@ -187,7 +187,8 @@ const en = {
     queued: "Queued",
     running: "Running",
     succeeded: "Succeeded",
-    dead_letter: "Dead letter"
+    dead_letter: "Dead letter",
+    cancelled: "Cancelled"
   },
   jobAttempt: "Attempts",
   jobRunAfter: "Run after",
@@ -416,7 +417,8 @@ const de: AdminOperationsCopy = {
     queued: "In Warteschlange",
     running: "In Bearbeitung",
     succeeded: "Erfolgreich",
-    dead_letter: "Dead Letter"
+    dead_letter: "Dead Letter",
+    cancelled: "Abgebrochen"
   },
   jobAttempt: "Versuche",
   jobRunAfter: "Ausführung ab",

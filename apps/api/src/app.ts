@@ -4,6 +4,7 @@ import websocket from "@fastify/websocket";
 import {
   ADMIN_CALL_LIST_LIMIT_MAX,
   accountStatusActionSchema,
+  callDataDeletionInputSchema,
   adminCallListFiltersSchema,
   adminDurableJobRetryInputSchema,
   adminOperationsWindowSchema,
@@ -1698,6 +1699,53 @@ export function buildApp({
       try {
         return await service.deleteRecording(request.params.id);
       } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/data-deletion",
+    async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        mutation: true
+      });
+      if (!access) return;
+      if (!access.user || !access.userId || !authService) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      if (!isUuid(request.params.id)) {
+        return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+      }
+      const parsed = callDataDeletionInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "INVALID_CALL_DATA_DELETION"
+        });
+      }
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "call-data-deletion",
+        endpointRateLimitPolicy.callDataDeletion
+      ))) return;
+      try {
+        await authService.confirmOwnPassword(
+          access.user,
+          parsed.data.password
+        );
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await service.deleteCallData(
+            request.params.id,
+            access.userId,
+            parsed.data
+          ));
+      } catch (error) {
+        if (error instanceof AuthServiceError) {
+          return sendAuthError(reply, error);
+        }
         return sendRepositoryError(reply, error);
       }
     }

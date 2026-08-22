@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_DATA_EXPORT_SCHEMA_VERSION,
+  CALL_DATA_DELETION_CONFIRMATION,
   accountDataExportSchema,
+  callDataDeletionInputSchema,
+  callDataDeletionResultSchema,
   accountSessionListSchema,
   accountStatusActionSchema,
   creditUsageSchema,
@@ -143,5 +146,29 @@ describe("registrationInputSchema", () => {
       ...exported,
       schemaVersion: "2"
     }).success).toBe(false);
+  });
+
+  it("requires an idempotency key, current password, and exact deletion phrase", () => {
+    const request = callDataDeletionInputSchema.parse({
+      requestId: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+      password: "a-long-test-password",
+      confirmation: CALL_DATA_DELETION_CONFIRMATION
+    });
+    expect(request.confirmation).toBe("DELETE");
+    expect(callDataDeletionInputSchema.safeParse({
+      ...request,
+      confirmation: "delete"
+    }).success).toBe(false);
+    expect(callDataDeletionInputSchema.safeParse({
+      ...request,
+      unexpected: true
+    }).success).toBe(false);
+    expect(callDataDeletionResultSchema.parse({
+      requestId: request.requestId,
+      deletedAt: "2026-08-22T10:00:00.000Z"
+    })).toEqual({
+      requestId: request.requestId,
+      deletedAt: "2026-08-22T10:00:00.000Z"
+    });
   });
 });

@@ -10,6 +10,7 @@ import {
   createAdminEditorialDraft,
   createCallBrief,
   createPromoCode,
+  deleteCallData,
   getCreditUsage,
   getAdminCallInspector,
   getAdminOperationsOverview,
@@ -287,6 +288,33 @@ describe("API client headers", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
       credentials: "include"
+    });
+  });
+
+  it("sends a step-up call-data deletion request with its idempotency key", async () => {
+    const callId = "f4e2bf73-e441-4dd2-976b-f949ad41b674";
+    const requestId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      requestId,
+      deletedAt: "2026-08-22T10:00:00.000Z"
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteCallData(callId, {
+      requestId,
+      password: "a-long-test-password",
+      confirmation: "DELETE"
+    })).resolves.toMatchObject({ requestId });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      `/api/call-briefs/${callId}/data-deletion`
+    );
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request).toMatchObject({ method: "POST", credentials: "include" });
+    expect(JSON.parse(String(request.body))).toEqual({
+      requestId,
+      password: "a-long-test-password",
+      confirmation: "DELETE"
     });
   });
 

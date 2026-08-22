@@ -114,7 +114,8 @@ export const adminDurableJobStatusSchema = z.enum([
   "queued",
   "running",
   "succeeded",
-  "dead_letter"
+  "dead_letter",
+  "cancelled"
 ]);
 
 const adminDurableJobSchema = z.strictObject({

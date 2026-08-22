@@ -282,6 +282,7 @@ main:focus { outline: none; }
 .admin-job-list { display: grid; gap: 12px; }
 .admin-job-card { background: var(--canvas); border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 14px; padding: 16px; }
 .admin-job-card[data-status="dead_letter"] { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.admin-job-card[data-status="cancelled"] { opacity: 0.72; }
 .admin-job-card > header { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; }
 .admin-job-card > header > div { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .admin-job-card > header strong { font-size: 12px; }
@@ -466,7 +467,7 @@ main:focus { outline: none; }
   grid-template-columns: minmax(0, 1.5fr) minmax(330px, 0.75fr);
 }
 
-.call-form, .activity-panel, .transcript-card, .final-transcript-card, .call-feedback-card, .approval-card, .guard-card, .brief-card, .compilation-review {
+.call-form, .activity-panel, .transcript-card, .final-transcript-card, .call-feedback-card, .call-data-deletion-card, .approval-card, .guard-card, .brief-card, .compilation-review {
   background: var(--surface);
   border: 1px solid rgba(20, 35, 31, 0.08);
   border-radius: 24px;
@@ -1093,6 +1094,16 @@ button:disabled { cursor: wait; opacity: .55; }
   margin: 4px 0 8px;
 }
 .call-feedback-card > p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0 0 24px; }
+.call-data-deletion-card { border-color: color-mix(in srgb, var(--danger) 28%, var(--line)); padding: 28px 30px 30px; }
+.call-data-deletion-card h2 { font-family: var(--font-display), sans-serif; font-size: 24px; letter-spacing: -.035em; margin: 0 0 8px; }
+.call-data-deletion-card > p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0 0 12px; }
+.call-data-deletion-fields { display: grid; gap: 14px; margin: 22px 0 18px; }
+.call-data-deletion-fields label { display: grid; gap: 7px; }
+.call-data-deletion-fields label > span { font-size: 12px; font-weight: 760; }
+.call-data-deletion-fields input { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); min-height: 46px; padding: 0 13px; }
+.call-data-deletion-fields input:focus { border-color: var(--danger); outline: 3px solid color-mix(in srgb, var(--danger) 16%, transparent); }
+.call-data-deletion-fields small { color: var(--muted); font-size: 11px; }
+.call-data-deletion-card .danger-button { width: max-content; }
 .call-feedback-card form { display: grid; gap: 22px; }
 .call-feedback-card fieldset { border: 0; margin: 0; padding: 0; }
 .call-feedback-card legend, .feedback-comment > span { font-size: 12px; font-weight: 760; margin-bottom: 10px; }

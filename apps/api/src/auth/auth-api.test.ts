@@ -120,6 +120,103 @@ const callBrief = {
 };
 
 describe("auth API", () => {
+  it("step-up deletes only an owned terminal call and remains idempotent", async () => {
+    const { app, callRepository } = createAuthApp();
+    const ownerCookie = await registerAndVerify(app, registration);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie: ownerCookie },
+      payload: callBrief
+    });
+    expect(created.statusCode).toBe(201);
+    const callId = created.json().id as string;
+    await callRepository.updateStatus(callId, "completed");
+    const requestId = randomUUID();
+
+    const malformed = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/data-deletion`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        requestId,
+        password: registration.password,
+        confirmation: "delete"
+      }
+    });
+    expect(malformed.statusCode).toBe(400);
+
+    const wrongPassword = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/data-deletion`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        requestId,
+        password: "wrong-password",
+        confirmation: "DELETE"
+      }
+    });
+    expect(wrongPassword.statusCode).toBe(401);
+    expect((await callRepository.get(callId))?.brief.recipientName)
+      .toBe(callBrief.recipientName);
+
+    const foreignCookie = await registerAndVerify(app, {
+      ...registration,
+      email: "foreign-delete@example.com",
+      phoneE164: "+41710000009",
+      firstName: "Alex",
+      lastName: "Meier"
+    });
+    const foreign = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/data-deletion`,
+      headers: { cookie: foreignCookie },
+      payload: {
+        requestId,
+        password: registration.password,
+        confirmation: "DELETE"
+      }
+    });
+    expect(foreign.statusCode).toBe(404);
+
+    const deleted = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/data-deletion`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        requestId,
+        password: registration.password,
+        confirmation: "DELETE"
+      }
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toMatchObject({ requestId });
+    expect(deleted.headers["cache-control"]).toBe("private, no-store");
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${callId}/data-deletion`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        requestId,
+        password: registration.password,
+        confirmation: "DELETE"
+      }
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(deleted.json());
+    expect((await app.inject({
+      method: "GET",
+      url: `/api/call-briefs/${callId}`,
+      headers: { cookie: ownerCookie }
+    })).statusCode).toBe(404);
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/call-briefs",
+      headers: { cookie: ownerCookie }
+    })).json().items).toEqual([]);
+  });
+
   it("downloads a rate-limited versioned export containing only the owner's data", async () => {
     const contentService = new ContentService(new InMemoryContentRepository());
     await contentService.initialize();
