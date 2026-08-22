@@ -168,6 +168,13 @@ export class AuthService {
     }
   }
 
+  async revokeAllSessions(userId: string) {
+    await this.repository.revokeUserSessions(
+      userId,
+      this.#now().toISOString()
+    );
+  }
+
   async listUsersAsAdmin(
     actor: User,
     input: Omit<ListAdminUsersInput, "actorUserId">

@@ -81,7 +81,7 @@ export function Dashboard() {
   }
 
   function openBrief(brief: CallBrief) {
-    router.push(localizeHref(`/calls/${brief.id}`));
+    router.push(localizeHref(`/app/calls/${brief.id}`));
   }
 
   return (
@@ -101,9 +101,11 @@ export function Dashboard() {
         </section>
 
         <div className="dashboard-grid">
-          <CreateCallForm onCreated={openBrief} />
+          <div id="new-call">
+            <CreateCallForm onCreated={openBrief} />
+          </div>
 
-          <aside className="activity-panel">
+          <aside className="activity-panel" id="history">
             <div className="panel-heading">
               <div>
                 <span className="eyebrow">{copy.historyEyebrow}</span>

@@ -30,7 +30,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { locale, localizeHref, messages } = useUiLocale();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [canManageAdmin, setCanManageAdmin] = useState(false);
 
   useEffect(() => {
@@ -56,6 +56,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isAuthenticated !== true) {
+      setCreditBalance(null);
+      return;
+    }
     let active = true;
     const refresh = async () => {
       try {
@@ -76,7 +80,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener("callassist:usage-changed", onUsageChanged);
       window.removeEventListener("focus", onUsageChanged);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";
@@ -97,6 +101,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
+          {isAuthenticated === true ? <>
+            <Link className="topbar-link" href={localizeHref("/app#new-call")}>{messages.app.newCall}</Link>
+            <Link className="topbar-link" href={localizeHref("/app#history")}>{messages.app.history}</Link>
+            <Link className="topbar-link" href={localizeHref("/app/account")}>{messages.app.account}</Link>
+          </> : null}
+          {isAuthenticated === false ? <>
+            <Link className="topbar-link" href={localizeHref("/login")}>{messages.app.signIn}</Link>
+            <Link className="topbar-link" href={localizeHref("/register")}>{messages.app.createAccount}</Link>
+          </> : null}
           <Link className="topbar-link" href={localizeHref("/opt-out")}>
             {messages.app.optOut}
           </Link>
@@ -107,14 +120,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link className="topbar-link" href={localizeHref("/admin/credits")}>{messages.app.creditAdmin}</Link>
           </> : null}
           {creditBalance !== null ? (
-            <span
+            <Link
               aria-label={messages.app.creditsRemaining(creditBalance)}
               className="credit-balance"
               data-balance={creditBalance}
+              href={localizeHref("/app/account#usage")}
             >
               <span aria-hidden="true">●</span>
               {messages.app.creditsRemaining(creditBalance)}
-            </span>
+            </Link>
           ) : null}
           <div className="topbar-meta">
             <span className="secure-dot" aria-hidden="true" />

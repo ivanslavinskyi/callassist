@@ -179,6 +179,40 @@ describe("auth API", () => {
     expect(loggedIn.headers["set-cookie"]).toContain("callassist_session=");
   });
 
+  it("lets an authenticated user revoke every active session", async () => {
+    const { app } = createAuthApp();
+    const firstCookie = await registerAndVerify(app, registration);
+    const secondSession = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: registration.email, password: registration.password }
+    });
+    const secondCookie = String(secondSession.headers["set-cookie"]);
+
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/api/auth/sessions/revoke"
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const revoked = await app.inject({
+      method: "POST",
+      url: "/api/auth/sessions/revoke",
+      headers: { cookie: firstCookie }
+    });
+    expect(revoked.statusCode).toBe(204);
+    expect(revoked.headers["set-cookie"]).toContain("Max-Age=0");
+
+    for (const cookie of [firstCookie, secondCookie]) {
+      const current = await app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { cookie }
+      });
+      expect(current.statusCode).toBe(401);
+    }
+  });
+
   it("requires a session and hides every call resource from other users", async () => {
     const { app } = createAuthApp();
     const userACookie = await registerAndVerify(app, registration);

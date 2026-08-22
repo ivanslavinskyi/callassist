@@ -179,6 +179,10 @@ export async function logout() {
   return apiRequest<void>("/api/auth/logout", { method: "POST" });
 }
 
+export async function revokeAllOwnSessions() {
+  return apiRequest<void>("/api/auth/sessions/revoke", { method: "POST" });
+}
+
 export async function requestRecipientOptOut(input: RecipientOptOutRequest) {
   return apiRequest<{ status: "verification_required" }>(
     "/api/recipient-opt-out/verification",

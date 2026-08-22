@@ -3,12 +3,12 @@ import { localeFromPathname, localizePathname, negotiateUiLocale } from "./routi
 
 describe("UI locale routing", () => {
   it("reads only supported locale prefixes", () => {
-    expect(localeFromPathname("/de/calls/123")).toBe("de");
-    expect(localeFromPathname("/fr/calls/123")).toBeNull();
+    expect(localeFromPathname("/de/app/calls/123")).toBe("de");
+    expect(localeFromPathname("/fr/app/calls/123")).toBeNull();
   });
   it("adds and replaces locale prefixes", () => {
-    expect(localizePathname("/calls/123", "de")).toBe("/de/calls/123");
-    expect(localizePathname("/en/calls/123", "de")).toBe("/de/calls/123");
+    expect(localizePathname("/app/calls/123", "de")).toBe("/de/app/calls/123");
+    expect(localizePathname("/en/app/calls/123", "de")).toBe("/de/app/calls/123");
     expect(localizePathname("/", "en")).toBe("/en");
   });
   it("prefers a valid persisted locale", () => {

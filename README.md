@@ -100,7 +100,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-The console runs at `http://localhost:3000`; the API runs at `http://localhost:4000`. PostgreSQL is exposed on `localhost:55432`. Set `STORAGE_DRIVER=memory` for a temporary run without PostgreSQL.
+The web app runs at `http://localhost:3000`; the API runs at `http://localhost:4000`. `/en` and `/de` are public landing pages; the authenticated console lives at `/en/app` and `/de/app`. PostgreSQL is exposed on `localhost:55432`. Set `STORAGE_DRIVER=memory` for a temporary run without PostgreSQL.
 
 The API development process intentionally does not auto-restart when source
 files change. Restart it manually between edits: an automatic restart during an
@@ -152,8 +152,12 @@ never use the mock driver in a public environment.
 The web app exposes the corresponding localized flows at `/en/register`, `/en/verify`,
 `/en/login` and their `/de` equivalents. Browser API requests include credentials so
 the opaque HttpOnly session cookie is used without exposing its token to JavaScript.
-All browser call routes now require the session when the production auth service is
-configured. New briefs are assigned to that authenticated user, list queries are
+The localized `/app` tree is guarded through a server-side current-session lookup,
+and every existing `/admin` page additionally requires an `admin` or `superadmin`
+role before rendering. `INTERNAL_API_URL` configures the private API origin used by
+those server checks. The old localized Dashboard/call-detail routes were deliberately
+removed without compatibility redirects while the product remains local pre-beta.
+New briefs are assigned to that authenticated user, list queries are
 owner-scoped, and foreign IDs receive the same `CALL_NOT_FOUND` response across normal
 reads, mutations, SSE, recordings, approvals, and transcript retry. Signed provider
 webhooks remain independent of browser sessions. Pre-authentication database rows stay
@@ -183,6 +187,11 @@ active call, and ledger history. Starting a call reserves one credit atomically 
 enforces one active outbound call per user. A credit is charged only after the
 provider confirms a successful connection (`in-progress` or `completed`). Busy,
 unanswered, canceled, and technical failures refund the reservation once.
+
+The localized account page at `/en/app/account` or `/de/app/account` shows the
+required first and last name, verified contact data, current usage, and ledger history.
+Users can end the current browser session or revoke all of their own sessions through
+`POST /api/auth/sessions/revoke`; both actions clear the current session cookie.
 
 Authenticated users can redeem a code at `/en/redeem` or `/de/redeem` through
 `POST /api/credits/promo-redemptions`. Active administrators can create bounded
@@ -256,8 +265,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   Swiss German, multilingual input, and adversarial prompts.
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
-- Add interface internationalization, an accessible onboarding flow, and a public
-  landing page.
+- Add accessible onboarding, localized legal/support/FAQ content, and Terms/AUP
+  acceptance on top of the public EN/DE shell.
 - Add durable background jobs, production deployment, observability, compliance,
   and staged invite-only/public beta release gates.
 

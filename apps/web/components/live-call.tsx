@@ -293,7 +293,7 @@ export function LiveCall({ callId }: { callId: string }) {
           <div className="loading-card">
             <strong>{copy.unavailableTitle}</strong>
             <p>{loadError}</p>
-            <Link href={localizeHref("/")}>{copy.returnDashboard}</Link>
+            <Link href={localizeHref("/app")}>{copy.returnDashboard}</Link>
           </div>
         </main>
       </AppShell>
@@ -318,7 +318,7 @@ export function LiveCall({ callId }: { callId: string }) {
         <div className="live-nav">
           <nav aria-label={messages.live.breadcrumbLabel} className="breadcrumbs">
             <ol>
-              <li><Link href={localizeHref("/")}>{messages.live.allCallBriefs}</Link></li>
+              <li><Link href={localizeHref("/app")}>{messages.live.allCallBriefs}</Link></li>
               <li aria-current="page">{brief.recipientName}</li>
             </ol>
           </nav>

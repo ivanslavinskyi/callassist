@@ -19,6 +19,7 @@ import {
   requestRecipientOptOut,
   grantCreditsAsAdmin,
   revokeAdminUserSessions,
+  revokeAllOwnSessions,
   suppressRecipientAsStaff,
   startCall
 } from "./api";
@@ -93,6 +94,18 @@ describe("API client headers", () => {
 
     await expect(logout()).resolves.toBeUndefined();
 
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request).toMatchObject({ method: "POST", credentials: "include" });
+    expect(new Headers(request.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("revokes all of the current user's sessions with a bodyless request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(revokeAllOwnSessions()).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/auth/sessions/revoke");
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(request).toMatchObject({ method: "POST", credentials: "include" });
     expect(new Headers(request.headers).has("Content-Type")).toBe(false);

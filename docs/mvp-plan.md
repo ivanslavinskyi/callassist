@@ -24,6 +24,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 4. Preserve `AI disclosure -> DTMF consent -> recording/model processing`.
 5. Beta allows Swiss destinations, low-risk tasks, one concurrent call per user, and three signup credits. There are no payments.
 6. Expand access only after invite-alpha telemetry, failure, abuse, cost, privacy, and support reviews meet written thresholds.
+7. During local pre-beta development, prefer the final route architecture over compatibility: the former localized Dashboard and call-detail URLs are removed without redirects. Root `/` locale negotiation remains part of the public routing boundary.
 
 ## Verified implementation baseline — DONE
 
@@ -37,20 +38,20 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [x] PostgreSQL persistence for briefs, attempts, transcripts, approvals, recordings, final transcripts, compilations, and immutable audit events.
 - [x] AES-256-GCM protection for private context/facts and encrypted compilation/final transcript data.
 - [x] Audio retention choices of 0, 7, or 30 days and manual provider recording deletion.
-- [x] Current responsive Dashboard and LiveCall/call-detail, history search/filter/pagination, confirmations, loading/error states, and EN/DE typed UI catalogues.
-- [x] Locale negotiation/cookie, localized roots and call details, and routing/i18n tests.
+- [x] Responsive authenticated Dashboard and LiveCall/call-detail under `/en/app` and `/de/app`, with history search/filter/pagination, confirmations, loading/error states, and EN/DE typed UI catalogues.
+- [x] Locale negotiation/cookie, public localized roots, authenticated localized call routes, and routing/i18n tests.
 - [x] Represented-person input uses explicit first/last name fields; the personal default has been removed from contracts and the call form.
 - [x] Local lint, typecheck, unit/integration tests, builds, and migration commands.
 
 ## Known partial implementation and beta gaps
 
-- **PARTIAL — product UI:** Dashboard and call detail are the application foundation, but occupy localized roots rather than an authenticated `/app` area.
-- **PARTIAL — localization:** operational UI is EN/DE; localized public content, publishing, metadata, and translation freshness are absent.
+- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, and server route guards exist; onboarding and standalone legal/support pages remain.
+- **PARTIAL — localization:** operational UI and the initial public landing are EN/DE; CMS publishing, localized legal/support content, full SEO metadata, and translation freshness remain absent.
 - **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
-- **PARTIAL — data lifecycle:** recording deletion and transcript export exist; account/session/full-data lifecycle does not.
-- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, and process-local auth/expensive-endpoint rate limits exist. Password recovery, distributed rate limits, and authenticated page routing remain.
-- **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen; PostgreSQL integration execution still requires the local database container.
+- **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
+- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
+- **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. The PostgreSQL ownership suite has been executed successfully. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen.
 - **PARTIAL — destination rollout:** shared `libphonenumber-js/max` metadata parses and canonicalizes Swiss national/international input; contracts, call-start policy, and the Twilio adapter reject invalid or non-CH destinations. Production Twilio Voice Geographic Permissions still need to be restricted and captured as deployment evidence.
 
 # Public Beta Foundation
@@ -76,7 +77,7 @@ Acceptance: unverified, suspended, deleted, expired-session, and revoked-session
 - [x] Scope every browser operation by the authenticated owner: list/get/update, compile, approve/start/stop, SSE, playback/delete, client-side export source data, and transcription retry. Mutations also enforce the configured browser origin.
 - [x] Keep provider webhooks authorized by signature and provider IDs; never trust a browser-supplied user ID.
 - [x] Add an automated cross-user API matrix for every read/write/action/SSE/media endpoint and return indistinguishable `CALL_NOT_FOUND` responses for foreign IDs.
-- [ ] Execute the PostgreSQL ownership integration suite in the database-enabled environment, then define the archive/backfill policy for nullable pre-authentication records before validating a final `NOT NULL` constraint.
+- [ ] Define the archive/backfill policy for nullable pre-authentication records before validating a final `NOT NULL` constraint. **Verified:** the PostgreSQL ownership integration suite executes successfully in the database-enabled local environment.
 
 Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play, delete, or retry user B's resource.
 
@@ -89,7 +90,7 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 ### P1 — acceptance and lifecycle
 
 - [ ] Record accepted Terms/AUP revision IDs and timestamps; support required re-acceptance.
-- [ ] Provide session listing/revocation, user data export, transcript/data deletion, and account deletion/anonymization with documented audit, suppression, backup, provider, and retention behavior.
+- [ ] Provide session listing/revocation, user data export, transcript/data deletion, and account deletion/anonymization with documented audit, suppression, backup, provider, and retention behavior. **Partial:** `/app/account` supports current logout and tested all-session revocation; session inventory/audit and the remaining data lifecycle are open.
 
 ## 2. Usage & Abuse Prevention
 
@@ -130,20 +131,20 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 
 ### P0 — routing and authenticated shell
 
-- [ ] Make `/en` and `/de` public landing pages and redirect `/` through current locale negotiation.
-- [ ] Move—not rewrite—the Dashboard to `/en/app` and `/de/app`; move call detail to `/en/app/calls/[id]` and `/de/app/calls/[id]`, preserving current review, LiveCall, transcript, recording, history, search/filter/pagination, and accessibility behavior.
+- [x] Make `/en` and `/de` public landing pages and redirect `/` through current locale negotiation.
+- [x] Move—not rewrite—the Dashboard to `/en/app` and `/de/app`; move call detail to `/en/app/calls/[id]` and `/de/app/calls/[id]`, preserving current review, LiveCall, transcript, recording, history, search/filter/pagination, and accessibility behavior. The former local-development URLs are removed without compatibility redirects.
 - [x] Add localized EN/DE login, registration, and phone-verification screens with separate required first and last names.
-- [ ] Add `/app/account` and optionally separate `/app/usage`; protect all app routes server-side.
+- [x] Add `/app/account` with integrated usage and session actions; protect all app routes server-side.
 - [ ] Add localized How it works, Privacy, Terms, Acceptable Use, Support, and Opt-out. App/admin/auth routes are `noindex` (not a security control).
-- [ ] Show credits, New call, History, and account/session actions in the app header.
+- [x] Show credits, New call, History, and account/session actions in the app header.
 
 ### P0 — landing and onboarding
 
-- [ ] Publish EN/DE Hero: AI phone assistant acting for the user, focused on speech accessibility/language barriers; CTA “Try the beta”; “Free public beta”, “3 calls included”, “Switzerland only”.
-- [ ] Explain: describe -> compile -> review/approve -> call -> result.
-- [ ] Explain disclosure, consent-gated processing/recording, retention/deletion control, and beta fallibility.
-- [ ] List supported information/appointment/document/status/neutral-message cases and prohibit emergencies, harassment, deception, spam/bulk marketing, political persuasion, and high-stakes legal/medical/financial negotiation.
-- [ ] Separate website languages from call languages; FAQ covers disclosure, consent, recording, transcripts, retention/deletion, Swiss numbers, and credits.
+- [x] Publish EN/DE Hero: AI phone assistant acting for the user, focused on speech accessibility/language barriers; CTA “Try the beta”; “Free public beta”, “3 calls included”, “Switzerland only”.
+- [x] Explain: describe -> compile -> review/approve -> call -> result.
+- [x] Explain disclosure, consent-gated processing/recording, retention/deletion control, and beta fallibility.
+- [x] List supported information/appointment/document/status/neutral-message cases and prohibit emergencies, harassment, deception, spam/bulk marketing, political persuasion, and high-stakes legal/medical/financial negotiation.
+- [ ] Separate website languages from call languages; FAQ covers disclosure, consent, recording, transcripts, retention/deletion, Swiss numbers, and credits. **Partial:** the landing explains the website/call-language boundary; the FAQ remains open.
 - [ ] Add accessible onboarding with current Terms/AUP acceptance and explicit consent/retention/use/credit explanations.
 
 ### P1 — outcomes and feedback
@@ -184,7 +185,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — minimum safe operations
 
-- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** backend account-status and force-logout routes already enforce admin/superadmin RBAC, privileged-target rules, self-action denial, and origin checks.
+- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** every current admin page now has a server-side admin/superadmin guard, and backend account-status/force-logout routes enforce matching RBAC, privileged-target rules, self-action denial, and origin checks. Role-specific content-editor/support areas do not exist yet.
 - [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events and suppression/lift safety events are immutable and include the applicable actor, target/source, reason, and time.
 - [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** the localized user console now consolidates paginated role-scoped lookup, ledger inspection, confirmed suspend/unsuspend, force logout, and idempotent manual credit grants; localized suppression controls and the kill-switch operator command also exist, but suppression lookup and in-app kill-switch control remain.
 
@@ -272,7 +273,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Recipient suppression/opt-out checked before provider call.
 - [x] Audited admin suspension and session revocation/blocking.
 - [x] Global kill switch blocks new calls without implicitly ending active calls.
-- [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** EN/DE registration, verification, login, and SMS-verified public opt-out routes are live; landing, onboarding, and support remain.
+- [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** EN/DE landing, registration, verification, login, and SMS-verified public opt-out routes are live; onboarding and support remain.
 - [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live.
 - [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance.
 - [ ] Localized metadata, canonical, hreflang, robots, sitemap verified.
@@ -292,9 +293,9 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Call Inspector timeline and sensitive-access audit.
 - [ ] Separate technical telemetry; `audit_events` remains action audit.
 - [ ] Structured outcomes and user feedback measurable.
-- [ ] Admin Users workflows. **Partial:** safe search and credit-ledger inspection exist; consolidated status/session/grant/delete and related support context remain.
+- [ ] Admin Users workflows. **Partial:** safe search, credit-ledger inspection, and consolidated status/session/grant actions exist; account deletion and related support context remain.
 - [x] Transactional promo codes and ledger grants.
-- [ ] Account/data export/delete and session revocation tested.
+- [ ] Account/data export/delete and session revocation tested. **Partial:** current logout and all-session revocation are exposed in `/app/account` and tested; session listing, data export/delete, and account deletion remain.
 - [ ] Support/complaint/suppression workflow with owners and targets. **Partial:** staff/complaint suppression and lift actions are RBAC-protected and audited, but complaint intake, ownership, escalation, and response targets remain.
 - [ ] CI and `main` branch protection.
 - [ ] SEO audit.

@@ -121,7 +121,7 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
     const data = new FormData(event.currentTarget);
     try {
       await verifyPhone({ email, code: String(data.get("code") ?? "").trim() });
-      router.push(localizeHref("/"));
+      router.push(localizeHref("/app"));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));
@@ -186,7 +186,7 @@ export function LoginForm() {
     const email = String(data.get("email") ?? "").trim();
     try {
       await login({ email, password: String(data.get("password") ?? "") });
-      router.push(localizeHref("/"));
+      router.push(localizeHref("/app"));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));

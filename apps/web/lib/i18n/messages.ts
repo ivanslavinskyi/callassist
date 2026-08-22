@@ -89,6 +89,11 @@ export type Messages = {
     switchToDarkTheme: string;
     skipToContent: string;
     defaultTitle: string;
+    newCall: string;
+    history: string;
+    account: string;
+    signIn: string;
+    createAccount: string;
     optOut: string;
     redeem: string;
     safety: string;
@@ -281,6 +286,11 @@ const en: Messages = {
     switchToDarkTheme: "Switch to dark theme",
     skipToContent: "Skip to main content",
     defaultTitle: "CallAssist — controlled AI phone calls",
+    newCall: "New call",
+    history: "History",
+    account: "Account",
+    signIn: "Sign in",
+    createAccount: "Try the beta",
     optOut: "Stop calls",
     redeem: "Redeem",
     safety: "Safety",
@@ -435,6 +445,11 @@ const de: Messages = {
     switchToDarkTheme: "Zum dunklen Design wechseln",
     skipToContent: "Zum Hauptinhalt springen",
     defaultTitle: "CallAssist — kontrollierte KI-Telefonanrufe",
+    newCall: "Neuer Anruf",
+    history: "Verlauf",
+    account: "Konto",
+    signIn: "Anmelden",
+    createAccount: "Beta testen",
     optOut: "Anrufe sperren",
     redeem: "Code einlösen",
     safety: "Sicherheit",

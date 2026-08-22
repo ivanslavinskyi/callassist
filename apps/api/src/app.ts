@@ -331,6 +331,21 @@ export function buildApp({
       return reply.status(204).send();
     });
 
+    app.post("/api/auth/sessions/revoke", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const user = await authService.authenticate(
+        sessionTokenFromHeaders(request.headers)
+      );
+      if (!user) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      await authService.revokeAllSessions(user.id);
+      clearSessionCookie(reply, secureCookies);
+      return reply.status(204).send();
+    });
+
     app.get("/api/auth/me", async (request, reply) => {
       const user = await authService.authenticate(
         sessionTokenFromHeaders(request.headers)
