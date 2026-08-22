@@ -143,6 +143,15 @@ hash keys and never overwrites an existing file. Existing deployments may tempor
 fall back to `DATA_ENCRYPTION_KEY`, but should set and rotate a separate
 `PROMO_CODE_HASH_KEY` before issuing codes.
 
+PostgreSQL deployments write private JSON as authenticated `v2` envelopes containing
+an authenticated key ID. `DATA_ENCRYPTION_ACTIVE_KEY_ID` names the write key,
+`DATA_ENCRYPTION_PREVIOUS_KEYS` supplies decrypt-only keys during a controlled
+rotation, and `DATA_ENCRYPTION_LEGACY_V1_KEY_ID` maps unversioned-key `v1` rows to the
+correct retained key. Production configuration requires an explicit active ID and
+rejects duplicate IDs or reused key material. See the
+[recovery and secret-operations runbook](docs/database-recovery-and-secrets.md) before
+changing any data-encryption setting.
+
 ## Test a real Twilio call
 
 The default `TELEPHONY_DRIVER=mock` mode is safe for local UI development. For a real test call, start a temporary tunnel to the Twilio-only gateway:
@@ -337,9 +346,10 @@ by the pre-identity local MVP. It is never executed for a fresh database; every 
 applied migration must still exist in the canonical catalog.
 
 The repository CI workflow performs a frozen install, validates and applies the
-migrations twice against PostgreSQL, executes a disposable backup/restore proof,
-audits production dependencies, then runs lint, typecheck, all tests and production
-builds. GitHub branch protection must still make that workflow required before merge.
+migrations twice against PostgreSQL, runs lint/typecheck/all tests, proves resumable
+data re-encryption against the populated integration database, executes a disposable
+backup/restore proof, audits production dependencies, and builds production artifacts.
+GitHub branch protection must still make that workflow required before merge.
 
 The recovery drill accepts only a local application database, restores a temporary
 custom-format dump into a guarded disposable database, verifies migration checksums,
@@ -369,8 +379,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   snapshot alerts, and role-based runbooks are complete.
 - Continue from the completed application-security/CI foundation with a hosted CI
   run, required branch protection, production managed-backup/restore evidence,
-  managed-secret/key-rotation implementation, infrastructure limits, and an
-  independent focused review. The local recovery drill and operations contract exist.
+  managed-secret deployment and an exercised production key rotation, infrastructure
+  limits, and an independent focused review. Versioned dual-read/new-write encryption,
+  resumable re-encryption, the local recovery drill, and the operations contract exist.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

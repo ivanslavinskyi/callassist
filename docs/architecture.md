@@ -57,7 +57,7 @@ Twilio dual-channel recording ──► authenticated API download
 
 The API depends on a `CallRepository` interface. The in-memory and PostgreSQL repositories implement the same contract, keeping telephony and Realtime independent from storage. SQL migrations are versioned with the API.
 
-Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. Audit events do not include source text, transcript content, or private fact values. Call audit events, account-admin events, safety events, and credit transactions are protected against mutation and deletion at the PostgreSQL layer.
+Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. New ciphertext uses an AES-256-GCM `v2` envelope whose key ID is authenticated as additional data. The bounded runtime keyring writes only with its active key while retaining explicit decrypt-only keys and a mapping for legacy `v1` rows. A confirmed, advisory-lock-protected maintenance command re-encrypts all eight ciphertext families in committed batches, verifies every ciphertext and feedback fingerprint, and can be safely resumed. Audit events do not include source text, transcript content, or private fact values. Call audit events, account-admin events, safety events, and credit transactions are protected against mutation and deletion at the PostgreSQL layer.
 
 On embedded-runtime startup, or when the dedicated worker starts, pending approvals expire and recovery is recorded in the audit trail. An unfinished Twilio call with a stored provider SID remains active until a due reconciliation job reads the provider state; it is not assigned a synthetic failure or refund merely because the process restarted. Mock calls and attempts without a recoverable provider identity still fail closed. Incomplete provider recordings, available recordings, and due retention work are transactionally seeded or advanced in durable jobs; interrupted leases expire and may be reclaimed without allowing a stale worker to publish domain state. Graceful worker shutdown stops new claims, waits for the active handler, marks its runtime heartbeat stopped, and then closes storage; a restarted worker claims remaining or expired work through the same fencing boundary. A killed worker becomes stale after 15 seconds. Heartbeat rows are bounded to a 30-day operational window and expose counts/timestamps only. Webhook delivery is summarized in hourly, low-cardinality buckets and old rows are removed on subsequent writes; the admin view queries only its bounded recent window.
 
@@ -203,15 +203,16 @@ Migration files use contiguous four-digit sequence names. The runner holds a
 PostgreSQL advisory lock, wraps each migration transactionally, records a SHA-256
 checksum, and refuses to continue when an applied file has changed or disappeared.
 Legacy rows receive their checksum once during the upgrade. CI validates the catalog,
-applies migrations twice to prove idempotent startup, audits production dependencies,
-and executes the repository quality gate.
+applies migrations twice to prove idempotent startup, runs the populated database
+through the re-encryption verifier, audits production dependencies, and executes the
+repository quality gate.
 The explicit `0013_final_transcript_quality.sql` tombstone is the only accepted
 pre-catalog applied name and is never executed on a fresh database.
 
 The repository recovery drill uses the same migration catalog against a disposable
 PostgreSQL restore. It compares all public tables, row counts and migration checksums,
 confirms critical tables are readable, and decrypts one available sample per encrypted data
-family without logging the value. Its custom-format dump and randomly named restore
+family with the configured active/previous keyring without logging the value. Its custom-format dump and randomly named restore
 database are temporary and removed after the run. This validates application recovery
 mechanics, not production backup encryption, retention or point-in-time recovery; see
 `docs/database-recovery-and-secrets.md` for those deployment gates and key constraints.

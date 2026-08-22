@@ -178,15 +178,17 @@ harassment, disputed consent, or possible data exposure to the safety/privacy ow
   abuse/complaint and privacy tabletop drills.
 - Configure managed encrypted database backups/PITR, accept recovery targets, and
   preserve a successful isolated production restore record.
-- Configure a managed secret store and exercise credential rotation. Do not rotate the
-  current data-encryption key until dual-read/re-encryption support exists.
+- Configure a managed secret store and exercise credential rotation. The repository
+  has versioned dual-read/new-write encryption and a verified resumable re-encryption
+  command; production still requires named owners, a maintenance window, preserved
+  evidence, backup-expiry handling, and an exercised managed-key rotation.
 
 ## Security and migration release evidence
 
 Before deployment, preserve the successful CI run for the exact commit and confirm
 that it includes the frozen install, production dependency audit, migration catalog
 validation, two consecutive migration runs, a disposable recovery drill, lint,
-typecheck, tests and builds. Confirm
+typecheck, tests, populated-database re-encryption proof and builds. Confirm
 that branch protection requires the workflow and review. A passing dependency audit
 means no finding at or above its configured high-severity threshold; moderate findings
 still require triage and a recorded disposition.

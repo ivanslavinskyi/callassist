@@ -1,4 +1,4 @@
-import { parseDataEncryptionKey } from "../security/encryption";
+import { parseDataEncryptionKeyring } from "../security/encryption";
 import type { CallRepository } from "./call-repository";
 import { InMemoryCallRepository } from "./in-memory-call-repository";
 import { PostgresCallRepository } from "./postgres-call-repository";
@@ -14,7 +14,7 @@ export function createCallRepositoryFromEnv(): CallRepository {
     }
     return new PostgresCallRepository(
       databaseUrl,
-      parseDataEncryptionKey(process.env.DATA_ENCRYPTION_KEY)
+      parseDataEncryptionKeyring(process.env)
     );
   }
 

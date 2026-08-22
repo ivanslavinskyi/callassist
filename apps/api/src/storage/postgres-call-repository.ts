@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
@@ -54,7 +54,13 @@ import {
   type TranscriptSegment
 } from "@callassist/contracts";
 import postgres from "postgres";
-import { decryptJson, encryptJson } from "../security/encryption";
+import {
+  dataEncryptionActiveKeyId,
+  decryptJson,
+  encryptJson,
+  type DataEncryptionMaterial
+} from "../security/encryption";
+import { createCallFeedbackFingerprint } from "../security/feedback-fingerprint";
 import {
   durableJobMaxAttempts,
   type ClaimDurableJobInput,
@@ -221,6 +227,7 @@ type CallFeedbackRevisionRow = {
   transcriptQuality: CallFeedbackRevision["transcriptQuality"];
   commentCiphertext: string | null;
   payloadFingerprint: string;
+  payloadFingerprintKeyId: string;
   idempotencyKey: string;
   createdAt: DatabaseDate;
 };
@@ -388,9 +395,9 @@ function toIso(value: DatabaseDate) {
 export class PostgresCallRepository implements CallRepository {
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
-  readonly #encryptionKey: Buffer;
+  readonly #encryptionKey: DataEncryptionMaterial;
 
-  constructor(databaseUrl: string, encryptionKey: Buffer) {
+  constructor(databaseUrl: string, encryptionKey: DataEncryptionMaterial) {
     this.#encryptionKey = encryptionKey;
     this.#sql = postgres(databaseUrl, {
       max: 10,
@@ -1895,7 +1902,12 @@ export class PostgresCallRepository implements CallRepository {
       ...parsed,
       comment: parsed.comment?.trim() || null
     };
-    const fingerprint = feedbackFingerprint(normalized, this.#encryptionKey);
+    const activeKeyId = dataEncryptionActiveKeyId(this.#encryptionKey);
+    const fingerprint = createCallFeedbackFingerprint(
+      normalized,
+      this.#encryptionKey,
+      activeKeyId
+    );
     await this.#sql.begin(async (transaction) => {
       await this.#lockOperation(
         transaction,
@@ -1908,9 +1920,14 @@ export class PostgresCallRepository implements CallRepository {
         LIMIT 1
       `;
       if (replay) {
+        const replayFingerprint = createCallFeedbackFingerprint(
+          normalized,
+          this.#encryptionKey,
+          replay.payloadFingerprintKeyId
+        );
         if (
           replay.callBriefId !== id ||
-          replay.payloadFingerprint !== fingerprint
+          replay.payloadFingerprint !== replayFingerprint
         ) {
           throw new CallRepositoryError(
             "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
@@ -1958,6 +1975,7 @@ export class PostgresCallRepository implements CallRepository {
           transcript_quality,
           comment_ciphertext,
           payload_fingerprint,
+          payload_fingerprint_key_id,
           idempotency_key,
           created_at
         ) VALUES (
@@ -1970,6 +1988,7 @@ export class PostgresCallRepository implements CallRepository {
           ${normalized.transcriptQuality},
           ${commentCiphertext},
           ${fingerprint},
+          ${activeKeyId},
           ${normalized.idempotencyKey},
           ${now}
         )
@@ -4439,6 +4458,7 @@ export class PostgresCallRepository implements CallRepository {
           transcript_quality AS "transcriptQuality",
           comment_ciphertext AS "commentCiphertext",
           payload_fingerprint AS "payloadFingerprint",
+          payload_fingerprint_key_id AS "payloadFingerprintKeyId",
           idempotency_key::text AS "idempotencyKey",
           created_at AS "createdAt"
         FROM call_feedback_revisions
@@ -5107,6 +5127,7 @@ function callFeedbackRevisionSelect(sql: postgres.TransactionSql) {
       transcript_quality AS "transcriptQuality",
       comment_ciphertext AS "commentCiphertext",
       payload_fingerprint AS "payloadFingerprint",
+      payload_fingerprint_key_id AS "payloadFingerprintKeyId",
       idempotency_key::text AS "idempotencyKey",
       created_at AS "createdAt"
     FROM call_feedback_revisions
@@ -5134,7 +5155,7 @@ function mapCallOutcomeRevision(
 
 function mapCallFeedbackRevision(
   row: CallFeedbackRevisionRow,
-  encryptionKey: Buffer
+  encryptionKey: DataEncryptionMaterial
 ): CallFeedbackRevision {
   return callFeedbackRevisionSchema.parse({
     id: row.id,
@@ -5199,19 +5220,6 @@ function systemOutcomeIdempotencyKey(technical: TechnicalCallOutcome) {
   return `system:${createHash("sha256")
     .update(JSON.stringify(technical))
     .digest("hex")}`;
-}
-
-function feedbackFingerprint(
-  input: OwnerCallFeedbackInput,
-  encryptionKey: Buffer
-) {
-  return createHmac("sha256", encryptionKey)
-    .update(JSON.stringify({
-      goalResult: input.goalResult,
-      transcriptQuality: input.transcriptQuality,
-      comment: input.comment?.trim() || null
-    }))
-    .digest("hex");
 }
 
 function emptyOutcomeMetrics(): CallOutcomeMetrics {

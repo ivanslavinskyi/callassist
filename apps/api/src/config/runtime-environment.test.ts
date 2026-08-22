@@ -13,7 +13,9 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     TELEPHONY_DRIVER: "twilio",
     DURABLE_WORKER_MODE: "external",
     DATABASE_URL: "postgresql://callassist:private@database.internal/callassist",
+    DATA_ENCRYPTION_ACTIVE_KEY_ID: "primary-1",
     DATA_ENCRYPTION_KEY: key,
+    DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "primary-1",
     PROMO_CODE_HASH_KEY: Buffer.alloc(32, 8).toString("base64"),
     OPENAI_API_KEY: "openai-private",
     TWILIO_ACCOUNT_SID: "AC123",
@@ -79,6 +81,19 @@ describe("production runtime configuration", () => {
         "twilio-private"
       ));
     }
+  });
+
+  it("keeps the promo HMAC key independent from retained data keys", () => {
+    const environment = productionEnvironment();
+    const previousKey = Buffer.alloc(32, 9).toString("base64");
+    environment.DATA_ENCRYPTION_PREVIOUS_KEYS = JSON.stringify({
+      "primary-0": previousKey
+    });
+    environment.DATA_ENCRYPTION_LEGACY_V1_KEY_ID = "primary-0";
+    environment.PROMO_CODE_HASH_KEY = previousKey;
+
+    expect(() => validateRuntimeEnvironment(environment, "api"))
+      .toThrow("PROMO_CODE_HASH_KEY must be independent");
   });
 
   it("does not require API-only verification and browser settings in a worker", () => {

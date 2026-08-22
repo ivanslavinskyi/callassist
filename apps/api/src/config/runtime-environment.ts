@@ -1,3 +1,10 @@
+import {
+  dataEncryptionMaterialUsesKey,
+  parseDataEncryptionKey,
+  parseDataEncryptionKeyring,
+  type DataEncryptionMaterial
+} from "../security/encryption";
+
 export type RuntimeProcess = "api" | "worker";
 
 export class RuntimeConfigurationError extends Error {
@@ -18,7 +25,14 @@ export function validateRuntimeEnvironment(
   requireExact(environment, "TELEPHONY_DRIVER", "twilio", issues);
   requireExact(environment, "DURABLE_WORKER_MODE", "external", issues);
   requirePostgresUrl(environment.DATABASE_URL, issues);
-  requireBase64Key(environment.DATA_ENCRYPTION_KEY, "DATA_ENCRYPTION_KEY", issues);
+  let dataEncryptionMaterial: DataEncryptionMaterial | undefined;
+  try {
+    dataEncryptionMaterial = parseDataEncryptionKeyring(environment);
+  } catch (error) {
+    issues.push(error instanceof Error
+      ? error.message
+      : "DATA_ENCRYPTION keyring is invalid");
+  }
   requireSecret(environment, "OPENAI_API_KEY", issues);
   requireSecret(environment, "TWILIO_ACCOUNT_SID", issues);
   requireSecret(environment, "TWILIO_AUTH_TOKEN", issues);
@@ -34,12 +48,17 @@ export function validateRuntimeEnvironment(
       "PROMO_CODE_HASH_KEY",
       issues
     );
-    if (
-      environment.PROMO_CODE_HASH_KEY?.trim() &&
-      environment.PROMO_CODE_HASH_KEY.trim() ===
-        environment.DATA_ENCRYPTION_KEY?.trim()
-    ) {
-      issues.push("PROMO_CODE_HASH_KEY must be independent");
+    if (environment.PROMO_CODE_HASH_KEY?.trim() && dataEncryptionMaterial) {
+      try {
+        const promoKey = parseDataEncryptionKey(
+          environment.PROMO_CODE_HASH_KEY
+        );
+        if (dataEncryptionMaterialUsesKey(dataEncryptionMaterial, promoKey)) {
+          issues.push("PROMO_CODE_HASH_KEY must be independent");
+        }
+      } catch {
+        // The field-specific validation above reports the bounded issue.
+      }
     }
     const origins = environment.WEB_ORIGIN
       ?.split(",")

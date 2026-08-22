@@ -105,10 +105,55 @@ browser, source-control, CI-log or support-channel exposure.
 | Twilio/OpenAI credentials | Create/activate a new provider credential, deploy all consumers, perform bounded provider checks, then revoke the old credential. Disable calls throughout an incident rotation. |
 | Session exposure | Revoke all server-side sessions with the existing audited control and require login again; rotating unrelated encryption keys does not revoke sessions. |
 | `PROMO_CODE_HASH_KEY` | Deactivate every outstanding promo campaign/code before replacement, deploy the new independent key, and issue new codes. A future key-ID scheme is required for overlap without invalidation. |
-| `DATA_ENCRYPTION_KEY` | Do not replace it in place. Current `v1` ciphertext has no key identifier: removing the old key makes existing private data unreadable. Rotation requires a reviewed key-ring/envelope format, dual-read/new-key-write deployment, complete resumable re-encryption with counts, backup/restore verification, and only then retirement of the old key. |
+| Data-encryption keyring | Never replace `DATA_ENCRYPTION_KEY` alone. Introduce a new active ID/key while retaining the old key in `DATA_ENCRYPTION_PREVIOUS_KEYS`, map legacy `v1` rows with `DATA_ENCRYPTION_LEGACY_V1_KEY_ID`, run the confirmed re-encryption procedure below, verify a restore with the full keyring, and retire the old key only after affected backups expire or have an approved recovery path. |
 
-A suspected `DATA_ENCRYPTION_KEY` compromise is therefore a release-blocking security
-incident, not a normal environment-variable update. Keep the old key available only
-under incident-controlled access until re-encryption and backup-expiry obligations are
+A suspected data-encryption-key compromise is a release-blocking security incident,
+not a normal environment-variable update. Keep any old key available only under
+incident-controlled access until re-encryption and backup-expiry obligations are
 complete. The production launch remains blocked until the secret manager, named
 owners, access policy and one exercised credential/key procedure are evidenced.
+
+## Data-encryption key rotation
+
+New encrypted values use `v2:<key-id>:<iv>:<tag>:<ciphertext>`. AES-GCM authenticates
+the key ID as additional data, so changing the envelope ID invalidates authentication.
+The runtime still reads legacy `v1` values by resolving them through the explicitly
+configured legacy key ID. Feedback idempotency fingerprints are also key-versioned;
+new versions derive a purpose-separated HMAC key rather than using the data key
+directly.
+
+Use this sequence for every production rotation:
+
+1. Preserve a successful encrypted backup/restore record and record the application
+   commit, current key ID, proposed new key ID, maintenance window and named security,
+   database and privacy owners. Never put key material in that evidence.
+2. Disable outbound calls, stop worker consumers, quiesce all API writers, and keep
+   traffic stopped until every consumer runs the dual-read build. A mixed deployment
+   is unsafe because an old binary cannot read a newly written `v2` envelope.
+3. Configure a fresh active ID/key, retain the old ID/key in the JSON previous-key map,
+   and point the legacy ID at the key that encrypted existing `v1` rows. Production
+   startup rejects an implicit active ID, unknown legacy ID, duplicate IDs, more than
+   four previous keys, and the same key material under two IDs.
+4. Set `DATA_ENCRYPTION_REENCRYPT_CONFIRM` to the exact active key ID and run
+   `pnpm db:reencrypt`. The command applies pending migrations, takes a dedicated
+   PostgreSQL advisory lock, commits bounded batches, refuses unverified feedback,
+   and emits only aggregate versioned JSON evidence. An interrupted run is resumable;
+   rows already using the active key are skipped.
+5. Run `pnpm db:reencrypt` again with the same confirmation. Preserve evidence that
+   both remaining counts are zero and the second run rewrites zero rows. Run
+   `pnpm db:recovery:drill` with the complete keyring and preserve its minimized
+   evidence before resuming one worker, the API, and finally outbound calls.
+6. Remove the old runtime key only when no live row depends on it and every retained
+   backup containing old ciphertext has expired or has a separately approved escrowed
+   recovery procedure. Validate production startup and recovery again after removal.
+
+Example shape (values belong in the managed secret store, not the shell history or
+repository):
+
+```text
+DATA_ENCRYPTION_ACTIVE_KEY_ID=primary-2026-08
+DATA_ENCRYPTION_KEY=<new-base64-key>
+DATA_ENCRYPTION_PREVIOUS_KEYS={"primary-2026-01":"<old-base64-key>"}
+DATA_ENCRYPTION_LEGACY_V1_KEY_ID=primary-2026-01
+DATA_ENCRYPTION_REENCRYPT_CONFIRM=primary-2026-08
+```

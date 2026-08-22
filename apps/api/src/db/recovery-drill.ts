@@ -7,7 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import postgres from "postgres";
-import { decryptJson, parseDataEncryptionKey } from "../security/encryption";
+import {
+  decryptJson,
+  parseDataEncryptionKeyring,
+  type DataEncryptionMaterial
+} from "../security/encryption";
 import {
   readMigrationCatalog,
   runMigrations,
@@ -117,7 +121,7 @@ export async function runRecoveryDrill(
   const source = parseLocalRecoverySource(
     environment.RECOVERY_SOURCE_DATABASE_URL?.trim() || environment.DATABASE_URL
   );
-  const encryptionKey = parseDataEncryptionKey(environment.DATA_ENCRYPTION_KEY);
+  const encryptionKey = parseDataEncryptionKeyring(environment);
   const container = await resolvePostgresContainer(
     environment.RECOVERY_POSTGRES_CONTAINER
   );
@@ -244,7 +248,7 @@ export async function runRecoveryDrill(
 
 async function readDatabaseSnapshot(
   databaseUrl: string,
-  encryptionKey: Buffer
+  encryptionKey: DataEncryptionMaterial
 ): Promise<DatabaseSnapshot> {
   const sql = postgres(databaseUrl, { max: 1, onnotice: () => undefined });
   try {
