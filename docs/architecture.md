@@ -208,6 +208,14 @@ and executes the repository quality gate.
 The explicit `0013_final_transcript_quality.sql` tombstone is the only accepted
 pre-catalog applied name and is never executed on a fresh database.
 
+The repository recovery drill uses the same migration catalog against a disposable
+PostgreSQL restore. It compares all public tables, row counts and migration checksums,
+confirms critical tables are readable, and decrypts one available sample per encrypted data
+family without logging the value. Its custom-format dump and randomly named restore
+database are temporary and removed after the run. This validates application recovery
+mechanics, not production backup encryption, retention or point-in-time recovery; see
+`docs/database-recovery-and-secrets.md` for those deployment gates and key constraints.
+
 Admins and superadmins may read both views. Either role may immediately disable new
 outbound calls with a 3–500 character reason, but only a superadmin may re-enable
 them. The existing repository transaction updates the singleton control and appends

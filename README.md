@@ -317,6 +317,7 @@ Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick
 
 ```powershell
 pnpm db:migrate:check
+pnpm db:recovery:drill
 pnpm security:audit
 pnpm lint
 pnpm typecheck
@@ -336,9 +337,16 @@ by the pre-identity local MVP. It is never executed for a fresh database; every 
 applied migration must still exist in the canonical catalog.
 
 The repository CI workflow performs a frozen install, validates and applies the
-migrations twice against PostgreSQL, audits production dependencies, then runs lint,
-typecheck, all tests and production builds. GitHub branch protection must still make
-that workflow required before merge.
+migrations twice against PostgreSQL, executes a disposable backup/restore proof,
+audits production dependencies, then runs lint, typecheck, all tests and production
+builds. GitHub branch protection must still make that workflow required before merge.
+
+The recovery drill accepts only a local application database, restores a temporary
+custom-format dump into a guarded disposable database, verifies migration checksums,
+table inventory/row counts and available encrypted samples, emits PII-free JSON
+evidence, then removes the restore database and dump. Production policy, provisional RPO/RTO and the secret
+rotation constraints are documented in
+[the recovery and secret-operations runbook](docs/database-recovery-and-secrets.md).
 
 The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` configures for the local Docker database.
 
@@ -360,8 +368,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   incident ownership. Local liveness/readiness, PII-safe logger boundaries, versioned
   snapshot alerts, and role-based runbooks are complete.
 - Continue from the completed application-security/CI foundation with a hosted CI
-  run, required branch protection, managed-secret rotation, production database
-  backup/restore evidence, infrastructure limits, and an independent focused review.
+  run, required branch protection, production managed-backup/restore evidence,
+  managed-secret/key-rotation implementation, infrastructure limits, and an
+  independent focused review. The local recovery drill and operations contract exist.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

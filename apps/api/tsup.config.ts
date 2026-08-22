@@ -6,6 +6,7 @@ export default defineConfig({
     index: "src/index.ts",
     worker: "src/worker.ts",
     "db/migrate": "src/db/migrate.ts",
+    "db/recovery-drill": "src/db/recovery-drill.ts",
     "db/set-outbound-calls": "src/db/set-outbound-calls.ts"
   },
   format: ["esm"],

@@ -151,6 +151,12 @@ an incident; restore requires a separately tested backup procedure and recovery 
 Run readiness, worker heartbeat, queue and one approved non-billable or supervised
 smoke check before resuming calls.
 
+The executable local procedure, provisional invite-alpha RPO/RTO, production recovery
+sequence, backup evidence/retention requirements and non-destructive secret-rotation
+contract are maintained in `docs/database-recovery-and-secrets.md`. A successful local
+drill proves mechanics only; managed point-in-time recovery and an isolated production
+restore remain release gates.
+
 ### Abuse, complaint and support
 
 For a recipient complaint or opt-out, create the appropriate durable suppression
@@ -170,12 +176,17 @@ harassment, disputed consent, or possible data exposure to the safety/privacy ow
 - Configure protected log transport/retention and execute a PII-redaction canary.
 - Assign named primary/backup owners and run worker, provider, retention, rollback,
   abuse/complaint and privacy tabletop drills.
+- Configure managed encrypted database backups/PITR, accept recovery targets, and
+  preserve a successful isolated production restore record.
+- Configure a managed secret store and exercise credential rotation. Do not rotate the
+  current data-encryption key until dual-read/re-encryption support exists.
 
 ## Security and migration release evidence
 
 Before deployment, preserve the successful CI run for the exact commit and confirm
 that it includes the frozen install, production dependency audit, migration catalog
-validation, two consecutive migration runs, lint, typecheck, tests and builds. Confirm
+validation, two consecutive migration runs, a disposable recovery drill, lint,
+typecheck, tests and builds. Confirm
 that branch protection requires the workflow and review. A passing dependency audit
 means no finding at or above its configured high-severity threshold; moderate findings
 still require triage and a recorded disposition.

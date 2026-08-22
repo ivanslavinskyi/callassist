@@ -12,6 +12,7 @@
     "db:logs": "docker compose logs -f postgres",
     "db:migrate": "corepack pnpm --filter @callassist/api db:migrate",
     "db:migrate:check": "corepack pnpm --filter @callassist/api db:migrate:check",
+    "db:recovery:drill": "corepack pnpm --filter @callassist/api db:recovery:drill",
     "db:test:prepare": "corepack pnpm --filter @callassist/api db:test:prepare",
     "db:up": "docker compose up -d --wait postgres",
     "dev": "turbo dev",
