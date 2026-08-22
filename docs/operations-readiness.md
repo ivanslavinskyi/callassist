@@ -170,3 +170,19 @@ harassment, disputed consent, or possible data exposure to the safety/privacy ow
 - Configure protected log transport/retention and execute a PII-redaction canary.
 - Assign named primary/backup owners and run worker, provider, retention, rollback,
   abuse/complaint and privacy tabletop drills.
+
+## Security and migration release evidence
+
+Before deployment, preserve the successful CI run for the exact commit and confirm
+that it includes the frozen install, production dependency audit, migration catalog
+validation, two consecutive migration runs, lint, typecheck, tests and builds. Confirm
+that branch protection requires the workflow and review. A passing dependency audit
+means no finding at or above its configured high-severity threshold; moderate findings
+still require triage and a recorded disposition.
+
+Production API and worker processes must pass fail-closed environment validation.
+Never bypass a validation issue by changing `NODE_ENV`. Verify TLS termination before
+trusting HSTS, keep the main and Twilio listener ports separate, and do not reuse the
+data-encryption key as the promo-code HMAC key. If an applied migration checksum
+mismatch occurs, stop: restore the committed historical file and create a new forward
+migration instead of updating the stored checksum.

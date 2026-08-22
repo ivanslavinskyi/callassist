@@ -14,6 +14,7 @@ import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
 import { durableWorkerModeFromEnv } from "./config/durable-worker-mode";
 import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
 import { operationalCostPolicyFromEnv } from "./config/operational-cost-policy";
+import { validateRuntimeEnvironment } from "./config/runtime-environment";
 import {
   CreditService,
   parsePromoCodeHashKey
@@ -31,6 +32,8 @@ import {
   registerProcessShutdown
 } from "./runtime/graceful-shutdown";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
+
+validateRuntimeEnvironment(process.env, "api");
 
 const {
   repository,

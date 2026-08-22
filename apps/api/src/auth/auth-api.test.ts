@@ -17,7 +17,10 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-function createAuthApp(contentService?: ContentService) {
+function createAuthApp(
+  contentService?: ContentService,
+  options: { production?: boolean; secureCookies?: boolean } = {}
+) {
   const repository = new InMemoryAuthRepository();
   const callRepository = new InMemoryCallRepository();
   const callService = new CallService(callRepository);
@@ -37,7 +40,8 @@ function createAuthApp(contentService?: ContentService) {
     creditService,
     contentService,
     logger: false,
-    secureCookies: false
+    production: options.production,
+    secureCookies: options.secureCookies ?? false
   });
   apps.push(app);
   return { app, repository, callRepository };
@@ -215,6 +219,29 @@ describe("auth API", () => {
       });
       expect(current.statusCode).toBe(401);
     }
+  });
+
+  it("uses a host-only high-priority secure cookie in production", async () => {
+    const { app } = createAuthApp(undefined, {
+      production: true,
+      secureCookies: true
+    });
+    const cookie = await registerAndVerify(app, {
+      ...registration,
+      email: "secure-cookie@example.com"
+    });
+
+    expect(cookie).toContain("__Host-callassist_session=");
+    expect(cookie).toContain("Path=/");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Lax");
+    expect(cookie).toContain("Priority=High");
+    expect(cookie).toContain("Secure");
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    })).statusCode).toBe(200);
   });
 
   it("serves localized policy pages and enforces current onboarding acceptance", async () => {

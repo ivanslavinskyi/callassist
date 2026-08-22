@@ -68,6 +68,13 @@ import {
   RecipientOptOutServiceError
 } from "./safety/recipient-opt-out-service";
 import {
+  connectionTimeoutMs,
+  mainApiBodyLimitBytes,
+  registerHttpSecurity,
+  requestTimeoutMs,
+  webhookBodyLimitBytes
+} from "./security/http-security";
+import {
   CallRepositoryError,
   decodeAdminCallCursor,
   decodeCallBriefCursor,
@@ -88,6 +95,7 @@ type BuildAppOptions = {
   contentService?: ContentService;
   allowAnonymousCallsForTesting?: boolean;
   logger?: boolean;
+  production?: boolean;
   secureCookies?: boolean;
   webOrigin?: string | string[];
   endpointRateLimiter?: ApplicationRateLimiter;
@@ -101,6 +109,7 @@ type BuildWebhookAppOptions = {
   twilioProvider: TwilioTelephonyProvider;
   realtimeBridge: OpenAIRealtimeBridge;
   logger?: boolean;
+  production?: boolean;
 };
 
 export function buildApp({
@@ -110,7 +119,8 @@ export function buildApp({
   contentService,
   allowAnonymousCallsForTesting = false,
   logger = true,
-  secureCookies = process.env.NODE_ENV === "production",
+  production = process.env.NODE_ENV === "production",
+  secureCookies = production,
   webOrigin = process.env.WEB_ORIGIN,
   endpointRateLimiter = new ApplicationRateLimiter(),
   endpointRateLimitPolicy = defaultEndpointRateLimitPolicy,
@@ -122,12 +132,16 @@ export function buildApp({
       })
     : undefined
 }: BuildAppOptions) {
+  const webOrigins = resolveWebOrigins(webOrigin);
   const app = Fastify({
     logger: logger ? piiSafeLoggerOptions : false,
-    logController: new LogController({ disableRequestLogging: logger })
+    logController: new LogController({ disableRequestLogging: logger }),
+    bodyLimit: mainApiBodyLimitBytes,
+    requestTimeout: requestTimeoutMs,
+    connectionTimeout: connectionTimeoutMs
   });
   if (logger) registerPiiSafeRequestLogging(app);
-  const webOrigins = resolveWebOrigins(webOrigin);
+  registerHttpSecurity(app, { allowedOrigins: webOrigins, production });
 
   void app.register(cors, {
     origin: webOrigins,
@@ -152,7 +166,9 @@ export function buildApp({
       return null;
     }
     const user = authService
-      ? await authService.authenticate(sessionTokenFromHeaders(request.headers))
+      ? await authService.authenticate(
+          sessionTokenFromHeaders(request.headers, secureCookies)
+        )
       : null;
     if (authService && !user) {
       await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
@@ -202,7 +218,7 @@ export function buildApp({
       return null;
     }
     const user = await authService.authenticate(
-      sessionTokenFromHeaders(request.headers)
+      sessionTokenFromHeaders(request.headers, secureCookies)
     );
     if (!user) {
       await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
@@ -261,7 +277,7 @@ export function buildApp({
       return null;
     }
     const user = await authService.authenticate(
-      sessionTokenFromHeaders(request.headers)
+      sessionTokenFromHeaders(request.headers, secureCookies)
     );
     if (!user) {
       await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
@@ -516,7 +532,9 @@ export function buildApp({
       if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
         return reply.status(403).send({ error: "INVALID_ORIGIN" });
       }
-      await authService.logout(sessionTokenFromHeaders(request.headers));
+      await authService.logout(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
       clearSessionCookie(reply, secureCookies);
       return reply.status(204).send();
     });
@@ -526,7 +544,7 @@ export function buildApp({
         return reply.status(403).send({ error: "INVALID_ORIGIN" });
       }
       const user = await authService.authenticate(
-        sessionTokenFromHeaders(request.headers)
+        sessionTokenFromHeaders(request.headers, secureCookies)
       );
       if (!user) {
         return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
@@ -538,7 +556,7 @@ export function buildApp({
 
     app.get("/api/auth/me", async (request, reply) => {
       const user = await authService.authenticate(
-        sessionTokenFromHeaders(request.headers)
+        sessionTokenFromHeaders(request.headers, secureCookies)
       );
       if (!user) return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
       return reply
@@ -551,7 +569,7 @@ export function buildApp({
         Querystring: { locale?: string };
       }>("/api/onboarding/status", async (request, reply) => {
         const user = await authService.authenticate(
-          sessionTokenFromHeaders(request.headers)
+          sessionTokenFromHeaders(request.headers, secureCookies)
         );
         if (!user) {
           return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
@@ -572,7 +590,7 @@ export function buildApp({
           return reply.status(403).send({ error: "INVALID_ORIGIN" });
         }
         const user = await authService.authenticate(
-          sessionTokenFromHeaders(request.headers)
+          sessionTokenFromHeaders(request.headers, secureCookies)
         );
         if (!user) {
           return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
@@ -1780,7 +1798,8 @@ export function buildApp({
   return app;
 }
 
-const sessionCookieName = "callassist_session";
+const developmentSessionCookieName = "callassist_session";
+const productionSessionCookieName = "__Host-callassist_session";
 
 function authContext(request: {
   ip: string;
@@ -1793,9 +1812,15 @@ function hasAllowedOrigin(origin: string | undefined, webOrigins: string[]) {
   return origin === undefined || webOrigins.includes(origin);
 }
 
-function sessionTokenFromHeaders(headers: { cookie?: string }) {
+function sessionTokenFromHeaders(
+  headers: { cookie?: string },
+  secure: boolean
+) {
   const cookie = headers.cookie;
   if (!cookie) return undefined;
+  const sessionCookieName = secure
+    ? productionSessionCookieName
+    : developmentSessionCookieName;
   for (const part of cookie.split(";")) {
     const [name, ...valueParts] = part.trim().split("=");
     if (name === sessionCookieName) return valueParts.join("=") || undefined;
@@ -1809,6 +1834,9 @@ function setSessionCookie(
   expiresAt: string,
   secure: boolean
 ) {
+  const sessionCookieName = secure
+    ? productionSessionCookieName
+    : developmentSessionCookieName;
   const maxAge = Math.max(
     0,
     Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1_000)
@@ -1820,6 +1848,7 @@ function setSessionCookie(
       "Path=/",
       "HttpOnly",
       "SameSite=Lax",
+      "Priority=High",
       `Max-Age=${maxAge}`,
       `Expires=${new Date(expiresAt).toUTCString()}`,
       ...(secure ? ["Secure"] : [])
@@ -1831,6 +1860,9 @@ function clearSessionCookie(
   reply: { header(name: string, value: string): unknown },
   secure: boolean
 ) {
+  const sessionCookieName = secure
+    ? productionSessionCookieName
+    : developmentSessionCookieName;
   reply.header(
     "Set-Cookie",
     [
@@ -1838,6 +1870,7 @@ function clearSessionCookie(
       "Path=/",
       "HttpOnly",
       "SameSite=Lax",
+      "Priority=High",
       "Max-Age=0",
       "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
       ...(secure ? ["Secure"] : [])
@@ -1901,13 +1934,18 @@ export function buildWebhookApp({
   service,
   twilioProvider,
   realtimeBridge,
-  logger = true
+  logger = true,
+  production = process.env.NODE_ENV === "production"
 }: BuildWebhookAppOptions) {
   const app = Fastify({
     logger: logger ? piiSafeLoggerOptions : false,
-    logController: new LogController({ disableRequestLogging: logger })
+    logController: new LogController({ disableRequestLogging: logger }),
+    bodyLimit: webhookBodyLimitBytes,
+    requestTimeout: requestTimeoutMs,
+    connectionTimeout: connectionTimeoutMs
   });
   if (logger) registerPiiSafeRequestLogging(app);
+  registerHttpSecurity(app, { production });
   async function recordWebhookDelivery(
     request: FastifyRequest,
     input: ProviderWebhookDeliveryInput

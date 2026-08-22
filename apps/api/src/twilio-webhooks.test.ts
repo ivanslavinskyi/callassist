@@ -90,6 +90,21 @@ describe("Twilio webhooks", () => {
     const { app } = createHarness();
     const response = await app.inject({ method: "GET", url: "/health/live" });
     expect(response.statusCode).toBe(404);
+    expect(response.headers["content-security-policy"]).toContain(
+      "default-src 'none'"
+    );
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+  });
+
+  it("rejects oversized webhook bodies before signature processing", async () => {
+    const { app } = createHarness();
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/voice?callBriefId=private",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: `CallSid=${"x".repeat(64 * 1_024)}`
+    });
+    expect(response.statusCode).toBe(413);
   });
 
   it("rejects an unsigned voice webhook", async () => {

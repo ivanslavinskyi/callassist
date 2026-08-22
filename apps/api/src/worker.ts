@@ -1,5 +1,6 @@
 import "./config/load-env";
 import { CallService } from "./call-service";
+import { validateRuntimeEnvironment } from "./config/runtime-environment";
 import {
   createCallRuntimeDependenciesFromEnv
 } from "./runtime/call-runtime-dependencies";
@@ -8,6 +9,8 @@ import {
   registerProcessShutdown
 } from "./runtime/graceful-shutdown";
 import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
+
+validateRuntimeEnvironment(process.env, "worker");
 
 const {
   repository,

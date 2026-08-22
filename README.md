@@ -130,6 +130,14 @@ Twilio-only listener deliberately exposes neither route. Operational thresholds,
 PII-safe logging rules, ownership requirements, and response procedures are defined
 in [the operations readiness runbook](docs/operations-readiness.md).
 
+Both HTTP listeners enforce bounded request bodies and request/connection timeouts.
+API responses carry a restrictive browser security-header policy; the web application
+adds a Next.js-compatible CSP and the same anti-framing, MIME-sniffing, referrer and
+permissions boundaries. HSTS is emitted only by production/HTTPS configurations.
+Unsafe browser requests with a foreign `Origin` are rejected before route dispatch,
+while `SameSite=Lax` session cookies provide the primary CSRF boundary. Production
+sessions use a `Secure`, `HttpOnly`, high-priority `__Host-` cookie.
+
 `pnpm env:init` creates `.env` with independent encryption and keyed promo-code
 hash keys and never overwrites an existing file. Existing deployments may temporarily
 fall back to `DATA_ENCRYPTION_KEY`, but should set and rotate a separate
@@ -308,11 +316,29 @@ Keep the tunnel running, apply migrations, and restart the API. Cloudflare Quick
 ## Quality checks
 
 ```powershell
+pnpm db:migrate:check
+pnpm security:audit
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
 ```
+
+The migration check requires contiguous, canonical filenames and non-empty SQL.
+Applied migrations retain a SHA-256 checksum; changing or removing an already
+recorded migration causes migration startup to fail before new SQL runs. Existing
+databases bootstrap checksums once, after which drift is rejected. The security audit
+blocks high and critical production-dependency advisories; lower-severity findings still require
+review rather than being described as absent.
+
+The sole `0013_final_transcript_quality.sql` tombstone recognizes a migration applied
+by the pre-identity local MVP. It is never executed for a fresh database; every other
+applied migration must still exist in the canonical catalog.
+
+The repository CI workflow performs a frozen install, validates and applies the
+migrations twice against PostgreSQL, audits production dependencies, then runs lint,
+typecheck, all tests and production builds. GitHub branch protection must still make
+that workflow required before merge.
 
 The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` configures for the local Docker database.
 
@@ -333,6 +359,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   production upstream probes, monitor/pager routing, protected log storage, and named
   incident ownership. Local liveness/readiness, PII-safe logger boundaries, versioned
   snapshot alerts, and role-based runbooks are complete.
+- Continue from the completed application-security/CI foundation with a hosted CI
+  run, required branch protection, managed-secret rotation, production database
+  backup/restore evidence, infrastructure limits, and an independent focused review.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

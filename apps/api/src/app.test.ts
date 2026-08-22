@@ -228,6 +228,12 @@ describe("call API", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["content-security-policy"]).toContain(
+      "default-src 'none'"
+    );
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["x-frame-options"]).toBe("DENY");
+    expect(response.headers["strict-transport-security"]).toBeUndefined();
     expect(response.json()).toEqual({ status: "alive" });
     expect(ping).not.toHaveBeenCalled();
   });
@@ -271,6 +277,44 @@ describe("call API", () => {
     const app = createApp();
     expect((await app.inject({ method: "GET", url: "/health" })).statusCode)
       .toBe(404);
+  });
+
+  it("adds HSTS only to a production API", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const app = buildApp({
+      service,
+      allowAnonymousCallsForTesting: true,
+      logger: false,
+      production: true
+    });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/health/live" });
+    expect(response.headers["strict-transport-security"]).toBe(
+      "max-age=31536000; includeSubDomains"
+    );
+  });
+
+  it("rejects oversized JSON before application parsing", async () => {
+    const app = createApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload: { objective: "x".repeat(256 * 1_024) }
+    });
+    expect(response.statusCode).toBe(413);
+  });
+
+  it("applies the origin boundary before an unsafe route is dispatched", async () => {
+    const app = createApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/not-a-route",
+      headers: { origin: "https://attacker.example" },
+      payload: {}
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "INVALID_ORIGIN" });
   });
 
   it.each(["http://localhost:3000", "http://127.0.0.1:3000"])(

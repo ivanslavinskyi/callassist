@@ -8,6 +8,7 @@
     "calls:disable": "tsx src/db/set-outbound-calls.ts disable",
     "calls:enable": "tsx src/db/set-outbound-calls.ts enable",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:check": "tsx src/db/migrate.ts --check",
     "db:migrate:prod": "node dist/db/migrate.js",
     "calls:disable:prod": "node dist/db/set-outbound-calls.js disable",
     "calls:enable:prod": "node dist/db/set-outbound-calls.js enable",
@@ -28,10 +29,10 @@
     "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.3.0",
     "dotenv": "^17.4.2",
-    "fastify": "^5.4.0",
+    "fastify": "^5.12.1",
     "postgres": "^3.4.9",
     "twilio": "^6.0.2",
-    "ws": "^8.21.1"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

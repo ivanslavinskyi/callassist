@@ -189,6 +189,25 @@ logs use registered route templates, safe error shapes, and explicit redaction r
 than raw URLs, headers, request bodies, identifiers, private call text, or provider
 payloads. See `docs/operations-readiness.md` for thresholds and response procedures.
 
+Both Fastify listeners set explicit body, request and connection limits and emit a
+restrictive API security-header set. The main listener rejects any unsafe request
+whose supplied `Origin` is outside the configured web-origin allow-list before route
+dispatch; authenticated cookies are `SameSite=Lax`, and production cookies add
+`Secure`, `Priority=High`, and the host-only `__Host-` prefix. The web layer publishes
+a Next.js-compatible CSP assembled from origins rather than raw configured URLs.
+Production startup fails closed unless PostgreSQL, external worker topology, Twilio
+Voice/Verify, OpenAI compilation/Realtime, HTTPS origins, independent encryption/HMAC
+keys, and distinct listener ports are configured.
+
+Migration files use contiguous four-digit sequence names. The runner holds a
+PostgreSQL advisory lock, wraps each migration transactionally, records a SHA-256
+checksum, and refuses to continue when an applied file has changed or disappeared.
+Legacy rows receive their checksum once during the upgrade. CI validates the catalog,
+applies migrations twice to prove idempotent startup, audits production dependencies,
+and executes the repository quality gate.
+The explicit `0013_final_transcript_quality.sql` tombstone is the only accepted
+pre-catalog applied name and is never executed on a fresh database.
+
 Admins and superadmins may read both views. Either role may immediately disable new
 outbound calls with a 3–500 character reason, but only a superadmin may re-enable
 them. The existing repository transaction updates the singleton control and appends
