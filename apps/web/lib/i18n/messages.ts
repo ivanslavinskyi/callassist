@@ -209,6 +209,15 @@ export type Messages = {
     deleted: string; available: string; audioUnsupported: string; deleteAudioNow: string;
     audioDeleted: string; retentionImmediate: string;
     retentionScheduled: (date: string) => string; retentionAutomatic: (days: number) => string;
+    feedbackEyebrow: string; feedbackTitle: string; feedbackHelp: string;
+    feedbackGoalQuestion: string;
+    feedbackGoal: Record<import("@callassist/contracts").CallGoalResult, string>;
+    feedbackTranscriptQuestion: string;
+    feedbackTranscriptQuality: Record<import("@callassist/contracts").TranscriptQualityRating, string>;
+    feedbackTranscriptUnavailable: string; feedbackCommentLabel: string;
+    feedbackCommentPlaceholder: string; feedbackCommentHint: string;
+    feedbackSave: string; feedbackUpdate: string; feedbackSaving: string;
+    feedbackSaved: string; feedbackError: string;
   };
 };
 
@@ -446,7 +455,27 @@ const en: Messages = {
     audioDeleted: "The provider audio has been permanently deleted.",
     retentionImmediate: "Deleted automatically after the final transcript is created.",
     retentionScheduled: (date: string) => `Scheduled for deletion on ${date}.`,
-    retentionAutomatic: (days: number) => `Deleted automatically ${days} days after the final transcript is created.`
+    retentionAutomatic: (days: number) => `Deleted automatically ${days} days after the final transcript is created.`,
+    feedbackEyebrow: "Your assessment",
+    feedbackTitle: "How did this call go?",
+    feedbackHelp: "Your answer describes the task result. A completed phone connection alone is never treated as success.",
+    feedbackGoalQuestion: "Was the call goal achieved?",
+    feedbackGoal: { yes: "Yes", partly: "Partly", no: "No" },
+    feedbackTranscriptQuestion: "How accurate is the final transcript?",
+    feedbackTranscriptQuality: {
+      good: "Good",
+      some_errors: "Some errors",
+      poor: "Poor"
+    },
+    feedbackTranscriptUnavailable: "Transcript quality can be rated after the final transcript is available.",
+    feedbackCommentLabel: "Optional comment",
+    feedbackCommentPlaceholder: "What worked, or what should be improved?",
+    feedbackCommentHint: "Maximum 500 characters. This comment remains private.",
+    feedbackSave: "Save feedback",
+    feedbackUpdate: "Update feedback",
+    feedbackSaving: "Saving…",
+    feedbackSaved: "Feedback saved.",
+    feedbackError: "Feedback could not be saved. Try again."
   }
 };
 
@@ -668,7 +697,27 @@ const de: Messages = {
     audioDeleted: "Die Audioaufnahme des Anbieters wurde endgültig gelöscht.",
     retentionImmediate: "Wird nach Erstellung des endgültigen Transkripts automatisch gelöscht.",
     retentionScheduled: (date: string) => `Löschung geplant für ${date}.`,
-    retentionAutomatic: (days: number) => `Wird ${days} Tage nach Erstellung des endgültigen Transkripts automatisch gelöscht.`
+    retentionAutomatic: (days: number) => `Wird ${days} Tage nach Erstellung des endgültigen Transkripts automatisch gelöscht.`,
+    feedbackEyebrow: "Ihre Einschätzung",
+    feedbackTitle: "Wie ist dieser Anruf verlaufen?",
+    feedbackHelp: "Ihre Antwort beschreibt das Aufgabenergebnis. Eine hergestellte Telefonverbindung allein gilt nie als Erfolg.",
+    feedbackGoalQuestion: "Wurde das Anrufziel erreicht?",
+    feedbackGoal: { yes: "Ja", partly: "Teilweise", no: "Nein" },
+    feedbackTranscriptQuestion: "Wie genau ist das endgültige Transkript?",
+    feedbackTranscriptQuality: {
+      good: "Gut",
+      some_errors: "Einige Fehler",
+      poor: "Schlecht"
+    },
+    feedbackTranscriptUnavailable: "Die Transkriptqualität kann bewertet werden, sobald das endgültige Transkript verfügbar ist.",
+    feedbackCommentLabel: "Optionaler Kommentar",
+    feedbackCommentPlaceholder: "Was hat funktioniert oder sollte verbessert werden?",
+    feedbackCommentHint: "Maximal 500 Zeichen. Dieser Kommentar bleibt privat.",
+    feedbackSave: "Feedback speichern",
+    feedbackUpdate: "Feedback aktualisieren",
+    feedbackSaving: "Wird gespeichert…",
+    feedbackSaved: "Feedback gespeichert.",
+    feedbackError: "Das Feedback konnte nicht gespeichert werden. Versuchen Sie es erneut."
   }
 };
 

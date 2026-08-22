@@ -4,9 +4,11 @@ import {
   type ApprovalDecision,
   type CallBrief,
   type CallEvent,
+  type CallOutcomeView,
   type CallSnapshot,
   type CallTelemetryEventInput,
   type CreateCallBriefInput,
+  type OwnerCallFeedbackInput,
   type TranscriptSegment
 } from "@callassist/contracts";
 import {
@@ -120,14 +122,39 @@ export class CallService {
     const callAttemptId = input.callAttemptId === undefined
       ? (await this.repository.getLatestAttempt(id))?.id ?? null
       : input.callAttemptId;
-    return this.repository.appendCallTelemetryEvent(id, {
+    const event = await this.repository.appendCallTelemetryEvent(id, {
       ...input,
       callAttemptId
     });
+    if ([
+      "consent.failed",
+      "recording.failed",
+      "conversation.ended",
+      "transcription.failed"
+    ].includes(event.payload.name)) {
+      await this.#syncSystemOutcome(id);
+    }
+    return event;
   }
 
   listTelemetry(id: string) {
     return this.repository.listCallTelemetryEvents(id);
+  }
+
+  async getOutcome(id: string): Promise<CallOutcomeView> {
+    return this.repository.recordSystemCallOutcome(id);
+  }
+
+  submitOwnerFeedback(
+    id: string,
+    userId: string,
+    input: OwnerCallFeedbackInput
+  ) {
+    return this.repository.submitOwnerCallFeedback(id, userId, input);
+  }
+
+  getOutcomeMetrics() {
+    return this.repository.getCallOutcomeMetrics();
   }
 
   async create(input: CreateCallBriefInput, userId: string | null = null) {
@@ -325,6 +352,7 @@ export class CallService {
         recording: snapshot.recording
       });
     }
+    await this.#syncSystemOutcome(id);
     return snapshot;
   }
 
@@ -352,6 +380,11 @@ export class CallService {
           type: "recording.updated",
           recording: result.snapshot.recording
         });
+      }
+      if (["completed", "failed", "stopped"].includes(
+        result.snapshot.brief.status
+      )) {
+        await this.#syncSystemOutcome(result.callId);
       }
     }
     return result?.snapshot ?? null;
@@ -401,6 +434,7 @@ export class CallService {
           type: "recording.updated",
           recording: failed.recording
         });
+        await this.#syncSystemOutcome(id);
       }
       this.#onBackgroundError(error);
       throw new CallServiceError("RECORDING_START_FAILED", { cause: error });
@@ -421,6 +455,9 @@ export class CallService {
       this.#postCallTranscriber
     ) {
       this.#runBackground(() => this.#processRecording(result.recording.id));
+    }
+    if (["available", "failed"].includes(result.recording.status)) {
+      await this.#syncSystemOutcome(result.callId);
     }
     return result.snapshot;
   }
@@ -576,6 +613,7 @@ export class CallService {
         type: "final_transcript.updated",
         finalTranscript: completed.finalTranscript
       });
+      await this.#syncSystemOutcome(completed.callId);
       if (completed.snapshot.brief.audioRetentionDays === 0) {
         await this.deleteRecording(completed.callId).catch(
           this.#onBackgroundError
@@ -591,6 +629,7 @@ export class CallService {
             type: "final_transcript.updated",
             finalTranscript: failed.finalTranscript
           });
+          await this.#syncSystemOutcome(failed.callId);
         }
       }
       this.#onBackgroundError(error);
@@ -646,7 +685,19 @@ export class CallService {
       this.#clearTimers(id);
     }
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
+    if (["completed", "failed", "stopped"].includes(status)) {
+      await this.#syncSystemOutcome(id);
+    }
     return snapshot;
+  }
+
+  async #syncSystemOutcome(id: string) {
+    try {
+      return await this.repository.recordSystemCallOutcome(id);
+    } catch (error) {
+      this.#onBackgroundError(error);
+      return null;
+    }
   }
 
   async #markFailedIfActive(id: string) {

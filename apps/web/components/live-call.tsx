@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./app-shell";
+import { CallFeedback } from "./call-feedback";
 import { CompilationReview } from "./compilation-review";
 import { ConfirmDialog } from "./confirm-dialog";
 import { CreateCallForm } from "./create-call-form";
@@ -697,6 +698,13 @@ export function LiveCall({ callId }: { callId: string }) {
                 </div>
               ) : null}
             </section>
+
+            {isTerminalCallStatus(brief.status) && brief.status !== "blocked" ? (
+              <CallFeedback
+                callId={callId}
+                hasCompletedTranscript={finalTranscript?.status === "completed"}
+              />
+            ) : null}
           </div>
 
           <aside className="call-sidebar">

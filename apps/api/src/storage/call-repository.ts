@@ -3,6 +3,8 @@ import type {
   ApprovalRequest,
   CallBrief,
   CallCompilation,
+  CallOutcomeMetrics,
+  CallOutcomeView,
   CallTelemetryEventInput,
   CreditTransaction,
   CreditUsage,
@@ -13,6 +15,7 @@ import type {
   CreateCallBriefInput,
   FinalTranscript,
   FinalTranscriptSegment,
+  OwnerCallFeedbackInput,
   PromoCodeSummary,
   TranscriptSegment
 } from "@callassist/contracts";
@@ -230,6 +233,14 @@ export interface CallRepository {
     input: CallTelemetryEventInput
   ): Promise<DurableCallEvent>;
   listCallTelemetryEvents(id: string): Promise<DurableCallEvent[]>;
+  getCallOutcome(id: string): Promise<CallOutcomeView>;
+  recordSystemCallOutcome(id: string): Promise<CallOutcomeView>;
+  submitOwnerCallFeedback(
+    id: string,
+    userId: string,
+    input: OwnerCallFeedbackInput
+  ): Promise<CallOutcomeView>;
+  getCallOutcomeMetrics(): Promise<CallOutcomeMetrics>;
   approveCompilation(id: string): Promise<CallSnapshot>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
   startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
@@ -325,7 +336,9 @@ export class CallRepositoryError extends Error {
       | "CREDIT_SELF_GRANT_FORBIDDEN"
       | "CREDIT_USER_NOT_FOUND"
       | "RECORDING_NOT_FOUND"
-      | "RECORDING_NOT_AVAILABLE",
+      | "RECORDING_NOT_AVAILABLE"
+      | "CALL_FEEDBACK_NOT_AVAILABLE"
+      | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT",
     message = code
   ) {
     super(message);

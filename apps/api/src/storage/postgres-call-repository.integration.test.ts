@@ -713,6 +713,115 @@ describeWithDatabase("PostgresCallRepository", () => {
     ).rejects.toThrow("immutable");
   });
 
+  it("persists immutable owner feedback separately from technical outcomes", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Outcome persistence office",
+      phoneNumber: "+41710000042",
+      objective: "Verify outcome and feedback persistence",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const attempt = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    const providerCallId = `CA-outcome-${brief.id}`;
+    await repository.attachProviderCall(
+      attempt.attempt.id,
+      providerCallId,
+      "queued"
+    );
+    await repository.applyProviderStatus(
+      providerCallId,
+      "no-answer",
+      "failed",
+      brief.id
+    );
+    const technical = await repository.recordSystemCallOutcome(brief.id);
+    expect(technical).toMatchObject({
+      technical: {
+        connection: "not_confirmed",
+        failureStage: "provider",
+        failureCode: "no-answer"
+      },
+      latestOutcome: null
+    });
+
+    const idempotencyKey = randomUUID();
+    const feedbackInput = {
+      idempotencyKey,
+      goalResult: "no" as const,
+      transcriptQuality: "poor" as const,
+      comment: "Private owner comment stored under encryption."
+    };
+    const submitted = await repository.submitOwnerCallFeedback(
+      brief.id,
+      ownerA,
+      feedbackInput
+    );
+    await expect(repository.submitOwnerCallFeedback(
+      brief.id,
+      ownerA,
+      feedbackInput
+    )).resolves.toEqual(submitted);
+    expect(submitted.latestOutcome).toMatchObject({
+      outcome: "unresolved",
+      provenance: "user",
+      actorUserId: ownerA
+    });
+    expect(submitted.latestFeedback).toMatchObject({
+      goalResult: "no",
+      transcriptQuality: "poor",
+      comment: feedbackInput.comment
+    });
+    await expect(repository.submitOwnerCallFeedback(
+      brief.id,
+      ownerB,
+      { ...feedbackInput, idempotencyKey: randomUUID() }
+    )).rejects.toMatchObject({ code: "CALL_NOT_FOUND" });
+
+    const [stored] = await inspection<{
+      commentCiphertext: string;
+      feedbackRevisions: number;
+      outcomeRevisions: number;
+    }[]>`
+      SELECT
+        comment_ciphertext AS "commentCiphertext",
+        (SELECT count(*)::int FROM call_feedback_revisions WHERE call_brief_id = ${brief.id}) AS "feedbackRevisions",
+        (SELECT count(*)::int FROM call_outcome_revisions WHERE call_brief_id = ${brief.id}) AS "outcomeRevisions"
+      FROM call_feedback_revisions
+      WHERE call_brief_id = ${brief.id}
+      ORDER BY revision DESC
+      LIMIT 1
+    `;
+    expect(stored?.commentCiphertext).not.toContain(feedbackInput.comment);
+    expect(stored).toMatchObject({ feedbackRevisions: 1, outcomeRevisions: 2 });
+    await expect(inspection`
+      UPDATE call_feedback_revisions
+      SET goal_result = 'yes'
+      WHERE call_brief_id = ${brief.id}
+    `).rejects.toThrow("immutable");
+    await expect(inspection`
+      UPDATE call_outcome_revisions
+      SET outcome = 'resolved'
+      WHERE call_brief_id = ${brief.id}
+    `).rejects.toThrow("immutable");
+
+    const metrics = await repository.getCallOutcomeMetrics();
+    expect(metrics.feedbackResponses).toBeGreaterThanOrEqual(1);
+    expect(metrics.goalResults.no).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(metrics)).not.toContain(feedbackInput.comment);
+  });
+
   it("persists consent-gated recording and encrypted final transcript states", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "Recording test office",

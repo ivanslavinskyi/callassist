@@ -9,6 +9,7 @@ import type {
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
+  CallOutcomeView,
   CallSnapshot,
   ContentLocale,
   ContentDraftUpdateInput,
@@ -21,6 +22,7 @@ import type {
   LoginInput,
   OnboardingAcceptanceInput,
   OnboardingStatus,
+  OwnerCallFeedbackInput,
   PhoneVerificationInput,
   PromoCodeCreateInput,
   PromoCodeSummary,
@@ -450,6 +452,20 @@ export async function createCallBrief(input: CreateCallBriefInput) {
 
 export async function getCallSnapshot(id: string) {
   return apiRequest<CallSnapshot>(`/api/call-briefs/${id}`);
+}
+
+export async function getCallOutcome(id: string) {
+  return apiRequest<CallOutcomeView>(`/api/call-briefs/${id}/outcome`);
+}
+
+export async function submitCallFeedback(
+  id: string,
+  input: OwnerCallFeedbackInput
+) {
+  return apiRequest<CallOutcomeView>(`/api/call-briefs/${id}/feedback`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
 }
 
 export async function recompileCallBrief(

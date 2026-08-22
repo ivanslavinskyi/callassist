@@ -1,16 +1,30 @@
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import {
+  CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
+  callFeedbackRevisionSchema,
+  callOutcomeMetricsSchema,
+  callOutcomeRevisionSchema,
+  callOutcomeViewSchema,
   callTelemetryEventInputSchema,
+  deriveTechnicalCallOutcome,
   describeCallTelemetryEvent,
   durableCallEventSchema,
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput,
+  ownerCallFeedbackInputSchema,
   parseSwissDestinationPhone,
+  semanticOutcomeForGoalResult,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
   type CallCompilation,
+  type CallFeedbackRevision,
+  type CallGoalResult,
+  type CallOutcomeMetrics,
+  type CallOutcomeProvenance,
+  type CallOutcomeRevision,
+  type CallOutcomeView,
   type CallTelemetryEventInput,
   type CallTelemetryEventName,
   type CallTelemetrySeverity,
@@ -27,6 +41,9 @@ import {
   type AssistanceReason,
   type FinalTranscript,
   type FinalTranscriptSegment,
+  type OwnerCallFeedbackInput,
+  type SemanticCallOutcome,
+  type TechnicalCallOutcome,
   type PromoCodeSummary,
   type TranscriptSegment
 } from "@callassist/contracts";
@@ -152,6 +169,33 @@ type CallTelemetryEventRow = {
   severity: CallTelemetrySeverity;
   metadata: unknown | string;
   occurredAt: DatabaseDate;
+};
+
+type CallOutcomeRevisionRow = {
+  id: string;
+  callBriefId: string;
+  revision: number;
+  schemaVersion: number;
+  outcome: SemanticCallOutcome | null;
+  provenance: CallOutcomeProvenance;
+  actorUserId: string | null;
+  reason: CallOutcomeRevision["reason"];
+  technical: unknown | string;
+  createdAt: DatabaseDate;
+};
+
+type CallFeedbackRevisionRow = {
+  id: string;
+  callBriefId: string;
+  userId: string;
+  revision: number;
+  schemaVersion: number;
+  goalResult: CallGoalResult;
+  transcriptQuality: CallFeedbackRevision["transcriptQuality"];
+  commentCiphertext: string | null;
+  payloadFingerprint: string;
+  idempotencyKey: string;
+  createdAt: DatabaseDate;
 };
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
@@ -980,6 +1024,244 @@ export class PostgresCallRepository implements CallRepository {
       ORDER BY sequence ASC
     `;
     return rows.map(mapCallTelemetryEvent);
+  }
+
+  async getCallOutcome(id: string) {
+    return this.#buildOutcomeView(id);
+  }
+
+  async recordSystemCallOutcome(id: string) {
+    await this.#sql.begin(async (transaction) => {
+      const [call] = await transaction<{ status: CallBrief["status"] }[]>`
+        SELECT status
+        FROM call_briefs
+        WHERE id = ${id}
+        FOR SHARE
+      `;
+      if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const technical = await this.#deriveTechnicalOutcome(
+        transaction,
+        id,
+        call.status
+      );
+      if (
+        technical.terminalStatus === null &&
+        technical.failureStage === null
+      ) {
+        return;
+      }
+      await this.#lockCallOutcome(transaction, id);
+      const [latestSystem] = await transaction<CallOutcomeRevisionRow[]>`
+        ${callOutcomeRevisionSelect(transaction)}
+        WHERE call_brief_id = ${id} AND provenance = 'system'
+        ORDER BY revision DESC
+        LIMIT 1
+      `;
+      if (
+        latestSystem &&
+        sameTechnicalOutcome(
+          mapCallOutcomeRevision(latestSystem).technical,
+          technical
+        )
+      ) {
+        return;
+      }
+      await this.#appendOutcomeRevision(transaction, id, {
+        outcome: null,
+        provenance: "system",
+        actorUserId: null,
+        reason: "technical_state_changed",
+        technical,
+        idempotencyKey: systemOutcomeIdempotencyKey(technical),
+        createdAt: new Date()
+      });
+    });
+    return this.#buildOutcomeView(id);
+  }
+
+  async submitOwnerCallFeedback(
+    id: string,
+    userId: string,
+    input: OwnerCallFeedbackInput
+  ) {
+    const parsed = ownerCallFeedbackInputSchema.parse(input);
+    const normalized = {
+      ...parsed,
+      comment: parsed.comment?.trim() || null
+    };
+    const fingerprint = feedbackFingerprint(normalized, this.#encryptionKey);
+    await this.#sql.begin(async (transaction) => {
+      await this.#lockOperation(
+        transaction,
+        `call-feedback:${userId}:${normalized.idempotencyKey}`
+      );
+      const [replay] = await transaction<CallFeedbackRevisionRow[]>`
+        ${callFeedbackRevisionSelect(transaction)}
+        WHERE user_id = ${userId}
+          AND idempotency_key = ${normalized.idempotencyKey}
+        LIMIT 1
+      `;
+      if (replay) {
+        if (
+          replay.callBriefId !== id ||
+          replay.payloadFingerprint !== fingerprint
+        ) {
+          throw new CallRepositoryError(
+            "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
+          );
+        }
+        return;
+      }
+
+      const [call] = await transaction<
+        { ownerUserId: string | null; status: CallBrief["status"] }[]
+      >`
+        SELECT user_id AS "ownerUserId", status
+        FROM call_briefs
+        WHERE id = ${id}
+        FOR SHARE
+      `;
+      if (!call || call.ownerUserId !== userId) {
+        throw new CallRepositoryError("CALL_NOT_FOUND");
+      }
+      if (!(["completed", "stopped", "failed"] as CallBrief["status"][])
+        .includes(call.status)) {
+        throw new CallRepositoryError("CALL_FEEDBACK_NOT_AVAILABLE");
+      }
+      await this.#lockCallOutcome(transaction, id);
+      const [{ nextRevision }] = await transaction<
+        { nextRevision: number }[]
+      >`
+        SELECT COALESCE(MAX(revision), 0)::int + 1 AS "nextRevision"
+        FROM call_feedback_revisions
+        WHERE call_brief_id = ${id}
+      `;
+      const feedbackId = randomUUID();
+      const now = new Date();
+      const commentCiphertext = normalized.comment
+        ? encryptJson(normalized.comment, this.#encryptionKey)
+        : null;
+      await transaction`
+        INSERT INTO call_feedback_revisions (
+          id,
+          call_brief_id,
+          user_id,
+          revision,
+          schema_version,
+          goal_result,
+          transcript_quality,
+          comment_ciphertext,
+          payload_fingerprint,
+          idempotency_key,
+          created_at
+        ) VALUES (
+          ${feedbackId},
+          ${id},
+          ${userId},
+          ${nextRevision},
+          ${CALL_OUTCOME_SCHEMA_VERSION},
+          ${normalized.goalResult},
+          ${normalized.transcriptQuality},
+          ${commentCiphertext},
+          ${fingerprint},
+          ${normalized.idempotencyKey},
+          ${now}
+        )
+      `;
+      const technical = await this.#deriveTechnicalOutcome(
+        transaction,
+        id,
+        call.status
+      );
+      await this.#appendOutcomeRevision(transaction, id, {
+        outcome: semanticOutcomeForGoalResult(normalized.goalResult),
+        provenance: "user",
+        actorUserId: userId,
+        reason: "owner_feedback",
+        technical,
+        idempotencyKey: `feedback:${feedbackId}:outcome`,
+        createdAt: now
+      });
+    });
+    return this.#buildOutcomeView(id);
+  }
+
+  async getCallOutcomeMetrics(): Promise<CallOutcomeMetrics> {
+    const [terminalRows, goalRows, qualityRows, semanticRows, failureRows] =
+      await Promise.all([
+        this.#sql<{ count: number }[]>`
+          SELECT count(*)::int AS count
+          FROM call_briefs
+          WHERE status IN ('completed', 'stopped', 'failed')
+        `,
+        this.#sql<{ value: CallGoalResult; count: number }[]>`
+          WITH latest AS (
+            SELECT DISTINCT ON (call_brief_id) goal_result
+            FROM call_feedback_revisions
+            ORDER BY call_brief_id, revision DESC
+          )
+          SELECT goal_result AS value, count(*)::int AS count
+          FROM latest
+          GROUP BY goal_result
+        `,
+        this.#sql<{
+          value: NonNullable<CallFeedbackRevision["transcriptQuality"]>;
+          count: number;
+        }[]>`
+          WITH latest AS (
+            SELECT DISTINCT ON (call_brief_id) transcript_quality
+            FROM call_feedback_revisions
+            ORDER BY call_brief_id, revision DESC
+          )
+          SELECT transcript_quality AS value, count(*)::int AS count
+          FROM latest
+          WHERE transcript_quality IS NOT NULL
+          GROUP BY transcript_quality
+        `,
+        this.#sql<{ value: SemanticCallOutcome; count: number }[]>`
+          WITH latest AS (
+            SELECT DISTINCT ON (call_brief_id) outcome
+            FROM call_outcome_revisions
+            WHERE outcome IS NOT NULL
+            ORDER BY call_brief_id, revision DESC
+          )
+          SELECT outcome AS value, count(*)::int AS count
+          FROM latest
+          GROUP BY outcome
+        `,
+        this.#sql<{ value: NonNullable<TechnicalCallOutcome["failureStage"]>; count: number }[]>`
+          WITH latest AS (
+            SELECT DISTINCT ON (call_brief_id) technical
+            FROM call_outcome_revisions
+            ORDER BY call_brief_id, revision DESC
+          )
+          SELECT technical->>'failureStage' AS value, count(*)::int AS count
+          FROM latest
+          WHERE technical->>'failureStage' IS NOT NULL
+          GROUP BY technical->>'failureStage'
+        `
+      ]);
+    const metrics = emptyOutcomeMetrics();
+    metrics.terminalCalls = terminalRows[0]?.count ?? 0;
+    metrics.feedbackResponses = goalRows.reduce(
+      (total, row) => total + row.count,
+      0
+    );
+    for (const row of goalRows) metrics.goalResults[row.value] = row.count;
+    for (const row of qualityRows) {
+      if (row.value === "some_errors") {
+        metrics.transcriptQuality.someErrors = row.count;
+      } else {
+        metrics.transcriptQuality[row.value] = row.count;
+      }
+    }
+    for (const row of semanticRows) {
+      setSemanticOutcomeCount(metrics, row.value, row.count);
+    }
+    for (const row of failureRows) {
+      metrics.technicalFailures[row.value] = row.count;
+    }
+    return callOutcomeMetricsSchema.parse(metrics);
   }
 
   async approveCompilation(id: string) {
@@ -2548,6 +2830,154 @@ export class PostgresCallRepository implements CallRepository {
     return snapshot;
   }
 
+  async #buildOutcomeView(id: string): Promise<CallOutcomeView> {
+    const snapshot = await this.#require(id);
+    const [events, outcomeRows, feedbackRows] = await Promise.all([
+      this.listCallTelemetryEvents(id),
+      this.#sql<CallOutcomeRevisionRow[]>`
+        SELECT
+          id,
+          call_brief_id AS "callBriefId",
+          revision,
+          schema_version AS "schemaVersion",
+          outcome,
+          provenance,
+          actor_user_id AS "actorUserId",
+          reason,
+          technical,
+          created_at AS "createdAt"
+        FROM call_outcome_revisions
+        WHERE call_brief_id = ${id} AND outcome IS NOT NULL
+        ORDER BY revision DESC
+        LIMIT 1
+      `,
+      this.#sql<CallFeedbackRevisionRow[]>`
+        SELECT
+          id,
+          call_brief_id AS "callBriefId",
+          user_id AS "userId",
+          revision,
+          schema_version AS "schemaVersion",
+          goal_result AS "goalResult",
+          transcript_quality AS "transcriptQuality",
+          comment_ciphertext AS "commentCiphertext",
+          payload_fingerprint AS "payloadFingerprint",
+          idempotency_key::text AS "idempotencyKey",
+          created_at AS "createdAt"
+        FROM call_feedback_revisions
+        WHERE call_brief_id = ${id}
+        ORDER BY revision DESC
+        LIMIT 1
+      `
+    ]);
+    return callOutcomeViewSchema.parse({
+      technical: deriveTechnicalCallOutcome(snapshot.brief.status, events),
+      latestOutcome: outcomeRows[0]
+        ? mapCallOutcomeRevision(outcomeRows[0])
+        : null,
+      latestFeedback: feedbackRows[0]
+        ? mapCallFeedbackRevision(feedbackRows[0], this.#encryptionKey)
+        : null
+    });
+  }
+
+  async #deriveTechnicalOutcome(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    status: CallBrief["status"]
+  ) {
+    const rows = await transaction<CallTelemetryEventRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        call_attempt_id AS "callAttemptId",
+        user_id AS "userId",
+        sequence,
+        schema_version AS "schemaVersion",
+        event_name AS "eventName",
+        source,
+        stage,
+        severity,
+        metadata,
+        occurred_at AS "occurredAt"
+      FROM call_events
+      WHERE call_brief_id = ${callBriefId}
+      ORDER BY sequence ASC
+    `;
+    return deriveTechnicalCallOutcome(
+      status,
+      rows.map(mapCallTelemetryEvent)
+    );
+  }
+
+  async #lockCallOutcome(
+    transaction: postgres.TransactionSql,
+    callBriefId: string
+  ) {
+    await transaction`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended(${`call-outcome:${callBriefId}`}, 0)
+      )
+    `;
+  }
+
+  async #appendOutcomeRevision(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    input: {
+      outcome: SemanticCallOutcome | null;
+      provenance: CallOutcomeProvenance;
+      actorUserId: string | null;
+      reason: CallOutcomeRevision["reason"];
+      technical: TechnicalCallOutcome;
+      idempotencyKey: string;
+      createdAt: Date;
+    }
+  ) {
+    const existing = await transaction`
+      SELECT id
+      FROM call_outcome_revisions
+      WHERE call_brief_id = ${callBriefId}
+        AND idempotency_key = ${input.idempotencyKey}
+      LIMIT 1
+    `;
+    if (existing.count > 0) return;
+    const [{ nextRevision }] = await transaction<
+      { nextRevision: number }[]
+    >`
+      SELECT COALESCE(MAX(revision), 0)::int + 1 AS "nextRevision"
+      FROM call_outcome_revisions
+      WHERE call_brief_id = ${callBriefId}
+    `;
+    await transaction`
+      INSERT INTO call_outcome_revisions (
+        id,
+        call_brief_id,
+        revision,
+        schema_version,
+        outcome,
+        provenance,
+        actor_user_id,
+        reason,
+        technical,
+        idempotency_key,
+        created_at
+      ) VALUES (
+        ${randomUUID()},
+        ${callBriefId},
+        ${nextRevision},
+        ${CALL_OUTCOME_SCHEMA_VERSION},
+        ${input.outcome},
+        ${input.provenance},
+        ${input.actorUserId},
+        ${input.reason},
+        ${transaction.json(input.technical)},
+        ${input.idempotencyKey},
+        ${input.createdAt}
+      )
+    `;
+  }
+
   async #recordingMutation(callId: string) {
     const snapshot = await this.#require(callId);
     if (!snapshot.recording) {
@@ -2961,6 +3391,162 @@ function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {
         : row.metadata
     }
   });
+}
+
+function callOutcomeRevisionSelect(sql: postgres.TransactionSql) {
+  return sql`
+    SELECT
+      id,
+      call_brief_id AS "callBriefId",
+      revision,
+      schema_version AS "schemaVersion",
+      outcome,
+      provenance,
+      actor_user_id AS "actorUserId",
+      reason,
+      technical,
+      created_at AS "createdAt"
+    FROM call_outcome_revisions
+  `;
+}
+
+function callFeedbackRevisionSelect(sql: postgres.TransactionSql) {
+  return sql`
+    SELECT
+      id,
+      call_brief_id AS "callBriefId",
+      user_id AS "userId",
+      revision,
+      schema_version AS "schemaVersion",
+      goal_result AS "goalResult",
+      transcript_quality AS "transcriptQuality",
+      comment_ciphertext AS "commentCiphertext",
+      payload_fingerprint AS "payloadFingerprint",
+      idempotency_key::text AS "idempotencyKey",
+      created_at AS "createdAt"
+    FROM call_feedback_revisions
+  `;
+}
+
+function mapCallOutcomeRevision(
+  row: CallOutcomeRevisionRow
+): CallOutcomeRevision {
+  return callOutcomeRevisionSchema.parse({
+    id: row.id,
+    callBriefId: row.callBriefId,
+    revision: row.revision,
+    schemaVersion: row.schemaVersion,
+    outcome: row.outcome,
+    provenance: row.provenance,
+    actorUserId: row.actorUserId,
+    reason: row.reason,
+    technical: typeof row.technical === "string"
+      ? JSON.parse(row.technical)
+      : row.technical,
+    createdAt: toIso(row.createdAt)
+  });
+}
+
+function mapCallFeedbackRevision(
+  row: CallFeedbackRevisionRow,
+  encryptionKey: Buffer
+): CallFeedbackRevision {
+  return callFeedbackRevisionSchema.parse({
+    id: row.id,
+    callBriefId: row.callBriefId,
+    userId: row.userId,
+    revision: row.revision,
+    schemaVersion: row.schemaVersion,
+    goalResult: row.goalResult,
+    transcriptQuality: row.transcriptQuality,
+    comment: row.commentCiphertext
+      ? decryptJson<string>(row.commentCiphertext, encryptionKey)
+      : null,
+    createdAt: toIso(row.createdAt)
+  });
+}
+
+function sameTechnicalOutcome(
+  left: TechnicalCallOutcome,
+  right: TechnicalCallOutcome
+) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function systemOutcomeIdempotencyKey(technical: TechnicalCallOutcome) {
+  return `system:${createHash("sha256")
+    .update(JSON.stringify(technical))
+    .digest("hex")}`;
+}
+
+function feedbackFingerprint(
+  input: OwnerCallFeedbackInput,
+  encryptionKey: Buffer
+) {
+  return createHmac("sha256", encryptionKey)
+    .update(JSON.stringify({
+      goalResult: input.goalResult,
+      transcriptQuality: input.transcriptQuality,
+      comment: input.comment?.trim() || null
+    }))
+    .digest("hex");
+}
+
+function emptyOutcomeMetrics(): CallOutcomeMetrics {
+  return {
+    terminalCalls: 0,
+    feedbackResponses: 0,
+    goalResults: { yes: 0, partly: 0, no: 0 },
+    transcriptQuality: { good: 0, someErrors: 0, poor: 0 },
+    semanticOutcomes: {
+      resolved: 0,
+      partiallyResolved: 0,
+      unresolved: 0,
+      wrongRecipient: 0,
+      voicemail: 0,
+      declined: 0,
+      technicalFailure: 0
+    },
+    technicalFailures: {
+      policy: 0,
+      provider: 0,
+      consent: 0,
+      recording: 0,
+      realtime: 0,
+      transcription: 0,
+      recovery: 0
+    }
+  };
+}
+
+function setSemanticOutcomeCount(
+  metrics: CallOutcomeMetrics,
+  outcome: SemanticCallOutcome,
+  count: number
+) {
+  switch (outcome) {
+    case "resolved":
+      metrics.semanticOutcomes.resolved = count;
+      break;
+    case "partially_resolved":
+      metrics.semanticOutcomes.partiallyResolved = count;
+      break;
+    case "unresolved":
+      metrics.semanticOutcomes.unresolved = count;
+      break;
+    case "wrong_recipient":
+      metrics.semanticOutcomes.wrongRecipient = count;
+      break;
+    case "voicemail":
+      metrics.semanticOutcomes.voicemail = count;
+      break;
+    case "declined":
+      metrics.semanticOutcomes.declined = count;
+      break;
+    case "technical_failure":
+      metrics.semanticOutcomes.technicalFailure = count;
+      break;
+  }
 }
 
 function requireSwissPhone(value: string) {

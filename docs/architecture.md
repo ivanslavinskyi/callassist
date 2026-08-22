@@ -128,6 +128,14 @@ Each event name owns a strict, bounded metadata schema. Durable telemetry may co
 
 State transitions and their durable events share a PostgreSQL transaction where practical. Per-call advisory locking, sequence uniqueness, and idempotency keys make callback replay safe. A credit charge is emitted only with provider-confirmed connection evidence (`in-progress` or provider `completed`); busy, no-answer, stopped, recovery, and other pre-connection terminal paths emit one refund. A terminal domain status by itself is not treated as proof of a conversation.
 
+## Call outcomes and owner feedback
+
+Technical classification and semantic task success are separate. The current technical view is derived from the bounded durable event stream and records connection evidence, terminal state, consent, recording/transcription state, and a controlled failure stage/code. Provider completion alone never means that the user's goal was resolved.
+
+`call_outcome_revisions` is an immutable, schema-versioned provenance chain. System revisions capture technical-state changes without a semantic outcome; user or authorized staff revisions require an actor. `call_feedback_revisions` is a separate immutable owner-feedback chain for Yes/Partly/No goal result, optional final-transcript quality, and an optional 500-character comment. The comment is encrypted at rest. Idempotency keys make retries safe while conflicting replay is rejected.
+
+Owner API reads and writes use the same tenant boundary as call detail. Aggregate metrics expose counts only and omit call text, comments, phone numbers, and user identity. The next Admin Calls read model must preserve this minimized default and separately authorize and audit access to sensitive content.
+
 ## Call language
 
 Language is a required `CallBrief` property rather than a profile default. One operator can therefore create calls in different languages without mixing instructions or transcripts.
@@ -205,6 +213,8 @@ an approved call plan.
 - `CallCompilation`: encrypted raw brief, structured compiled plan, policy decision,
   compiler/policy versions, response ID, approval time, and immutable snapshot hash.
 - `CallAttempt`: provider call ID, raw and domain status, timestamps, and stop reason.
+- `CallOutcomeRevision`: immutable technical/semantic classification with explicit provenance, actor, reason, schema version, and revision number.
+- `CallFeedbackRevision`: immutable owner rating revision; optional bounded comment is encrypted at rest and excluded from aggregate metrics.
 - `PromoCode` / `PromoRedemption`: keyed code hash, bounded campaign/window limits,
   immutable per-user redemptions, idempotency, actor, reason, and timestamps.
 - `RecipientSuppression`: normalized recipient phone, source, reason, actor, creation,

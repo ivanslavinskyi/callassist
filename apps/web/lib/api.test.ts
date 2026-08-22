@@ -10,6 +10,7 @@ import {
   createCallBrief,
   createPromoCode,
   getCreditUsage,
+  getCallOutcome,
   getOnboardingStatus,
   getPublishedContentIndex,
   getPublishedFaq,
@@ -39,6 +40,7 @@ import {
   revokeAllOwnSessions,
   suppressRecipientAsStaff,
   startCall,
+  submitCallFeedback,
   updateAdminContentDraft,
   updateAdminEditorialDraft
 } from "./api";
@@ -520,6 +522,57 @@ describe("API client headers", () => {
         "Content-Type"
       )
     ).toBe(false);
+  });
+
+  it("loads the private outcome and submits bounded owner feedback", async () => {
+    const outcome = {
+      technical: {
+        connection: "confirmed",
+        terminalStatus: "completed",
+        consent: "granted",
+        recording: "completed",
+        transcription: "completed",
+        failureStage: null,
+        failureCode: null
+      },
+      latestOutcome: null,
+      latestFeedback: null
+    };
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify(outcome), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getCallOutcome("call-id")).resolves.toEqual(outcome);
+    await expect(submitCallFeedback("call-id", {
+      idempotencyKey: "f04a1f42-b7ad-4b51-b7bd-6519bd33216f",
+      goalResult: "yes",
+      transcriptQuality: "good",
+      comment: "The appointment was booked."
+    })).resolves.toEqual(outcome);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/call-briefs/call-id/outcome"
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: "include"
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      "/api/call-briefs/call-id/feedback"
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "PUT",
+      credentials: "include"
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      idempotencyKey: "f04a1f42-b7ad-4b51-b7bd-6519bd33216f",
+      goalResult: "yes",
+      transcriptQuality: "good",
+      comment: "The appointment was booked."
+    });
   });
 
   it("preserves typed API errors and maps call-planner failures to actionable copy", async () => {

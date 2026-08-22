@@ -16,6 +16,7 @@ import {
   contentLocaleSchema,
   contentPageKeySchema,
   onboardingAcceptanceInputSchema,
+  ownerCallFeedbackInputSchema,
   phoneVerificationInputSchema,
   promoCodeCreateInputSchema,
   promoRedemptionInputSchema,
@@ -986,6 +987,14 @@ export function buildApp({
       });
     }
 
+    app.get("/api/admin/call-outcome-metrics", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(await service.getOutcomeMetrics());
+    });
+
     app.get<{
       Querystring: {
         limit?: string;
@@ -1233,6 +1242,52 @@ export function buildApp({
       const snapshot = await service.get(request.params.id);
       if (!snapshot) return reply.status(404).send({ error: "CALL_NOT_FOUND" });
       return snapshot;
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/outcome",
+    async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id
+      });
+      if (!access) return;
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await service.getOutcome(request.params.id));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.put<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/feedback",
+    async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
+      if (!access.userId) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      const parsed = ownerCallFeedbackInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_CALL_FEEDBACK" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await service.submitOwnerFeedback(
+            request.params.id,
+            access.userId,
+            parsed.data
+          ));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
     }
   );
 

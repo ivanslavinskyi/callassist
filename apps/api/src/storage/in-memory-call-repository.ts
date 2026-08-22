@@ -1,15 +1,27 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
+  CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
+  callFeedbackRevisionSchema,
+  callOutcomeMetricsSchema,
+  callOutcomeRevisionSchema,
+  callOutcomeViewSchema,
   callTelemetryEventInputSchema,
+  deriveTechnicalCallOutcome,
   describeCallTelemetryEvent,
   durableCallEventSchema,
   normalizeCreateCallBriefInput,
+  ownerCallFeedbackInputSchema,
   parseSwissDestinationPhone,
+  semanticOutcomeForGoalResult,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
   type CallCompilation,
+  type CallFeedbackRevision,
+  type CallOutcomeMetrics,
+  type CallOutcomeRevision,
+  type CallOutcomeView,
   type CallTelemetryEventInput,
   type CreditTransaction,
   type CreditUsage,
@@ -21,6 +33,7 @@ import {
   type FinalTranscript,
   type FinalTranscriptSegment,
   type NormalizedCallBriefInput,
+  type OwnerCallFeedbackInput,
   type PromoCodeSummary,
   type TranscriptSegment
 } from "@callassist/contracts";
@@ -54,6 +67,16 @@ type StoredPromoCode = PromoCodeSummary & {
 
 type StoredCallTelemetryEvent = {
   event: DurableCallEvent;
+  idempotencyKey: string;
+};
+
+type StoredCallOutcomeRevision = {
+  revision: CallOutcomeRevision;
+  idempotencyKey: string;
+};
+
+type StoredCallFeedbackRevision = {
+  revision: CallFeedbackRevision;
   idempotencyKey: string;
 };
 
@@ -91,6 +114,14 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #callTelemetryEvents = new Map<
     string,
     StoredCallTelemetryEvent[]
+  >();
+  readonly #callOutcomeRevisions = new Map<
+    string,
+    StoredCallOutcomeRevision[]
+  >();
+  readonly #callFeedbackRevisions = new Map<
+    string,
+    StoredCallFeedbackRevision[]
   >();
   readonly #creditTransactions: Array<
     CreditTransaction & { userId: string; idempotencyKey: string }
@@ -469,6 +500,160 @@ export class InMemoryCallRepository implements CallRepository {
     return copy(
       (this.#callTelemetryEvents.get(id) ?? []).map(({ event }) => event)
     );
+  }
+
+  async getCallOutcome(id: string) {
+    return copy(this.#buildOutcomeView(id));
+  }
+
+  async recordSystemCallOutcome(id: string) {
+    const view = this.#buildOutcomeView(id);
+    if (
+      view.technical.terminalStatus === null &&
+      view.technical.failureStage === null
+    ) {
+      return copy(view);
+    }
+    const stored = this.#callOutcomeRevisions.get(id) ?? [];
+    const latestSystem = [...stored]
+      .reverse()
+      .find(({ revision }) => revision.provenance === "system");
+    if (
+      latestSystem &&
+      sameTechnicalOutcome(latestSystem.revision.technical, view.technical)
+    ) {
+      return copy(view);
+    }
+    const idempotencyKey = systemOutcomeIdempotencyKey(view.technical);
+    const existing = stored.find(
+      (candidate) => candidate.idempotencyKey === idempotencyKey
+    );
+    if (!existing) {
+      const revision = callOutcomeRevisionSchema.parse({
+        id: randomUUID(),
+        callBriefId: id,
+        revision: stored.length + 1,
+        schemaVersion: CALL_OUTCOME_SCHEMA_VERSION,
+        outcome: null,
+        provenance: "system",
+        actorUserId: null,
+        reason: "technical_state_changed",
+        technical: view.technical,
+        createdAt: new Date().toISOString()
+      });
+      stored.push({ revision, idempotencyKey });
+      this.#callOutcomeRevisions.set(id, stored);
+    }
+    return copy(this.#buildOutcomeView(id));
+  }
+
+  async submitOwnerCallFeedback(
+    id: string,
+    userId: string,
+    input: OwnerCallFeedbackInput
+  ) {
+    const snapshot = this.#require(id);
+    if (this.#owners.get(id) !== userId) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
+    if (!(["completed", "stopped", "failed"] as CallBrief["status"][])
+      .includes(snapshot.brief.status)) {
+      throw new CallRepositoryError("CALL_FEEDBACK_NOT_AVAILABLE");
+    }
+    const parsed = ownerCallFeedbackInputSchema.parse(input);
+    const normalized = {
+      ...parsed,
+      comment: parsed.comment?.trim() || null
+    };
+    const replay = [...this.#callFeedbackRevisions.values()]
+      .flat()
+      .find(({ idempotencyKey, revision }) =>
+        revision.userId === userId &&
+        idempotencyKey === parsed.idempotencyKey
+      );
+    if (replay) {
+      if (
+        replay.revision.callBriefId !== id ||
+        replay.revision.userId !== userId ||
+        !sameFeedback(replay.revision, normalized)
+      ) {
+        throw new CallRepositoryError(
+          "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
+        );
+      }
+      return copy(this.#buildOutcomeView(id));
+    }
+
+    const feedbackStored = this.#callFeedbackRevisions.get(id) ?? [];
+    const feedback = callFeedbackRevisionSchema.parse({
+      id: randomUUID(),
+      callBriefId: id,
+      userId,
+      revision: feedbackStored.length + 1,
+      schemaVersion: CALL_OUTCOME_SCHEMA_VERSION,
+      goalResult: normalized.goalResult,
+      transcriptQuality: normalized.transcriptQuality,
+      comment: normalized.comment,
+      createdAt: new Date().toISOString()
+    });
+    feedbackStored.push({
+      revision: feedback,
+      idempotencyKey: normalized.idempotencyKey
+    });
+    this.#callFeedbackRevisions.set(id, feedbackStored);
+
+    const outcomeStored = this.#callOutcomeRevisions.get(id) ?? [];
+    const outcome = callOutcomeRevisionSchema.parse({
+      id: randomUUID(),
+      callBriefId: id,
+      revision: outcomeStored.length + 1,
+      schemaVersion: CALL_OUTCOME_SCHEMA_VERSION,
+      outcome: semanticOutcomeForGoalResult(normalized.goalResult),
+      provenance: "user",
+      actorUserId: userId,
+      reason: "owner_feedback",
+      technical: this.#buildOutcomeView(id).technical,
+      createdAt: feedback.createdAt
+    });
+    outcomeStored.push({
+      revision: outcome,
+      idempotencyKey: `feedback:${feedback.id}:outcome`
+    });
+    this.#callOutcomeRevisions.set(id, outcomeStored);
+    return copy(this.#buildOutcomeView(id));
+  }
+
+  async getCallOutcomeMetrics(): Promise<CallOutcomeMetrics> {
+    const metrics = emptyOutcomeMetrics();
+    for (const snapshot of this.#calls.values()) {
+      if (
+        (["completed", "stopped", "failed"] as CallBrief["status"][])
+          .includes(snapshot.brief.status)
+      ) {
+        metrics.terminalCalls += 1;
+      }
+      const feedback = this.#callFeedbackRevisions
+        .get(snapshot.brief.id)
+        ?.at(-1)?.revision;
+      if (feedback) {
+        metrics.feedbackResponses += 1;
+        metrics.goalResults[feedback.goalResult] += 1;
+        if (feedback.transcriptQuality === "some_errors") {
+          metrics.transcriptQuality.someErrors += 1;
+        } else if (feedback.transcriptQuality) {
+          metrics.transcriptQuality[feedback.transcriptQuality] += 1;
+        }
+      }
+      const semantic = [...(this.#callOutcomeRevisions.get(
+        snapshot.brief.id
+      ) ?? [])].reverse().find(({ revision }) => revision.outcome !== null)
+        ?.revision.outcome;
+      incrementSemanticOutcome(metrics, semantic ?? null);
+      const stage = this.#buildOutcomeView(snapshot.brief.id).technical
+        .failureStage;
+      if (stage) metrics.technicalFailures[stage] += 1;
+    }
+    return callOutcomeMetricsSchema.parse(metrics);
   }
 
   async approveCompilation(id: string) {
@@ -1242,6 +1427,22 @@ export class InMemoryCallRepository implements CallRepository {
 
   async close() {}
 
+  #buildOutcomeView(callBriefId: string): CallOutcomeView {
+    const snapshot = this.#require(callBriefId);
+    const events = (this.#callTelemetryEvents.get(callBriefId) ?? [])
+      .map(({ event }) => event);
+    const latestOutcome = [...(this.#callOutcomeRevisions.get(callBriefId) ?? [])]
+      .reverse()
+      .find(({ revision }) => revision.outcome !== null)?.revision ?? null;
+    const latestFeedback = this.#callFeedbackRevisions.get(callBriefId)
+      ?.at(-1)?.revision ?? null;
+    return callOutcomeViewSchema.parse({
+      technical: deriveTechnicalCallOutcome(snapshot.brief.status, events),
+      latestOutcome,
+      latestFeedback
+    });
+  }
+
   #appendConnectionTelemetry(
     callBriefId: string,
     callAttemptId: string,
@@ -1464,6 +1665,86 @@ function safeTelemetryCode(value: string | null | undefined, fallback: string) {
   return normalized && /^[a-z0-9_.:/-]{1,160}$/i.test(normalized)
     ? normalized
     : fallback;
+}
+
+function sameTechnicalOutcome(
+  left: CallOutcomeView["technical"],
+  right: CallOutcomeView["technical"]
+) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function systemOutcomeIdempotencyKey(
+  technical: CallOutcomeView["technical"]
+) {
+  return `system:${createHash("sha256")
+    .update(JSON.stringify(technical))
+    .digest("hex")}`;
+}
+
+function sameFeedback(
+  revision: CallFeedbackRevision,
+  input: OwnerCallFeedbackInput
+) {
+  return revision.goalResult === input.goalResult &&
+    revision.transcriptQuality === input.transcriptQuality &&
+    revision.comment === (input.comment?.trim() || null);
+}
+
+function emptyOutcomeMetrics(): CallOutcomeMetrics {
+  return {
+    terminalCalls: 0,
+    feedbackResponses: 0,
+    goalResults: { yes: 0, partly: 0, no: 0 },
+    transcriptQuality: { good: 0, someErrors: 0, poor: 0 },
+    semanticOutcomes: {
+      resolved: 0,
+      partiallyResolved: 0,
+      unresolved: 0,
+      wrongRecipient: 0,
+      voicemail: 0,
+      declined: 0,
+      technicalFailure: 0
+    },
+    technicalFailures: {
+      policy: 0,
+      provider: 0,
+      consent: 0,
+      recording: 0,
+      realtime: 0,
+      transcription: 0,
+      recovery: 0
+    }
+  };
+}
+
+function incrementSemanticOutcome(
+  metrics: CallOutcomeMetrics,
+  outcome: CallOutcomeRevision["outcome"]
+) {
+  switch (outcome) {
+    case "resolved":
+      metrics.semanticOutcomes.resolved += 1;
+      break;
+    case "partially_resolved":
+      metrics.semanticOutcomes.partiallyResolved += 1;
+      break;
+    case "unresolved":
+      metrics.semanticOutcomes.unresolved += 1;
+      break;
+    case "wrong_recipient":
+      metrics.semanticOutcomes.wrongRecipient += 1;
+      break;
+    case "voicemail":
+      metrics.semanticOutcomes.voicemail += 1;
+      break;
+    case "declined":
+      metrics.semanticOutcomes.declined += 1;
+      break;
+    case "technical_failure":
+      metrics.semanticOutcomes.technicalFailure += 1;
+      break;
+  }
 }
 
 function samePromoDefinition(

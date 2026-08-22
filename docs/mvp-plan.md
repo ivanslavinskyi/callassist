@@ -37,6 +37,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [x] Whole-recording post-call transcription, conservative optional role/time alignment, playback proxy, export, and transcription retry.
 - [x] PostgreSQL persistence for briefs, attempts, transcripts, approvals, recordings, final transcripts, compilations, and immutable audit events.
 - [x] Schema-versioned, append-only durable call telemetry with immutable PostgreSQL storage, memory parity, bounded event-specific metadata, and lifecycle/credit idempotency.
+- [x] Immutable, schema-versioned call outcomes with explicit provenance, owner-scoped versioned feedback, encrypted bounded comments, and privacy-safe aggregate metrics.
 - [x] AES-256-GCM protection for private context/facts and encrypted compilation/final transcript data.
 - [x] Audio retention choices of 0, 7, or 30 days and manual provider recording deletion.
 - [x] Responsive authenticated Dashboard and LiveCall/call-detail under `/en/app` and `/de/app`, with history search/filter/pagination, confirmations, loading/error states, and EN/DE typed UI catalogues.
@@ -48,7 +49,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 - **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, localized CMS Core, and structured Landing/FAQ/navigation administration exist. Media administration, reviewed operator/contact details, and production release work remain.
 - **PARTIAL — localization:** operational UI and CMS-managed structured Landing/legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Route-derived canonical/hreflang/robots/sitemap/OG metadata and translation-freshness reporting exist; structured global/organization settings and additional editorial models remain.
-- **PARTIAL — observability:** audit/provider/SSE/health data and a privacy-safe durable technical event stream exist; outcomes, owner feedback, Admin Calls/Inspector, cost views, and production monitoring remain.
+- **PARTIAL — observability:** audit/provider/SSE/health data, a privacy-safe durable technical event stream, versioned outcomes, and owner feedback exist; Admin Calls/Inspector, cost views, and production monitoring remain.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
 - **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
@@ -101,28 +102,35 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [x] Make repeated provider/recording callbacks and settlements idempotent. Busy/no-answer/pre-connection terminals refund once; charge occurs only after provider-confirmed connection, and a terminal domain state alone is not connection evidence.
 - [x] Cover contracts, memory/PostgreSQL parity, immutable rows, callback replay, credit invariants, Realtime consent/conversation events, and sensitive-data exclusion.
 
-## Next checkpoint — outcomes and owner feedback (5B), then Admin Calls (5C)
+## Completed checkpoint — outcomes and owner feedback (5B)
 
-- [ ] Persist versioned/provenanced call outcomes separately from user feedback, deriving provider-confirmed connection and technical/failure stages without storing raw provider payloads in generic telemetry.
-- [ ] Add owner-scoped post-call feedback for goal result, final-transcript quality, and an optional bounded comment; expose privacy-safe aggregate beta metrics.
+- [x] Persist versioned/provenanced call outcomes separately from user feedback, deriving provider-confirmed connection and technical/failure stages without storing raw provider payloads in generic telemetry.
+- [x] Add owner-scoped post-call feedback for goal result, final-transcript quality, and an optional bounded encrypted comment; expose privacy-safe aggregate beta metrics.
 - [x] Add a durable technical `call_events` stream distinct from immutable staff/action audit, with lifecycle stage, consent, duration, failure/provider/model, and credit-settlement fields. Derived latency and cost aggregation remain part of later read models.
-- [ ] Add RBAC-protected `/admin/calls` list/detail views with useful status/outcome/consent/failure/language/date filters and privacy-minimized recipient/user context.
+
+The system derives technical state only from durable events. Provider completion never infers semantic success. Every owner submission appends separate feedback and semantic-outcome revisions, is idempotent by request key, remains tenant-scoped, and exposes comments only through the existing private owner boundary. PostgreSQL immutability, encrypted comment storage, memory parity, ownership, replay/conflict behavior, and aggregate privacy are covered by automated tests.
+
+## Next checkpoint — Admin Calls and Inspector (5C)
+
+- [ ] Add an RBAC-protected `/admin/calls` read model and localized list/detail views with useful status/outcome/consent/failure/language/date filters and privacy-minimized recipient/user context.
+- [ ] Build a technical timeline from durable events and outcomes, with separately authorized and audited access to sensitive content.
+- [ ] Add pagination, deterministic filters, empty/error/loading states, and memory/PostgreSQL/API/RBAC/UI coverage.
 
 ### Delivery order for this checkpoint
 
 1. **5A — durable telemetry foundation — DONE.** The live `CallEvent` SSE contract remains unchanged. `DurableCallEvent` and immutable `call_events` now provide a bounded, PII-safe, idempotent technical timeline with transactional PostgreSQL writes and memory parity.
-2. **5B — outcomes and owner feedback.** Keep technical terminal classification separate from semantic task outcome. Store immutable/versioned outcomes with provenance (`system`, `user`, or authorized staff) and never infer `resolved` from provider completion alone. Add owner-scoped Yes/Partly/No goal feedback, Good/Some errors/Poor transcript quality, and an optional length-bounded comment.
-3. **5C — Admin Calls and Inspector.** Build the RBAC-protected list only after the event/outcome read model exists, then add the detail timeline, failure-stage filters, privacy-minimized identity context, and separately authorized/audited access to sensitive call content.
+2. **5B — outcomes and owner feedback — DONE.** Technical terminal classification remains separate from semantic task outcome. Immutable outcome/feedback revision chains, explicit provenance, encrypted bounded comments, owner isolation, idempotent submissions, and identity-free aggregate metrics are implemented and tested.
+3. **5C — Admin Calls and Inspector — NEXT.** Build the RBAC-protected list from the event/outcome read model, then add the detail timeline, failure-stage filters, privacy-minimized identity context, and separately authorized/audited access to sensitive call content.
 
-Immediate implementation scope is now **5B only**:
+Immediate implementation scope is now **5C only**:
 
-- Add an immutable, schema-versioned call-outcome record with explicit provenance (`system`, `user`, authorized staff) and revision history rather than mutable terminal labels.
-- Derive only technical classifications from durable events: connection evidence, terminal/failure stage, consent/recording/transcription state. Never infer semantic task success from provider completion.
-- Add owner-scoped feedback with goal result (Yes/Partly/No), final-transcript quality (Good/Some errors/Poor), and an optional length-bounded comment stored under the existing private-data boundary.
-- Define idempotent submission/revision behavior, tenant isolation, and privacy-safe aggregate metrics before adding Admin Calls UI.
-- Cover contracts, memory/PostgreSQL persistence, immutable revision/provenance evidence, ownership, idempotency, and the separation between technical classification and semantic feedback.
+- Add a purpose-built admin call-summary query/read model rather than exposing owner APIs or raw tables.
+- Support deterministic pagination and filters for status, semantic outcome, consent, failure stage, call language, and date range.
+- Show only the identity context needed for support in the list; keep transcript, recording, raw objective, and private feedback comment outside the default response.
+- Build `/admin/calls/[id]` around the durable technical timeline and outcome provenance. Gate sensitive content behind a separate permission and append an audit event whenever it is viewed.
+- Cover repository parity, RBAC, privacy-minimized DTOs, filter/pagination behavior, timeline ordering, and localized responsive UI.
 
-Acceptance for 5B: provider completion alone never marks a task resolved; every outcome/feedback revision has explicit provenance and ownership; another user cannot read or write it; comments remain bounded/private; aggregate beta metrics expose no call text or direct identity.
+Acceptance for 5C: only authorized operational roles can open Admin Calls; list/filter responses expose no call text, phone number, or feedback comment; the Inspector reconstructs the ordered technical lifecycle and outcome provenance; sensitive content requires explicit authorization and creates immutable audit evidence.
 
 # Public Beta Foundation
 
@@ -219,9 +227,9 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 
 ### P1 — outcomes and feedback
 
-- [ ] Persist versioned/provenanced outcomes: `resolved`, `partially_resolved`, `unresolved`, `wrong_recipient`, `voicemail`, `declined`, `technical_failure`.
-- [ ] Ask goal result (Yes/Partly/No), final transcript quality (Good/Some errors/Poor), and optional bounded comment.
-- [ ] Ownership-scope feedback and make it available as privacy-safe beta metrics.
+- [x] Persist versioned/provenanced outcomes: `resolved`, `partially_resolved`, `unresolved`, `wrong_recipient`, `voicemail`, `declined`, `technical_failure`.
+- [x] Ask goal result (Yes/Partly/No), final transcript quality (Good/Some errors/Poor), and optional bounded comment.
+- [x] Ownership-scope feedback and make it available as privacy-safe beta metrics.
 
 ## 4. Content / CMS / SEO
 
@@ -271,7 +279,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 ### P1 — Call Inspector and telemetry
 
 - [x] Keep human/action `audit_events` separate. Add append-only `call_events`: call/attempt/user correlation, time, source/name/stage/severity, provider status/failure code, model/version, channels/duration, bounded metadata, and schema version. Add rebuildable `call_metrics` only if needed.
-- [ ] Instrument brief/compiler/policy/approval/credit/Twilio/ringing/answer/disclosure/consent/recording/Realtime/first-audio/conversation/completion/transcription/outcome, including latency, retries, reconnects, provider IDs/status, model/version, channels/duration, feedback. **Partial:** the reconstructable 5A lifecycle is durable; first-audio latency, reconnect/cost derivation, outcomes, and feedback remain.
+- [ ] Instrument brief/compiler/policy/approval/credit/Twilio/ringing/answer/disclosure/consent/recording/Realtime/first-audio/conversation/completion/transcription/outcome, including latency, retries, reconnects, provider IDs/status, model/version, channels/duration, feedback. **Partial:** the reconstructable lifecycle, technical outcomes, and owner feedback are durable; first-audio latency plus reconnect/cost derivation remain.
 - [ ] Build `/admin/calls/[id]`: summary, timeline, technical metadata, separately permissioned sensitive content. Never show secrets; audit sensitive views.
 - [x] Define event-specific metadata allow-lists excluding phone/name/brief/transcript text, credentials, cookies, OTPs, arbitrary exception bodies, and raw provider payloads from durable call events.
 - [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch.
@@ -362,7 +370,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Admin Calls and failure-stage filters.
 - [ ] Call Inspector timeline and sensitive-access audit.
 - [x] Separate technical telemetry; `audit_events` remains action audit.
-- [ ] Structured outcomes and user feedback measurable.
+- [x] Structured outcomes and user feedback measurable.
 - [ ] Admin Users workflows. **Partial:** safe search, credit-ledger inspection, and consolidated status/session/grant actions exist; account deletion and related support context remain.
 - [x] Transactional promo codes and ledger grants.
 - [ ] Account/data export/delete and session revocation tested. **Partial:** current logout and all-session revocation are exposed in `/app/account` and tested; session listing, data export/delete, and account deletion remain.

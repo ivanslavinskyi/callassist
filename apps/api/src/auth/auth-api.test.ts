@@ -653,7 +653,7 @@ describe("auth API", () => {
   });
 
   it("requires a session and hides every call resource from other users", async () => {
-    const { app } = createAuthApp();
+    const { app, callRepository } = createAuthApp();
     const userACookie = await registerAndVerify(app, registration);
     const userBCookie = await registerAndVerify(app, {
       ...registration,
@@ -703,6 +703,8 @@ describe("auth API", () => {
       { method: "GET", url: `/api/call-briefs/${callId}/recording` },
       { method: "DELETE", url: `/api/call-briefs/${callId}/recording` },
       { method: "POST", url: `/api/call-briefs/${callId}/final-transcript/retry` },
+      { method: "GET", url: `/api/call-briefs/${callId}/outcome` },
+      { method: "PUT", url: `/api/call-briefs/${callId}/feedback` },
       { method: "POST", url: `/api/call-briefs/${callId}/approvals/00000000-0000-4000-8000-000000000001` },
       { method: "GET", url: `/api/call-briefs/${callId}/events` }
     ] as const;
@@ -752,6 +754,50 @@ describe("auth API", () => {
       balance: 2,
       activeCallBriefId: callId
     });
+    await callRepository.updateStatus(callId, "completed");
+
+    const beforeFeedback = await app.inject({
+      method: "GET",
+      url: `/api/call-briefs/${callId}/outcome`,
+      headers: { cookie: userACookie }
+    });
+    expect(beforeFeedback.statusCode).toBe(200);
+    expect(beforeFeedback.json()).toMatchObject({
+      technical: {
+        connection: "not_confirmed",
+        terminalStatus: "completed"
+      },
+      latestOutcome: null,
+      latestFeedback: null
+    });
+    const feedback = await app.inject({
+      method: "PUT",
+      url: `/api/call-briefs/${callId}/feedback`,
+      headers: { cookie: userACookie },
+      payload: {
+        idempotencyKey: randomUUID(),
+        goalResult: "yes",
+        transcriptQuality: null,
+        comment: "Explicit owner assessment"
+      }
+    });
+    expect(feedback.statusCode).toBe(200);
+    expect(feedback.json()).toMatchObject({
+      latestOutcome: {
+        outcome: "resolved",
+        provenance: "user"
+      },
+      latestFeedback: {
+        goalResult: "yes",
+        comment: "Explicit owner assessment"
+      }
+    });
+    const userMetrics = await app.inject({
+      method: "GET",
+      url: "/api/admin/call-outcome-metrics",
+      headers: { cookie: userACookie }
+    });
+    expect(userMetrics.statusCode).toBe(403);
   });
 
   it("uses a generic response for duplicate registration and generic login errors", async () => {
@@ -1111,6 +1157,19 @@ describe("auth API", () => {
     const adminId = adminMe.json().user.id as string;
     const targetId = targetMe.json().user.id as string;
     await repository.setUserRoleForTest(adminId, "admin");
+
+    const outcomeMetrics = await app.inject({
+      method: "GET",
+      url: "/api/admin/call-outcome-metrics",
+      headers: { cookie: adminCookie }
+    });
+    expect(outcomeMetrics.statusCode).toBe(200);
+    expect(outcomeMetrics.headers["cache-control"]).toBe("private, no-store");
+    expect(outcomeMetrics.json()).toMatchObject({
+      terminalCalls: 0,
+      feedbackResponses: 0,
+      goalResults: { yes: 0, partly: 0, no: 0 }
+    });
 
     await repository.setUserRoleForTest(targetId, "support");
     const privilegedTargetAction = await app.inject({
