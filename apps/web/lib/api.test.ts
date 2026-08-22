@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   acceptOnboarding,
+  accessAdminCallSensitiveContent,
   approveAndStartCall,
   changeAdminUserStatus,
   confirmRecipientOptOut,
@@ -10,6 +11,7 @@ import {
   createCallBrief,
   createPromoCode,
   getCreditUsage,
+  getAdminCallInspector,
   getCallOutcome,
   getOnboardingStatus,
   getPublishedContentIndex,
@@ -22,6 +24,7 @@ import {
   getCallPreparationErrorMessage,
   login,
   listAdminUsers,
+  listAdminCalls,
   listAdminContentPages,
   listAdminContentRevisions,
   listAdminEditorialRevisions,
@@ -289,6 +292,56 @@ describe("API client headers", () => {
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
       method: "POST",
       credentials: "include"
+    });
+  });
+
+  it("uses minimized Admin Calls routes and explicit sensitive access", async () => {
+    const callId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [],
+        nextCursor: null
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        summary: { id: callId },
+        timeline: [],
+        outcomeHistory: []
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        callBriefId: callId,
+        phoneNumber: "+41710000000"
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listAdminCalls({
+      limit: 20,
+      status: "failed",
+      outcome: "unresolved",
+      consent: "failed",
+      failureStage: "consent",
+      locale: "de-CH",
+      dateFrom: "2026-08-01T00:00:00.000Z",
+      dateTo: "2026-08-31T23:59:59.999Z"
+    });
+    await getAdminCallInspector(callId);
+    await accessAdminCallSensitiveContent(
+      callId,
+      "Investigating support ticket 123"
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/admin/calls?limit=20&status=failed&outcome=unresolved&consent=failed&failureStage=consent&locale=de-CH&dateFrom=2026-08-01T00%3A00%3A00.000Z&dateTo=2026-08-31T23%3A59%3A59.999Z"
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      `/api/admin/calls/${callId}`
+    );
+    expect(fetchMock.mock.calls[2]?.[0]).toContain(
+      `/api/admin/calls/${callId}/sensitive-access`
+    );
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ reason: "Investigating support ticket 123" })
     });
   });
 

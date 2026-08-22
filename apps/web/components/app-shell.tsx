@@ -155,6 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </>
           ) : null}
           {role && ["admin", "superadmin"].includes(role) ? <>
+            <Link className="topbar-link" href={localizeHref("/admin/calls")}>{messages.app.callsAdmin}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/users")}>{messages.app.usersAdmin}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/safety")}>{messages.app.safety}</Link>
             <Link className="topbar-link" href={localizeHref("/admin/credits")}>{messages.app.creditAdmin}</Link>

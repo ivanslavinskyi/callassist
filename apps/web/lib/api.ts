@@ -5,6 +5,10 @@ import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
   AdminContentRevisionSummary,
+  AdminCallInspector,
+  AdminCallList,
+  AdminCallListFilters,
+  AdminCallSensitiveContent,
   AdminEditorialRevision,
   AdminUserCreditLedger,
   AdminUserList,
@@ -286,6 +290,40 @@ export async function listAdminUsers(options: {
   if (options.status) query.set("status", options.status);
   const suffix = query.size > 0 ? `?${query}` : "";
   return apiRequest<AdminUserList>(`/api/admin/users${suffix}`);
+}
+
+export async function listAdminCalls(options: AdminCallListFilters & {
+  cursor?: string;
+  limit?: number;
+} = {}) {
+  const query = new URLSearchParams();
+  if (options.cursor) query.set("cursor", options.cursor);
+  if (options.limit) query.set("limit", String(options.limit));
+  if (options.status) query.set("status", options.status);
+  if (options.outcome) query.set("outcome", options.outcome);
+  if (options.consent) query.set("consent", options.consent);
+  if (options.failureStage) query.set("failureStage", options.failureStage);
+  if (options.locale) query.set("locale", options.locale);
+  if (options.dateFrom) query.set("dateFrom", options.dateFrom);
+  if (options.dateTo) query.set("dateTo", options.dateTo);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return apiRequest<AdminCallList>(`/api/admin/calls${suffix}`);
+}
+
+export async function getAdminCallInspector(id: string) {
+  return apiRequest<AdminCallInspector>(
+    `/api/admin/calls/${encodeURIComponent(id)}`
+  );
+}
+
+export async function accessAdminCallSensitiveContent(
+  id: string,
+  reason: string
+) {
+  return apiRequest<AdminCallSensitiveContent>(
+    `/api/admin/calls/${encodeURIComponent(id)}/sensitive-access`,
+    { method: "POST", body: JSON.stringify({ reason }) }
+  );
 }
 
 export async function getAdminUserCreditLedger(userId: string) {

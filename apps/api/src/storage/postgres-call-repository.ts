@@ -2,6 +2,10 @@ import { createHash, createHmac, randomUUID } from "node:crypto";
 import {
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
+  adminCallInspectorSchema,
+  adminCallListSchema,
+  adminCallSensitiveContentSchema,
+  adminCallSummarySchema,
   callFeedbackRevisionSchema,
   callOutcomeMetricsSchema,
   callOutcomeRevisionSchema,
@@ -15,6 +19,8 @@ import {
   ownerCallFeedbackInputSchema,
   parseSwissDestinationPhone,
   semanticOutcomeForGoalResult,
+  sensitiveCallAccessInputSchema,
+  type AdminCallSummary,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
@@ -55,6 +61,7 @@ import {
   connectedProviderStatuses,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
+  encodeAdminCallCursor,
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
@@ -64,6 +71,7 @@ import {
   type CreatePromoCodeRepositoryInput,
   type PromoCodeCreationResult,
   type ListCallBriefsInput,
+  type ListAdminCallsInput,
   type RecordingStatusInput,
   type RecipientSuppressionInput,
   type RedeemPromoRepositoryInput,
@@ -196,6 +204,23 @@ type CallFeedbackRevisionRow = {
   payloadFingerprint: string;
   idempotencyKey: string;
   createdAt: DatabaseDate;
+};
+
+type AdminCallReadRow = {
+  id: string;
+  ownerUserId: string | null;
+  status: CallBrief["status"];
+  locale: CallLocale;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  semanticOutcome: SemanticCallOutcome | null;
+  outcomeProvenance: CallOutcomeProvenance | null;
+  feedbackRevision: number | null;
+  goalResult: CallGoalResult | null;
+  transcriptQuality: CallFeedbackRevision["transcriptQuality"];
+  feedbackCreatedAt: DatabaseDate | null;
+  durationSeconds: number | null;
+  eventCount: number;
 };
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
@@ -1024,6 +1049,129 @@ export class PostgresCallRepository implements CallRepository {
       ORDER BY sequence ASC
     `;
     return rows.map(mapCallTelemetryEvent);
+  }
+
+  async listAdminCalls(input: ListAdminCallsInput) {
+    const batchSize = Math.min(Math.max(input.limit * 2, 50), 200);
+    const matched: AdminCallSummary[] = [];
+    let cursor = input.cursor;
+    while (matched.length <= input.limit) {
+      const rows = await this.#selectAdminCallRows(
+        { ...input, cursor },
+        undefined,
+        batchSize
+      );
+      if (rows.length === 0) break;
+      const events = await this.#selectTelemetryForCallIds(
+        rows.map(({ id }) => id)
+      );
+      const byCall = groupTelemetryByCall(events);
+      matched.push(...rows
+        .map((row) => mapAdminCallSummary(row, byCall.get(row.id) ?? []))
+        .filter((summary) =>
+          !input.consent || summary.technical.consent === input.consent
+        )
+        .filter((summary) =>
+          !input.failureStage ||
+          summary.technical.failureStage === input.failureStage
+        ));
+      if (rows.length < batchSize) break;
+      const lastScanned = rows.at(-1)!;
+      cursor = {
+        createdAt: toIso(lastScanned.createdAt),
+        id: lastScanned.id
+      };
+    }
+    const items = matched.slice(0, input.limit);
+    const last = items.at(-1);
+    return adminCallListSchema.parse({
+      items,
+      nextCursor: matched.length > input.limit && last
+        ? encodeAdminCallCursor({ createdAt: last.createdAt, id: last.id })
+        : null
+    });
+  }
+
+  async getAdminCallInspector(id: string) {
+    const rows = await this.#selectAdminCallRows({}, id, 1);
+    const row = rows[0];
+    if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const [timeline, outcomeRows] = await Promise.all([
+      this.listCallTelemetryEvents(id),
+      this.#sql<CallOutcomeRevisionRow[]>`
+        SELECT
+          id,
+          call_brief_id AS "callBriefId",
+          revision,
+          schema_version AS "schemaVersion",
+          outcome,
+          provenance,
+          actor_user_id AS "actorUserId",
+          reason,
+          technical,
+          created_at AS "createdAt"
+        FROM call_outcome_revisions
+        WHERE call_brief_id = ${id}
+        ORDER BY revision ASC
+      `
+    ]);
+    return adminCallInspectorSchema.parse({
+      summary: mapAdminCallSummary(row, timeline),
+      timeline: timeline.map(
+        ({ callBriefId: _callBriefId, userId: _userId, ...event }) => event
+      ),
+      outcomeHistory: outcomeRows.map(mapCallOutcomeRevision)
+    });
+  }
+
+  async getAdminCallSensitiveContent(
+    id: string,
+    actorUserId: string,
+    reason: string
+  ) {
+    const parsed = sensitiveCallAccessInputSchema.parse({ reason });
+    await this.#sql.begin(async (transaction) => {
+      const call = await transaction`
+        SELECT id
+        FROM call_briefs
+        WHERE id = ${id}
+        FOR SHARE
+      `;
+      if (call.count === 0) {
+        throw new CallRepositoryError("CALL_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO call_sensitive_access_events (
+          id,
+          call_brief_id,
+          actor_user_id,
+          reason,
+          created_at
+        ) VALUES (
+          ${randomUUID()},
+          ${id},
+          ${actorUserId},
+          ${parsed.reason},
+          ${new Date()}
+        )
+      `;
+    });
+    const [snapshot, outcome] = await Promise.all([
+      this.#require(id),
+      this.#buildOutcomeView(id)
+    ]);
+    return adminCallSensitiveContentSchema.parse({
+      callBriefId: id,
+      recipientName: snapshot.brief.recipientName,
+      phoneNumber: snapshot.brief.phoneNumber,
+      representedPerson: snapshot.brief.representedPerson,
+      objective: snapshot.brief.objective,
+      context: snapshot.brief.context,
+      allowedFacts: snapshot.brief.allowedFacts,
+      transcript: snapshot.transcript,
+      finalTranscript: snapshot.finalTranscript,
+      feedbackComment: outcome.latestFeedback?.comment ?? null
+    });
   }
 
   async getCallOutcome(id: string) {
@@ -2830,6 +2978,99 @@ export class PostgresCallRepository implements CallRepository {
     return snapshot;
   }
 
+  async #selectAdminCallRows(
+    input: Partial<ListAdminCallsInput>,
+    callBriefId?: string,
+    limit = 200
+  ) {
+    const status = input.status ?? null;
+    const outcome = input.outcome ?? null;
+    const locale = input.locale ?? null;
+    const dateFrom = input.dateFrom ?? null;
+    const dateTo = input.dateTo ?? null;
+    const cursorCreatedAt = input.cursor?.createdAt ?? null;
+    const cursorId = input.cursor?.id ?? null;
+    return this.#sql<AdminCallReadRow[]>`
+      SELECT
+        call_briefs.id,
+        call_briefs.user_id AS "ownerUserId",
+        call_briefs.status,
+        call_briefs.locale,
+        call_briefs.created_at AS "createdAt",
+        call_briefs.updated_at AS "updatedAt",
+        latest_outcome.outcome AS "semanticOutcome",
+        latest_outcome.provenance AS "outcomeProvenance",
+        latest_feedback.revision AS "feedbackRevision",
+        latest_feedback.goal_result AS "goalResult",
+        latest_feedback.transcript_quality AS "transcriptQuality",
+        latest_feedback.created_at AS "feedbackCreatedAt",
+        call_recordings.duration_seconds AS "durationSeconds",
+        COALESCE(event_counts.event_count, 0)::int AS "eventCount"
+      FROM call_briefs
+      LEFT JOIN LATERAL (
+        SELECT outcome, provenance
+        FROM call_outcome_revisions
+        WHERE call_brief_id = call_briefs.id
+          AND outcome IS NOT NULL
+        ORDER BY revision DESC
+        LIMIT 1
+      ) AS latest_outcome ON true
+      LEFT JOIN LATERAL (
+        SELECT revision, goal_result, transcript_quality, created_at
+        FROM call_feedback_revisions
+        WHERE call_brief_id = call_briefs.id
+        ORDER BY revision DESC
+        LIMIT 1
+      ) AS latest_feedback ON true
+      LEFT JOIN call_recordings
+        ON call_recordings.call_brief_id = call_briefs.id
+      LEFT JOIN LATERAL (
+        SELECT count(*)::int AS event_count
+        FROM call_events
+        WHERE call_brief_id = call_briefs.id
+      ) AS event_counts ON true
+      WHERE (${callBriefId ?? null}::uuid IS NULL OR call_briefs.id = ${callBriefId ?? null})
+        AND (${status}::text IS NULL OR call_briefs.status = ${status})
+        AND (${outcome}::text IS NULL OR latest_outcome.outcome = ${outcome})
+        AND (${locale}::text IS NULL OR call_briefs.locale = ${locale})
+        AND (${dateFrom}::timestamptz IS NULL OR call_briefs.created_at >= ${dateFrom})
+        AND (${dateTo}::timestamptz IS NULL OR call_briefs.created_at <= ${dateTo})
+        AND (
+          ${cursorCreatedAt}::timestamptz IS NULL
+          OR call_briefs.created_at < ${cursorCreatedAt}
+          OR (
+            call_briefs.created_at = ${cursorCreatedAt}
+            AND call_briefs.id < ${cursorId}::uuid
+          )
+      )
+      ORDER BY call_briefs.created_at DESC, call_briefs.id DESC
+      LIMIT ${limit}
+    `;
+  }
+
+  async #selectTelemetryForCallIds(ids: string[]) {
+    if (ids.length === 0) return [];
+    const rows = await this.#sql<CallTelemetryEventRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        call_attempt_id AS "callAttemptId",
+        user_id AS "userId",
+        sequence,
+        schema_version AS "schemaVersion",
+        event_name AS "eventName",
+        source,
+        stage,
+        severity,
+        metadata,
+        occurred_at AS "occurredAt"
+      FROM call_events
+      WHERE call_brief_id IN ${this.#sql(ids)}
+      ORDER BY call_brief_id ASC, sequence ASC
+    `;
+    return rows.map(mapCallTelemetryEvent);
+  }
+
   async #buildOutcomeView(id: string): Promise<CallOutcomeView> {
     const snapshot = await this.#require(id);
     const [events, outcomeRows, feedbackRows] = await Promise.all([
@@ -3463,6 +3704,43 @@ function mapCallFeedbackRevision(
       ? decryptJson<string>(row.commentCiphertext, encryptionKey)
       : null,
     createdAt: toIso(row.createdAt)
+  });
+}
+
+function groupTelemetryByCall(events: DurableCallEvent[]) {
+  const grouped = new Map<string, DurableCallEvent[]>();
+  for (const event of events) {
+    const stored = grouped.get(event.callBriefId) ?? [];
+    stored.push(event);
+    grouped.set(event.callBriefId, stored);
+  }
+  return grouped;
+}
+
+function mapAdminCallSummary(
+  row: AdminCallReadRow,
+  events: DurableCallEvent[]
+): AdminCallSummary {
+  return adminCallSummarySchema.parse({
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    status: row.status,
+    locale: row.locale,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    technical: deriveTechnicalCallOutcome(row.status, events),
+    semanticOutcome: row.semanticOutcome,
+    outcomeProvenance: row.outcomeProvenance,
+    feedback: row.feedbackRevision && row.goalResult && row.feedbackCreatedAt
+      ? {
+          revision: row.feedbackRevision,
+          goalResult: row.goalResult,
+          transcriptQuality: row.transcriptQuality,
+          createdAt: toIso(row.feedbackCreatedAt)
+        }
+      : null,
+    durationSeconds: row.durationSeconds,
+    eventCount: row.eventCount
   });
 }
 

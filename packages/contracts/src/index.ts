@@ -1,5 +1,6 @@
 export * from "./account";
 export * from "./admin-users";
+export * from "./admin-calls";
 export * from "./call-brief";
 export * from "./call-event";
 export * from "./call-outcome";

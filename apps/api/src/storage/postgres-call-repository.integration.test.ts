@@ -816,6 +816,62 @@ describeWithDatabase("PostgresCallRepository", () => {
       WHERE call_brief_id = ${brief.id}
     `).rejects.toThrow("immutable");
 
+    const adminList = await repository.listAdminCalls({
+      limit: 20,
+      status: "failed",
+      outcome: "unresolved",
+      failureStage: "provider",
+      locale: "en-GB"
+    });
+    expect(adminList.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: brief.id,
+        ownerUserId: ownerA,
+        semanticOutcome: "unresolved",
+        technical: expect.objectContaining({
+          connection: "not_confirmed",
+          failureStage: "provider",
+          failureCode: "no-answer"
+        })
+      })
+    ]));
+    expect(JSON.stringify(adminList)).not.toContain(feedbackInput.comment);
+    expect(adminList.items[0]).not.toHaveProperty("phoneNumber");
+
+    const inspector = await repository.getAdminCallInspector(brief.id);
+    expect(inspector.timeline[0]).not.toHaveProperty("userId");
+    expect(inspector.outcomeHistory).toHaveLength(2);
+    expect(inspector.outcomeHistory.map(({ revision }) => revision)).toEqual([
+      1,
+      2
+    ]);
+
+    const sensitive = await repository.getAdminCallSensitiveContent(
+      brief.id,
+      ownerB,
+      "Investigating support ticket 123"
+    );
+    expect(sensitive).toMatchObject({
+      callBriefId: brief.id,
+      phoneNumber: input.phoneNumber,
+      feedbackComment: feedbackInput.comment
+    });
+    const [sensitiveAudit] = await inspection<{
+      count: number;
+      actorUserId: string;
+    }[]>`
+      SELECT
+        count(*)::int AS count,
+        min(actor_user_id::text) AS "actorUserId"
+      FROM call_sensitive_access_events
+      WHERE call_brief_id = ${brief.id}
+    `;
+    expect(sensitiveAudit).toEqual({ count: 1, actorUserId: ownerB });
+    await expect(inspection`
+      DELETE FROM call_sensitive_access_events
+      WHERE call_brief_id = ${brief.id}
+    `).rejects.toThrow("immutable");
+
     const metrics = await repository.getCallOutcomeMetrics();
     expect(metrics.feedbackResponses).toBeGreaterThanOrEqual(1);
     expect(metrics.goalResults.no).toBeGreaterThanOrEqual(1);

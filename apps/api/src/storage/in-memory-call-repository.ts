@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
+  adminCallInspectorSchema,
+  adminCallListSchema,
+  adminCallSensitiveContentSchema,
+  adminCallSummarySchema,
   callFeedbackRevisionSchema,
   callOutcomeMetricsSchema,
   callOutcomeRevisionSchema,
@@ -14,6 +18,8 @@ import {
   ownerCallFeedbackInputSchema,
   parseSwissDestinationPhone,
   semanticOutcomeForGoalResult,
+  sensitiveCallAccessInputSchema,
+  type AdminCallSummary,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
@@ -44,6 +50,7 @@ import {
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
+  encodeAdminCallCursor,
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type ApprovalRequestDraft,
@@ -51,6 +58,7 @@ import {
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
   type ListCallBriefsInput,
+  type ListAdminCallsInput,
   type RecordingStatusInput,
   type RecipientSuppressionInput,
   type RedeemPromoRepositoryInput,
@@ -123,6 +131,13 @@ export class InMemoryCallRepository implements CallRepository {
     string,
     StoredCallFeedbackRevision[]
   >();
+  readonly #sensitiveCallAccessEvents: Array<{
+    id: string;
+    callBriefId: string;
+    actorUserId: string;
+    reason: string;
+    createdAt: string;
+  }> = [];
   readonly #creditTransactions: Array<
     CreditTransaction & { userId: string; idempotencyKey: string }
   > = [];
@@ -500,6 +515,97 @@ export class InMemoryCallRepository implements CallRepository {
     return copy(
       (this.#callTelemetryEvents.get(id) ?? []).map(({ event }) => event)
     );
+  }
+
+  async listAdminCalls(input: ListAdminCallsInput) {
+    const filtered = [...this.#calls.values()]
+      .map(({ brief }) => this.#buildAdminCallSummary(brief.id))
+      .filter((summary) => !input.status || summary.status === input.status)
+      .filter((summary) =>
+        !input.outcome || summary.semanticOutcome === input.outcome
+      )
+      .filter((summary) =>
+        !input.consent || summary.technical.consent === input.consent
+      )
+      .filter((summary) =>
+        !input.failureStage ||
+        summary.technical.failureStage === input.failureStage
+      )
+      .filter((summary) => !input.locale || summary.locale === input.locale)
+      .filter((summary) =>
+        !input.dateFrom || summary.createdAt >= input.dateFrom
+      )
+      .filter((summary) =>
+        !input.dateTo || summary.createdAt <= input.dateTo
+      )
+      .filter((summary) =>
+        !input.cursor ||
+        summary.createdAt < input.cursor.createdAt ||
+        (
+          summary.createdAt === input.cursor.createdAt &&
+          summary.id < input.cursor.id
+        )
+      )
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.id.localeCompare(left.id)
+      );
+    const items = filtered.slice(0, input.limit);
+    const last = items.at(-1);
+    return adminCallListSchema.parse({
+      items,
+      nextCursor: filtered.length > input.limit && last
+        ? encodeAdminCallCursor({ createdAt: last.createdAt, id: last.id })
+        : null
+    });
+  }
+
+  async getAdminCallInspector(id: string) {
+    this.#require(id);
+    const timeline = (this.#callTelemetryEvents.get(id) ?? []).map(
+      ({ event: { callBriefId: _callBriefId, userId: _userId, ...event } }) =>
+        event
+    );
+    const outcomeHistory = (this.#callOutcomeRevisions.get(id) ?? [])
+      .map(({ revision }) => revision);
+    return adminCallInspectorSchema.parse({
+      summary: this.#buildAdminCallSummary(id),
+      timeline,
+      outcomeHistory
+    });
+  }
+
+  async getAdminCallSensitiveContent(
+    id: string,
+    actorUserId: string,
+    reason: string
+  ) {
+    const snapshot = this.#require(id);
+    const parsed = sensitiveCallAccessInputSchema.parse({ reason });
+    this.#sensitiveCallAccessEvents.push({
+      id: randomUUID(),
+      callBriefId: id,
+      actorUserId,
+      reason: parsed.reason,
+      createdAt: new Date().toISOString()
+    });
+    const feedback = this.#callFeedbackRevisions.get(id)?.at(-1)?.revision;
+    return adminCallSensitiveContentSchema.parse({
+      callBriefId: id,
+      recipientName: snapshot.brief.recipientName,
+      phoneNumber: snapshot.brief.phoneNumber,
+      representedPerson: snapshot.brief.representedPerson,
+      objective: snapshot.brief.objective,
+      context: snapshot.brief.context,
+      allowedFacts: snapshot.brief.allowedFacts,
+      transcript: snapshot.transcript,
+      finalTranscript: snapshot.finalTranscript,
+      feedbackComment: feedback?.comment ?? null
+    });
+  }
+
+  sensitiveCallAccessEventsForTest() {
+    return copy(this.#sensitiveCallAccessEvents);
   }
 
   async getCallOutcome(id: string) {
@@ -1440,6 +1546,31 @@ export class InMemoryCallRepository implements CallRepository {
       technical: deriveTechnicalCallOutcome(snapshot.brief.status, events),
       latestOutcome,
       latestFeedback
+    });
+  }
+
+  #buildAdminCallSummary(callBriefId: string): AdminCallSummary {
+    const snapshot = this.#require(callBriefId);
+    const outcomeView = this.#buildOutcomeView(callBriefId);
+    const feedback = outcomeView.latestFeedback;
+    return adminCallSummarySchema.parse({
+      id: callBriefId,
+      ownerUserId: this.#owners.get(callBriefId) ?? null,
+      status: snapshot.brief.status,
+      locale: snapshot.brief.locale,
+      createdAt: snapshot.brief.createdAt,
+      updatedAt: snapshot.brief.updatedAt,
+      technical: outcomeView.technical,
+      semanticOutcome: outcomeView.latestOutcome?.outcome ?? null,
+      outcomeProvenance: outcomeView.latestOutcome?.provenance ?? null,
+      feedback: feedback ? {
+        revision: feedback.revision,
+        goalResult: feedback.goalResult,
+        transcriptQuality: feedback.transcriptQuality,
+        createdAt: feedback.createdAt
+      } : null,
+      durationSeconds: snapshot.recording?.durationSeconds ?? null,
+      eventCount: (this.#callTelemetryEvents.get(callBriefId) ?? []).length
     });
   }
 

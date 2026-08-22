@@ -134,7 +134,13 @@ Technical classification and semantic task success are separate. The current tec
 
 `call_outcome_revisions` is an immutable, schema-versioned provenance chain. System revisions capture technical-state changes without a semantic outcome; user or authorized staff revisions require an actor. `call_feedback_revisions` is a separate immutable owner-feedback chain for Yes/Partly/No goal result, optional final-transcript quality, and an optional 500-character comment. The comment is encrypted at rest. Idempotency keys make retries safe while conflicting replay is rejected.
 
-Owner API reads and writes use the same tenant boundary as call detail. Aggregate metrics expose counts only and omit call text, comments, phone numbers, and user identity. The next Admin Calls read model must preserve this minimized default and separately authorize and audit access to sensitive content.
+Owner API reads and writes use the same tenant boundary as call detail. Aggregate metrics expose counts only and omit call text, comments, phone numbers, and user identity.
+
+## Admin Calls privacy boundary
+
+The operational `/api/admin/calls` read model is purpose-built from call rows, the latest outcome/feedback revisions, recording state, and bounded durable telemetry. Its default list and Inspector DTOs expose only call/owner UUIDs, locale, lifecycle and technical state, outcome provenance, comment-free feedback ratings, duration, event counts, the ordered sanitized event timeline, and outcome history. They do not reuse the owner call-detail response and do not include recipient names, phone numbers, objectives, context, approved facts, transcript text, recording URLs, private feedback comments, credentials, or raw provider payloads.
+
+Active admins and superadmins may read the minimized list and Inspector. Sensitive content is served by a distinct POST capability, requires a 3–500 character operational reason, and is restricted to superadmins. The PostgreSQL transaction appends a `call_sensitive_access_events` row before decrypting and returning content. Foreign keys retain actor/call attribution, and the shared immutable-row trigger rejects updates and deletes. This access evidence is intentionally separate from the reconstructable technical `call_events` timeline.
 
 ## Call language
 
@@ -215,6 +221,7 @@ an approved call plan.
 - `CallAttempt`: provider call ID, raw and domain status, timestamps, and stop reason.
 - `CallOutcomeRevision`: immutable technical/semantic classification with explicit provenance, actor, reason, schema version, and revision number.
 - `CallFeedbackRevision`: immutable owner rating revision; optional bounded comment is encrypted at rest and excluded from aggregate metrics.
+- `CallSensitiveAccessEvent`: immutable superadmin access evidence with call, actor, reason, and timestamp; stored separately from technical telemetry.
 - `PromoCode` / `PromoRedemption`: keyed code hash, bounded campaign/window limits,
   immutable per-user redemptions, idempotency, actor, reason, and timestamps.
 - `RecipientSuppression`: normalized recipient phone, source, reason, actor, creation,

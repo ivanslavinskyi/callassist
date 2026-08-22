@@ -798,6 +798,122 @@ describe("auth API", () => {
       headers: { cookie: userACookie }
     });
     expect(userMetrics.statusCode).toBe(403);
+    for (const request of [
+      { method: "GET", url: "/api/admin/calls" },
+      { method: "GET", url: `/api/admin/calls/${callId}` },
+      {
+        method: "POST",
+        url: `/api/admin/calls/${callId}/sensitive-access`,
+        payload: { reason: "Unauthorized access test" }
+      }
+    ] as const) {
+      const response = await app.inject({
+        ...request,
+        headers: { cookie: userACookie }
+      });
+      expect(response.statusCode).toBe(403);
+    }
+  });
+
+  it("separates minimized Admin Calls from audited superadmin content access", async () => {
+    const { app, repository, callRepository } = createAuthApp();
+    const ownerCookie = await registerAndVerify(app, registration);
+    const adminRegistration = {
+      ...registration,
+      email: "call-inspector-admin@example.com",
+      phoneE164: "+41710000031",
+      firstName: "Ari",
+      lastName: "Inspector"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const adminMe = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: adminCookie }
+    });
+    const adminId = adminMe.json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie: ownerCookie },
+      payload: callBrief
+    });
+    const callId = created.json<{ id: string }>().id;
+    await callRepository.updateStatus(callId, "failed");
+    await callRepository.recordSystemCallOutcome(callId);
+
+    const invalidQuery = await app.inject({
+      method: "GET",
+      url: "/api/admin/calls?limit=0",
+      headers: { cookie: adminCookie }
+    });
+    expect(invalidQuery.statusCode).toBe(400);
+
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/admin/calls?status=failed&locale=de-CH",
+      headers: { cookie: adminCookie }
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.headers["cache-control"]).toBe("private, no-store");
+    expect(list.json().items).toEqual([
+      expect.objectContaining({ id: callId, status: "failed" })
+    ]);
+    expect(JSON.stringify(list.json())).not.toContain(callBrief.phoneNumber);
+    expect(JSON.stringify(list.json())).not.toContain(callBrief.objective);
+
+    const inspector = await app.inject({
+      method: "GET",
+      url: `/api/admin/calls/${callId}`,
+      headers: { cookie: adminCookie }
+    });
+    expect(inspector.statusCode).toBe(200);
+    expect(inspector.json()).toMatchObject({
+      summary: { id: callId },
+      timeline: expect.any(Array),
+      outcomeHistory: expect.any(Array)
+    });
+    expect(JSON.stringify(inspector.json())).not.toContain(callBrief.phoneNumber);
+
+    const adminSensitive = await app.inject({
+      method: "POST",
+      url: `/api/admin/calls/${callId}/sensitive-access`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "Investigating support ticket 123" }
+    });
+    expect(adminSensitive.statusCode).toBe(403);
+    expect(callRepository.sensitiveCallAccessEventsForTest()).toHaveLength(0);
+
+    await repository.setUserRoleForTest(adminId, "superadmin");
+    const invalidReason = await app.inject({
+      method: "POST",
+      url: `/api/admin/calls/${callId}/sensitive-access`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "x" }
+    });
+    expect(invalidReason.statusCode).toBe(400);
+
+    const sensitive = await app.inject({
+      method: "POST",
+      url: `/api/admin/calls/${callId}/sensitive-access`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "Investigating support ticket 123" }
+    });
+    expect(sensitive.statusCode).toBe(200);
+    expect(sensitive.json()).toMatchObject({
+      callBriefId: callId,
+      phoneNumber: callBrief.phoneNumber,
+      objective: expect.any(String)
+    });
+    expect(callRepository.sensitiveCallAccessEventsForTest()).toEqual([
+      expect.objectContaining({
+        callBriefId: callId,
+        actorUserId: adminId,
+        reason: "Investigating support ticket 123"
+      })
+    ]);
   });
 
   it("uses a generic response for duplicate registration and generic login errors", async () => {

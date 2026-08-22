@@ -1,6 +1,10 @@
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  AdminCallInspector,
+  AdminCallList,
+  AdminCallListFilters,
+  AdminCallSensitiveContent,
   CallBrief,
   CallCompilation,
   CallOutcomeMetrics,
@@ -137,6 +141,12 @@ export type ListCallBriefsResult = {
   nextCursor: string | null;
 };
 
+export type AdminCallCursor = { createdAt: string; id: string };
+export type ListAdminCallsInput = AdminCallListFilters & {
+  limit: number;
+  cursor?: AdminCallCursor;
+};
+
 export function encodeCallBriefCursor(cursor: CallBriefCursor) {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
@@ -148,6 +158,29 @@ export function decodeCallBriefCursor(value: string): CallBriefCursor | null {
     const { createdAt, id } = parsed as Record<string, unknown>;
     if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) return null;
     if (typeof id !== "string" || !isUuid(id)) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
+export function encodeAdminCallCursor(cursor: AdminCallCursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function decodeAdminCallCursor(value: string): AdminCallCursor | null {
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const { createdAt, id } = parsed as Record<string, unknown>;
+    if (
+      typeof createdAt !== "string" ||
+      !Number.isFinite(Date.parse(createdAt)) ||
+      typeof id !== "string" ||
+      !isUuid(id)
+    ) return null;
     return { createdAt, id };
   } catch {
     return null;
@@ -233,6 +266,13 @@ export interface CallRepository {
     input: CallTelemetryEventInput
   ): Promise<DurableCallEvent>;
   listCallTelemetryEvents(id: string): Promise<DurableCallEvent[]>;
+  listAdminCalls(input: ListAdminCallsInput): Promise<AdminCallList>;
+  getAdminCallInspector(id: string): Promise<AdminCallInspector>;
+  getAdminCallSensitiveContent(
+    id: string,
+    actorUserId: string,
+    reason: string
+  ): Promise<AdminCallSensitiveContent>;
   getCallOutcome(id: string): Promise<CallOutcomeView>;
   recordSystemCallOutcome(id: string): Promise<CallOutcomeView>;
   submitOwnerCallFeedback(

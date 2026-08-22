@@ -49,7 +49,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 - **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, localized CMS Core, and structured Landing/FAQ/navigation administration exist. Media administration, reviewed operator/contact details, and production release work remain.
 - **PARTIAL — localization:** operational UI and CMS-managed structured Landing/legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Route-derived canonical/hreflang/robots/sitemap/OG metadata and translation-freshness reporting exist; structured global/organization settings and additional editorial models remain.
-- **PARTIAL — observability:** audit/provider/SSE/health data, a privacy-safe durable technical event stream, versioned outcomes, and owner feedback exist; Admin Calls/Inspector, cost views, and production monitoring remain.
+- **PARTIAL — observability:** audit/provider/SSE/health data, a privacy-safe durable technical event stream, versioned outcomes, owner feedback, and the RBAC-protected Admin Calls/Inspector workflow exist; cost/latency views, system operations, and production monitoring remain.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
 - **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
@@ -110,27 +110,36 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 The system derives technical state only from durable events. Provider completion never infers semantic success. Every owner submission appends separate feedback and semantic-outcome revisions, is idempotent by request key, remains tenant-scoped, and exposes comments only through the existing private owner boundary. PostgreSQL immutability, encrypted comment storage, memory parity, ownership, replay/conflict behavior, and aggregate privacy are covered by automated tests.
 
-## Next checkpoint — Admin Calls and Inspector (5C)
+## Completed checkpoint — Admin Calls and Inspector (5C)
 
-- [ ] Add an RBAC-protected `/admin/calls` read model and localized list/detail views with useful status/outcome/consent/failure/language/date filters and privacy-minimized recipient/user context.
-- [ ] Build a technical timeline from durable events and outcomes, with separately authorized and audited access to sensitive content.
-- [ ] Add pagination, deterministic filters, empty/error/loading states, and memory/PostgreSQL/API/RBAC/UI coverage.
+- [x] Add an RBAC-protected `/admin/calls` read model and localized list/detail views with useful status/outcome/consent/failure/language/date filters and privacy-minimized operational context.
+- [x] Build a technical timeline from durable events and outcomes, with separately authorized and audited access to sensitive content.
+- [x] Add deterministic cursor pagination, empty/error/loading states, and contract/memory/PostgreSQL/API/RBAC/web-client coverage.
+
+The default Admin Calls response contains call and owner UUIDs, locale, lifecycle state, bounded technical metadata, outcome provenance, comment-free feedback ratings, duration, and event counts. It excludes recipient identity, phone number, objective, context, facts, transcript text, and private feedback comments. Admins and superadmins can inspect this minimized view; only superadmins may perform the separate reasoned sensitive-content read. PostgreSQL records every such read in an append-only, update/delete-protected access-evidence table.
+
+## Next checkpoint — operational overview and cost visibility (5D)
+
+- [ ] Add privacy-safe operational aggregates for call volume, connection/consent/failure/outcome rates, duration, first-audio latency, reconnects/retries, and estimated provider/model cost.
+- [ ] Build localized `/admin` overview and `/admin/system` views for API/database/provider health, active calls, transcription/retention work, recent failures, and the existing outbound-call control.
+- [ ] Define freshness, unavailable-data, and alert-threshold semantics; cover aggregation, RBAC, privacy, UI states, and PostgreSQL query behavior without introducing a second source of truth.
 
 ### Delivery order for this checkpoint
 
 1. **5A — durable telemetry foundation — DONE.** The live `CallEvent` SSE contract remains unchanged. `DurableCallEvent` and immutable `call_events` now provide a bounded, PII-safe, idempotent technical timeline with transactional PostgreSQL writes and memory parity.
 2. **5B — outcomes and owner feedback — DONE.** Technical terminal classification remains separate from semantic task outcome. Immutable outcome/feedback revision chains, explicit provenance, encrypted bounded comments, owner isolation, idempotent submissions, and identity-free aggregate metrics are implemented and tested.
-3. **5C — Admin Calls and Inspector — NEXT.** Build the RBAC-protected list from the event/outcome read model, then add the detail timeline, failure-stage filters, privacy-minimized identity context, and separately authorized/audited access to sensitive call content.
+3. **5C — Admin Calls and Inspector — DONE.** The RBAC-protected list and detail read model provides deterministic operational filters, a bounded technical timeline and outcome provenance without private call text. Sensitive content is a separate superadmin-only, reasoned read with immutable access evidence.
+4. **5D — operational overview and cost visibility — NEXT.** Derive privacy-safe support and cost signals from durable telemetry, then expose system health and work-queue visibility before production hardening.
 
-Immediate implementation scope is now **5C only**:
+Immediate implementation scope is now **5D only**:
 
-- Add a purpose-built admin call-summary query/read model rather than exposing owner APIs or raw tables.
-- Support deterministic pagination and filters for status, semantic outcome, consent, failure stage, call language, and date range.
-- Show only the identity context needed for support in the list; keep transcript, recording, raw objective, and private feedback comment outside the default response.
-- Build `/admin/calls/[id]` around the durable technical timeline and outcome provenance. Gate sensitive content behind a separate permission and append an audit event whenever it is viewed.
-- Cover repository parity, RBAC, privacy-minimized DTOs, filter/pagination behavior, timeline ordering, and localized responsive UI.
+- Specify metric definitions from existing durable facts, including denominators and unknown/not-recorded states; do not infer successful conversation from a terminal provider status.
+- Add first-audio/reconnect/retry and cost metadata only through bounded telemetry contracts, excluding prompts, transcript text, phone numbers, credentials, and raw provider payloads.
+- Implement purpose-built aggregate repository queries for the overview and a bounded system-status read model for active calls, transcription/retention work, provider health, recent failures, and outbound-call control.
+- Keep operational pages admin/superadmin-only and aggregate user/call data wherever drill-down is unnecessary.
+- Cover memory/PostgreSQL parity, aggregation windows, unavailable/stale state, RBAC, privacy-safe DTOs, and localized responsive UI.
 
-Acceptance for 5C: only authorized operational roles can open Admin Calls; list/filter responses expose no call text, phone number, or feedback comment; the Inspector reconstructs the ordered technical lifecycle and outcome provenance; sensitive content requires explicit authorization and creates immutable audit evidence.
+Acceptance for 5D: an authorized operator can understand current service health, call/failure trends, and estimated cost from bounded durable data; missing or stale measurements remain explicit; ordinary users and content editors cannot access the views; no aggregate or health response exposes call text, recipient identity, phone numbers, private comments, credentials, or raw provider payloads.
 
 # Public Beta Foundation
 
@@ -264,14 +273,14 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 ### P0 — minimum safe operations
 
 - [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** content editors now have dedicated server- and API-guarded CMS/SEO boundaries with no app/call/recording or operational-admin access; admin/superadmin permissions remain explicit, while the role-specific support area remains.
-- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events and suppression/lift safety events are immutable and include the applicable actor, target/source, reason, and time.
+- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout, suppression/lift, and sensitive call-content reads are immutable and include the applicable actor, target/source, reason, and time.
 - [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** the localized user console now consolidates paginated role-scoped lookup, ledger inspection, confirmed suspend/unsuspend, force logout, and idempotent manual credit grants; localized suppression controls and the kill-switch operator command also exist, but suppression lookup and in-app kill-switch control remain.
 
 ### P1 — admin areas
 
 - [ ] `/admin`: user, call, outcome/consent/failure, cost, and system-health metrics.
 - [ ] `/admin/users` and detail: identity/verification, activity/status, ledger/promos, calls/feedback/safety/complaints, and audited grant/suspend/session/delete actions. **Partial:** the localized RBAC-protected console supports paginated name/email/role/status search, a privacy-minimized credit ledger, and reasoned grant/suspend/unsuspend/session actions with destructive confirmations; calls, feedback, safety/complaints, promo history, and account deletion remain.
-- [ ] `/admin/calls` and detail: user/recipient (controlled), locale, status/outcome, duration, consent, recording/transcription, failure stage, and useful failure/policy/model/language/date filters.
+- [x] `/admin/calls` and detail: privacy-minimized owner context, locale, status/outcome, duration, consent, recording/transcription, failure stage, deterministic operational filters, technical timeline, outcome history, and a separately authorized sensitive-content boundary.
 - [ ] `/admin/safety`: blocks, repeat recipients, no-consent/declines, opt-outs, complaints, suspicious registration/credits, anomaly review and actions. **Partial:** an RBAC-protected localized form now creates staff/complaint suppressions and audited lifts; list/search, anomaly queues, call context, and complaint review remain.
 - [ ] `/admin/credits`: ledger, grants/adjustments, promo/redemption/expiry/campaign; no silent balance edits. **Partial:** localized RBAC-protected promo creation and manual reasoned grant forms exist; ledger/redemption browsing, deactivation, and campaign management remain.
 - [ ] `/admin/audit`: actor/action/target/time/result filters and immutable evidence.
@@ -280,7 +289,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 - [x] Keep human/action `audit_events` separate. Add append-only `call_events`: call/attempt/user correlation, time, source/name/stage/severity, provider status/failure code, model/version, channels/duration, bounded metadata, and schema version. Add rebuildable `call_metrics` only if needed.
 - [ ] Instrument brief/compiler/policy/approval/credit/Twilio/ringing/answer/disclosure/consent/recording/Realtime/first-audio/conversation/completion/transcription/outcome, including latency, retries, reconnects, provider IDs/status, model/version, channels/duration, feedback. **Partial:** the reconstructable lifecycle, technical outcomes, and owner feedback are durable; first-audio latency plus reconnect/cost derivation remain.
-- [ ] Build `/admin/calls/[id]`: summary, timeline, technical metadata, separately permissioned sensitive content. Never show secrets; audit sensitive views.
+- [x] Build `/admin/calls/[id]`: summary, timeline, technical metadata, separately permissioned sensitive content. Never show secrets; audit sensitive views.
 - [x] Define event-specific metadata allow-lists excluding phone/name/brief/transcript text, credentials, cookies, OTPs, arbitrary exception bodies, and raw provider payloads from durable call events.
 - [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch.
 
@@ -367,8 +376,8 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 ## P1 — broad-beta requirement; invite-alpha waiver only
 
 - [ ] Durable jobs and recovery/dead-letter visibility.
-- [ ] Admin Calls and failure-stage filters.
-- [ ] Call Inspector timeline and sensitive-access audit.
+- [x] Admin Calls and failure-stage filters.
+- [x] Call Inspector timeline and sensitive-access audit.
 - [x] Separate technical telemetry; `audit_events` remains action audit.
 - [x] Structured outcomes and user feedback measurable.
 - [ ] Admin Users workflows. **Partial:** safe search, credit-ledger inspection, and consolidated status/session/grant actions exist; account deletion and related support context remain.

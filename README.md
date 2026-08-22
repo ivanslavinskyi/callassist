@@ -181,6 +181,14 @@ suspend/unsuspend, force-logout, and manual credit-grant actions. Destructive ac
 require confirmation, and credit grants are available only for active, phone-verified
 targets within the acting administrator's permission scope.
 
+Operational administrators can inspect the privacy-minimized call read model at
+`/en/admin/calls` or `/de/admin/calls`. The list supports deterministic pagination
+and status, outcome, consent, failure-stage, language, and date filters; its detail
+Inspector reconstructs the sanitized durable timeline and outcome provenance. The
+default API omits recipient identity, phone number, brief/transcript text, and private
+feedback comments. Loading that sensitive content is a separate superadmin-only POST
+with a mandatory reason, and every read creates immutable PostgreSQL access evidence.
+
 Phone verification grants exactly three signup credits through the append-only
 credit ledger. `GET /api/usage` returns the authenticated user's reconciled balance,
 active call, and ledger history. Starting a call reserves one credit atomically and
@@ -265,9 +273,10 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   Swiss German, multilingual input, and adversarial prompts.
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
-- Continue the observability phase from the completed append-only telemetry and
-  versioned outcome/owner-feedback foundations with the RBAC-protected Admin
-  Calls/Inspector workflow.
+- Continue the observability phase from the completed append-only telemetry,
+  versioned outcome/owner-feedback, and Admin Calls/Inspector foundations with a
+  privacy-safe operational overview, system health, latency/reconnect, and cost
+  visibility.
 - Add durable background jobs, production deployment, observability, compliance,
   and staged invite-only/public beta release gates.
 

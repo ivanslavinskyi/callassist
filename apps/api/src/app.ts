@@ -2,7 +2,9 @@ import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import {
+  ADMIN_CALL_LIST_LIMIT_MAX,
   accountStatusActionSchema,
+  adminCallListFiltersSchema,
   adminUserSearchSchema,
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
@@ -24,6 +26,7 @@ import {
   recipientOptOutRequestSchema,
   registrationInputSchema,
   sessionRevocationActionSchema,
+  sensitiveCallAccessInputSchema,
   staffRecipientSuppressionLiftSchema,
   staffRecipientSuppressionSchema,
   userRoleSchema,
@@ -56,6 +59,7 @@ import {
 } from "./safety/recipient-opt-out-service";
 import {
   CallRepositoryError,
+  decodeAdminCallCursor,
   decodeCallBriefCursor,
   isUuid
 } from "./storage/call-repository";
@@ -200,6 +204,25 @@ export function buildApp({
       return null;
     }
     return user;
+  }
+
+  async function authorizeSensitiveCallMutation(
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+      await reply.status(403).send({ error: "INVALID_ORIGIN" });
+      return null;
+    }
+    const actor = await authorizeAdminRead(request, reply);
+    if (!actor) return null;
+    if (actor.role !== "superadmin") {
+      await reply.status(403).send({
+        error: "SENSITIVE_CALL_ACCESS_FORBIDDEN"
+      });
+      return null;
+    }
+    return actor;
   }
 
   async function authorizeContentMutation(
@@ -994,6 +1017,104 @@ export function buildApp({
         .header("Cache-Control", "private, no-store")
         .send(await service.getOutcomeMetrics());
     });
+
+    app.get<{
+      Querystring: {
+        limit?: string;
+        cursor?: string;
+        status?: string;
+        outcome?: string;
+        consent?: string;
+        failureStage?: string;
+        locale?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      };
+    }>("/api/admin/calls", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      const limit = request.query.limit === undefined
+        ? 20
+        : Number(request.query.limit);
+      const filters = adminCallListFiltersSchema.safeParse({
+        ...(request.query.status ? { status: request.query.status } : {}),
+        ...(request.query.outcome ? { outcome: request.query.outcome } : {}),
+        ...(request.query.consent ? { consent: request.query.consent } : {}),
+        ...(request.query.failureStage
+          ? { failureStage: request.query.failureStage }
+          : {}),
+        ...(request.query.locale ? { locale: request.query.locale } : {}),
+        ...(request.query.dateFrom
+          ? { dateFrom: request.query.dateFrom }
+          : {}),
+        ...(request.query.dateTo ? { dateTo: request.query.dateTo } : {})
+      });
+      const cursor = request.query.cursor
+        ? decodeAdminCallCursor(request.query.cursor)
+        : undefined;
+      if (
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > ADMIN_CALL_LIST_LIMIT_MAX ||
+        !filters.success ||
+        (request.query.cursor !== undefined && !cursor)
+      ) {
+        return reply.status(400).send({ error: "INVALID_ADMIN_CALL_QUERY" });
+      }
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(await service.listAdminCalls(
+          filters.data,
+          limit,
+          cursor ?? undefined
+        ));
+    });
+
+    app.get<{ Params: { id: string } }>(
+      "/api/admin/calls/:id",
+      async (request, reply) => {
+        const actor = await authorizeAdminRead(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.id)) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await service.getAdminCallInspector(request.params.id));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      }
+    );
+
+    app.post<{ Params: { id: string } }>(
+      "/api/admin/calls/:id/sensitive-access",
+      async (request, reply) => {
+        const actor = await authorizeSensitiveCallMutation(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.id)) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+        const parsed = sensitiveCallAccessInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({
+            error: "INVALID_SENSITIVE_CALL_ACCESS"
+          });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await service.getAdminCallSensitiveContent(
+              request.params.id,
+              actor.id,
+              parsed.data.reason
+            ));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      }
+    );
 
     app.get<{
       Querystring: {

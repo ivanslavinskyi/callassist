@@ -1,6 +1,7 @@
 import {
   normalizeCreateCallBriefInput,
   isSwissDestinationPhone,
+  type AdminCallListFilters,
   type ApprovalDecision,
   type CallBrief,
   type CallEvent,
@@ -21,6 +22,7 @@ import {
   CallRepositoryError,
   defaultCallAdmissionPolicy,
   isUuid,
+  type AdminCallCursor,
   type CallAdmissionPolicy,
   type CallRepository
 } from "./storage/call-repository";
@@ -155,6 +157,30 @@ export class CallService {
 
   getOutcomeMetrics() {
     return this.repository.getCallOutcomeMetrics();
+  }
+
+  listAdminCalls(
+    filters: AdminCallListFilters,
+    limit: number,
+    cursor?: AdminCallCursor
+  ) {
+    return this.repository.listAdminCalls({ ...filters, limit, cursor });
+  }
+
+  getAdminCallInspector(id: string) {
+    return this.repository.getAdminCallInspector(id);
+  }
+
+  getAdminCallSensitiveContent(
+    id: string,
+    actorUserId: string,
+    reason: string
+  ) {
+    return this.repository.getAdminCallSensitiveContent(
+      id,
+      actorUserId,
+      reason
+    );
   }
 
   async create(input: CreateCallBriefInput, userId: string | null = null) {
