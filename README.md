@@ -189,6 +189,21 @@ default API omits recipient identity, phone number, brief/transcript text, and p
 feedback comments. Loading that sensitive content is a separate superadmin-only POST
 with a mandatory reason, and every read creates immutable PostgreSQL access evidence.
 
+The localized operational overview is available at `/en/admin` and `/de/admin`, with
+24-hour, 7-day, and 30-day creation cohorts, explicit rate denominators, semantic
+outcomes, recorded-duration and first-audio aggregates, reliability counters, and
+optional versioned cost estimates. `/en/admin/system` and `/de/admin/system` report
+the API/database request path, configured provider modes, bounded workload, recent
+durable warnings/errors, and the global outbound-call control. Provider entries are
+configuration state only and explicitly do not claim an upstream health probe.
+Admins may stop new calls; only superadmins may resume them. Both operations require
+a reason and retain immutable safety evidence.
+
+Cost estimates are disabled by default. Set `ADMIN_COST_PRICING_VERSION` together
+with any reviewed `ADMIN_COST_*_USD_MICROS_PER_MINUTE` rates to enable partial or
+complete estimates. One USD equals 1,000,000 micro-dollars. The result uses completed
+bounded usage and is not a provider invoice.
+
 Phone verification grants exactly three signup credits through the append-only
 credit ledger. `GET /api/usage` returns the authenticated user's reconciled balance,
 active call, and ledger history. Starting a call reserves one credit atomically and
@@ -273,11 +288,10 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   Swiss German, multilingual input, and adversarial prompts.
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
-- Continue the observability phase from the completed append-only telemetry,
-  versioned outcome/owner-feedback, and Admin Calls/Inspector foundations with a
-  privacy-safe operational overview, system health, latency/reconnect, and cost
-  visibility.
-- Add durable background jobs, production deployment, observability, compliance,
+- Continue from the completed privacy-safe operational overview and local system
+  control with durable background jobs, recovery/dead-letter visibility, and
+  external provider monitoring.
+- Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 
 See the [public MVP roadmap](docs/mvp-plan.md) for the implementation sequence,

@@ -12,6 +12,7 @@ import { ContentService } from "./content/content-service";
 import { createContentRepositoryFromEnv } from "./content/create-content-repository";
 import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
 import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
+import { operationalCostPolicyFromEnv } from "./config/operational-cost-policy";
 import {
   CreditService,
   parsePromoCodeHashKey
@@ -44,9 +45,17 @@ const postCallTranscriber = realtimeApiKey
     })
   : undefined;
 const briefCompiler = createBriefCompiler();
-const service = new CallService(repository, telephonyProvider, (error) => {
-  app.log.error(error, "Background call operation failed");
-}, postCallTranscriber, briefCompiler, callAdmissionPolicyFromEnv());
+const service = new CallService(
+  repository,
+  telephonyProvider,
+  (error) => {
+    app.log.error(error, "Background call operation failed");
+  },
+  postCallTranscriber,
+  briefCompiler,
+  callAdmissionPolicyFromEnv(),
+  operationalCostPolicyFromEnv()
+);
 const authService = new AuthService({
   repository: authRepository,
   verificationProvider: createVerificationProviderFromEnv(),
@@ -65,7 +74,8 @@ const app = buildApp({
   authService,
   creditService,
   contentService,
-  endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv()
+  endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv(),
+  realtimeConfigured: telephonyProvider instanceof TwilioTelephonyProvider
 });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider

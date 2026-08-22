@@ -916,6 +916,117 @@ describe("auth API", () => {
     ]);
   });
 
+  it("protects operational metrics and reasoned outbound-call control", async () => {
+    const { app, repository, callRepository } = createAuthApp();
+    const userCookie = await registerAndVerify(app, registration);
+    const adminRegistration = {
+      ...registration,
+      email: "operations-admin@example.com",
+      phoneE164: "+41710000032",
+      firstName: "Ona",
+      lastName: "Operations"
+    };
+    const adminCookie = await registerAndVerify(app, adminRegistration);
+    const adminMe = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: adminCookie }
+    });
+    const adminId = adminMe.json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+
+    for (const url of [
+      "/api/admin/operations/overview",
+      "/api/admin/system"
+    ]) {
+      const forbidden = await app.inject({
+        method: "GET",
+        url,
+        headers: { cookie: userCookie }
+      });
+      expect(forbidden.statusCode).toBe(403);
+    }
+    const invalidWindow = await app.inject({
+      method: "GET",
+      url: "/api/admin/operations/overview?window=year",
+      headers: { cookie: adminCookie }
+    });
+    expect(invalidWindow.statusCode).toBe(400);
+
+    const overview = await app.inject({
+      method: "GET",
+      url: "/api/admin/operations/overview?window=7d",
+      headers: { cookie: adminCookie }
+    });
+    expect(overview.statusCode).toBe(200);
+    expect(overview.headers["cache-control"]).toBe("private, no-store");
+    expect(overview.json()).toMatchObject({
+      window: { kind: "7d", cohort: "call_created_at" },
+      cost: { status: "unavailable", estimatedUsdMicros: null },
+      reliability: {
+        realtimeReconnects: { status: "not_supported", count: null }
+      }
+    });
+
+    const disabled = await app.inject({
+      method: "PUT",
+      url: "/api/admin/system/outbound-calls",
+      headers: { cookie: adminCookie },
+      payload: {
+        enabled: false,
+        reason: "Investigating elevated provider failures"
+      }
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({
+      outboundCalls: {
+        enabled: false,
+        reason: "Investigating elevated provider failures"
+      }
+    });
+
+    const adminEnable = await app.inject({
+      method: "PUT",
+      url: "/api/admin/system/outbound-calls",
+      headers: { cookie: adminCookie },
+      payload: {
+        enabled: true,
+        reason: "Provider has recovered"
+      }
+    });
+    expect(adminEnable.statusCode).toBe(403);
+    expect(adminEnable.json()).toEqual({
+      error: "OUTBOUND_CALL_ENABLE_FORBIDDEN"
+    });
+
+    await repository.setUserRoleForTest(adminId, "superadmin");
+    const enabled = await app.inject({
+      method: "PUT",
+      url: "/api/admin/system/outbound-calls",
+      headers: { cookie: adminCookie },
+      payload: {
+        enabled: true,
+        reason: "Provider has recovered"
+      }
+    });
+    expect(enabled.statusCode).toBe(200);
+    expect(enabled.json()).toMatchObject({
+      outboundCalls: { enabled: true, reason: "Provider has recovered" }
+    });
+    expect(callRepository.safetyEventsForTest()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "outbound_calls.disabled",
+          actorUserId: adminId
+        }),
+        expect.objectContaining({
+          eventType: "outbound_calls.enabled",
+          actorUserId: adminId
+        })
+      ])
+    );
+  });
+
   it("uses a generic response for duplicate registration and generic login errors", async () => {
     const { app } = createAuthApp();
     const first = await app.inject({

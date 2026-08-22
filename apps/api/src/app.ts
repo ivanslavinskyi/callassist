@@ -5,6 +5,8 @@ import {
   ADMIN_CALL_LIST_LIMIT_MAX,
   accountStatusActionSchema,
   adminCallListFiltersSchema,
+  adminOperationsWindowSchema,
+  adminOutboundCallControlInputSchema,
   adminUserSearchSchema,
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
@@ -83,6 +85,7 @@ type BuildAppOptions = {
   endpointRateLimiter?: ApplicationRateLimiter;
   endpointRateLimitPolicy?: EndpointRateLimitPolicy;
   recipientOptOutService?: RecipientOptOutService;
+  realtimeConfigured?: boolean;
 };
 
 type BuildWebhookAppOptions = {
@@ -103,6 +106,7 @@ export function buildApp({
   webOrigin = process.env.WEB_ORIGIN,
   endpointRateLimiter = new ApplicationRateLimiter(),
   endpointRateLimitPolicy = defaultEndpointRateLimitPolicy,
+  realtimeConfigured = false,
   recipientOptOutService = authService
     ? new RecipientOptOutService({
         repository: service.repository,
@@ -1016,6 +1020,58 @@ export function buildApp({
       return reply
         .header("Cache-Control", "private, no-store")
         .send(await service.getOutcomeMetrics());
+    });
+
+    app.get<{ Querystring: { window?: string } }>(
+      "/api/admin/operations/overview",
+      async (request, reply) => {
+        const actor = await authorizeAdminRead(request, reply);
+        if (!actor) return;
+        const window = adminOperationsWindowSchema.safeParse(
+          request.query.window ?? "24h"
+        );
+        if (!window.success) {
+          return reply.status(400).send({
+            error: "INVALID_ADMIN_OPERATIONS_WINDOW"
+          });
+        }
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await service.getAdminOperationsOverview(window.data));
+      }
+    );
+
+    app.get("/api/admin/system", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(await service.getAdminSystemStatus(realtimeConfigured));
+    });
+
+    app.put("/api/admin/system/outbound-calls", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      const parsed = adminOutboundCallControlInputSchema.safeParse(
+        request.body
+      );
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "INVALID_OUTBOUND_CALL_CONTROL"
+        });
+      }
+      if (parsed.data.enabled && actor.role !== "superadmin") {
+        return reply.status(403).send({
+          error: "OUTBOUND_CALL_ENABLE_FORBIDDEN"
+        });
+      }
+      await service.repository.setOutboundCallsEnabled(parsed.data.enabled, {
+        actorUserId: actor.id,
+        reason: parsed.data.reason
+      });
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(await service.getAdminSystemStatus(realtimeConfigured));
     });
 
     app.get<{

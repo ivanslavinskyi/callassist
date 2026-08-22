@@ -398,9 +398,18 @@ describe("OpenAIRealtimeBridge", () => {
         "realtime.ready",
         "disclosure.started",
         "conversation.started",
+        "conversation.first_audio",
         "conversation.ended"
       ])
     );
+    expect(
+      telemetry.find(
+        ({ payload }) => payload.name === "conversation.first_audio"
+      )?.payload
+    ).toEqual({
+      name: "conversation.first_audio",
+      metadata: { latencyMs: expect.any(Number) }
+    });
     expect(
       telemetry.find(({ payload }) => payload.name === "conversation.ended")
         ?.payload

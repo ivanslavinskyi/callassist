@@ -147,6 +147,62 @@ export type ListAdminCallsInput = AdminCallListFilters & {
   cursor?: AdminCallCursor;
 };
 
+export type AdminOperationsAggregateFacts = {
+  samples: number;
+  total: number;
+  average: number | null;
+  p95: number | null;
+};
+
+export type AdminOperationsFacts = {
+  createdCalls: number;
+  attemptedCalls: number;
+  activeCalls: number;
+  terminalCalls: number;
+  connectedCalls: number;
+  consentGrantedCalls: number;
+  consentFailedCalls: number;
+  technicalFailureCalls: number;
+  feedbackResponses: number;
+  semanticOutcomes: {
+    resolved: number;
+    partiallyResolved: number;
+    unresolved: number;
+    wrongRecipient: number;
+    voicemail: number;
+    declined: number;
+    technicalFailure: number;
+    unclassified: number;
+  };
+  recordedDurationSeconds: AdminOperationsAggregateFacts;
+  firstAudioLatencyMs: AdminOperationsAggregateFacts;
+  transcriptionRetries: number;
+  realtimeDisconnects: number;
+  recoveries: number;
+  usageSeconds: {
+    telephony: number;
+    realtime: number;
+    transcription: number;
+  };
+};
+
+export type AdminSystemFacts = {
+  outboundCalls: {
+    enabled: boolean;
+    reason: string;
+    updatedAt: string | null;
+  };
+  activeCalls: number;
+  recordingsProcessing: number;
+  transcriptionReady: number;
+  transcriptionProcessing: number;
+  transcriptionFailed: number;
+  retentionScheduled: number;
+  retentionOverdue: number;
+  recentWarnings: number;
+  recentErrors: number;
+};
+
 export function encodeCallBriefCursor(cursor: CallBriefCursor) {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
@@ -273,6 +329,14 @@ export interface CallRepository {
     actorUserId: string,
     reason: string
   ): Promise<AdminCallSensitiveContent>;
+  getAdminOperationsFacts(
+    from: string,
+    to: string
+  ): Promise<AdminOperationsFacts>;
+  getAdminSystemFacts(
+    now: string,
+    recentSince: string
+  ): Promise<AdminSystemFacts>;
   getCallOutcome(id: string): Promise<CallOutcomeView>;
   recordSystemCallOutcome(id: string): Promise<CallOutcomeView>;
   submitOwnerCallFeedback(

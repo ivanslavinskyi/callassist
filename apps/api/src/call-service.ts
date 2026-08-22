@@ -1,7 +1,10 @@
 import {
+  adminOperationsWindowBounds,
+  adminSystemStatusSchema,
   normalizeCreateCallBriefInput,
   isSwissDestinationPhone,
   type AdminCallListFilters,
+  type AdminOperationsWindow,
   type ApprovalDecision,
   type CallBrief,
   type CallEvent,
@@ -12,6 +15,7 @@ import {
   type OwnerCallFeedbackInput,
   type TranscriptSegment
 } from "@callassist/contracts";
+import { buildAdminOperationsOverview } from "./admin-operations";
 import {
   BriefCompilerError,
   DeterministicBriefCompiler,
@@ -37,6 +41,10 @@ import {
   PostCallTranscriptionError,
   type PostCallTranscriber
 } from "./transcription/openai-post-call-transcriber";
+import {
+  unavailableOperationalCostPolicy,
+  type OperationalCostPolicy
+} from "./config/operational-cost-policy";
 
 type Subscriber = (event: CallEvent) => void;
 
@@ -79,6 +87,7 @@ export class CallService {
   readonly #postCallTranscriber?: PostCallTranscriber;
   readonly #briefCompiler: BriefCompiler;
   readonly #admissionPolicy: CallAdmissionPolicy;
+  readonly #operationalCostPolicy: OperationalCostPolicy;
   #retentionTimer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -87,12 +96,15 @@ export class CallService {
     onBackgroundError: (error: unknown) => void = console.error,
     postCallTranscriber?: PostCallTranscriber,
     briefCompiler: BriefCompiler = new DeterministicBriefCompiler(),
-    admissionPolicy: CallAdmissionPolicy = defaultCallAdmissionPolicy
+    admissionPolicy: CallAdmissionPolicy = defaultCallAdmissionPolicy,
+    operationalCostPolicy: OperationalCostPolicy =
+      unavailableOperationalCostPolicy
   ) {
     this.#onBackgroundError = onBackgroundError;
     this.#postCallTranscriber = postCallTranscriber;
     this.#briefCompiler = briefCompiler;
     this.#admissionPolicy = admissionPolicy;
+    this.#operationalCostPolicy = operationalCostPolicy;
   }
 
   async initialize() {
@@ -181,6 +193,78 @@ export class CallService {
       actorUserId,
       reason
     );
+  }
+
+  async getAdminOperationsOverview(
+    kind: AdminOperationsWindow,
+    now = new Date()
+  ) {
+    const { from, to } = adminOperationsWindowBounds(kind, now);
+    const facts = await this.repository.getAdminOperationsFacts(from, to);
+    return buildAdminOperationsOverview({
+      facts,
+      kind,
+      from,
+      to,
+      costPolicy: this.#operationalCostPolicy
+    });
+  }
+
+  async getAdminSystemStatus(
+    realtimeConfigured: boolean,
+    now = new Date()
+  ) {
+    const generatedAt = now.toISOString();
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1_000)
+      .toISOString();
+    await this.repository.ping();
+    const facts = await this.repository.getAdminSystemFacts(
+      generatedAt,
+      since
+    );
+    return adminSystemStatusSchema.parse({
+      generatedAt,
+      components: {
+        api: { state: "healthy" },
+        database: { state: "healthy" },
+        telephony: {
+          state: this.telephonyProvider.mode === "mock"
+            ? "development"
+            : "configured",
+          mode: this.telephonyProvider.mode,
+          upstreamChecked: false
+        },
+        realtime: {
+          state: realtimeConfigured ? "configured" : "disabled",
+          upstreamChecked: false
+        },
+        transcription: {
+          state: this.#postCallTranscriber ? "configured" : "disabled",
+          upstreamChecked: false
+        }
+      },
+      outboundCalls: facts.outboundCalls,
+      runtime: {
+        uptimeSeconds: Math.max(0, Math.floor(process.uptime())),
+        backgroundTasks: this.#backgroundJobs.size,
+        processingRecordings: this.#processingRecordings.size,
+        retentionLoopEnabled: this.#retentionTimer !== null
+      },
+      workload: {
+        activeCalls: facts.activeCalls,
+        recordingsProcessing: facts.recordingsProcessing,
+        transcriptionReady: facts.transcriptionReady,
+        transcriptionProcessing: facts.transcriptionProcessing,
+        transcriptionFailed: facts.transcriptionFailed,
+        retentionScheduled: facts.retentionScheduled,
+        retentionOverdue: facts.retentionOverdue
+      },
+      recentTelemetry: {
+        since,
+        warnings: facts.recentWarnings,
+        errors: facts.recentErrors
+      }
+    });
   }
 
   async create(input: CreateCallBriefInput, userId: string | null = null) {

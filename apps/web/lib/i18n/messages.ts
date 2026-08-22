@@ -103,6 +103,8 @@ export type Messages = {
     redeem: string;
     safety: string;
     creditAdmin: string;
+    operationsAdmin: string;
+    systemAdmin: string;
     callsAdmin: string;
     usersAdmin: string;
     contentAdmin: string;
@@ -317,6 +319,8 @@ const en: Messages = {
     redeem: "Redeem",
     safety: "Safety",
     creditAdmin: "Credits",
+    operationsAdmin: "Overview",
+    systemAdmin: "System",
     callsAdmin: "Calls",
     usersAdmin: "Users",
     contentAdmin: "Content",
@@ -504,6 +508,8 @@ const de: Messages = {
     redeem: "Code einlösen",
     safety: "Sicherheit",
     creditAdmin: "Guthaben",
+    operationsAdmin: "Übersicht",
+    systemAdmin: "System",
     callsAdmin: "Anrufe",
     usersAdmin: "Benutzer",
     contentAdmin: "Inhalte",

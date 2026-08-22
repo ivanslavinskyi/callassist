@@ -128,6 +128,12 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     metadata: emptyMetadataSchema
   }),
   z.strictObject({
+    name: z.literal("conversation.first_audio"),
+    metadata: z.strictObject({
+      latencyMs: z.number().int().nonnegative()
+    })
+  }),
+  z.strictObject({
     name: z.literal("conversation.ended"),
     metadata: z.strictObject({
       reason: z.enum([
@@ -288,6 +294,7 @@ export function describeCallTelemetryEvent(
     case "realtime.ready":
       return { source: "realtime", stage: "realtime", severity: "info" };
     case "conversation.started":
+    case "conversation.first_audio":
     case "conversation.ended":
       return { source: "realtime", stage: "conversation", severity: "info" };
     case "transcription.started":

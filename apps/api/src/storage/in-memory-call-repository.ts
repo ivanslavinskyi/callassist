@@ -53,6 +53,8 @@ import {
   encodeAdminCallCursor,
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
+  type AdminOperationsFacts,
+  type AdminSystemFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
@@ -160,6 +162,8 @@ export class InMemoryCallRepository implements CallRepository {
     reason: string;
   }> = [];
   #outboundCallsEnabled = true;
+  #outboundCallsReason = "Initial public-beta default";
+  #outboundCallsUpdatedAt: string | null = null;
 
   async list(input: ListCallBriefsInput) {
     const filtered = [...this.#calls.values()]
@@ -430,13 +434,15 @@ export class InMemoryCallRepository implements CallRepository {
     enabled: boolean,
     input: SafetyControlInput
   ) {
-    requireReason(input.reason);
+    const reason = requireSystemControlReason(input.reason);
     this.#outboundCallsEnabled = enabled;
+    this.#outboundCallsReason = reason;
+    this.#outboundCallsUpdatedAt = new Date().toISOString();
     this.#safetyEvents.push({
       eventType: enabled ? "outbound_calls.enabled" : "outbound_calls.disabled",
       actorUserId: input.actorUserId ?? null,
       phoneE164: null,
-      reason: input.reason.trim()
+      reason
     });
   }
 
@@ -606,6 +612,145 @@ export class InMemoryCallRepository implements CallRepository {
 
   sensitiveCallAccessEventsForTest() {
     return copy(this.#sensitiveCallAccessEvents);
+  }
+
+  async getAdminOperationsFacts(
+    from: string,
+    to: string
+  ): Promise<AdminOperationsFacts> {
+    const scoped = [...this.#calls.values()].filter(({ brief }) =>
+      brief.createdAt >= from && brief.createdAt <= to
+    );
+    const facts = emptyAdminOperationsFacts();
+    const durationValues: number[] = [];
+    const firstAudioValues: number[] = [];
+    for (const snapshot of scoped) {
+      const id = snapshot.brief.id;
+      const events = (this.#callTelemetryEvents.get(id) ?? [])
+        .map(({ event }) => event);
+      const attempts = this.#attempts.get(id) ?? [];
+      const outcome = this.#buildOutcomeView(id);
+      facts.createdCalls += 1;
+      if (attempts.length > 0) facts.attemptedCalls += 1;
+      if (interruptedStatuses.has(snapshot.brief.status)) {
+        facts.activeCalls += 1;
+      }
+      if (terminalStatuses.has(snapshot.brief.status)) {
+        facts.terminalCalls += 1;
+      }
+      if (outcome.technical.connection === "confirmed") {
+        facts.connectedCalls += 1;
+      }
+      if (outcome.technical.consent === "granted") {
+        facts.consentGrantedCalls += 1;
+      } else if (outcome.technical.consent === "failed") {
+        facts.consentFailedCalls += 1;
+      }
+      if (outcome.technical.failureStage !== null) {
+        facts.technicalFailureCalls += 1;
+      }
+      if (outcome.latestFeedback) facts.feedbackResponses += 1;
+      incrementAdminSemanticOutcome(
+        facts,
+        outcome.latestOutcome?.outcome ?? null
+      );
+
+      const duration = snapshot.recording?.durationSeconds;
+      if (duration !== null && duration !== undefined) {
+        durationValues.push(duration);
+        if (events.some(({ payload }) => payload.name === "realtime.ready")) {
+          facts.usageSeconds.realtime += duration;
+        }
+        if (events.some(
+          ({ payload }) => payload.name === "transcription.started"
+        )) {
+          facts.usageSeconds.transcription += duration;
+        }
+      }
+      for (const event of events) {
+        if (event.payload.name === "conversation.first_audio") {
+          firstAudioValues.push(event.payload.metadata.latencyMs);
+        } else if (
+          event.payload.name === "transcription.started" &&
+          event.payload.metadata.retry
+        ) {
+          facts.transcriptionRetries += 1;
+        } else if (
+          event.payload.name === "conversation.ended" &&
+          ["openai_closed", "openai_error"].includes(
+            event.payload.metadata.reason
+          )
+        ) {
+          facts.realtimeDisconnects += 1;
+        } else if (event.payload.name === "call.recovered") {
+          facts.recoveries += 1;
+        }
+      }
+      for (const attempt of attempts) {
+        if (!attempt.endedAt) continue;
+        const connectedAt = events.find((event) =>
+          event.callAttemptId === attempt.id &&
+          event.payload.name === "connection.confirmed"
+        )?.occurredAt;
+        if (!connectedAt) continue;
+        facts.usageSeconds.telephony += Math.max(
+          0,
+          Math.floor(
+            (Date.parse(attempt.endedAt) - Date.parse(connectedAt)) / 1_000
+          )
+        );
+      }
+    }
+    facts.recordedDurationSeconds = aggregateFacts(durationValues);
+    facts.firstAudioLatencyMs = aggregateFacts(firstAudioValues);
+    return facts;
+  }
+
+  async getAdminSystemFacts(
+    now: string,
+    recentSince: string
+  ): Promise<AdminSystemFacts> {
+    const snapshots = [...this.#calls.values()];
+    const events = [...this.#callTelemetryEvents.values()]
+      .flatMap((stored) => stored.map(({ event }) => event))
+      .filter(({ occurredAt }) => occurredAt >= recentSince);
+    return {
+      outboundCalls: {
+        enabled: this.#outboundCallsEnabled,
+        reason: this.#outboundCallsReason,
+        updatedAt: this.#outboundCallsUpdatedAt
+      },
+      activeCalls: snapshots.filter(({ brief }) =>
+        interruptedStatuses.has(brief.status)
+      ).length,
+      recordingsProcessing: snapshots.filter(({ recording }) =>
+        recording && ["starting", "recording", "processing"]
+          .includes(recording.status)
+      ).length,
+      transcriptionReady: snapshots.filter(({ recording, finalTranscript }) =>
+        recording?.status === "available" &&
+        finalTranscript?.status !== "completed" &&
+        finalTranscript?.status !== "processing"
+      ).length,
+      transcriptionProcessing: snapshots.filter(({ finalTranscript }) =>
+        finalTranscript?.status === "processing"
+      ).length,
+      transcriptionFailed: snapshots.filter(({ finalTranscript }) =>
+        finalTranscript?.status === "failed"
+      ).length,
+      retentionScheduled: snapshots.filter(({ recording }) =>
+        recording?.status === "available" && recording.deleteAfter !== null
+      ).length,
+      retentionOverdue: snapshots.filter(({ recording }) =>
+        recording?.status === "available" &&
+        recording.deleteAfter !== null &&
+        recording.deleteAfter <= now
+      ).length,
+      recentWarnings: events.filter(({ severity }) => severity === "warning")
+        .length,
+      recentErrors: events.filter(({ severity }) => severity === "error")
+        .length
+    };
   }
 
   async getCallOutcome(id: string) {
@@ -1791,6 +1936,14 @@ function requireReason(value: string) {
   return reason;
 }
 
+function requireSystemControlReason(value: string) {
+  const reason = requireReason(value);
+  if (reason.length > 500) {
+    throw new Error("A safety-control reason must not exceed 500 characters");
+  }
+  return reason;
+}
+
 function safeTelemetryCode(value: string | null | undefined, fallback: string) {
   const normalized = value?.trim();
   return normalized && /^[a-z0-9_.:/-]{1,160}$/i.test(normalized)
@@ -1846,6 +1999,96 @@ function emptyOutcomeMetrics(): CallOutcomeMetrics {
       transcription: 0,
       recovery: 0
     }
+  };
+}
+
+function emptyAdminOperationsFacts(): AdminOperationsFacts {
+  return {
+    createdCalls: 0,
+    attemptedCalls: 0,
+    activeCalls: 0,
+    terminalCalls: 0,
+    connectedCalls: 0,
+    consentGrantedCalls: 0,
+    consentFailedCalls: 0,
+    technicalFailureCalls: 0,
+    feedbackResponses: 0,
+    semanticOutcomes: {
+      resolved: 0,
+      partiallyResolved: 0,
+      unresolved: 0,
+      wrongRecipient: 0,
+      voicemail: 0,
+      declined: 0,
+      technicalFailure: 0,
+      unclassified: 0
+    },
+    recordedDurationSeconds: {
+      samples: 0,
+      total: 0,
+      average: null,
+      p95: null
+    },
+    firstAudioLatencyMs: {
+      samples: 0,
+      total: 0,
+      average: null,
+      p95: null
+    },
+    transcriptionRetries: 0,
+    realtimeDisconnects: 0,
+    recoveries: 0,
+    usageSeconds: { telephony: 0, realtime: 0, transcription: 0 }
+  };
+}
+
+function incrementAdminSemanticOutcome(
+  facts: AdminOperationsFacts,
+  outcome: CallOutcomeRevision["outcome"]
+) {
+  switch (outcome) {
+    case "resolved":
+      facts.semanticOutcomes.resolved += 1;
+      break;
+    case "partially_resolved":
+      facts.semanticOutcomes.partiallyResolved += 1;
+      break;
+    case "unresolved":
+      facts.semanticOutcomes.unresolved += 1;
+      break;
+    case "wrong_recipient":
+      facts.semanticOutcomes.wrongRecipient += 1;
+      break;
+    case "voicemail":
+      facts.semanticOutcomes.voicemail += 1;
+      break;
+    case "declined":
+      facts.semanticOutcomes.declined += 1;
+      break;
+    case "technical_failure":
+      facts.semanticOutcomes.technicalFailure += 1;
+      break;
+    case null:
+      facts.semanticOutcomes.unclassified += 1;
+      break;
+  }
+}
+
+function aggregateFacts(values: number[]) {
+  if (values.length === 0) {
+    return { samples: 0, total: 0, average: null, p95: null };
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const total = sorted.reduce((sum, value) => sum + value, 0);
+  const position = (sorted.length - 1) * 0.95;
+  const lower = sorted[Math.floor(position)]!;
+  const upper = sorted[Math.ceil(position)]!;
+  const p95 = lower + (upper - lower) * (position - Math.floor(position));
+  return {
+    samples: sorted.length,
+    total,
+    average: total / sorted.length,
+    p95
   };
 }
 

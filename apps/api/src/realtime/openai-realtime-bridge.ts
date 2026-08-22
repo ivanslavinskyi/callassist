@@ -148,6 +148,8 @@ export class OpenAIRealtimeBridge {
     let consentStarting = false;
     let consentGranted = false;
     let conversationStarted = false;
+    let conversationStartedAt: number | null = null;
+    let firstConversationAudioRecorded = false;
     let openingPlaybackComplete = false;
     let responseActive = false;
     let activeResponsePurpose: ResponsePurpose | null = null;
@@ -273,6 +275,7 @@ export class OpenAIRealtimeBridge {
         return;
       }
       conversationStarted = true;
+      conversationStartedAt = Date.now();
       recordTelemetry("realtime:conversation:started", {
         name: "conversation.started",
         metadata: {}
@@ -386,6 +389,18 @@ export class OpenAIRealtimeBridge {
         }
         case "response.output_audio.delta":
           if (event.delta && streamSid) {
+            if (
+              conversationStartedAt !== null &&
+              !firstConversationAudioRecorded
+            ) {
+              firstConversationAudioRecorded = true;
+              recordTelemetry("realtime:conversation:first-audio", {
+                name: "conversation.first_audio",
+                metadata: {
+                  latencyMs: Math.max(0, Date.now() - conversationStartedAt)
+                }
+              });
+            }
             sendTwilio({
               event: "media",
               streamSid,

@@ -12,6 +12,8 @@ import {
   createPromoCode,
   getCreditUsage,
   getAdminCallInspector,
+  getAdminOperationsOverview,
+  getAdminSystemStatus,
   getCallOutcome,
   getOnboardingStatus,
   getPublishedContentIndex,
@@ -41,6 +43,7 @@ import {
   grantCreditsAsAdmin,
   revokeAdminUserSessions,
   revokeAllOwnSessions,
+  setAdminOutboundCalls,
   suppressRecipientAsStaff,
   startCall,
   submitCallFeedback,
@@ -342,6 +345,37 @@ describe("API client headers", () => {
       method: "POST",
       credentials: "include",
       body: JSON.stringify({ reason: "Investigating support ticket 123" })
+    });
+  });
+
+  it("uses protected operations and reasoned system-control routes", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(
+      JSON.stringify({ generatedAt: "2026-08-22T12:00:00.000Z" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAdminOperationsOverview("30d");
+    await getAdminSystemStatus();
+    await setAdminOutboundCalls({
+      enabled: false,
+      reason: "Investigating elevated provider failures"
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/admin/operations/overview?window=30d"
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/admin/system");
+    expect(fetchMock.mock.calls[2]?.[0]).toContain(
+      "/api/admin/system/outbound-calls"
+    );
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+      method: "PUT",
+      credentials: "include",
+      body: JSON.stringify({
+        enabled: false,
+        reason: "Investigating elevated provider failures"
+      })
     });
   });
 

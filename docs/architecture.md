@@ -142,6 +142,38 @@ The operational `/api/admin/calls` read model is purpose-built from call rows, t
 
 Active admins and superadmins may read the minimized list and Inspector. Sensitive content is served by a distinct POST capability, requires a 3–500 character operational reason, and is restricted to superadmins. The PostgreSQL transaction appends a `call_sensitive_access_events` row before decrypting and returning content. Foreign keys retain actor/call attribution, and the shared immutable-row trigger rejects updates and deletes. This access evidence is intentionally separate from the reconstructable technical `call_events` timeline.
 
+## Operational overview and system control
+
+`GET /api/admin/operations/overview` builds a privacy-safe cohort snapshot directly
+from call rows, the latest outcome/feedback revisions, recordings, and bounded durable
+events. Supported creation-time windows are 24 hours, 7 days, and 30 days. Every rate
+returns its numerator and denominator: connection is connected/attempted, consent is
+consented/connected, technical failure is failed/terminal, feedback is responses/terminal,
+and resolution is resolved/classified semantic outcomes. A zero denominator produces
+`null`, not a synthetic 0%. Duration and first-audio aggregates expose sample counts
+and `no_samples`; Realtime reconnects are explicitly `not_supported` because a broken
+session currently ends the call.
+
+Cost output is an operational estimate, never an invoice. Completed bounded usage is
+multiplied by optional integer USD micro-dollar-per-minute rates from environment
+configuration. Any configured rate requires `ADMIN_COST_PRICING_VERSION`; partial
+configuration remains `partial`, and no configured rates remains `unavailable`.
+Active usage, provider discounts, taxes, rounding differences, and invoice
+reconciliation are outside this read model.
+
+`GET /api/admin/system` confirms the API and database request path, reports bounded
+workload and recent durable warning/error counts, and distinguishes local component
+configuration from upstream health. Twilio and OpenAI entries therefore set
+`upstreamChecked: false`; they must not be interpreted as provider availability.
+`generatedAt` is the snapshot freshness boundary. The current view deliberately does
+not infer alert severity from raw counts: production alert thresholds, probes,
+notification routing, and ownership belong to the deployment/monitoring checkpoint.
+
+Admins and superadmins may read both views. Either role may immediately disable new
+outbound calls with a 3–500 character reason, but only a superadmin may re-enable
+them. The existing repository transaction updates the singleton control and appends
+an immutable safety event; active calls are unaffected.
+
 ## Call language
 
 Language is a required `CallBrief` property rather than a profile default. One operator can therefore create calls in different languages without mixing instructions or transcripts.

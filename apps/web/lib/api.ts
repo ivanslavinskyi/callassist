@@ -9,6 +9,10 @@ import type {
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
+  AdminOperationsOverview,
+  AdminOperationsWindow,
+  AdminOutboundCallControlInput,
+  AdminSystemStatus,
   AdminEditorialRevision,
   AdminUserCreditLedger,
   AdminUserList,
@@ -323,6 +327,27 @@ export async function accessAdminCallSensitiveContent(
   return apiRequest<AdminCallSensitiveContent>(
     `/api/admin/calls/${encodeURIComponent(id)}/sensitive-access`,
     { method: "POST", body: JSON.stringify({ reason }) }
+  );
+}
+
+export async function getAdminOperationsOverview(
+  window: AdminOperationsWindow = "24h"
+) {
+  return apiRequest<AdminOperationsOverview>(
+    `/api/admin/operations/overview?window=${encodeURIComponent(window)}`
+  );
+}
+
+export async function getAdminSystemStatus() {
+  return apiRequest<AdminSystemStatus>("/api/admin/system");
+}
+
+export async function setAdminOutboundCalls(
+  input: AdminOutboundCallControlInput
+) {
+  return apiRequest<AdminSystemStatus>(
+    "/api/admin/system/outbound-calls",
+    { method: "PUT", body: JSON.stringify(input) }
   );
 }
 

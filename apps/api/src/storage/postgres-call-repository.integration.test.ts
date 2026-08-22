@@ -998,4 +998,57 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(deleted?.recording?.status).toBe("deleted");
     expect(deleted?.finalTranscript?.text).toBe("The final private transcript.");
   });
+
+  it("aggregates bounded operational and system facts in PostgreSQL", async () => {
+    const now = new Date();
+    const input: CreateCallBriefInput = {
+      recipientName: "PostgreSQL operations facts",
+      phoneNumber: "+41710000062",
+      objective: "Verify operational aggregation",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.appendCallTelemetryEvent(brief.id, {
+      idempotencyKey: "postgres-operations-first-audio",
+      payload: {
+        name: "conversation.first_audio",
+        metadata: { latencyMs: 275 }
+      }
+    });
+
+    const facts = await repository.getAdminOperationsFacts(
+      new Date(now.getTime() - 60_000).toISOString(),
+      new Date(now.getTime() + 60_000).toISOString()
+    );
+    expect(facts.createdCalls).toBeGreaterThanOrEqual(1);
+    expect(facts.firstAudioLatencyMs).toMatchObject({
+      samples: expect.any(Number),
+      total: expect.any(Number)
+    });
+    expect(facts.firstAudioLatencyMs.samples).toBeGreaterThanOrEqual(1);
+    expect(facts.firstAudioLatencyMs.total).toBeGreaterThanOrEqual(275);
+
+    const system = await repository.getAdminSystemFacts(
+      now.toISOString(),
+      new Date(now.getTime() - 86_400_000).toISOString()
+    );
+    expect(system).toMatchObject({
+      outboundCalls: {
+        enabled: expect.any(Boolean),
+        reason: expect.any(String)
+      },
+      activeCalls: expect.any(Number),
+      recentWarnings: expect.any(Number),
+      recentErrors: expect.any(Number)
+    });
+  });
 });

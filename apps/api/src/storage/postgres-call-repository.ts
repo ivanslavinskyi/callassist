@@ -65,6 +65,8 @@ import {
   encodeCallBriefCursor,
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
+  type AdminOperationsFacts,
+  type AdminSystemFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
@@ -221,6 +223,55 @@ type AdminCallReadRow = {
   feedbackCreatedAt: DatabaseDate | null;
   durationSeconds: number | null;
   eventCount: number;
+};
+
+type AdminOperationsFactsRow = {
+  createdCalls: number;
+  attemptedCalls: number;
+  activeCalls: number;
+  terminalCalls: number;
+  connectedCalls: number;
+  consentGrantedCalls: number;
+  consentFailedCalls: number;
+  technicalFailureCalls: number;
+  feedbackResponses: number;
+  resolved: number;
+  partiallyResolved: number;
+  unresolved: number;
+  wrongRecipient: number;
+  voicemail: number;
+  declined: number;
+  technicalFailure: number;
+  unclassified: number;
+  durationSamples: number;
+  durationTotal: number;
+  durationAverage: number | null;
+  durationP95: number | null;
+  firstAudioSamples: number;
+  firstAudioTotal: number;
+  firstAudioAverage: number | null;
+  firstAudioP95: number | null;
+  transcriptionRetries: number;
+  realtimeDisconnects: number;
+  recoveries: number;
+  telephonyUsageSeconds: number;
+  realtimeUsageSeconds: number;
+  transcriptionUsageSeconds: number;
+};
+
+type AdminSystemFactsRow = {
+  outboundCallsEnabled: boolean;
+  outboundCallsReason: string;
+  outboundCallsUpdatedAt: DatabaseDate | null;
+  activeCalls: number;
+  recordingsProcessing: number;
+  transcriptionReady: number;
+  transcriptionProcessing: number;
+  transcriptionFailed: number;
+  retentionScheduled: number;
+  retentionOverdue: number;
+  recentWarnings: number;
+  recentErrors: number;
 };
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
@@ -816,7 +867,7 @@ export class PostgresCallRepository implements CallRepository {
     enabled: boolean,
     input: SafetyControlInput
   ) {
-    const reason = requireReason(input.reason);
+    const reason = requireSystemControlReason(input.reason);
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
       await transaction`
@@ -1172,6 +1223,312 @@ export class PostgresCallRepository implements CallRepository {
       finalTranscript: snapshot.finalTranscript,
       feedbackComment: outcome.latestFeedback?.comment ?? null
     });
+  }
+
+  async getAdminOperationsFacts(
+    from: string,
+    to: string
+  ): Promise<AdminOperationsFacts> {
+    const [row] = await this.#sql<AdminOperationsFactsRow[]>`
+      WITH scoped_calls AS (
+        SELECT id, status
+        FROM call_briefs
+        WHERE created_at >= ${from}::timestamptz
+          AND created_at <= ${to}::timestamptz
+      ),
+      signals AS (
+        SELECT
+          scoped_calls.id,
+          scoped_calls.status,
+          EXISTS (
+            SELECT 1 FROM call_attempts
+            WHERE call_attempts.call_brief_id = scoped_calls.id
+          ) AS attempted,
+          EXISTS (
+            SELECT 1 FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'connection.confirmed'
+          ) AS connected,
+          EXISTS (
+            SELECT 1 FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'consent.granted'
+          ) AS consent_granted,
+          EXISTS (
+            SELECT 1 FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'consent.failed'
+          ) AS consent_failed,
+          EXISTS (
+            SELECT 1 FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND (
+                call_events.severity = 'error'
+                OR call_events.event_name IN ('consent.failed', 'call.recovered')
+                OR (
+                  call_events.event_name = 'provider.status_changed'
+                  AND call_events.metadata->>'callStatus' = 'failed'
+                )
+                OR (
+                  call_events.event_name = 'conversation.ended'
+                  AND call_events.metadata->>'reason' IN (
+                    'openai_closed', 'openai_error'
+                  )
+                )
+              )
+          ) AS has_failure_signal,
+          (
+            SELECT call_outcome_revisions.outcome
+            FROM call_outcome_revisions
+            WHERE call_outcome_revisions.call_brief_id = scoped_calls.id
+              AND call_outcome_revisions.outcome IS NOT NULL
+            ORDER BY call_outcome_revisions.revision DESC
+            LIMIT 1
+          ) AS semantic_outcome,
+          EXISTS (
+            SELECT 1 FROM call_feedback_revisions
+            WHERE call_feedback_revisions.call_brief_id = scoped_calls.id
+          ) AS has_feedback,
+          call_recordings.duration_seconds AS recording_duration_seconds,
+          (
+            SELECT min((call_events.metadata->>'latencyMs')::double precision)
+            FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'conversation.first_audio'
+          ) AS first_audio_latency_ms,
+          (
+            SELECT count(*)::int
+            FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'transcription.started'
+              AND call_events.metadata->>'retry' = 'true'
+          ) AS transcription_retries,
+          (
+            SELECT count(*)::int
+            FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'conversation.ended'
+              AND call_events.metadata->>'reason' IN (
+                'openai_closed', 'openai_error'
+              )
+          ) AS realtime_disconnects,
+          (
+            SELECT count(*)::int
+            FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'call.recovered'
+          ) AS recoveries,
+          COALESCE((
+            SELECT floor(sum(GREATEST(
+              0,
+              EXTRACT(EPOCH FROM (
+                call_attempts.ended_at - connection.occurred_at
+              ))
+            )))::int
+            FROM call_attempts
+            JOIN LATERAL (
+              SELECT min(call_events.occurred_at) AS occurred_at
+              FROM call_events
+              WHERE call_events.call_attempt_id = call_attempts.id
+                AND call_events.event_name = 'connection.confirmed'
+            ) AS connection ON connection.occurred_at IS NOT NULL
+            WHERE call_attempts.call_brief_id = scoped_calls.id
+              AND call_attempts.ended_at IS NOT NULL
+          ), 0) AS telephony_usage_seconds,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'realtime.ready'
+          ) THEN COALESCE(call_recordings.duration_seconds, 0) ELSE 0 END
+            AS realtime_usage_seconds,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM call_events
+            WHERE call_events.call_brief_id = scoped_calls.id
+              AND call_events.event_name = 'transcription.started'
+          ) THEN COALESCE(call_recordings.duration_seconds, 0) ELSE 0 END
+            AS transcription_usage_seconds
+        FROM scoped_calls
+        LEFT JOIN call_recordings
+          ON call_recordings.call_brief_id = scoped_calls.id
+      )
+      SELECT
+        count(*)::int AS "createdCalls",
+        count(*) FILTER (WHERE attempted)::int AS "attemptedCalls",
+        count(*) FILTER (
+          WHERE status IN ('dialing', 'in_progress', 'awaiting_approval')
+        )::int AS "activeCalls",
+        count(*) FILTER (
+          WHERE status IN ('blocked', 'completed', 'stopped', 'failed')
+        )::int AS "terminalCalls",
+        count(*) FILTER (WHERE connected)::int AS "connectedCalls",
+        count(*) FILTER (WHERE consent_granted)::int AS "consentGrantedCalls",
+        count(*) FILTER (WHERE consent_failed)::int AS "consentFailedCalls",
+        count(*) FILTER (WHERE
+          status = 'blocked'
+          OR has_failure_signal
+          OR (
+            status IN ('completed', 'stopped', 'failed')
+            AND NOT connected
+          )
+        )::int AS "technicalFailureCalls",
+        count(*) FILTER (WHERE has_feedback)::int AS "feedbackResponses",
+        count(*) FILTER (WHERE semantic_outcome = 'resolved')::int AS resolved,
+        count(*) FILTER (
+          WHERE semantic_outcome = 'partially_resolved'
+        )::int AS "partiallyResolved",
+        count(*) FILTER (WHERE semantic_outcome = 'unresolved')::int AS unresolved,
+        count(*) FILTER (
+          WHERE semantic_outcome = 'wrong_recipient'
+        )::int AS "wrongRecipient",
+        count(*) FILTER (WHERE semantic_outcome = 'voicemail')::int AS voicemail,
+        count(*) FILTER (WHERE semantic_outcome = 'declined')::int AS declined,
+        count(*) FILTER (
+          WHERE semantic_outcome = 'technical_failure'
+        )::int AS "technicalFailure",
+        count(*) FILTER (WHERE semantic_outcome IS NULL)::int AS unclassified,
+        count(recording_duration_seconds)::int AS "durationSamples",
+        COALESCE(sum(recording_duration_seconds), 0)::int AS "durationTotal",
+        avg(recording_duration_seconds)::double precision AS "durationAverage",
+        percentile_cont(0.95) WITHIN GROUP (
+          ORDER BY recording_duration_seconds
+        )::double precision AS "durationP95",
+        count(first_audio_latency_ms)::int AS "firstAudioSamples",
+        COALESCE(sum(first_audio_latency_ms), 0)::int AS "firstAudioTotal",
+        avg(first_audio_latency_ms)::double precision AS "firstAudioAverage",
+        percentile_cont(0.95) WITHIN GROUP (
+          ORDER BY first_audio_latency_ms
+        )::double precision AS "firstAudioP95",
+        COALESCE(sum(transcription_retries), 0)::int AS "transcriptionRetries",
+        COALESCE(sum(realtime_disconnects), 0)::int AS "realtimeDisconnects",
+        COALESCE(sum(recoveries), 0)::int AS recoveries,
+        COALESCE(sum(telephony_usage_seconds), 0)::int AS "telephonyUsageSeconds",
+        COALESCE(sum(realtime_usage_seconds), 0)::int AS "realtimeUsageSeconds",
+        COALESCE(sum(transcription_usage_seconds), 0)::int
+          AS "transcriptionUsageSeconds"
+      FROM signals
+    `;
+    if (!row) throw new Error("Admin operations query returned no row");
+    return {
+      createdCalls: row.createdCalls,
+      attemptedCalls: row.attemptedCalls,
+      activeCalls: row.activeCalls,
+      terminalCalls: row.terminalCalls,
+      connectedCalls: row.connectedCalls,
+      consentGrantedCalls: row.consentGrantedCalls,
+      consentFailedCalls: row.consentFailedCalls,
+      technicalFailureCalls: row.technicalFailureCalls,
+      feedbackResponses: row.feedbackResponses,
+      semanticOutcomes: {
+        resolved: row.resolved,
+        partiallyResolved: row.partiallyResolved,
+        unresolved: row.unresolved,
+        wrongRecipient: row.wrongRecipient,
+        voicemail: row.voicemail,
+        declined: row.declined,
+        technicalFailure: row.technicalFailure,
+        unclassified: row.unclassified
+      },
+      recordedDurationSeconds: {
+        samples: row.durationSamples,
+        total: row.durationTotal,
+        average: row.durationAverage,
+        p95: row.durationP95
+      },
+      firstAudioLatencyMs: {
+        samples: row.firstAudioSamples,
+        total: row.firstAudioTotal,
+        average: row.firstAudioAverage,
+        p95: row.firstAudioP95
+      },
+      transcriptionRetries: row.transcriptionRetries,
+      realtimeDisconnects: row.realtimeDisconnects,
+      recoveries: row.recoveries,
+      usageSeconds: {
+        telephony: row.telephonyUsageSeconds,
+        realtime: row.realtimeUsageSeconds,
+        transcription: row.transcriptionUsageSeconds
+      }
+    };
+  }
+
+  async getAdminSystemFacts(
+    now: string,
+    recentSince: string
+  ): Promise<AdminSystemFacts> {
+    const [row] = await this.#sql<AdminSystemFactsRow[]>`
+      SELECT
+        system_controls.enabled AS "outboundCallsEnabled",
+        system_controls.reason AS "outboundCallsReason",
+        system_controls.updated_at AS "outboundCallsUpdatedAt",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE status IN ('dialing', 'in_progress', 'awaiting_approval')
+        ) AS "activeCalls",
+        (
+          SELECT count(*)::int FROM call_recordings
+          WHERE status IN ('starting', 'recording', 'processing')
+        ) AS "recordingsProcessing",
+        (
+          SELECT count(*)::int
+          FROM call_recordings
+          LEFT JOIN final_transcripts
+            ON final_transcripts.call_recording_id = call_recordings.id
+          WHERE call_recordings.status = 'available'
+            AND (
+              final_transcripts.id IS NULL
+              OR final_transcripts.status = 'failed'
+            )
+        ) AS "transcriptionReady",
+        (
+          SELECT count(*)::int FROM final_transcripts
+          WHERE status = 'processing'
+        ) AS "transcriptionProcessing",
+        (
+          SELECT count(*)::int FROM final_transcripts
+          WHERE status = 'failed'
+        ) AS "transcriptionFailed",
+        (
+          SELECT count(*)::int FROM call_recordings
+          WHERE status = 'available' AND delete_after IS NOT NULL
+        ) AS "retentionScheduled",
+        (
+          SELECT count(*)::int FROM call_recordings
+          WHERE status = 'available'
+            AND delete_after IS NOT NULL
+            AND delete_after <= ${now}::timestamptz
+        ) AS "retentionOverdue",
+        (
+          SELECT count(*)::int FROM call_events
+          WHERE occurred_at >= ${recentSince}::timestamptz
+            AND severity = 'warning'
+        ) AS "recentWarnings",
+        (
+          SELECT count(*)::int FROM call_events
+          WHERE occurred_at >= ${recentSince}::timestamptz
+            AND severity = 'error'
+        ) AS "recentErrors"
+      FROM system_controls
+      WHERE key = 'outbound_calls'
+    `;
+    if (!row) throw new Error("Outbound-call system control is missing");
+    return {
+      outboundCalls: {
+        enabled: row.outboundCallsEnabled,
+        reason: row.outboundCallsReason,
+        updatedAt: row.outboundCallsUpdatedAt
+          ? toIso(row.outboundCallsUpdatedAt)
+          : null
+      },
+      activeCalls: row.activeCalls,
+      recordingsProcessing: row.recordingsProcessing,
+      transcriptionReady: row.transcriptionReady,
+      transcriptionProcessing: row.transcriptionProcessing,
+      transcriptionFailed: row.transcriptionFailed,
+      retentionScheduled: row.retentionScheduled,
+      retentionOverdue: row.retentionOverdue,
+      recentWarnings: row.recentWarnings,
+      recentErrors: row.recentErrors
+    };
   }
 
   async getCallOutcome(id: string) {
@@ -3836,6 +4193,14 @@ function requireSwissPhone(value: string) {
 function requireReason(value: string) {
   const reason = value.trim();
   if (!reason) throw new Error("A safety-control reason is required");
+  return reason;
+}
+
+function requireSystemControlReason(value: string) {
+  const reason = requireReason(value);
+  if (reason.length > 500) {
+    throw new Error("A safety-control reason must not exceed 500 characters");
+  }
   return reason;
 }
 
