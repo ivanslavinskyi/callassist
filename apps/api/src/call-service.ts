@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   adminOperationsWindowBounds,
   adminSystemStatusSchema,
@@ -30,6 +31,7 @@ import {
   type CallAdmissionPolicy,
   type CallRepository,
   type AdminWebhookDeliveryFacts,
+  type CallChangeSignal,
   type ProviderWebhookDeliveryInput
 } from "./storage/call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
@@ -57,6 +59,7 @@ import {
 import { DurableJobWorker } from "./jobs/durable-job-worker";
 
 type Subscriber = (event: CallEvent) => void;
+type LiveEventMode = "disabled" | "publish" | "subscribe" | "both";
 
 export class CallServiceError extends Error {
   readonly diagnostic: {
@@ -98,7 +101,12 @@ export class CallService {
   readonly #admissionPolicy: CallAdmissionPolicy;
   readonly #operationalCostPolicy: OperationalCostPolicy;
   readonly #durableJobWorker: DurableJobWorker;
+  readonly #durableWorkerConfigured: boolean;
   readonly #durableWorkerMode: DurableWorkerMode;
+  readonly #liveEventMode: LiveEventMode;
+  readonly #sourceId = randomUUID();
+  readonly #pendingCallChangePublications = new Set<Promise<void>>();
+  #unsubscribeCallChanges: (() => Promise<void>) | null = null;
   #closePromise: Promise<void> | null = null;
 
   constructor(
@@ -113,6 +121,9 @@ export class CallService {
     runtime: {
       durableWorkerMode?: DurableWorkerMode;
       durableWorkerKeepAlive?: boolean;
+      durableWorkerEnabled?: boolean;
+      reportDurableWorkerHeartbeat?: boolean;
+      liveEventMode?: LiveEventMode;
     } = {}
   ) {
     this.#onBackgroundError = onBackgroundError;
@@ -121,6 +132,10 @@ export class CallService {
     this.#admissionPolicy = admissionPolicy;
     this.#operationalCostPolicy = operationalCostPolicy;
     this.#durableWorkerMode = runtime.durableWorkerMode ?? "embedded";
+    this.#liveEventMode = runtime.liveEventMode ?? "both";
+    const durableWorkerEnabled = runtime.durableWorkerEnabled ??
+      this.#durableWorkerMode === "embedded";
+    this.#durableWorkerConfigured = durableWorkerEnabled;
     this.#durableJobWorker = new DurableJobWorker(
       repository,
       {
@@ -155,7 +170,9 @@ export class CallService {
       },
       onBackgroundError,
       {
-        enabled: this.#durableWorkerMode === "embedded",
+        enabled: durableWorkerEnabled,
+        reportRuntimeHeartbeat:
+          runtime.reportDurableWorkerHeartbeat ?? false,
         ...(runtime.durableWorkerKeepAlive === undefined
           ? {}
           : { keepAlive: runtime.durableWorkerKeepAlive })
@@ -165,7 +182,19 @@ export class CallService {
 
   async initialize() {
     await this.repository.ping();
-    if (this.#durableWorkerMode === "external") return 0;
+    if (
+      !this.#unsubscribeCallChanges &&
+      ["subscribe", "both"].includes(this.#liveEventMode)
+    ) {
+      this.#unsubscribeCallChanges = await this.repository.subscribeCallChanges(
+        (signal) => {
+          void this.#handleRemoteCallChange(signal).catch(
+            this.#onBackgroundError
+          );
+        }
+      );
+    }
+    if (!this.#durableWorkerConfigured) return 0;
     const recoveredCalls = await this.repository.recoverInterruptedCalls();
     await this.repository.seedDurableJobs(new Date().toISOString());
     this.#durableJobWorker.start();
@@ -301,7 +330,12 @@ export class CallService {
         backgroundTasks: this.#durableJobWorker.runningCount,
         processingRecordings: this.#processingRecordings.size,
         durableWorkerEnabled: this.#durableJobWorker.enabled,
-        durableWorkerMode: this.#durableWorkerMode
+        durableWorkerMode: this.#durableWorkerMode,
+        externalWorker: externalWorkerView(
+          this.#durableWorkerMode,
+          facts.externalWorker,
+          generatedAt
+        )
       },
       workload: {
         activeCalls: facts.activeCalls,
@@ -772,6 +806,9 @@ export class CallService {
   async #close() {
     for (const id of this.#timers.keys()) this.#clearTimers(id);
     await this.#durableJobWorker.close();
+    await Promise.allSettled([...this.#pendingCallChangePublications]);
+    await this.#unsubscribeCallChanges?.();
+    this.#unsubscribeCallChanges = null;
     await this.repository.close();
   }
 
@@ -1063,6 +1100,30 @@ export class CallService {
 
   #publish(id: string, event: CallEvent) {
     for (const subscriber of this.#subscribers.get(id) ?? []) subscriber(event);
+    if (
+      event.type === "transcript.delta" ||
+      !["publish", "both"].includes(this.#liveEventMode)
+    ) return;
+    const publication = this.repository.publishCallChange({
+      sourceId: this.#sourceId,
+      callId: id
+    });
+    this.#pendingCallChangePublications.add(publication);
+    void publication.catch(this.#onBackgroundError).finally(() => {
+      this.#pendingCallChangePublications.delete(publication);
+    });
+  }
+
+  async #handleRemoteCallChange(signal: CallChangeSignal) {
+    if (
+      signal.sourceId === this.#sourceId ||
+      !this.#subscribers.has(signal.callId)
+    ) return;
+    const snapshot = await this.repository.get(signal.callId);
+    if (!snapshot) return;
+    for (const subscriber of this.#subscribers.get(signal.callId) ?? []) {
+      subscriber({ type: "call.updated", brief: snapshot.brief });
+    }
   }
 
   async #require(id: string): Promise<CallSnapshot> {
@@ -1070,6 +1131,44 @@ export class CallService {
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     return snapshot;
   }
+}
+
+function externalWorkerView(
+  mode: DurableWorkerMode,
+  facts: {
+    healthyInstances: number;
+    staleInstances: number;
+    activeJobs: number;
+    lastSeenAt: string | null;
+  },
+  generatedAt: string
+) {
+  if (mode === "embedded") {
+    return {
+      state: "not_applicable" as const,
+      healthyInstances: 0,
+      staleInstances: 0,
+      activeJobs: 0,
+      lastSeenAt: null,
+      lastSeenAgeSeconds: null
+    };
+  }
+  return {
+    state: facts.healthyInstances > 0
+      ? "healthy" as const
+      : facts.staleInstances > 0
+        ? "stale" as const
+        : "offline" as const,
+    ...facts,
+    lastSeenAgeSeconds: facts.lastSeenAt
+      ? Math.max(
+          0,
+          Math.floor(
+            (Date.parse(generatedAt) - Date.parse(facts.lastSeenAt)) / 1_000
+          )
+        )
+      : null
+  };
 }
 
 function transcriptionFailureCode(error: unknown) {

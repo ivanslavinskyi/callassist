@@ -49,6 +49,8 @@ import {
   connectedProviderStatuses,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
+  durableWorkerHeartbeatRetentionMs,
+  durableWorkerHeartbeatStaleAfterMs,
   encodeCallBriefCursor,
   encodeAdminCallCursor,
   shouldApplyProviderCallStatus,
@@ -58,6 +60,7 @@ import {
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
+  type CallChangeSignal,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
   type ListCallBriefsInput,
@@ -68,7 +71,8 @@ import {
   type SafetyControlInput,
   type StartAttemptInput,
   type ProviderWebhookDeliveryInput,
-  type ProviderWebhookKind
+  type ProviderWebhookKind,
+  type DurableWorkerHeartbeatInput
 } from "./call-repository";
 import {
   durableJobMaxAttempts,
@@ -118,6 +122,10 @@ type StoredProviderWebhookBucket = {
   deliveryCount: number;
   lastReceivedAt: string;
   lastErrorCode: string | null;
+};
+
+type StoredWorkerHeartbeat = DurableWorkerHeartbeatInput & {
+  stoppedAt: string | null;
 };
 
 const interruptedStatuses = new Set<CallBrief["status"]>([
@@ -178,6 +186,10 @@ export class InMemoryCallRepository implements CallRepository {
     string,
     StoredProviderWebhookBucket
   >();
+  readonly #callChangeSubscribers = new Set<
+    (signal: CallChangeSignal) => void
+  >();
+  readonly #workerHeartbeats = new Map<string, StoredWorkerHeartbeat>();
   readonly #recipientSuppressions = new Map<
     string,
     RecipientSuppressionInput & { createdAt: string }
@@ -769,6 +781,25 @@ export class InMemoryCallRepository implements CallRepository {
         facts.lastProblemCode = bucket.lastErrorCode;
       }
     }
+    const nowMs = Date.parse(now);
+    const retentionCutoff = nowMs - durableWorkerHeartbeatRetentionMs;
+    for (const [workerId, heartbeat] of this.#workerHeartbeats) {
+      if (Date.parse(heartbeat.seenAt) < retentionCutoff) {
+        this.#workerHeartbeats.delete(workerId);
+      }
+    }
+    const workerHeartbeats = [...this.#workerHeartbeats.values()];
+    const activeWorkerHeartbeats = workerHeartbeats.filter(
+      ({ stoppedAt }) => stoppedAt === null
+    );
+    const healthyWorkerHeartbeats = activeWorkerHeartbeats.filter(
+      ({ seenAt }) =>
+        nowMs - Date.parse(seenAt) <= durableWorkerHeartbeatStaleAfterMs
+    );
+    const staleWorkerHeartbeats = activeWorkerHeartbeats.filter(
+      ({ seenAt }) =>
+        nowMs - Date.parse(seenAt) > durableWorkerHeartbeatStaleAfterMs
+    );
     return {
       outboundCalls: {
         enabled: this.#outboundCallsEnabled,
@@ -805,6 +836,18 @@ export class InMemoryCallRepository implements CallRepository {
         .length,
       recentErrors: events.filter(({ severity }) => severity === "error")
         .length,
+      externalWorker: {
+        healthyInstances: healthyWorkerHeartbeats.length,
+        staleInstances: staleWorkerHeartbeats.length,
+        activeJobs: healthyWorkerHeartbeats.reduce(
+          (sum, { activeJobs }) => sum + activeJobs,
+          0
+        ),
+        lastSeenAt: workerHeartbeats
+          .map(({ seenAt }) => seenAt)
+          .sort()
+          .at(-1) ?? null
+      },
       webhooks,
       jobs: {
         queued: queued.length,
@@ -837,6 +880,42 @@ export class InMemoryCallRepository implements CallRepository {
             completedAt: _completedAt, ...job }) => copy(job))
       }
     };
+  }
+
+  async publishCallChange(signal: CallChangeSignal) {
+    for (const subscriber of this.#callChangeSubscribers) {
+      subscriber(copy(signal));
+    }
+  }
+
+  async subscribeCallChanges(
+    subscriber: (signal: CallChangeSignal) => void
+  ) {
+    this.#callChangeSubscribers.add(subscriber);
+    return async () => {
+      this.#callChangeSubscribers.delete(subscriber);
+    };
+  }
+
+  async reportDurableWorkerHeartbeat(input: DurableWorkerHeartbeatInput) {
+    const cutoff = Date.parse(input.seenAt) - durableWorkerHeartbeatRetentionMs;
+    for (const [workerId, heartbeat] of this.#workerHeartbeats) {
+      if (Date.parse(heartbeat.seenAt) < cutoff) {
+        this.#workerHeartbeats.delete(workerId);
+      }
+    }
+    this.#workerHeartbeats.set(input.workerId, {
+      ...copy(input),
+      stoppedAt: null
+    });
+  }
+
+  async stopDurableWorkerHeartbeat(workerId: string, stoppedAt: string) {
+    const heartbeat = this.#workerHeartbeats.get(workerId);
+    if (!heartbeat) return;
+    heartbeat.seenAt = stoppedAt;
+    heartbeat.stoppedAt = stoppedAt;
+    heartbeat.activeJobs = 0;
   }
 
   async recordProviderWebhookDelivery(input: ProviderWebhookDeliveryInput) {

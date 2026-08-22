@@ -69,8 +69,11 @@ import {
   connectedProviderStatuses,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
+  durableWorkerHeartbeatRetentionMs,
+  durableWorkerHeartbeatStaleAfterMs,
   encodeAdminCallCursor,
   encodeCallBriefCursor,
+  isUuid,
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
@@ -78,6 +81,7 @@ import {
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
+  type CallChangeSignal,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
   type PromoCodeCreationResult,
@@ -90,7 +94,8 @@ import {
   type StartAttemptInput,
   type ProviderWebhookDeliveryInput,
   type ProviderWebhookKind,
-  type ProviderWebhookOutcome
+  type ProviderWebhookOutcome,
+  type DurableWorkerHeartbeatInput
 } from "./call-repository";
 
 type DatabaseDate = Date | string;
@@ -293,6 +298,10 @@ type AdminSystemFactsRow = {
   retentionQueued: number;
   providerReconciliationQueued: number;
   oldestJobDueAt: DatabaseDate | null;
+  workerHealthyInstances: number;
+  workerStaleInstances: number;
+  workerActiveJobs: number;
+  workerLastSeenAt: DatabaseDate | null;
 };
 
 type DurableJobRow = {
@@ -369,6 +378,8 @@ const terminalStatuses = new Set<CallBrief["status"]>([
   "stopped",
   "failed"
 ]);
+
+const callChangeChannel = "callassist_call_changes_v1";
 
 function toIso(value: DatabaseDate) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -1514,6 +1525,12 @@ export class PostgresCallRepository implements CallRepository {
     recentSince: string,
     webhookSince = recentSince
   ): Promise<AdminSystemFacts> {
+    const workerFreshSince = new Date(
+      Date.parse(now) - durableWorkerHeartbeatStaleAfterMs
+    ).toISOString();
+    const workerRetentionSince = new Date(
+      Date.parse(now) - durableWorkerHeartbeatRetentionMs
+    ).toISOString();
     const [row] = await this.#sql<AdminSystemFactsRow[]>`
       SELECT
         system_controls.enabled AS "outboundCallsEnabled",
@@ -1600,7 +1617,28 @@ export class PostgresCallRepository implements CallRepository {
         ) AS "providerReconciliationQueued",
         (
           SELECT min(run_after) FROM durable_jobs WHERE status = 'queued'
-        ) AS "oldestJobDueAt"
+        ) AS "oldestJobDueAt",
+        (
+          SELECT count(*)::int FROM durable_worker_heartbeats
+          WHERE stopped_at IS NULL
+            AND last_seen_at >= ${workerFreshSince}::timestamptz
+        ) AS "workerHealthyInstances",
+        (
+          SELECT count(*)::int FROM durable_worker_heartbeats
+          WHERE stopped_at IS NULL
+            AND last_seen_at < ${workerFreshSince}::timestamptz
+            AND last_seen_at >= ${workerRetentionSince}::timestamptz
+        ) AS "workerStaleInstances",
+        (
+          SELECT coalesce(sum(active_jobs), 0)::int
+          FROM durable_worker_heartbeats
+          WHERE stopped_at IS NULL
+            AND last_seen_at >= ${workerFreshSince}::timestamptz
+        ) AS "workerActiveJobs",
+        (
+          SELECT max(last_seen_at) FROM durable_worker_heartbeats
+          WHERE last_seen_at >= ${workerRetentionSince}::timestamptz
+        ) AS "workerLastSeenAt"
       FROM system_controls
       WHERE key = 'outbound_calls'
     `;
@@ -1646,6 +1684,12 @@ export class PostgresCallRepository implements CallRepository {
       retentionOverdue: row.retentionOverdue,
       recentWarnings: row.recentWarnings,
       recentErrors: row.recentErrors,
+      externalWorker: {
+        healthyInstances: row.workerHealthyInstances,
+        staleInstances: row.workerStaleInstances,
+        activeJobs: row.workerActiveJobs,
+        lastSeenAt: row.workerLastSeenAt ? toIso(row.workerLastSeenAt) : null
+      },
       webhooks: aggregateProviderWebhookFacts(webhookRows),
       jobs: {
         queued: row.jobsQueued,
@@ -1669,6 +1713,66 @@ export class PostgresCallRepository implements CallRepository {
         }) => job)
       }
     };
+  }
+
+  async publishCallChange(signal: CallChangeSignal) {
+    if (!isUuid(signal.sourceId) || !isUuid(signal.callId)) {
+      throw new Error("CALL_CHANGE_SIGNAL_INVALID");
+    }
+    await this.#sql.notify(callChangeChannel, JSON.stringify(signal));
+  }
+
+  async subscribeCallChanges(
+    subscriber: (signal: CallChangeSignal) => void
+  ) {
+    const listener = await this.#sql.listen(callChangeChannel, (payload) => {
+      const signal = parseCallChangeSignal(payload);
+      if (signal) subscriber(signal);
+    });
+    return () => listener.unlisten();
+  }
+
+  async reportDurableWorkerHeartbeat(input: DurableWorkerHeartbeatInput) {
+    const retentionCutoff = new Date(
+      Date.parse(input.seenAt) - durableWorkerHeartbeatRetentionMs
+    ).toISOString();
+    await this.#sql.begin(async (transaction) => {
+      await transaction`
+        DELETE FROM durable_worker_heartbeats
+        WHERE last_seen_at < ${retentionCutoff}::timestamptz
+      `;
+      await transaction`
+        INSERT INTO durable_worker_heartbeats (
+          worker_id,
+          started_at,
+          last_seen_at,
+          stopped_at,
+          active_jobs
+        ) VALUES (
+          ${input.workerId},
+          ${input.startedAt}::timestamptz,
+          ${input.seenAt}::timestamptz,
+          NULL,
+          ${input.activeJobs}
+        )
+        ON CONFLICT (worker_id) DO UPDATE SET
+          started_at = EXCLUDED.started_at,
+          last_seen_at = EXCLUDED.last_seen_at,
+          stopped_at = NULL,
+          active_jobs = EXCLUDED.active_jobs
+      `;
+    });
+  }
+
+  async stopDurableWorkerHeartbeat(workerId: string, stoppedAt: string) {
+    await this.#sql`
+      UPDATE durable_worker_heartbeats
+      SET
+        last_seen_at = GREATEST(last_seen_at, ${stoppedAt}::timestamptz),
+        stopped_at = ${stoppedAt}::timestamptz,
+        active_jobs = 0
+      WHERE worker_id = ${workerId}
+    `;
   }
 
   async recordProviderWebhookDelivery(input: ProviderWebhookDeliveryInput) {
@@ -4937,6 +5041,20 @@ function safeProviderWebhookErrorCode(value?: string | null) {
   return value && /^[a-z0-9_.:/-]{1,160}$/i.test(value)
     ? value
     : "WEBHOOK_DELIVERY_FAILED";
+}
+
+function parseCallChangeSignal(payload: string): CallChangeSignal | null {
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const { sourceId, callId } = parsed as Record<string, unknown>;
+    return typeof sourceId === "string" && isUuid(sourceId) &&
+      typeof callId === "string" && isUuid(callId)
+      ? { sourceId, callId }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {

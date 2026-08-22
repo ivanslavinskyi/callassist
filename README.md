@@ -118,9 +118,11 @@ The API process then only enqueues work; it never performs startup recovery or
 claims a durable lease. The worker owns recovery, seeding, polling, heartbeats,
 and execution. Its `SIGINT`/`SIGTERM` shutdown stops new claims, completes the
 active lease, and closes the database connection. Production builds expose the
-same boundary through `start` and `start:worker`. `/admin/system` reports the
-configured topology and only the API-local worker state; external worker health
-and cross-process SSE delivery still require deployment monitoring/event-bus work.
+same boundary through `start` and `start:worker`. PostgreSQL invalidation signals
+make committed worker changes refresh an open API SSE stream without carrying call
+content in the notification. `/admin/system` reports fresh/stale/offline external
+worker heartbeats and active work; production alerting still requires deployment
+monitoring and notification routing.
 
 `pnpm env:init` creates `.env` with independent encryption and keyed promo-code
 hash keys and never overwrites an existing file. Existing deployments may temporarily
@@ -316,9 +318,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
 - Continue from the completed durable transcription/retention, Twilio status
-  reconciliation, webhook-delivery visibility, split worker runtime, and
-  real-provider crash drills with cross-process live events and externally monitored
-  worker liveness.
+  reconciliation, webhook-delivery visibility, split worker runtime, real-provider
+  crash drills, cross-process live state, and worker heartbeat visibility with
+  production probes, alerts, and incident ownership.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

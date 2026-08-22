@@ -34,6 +34,7 @@ describeWithDatabase("PostgresCallRepository", () => {
     await runMigrations(databaseUrl);
     repository = new PostgresCallRepository(databaseUrl!, encryptionKey);
     inspection = postgres(databaseUrl!, { max: 1 });
+    await inspection`DELETE FROM durable_worker_heartbeats`;
     const suffix = ownerA.replaceAll("-", "");
     await inspection`
       INSERT INTO users (
@@ -92,6 +93,23 @@ describeWithDatabase("PostgresCallRepository", () => {
     })).resolves.toMatchObject({ items: [] });
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerA)).resolves.toBe(true);
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
+  });
+
+  it("relays bounded call-change signals through PostgreSQL", async () => {
+    const publisher = new PostgresCallRepository(databaseUrl!, encryptionKey);
+    const sourceId = randomUUID();
+    const callId = randomUUID();
+    let release!: (signal: { sourceId: string; callId: string }) => void;
+    const received = new Promise<{ sourceId: string; callId: string }>(
+      (resolve) => { release = resolve; }
+    );
+    const unsubscribe = await repository.subscribeCallChanges(release);
+    try {
+      await publisher.publishCallChange({ sourceId, callId });
+      await expect(received).resolves.toEqual({ sourceId, callId });
+    } finally {
+      await Promise.all([unsubscribe(), publisher.close()]);
+    }
   });
 
   it("keeps credit reservations and settlements atomic in PostgreSQL", async () => {
@@ -1060,6 +1078,19 @@ describeWithDatabase("PostgresCallRepository", () => {
       receivedAt: new Date(now.getTime() - 5_000).toISOString(),
       errorCode: "raw provider error with private text"
     });
+    const freshWorkerId = randomUUID();
+    await repository.reportDurableWorkerHeartbeat({
+      workerId: freshWorkerId,
+      startedAt: new Date(now.getTime() - 30_000).toISOString(),
+      seenAt: new Date(now.getTime() - 1_000).toISOString(),
+      activeJobs: 1
+    });
+    await repository.reportDurableWorkerHeartbeat({
+      workerId: randomUUID(),
+      startedAt: new Date(now.getTime() - 60_000).toISOString(),
+      seenAt: new Date(now.getTime() - 20_000).toISOString(),
+      activeJobs: 1
+    });
 
     const system = await repository.getAdminSystemFacts(
       now.toISOString(),
@@ -1073,6 +1104,12 @@ describeWithDatabase("PostgresCallRepository", () => {
       activeCalls: expect.any(Number),
       recentWarnings: expect.any(Number),
       recentErrors: expect.any(Number),
+      externalWorker: {
+        healthyInstances: 1,
+        staleInstances: 1,
+        activeJobs: 1,
+        lastSeenAt: expect.any(String)
+      },
       webhooks: {
         voice: {
           accepted: 2,
@@ -1091,6 +1128,10 @@ describeWithDatabase("PostgresCallRepository", () => {
         }
       }
     });
+    await repository.stopDurableWorkerHeartbeat(
+      freshWorkerId,
+      now.toISOString()
+    );
     const [storedWebhookFacts] = await inspection<{
       rows: number;
       total: number;

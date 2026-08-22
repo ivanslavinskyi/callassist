@@ -171,7 +171,15 @@ export const adminSystemStatusSchema = z.strictObject({
     backgroundTasks: countSchema,
     processingRecordings: countSchema,
     durableWorkerEnabled: z.boolean(),
-    durableWorkerMode: z.enum(["embedded", "external"])
+    durableWorkerMode: z.enum(["embedded", "external"]),
+    externalWorker: z.strictObject({
+      state: z.enum(["not_applicable", "healthy", "stale", "offline"]),
+      healthyInstances: countSchema,
+      staleInstances: countSchema,
+      activeJobs: countSchema,
+      lastSeenAt: z.iso.datetime().nullable(),
+      lastSeenAgeSeconds: secondsSchema.nullable()
+    })
   }),
   workload: z.strictObject({
     activeCalls: countSchema,

@@ -148,6 +148,23 @@ export function AdminSystemConsole() {
                     value={copy.durableWorkerModes[status.runtime.durableWorkerMode]}
                   />
                   <Fact label={copy.durableWorker} value={status.runtime.durableWorkerEnabled ? copy.enabled : copy.disabled} />
+                  <Fact
+                    label={copy.externalWorker}
+                    value={copy.externalWorkerStates[status.runtime.externalWorker.state]}
+                  />
+                  {status.runtime.durableWorkerMode === "external" ? (
+                    <>
+                      <Fact label={copy.workerHealthyInstances} value={String(status.runtime.externalWorker.healthyInstances)} />
+                      <Fact label={copy.workerStaleInstances} value={String(status.runtime.externalWorker.staleInstances)} />
+                      <Fact label={copy.workerActiveJobs} value={String(status.runtime.externalWorker.activeJobs)} />
+                      <Fact
+                        label={copy.workerLastSeen}
+                        value={status.runtime.externalWorker.lastSeenAt
+                          ? `${formatDate(status.runtime.externalWorker.lastSeenAt, locale)} · ${formatSeconds(status.runtime.externalWorker.lastSeenAgeSeconds ?? 0)}`
+                          : copy.notAvailable}
+                      />
+                    </>
+                  ) : null}
                   <Fact label={copy.warnings} value={String(status.recentTelemetry.warnings)} />
                   <Fact label={copy.errors} value={String(status.recentTelemetry.errors)} />
                 </dl>

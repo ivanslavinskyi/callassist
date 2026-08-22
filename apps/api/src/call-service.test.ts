@@ -74,7 +74,104 @@ describe("CallService", () => {
     await expect(service.getAdminSystemStatus(false)).resolves.toMatchObject({
       runtime: {
         durableWorkerMode: "external",
-        durableWorkerEnabled: false
+        durableWorkerEnabled: false,
+        externalWorker: {
+          state: "offline",
+          healthyInstances: 0,
+          staleInstances: 0,
+          activeJobs: 0,
+          lastSeenAt: null
+        }
+      }
+    });
+  });
+
+  it("relays persisted call changes between service processes", async () => {
+    const repository = new InMemoryCallRepository();
+    const first = new CallService(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { durableWorkerMode: "external" }
+    );
+    const second = new CallService(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { durableWorkerMode: "external" }
+    );
+    services.push(first, second);
+    await Promise.all([first.initialize(), second.initialize()]);
+    const brief = await first.create({
+      recipientName: "Cross-process event test",
+      phoneNumber: "+41710000065",
+      objective: "Verify live state invalidation",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    });
+    const localEvents: string[] = [];
+    const remoteEvents: string[] = [];
+    first.subscribe(brief.id, ({ type }) => localEvents.push(type));
+    second.subscribe(brief.id, ({ type }) => remoteEvents.push(type));
+
+    await first.approveCompilation(brief.id);
+
+    await vi.waitFor(() => expect(remoteEvents).toEqual(["call.updated"]));
+    expect(localEvents).toEqual(["call.updated"]);
+  });
+
+  it("reports fresh and stale external worker heartbeats", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { durableWorkerMode: "external" }
+    );
+    services.push(service);
+    await repository.reportDurableWorkerHeartbeat({
+      workerId: "fresh-worker",
+      startedAt: "2026-08-22T12:00:00.000Z",
+      seenAt: "2026-08-22T12:00:29.000Z",
+      activeJobs: 1
+    });
+    await repository.reportDurableWorkerHeartbeat({
+      workerId: "stale-worker",
+      startedAt: "2026-08-22T11:59:00.000Z",
+      seenAt: "2026-08-22T12:00:00.000Z",
+      activeJobs: 1
+    });
+
+    await expect(service.getAdminSystemStatus(
+      false,
+      new Date("2026-08-22T12:00:30.000Z")
+    )).resolves.toMatchObject({
+      runtime: {
+        externalWorker: {
+          state: "healthy",
+          healthyInstances: 1,
+          staleInstances: 1,
+          activeJobs: 1,
+          lastSeenAt: "2026-08-22T12:00:29.000Z",
+          lastSeenAgeSeconds: 1
+        }
       }
     });
   });

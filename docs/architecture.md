@@ -49,7 +49,8 @@ Twilio dual-channel recording ──► authenticated API download
 - OpenAI Moderation: checks both raw input and generated runtime text.
 - OpenAI Realtime: direct speech-to-speech conversation. External actions remain under server control.
 - OpenAI file transcription: post-call processing of the complete recording with bounded call context.
-- PostgreSQL durable jobs: transactional enqueue, exclusive expiring leases, worker fencing, bounded retry/dead-letter state, and immutable attempt evidence for final transcription, recording retention, and Twilio call/recording status reconciliation. Local development defaults to an embedded worker; `DURABLE_WORKER_MODE=external` turns the API into an enqueue-only process and moves recovery, seeding, polling, heartbeats, and execution to the dedicated worker entry point.
+- PostgreSQL durable jobs: transactional enqueue, exclusive expiring leases, worker fencing, bounded retry/dead-letter state, and immutable attempt evidence for final transcription, recording retention, and Twilio call/recording status reconciliation. Local development defaults to an embedded worker; `DURABLE_WORKER_MODE=external` turns the API into an enqueue-only process and moves recovery, seeding, polling, lease renewal, runtime heartbeats, and execution to the dedicated worker entry point.
+- Cross-process live state: PostgreSQL `LISTEN/NOTIFY` carries only a versioned invalidation signal containing a random process UUID and application call UUID. It never carries a brief, phone number, transcript, provider identifier, or credential. Receiving API processes re-read the authorized canonical snapshot and emit the existing SSE envelope to their local subscribers.
 - Webhook delivery evidence: bounded hourly PostgreSQL aggregates for accepted, rejected, unmatched, and failed Twilio HTTP callbacks. They retain controlled error codes and timestamps for 30 days, never provider/call IDs or payloads, and do not replace signature validation or upstream monitoring.
 
 ## Storage boundary
@@ -58,7 +59,7 @@ The API depends on a `CallRepository` interface. The in-memory and PostgreSQL re
 
 Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. Audit events do not include source text, transcript content, or private fact values. Call audit events, account-admin events, safety events, and credit transactions are protected against mutation and deletion at the PostgreSQL layer.
 
-On embedded-runtime startup, or when the dedicated worker starts, pending approvals expire and recovery is recorded in the audit trail. An unfinished Twilio call with a stored provider SID remains active until a due reconciliation job reads the provider state; it is not assigned a synthetic failure or refund merely because the process restarted. Mock calls and attempts without a recoverable provider identity still fail closed. Incomplete provider recordings, available recordings, and due retention work are transactionally seeded or advanced in durable jobs; interrupted leases expire and may be reclaimed without allowing a stale worker to publish domain state. Graceful worker shutdown stops new claims, waits for the active handler, and then closes storage; a restarted worker claims remaining or expired work through the same fencing boundary. Webhook delivery is summarized in hourly, low-cardinality buckets and old rows are removed on subsequent writes; the admin view queries only its bounded recent window. A cross-process live event bus remains planned, so worker-originated state becomes visible through subsequent database reads but does not yet produce an API-process SSE event.
+On embedded-runtime startup, or when the dedicated worker starts, pending approvals expire and recovery is recorded in the audit trail. An unfinished Twilio call with a stored provider SID remains active until a due reconciliation job reads the provider state; it is not assigned a synthetic failure or refund merely because the process restarted. Mock calls and attempts without a recoverable provider identity still fail closed. Incomplete provider recordings, available recordings, and due retention work are transactionally seeded or advanced in durable jobs; interrupted leases expire and may be reclaimed without allowing a stale worker to publish domain state. Graceful worker shutdown stops new claims, waits for the active handler, marks its runtime heartbeat stopped, and then closes storage; a restarted worker claims remaining or expired work through the same fencing boundary. A killed worker becomes stale after 15 seconds. Heartbeat rows are bounded to a 30-day operational window and expose counts/timestamps only. Webhook delivery is summarized in hourly, low-cardinality buckets and old rows are removed on subsequent writes; the admin view queries only its bounded recent window.
 
 ## Brief Compiler and policy boundary
 
@@ -123,7 +124,7 @@ Production should preserve this boundary with a dedicated ingress route or servi
 
 ## Durable call telemetry
 
-The live `CallEvent` union remains an ephemeral SSE/UI envelope. Operational reconstruction uses the separately named, schema-versioned `DurableCallEvent` contract and append-only `call_events` rows. Each row has a per-call sequence and call/attempt/owner correlation plus deterministic source, stage, and severity fields. PostgreSQL rejects updates and deletes; the memory repository mirrors the same contract for deterministic tests.
+The live `CallEvent` union remains an ephemeral SSE/UI envelope. Operational reconstruction uses the separately named, schema-versioned `DurableCallEvent` contract and append-only `call_events` rows. Each row has a per-call sequence and call/attempt/owner correlation plus deterministic source, stage, and severity fields. PostgreSQL rejects updates and deletes; the memory repository mirrors the same contract for deterministic tests. Persisted changes publish a small best-effort invalidation after commit. Each API ignores its own signal, rehydrates remote state only when it has a local subscriber, and emits `call.updated`; the browser already refreshes the full owner-authorized snapshot for every non-delta event. Notification loss is not a correctness boundary because initial load/reconnect reads PostgreSQL. Non-persisted Realtime transcript deltas remain local to the process that owns the media stream.
 
 Each event name owns a strict, bounded metadata schema. Durable telemetry may contain lifecycle states, controlled failure codes, compiler/provider/model versions, recording duration/channels, and credit settlement classification. It never contains phone numbers, names, objectives, approved facts, transcript text, credentials, raw provider payloads, or arbitrary exception bodies. Staff/action `audit_events` remain a separate evidence stream, and live SSE behavior is unchanged.
 
@@ -172,8 +173,9 @@ payloads. A superadmin may restart dead-letter work only with a recorded reason;
 The view distinguishes local component configuration from upstream health. Twilio and OpenAI entries therefore set
 `upstreamChecked: false`; they must not be interpreted as provider availability.
 `generatedAt` is the snapshot freshness boundary. Runtime facts distinguish an
-API-embedded worker from external-worker topology and report only API-local execution;
-they are not an external worker heartbeat. The current view deliberately does
+API-embedded worker from external-worker topology. In external mode they expose the
+fresh/stale/offline heartbeat state, healthy/stale instance counts, active leased-job
+count, and last-seen age without exposing a worker identifier. The current view deliberately does
 not infer alert severity from raw counts: production alert thresholds, probes,
 notification routing, and ownership belong to the deployment/monitoring checkpoint.
 

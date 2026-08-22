@@ -240,6 +240,12 @@ export type AdminSystemFacts = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  externalWorker: {
+    healthyInstances: number;
+    staleInstances: number;
+    activeJobs: number;
+    lastSeenAt: string | null;
+  };
   webhooks: Record<ProviderWebhookKind, AdminWebhookDeliveryFacts>;
   jobs: {
     queued: number;
@@ -267,6 +273,21 @@ export type AdminSystemFacts = {
     >>;
   };
 };
+
+export type CallChangeSignal = {
+  sourceId: string;
+  callId: string;
+};
+
+export type DurableWorkerHeartbeatInput = {
+  workerId: string;
+  startedAt: string;
+  seenAt: string;
+  activeJobs: number;
+};
+
+export const durableWorkerHeartbeatStaleAfterMs = 15_000;
+export const durableWorkerHeartbeatRetentionMs = 30 * 24 * 60 * 60 * 1_000;
 
 export function encodeCallBriefCursor(cursor: CallBriefCursor) {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
@@ -403,6 +424,14 @@ export interface CallRepository {
     recentSince: string,
     webhookSince?: string
   ): Promise<AdminSystemFacts>;
+  publishCallChange(signal: CallChangeSignal): Promise<void>;
+  subscribeCallChanges(
+    subscriber: (signal: CallChangeSignal) => void
+  ): Promise<() => Promise<void>>;
+  reportDurableWorkerHeartbeat(
+    input: DurableWorkerHeartbeatInput
+  ): Promise<void>;
+  stopDurableWorkerHeartbeat(workerId: string, stoppedAt: string): Promise<void>;
   recordProviderWebhookDelivery(
     input: ProviderWebhookDeliveryInput
   ): Promise<void>;

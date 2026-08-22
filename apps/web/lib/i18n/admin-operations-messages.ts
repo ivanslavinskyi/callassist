@@ -109,6 +109,17 @@ const en = {
     embedded: "Embedded in API",
     external: "Separate runtime"
   },
+  externalWorker: "External worker",
+  externalWorkerStates: {
+    not_applicable: "Not applicable",
+    healthy: "Healthy",
+    stale: "Heartbeat stale",
+    offline: "Offline"
+  },
+  workerHealthyInstances: "Healthy instances",
+  workerStaleInstances: "Stale instances",
+  workerActiveJobs: "Active jobs",
+  workerLastSeen: "Last heartbeat",
   enabled: "Enabled",
   disabled: "Disabled",
   recentTelemetryTitle: "Recent telemetry (24h)",
@@ -306,6 +317,17 @@ const de: AdminOperationsCopy = {
     embedded: "In API eingebettet",
     external: "Separater Prozess"
   },
+  externalWorker: "Externer Worker",
+  externalWorkerStates: {
+    not_applicable: "Nicht zutreffend",
+    healthy: "Fehlerfrei",
+    stale: "Heartbeat veraltet",
+    offline: "Offline"
+  },
+  workerHealthyInstances: "Aktive Instanzen",
+  workerStaleInstances: "Veraltete Instanzen",
+  workerActiveJobs: "Laufende Jobs",
+  workerLastSeen: "Letzter Heartbeat",
   enabled: "Aktiviert",
   disabled: "Deaktiviert",
   recentTelemetryTitle: "Letzte Telemetrie (24 Std.)",

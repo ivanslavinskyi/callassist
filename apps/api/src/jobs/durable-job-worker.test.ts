@@ -316,6 +316,47 @@ describe("durable job worker", () => {
     await worker.close();
   });
 
+  it("registers and stops its externally visible runtime heartbeat", async () => {
+    const repository = new InMemoryCallRepository();
+    const worker = new DurableJobWorker(
+      repository,
+      { final_transcription: async () => undefined },
+      () => undefined,
+      {
+        workerId: "heartbeat-worker",
+        reportRuntimeHeartbeat: true,
+        runtimeHeartbeatIntervalMs: 60_000,
+        now: () => new Date("2099-05-02T00:00:00.000Z")
+      }
+    );
+
+    worker.start();
+    await vi.waitFor(async () => {
+      const facts = await repository.getAdminSystemFacts(
+        "2099-05-02T00:00:01.000Z",
+        "2099-05-01T00:00:00.000Z"
+      );
+      expect(facts.externalWorker).toMatchObject({
+        healthyInstances: 1,
+        staleInstances: 0,
+        activeJobs: 0
+      });
+    });
+
+    await worker.close();
+    await expect(repository.getAdminSystemFacts(
+      "2099-05-02T00:00:02.000Z",
+      "2099-05-01T00:00:00.000Z"
+    )).resolves.toMatchObject({
+      externalWorker: {
+        healthyInstances: 0,
+        staleInstances: 0,
+        activeJobs: 0,
+        lastSeenAt: "2099-05-02T00:00:00.000Z"
+      }
+    });
+  });
+
   it("finishes the active lease on shutdown and leaves later work for restart", async () => {
     const { repository, recordingId } = await repositoryWithAvailableRecording();
     await repository.enqueueDurableJob({

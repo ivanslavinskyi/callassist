@@ -127,7 +127,15 @@ describe("admin operations contracts", () => {
         backgroundTasks: 0,
         processingRecordings: 0,
         durableWorkerEnabled: false,
-        durableWorkerMode: "external"
+        durableWorkerMode: "external",
+        externalWorker: {
+          state: "offline",
+          healthyInstances: 0,
+          staleInstances: 0,
+          activeJobs: 0,
+          lastSeenAt: null,
+          lastSeenAgeSeconds: null
+        }
       },
       workload: {
         activeCalls: 0,

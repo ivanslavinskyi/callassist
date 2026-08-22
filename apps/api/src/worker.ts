@@ -22,8 +22,11 @@ const service = new CallService(
   undefined,
   undefined,
   {
-    durableWorkerMode: "embedded",
-    durableWorkerKeepAlive: true
+    durableWorkerMode: "external",
+    durableWorkerEnabled: true,
+    durableWorkerKeepAlive: true,
+    reportDurableWorkerHeartbeat: true,
+    liveEventMode: "publish"
   }
 );
 const initialization = service.initialize();

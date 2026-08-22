@@ -20,6 +20,8 @@ type DurableJobWorkerOptions = {
   now?: () => Date;
   enabled?: boolean;
   keepAlive?: boolean;
+  reportRuntimeHeartbeat?: boolean;
+  runtimeHeartbeatIntervalMs?: number;
 };
 
 export class DurableJobWorker {
@@ -30,8 +32,15 @@ export class DurableJobWorker {
   readonly #types: DurableJobType[];
   readonly #configured: boolean;
   readonly #keepAlive: boolean;
+  readonly #reportRuntimeHeartbeat: boolean;
+  readonly #runtimeHeartbeatIntervalMs: number;
+  readonly #startedAt: string;
   #timer: NodeJS.Timeout | null = null;
+  #runtimeHeartbeatTimer: NodeJS.Timeout | null = null;
+  #runtimeHeartbeatWrite: Promise<void> | null = null;
+  #runtimeHeartbeatDirty = false;
   #drain: Promise<void> | null = null;
+  #activeJobs = 0;
   #closed = false;
 
   constructor(
@@ -47,6 +56,10 @@ export class DurableJobWorker {
     this.#types = Object.keys(handlers) as DurableJobType[];
     this.#configured = options.enabled ?? true;
     this.#keepAlive = options.keepAlive ?? false;
+    this.#reportRuntimeHeartbeat = options.reportRuntimeHeartbeat ?? false;
+    this.#runtimeHeartbeatIntervalMs =
+      options.runtimeHeartbeatIntervalMs ?? 5_000;
+    this.#startedAt = this.#now().toISOString();
   }
 
   get runningCount() {
@@ -66,7 +79,15 @@ export class DurableJobWorker {
     ) return;
     this.#timer = setInterval(() => this.wake(), this.#pollIntervalMs);
     if (!this.#keepAlive) this.#timer.unref();
+    if (this.#reportRuntimeHeartbeat) {
+      this.#runtimeHeartbeatTimer = setInterval(
+        () => this.#writeRuntimeHeartbeat(),
+        this.#runtimeHeartbeatIntervalMs
+      );
+      if (!this.#keepAlive) this.#runtimeHeartbeatTimer.unref();
+    }
     this.wake();
+    this.#writeRuntimeHeartbeat();
   }
 
   wake() {
@@ -78,14 +99,21 @@ export class DurableJobWorker {
     ) return;
     this.#drain = this.#drainDueJobs()
       .catch(this.onError)
-      .finally(() => { this.#drain = null; });
+      .finally(() => {
+        this.#drain = null;
+        this.#writeRuntimeHeartbeat();
+      });
+    this.#writeRuntimeHeartbeat();
   }
 
   async runOnce() {
     if (!this.#configured || this.#closed) return;
     if (this.#drain) return this.#drain;
     this.#drain = this.#drainDueJobs()
-      .finally(() => { this.#drain = null; });
+      .finally(() => {
+        this.#drain = null;
+        this.#writeRuntimeHeartbeat();
+      });
     return this.#drain;
   }
 
@@ -93,7 +121,38 @@ export class DurableJobWorker {
     this.#closed = true;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
+    if (this.#runtimeHeartbeatTimer) {
+      clearInterval(this.#runtimeHeartbeatTimer);
+    }
+    this.#runtimeHeartbeatTimer = null;
     await this.#drain;
+    await this.#runtimeHeartbeatWrite;
+    if (this.#reportRuntimeHeartbeat) {
+      await this.repository.stopDurableWorkerHeartbeat(
+        this.#workerId,
+        this.#now().toISOString()
+      ).catch(this.onError);
+    }
+  }
+
+  #writeRuntimeHeartbeat() {
+    if (!this.#reportRuntimeHeartbeat || this.#closed) return;
+    if (this.#runtimeHeartbeatWrite) {
+      this.#runtimeHeartbeatDirty = true;
+      return;
+    }
+    this.#runtimeHeartbeatWrite = this.repository.reportDurableWorkerHeartbeat({
+      workerId: this.#workerId,
+      startedAt: this.#startedAt,
+      seenAt: this.#now().toISOString(),
+      activeJobs: this.#activeJobs
+    }).catch(this.onError).finally(() => {
+      this.#runtimeHeartbeatWrite = null;
+      if (this.#runtimeHeartbeatDirty) {
+        this.#runtimeHeartbeatDirty = false;
+        this.#writeRuntimeHeartbeat();
+      }
+    });
   }
 
   async #drainDueJobs() {
@@ -115,6 +174,8 @@ export class DurableJobWorker {
   async #execute(job: DurableJob) {
     const handler = this.handlers[job.type];
     if (!handler) return;
+    this.#activeJobs = 1;
+    this.#writeRuntimeHeartbeat();
     const heartbeat = setInterval(() => {
       const now = this.#now();
       void this.repository.renewDurableJobLease(
@@ -154,6 +215,8 @@ export class DurableJobWorker {
       if (failed) this.onError(error);
     } finally {
       clearInterval(heartbeat);
+      this.#activeJobs = 0;
+      this.#writeRuntimeHeartbeat();
     }
   }
 }
