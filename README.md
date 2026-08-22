@@ -106,6 +106,22 @@ The API development process intentionally does not auto-restart when source
 files change. Restart it manually between edits: an automatic restart during an
 active PSTN call would terminate the Twilio Media Stream.
 
+Durable jobs run inside the API by default for one-process local development.
+To exercise the split topology, set `DURABLE_WORKER_MODE=external` and start the
+dedicated runtime in a second terminal:
+
+```powershell
+corepack pnpm --filter @callassist/api worker
+```
+
+The API process then only enqueues work; it never performs startup recovery or
+claims a durable lease. The worker owns recovery, seeding, polling, heartbeats,
+and execution. Its `SIGINT`/`SIGTERM` shutdown stops new claims, completes the
+active lease, and closes the database connection. Production builds expose the
+same boundary through `start` and `start:worker`. `/admin/system` reports the
+configured topology and only the API-local worker state; external worker health
+and cross-process SSE delivery still require deployment monitoring/event-bus work.
+
 `pnpm env:init` creates `.env` with independent encryption and keyed promo-code
 hash keys and never overwrites an existing file. Existing deployments may temporarily
 fall back to `DATA_ENCRYPTION_KEY`, but should set and rotate a separate
@@ -293,8 +309,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
 - Continue from the completed durable transcription/retention, Twilio status
-  reconciliation, and webhook-delivery visibility with a separate worker runtime,
-  real-provider crash drills, and external monitoring.
+  reconciliation, webhook-delivery visibility, and split worker runtime with
+  real-provider crash drills, cross-process live events, and external monitoring.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

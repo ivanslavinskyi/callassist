@@ -126,7 +126,8 @@ describe("admin operations contracts", () => {
         uptimeSeconds: 10,
         backgroundTasks: 0,
         processingRecordings: 0,
-        durableWorkerEnabled: false
+        durableWorkerEnabled: false,
+        durableWorkerMode: "external"
       },
       workload: {
         activeCalls: 0,

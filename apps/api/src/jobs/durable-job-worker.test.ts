@@ -290,4 +290,88 @@ describe("durable job worker", () => {
     });
     expect(await repository.listDurableJobAttempts(retention.id)).toEqual([]);
   });
+
+  it("does not claim work when this process is configured as API-only", async () => {
+    const { repository } = await repositoryWithAvailableRecording();
+    const handler = vi.fn(async () => undefined);
+    const worker = new DurableJobWorker(
+      repository,
+      { final_transcription: handler },
+      () => undefined,
+      {
+        enabled: false,
+        now: () => new Date("2099-05-01T00:00:00.000Z")
+      }
+    );
+
+    worker.start();
+    worker.wake();
+    await worker.runOnce();
+
+    expect(worker.enabled).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+    expect((await repository.listDurableJobs()).find(
+      ({ type }) => type === "final_transcription"
+    )).toMatchObject({ status: "queued", attemptCount: 0 });
+    await worker.close();
+  });
+
+  it("finishes the active lease on shutdown and leaves later work for restart", async () => {
+    const { repository, recordingId } = await repositoryWithAvailableRecording();
+    await repository.enqueueDurableJob({
+      type: "recording_retention",
+      recordingId,
+      runAfter: "2099-06-01T00:00:00.000Z",
+      maxAttempts: 3
+    });
+    let releaseFirst!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const firstHandler = vi.fn(async () => {
+      markStarted();
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    });
+    const worker = new DurableJobWorker(
+      repository,
+      {
+        final_transcription: firstHandler,
+        recording_retention: firstHandler
+      },
+      () => undefined,
+      {
+        workerId: "stopping-worker",
+        now: () => new Date("2099-06-01T00:00:01.000Z")
+      }
+    );
+
+    worker.wake();
+    await started;
+    const closing = worker.close();
+    expect(firstHandler).toHaveBeenCalledOnce();
+    releaseFirst();
+    await closing;
+
+    expect((await repository.listDurableJobs()).map(({ status }) => status))
+      .toEqual(["succeeded", "queued"]);
+
+    const restartedHandler = vi.fn(async () => undefined);
+    const restarted = new DurableJobWorker(
+      repository,
+      {
+        final_transcription: restartedHandler,
+        recording_retention: restartedHandler
+      },
+      () => undefined,
+      {
+        workerId: "restarted-worker",
+        now: () => new Date("2099-06-01T00:00:02.000Z")
+      }
+    );
+    await restarted.runOnce();
+
+    expect(restartedHandler).toHaveBeenCalledOnce();
+    expect((await repository.listDurableJobs()).map(({ status }) => status))
+      .toEqual(["succeeded", "succeeded"]);
+    await restarted.close();
+  });
 });

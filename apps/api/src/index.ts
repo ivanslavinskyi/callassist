@@ -11,6 +11,7 @@ import { CallService } from "./call-service";
 import { ContentService } from "./content/content-service";
 import { createContentRepositoryFromEnv } from "./content/create-content-repository";
 import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
+import { durableWorkerModeFromEnv } from "./config/durable-worker-mode";
 import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
 import { operationalCostPolicyFromEnv } from "./config/operational-cost-policy";
 import {
@@ -21,29 +22,25 @@ import {
   OpenAIRealtimeBridge,
   type RealtimeTranscriptionDelay
 } from "./realtime/openai-realtime-bridge";
-import { createCallRepositoryFromEnv } from "./storage/create-call-repository";
-import { createTelephonyProviderFromEnv } from "./telephony/create-telephony-provider";
+import {
+  createCallRuntimeDependenciesFromEnv,
+  requireEnvironmentVariable
+} from "./runtime/call-runtime-dependencies";
+import {
+  createGracefulShutdown,
+  registerProcessShutdown
+} from "./runtime/graceful-shutdown";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
-import { OpenAIPostCallTranscriber } from "./transcription/openai-post-call-transcriber";
 
-const repository = createCallRepositoryFromEnv();
+const {
+  repository,
+  telephonyProvider,
+  realtimeApiKey,
+  postCallTranscriber
+} = createCallRuntimeDependenciesFromEnv();
 const authRepository = createAuthRepositoryFromEnv();
 const contentService = new ContentService(createContentRepositoryFromEnv());
 await contentService.initialize();
-const telephonyProvider = createTelephonyProviderFromEnv();
-const realtimeApiKey =
-  telephonyProvider instanceof TwilioTelephonyProvider
-    ? requireEnvironmentVariable("OPENAI_API_KEY")
-    : null;
-const postCallTranscriber = realtimeApiKey
-  ? new OpenAIPostCallTranscriber({
-      apiKey: realtimeApiKey,
-      model: process.env.OPENAI_POST_CALL_TRANSCRIPTION_MODEL,
-      utteranceModel:
-        process.env.OPENAI_POST_CALL_UTTERANCE_TRANSCRIPTION_MODEL ??
-        "gpt-4o-transcribe"
-    })
-  : undefined;
 const briefCompiler = createBriefCompiler();
 const service = new CallService(
   repository,
@@ -54,7 +51,8 @@ const service = new CallService(
   postCallTranscriber,
   briefCompiler,
   callAdmissionPolicyFromEnv(),
-  operationalCostPolicyFromEnv()
+  operationalCostPolicyFromEnv(),
+  { durableWorkerMode: durableWorkerModeFromEnv() }
 );
 const authService = new AuthService({
   repository: authRepository,
@@ -120,14 +118,13 @@ if (webhookApp) {
   );
 }
 
+registerProcessShutdown(createGracefulShutdown(
+  () => app.close(),
+  (error) => app.log.error(error, "API shutdown failed")
+));
+
 if (recoveredCalls > 0) {
   app.log.warn({ recoveredCalls }, "Interrupted calls were marked as failed");
-}
-
-function requireEnvironmentVariable(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required when TELEPHONY_DRIVER=twilio`);
-  return value;
 }
 
 function createBriefCompiler() {

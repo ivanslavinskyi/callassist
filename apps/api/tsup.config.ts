@@ -4,6 +4,7 @@ export default defineConfig({
   clean: true,
   entry: {
     index: "src/index.ts",
+    worker: "src/worker.ts",
     "db/migrate": "src/db/migrate.ts",
     "db/set-outbound-calls": "src/db/set-outbound-calls.ts"
   },

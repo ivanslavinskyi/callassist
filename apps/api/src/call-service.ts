@@ -47,6 +47,7 @@ import {
   unavailableOperationalCostPolicy,
   type OperationalCostPolicy
 } from "./config/operational-cost-policy";
+import type { DurableWorkerMode } from "./config/durable-worker-mode";
 import {
   DurableJobExecutionError,
   durableJobMaxAttempts,
@@ -97,6 +98,8 @@ export class CallService {
   readonly #admissionPolicy: CallAdmissionPolicy;
   readonly #operationalCostPolicy: OperationalCostPolicy;
   readonly #durableJobWorker: DurableJobWorker;
+  readonly #durableWorkerMode: DurableWorkerMode;
+  #closePromise: Promise<void> | null = null;
 
   constructor(
     readonly repository: CallRepository,
@@ -106,13 +109,18 @@ export class CallService {
     briefCompiler: BriefCompiler = new DeterministicBriefCompiler(),
     admissionPolicy: CallAdmissionPolicy = defaultCallAdmissionPolicy,
     operationalCostPolicy: OperationalCostPolicy =
-      unavailableOperationalCostPolicy
+      unavailableOperationalCostPolicy,
+    runtime: {
+      durableWorkerMode?: DurableWorkerMode;
+      durableWorkerKeepAlive?: boolean;
+    } = {}
   ) {
     this.#onBackgroundError = onBackgroundError;
     this.#postCallTranscriber = postCallTranscriber;
     this.#briefCompiler = briefCompiler;
     this.#admissionPolicy = admissionPolicy;
     this.#operationalCostPolicy = operationalCostPolicy;
+    this.#durableWorkerMode = runtime.durableWorkerMode ?? "embedded";
     this.#durableJobWorker = new DurableJobWorker(
       repository,
       {
@@ -145,12 +153,19 @@ export class CallService {
             }
           : {})
       },
-      onBackgroundError
+      onBackgroundError,
+      {
+        enabled: this.#durableWorkerMode === "embedded",
+        ...(runtime.durableWorkerKeepAlive === undefined
+          ? {}
+          : { keepAlive: runtime.durableWorkerKeepAlive })
+      }
     );
   }
 
   async initialize() {
     await this.repository.ping();
+    if (this.#durableWorkerMode === "external") return 0;
     const recoveredCalls = await this.repository.recoverInterruptedCalls();
     await this.repository.seedDurableJobs(new Date().toISOString());
     this.#durableJobWorker.start();
@@ -285,7 +300,8 @@ export class CallService {
         uptimeSeconds: Math.max(0, Math.floor(process.uptime())),
         backgroundTasks: this.#durableJobWorker.runningCount,
         processingRecordings: this.#processingRecordings.size,
-        durableWorkerEnabled: this.#durableJobWorker.enabled
+        durableWorkerEnabled: this.#durableJobWorker.enabled,
+        durableWorkerMode: this.#durableWorkerMode
       },
       workload: {
         activeCalls: facts.activeCalls,
@@ -748,7 +764,12 @@ export class CallService {
     await this.repository.ping();
   }
 
-  async close() {
+  close() {
+    this.#closePromise ??= this.#close();
+    return this.#closePromise;
+  }
+
+  async #close() {
     for (const id of this.#timers.keys()) this.#clearTimers(id);
     await this.#durableJobWorker.close();
     await this.repository.close();

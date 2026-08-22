@@ -48,6 +48,51 @@ describe("CallService", () => {
     });
   });
 
+  it("keeps recovery and durable claims out of an external-worker API process", async () => {
+    const repository = new InMemoryCallRepository();
+    const recover = vi.spyOn(repository, "recoverInterruptedCalls");
+    const seed = vi.spyOn(repository, "seedDurableJobs");
+    const claim = vi.spyOn(repository, "claimDueDurableJob");
+    const service = new CallService(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { durableWorkerMode: "external" }
+    );
+    services.push(service);
+
+    await expect(service.initialize()).resolves.toBe(0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(recover).not.toHaveBeenCalled();
+    expect(seed).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+    await expect(service.getAdminSystemStatus(false)).resolves.toMatchObject({
+      runtime: {
+        durableWorkerMode: "external",
+        durableWorkerEnabled: false
+      }
+    });
+  });
+
+  it("closes worker and storage exactly once across concurrent shutdown paths", async () => {
+    const repository = new InMemoryCallRepository();
+    const closeRepository = vi.spyOn(repository, "close");
+    const service = new CallService(repository);
+    services.push(service);
+
+    const first = service.close();
+    const second = service.close();
+
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(closeRepository).toHaveBeenCalledOnce();
+  });
+
   it("requires review before a compiled call becomes ready", async () => {
     const service = createService();
     const brief = await service.create({

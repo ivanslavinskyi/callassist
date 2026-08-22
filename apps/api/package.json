@@ -13,8 +13,10 @@
     "calls:enable:prod": "node dist/db/set-outbound-calls.js enable",
     "db:test:prepare": "tsx src/db/prepare-test-database.ts",
     "dev": "node --use-system-ca --import tsx src/index.ts",
+    "worker": "node --use-system-ca --import tsx src/worker.ts",
     "lint": "tsc --noEmit",
     "start": "node --use-system-ca dist/index.js",
+    "start:worker": "node --use-system-ca dist/worker.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

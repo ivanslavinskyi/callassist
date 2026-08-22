@@ -143,6 +143,10 @@ export function AdminSystemConsole() {
                 <h2>{copy.runtimeTitle}</h2>
                 <dl className="admin-operations-list">
                   <Fact label={copy.uptime} value={formatSeconds(status.runtime.uptimeSeconds)} />
+                  <Fact
+                    label={copy.durableWorkerMode}
+                    value={copy.durableWorkerModes[status.runtime.durableWorkerMode]}
+                  />
                   <Fact label={copy.durableWorker} value={status.runtime.durableWorkerEnabled ? copy.enabled : copy.disabled} />
                   <Fact label={copy.warnings} value={String(status.recentTelemetry.warnings)} />
                   <Fact label={copy.errors} value={String(status.recentTelemetry.errors)} />

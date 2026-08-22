@@ -103,7 +103,12 @@ const en = {
   },
   runtimeTitle: "Runtime",
   uptime: "Uptime",
-  durableWorker: "Durable worker",
+  durableWorker: "Local durable worker",
+  durableWorkerMode: "Worker topology",
+  durableWorkerModes: {
+    embedded: "Embedded in API",
+    external: "Separate runtime"
+  },
   enabled: "Enabled",
   disabled: "Disabled",
   recentTelemetryTitle: "Recent telemetry (24h)",
@@ -295,7 +300,12 @@ const de: AdminOperationsCopy = {
   },
   runtimeTitle: "Laufzeit",
   uptime: "Betriebszeit",
-  durableWorker: "Durable Worker",
+  durableWorker: "Lokaler Durable Worker",
+  durableWorkerMode: "Worker-Topologie",
+  durableWorkerModes: {
+    embedded: "In API eingebettet",
+    external: "Separater Prozess"
+  },
   enabled: "Aktiviert",
   disabled: "Deaktiviert",
   recentTelemetryTitle: "Letzte Telemetrie (24 Std.)",
