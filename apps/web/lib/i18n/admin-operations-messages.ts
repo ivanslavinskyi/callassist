@@ -110,7 +110,7 @@ const en = {
   warnings: "Warnings",
   errors: "Errors",
   jobsTitle: "Durable jobs",
-  jobsIntro: "Persisted transcription and recording-retention work. Queued retries survive process restarts; dead-letter jobs require reviewed intervention.",
+  jobsIntro: "Persisted transcription, retention, and provider reconciliation work. Queued retries survive process restarts; dead-letter jobs require reviewed intervention.",
   jobsQueued: "Queued",
   jobsRunning: "Running",
   jobsRetryQueued: "Retry scheduled",
@@ -118,12 +118,15 @@ const en = {
   jobsSucceeded: "Succeeded",
   jobsTranscription: "Transcription queued",
   jobsRetention: "Retention queued",
+  jobsProviderReconciliation: "Provider reconciliation queued",
   jobsOldestDue: "Oldest due",
   jobsRecent: "Recent jobs",
   jobsEmpty: "No durable jobs have been created yet.",
   jobTypes: {
     final_transcription: "Final transcription",
-    recording_retention: "Recording retention"
+    recording_retention: "Recording retention",
+    provider_call_reconciliation: "Provider call reconciliation",
+    provider_recording_reconciliation: "Provider recording reconciliation"
   },
   jobStatuses: {
     queued: "Queued",
@@ -281,7 +284,7 @@ const de: AdminOperationsCopy = {
   warnings: "Warnungen",
   errors: "Fehler",
   jobsTitle: "Dauerhafte Jobs",
-  jobsIntro: "Persistierte Transkriptions- und Aufbewahrungsaufgaben. Geplante Wiederholungen überstehen Prozessneustarts; Dead-Letter-Jobs erfordern eine geprüfte Intervention.",
+  jobsIntro: "Persistierte Transkriptions-, Aufbewahrungs- und Anbieterabgleichsaufgaben. Geplante Wiederholungen überstehen Prozessneustarts; Dead-Letter-Jobs erfordern eine geprüfte Intervention.",
   jobsQueued: "In Warteschlange",
   jobsRunning: "In Bearbeitung",
   jobsRetryQueued: "Wiederholung geplant",
@@ -289,12 +292,15 @@ const de: AdminOperationsCopy = {
   jobsSucceeded: "Erfolgreich",
   jobsTranscription: "Transkription geplant",
   jobsRetention: "Löschung geplant",
+  jobsProviderReconciliation: "Anbieterabgleich geplant",
   jobsOldestDue: "Älteste Fälligkeit",
   jobsRecent: "Letzte Jobs",
   jobsEmpty: "Es wurden noch keine dauerhaften Jobs erstellt.",
   jobTypes: {
     final_transcription: "Finale Transkription",
-    recording_retention: "Aufzeichnungsaufbewahrung"
+    recording_retention: "Aufzeichnungsaufbewahrung",
+    provider_call_reconciliation: "Anbieterabgleich für Anruf",
+    provider_recording_reconciliation: "Anbieterabgleich für Aufzeichnung"
   },
   jobStatuses: {
     queued: "In Warteschlange",

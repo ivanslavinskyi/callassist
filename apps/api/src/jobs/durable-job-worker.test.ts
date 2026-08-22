@@ -58,6 +58,57 @@ async function repositoryWithAvailableRecording() {
 }
 
 describe("durable job worker", () => {
+  it("fences stale provider reconciliation writes after lease recovery", async () => {
+    const { repository, brief } = await repositoryWithAvailableRecording();
+    const attempt = await repository.getLatestAttempt(brief.id);
+    const job = await repository.enqueueDurableJob({
+      type: "provider_call_reconciliation",
+      callAttemptId: attempt!.id,
+      runAfter: "2098-12-01T00:00:00.000Z",
+      maxAttempts: 5
+    });
+    const first = await repository.claimDueDurableJob({
+      types: ["provider_call_reconciliation"],
+      workerId: "provider-worker-a",
+      now: "2098-12-01T00:00:00.000Z",
+      leaseExpiresAt: "2098-12-01T00:00:01.000Z"
+    });
+    const second = await repository.claimDueDurableJob({
+      types: ["provider_call_reconciliation"],
+      workerId: "provider-worker-b",
+      now: "2098-12-01T00:00:02.000Z",
+      leaseExpiresAt: "2098-12-01T00:01:02.000Z"
+    });
+    expect(first?.id).toBe(job.id);
+    expect(second).toMatchObject({ id: job.id, leaseOwner: "provider-worker-b" });
+
+    await expect(repository.applyProviderStatus(
+      attempt!.providerCallId!,
+      "completed",
+      "completed",
+      brief.id,
+      {
+        jobId: job.id,
+        workerId: "provider-worker-a",
+        checkedAt: "2098-12-01T00:00:02.000Z"
+      }
+    )).rejects.toMatchObject({ code: "DURABLE_JOB_LEASE_LOST" });
+    expect((await repository.get(brief.id))?.brief.status).toBe("dialing");
+
+    await repository.applyProviderStatus(
+      attempt!.providerCallId!,
+      "completed",
+      "completed",
+      brief.id,
+      {
+        jobId: job.id,
+        workerId: "provider-worker-b",
+        checkedAt: "2098-12-01T00:00:02.000Z"
+      }
+    );
+    expect((await repository.get(brief.id))?.brief.status).toBe("completed");
+  });
+
   it("fences an expired worker and lets a new lease recover processing", async () => {
     const { repository, recordingId } = await repositoryWithAvailableRecording();
     const firstNow = "2099-01-01T00:00:00.000Z";

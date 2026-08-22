@@ -162,6 +162,7 @@ export function AdminSystemConsole() {
                 <Metric label={copy.jobsSucceeded} value={status.jobs.succeeded} />
                 <Metric label={copy.jobsTranscription} value={status.jobs.transcriptionQueued} />
                 <Metric label={copy.jobsRetention} value={status.jobs.retentionQueued} />
+                <Metric label={copy.jobsProviderReconciliation} value={status.jobs.providerReconciliationQueued} />
                 <Metric
                   label={copy.jobsOldestDue}
                   value={status.jobs.oldestDueAt

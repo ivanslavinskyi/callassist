@@ -106,7 +106,9 @@ const systemComponentStateSchema = z.enum([
 
 export const adminDurableJobTypeSchema = z.enum([
   "final_transcription",
-  "recording_retention"
+  "recording_retention",
+  "provider_call_reconciliation",
+  "provider_recording_reconciliation"
 ]);
 export const adminDurableJobStatusSchema = z.enum([
   "queued",
@@ -176,6 +178,7 @@ export const adminSystemStatusSchema = z.strictObject({
     retryQueued: countSchema,
     transcriptionQueued: countSchema,
     retentionQueued: countSchema,
+    providerReconciliationQueued: countSchema,
     oldestDueAt: z.iso.datetime().nullable(),
     recent: z.array(adminDurableJobSchema).max(20)
   }),

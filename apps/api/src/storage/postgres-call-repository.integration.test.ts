@@ -1052,6 +1052,129 @@ describeWithDatabase("PostgresCallRepository", () => {
     });
   });
 
+  it("persists provider reconciliation targets and fences stale writes", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "PostgreSQL provider reconciliation",
+      phoneNumber: "+41710000066",
+      objective: "Recover provider state after a lost callback",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const attempt = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    const providerCallId = `CA-reconciliation-${brief.id}`;
+    await repository.attachProviderCall(
+      attempt.attempt.id,
+      providerCallId,
+      "queued",
+      "2097-01-01T00:00:00.000Z"
+    );
+    const begun = await repository.beginRecording(brief.id);
+    const providerRecordingId = `RE-reconciliation-${brief.id}`;
+    await repository.attachProviderRecording(
+      begun.recording.id,
+      providerRecordingId,
+      "in-progress",
+      "2200-01-01T00:00:00.000Z"
+    );
+
+    const jobs = await repository.listDurableJobs();
+    const callJob = jobs.find(
+      ({ type, callAttemptId }) =>
+        type === "provider_call_reconciliation" &&
+        callAttemptId === attempt.attempt.id
+    );
+    const recordingJob = jobs.find(
+      ({ type, recordingId }) =>
+        type === "provider_recording_reconciliation" &&
+        recordingId === begun.recording.id
+    );
+    expect(callJob).toMatchObject({
+      callId: brief.id,
+      callAttemptId: attempt.attempt.id,
+      recordingId: null,
+      status: "queued"
+    });
+    expect(recordingJob).toMatchObject({
+      callId: brief.id,
+      callAttemptId: null,
+      recordingId: begun.recording.id,
+      status: "queued"
+    });
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE id <> ${callJob!.id}
+        AND job_type = 'provider_call_reconciliation'
+        AND status = 'queued'
+    `;
+
+    const first = await repository.claimDueDurableJob({
+      types: ["provider_call_reconciliation"],
+      workerId: "postgres-provider-a",
+      now: "2097-01-01T00:00:00.000Z",
+      leaseExpiresAt: "2097-01-01T00:00:01.000Z"
+    });
+    const second = await repository.claimDueDurableJob({
+      types: ["provider_call_reconciliation"],
+      workerId: "postgres-provider-b",
+      now: "2097-01-01T00:00:02.000Z",
+      leaseExpiresAt: "2097-01-01T00:01:02.000Z"
+    });
+    expect(first?.id).toBe(callJob?.id);
+    expect(second).toMatchObject({
+      id: callJob?.id,
+      leaseOwner: "postgres-provider-b"
+    });
+    await expect(repository.applyProviderStatus(
+      providerCallId,
+      "no-answer",
+      "failed",
+      brief.id,
+      {
+        jobId: callJob!.id,
+        workerId: "postgres-provider-a",
+        checkedAt: "2097-01-01T00:00:02.000Z"
+      }
+    )).rejects.toMatchObject({ code: "DURABLE_JOB_LEASE_LOST" });
+    await repository.applyProviderStatus(
+      providerCallId,
+      "no-answer",
+      "failed",
+      brief.id,
+      {
+        jobId: callJob!.id,
+        workerId: "postgres-provider-b",
+        checkedAt: "2097-01-01T00:00:02.000Z"
+      }
+    );
+    await expect(repository.completeDurableJob(
+      callJob!.id,
+      "postgres-provider-b",
+      "2097-01-01T00:00:03.000Z"
+    )).resolves.toBe(true);
+    expect((await repository.get(brief.id))?.brief.status).toBe("failed");
+
+    await repository.seedDurableJobs("2097-01-01T00:00:03.000Z");
+    expect((await repository.listDurableJobs()).find(
+      ({ id }) => id === recordingJob?.id
+    )).toMatchObject({
+      status: "queued",
+      runAfter: "2097-01-01T00:00:03.000Z"
+    });
+  });
+
   it("leases durable jobs with retry fencing and immutable attempt history", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "PostgreSQL durable job",

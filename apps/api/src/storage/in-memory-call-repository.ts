@@ -780,6 +780,10 @@ export class InMemoryCallRepository implements CallRepository {
         retentionQueued: queued.filter(
           ({ type }) => type === "recording_retention"
         ).length,
+        providerReconciliationQueued: queued.filter(({ type }) =>
+          type === "provider_call_reconciliation" ||
+          type === "provider_recording_reconciliation"
+        ).length,
         oldestDueAt: queued
           .map(({ runAfter }) => runAfter)
           .sort()[0] ?? null,
@@ -789,7 +793,8 @@ export class InMemoryCallRepository implements CallRepository {
             right.id.localeCompare(left.id)
           )
           .slice(0, 20)
-          .map(({ recordingId: _recordingId, forceRequested: _force,
+          .map(({ recordingId: _recordingId, callAttemptId: _callAttemptId,
+            forceRequested: _force,
             leaseOwner: _owner, leasedAt: _leasedAt, createdAt: _createdAt,
             completedAt: _completedAt, ...job }) => copy(job))
       }
@@ -1066,7 +1071,8 @@ export class InMemoryCallRepository implements CallRepository {
   async attachProviderCall(
     attemptId: string,
     providerCallId: string,
-    providerStatus: string
+    providerStatus: string,
+    reconciliationRunAfter?: string
   ) {
     for (const [callId, attempts] of this.#attempts) {
       const attempt = attempts.find((candidate) => candidate.id === attemptId);
@@ -1110,6 +1116,18 @@ export class InMemoryCallRepository implements CallRepository {
       if (settlement) {
         this.#appendSettlementTelemetry(callId, attempt.id, settlement);
       }
+      if (
+        reconciliationRunAfter &&
+        attempt.provider === "twilio" &&
+        !terminalStatuses.has(this.#require(callId).brief.status)
+      ) {
+        await this.enqueueDurableJob({
+          type: "provider_call_reconciliation",
+          callAttemptId: attempt.id,
+          runAfter: reconciliationRunAfter,
+          maxAttempts: durableJobMaxAttempts.provider_call_reconciliation
+        });
+      }
       return copy(this.#require(callId));
     }
     throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
@@ -1119,8 +1137,10 @@ export class InMemoryCallRepository implements CallRepository {
     providerCallId: string,
     providerStatus: string,
     callStatus: CallBrief["status"],
-    callBriefId?: string
+    callBriefId?: string,
+    lease?: DurableJobLease
   ) {
+    this.#assertDurableJobLease(lease);
     for (const [callId, attempts] of this.#attempts) {
       const attempt = attempts.find(
         (candidate) =>
@@ -1182,6 +1202,13 @@ export class InMemoryCallRepository implements CallRepository {
       ) {
         snapshot.recording.status = "processing";
       }
+      if (terminalStatuses.has(callStatus)) {
+        this.#wakeDurableJob(
+          "provider_call_reconciliation",
+          attempt.id,
+          now
+        );
+      }
       return { callId, snapshot: copy(snapshot) };
     }
     return null;
@@ -1215,6 +1242,13 @@ export class InMemoryCallRepository implements CallRepository {
           id,
           attempt.id,
           settlement,
+          snapshot.brief.updatedAt
+        );
+      }
+      if (terminalStatuses.has(status)) {
+        this.#wakeDurableJob(
+          "provider_call_reconciliation",
+          attempt.id,
           snapshot.brief.updatedAt
         );
       }
@@ -1294,6 +1328,11 @@ export class InMemoryCallRepository implements CallRepository {
           snapshot.brief.updatedAt
         );
       }
+      this.#wakeDurableJob(
+        "provider_call_reconciliation",
+        attempt.id,
+        snapshot.brief.updatedAt
+      );
     }
     if (
       snapshot.recording?.status === "starting" ||
@@ -1352,7 +1391,8 @@ export class InMemoryCallRepository implements CallRepository {
   async attachProviderRecording(
     recordingId: string,
     providerRecordingId: string,
-    _providerStatus: string
+    _providerStatus: string,
+    reconciliationRunAfter?: string
   ) {
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
     recording.providerRecordingId = providerRecordingId;
@@ -1373,6 +1413,17 @@ export class InMemoryCallRepository implements CallRepository {
         metadata: { providerStatus }
       }
     });
+    if (
+      reconciliationRunAfter &&
+      ["recording", "processing"].includes(recording.status)
+    ) {
+      await this.enqueueDurableJob({
+        type: "provider_recording_reconciliation",
+        recordingId,
+        runAfter: reconciliationRunAfter,
+        maxAttempts: durableJobMaxAttempts.provider_recording_reconciliation
+      });
+    }
     return {
       callId,
       recording: copy(recording),
@@ -1406,7 +1457,11 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
-  async applyRecordingStatus(input: RecordingStatusInput) {
+  async applyRecordingStatus(
+    input: RecordingStatusInput,
+    lease?: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
     const snapshot = this.#calls.get(input.callBriefId);
     if (!snapshot?.recording || snapshot.recording.id !== input.recordingId) {
       return null;
@@ -1489,6 +1544,13 @@ export class InMemoryCallRepository implements CallRepository {
           metadata: { failureCode }
         }
       });
+    }
+    if (["completed", "absent"].includes(input.providerStatus)) {
+      this.#wakeDurableJob(
+        "provider_recording_reconciliation",
+        input.recordingId,
+        new Date().toISOString()
+      );
     }
     return {
       callId: input.callBriefId,
@@ -1652,16 +1714,17 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async enqueueDurableJob(input: EnqueueDurableJobInput) {
-    const { callId } = this.#requireRecording(input.recordingId);
-    const key = durableJobKey(input.type, input.recordingId);
+    const target = this.#resolveDurableJobTarget(input);
+    const key = durableJobKey(input.type, target.targetId);
     const existing = this.#durableJobs.get(key);
     const now = new Date().toISOString();
     if (!existing) {
       const job: DurableJob = {
         id: randomUUID(),
         type: input.type,
-        recordingId: input.recordingId,
-        callId,
+        recordingId: input.recordingId ?? null,
+        callAttemptId: input.callAttemptId ?? null,
+        callId: target.callId,
         status: "queued",
         generation: 1,
         attemptCount: 0,
@@ -1710,7 +1773,31 @@ export class InMemoryCallRepository implements CallRepository {
   async seedDurableJobs(now: string) {
     const before = this.#durableJobs.size;
     for (const snapshot of this.#calls.values()) {
+      const attempt = (this.#attempts.get(snapshot.brief.id) ?? []).at(-1);
+      if (
+        interruptedStatuses.has(snapshot.brief.status) &&
+        attempt?.provider === "twilio" &&
+        attempt.providerCallId
+      ) {
+        await this.enqueueDurableJob({
+          type: "provider_call_reconciliation",
+          callAttemptId: attempt.id,
+          runAfter: now,
+          maxAttempts: durableJobMaxAttempts.provider_call_reconciliation
+        });
+      }
       const recording = snapshot.recording;
+      if (
+        recording?.providerRecordingId &&
+        ["recording", "processing"].includes(recording.status)
+      ) {
+        await this.enqueueDurableJob({
+          type: "provider_recording_reconciliation",
+          recordingId: recording.id,
+          runAfter: now,
+          maxAttempts: durableJobMaxAttempts.provider_recording_reconciliation
+        });
+      }
       if (recording?.status !== "available") continue;
       if (
         snapshot.finalTranscript?.status !== "completed"
@@ -1911,13 +1998,25 @@ export class InMemoryCallRepository implements CallRepository {
       if (!interruptedStatuses.has(snapshot.brief.status)) continue;
       if (snapshot.pendingApproval) snapshot.pendingApproval.status = "expired";
       snapshot.pendingApproval = null;
-      snapshot.brief.status = "failed";
-      snapshot.brief.updatedAt = new Date().toISOString();
       const attempts = this.#attempts.get(snapshot.brief.id) ?? [];
       const attempt = attempts[attempts.length - 1];
-      if (attempt) {
+      const now = new Date().toISOString();
+      const reconcileProvider =
+        attempt?.provider === "twilio" && attempt.providerCallId;
+      if (reconcileProvider) {
+        await this.enqueueDurableJob({
+          type: "provider_call_reconciliation",
+          callAttemptId: attempt.id,
+          runAfter: now,
+          maxAttempts: durableJobMaxAttempts.provider_call_reconciliation
+        });
+      } else {
+        snapshot.brief.status = "failed";
+        snapshot.brief.updatedAt = now;
+      }
+      if (attempt && !reconcileProvider) {
         attempt.status = "failed";
-        attempt.endedAt = snapshot.brief.updatedAt;
+        attempt.endedAt = now;
         attempt.failureReason = "server_restarted";
         const settlement = this.#settleAttempt(
           snapshot.brief.id,
@@ -1929,19 +2028,21 @@ export class InMemoryCallRepository implements CallRepository {
             snapshot.brief.id,
             attempt.id,
             settlement,
-            snapshot.brief.updatedAt
+            now
           );
         }
       }
-      this.#appendTelemetry(snapshot.brief.id, {
-        callAttemptId: attempt?.id ?? null,
-        idempotencyKey: "call:recovered:server-restarted",
-        occurredAt: snapshot.brief.updatedAt,
-        payload: {
-          name: "call.recovered",
-          metadata: { reason: "server_restarted" }
-        }
-      });
+      if (!reconcileProvider) {
+        this.#appendTelemetry(snapshot.brief.id, {
+          callAttemptId: attempt?.id ?? null,
+          idempotencyKey: "call:recovered:server-restarted",
+          occurredAt: now,
+          payload: {
+            name: "call.recovered",
+            metadata: { reason: "server_restarted" }
+          }
+        });
+      }
       recovered += 1;
     }
     return recovered;
@@ -2200,6 +2301,36 @@ export class InMemoryCallRepository implements CallRepository {
     return [...this.#durableJobs.values()].find(({ id }) => id === jobId);
   }
 
+  #resolveDurableJobTarget(input: EnqueueDurableJobInput) {
+    if (input.type === "provider_call_reconciliation") {
+      if (!input.callAttemptId || input.recordingId) {
+        throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+      }
+      for (const [callId, attempts] of this.#attempts) {
+        if (attempts.some(({ id }) => id === input.callAttemptId)) {
+          return { callId, targetId: input.callAttemptId };
+        }
+      }
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    if (!input.recordingId || input.callAttemptId) {
+      throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+    }
+    const { callId } = this.#requireRecording(input.recordingId);
+    return { callId, targetId: input.recordingId };
+  }
+
+  #wakeDurableJob(
+    type: DurableJob["type"],
+    targetId: string,
+    now: string
+  ) {
+    const job = this.#durableJobs.get(durableJobKey(type, targetId));
+    if (job?.status !== "queued") return;
+    job.runAfter = job.runAfter < now ? job.runAfter : now;
+    job.updatedAt = now;
+  }
+
   #assertDurableJobLease(lease?: DurableJobLease) {
     if (!lease) return;
     const job = this.#findDurableJob(lease.jobId);
@@ -2213,8 +2344,8 @@ export class InMemoryCallRepository implements CallRepository {
   }
 }
 
-function durableJobKey(type: DurableJob["type"], recordingId: string) {
-  return `${type}:${recordingId}`;
+function durableJobKey(type: DurableJob["type"], targetId: string) {
+  return `${type}:${targetId}`;
 }
 
 function durableJobLeaseIsValid(

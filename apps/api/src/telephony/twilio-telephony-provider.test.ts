@@ -27,13 +27,25 @@ const brief: CallBrief = {
 
 function createProvider() {
   const update = vi.fn().mockResolvedValue({ sid: "CA123" });
+  const fetchCall = vi.fn().mockResolvedValue({
+    sid: "CA123",
+    status: "in-progress"
+  });
   const createRecording = vi.fn().mockResolvedValue({
     sid: "RE123",
     status: "in-progress"
   });
   const removeRecording = vi.fn().mockResolvedValue(true);
+  const fetchRecording = vi.fn().mockResolvedValue({
+    sid: "RE123",
+    status: "completed",
+    duration: "37",
+    channels: 2,
+    startTime: new Date("2026-07-14T12:01:00.000Z")
+  });
   const calls = Object.assign(
     vi.fn(() => ({
+      fetch: fetchCall,
       update,
       recordings: { create: createRecording }
     })),
@@ -44,7 +56,10 @@ function createProvider() {
       })
     }
   );
-  const recordings = vi.fn(() => ({ remove: removeRecording }));
+  const recordings = vi.fn(() => ({
+    fetch: fetchRecording,
+    remove: removeRecording
+  }));
   const provider = new TwilioTelephonyProvider({
     accountSid: "AC123",
     authToken: "test-auth-token",
@@ -55,6 +70,8 @@ function createProvider() {
   return {
     calls,
     createRecording,
+    fetchCall,
+    fetchRecording,
     provider,
     recordings,
     removeRecording,
@@ -111,6 +128,25 @@ describe("TwilioTelephonyProvider", () => {
     expect(update).toHaveBeenCalledWith({ status: "completed" });
   });
 
+  it("fetches and validates the provider call status", async () => {
+    const { fetchCall, provider } = createProvider();
+
+    await expect(provider.getCallStatus("CA123")).resolves.toEqual({
+      providerCallId: "CA123",
+      status: "in-progress"
+    });
+    expect(fetchCall).toHaveBeenCalledOnce();
+  });
+
+  it("returns a controlled error for an unsupported provider call status", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({ sid: "CA123", status: "mystery" });
+
+    await expect(provider.getCallStatus("CA123")).rejects.toThrow(
+      "TWILIO_CALL_STATUS_UNSUPPORTED"
+    );
+  });
+
   it("starts dual-channel recording on an active call after consent", async () => {
     const { createRecording, provider } = createProvider();
     const result = await provider.startRecording("CA123", {
@@ -138,6 +174,32 @@ describe("TwilioTelephonyProvider", () => {
     await provider.deleteRecording("RE123");
     expect(recordings).toHaveBeenCalledWith("RE123");
     expect(removeRecording).toHaveBeenCalledOnce();
+  });
+
+  it("fetches bounded provider recording state", async () => {
+    const { fetchRecording, provider } = createProvider();
+
+    await expect(provider.getRecordingStatus("RE123")).resolves.toEqual({
+      providerRecordingId: "RE123",
+      status: "completed",
+      durationSeconds: 37,
+      channels: 2,
+      startedAt: "2026-07-14T12:01:00.000Z"
+    });
+    expect(fetchRecording).toHaveBeenCalledOnce();
+  });
+
+  it("maps a missing provider recording to an absent terminal state", async () => {
+    const { fetchRecording, provider } = createProvider();
+    fetchRecording.mockRejectedValueOnce(
+      Object.assign(new Error("not found"), { status: 404 })
+    );
+
+    await expect(provider.getRecordingStatus("RE-missing")).resolves.toEqual({
+      providerRecordingId: "RE-missing",
+      status: "absent",
+      failureReason: "provider_recording_not_found"
+    });
   });
 
   it("downloads the original dual-channel recording", async () => {

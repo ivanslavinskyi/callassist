@@ -125,7 +125,23 @@ export class CallService {
         recording_retention: (
           job: DurableJob,
           lease: DurableJobLease
-        ) => this.#processRecordingRetention(job, lease)
+        ) => this.#processRecordingRetention(job, lease),
+        ...(telephonyProvider.getCallStatus
+          ? {
+              provider_call_reconciliation: (
+                job: DurableJob,
+                lease: DurableJobLease
+              ) => this.#reconcileProviderCall(job, lease)
+            }
+          : {}),
+        ...(telephonyProvider.getRecordingStatus
+          ? {
+              provider_recording_reconciliation: (
+                job: DurableJob,
+                lease: DurableJobLease
+              ) => this.#reconcileProviderRecording(job, lease)
+            }
+          : {})
       },
       onBackgroundError
     );
@@ -415,7 +431,8 @@ export class CallService {
       snapshot = await this.repository.attachProviderCall(
         reserved.attempt.id,
         started.providerCallId,
-        started.providerStatus
+        started.providerStatus,
+        this.#providerReconciliationDeadline(60_000)
       );
     } catch (error) {
       if (started.providerCallId) {
@@ -490,19 +507,22 @@ export class CallService {
       });
     }
     await this.#syncSystemOutcome(id);
+    this.#durableJobWorker.wake();
     return snapshot;
   }
 
   async handleTwilioStatus(
     providerCallId: string,
     status: TwilioCallStatus,
-    callBriefId?: string
+    callBriefId?: string,
+    lease?: DurableJobLease
   ) {
     const result = await this.repository.applyProviderStatus(
       providerCallId,
       status,
       mapTwilioStatusToCallStatus(status),
-      callBriefId
+      callBriefId,
+      lease
     );
     if (result) {
       if (["completed", "failed", "stopped"].includes(result.snapshot.brief.status)) {
@@ -522,6 +542,7 @@ export class CallService {
         result.snapshot.brief.status
       )) {
         await this.#syncSystemOutcome(result.callId);
+        this.#durableJobWorker.wake();
       }
     }
     return result?.snapshot ?? null;
@@ -555,7 +576,8 @@ export class CallService {
       const attached = await this.repository.attachProviderRecording(
         begun.recording.id,
         providerRecording.providerRecordingId,
-        providerRecording.providerStatus
+        providerRecording.providerStatus,
+        this.#providerReconciliationDeadline(120_000)
       );
       this.#publish(id, {
         type: "recording.updated",
@@ -579,9 +601,10 @@ export class CallService {
   }
 
   async handleTwilioRecordingStatus(
-    input: Parameters<CallRepository["applyRecordingStatus"]>[0]
+    input: Parameters<CallRepository["applyRecordingStatus"]>[0],
+    lease?: DurableJobLease
   ) {
-    const result = await this.repository.applyRecordingStatus(input);
+    const result = await this.repository.applyRecordingStatus(input, lease);
     if (!result) return null;
     this.#publish(result.callId, {
       type: "recording.updated",
@@ -595,6 +618,7 @@ export class CallService {
     }
     if (["available", "failed"].includes(result.recording.status)) {
       await this.#syncSystemOutcome(result.callId);
+      this.#durableJobWorker.wake();
     }
     return result.snapshot;
   }
@@ -709,6 +733,9 @@ export class CallService {
 
   async #processRecording(job: DurableJob, lease: DurableJobLease) {
     const recordingId = job.recordingId;
+    if (!recordingId) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    }
     if (!this.#postCallTranscriber) return;
     this.#processingRecordings.add(recordingId);
     let callId: string | null = null;
@@ -779,6 +806,9 @@ export class CallService {
   }
 
   async #processRecordingRetention(job: DurableJob, lease: DurableJobLease) {
+    if (!job.recordingId) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    }
     const snapshot = await this.#require(job.callId);
     const recording = snapshot.recording;
     if (!recording || recording.status === "deleted") return;
@@ -800,6 +830,104 @@ export class CallService {
     } catch (error) {
       throw new DurableJobExecutionError(
         recordingRetentionFailureCode(error),
+        { cause: error }
+      );
+    }
+  }
+
+  async #reconcileProviderCall(job: DurableJob, lease: DurableJobLease) {
+    if (!job.callAttemptId || !this.telephonyProvider.getCallStatus) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    }
+    const snapshot = await this.#require(job.callId);
+    if (["completed", "failed", "stopped"].includes(snapshot.brief.status)) {
+      return;
+    }
+    const attempt = await this.repository.getLatestAttempt(job.callId);
+    if (
+      !attempt ||
+      attempt.id !== job.callAttemptId ||
+      !attempt.providerCallId
+    ) {
+      throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
+    }
+    try {
+      const provider = await this.telephonyProvider.getCallStatus(
+        attempt.providerCallId
+      );
+      const reconciled = await this.handleTwilioStatus(
+        provider.providerCallId,
+        provider.status,
+        job.callId,
+        currentLease(lease)
+      );
+      if (!reconciled) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
+      }
+      if (!["completed", "failed", "stopped"].includes(
+        reconciled.brief.status
+      )) {
+        await this.telephonyProvider.stopCall(provider.providerCallId);
+        throw new DurableJobExecutionError("PROVIDER_CALL_STOP_PENDING");
+      }
+    } catch (error) {
+      if (error instanceof DurableJobExecutionError) throw error;
+      throw new DurableJobExecutionError(
+        providerReconciliationFailureCode(error, "PROVIDER_CALL_FETCH_FAILED"),
+        { cause: error }
+      );
+    }
+  }
+
+  async #reconcileProviderRecording(job: DurableJob, lease: DurableJobLease) {
+    if (!job.recordingId || !this.telephonyProvider.getRecordingStatus) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    }
+    const snapshot = await this.#require(job.callId);
+    const recording = snapshot.recording;
+    if (!recording || recording.id !== job.recordingId) {
+      throw new DurableJobExecutionError("PROVIDER_RECORDING_TARGET_MISSING");
+    }
+    if (["available", "failed", "deleted"].includes(recording.status)) {
+      return;
+    }
+    if (!recording.providerRecordingId) {
+      throw new DurableJobExecutionError("PROVIDER_RECORDING_TARGET_MISSING");
+    }
+    const attempt = await this.repository.getLatestAttempt(job.callId);
+    if (!attempt?.providerCallId) {
+      throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
+    }
+    try {
+      const provider = await this.telephonyProvider.getRecordingStatus(
+        recording.providerRecordingId
+      );
+      if (provider.status === "pending") {
+        throw new DurableJobExecutionError("PROVIDER_RECORDING_PENDING");
+      }
+      const reconciled = await this.handleTwilioRecordingStatus({
+        callBriefId: job.callId,
+        recordingId: recording.id,
+        providerCallId: attempt.providerCallId,
+        providerRecordingId: provider.providerRecordingId,
+        providerStatus: provider.status,
+        durationSeconds: provider.durationSeconds,
+        channels: provider.channels,
+        startedAt: provider.startedAt,
+        failureReason: provider.failureReason
+      }, currentLease(lease));
+      if (!reconciled) {
+        throw new DurableJobExecutionError(
+          "PROVIDER_RECORDING_TARGET_MISSING"
+        );
+      }
+    } catch (error) {
+      if (error instanceof DurableJobExecutionError) throw error;
+      throw new DurableJobExecutionError(
+        providerReconciliationFailureCode(
+          error,
+          "PROVIDER_RECORDING_FETCH_FAILED"
+        ),
         { cause: error }
       );
     }
@@ -883,6 +1011,12 @@ export class CallService {
     this.#timers.delete(id);
   }
 
+  #providerReconciliationDeadline(graceMs: number) {
+    return new Date(
+      Date.now() + this.#admissionPolicy.maxDurationSeconds * 1_000 + graceMs
+    ).toISOString();
+  }
+
   #publish(id: string, event: CallEvent) {
     for (const subscriber of this.#subscribers.get(id) ?? []) subscriber(event);
   }
@@ -913,6 +1047,22 @@ function recordingRetentionFailureCode(error: unknown) {
     return error.code;
   }
   return "RECORDING_RETENTION_DELETE_FAILED";
+}
+
+function providerReconciliationFailureCode(
+  error: unknown,
+  fallback: string
+) {
+  if (error instanceof Error && error.message.startsWith("TWILIO_")) {
+    return error.message.slice(0, 120);
+  }
+  if (
+    error instanceof CallRepositoryError &&
+    error.code === "DURABLE_JOB_LEASE_LOST"
+  ) {
+    return error.code;
+  }
+  return fallback;
 }
 
 function currentLease(lease: DurableJobLease): DurableJobLease {

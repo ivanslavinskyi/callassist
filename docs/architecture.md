@@ -49,7 +49,7 @@ Twilio dual-channel recording ──► authenticated API download
 - OpenAI Moderation: checks both raw input and generated runtime text.
 - OpenAI Realtime: direct speech-to-speech conversation. External actions remain under server control.
 - OpenAI file transcription: post-call processing of the complete recording with bounded call context.
-- PostgreSQL durable jobs: transactional enqueue, exclusive expiring leases, worker fencing, bounded retry/dead-letter state, and immutable attempt evidence for final transcription and recording retention. A dedicated worker deployment is deferred until production topology work.
+- PostgreSQL durable jobs: transactional enqueue, exclusive expiring leases, worker fencing, bounded retry/dead-letter state, and immutable attempt evidence for final transcription, recording retention, and Twilio call/recording status reconciliation. A dedicated worker deployment is deferred until production topology work.
 
 ## Storage boundary
 
@@ -57,7 +57,7 @@ The API depends on a `CallRepository` interface. The in-memory and PostgreSQL re
 
 Raw briefs, compiled plans, policy decisions, context, and approved facts are encrypted before persistence. Audit events do not include source text, transcript content, or private fact values. Call audit events, account-admin events, safety events, and credit transactions are protected against mutation and deletion at the PostgreSQL layer.
 
-On API startup, unfinished live calls are marked as failed, pending approvals expire, and recovery is recorded in the audit trail. Incomplete available recordings and due retention work are transactionally seeded into durable jobs; interrupted job leases expire and may be reclaimed without converting an in-progress transcript into a synthetic restart failure. A cross-process live event bus and provider/status reconciliation remain planned.
+On API startup, pending approvals expire and recovery is recorded in the audit trail. An unfinished Twilio call with a stored provider SID remains active until a due reconciliation job reads the provider state; it is not assigned a synthetic failure or refund merely because the API restarted. Mock calls and attempts without a recoverable provider identity still fail closed. Incomplete provider recordings, available recordings, and due retention work are transactionally seeded or advanced in durable jobs; interrupted leases expire and may be reclaimed without allowing a stale worker to publish domain state. A cross-process live event bus, webhook-delivery monitoring, and a separately deployed worker remain planned.
 
 ## Brief Compiler and policy boundary
 
@@ -111,7 +111,7 @@ The Twilio voice webhook immediately opens a bidirectional Media Stream with cal
 
 After DTMF consent, the API persists the consent timestamp and asks Twilio to start a dual-channel recording of both tracks on the active call. Recipient media remains blocked until Twilio confirms recording startup. Only then does the same Realtime session read the approved opening in the same voice: it addresses the intended recipient, states the specific purpose and scope, and asks whether it is convenient to continue. The response stops there. An affirmative answer advances to the first objective question, an immediate substantive answer is treated as willingness to continue, and a refusal ends the call politely. A failed recording start produces a same-voice technical notice and terminates the call.
 
-Twilio sends recording lifecycle events to a signed webhook. A completed callback transactionally creates an idempotent post-call transcription job. A leased worker downloads the complete consented media with server-side Twilio credentials and submits it to the configured OpenAI transcription model. The request includes only bounded compiled context, literal names, the selected call language, any explicitly allowed fallback language, and the expected writing system. Provider work may be repeated after a crash, but lease fencing ensures that only the current worker can publish the user-visible result. The final wording comes only from this recording request; it is never replaced or merged with the live draft. A deterministic local aligner may use already stored live events as a role/time scaffold without copying their words. It emits approximate structured segments only when the evidence is sufficient, marks unresolved spans as `unknown`, and otherwise keeps the canonical result as plain text. Browser audio playback is proxied through the main API so critical details can be checked while the Twilio recording is retained; the media URL and credentials remain server-side.
+Twilio sends call and recording lifecycle events to signed webhooks, which remain the primary synchronization path. Provider IDs also transactionally schedule bounded reconciliation jobs after the maximum call window; startup recovery advances unfinished work immediately, and a terminal callback advances its queued reconciliation job so it can complete without an unnecessary provider read. A leased worker may fetch controlled call/recording status from Twilio when a callback is lost. Provider reads and stop requests may repeat after a crash, while repository lease fencing ensures that only the current worker can publish domain state. A completed recording transition transactionally creates an idempotent post-call transcription job. That worker downloads the complete consented media with server-side Twilio credentials and submits it to the configured OpenAI transcription model. The request includes only bounded compiled context, literal names, the selected call language, any explicitly allowed fallback language, and the expected writing system. The final wording comes only from this recording request; it is never replaced or merged with the live draft. A deterministic local aligner may use already stored live events as a role/time scaffold without copying their words. It emits approximate structured segments only when the evidence is sufficient, marks unresolved spans as `unknown`, and otherwise keeps the canonical result as plain text. Browser audio playback is proxied through the main API so critical details can be checked while the Twilio recording is retained; the media URL and credentials remain server-side.
 
 The complete decision, constraints, and deferred improvements are documented in
 [the post-call transcription plan](./post-call-transcription-plan.md#stable-mvp-transcription-decision).
@@ -162,7 +162,7 @@ Active usage, provider discounts, taxes, rounding differences, and invoice
 reconciliation are outside this read model.
 
 `GET /api/admin/system` confirms the API and database request path, reports bounded
-workload, recent durable warning/error counts, and bounded transcription/retention
+workload, recent durable warning/error counts, and bounded transcription/retention/provider-reconciliation
 job state. Queue counts, oldest due time, attempts, controlled error codes, and recent
 dead-letter work exclude private call text and provider payloads. A superadmin may
 restart dead-letter work only with a recorded reason; the audit event is immutable.

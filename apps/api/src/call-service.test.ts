@@ -250,6 +250,172 @@ describe("CallService", () => {
     }
   });
 
+  it("reconciles a lost no-answer callback after restart without charging", async () => {
+    const userId = "570d85e7-c72c-4c84-b5c2-a2f13f8a0e75";
+    const repository = new InMemoryCallRepository();
+    await repository.grantSignupCredits(userId);
+    const getCallStatus = vi.fn().mockResolvedValue({
+      providerCallId: "CA-reconcile-no-answer",
+      status: "no-answer" as const
+    });
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return {
+          providerCallId: "CA-reconcile-no-answer",
+          providerStatus: "queued"
+        };
+      },
+      async stopCall() {},
+      async startRecording() {
+        throw new Error("not used");
+      },
+      async getRecordingMedia() {
+        throw new Error("not used");
+      },
+      async deleteRecording() {},
+      getCallStatus
+    };
+    const beforeRestart = new CallService(
+      repository,
+      provider,
+      () => undefined
+    );
+    const brief = await beforeRestart.create({
+      recipientName: "No-answer reconciliation office",
+      phoneNumber: "+41523686688",
+      objective: "Verify callback-loss reconciliation without a charge",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, userId);
+    await beforeRestart.approveCompilation(brief.id);
+    await beforeRestart.start(brief.id, userId);
+    await beforeRestart.close();
+
+    const afterRestart = new CallService(
+      repository,
+      provider,
+      () => undefined
+    );
+    services.push(afterRestart);
+    await afterRestart.initialize();
+
+    await vi.waitFor(async () => {
+      expect((await afterRestart.get(brief.id))?.brief.status).toBe("failed");
+      expect((await repository.listDurableJobs()).find(
+        ({ type }) => type === "provider_call_reconciliation"
+      )?.status).toBe("succeeded");
+    });
+    const usage = await afterRestart.getCreditUsage(userId);
+    expect(getCallStatus).toHaveBeenCalledWith("CA-reconcile-no-answer");
+    expect(usage.balance).toBe(3);
+    expect(usage.transactions.filter(({ type }) => type === "call_charge"))
+      .toHaveLength(0);
+    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(1);
+  });
+
+  it("reconciles lost connected-call and recording callbacks after restart", async () => {
+    const userId = "f2bc5a4b-654f-4fac-b756-5283278ff8fd";
+    const repository = new InMemoryCallRepository();
+    await repository.grantSignupCredits(userId);
+    const getCallStatus = vi.fn().mockResolvedValue({
+      providerCallId: "CA-reconcile-completed",
+      status: "completed" as const
+    });
+    const getRecordingStatus = vi.fn().mockResolvedValue({
+      providerRecordingId: "RE-reconcile-completed",
+      status: "completed" as const,
+      durationSeconds: 31,
+      channels: 2
+    });
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return {
+          providerCallId: "CA-reconcile-completed",
+          providerStatus: "queued"
+        };
+      },
+      async stopCall() {},
+      async startRecording() {
+        return {
+          providerRecordingId: "RE-reconcile-completed",
+          providerStatus: "in-progress"
+        };
+      },
+      async getRecordingMedia() {
+        throw new Error("not used");
+      },
+      async deleteRecording() {},
+      getCallStatus,
+      getRecordingStatus
+    };
+    const beforeRestart = new CallService(
+      repository,
+      provider,
+      () => undefined
+    );
+    const brief = await beforeRestart.create({
+      recipientName: "Completed reconciliation office",
+      phoneNumber: "+41523686688",
+      objective: "Recover completed provider and recording state",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, userId);
+    await beforeRestart.approveCompilation(brief.id);
+    await beforeRestart.start(brief.id, userId);
+    await beforeRestart.startRecordingAfterConsent(brief.id);
+    await beforeRestart.close();
+
+    const afterRestart = new CallService(
+      repository,
+      provider,
+      () => undefined
+    );
+    services.push(afterRestart);
+    await afterRestart.initialize();
+
+    await vi.waitFor(async () => {
+      const snapshot = await afterRestart.get(brief.id);
+      expect(snapshot?.brief.status).toBe("completed");
+      expect(snapshot?.recording).toMatchObject({
+        status: "available",
+        durationSeconds: 31,
+        channels: 2
+      });
+      const reconciliationJobs = (await repository.listDurableJobs()).filter(({ type }) =>
+        type === "provider_call_reconciliation" ||
+        type === "provider_recording_reconciliation"
+      );
+      expect(reconciliationJobs).toHaveLength(2);
+      expect(reconciliationJobs.every(({ status }) => status === "succeeded"))
+        .toBe(true);
+    });
+    const usage = await afterRestart.getCreditUsage(userId);
+    expect(getCallStatus).toHaveBeenCalledWith("CA-reconcile-completed");
+    expect(getRecordingStatus).toHaveBeenCalledWith(
+      "RE-reconcile-completed"
+    );
+    expect(usage.balance).toBe(2);
+    expect(usage.transactions.filter(({ type }) => type === "call_charge"))
+      .toHaveLength(1);
+    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(0);
+    expect((await afterRestart.getOutcome(brief.id)).technical.failureStage)
+      .toBeNull();
+  });
+
   it("reserves one attempt before concurrent provider starts", async () => {
     const startCall = vi.fn().mockResolvedValue({
       providerCallId: "CA-concurrent",

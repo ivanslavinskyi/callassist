@@ -145,6 +145,7 @@ describe("admin operations contracts", () => {
         retryQueued: 0,
         transcriptionQueued: 0,
         retentionQueued: 0,
+        providerReconciliationQueued: 0,
         oldestDueAt: null,
         recent: []
       },

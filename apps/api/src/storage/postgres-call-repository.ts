@@ -287,13 +287,15 @@ type AdminSystemFactsRow = {
   jobsRetryQueued: number;
   transcriptionQueued: number;
   retentionQueued: number;
+  providerReconciliationQueued: number;
   oldestJobDueAt: DatabaseDate | null;
 };
 
 type DurableJobRow = {
   id: string;
   type: DurableJob["type"];
-  recordingId: string;
+  recordingId: string | null;
+  callAttemptId: string | null;
   callId: string;
   status: DurableJob["status"];
   generation: number;
@@ -1576,6 +1578,14 @@ export class PostgresCallRepository implements CallRepository {
           WHERE status = 'queued' AND job_type = 'recording_retention'
         ) AS "retentionQueued",
         (
+          SELECT count(*)::int FROM durable_jobs
+          WHERE status = 'queued'
+            AND job_type IN (
+              'provider_call_reconciliation',
+              'provider_recording_reconciliation'
+            )
+        ) AS "providerReconciliationQueued",
+        (
           SELECT min(run_after) FROM durable_jobs WHERE status = 'queued'
         ) AS "oldestJobDueAt"
       FROM system_controls
@@ -1612,9 +1622,11 @@ export class PostgresCallRepository implements CallRepository {
         retryQueued: row.jobsRetryQueued,
         transcriptionQueued: row.transcriptionQueued,
         retentionQueued: row.retentionQueued,
+        providerReconciliationQueued: row.providerReconciliationQueued,
         oldestDueAt: row.oldestJobDueAt ? toIso(row.oldestJobDueAt) : null,
         recent: recentJobs.map(mapDurableJobRow).map(({
           recordingId: _recordingId,
+          callAttemptId: _callAttemptId,
           forceRequested: _force,
           leaseOwner: _owner,
           leasedAt: _leasedAt,
@@ -2129,7 +2141,8 @@ export class PostgresCallRepository implements CallRepository {
   async attachProviderCall(
     attemptId: string,
     providerCallId: string,
-    providerStatus: string
+    providerStatus: string,
+    reconciliationRunAfter?: string
   ) {
     const row = await this.#sql.begin(async (transaction) => {
       const [updated] = await transaction<
@@ -2185,6 +2198,35 @@ export class PostgresCallRepository implements CallRepository {
           settlement
         );
       }
+      const [call] = await transaction<{ status: CallBrief["status"] }[]>`
+        SELECT status FROM call_briefs
+        WHERE id = ${updated.callId}
+        FOR UPDATE
+      `;
+      if (
+        reconciliationRunAfter &&
+        updated.provider === "twilio" &&
+        call &&
+        !terminalStatuses.has(call.status)
+      ) {
+        const jobNow = new Date();
+        await transaction`
+          INSERT INTO durable_jobs (
+            id, job_type, call_attempt_id, status, max_attempts,
+            run_after, created_at, updated_at
+          ) VALUES (
+            ${randomUUID()}, 'provider_call_reconciliation', ${attemptId},
+            'queued', ${durableJobMaxAttempts.provider_call_reconciliation},
+            ${reconciliationRunAfter}::timestamptz, ${jobNow}, ${jobNow}
+          )
+          ON CONFLICT (job_type, call_attempt_id)
+            WHERE call_attempt_id IS NOT NULL
+          DO UPDATE SET
+            run_after = LEAST(durable_jobs.run_after, EXCLUDED.run_after),
+            updated_at = EXCLUDED.updated_at
+          WHERE durable_jobs.status = 'queued'
+        `;
+      }
       return updated;
     });
     if (!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
@@ -2195,10 +2237,14 @@ export class PostgresCallRepository implements CallRepository {
     providerCallId: string,
     providerStatus: string,
     callStatus: CallBrief["status"],
-    callBriefId?: string
+    callBriefId?: string,
+    lease?: DurableJobLease
   ) {
     const now = new Date();
     const callId = await this.#sql.begin(async (transaction) => {
+      if (lease) {
+        await requirePostgresDurableJobLease(transaction, lease);
+      }
       const [row] = await transaction<
         {
           attemptId: string;
@@ -2305,6 +2351,13 @@ export class PostgresCallRepository implements CallRepository {
           WHERE call_brief_id = ${row.callId}
             AND status IN ('starting', 'recording')
         `;
+        await transaction`
+          UPDATE durable_jobs
+          SET run_after = LEAST(run_after, ${now}), updated_at = ${now}
+          WHERE job_type = 'provider_call_reconciliation'
+            AND call_attempt_id = ${row.attemptId}
+            AND status = 'queued'
+        `;
       }
       await this.#audit(transaction, row.callId, "call.provider_status", {
         providerCallId,
@@ -2359,6 +2412,15 @@ export class PostgresCallRepository implements CallRepository {
           settlement.settlement,
           now.toISOString()
         );
+      }
+      if (attemptId && terminalStatuses.has(status)) {
+        await transaction`
+          UPDATE durable_jobs
+          SET run_after = LEAST(run_after, ${now}), updated_at = ${now}
+          WHERE job_type = 'provider_call_reconciliation'
+            AND call_attempt_id = ${attemptId}
+            AND status = 'queued'
+        `;
       }
       await this.#audit(transaction, id, "call.status_changed", { status });
     });
@@ -2524,6 +2586,10 @@ export class PostgresCallRepository implements CallRepository {
         id,
         "call_refund"
       );
+      const attemptId = settlement?.attemptId ?? await this.#latestAttemptId(
+        transaction,
+        id
+      );
       if (settlement) {
         await this.#appendSettlementTelemetry(
           transaction,
@@ -2539,6 +2605,15 @@ export class PostgresCallRepository implements CallRepository {
         WHERE call_brief_id = ${id}
           AND status IN ('starting', 'recording')
       `;
+      if (attemptId) {
+        await transaction`
+          UPDATE durable_jobs
+          SET run_after = LEAST(run_after, ${now}), updated_at = ${now}
+          WHERE job_type = 'provider_call_reconciliation'
+            AND call_attempt_id = ${attemptId}
+            AND status = 'queued'
+        `;
+      }
       await this.#audit(transaction, id, "call.status_changed", {
         status: "stopped"
       });
@@ -2632,12 +2707,17 @@ export class PostgresCallRepository implements CallRepository {
   async attachProviderRecording(
     recordingId: string,
     providerRecordingId: string,
-    providerStatus: string
+    providerStatus: string,
+    reconciliationRunAfter?: string
   ) {
     const now = new Date();
     const [row] = await this.#sql.begin(async (transaction) => {
       const rows = await transaction<
-        { callId: string; callAttemptId: string }[]
+        {
+          callId: string;
+          callAttemptId: string;
+          status: CallRecording["status"];
+        }[]
       >`
         UPDATE call_recordings
         SET
@@ -2663,7 +2743,8 @@ export class PostgresCallRepository implements CallRepository {
           )
         RETURNING
           call_brief_id AS "callId",
-          call_attempt_id AS "callAttemptId"
+          call_attempt_id AS "callAttemptId",
+          status
       `;
       const updated = rows[0];
       if (updated) {
@@ -2686,6 +2767,26 @@ export class PostgresCallRepository implements CallRepository {
             }
           }
         });
+        if (
+          reconciliationRunAfter &&
+          ["recording", "processing"].includes(updated.status)
+        ) {
+          await transaction`
+            INSERT INTO durable_jobs (
+              id, job_type, recording_id, status, max_attempts,
+              run_after, created_at, updated_at
+            ) VALUES (
+              ${randomUUID()}, 'provider_recording_reconciliation',
+              ${recordingId}, 'queued',
+              ${durableJobMaxAttempts.provider_recording_reconciliation},
+              ${reconciliationRunAfter}::timestamptz, ${now}, ${now}
+            )
+            ON CONFLICT (job_type, recording_id) DO UPDATE SET
+              run_after = LEAST(durable_jobs.run_after, EXCLUDED.run_after),
+              updated_at = EXCLUDED.updated_at
+            WHERE durable_jobs.status = 'queued'
+          `;
+        }
       }
       return rows;
     });
@@ -2735,9 +2836,15 @@ export class PostgresCallRepository implements CallRepository {
     return this.#recordingMutation(row.callId);
   }
 
-  async applyRecordingStatus(input: RecordingStatusInput) {
+  async applyRecordingStatus(
+    input: RecordingStatusInput,
+    lease?: DurableJobLease
+  ) {
     const now = new Date();
     const callId = await this.#sql.begin(async (transaction) => {
+      if (lease) {
+        await requirePostgresDurableJobLease(transaction, lease);
+      }
       const [row] = await transaction<
         {
           callId: string;
@@ -2880,6 +2987,15 @@ export class PostgresCallRepository implements CallRepository {
             metadata: { failureCode }
           }
         });
+      }
+      if (["completed", "absent"].includes(input.providerStatus)) {
+        await transaction`
+          UPDATE durable_jobs
+          SET run_after = LEAST(run_after, ${now}), updated_at = ${now}
+          WHERE job_type = 'provider_recording_reconciliation'
+            AND recording_id = ${input.recordingId}
+            AND status = 'queued'
+        `;
       }
       return row.callId;
     });
@@ -3179,13 +3295,32 @@ export class PostgresCallRepository implements CallRepository {
   async enqueueDurableJob(input: EnqueueDurableJobInput) {
     const now = new Date();
     const jobId = await this.#sql.begin(async (transaction) => {
-      const [recording] = await transaction<{ callId: string }[]>`
-        SELECT call_brief_id AS "callId"
-        FROM call_recordings
-        WHERE id = ${input.recordingId}
-        FOR UPDATE
-      `;
-      if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const callTarget = input.type === "provider_call_reconciliation";
+      if (
+        (callTarget && (!input.callAttemptId || input.recordingId)) ||
+        (!callTarget && (!input.recordingId || input.callAttemptId))
+      ) {
+        throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+      }
+      if (callTarget) {
+        const attempts = await transaction`
+          SELECT id FROM call_attempts
+          WHERE id = ${input.callAttemptId!}
+          FOR UPDATE
+        `;
+        if (attempts.count === 0) {
+          throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+        }
+      } else {
+        const recordings = await transaction`
+          SELECT id FROM call_recordings
+          WHERE id = ${input.recordingId!}
+          FOR UPDATE
+        `;
+        if (recordings.count === 0) {
+          throw new CallRepositoryError("RECORDING_NOT_FOUND");
+        }
+      }
       const [existing] = await transaction<{
         id: string;
         status: DurableJob["status"];
@@ -3193,7 +3328,11 @@ export class PostgresCallRepository implements CallRepository {
         SELECT id, status
         FROM durable_jobs
         WHERE job_type = ${input.type}
-          AND recording_id = ${input.recordingId}
+          AND (
+            (${callTarget} AND call_attempt_id = ${input.callAttemptId ?? null})
+            OR
+            (${!callTarget} AND recording_id = ${input.recordingId ?? null})
+          )
         FOR UPDATE
       `;
       if (!existing) {
@@ -3203,6 +3342,7 @@ export class PostgresCallRepository implements CallRepository {
             id,
             job_type,
             recording_id,
+            call_attempt_id,
             status,
             max_attempts,
             run_after,
@@ -3212,7 +3352,8 @@ export class PostgresCallRepository implements CallRepository {
           ) VALUES (
             ${id},
             ${input.type},
-            ${input.recordingId},
+            ${input.recordingId ?? null},
+            ${input.callAttemptId ?? null},
             'queued',
             ${input.maxAttempts},
             ${input.runAfter}::timestamptz,
@@ -3260,8 +3401,52 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async seedDurableJobs(now: string) {
-    const [transcriptions, retention] = await this.#sql.begin(
+    const [callReconciliations, recordingReconciliations,
+      transcriptions, retention] = await this.#sql.begin(
       async (transaction) => {
+        const callReconciliationRows = await transaction`
+          INSERT INTO durable_jobs (
+            id, job_type, call_attempt_id, status, max_attempts, run_after
+          )
+          SELECT
+            gen_random_uuid(),
+            'provider_call_reconciliation',
+            call_attempts.id,
+            'queued',
+            ${durableJobMaxAttempts.provider_call_reconciliation},
+            ${now}::timestamptz
+          FROM call_attempts
+          JOIN call_briefs ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_attempts.provider = 'twilio'
+            AND call_attempts.provider_call_id IS NOT NULL
+            AND call_briefs.status IN (
+              'dialing', 'in_progress', 'awaiting_approval'
+            )
+          ON CONFLICT (job_type, call_attempt_id)
+            WHERE call_attempt_id IS NOT NULL
+          DO NOTHING
+          RETURNING id
+        `;
+        const recordingReconciliationRows = await transaction`
+          INSERT INTO durable_jobs (
+            id, job_type, recording_id, status, max_attempts, run_after
+          )
+          SELECT
+            gen_random_uuid(),
+            'provider_recording_reconciliation',
+            call_recordings.id,
+            'queued',
+            ${durableJobMaxAttempts.provider_recording_reconciliation},
+            ${now}::timestamptz
+          FROM call_recordings
+          WHERE call_recordings.provider_recording_id IS NOT NULL
+            AND call_recordings.status IN ('recording', 'processing')
+          ON CONFLICT (job_type, recording_id) DO UPDATE SET
+            run_after = LEAST(durable_jobs.run_after, EXCLUDED.run_after),
+            updated_at = now()
+          WHERE durable_jobs.status = 'queued'
+          RETURNING id
+        `;
         const transcriptionRows = await transaction`
           INSERT INTO durable_jobs (
             id,
@@ -3314,10 +3499,16 @@ export class PostgresCallRepository implements CallRepository {
           ON CONFLICT (job_type, recording_id) DO NOTHING
           RETURNING id
         `;
-        return [transcriptionRows, retentionRows] as const;
+        return [
+          callReconciliationRows,
+          recordingReconciliationRows,
+          transcriptionRows,
+          retentionRows
+        ] as const;
       }
     );
-    return transcriptions.count + retention.count;
+    return callReconciliations.count + recordingReconciliations.count +
+      transcriptions.count + retention.count;
   }
 
   async claimDueDurableJob(input: ClaimDurableJobInput) {
@@ -3632,52 +3823,94 @@ export class PostgresCallRepository implements CallRepository {
   async recoverInterruptedCalls() {
     const now = new Date();
     return this.#sql.begin(async (transaction) => {
-      const rows = await transaction<{ id: string }[]>`
-        SELECT id
+      const rows = await transaction<{
+        id: string;
+        attemptId: string | null;
+        provider: CallAttemptRecord["provider"] | null;
+        providerCallId: string | null;
+      }[]>`
+        SELECT
+          call_briefs.id,
+          latest_attempt.id AS "attemptId",
+          latest_attempt.provider,
+          latest_attempt.provider_call_id AS "providerCallId"
         FROM call_briefs
-        WHERE status IN ('dialing', 'in_progress', 'awaiting_approval')
-        FOR UPDATE
+        LEFT JOIN LATERAL (
+          SELECT id, provider, provider_call_id
+          FROM call_attempts
+          WHERE call_attempts.call_brief_id = call_briefs.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) AS latest_attempt ON true
+        WHERE call_briefs.status IN (
+          'dialing', 'in_progress', 'awaiting_approval'
+        )
+        FOR UPDATE OF call_briefs
       `;
 
-      for (const { id } of rows) {
-        const attemptId = await this.#latestAttemptId(transaction, id);
+      for (const { id, attemptId, provider, providerCallId } of rows) {
         await transaction`
           UPDATE approval_requests
           SET status = 'expired', decided_at = ${now}
           WHERE call_brief_id = ${id} AND status = 'pending'
         `;
-        await transaction`
-          UPDATE call_briefs
-          SET status = 'failed', updated_at = ${now}
-          WHERE id = ${id}
-        `;
-        await transaction`
-          UPDATE call_attempts
-          SET status = 'failed', ended_at = ${now}, failure_reason = 'server_restarted'
-          WHERE id = (
-            SELECT id FROM call_attempts
-            WHERE call_brief_id = ${id}
-            ORDER BY created_at DESC
-            LIMIT 1
-          )
-        `;
-        const settlement = await this.#settleLatestAttempt(
-          transaction,
-          id,
-          "call_refund"
-        );
+        const reconcileProvider =
+          provider === "twilio" && attemptId && providerCallId;
+        let settlement: {
+          attemptId: string;
+          settlement: "call_charge" | "call_refund";
+        } | null | undefined = null;
+        if (reconcileProvider) {
+          await transaction`
+            INSERT INTO durable_jobs (
+              id, job_type, call_attempt_id, status, max_attempts,
+              run_after, created_at, updated_at
+            ) VALUES (
+              ${randomUUID()}, 'provider_call_reconciliation', ${attemptId},
+              'queued', ${durableJobMaxAttempts.provider_call_reconciliation},
+              ${now}, ${now}, ${now}
+            )
+            ON CONFLICT (job_type, call_attempt_id)
+              WHERE call_attempt_id IS NOT NULL
+            DO UPDATE SET
+              run_after = LEAST(durable_jobs.run_after, EXCLUDED.run_after),
+              updated_at = EXCLUDED.updated_at
+            WHERE durable_jobs.status = 'queued'
+          `;
+        } else {
+          await transaction`
+            UPDATE call_briefs
+            SET status = 'failed', updated_at = ${now}
+            WHERE id = ${id}
+          `;
+          await transaction`
+            UPDATE call_attempts
+            SET
+              status = 'failed',
+              ended_at = ${now},
+              failure_reason = 'server_restarted'
+            WHERE id = ${attemptId}
+          `;
+          settlement = await this.#settleLatestAttempt(
+            transaction,
+            id,
+            "call_refund"
+          );
+        }
         await this.#audit(transaction, id, "call.recovered_after_restart", {
-          status: "failed"
+          status: reconcileProvider ? "reconciliation_scheduled" : "failed"
         });
-        await this.#appendTelemetry(transaction, id, {
-          callAttemptId: attemptId,
-          idempotencyKey: "call:recovered:server-restarted",
-          occurredAt: now.toISOString(),
-          payload: {
-            name: "call.recovered",
-            metadata: { reason: "server_restarted" }
-          }
-        });
+        if (!reconcileProvider) {
+          await this.#appendTelemetry(transaction, id, {
+            callAttemptId: attemptId,
+            idempotencyKey: "call:recovered:server-restarted",
+            occurredAt: now.toISOString(),
+            payload: {
+              name: "call.recovered",
+              metadata: { reason: "server_restarted" }
+            }
+          });
+        }
         if (settlement) {
           await this.#appendSettlementTelemetry(
             transaction,
@@ -3861,7 +4094,11 @@ export class PostgresCallRepository implements CallRepository {
         durable_jobs.id,
         durable_jobs.job_type AS "type",
         durable_jobs.recording_id AS "recordingId",
-        call_recordings.call_brief_id AS "callId",
+        durable_jobs.call_attempt_id AS "callAttemptId",
+        COALESCE(
+          call_recordings.call_brief_id,
+          reconciliation_attempt.call_brief_id
+        ) AS "callId",
         durable_jobs.status,
         durable_jobs.generation,
         durable_jobs.attempt_count AS "attemptCount",
@@ -3876,8 +4113,10 @@ export class PostgresCallRepository implements CallRepository {
         durable_jobs.updated_at AS "updatedAt",
         durable_jobs.completed_at AS "completedAt"
       FROM durable_jobs
-      JOIN call_recordings
+      LEFT JOIN call_recordings
         ON call_recordings.id = durable_jobs.recording_id
+      LEFT JOIN call_attempts AS reconciliation_attempt
+        ON reconciliation_attempt.id = durable_jobs.call_attempt_id
     `;
   }
 

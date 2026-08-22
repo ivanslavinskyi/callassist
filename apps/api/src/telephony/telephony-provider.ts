@@ -44,6 +44,20 @@ export type RecordingMedia = {
   channels?: 1 | 2;
 };
 
+export type ProviderCallStatus = {
+  providerCallId: string;
+  status: TwilioCallStatus;
+};
+
+export type ProviderRecordingStatus = {
+  providerRecordingId: string;
+  status: TwilioRecordingStatus | "pending";
+  durationSeconds?: number;
+  channels?: number;
+  startedAt?: string;
+  failureReason?: string;
+};
+
 export interface TelephonyProvider {
   readonly mode: "mock" | "twilio";
   startCall(brief: CallBrief): Promise<StartTelephonyCallResult>;
@@ -54,6 +68,10 @@ export interface TelephonyProvider {
   ): Promise<StartCallRecordingResult>;
   getRecordingMedia(providerRecordingId: string): Promise<RecordingMedia>;
   deleteRecording(providerRecordingId: string): Promise<void>;
+  getCallStatus?(providerCallId: string): Promise<ProviderCallStatus>;
+  getRecordingStatus?(
+    providerRecordingId: string
+  ): Promise<ProviderRecordingStatus>;
 }
 
 export function mapTwilioStatusToCallStatus(

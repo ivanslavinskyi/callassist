@@ -8,6 +8,10 @@ import type {
   StartCallRecordingInput,
   TelephonyProvider
 } from "./telephony-provider";
+import {
+  isTwilioCallStatus,
+  isTwilioRecordingStatus
+} from "./telephony-provider";
 
 type TwilioClient = ReturnType<typeof twilio>;
 
@@ -67,6 +71,24 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
 
   async stopCall(providerCallId: string) {
     await this.#client.calls(providerCallId).update({ status: "completed" });
+  }
+
+  async getCallStatus(providerCallId: string) {
+    try {
+      const call = await this.#client.calls(providerCallId).fetch();
+      if (!isTwilioCallStatus(call.status)) {
+        throw new Error("TWILIO_CALL_STATUS_UNSUPPORTED");
+      }
+      return { providerCallId, status: call.status };
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("TWILIO_")) {
+        throw error;
+      }
+      throw new Error(
+        `TWILIO_CALL_FETCH_${twilioErrorStatus(error) ?? "FAILED"}`,
+        { cause: error }
+      );
+    }
   }
 
   async startRecording(
@@ -137,6 +159,36 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     }
   }
 
+  async getRecordingStatus(providerRecordingId: string) {
+    try {
+      const recording = await this.#client
+        .recordings(providerRecordingId)
+        .fetch();
+      const status = isTwilioRecordingStatus(recording.status)
+        ? recording.status
+        : "pending" as const;
+      return {
+        providerRecordingId,
+        status,
+        durationSeconds: optionalNonNegativeInteger(recording.duration),
+        channels: optionalPositiveInteger(recording.channels),
+        startedAt: recording.startTime?.toISOString()
+      };
+    } catch (error) {
+      if (twilioErrorStatus(error) === 404) {
+        return {
+          providerRecordingId,
+          status: "absent" as const,
+          failureReason: "provider_recording_not_found"
+        };
+      }
+      throw new Error(
+        `TWILIO_RECORDING_FETCH_${twilioErrorStatus(error) ?? "FAILED"}`,
+        { cause: error }
+      );
+    }
+  }
+
   validateWebhook(
     signature: string,
     rawRequestUrl: string,
@@ -204,4 +256,14 @@ function twilioErrorStatus(error: unknown) {
   if (!error || typeof error !== "object" || !("status" in error)) return null;
   const status = (error as { status?: unknown }).status;
   return typeof status === "number" ? status : null;
+}
+
+function optionalNonNegativeInteger(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function optionalPositiveInteger(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

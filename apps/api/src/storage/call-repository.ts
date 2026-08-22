@@ -216,6 +216,7 @@ export type AdminSystemFacts = {
     retryQueued: number;
     transcriptionQueued: number;
     retentionQueued: number;
+    providerReconciliationQueued: number;
     oldestDueAt: string | null;
     recent: Array<Pick<
       DurableJob,
@@ -382,13 +383,15 @@ export interface CallRepository {
   attachProviderCall(
     attemptId: string,
     providerCallId: string,
-    providerStatus: string
+    providerStatus: string,
+    reconciliationRunAfter?: string
   ): Promise<CallSnapshot>;
   applyProviderStatus(
     providerCallId: string,
     providerStatus: string,
     callStatus: CallBrief["status"],
-    callBriefId?: string
+    callBriefId?: string,
+    lease?: DurableJobLease
   ): Promise<ProviderStatusResult | null>;
   updateStatus(
     id: string,
@@ -414,14 +417,16 @@ export interface CallRepository {
   attachProviderRecording(
     recordingId: string,
     providerRecordingId: string,
-    providerStatus: string
+    providerStatus: string,
+    reconciliationRunAfter?: string
   ): Promise<RecordingMutationResult>;
   failRecording(
     recordingId: string,
     failureReason: string
   ): Promise<RecordingMutationResult>;
   applyRecordingStatus(
-    input: RecordingStatusInput
+    input: RecordingStatusInput,
+    lease?: DurableJobLease
   ): Promise<RecordingMutationResult | null>;
   claimFinalTranscript(
     recordingId: string,
@@ -510,7 +515,8 @@ export class CallRepositoryError extends Error {
       | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
       | "DURABLE_JOB_LEASE_LOST"
       | "DURABLE_JOB_NOT_FOUND"
-      | "DURABLE_JOB_NOT_RETRYABLE",
+      | "DURABLE_JOB_NOT_RETRYABLE"
+      | "DURABLE_JOB_TARGET_INVALID",
     message = code
   ) {
     super(message);
