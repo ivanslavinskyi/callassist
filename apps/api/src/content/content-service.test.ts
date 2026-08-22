@@ -21,6 +21,38 @@ describe("ContentService", () => {
     await expect(service.getPublishedPage("de", "datenschutz")).resolves
       .toMatchObject({ key: "privacy", locale: "de", revision: { number: 1 } });
     await expect(service.getPublishedPage("en", "datenschutz")).resolves.toBeNull();
+    const index = await service.listPublishedContentIndex();
+    const privacy = index.pages.find(({ key }) => key === "privacy")!;
+    expect(privacy.revision.number).toBe(1);
+    expect(privacy.localizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ locale: "en", translationStale: false }),
+      expect.objectContaining({ locale: "de", translationStale: false })
+    ]));
+  });
+
+  it("automatically advances source revisions and flags stale translations", async () => {
+    const actorUserId = "46ccac03-8177-49ba-843c-b920c94d86cf";
+    const source = (await service.getAdminPage("privacy", "en")).published!;
+    await service.createDraft(actorUserId, "privacy");
+    await expect(service.updateDraft(actorUserId, "privacy", {
+      locale: "en",
+      title: "Updated privacy notice",
+      summary: source.summary,
+      sections: source.sections,
+      seoTitle: source.seoTitle,
+      seoDescription: source.seoDescription,
+      sourceRevisionNumber: 1,
+      requiresReacceptance: false
+    })).resolves.toMatchObject({
+      revision: { number: 2, sourceRevisionNumber: 2 }
+    });
+    await service.publishDraft(actorUserId, "privacy", "Publish source update");
+    const index = await service.listPublishedContentIndex();
+    const privacy = index.pages.find(({ key }) => key === "privacy")!;
+    expect(privacy.localizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ locale: "en", sourceRevisionNumber: 2, translationStale: false }),
+      expect.objectContaining({ locale: "de", sourceRevisionNumber: 1, translationStale: true })
+    ]));
   });
 
   it("requires current Terms and AUP and retains append-only acceptance evidence", async () => {

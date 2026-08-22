@@ -21,6 +21,7 @@ import type {
   PromoCodeCreateInput,
   PromoCodeSummary,
   PromoRedemptionInput,
+  PublishedContentIndex,
   RecipientOptOutConfirmation,
   RecipientOptOutRequest,
   RegistrationInput,
@@ -126,6 +127,10 @@ export async function acceptOnboarding(input: OnboardingAcceptanceInput) {
 
 export async function getCreditUsage() {
   return apiRequest<CreditUsage>("/api/usage");
+}
+
+export async function getPublishedContentIndex() {
+  return apiRequest<PublishedContentIndex>("/api/content/index");
 }
 
 export async function listAdminContentPages() {

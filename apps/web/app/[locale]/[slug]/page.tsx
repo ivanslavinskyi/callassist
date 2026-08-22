@@ -2,19 +2,26 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ContentPage } from "@/components/content-page";
 import { isUiLocale } from "@/lib/i18n/messages";
-import { getPublishedContentPage } from "@/lib/server-content";
+import { contentPageMetadata } from "@/lib/seo-metadata";
+import {
+  getPublishedContentIndex,
+  getPublishedContentPage
+} from "@/lib/server-content";
 
 export async function generateMetadata({ params }: {
   params: Promise<{ locale: string; slug: string }>;
 }): Promise<Metadata> {
   const { locale, slug } = await params;
   if (!isUiLocale(locale)) return {};
-  const page = await getPublishedContentPage(locale, slug);
+  const [page, index] = await Promise.all([
+    getPublishedContentPage(locale, slug),
+    getPublishedContentIndex()
+  ]);
   if (!page) return {};
-  return {
-    title: page.seoTitle,
-    description: page.seoDescription
-  };
+  return contentPageMetadata(
+    page,
+    index.pages.find(({ key }) => key === page.key)
+  );
 }
 
 export default async function PublicContentPage({ params }: {

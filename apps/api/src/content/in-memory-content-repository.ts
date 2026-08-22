@@ -7,6 +7,7 @@ import type {
   ContentPageKey,
   OnboardingAcceptanceInput,
   OnboardingStatus,
+  PublishedContentIndex,
   PublishedContentPage
 } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
@@ -78,6 +79,49 @@ export class InMemoryContentRepository implements ContentRepository {
       (candidate) => candidate.locale === locale && candidate.slug === slug
     );
     return page ? toPublishedPage(page) : null;
+  }
+
+  async listPublishedContentIndex(): Promise<PublishedContentIndex> {
+    const grouped = new Map<ContentPageKey, SeedContentPage[]>();
+    for (const page of this.#latestPublishedPages()) {
+      const pages = grouped.get(page.key) ?? [];
+      pages.push(page);
+      grouped.set(page.key, pages);
+    }
+    return {
+      pages: [...grouped.entries()]
+        .map(([key, pages]) => {
+          const exemplar = pages[0]!;
+          const source = pages.find(({ locale }) =>
+            locale === exemplar.sourceLocale
+          );
+          const sourceRevisionNumber = source?.revision.sourceRevisionNumber ??
+            exemplar.revision.number;
+          return {
+            key,
+            pageType: exemplar.pageType,
+            sourceLocale: exemplar.sourceLocale,
+            revision: {
+              id: exemplar.revision.id,
+              number: exemplar.revision.number,
+              publishedAt: exemplar.revision.publishedAt
+            },
+            localizations: pages
+              .map((page) => ({
+                locale: page.locale,
+                slug: page.slug,
+                title: page.title,
+                seoTitle: page.seoTitle,
+                seoDescription: page.seoDescription,
+                sourceRevisionNumber: page.revision.sourceRevisionNumber,
+                translationStale: page.locale !== exemplar.sourceLocale &&
+                  page.revision.sourceRevisionNumber < sourceRevisionNumber
+              }))
+              .sort((left, right) => left.locale.localeCompare(right.locale))
+          };
+        })
+        .sort((left, right) => left.key.localeCompare(right.key))
+    };
   }
 
   async getOnboardingStatus(
@@ -226,7 +270,9 @@ export class InMemoryContentRepository implements ContentRepository {
       seoTitle: input.seoTitle,
       seoDescription: input.seoDescription
     });
-    page.revision.sourceRevisionNumber = input.sourceRevisionNumber;
+    page.revision.sourceRevisionNumber = page.locale === page.sourceLocale
+      ? page.revision.number
+      : input.sourceRevisionNumber;
     for (const candidate of draftPages) {
       candidate.revision.requiresReacceptance = input.requiresReacceptance;
     }

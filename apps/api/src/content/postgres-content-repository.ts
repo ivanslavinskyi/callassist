@@ -7,6 +7,7 @@ import type {
   ContentPageKey,
   OnboardingAcceptanceInput,
   OnboardingStatus,
+  PublishedContentIndex,
   PublishedContentPage
 } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
@@ -87,6 +88,21 @@ type RevisionLocalizationCopyRow = {
   title: string;
   summary: string;
   sections: AdminContentLocalizedRevision["sections"] | string;
+  seoTitle: string;
+  seoDescription: string;
+  sourceRevisionNumber: number;
+};
+
+type PublishedIndexRow = {
+  key: ContentPageKey;
+  pageType: "page" | "landing";
+  sourceLocale: ContentLocale;
+  revisionId: string;
+  revisionNumber: number;
+  publishedAt: DatabaseDate;
+  locale: ContentLocale;
+  slug: string;
+  title: string;
   seoTitle: string;
   seoDescription: string;
   sourceRevisionNumber: number;
@@ -185,6 +201,73 @@ export class PostgresContentRepository implements ContentRepository {
       LIMIT 1
     `;
     return row ? mapPublishedPage(row) : null;
+  }
+
+  async listPublishedContentIndex(): Promise<PublishedContentIndex> {
+    const rows = await this.#sql<PublishedIndexRow[]>`
+      SELECT
+        page.key AS "key",
+        page.page_type AS "pageType",
+        page.source_locale AS "sourceLocale",
+        revision.id AS "revisionId",
+        revision.revision_number AS "revisionNumber",
+        revision.published_at AS "publishedAt",
+        localization.locale AS "locale",
+        localization.slug AS "slug",
+        revision_localization.title AS "title",
+        revision_localization.seo_title AS "seoTitle",
+        revision_localization.seo_description AS "seoDescription",
+        revision_localization.source_revision_number AS "sourceRevisionNumber"
+      FROM content_pages page
+      JOIN LATERAL (
+        SELECT * FROM content_page_revisions candidate
+        WHERE candidate.page_id = page.id AND candidate.status = 'published'
+        ORDER BY candidate.revision_number DESC
+        LIMIT 1
+      ) revision ON true
+      JOIN content_page_revision_localizations revision_localization
+        ON revision_localization.revision_id = revision.id
+      JOIN content_page_localizations localization
+        ON localization.page_id = page.id
+        AND localization.locale = revision_localization.locale
+      ORDER BY page.key, localization.locale
+    `;
+    const grouped = new Map<ContentPageKey, PublishedIndexRow[]>();
+    for (const row of rows) {
+      const pages = grouped.get(row.key) ?? [];
+      pages.push(row);
+      grouped.set(row.key, pages);
+    }
+    return {
+      pages: [...grouped.entries()].map(([key, pages]) => {
+        const exemplar = pages[0]!;
+        const source = pages.find(({ locale }) =>
+          locale === exemplar.sourceLocale
+        );
+        const sourceRevisionNumber = source?.sourceRevisionNumber ??
+          exemplar.revisionNumber;
+        return {
+          key,
+          pageType: exemplar.pageType,
+          sourceLocale: exemplar.sourceLocale,
+          revision: {
+            id: exemplar.revisionId,
+            number: exemplar.revisionNumber,
+            publishedAt: toIso(exemplar.publishedAt)
+          },
+          localizations: pages.map((page) => ({
+            locale: page.locale,
+            slug: page.slug,
+            title: page.title,
+            seoTitle: page.seoTitle,
+            seoDescription: page.seoDescription,
+            sourceRevisionNumber: page.sourceRevisionNumber,
+            translationStale: page.locale !== exemplar.sourceLocale &&
+              page.sourceRevisionNumber < sourceRevisionNumber
+          }))
+        };
+      })
+    };
   }
 
   async getOnboardingStatus(
@@ -431,14 +514,26 @@ export class PostgresContentRepository implements ContentRepository {
     updatedAt: string
   ) {
     await this.#sql.begin(async (transaction) => {
-      const [draft] = await transaction<{ id: string; pageId: string }[]>`
-        SELECT revision.id, revision.page_id AS "pageId"
+      const [draft] = await transaction<{
+        id: string;
+        pageId: string;
+        revisionNumber: number;
+        sourceLocale: ContentLocale;
+      }[]>`
+        SELECT
+          revision.id,
+          revision.page_id AS "pageId",
+          revision.revision_number AS "revisionNumber",
+          page.source_locale AS "sourceLocale"
         FROM content_page_revisions revision
         JOIN content_pages page ON page.id = revision.page_id
         WHERE page.key = ${key} AND revision.status = 'draft'
         FOR UPDATE OF revision
       `;
       if (!draft) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+      const sourceRevisionNumber = input.locale === draft.sourceLocale
+        ? draft.revisionNumber
+        : input.sourceRevisionNumber;
       await transaction`
         UPDATE content_page_revisions
         SET requires_reacceptance = ${input.requiresReacceptance},
@@ -452,7 +547,7 @@ export class PostgresContentRepository implements ContentRepository {
             sections = ${transaction.json(input.sections)},
             seo_title = ${input.seoTitle},
             seo_description = ${input.seoDescription},
-            source_revision_number = ${input.sourceRevisionNumber},
+            source_revision_number = ${sourceRevisionNumber},
             updated_at = ${new Date(updatedAt)}
         WHERE revision_id = ${draft.id} AND locale = ${input.locale}
         RETURNING id

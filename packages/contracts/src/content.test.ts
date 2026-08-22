@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contentDraftUpdateInputSchema,
   onboardingAcceptanceInputSchema,
+  publishedContentIndexSchema,
   publishedContentPageSchema
 } from "./content";
 
@@ -73,5 +74,29 @@ describe("content and onboarding contracts", () => {
       ...draft,
       sections: []
     }).success).toBe(false);
+  });
+
+  it("describes published localized SEO state and translation freshness", () => {
+    expect(publishedContentIndexSchema.safeParse({
+      pages: [{
+        key: "privacy",
+        pageType: "page",
+        sourceLocale: "en",
+        revision: {
+          id: "20000000-0000-4000-8000-000000000001",
+          number: 2,
+          publishedAt: "2026-08-25T12:00:00.000Z"
+        },
+        localizations: [{
+          locale: "de",
+          slug: "datenschutz",
+          title: "Datenschutz",
+          seoTitle: "Datenschutz | CallAssist",
+          seoDescription: "Datenschutzinformationen für CallAssist.",
+          sourceRevisionNumber: 1,
+          translationStale: true
+        }]
+      }]
+    }).success).toBe(true);
   });
 });

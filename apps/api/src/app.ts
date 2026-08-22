@@ -270,6 +270,12 @@ export function buildApp({
   }
 
   if (contentService) {
+    app.get("/api/content/index", async (_request, reply) => {
+      return reply
+        .header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+        .send(await contentService.listPublishedContentIndex());
+    });
+
     app.get<{
       Params: { slug: string };
       Querystring: { locale?: string };

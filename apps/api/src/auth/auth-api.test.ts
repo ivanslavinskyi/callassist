@@ -241,6 +241,24 @@ describe("auth API", () => {
       url: "/api/content/pages/datenschutz?locale=en"
     });
     expect(wrongLocale.statusCode).toBe(404);
+    const contentIndex = await app.inject({
+      method: "GET",
+      url: "/api/content/index"
+    });
+    expect(contentIndex.statusCode).toBe(200);
+    expect(contentIndex.headers["cache-control"]).toContain("max-age=60");
+    expect(contentIndex.json()).toMatchObject({
+      pages: expect.arrayContaining([expect.objectContaining({
+        key: "privacy",
+        localizations: expect.arrayContaining([
+          expect.objectContaining({
+            locale: "de",
+            slug: "datenschutz",
+            translationStale: false
+          })
+        ])
+      })])
+    });
 
     const cookie = await registerAndVerify(app, registration);
     const blockedBeforeAcceptance = await app.inject({

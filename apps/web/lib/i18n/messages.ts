@@ -105,6 +105,7 @@ export type Messages = {
     creditAdmin: string;
     usersAdmin: string;
     contentAdmin: string;
+    seoAdmin: string;
     creditsRemaining: (count: number) => string;
   };
   dialog: {
@@ -308,6 +309,7 @@ const en: Messages = {
     creditAdmin: "Credits",
     usersAdmin: "Users",
     contentAdmin: "Content",
+    seoAdmin: "SEO",
     creditsRemaining: (count: number) =>
       `${count} call ${count === 1 ? "credit" : "credits"}`
   },
@@ -473,6 +475,7 @@ const de: Messages = {
     creditAdmin: "Guthaben",
     usersAdmin: "Benutzer",
     contentAdmin: "Inhalte",
+    seoAdmin: "SEO",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {

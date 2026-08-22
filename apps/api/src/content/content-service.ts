@@ -25,6 +25,10 @@ export class ContentService {
     return this.repository.getPublishedPage(locale, slug);
   }
 
+  async listPublishedContentIndex() {
+    return this.repository.listPublishedContentIndex();
+  }
+
   async getOnboardingStatus(userId: string, locale: ContentLocale) {
     return this.repository.getOnboardingStatus(userId, locale);
   }

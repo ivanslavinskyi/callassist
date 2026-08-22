@@ -44,6 +44,41 @@ export type PublishedContentPage = z.infer<
   typeof publishedContentPageSchema
 >;
 
+export const publishedContentIndexLocalizationSchema = z.object({
+  locale: contentLocaleSchema,
+  slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  title: z.string().trim().min(1).max(180),
+  seoTitle: z.string().trim().min(1).max(180),
+  seoDescription: z.string().trim().min(1).max(500),
+  sourceRevisionNumber: z.number().int().positive(),
+  translationStale: z.boolean()
+});
+export type PublishedContentIndexLocalization = z.infer<
+  typeof publishedContentIndexLocalizationSchema
+>;
+
+export const publishedContentIndexPageSchema = z.object({
+  key: contentPageKeySchema,
+  pageType: contentPageTypeSchema,
+  sourceLocale: contentLocaleSchema,
+  revision: z.object({
+    id: z.uuid(),
+    number: z.number().int().positive(),
+    publishedAt: z.iso.datetime()
+  }),
+  localizations: z.array(publishedContentIndexLocalizationSchema).min(1).max(2)
+});
+export type PublishedContentIndexPage = z.infer<
+  typeof publishedContentIndexPageSchema
+>;
+
+export const publishedContentIndexSchema = z.object({
+  pages: z.array(publishedContentIndexPageSchema)
+});
+export type PublishedContentIndex = z.infer<
+  typeof publishedContentIndexSchema
+>;
+
 export const contentRevisionStatusSchema = z.enum(["draft", "published"]);
 export type ContentRevisionStatus = z.infer<typeof contentRevisionStatusSchema>;
 

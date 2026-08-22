@@ -10,6 +10,7 @@ import {
   createPromoCode,
   getCreditUsage,
   getOnboardingStatus,
+  getPublishedContentIndex,
   getAdminUserCreditLedger,
   getAdminContentPage,
   getCallPreparationErrorMessage,
@@ -38,6 +39,17 @@ afterEach(() => {
 });
 
 describe("API client headers", () => {
+  it("loads the public published-content index for SEO consumers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ pages: [] }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getPublishedContentIndex()).resolves.toEqual({ pages: [] });
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/content/index");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
+  });
+
   it("uses the protected CMS endpoints for the complete editorial lifecycle", async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({ pages: [], revisions: [] }), {

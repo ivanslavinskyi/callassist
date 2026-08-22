@@ -7,6 +7,7 @@ import type {
   ContentPageKey,
   OnboardingAcceptanceInput,
   OnboardingStatus,
+  PublishedContentIndex,
   PublishedContentPage
 } from "@callassist/contracts";
 
@@ -23,6 +24,7 @@ export interface ContentRepository {
     locale: ContentLocale,
     slug: string
   ): Promise<PublishedContentPage | null>;
+  listPublishedContentIndex(): Promise<PublishedContentIndex>;
   getOnboardingStatus(
     userId: string,
     locale: ContentLocale

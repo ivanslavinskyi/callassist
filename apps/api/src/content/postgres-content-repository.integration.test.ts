@@ -137,6 +137,12 @@ describeWithDatabase("PostgresContentRepository", () => {
       { revisionNumber: sourceNumber }
     );
     expect(source).not.toBeNull();
+    const englishSource = await contentRepository.getAdminRevision(
+      "privacy",
+      "en",
+      { revisionNumber: sourceNumber }
+    );
+    expect(englishSource).not.toBeNull();
 
     const draft = await contentRepository.createDraft(
       editor.id,
@@ -147,6 +153,21 @@ describeWithDatabase("PostgresContentRepository", () => {
       number: sourceNumber + 1,
       status: "draft",
       locales: ["de", "en"]
+    });
+    await expect(contentRepository.updateDraft(editor.id, "privacy", {
+      locale: "en",
+      title: englishSource!.title,
+      summary: englishSource!.summary,
+      sections: englishSource!.sections,
+      seoTitle: englishSource!.seoTitle,
+      seoDescription: englishSource!.seoDescription,
+      sourceRevisionNumber: englishSource!.revision.sourceRevisionNumber,
+      requiresReacceptance: false
+    }, "2026-08-24T10:02:00.000Z")).resolves.toMatchObject({
+      revision: {
+        number: sourceNumber + 1,
+        sourceRevisionNumber: sourceNumber + 1
+      }
     });
     const title = `Datenschutzhinweise ${suffix.slice(0, 8)}`;
     await contentRepository.updateDraft(editor.id, "privacy", {
@@ -174,6 +195,16 @@ describeWithDatabase("PostgresContentRepository", () => {
     });
     await expect(contentRepository.getPublishedPage("de", "datenschutz"))
       .resolves.toMatchObject({ title, revision: { number: sourceNumber + 1 } });
+    const seoIndex = await contentRepository.listPublishedContentIndex();
+    const privacyIndex = seoIndex.pages.find(({ key }) => key === "privacy")!;
+    expect(privacyIndex.localizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        locale: "en",
+        sourceRevisionNumber: sourceNumber + 1,
+        translationStale: false
+      }),
+      expect.objectContaining({ locale: "de", translationStale: true })
+    ]));
 
     const rollback = await contentRepository.createRollbackDraft(
       editor.id,
@@ -206,6 +237,7 @@ describeWithDatabase("PostgresContentRepository", () => {
     `;
     expect(events.map(({ eventType }) => eventType)).toEqual([
       "content.draft_created",
+      "content.draft_updated",
       "content.draft_updated",
       "content.revision_published",
       "content.rollback_draft_created",

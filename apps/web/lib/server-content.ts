@@ -2,6 +2,7 @@ import "server-only";
 
 import type {
   ContentLocale,
+  PublishedContentIndex,
   PublishedContentPage
 } from "@callassist/contracts";
 import { cache } from "react";
@@ -26,4 +27,16 @@ export const getPublishedContentPage = cache(async (
   }
   const payload = await response.json() as { page: PublishedContentPage };
   return payload.page;
+});
+
+export const getPublishedContentIndex = cache(async (): Promise<
+  PublishedContentIndex
+> => {
+  const response = await fetch(`${internalApiUrl}/api/content/index`, {
+    next: { revalidate: 60 }
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load published content index (HTTP ${response.status})`);
+  }
+  return response.json() as Promise<PublishedContentIndex>;
 });

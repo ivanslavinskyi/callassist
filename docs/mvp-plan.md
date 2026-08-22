@@ -46,7 +46,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 ## Known partial implementation and beta gaps
 
 - **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, and localized CMS Core exist. Landing/navigation/media administration, reviewed operator/contact details, and production release work remain.
-- **PARTIAL — localization:** operational UI, public landing, and CMS-managed structured legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Full SEO metadata and automated translation-freshness flags remain absent.
+- **PARTIAL — localization:** operational UI, public landing, and CMS-managed structured legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Route-derived canonical/hreflang/robots/sitemap/OG metadata and translation-freshness reporting exist; structured global/organization settings and additional editorial models remain.
 - **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
@@ -64,15 +64,21 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 ## Completed checkpoint — CMS Core
 
-- [x] Add an RBAC-scoped `/admin/content` entry point for `content_editor`, admin, and superadmin. Content editors are redirected away from `/app` and operational admin routes, and backend call/recording operations reject the role. `/admin/seo` remains the next checkpoint.
+- [x] Add an RBAC-scoped `/admin/content` entry point for `content_editor`, admin, and superadmin. Content editors are redirected away from `/app` and operational admin routes, and backend call/recording operations reject the role.
 - [x] Add one-draft-per-page creation/editing, immutable publish snapshots, authenticated localized noindex preview, history, rollback-as-new-draft, and immutable content/legal audit events with actor/reason/time.
 - [x] Manage the existing seeded EN/DE pages through the publishing workflow while retaining deterministic bootstrap publication data for clean local environments.
 - [x] Preserve public reads on the latest published snapshot while drafts remain private; material Terms/AUP publication invalidates current onboarding acceptance through the existing revision boundary.
 
-## Next checkpoint — structured SEO and editorial expansion
+## Completed checkpoint — structured SEO boundary
+
+- [x] Expose a public latest-published content index without drafts or audit data and automatically advance source-locale revision markers when source copy is saved.
+- [x] Generate and test canonical URLs, published-localization-only hreflang plus `x-default`, index/follow metadata, localized Open Graph/Twitter metadata and 1200×630 images, `robots.txt`, and a database-driven sitemap.
+- [x] Add an RBAC-scoped localized `/admin/seo` report for `content_editor`, admin, and superadmin with route/index state, title/description bounds, canonical, hreflang, OG image, and stale-translation warnings.
+
+## Next checkpoint — structured editorial models
 
 - [ ] Add structured navigation and reusable FAQ management; defer the media library until a real asset workflow is required.
-- [ ] Generate and test canonical URLs, hreflang, robots, sitemap, localized OG metadata, and translation-staleness indicators from published content.
+- [ ] Model the localized Landing as reviewed ordered blocks and publish it through the existing revision boundary.
 
 # Public Beta Foundation
 
@@ -179,7 +185,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — localized CMS and publishing
 
-- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`. **Partial:** RBAC-scoped EN/DE Page/FAQ editing, preview, publication, and history are implemented; Landing blocks, reusable FAQ/navigation, Media, and `/admin/seo` remain.
+- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`. **Partial:** RBAC-scoped EN/DE Page/FAQ editing plus `/admin/seo` reporting are implemented; Landing blocks, reusable FAQ/navigation, and Media remain.
 - [x] Model logical `content_pages` separately from localized routing/editorial data, allowing `/en/privacy` and `/de/datenschutz`; expose draft/published state and editor-facing revision metadata.
 - [ ] Support `page`, `landing`, future `article`; no blog or universal builder for beta.
 - [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment. **Partial:** the full audited editorial lifecycle and database publication are implemented; public reads pick up publication through the existing 60-second revalidation window, while targeted on-publish revalidation remains.
@@ -190,22 +196,22 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 ### P0 — legal/localization/SEO correctness
 
 - [x] Let Terms/AUP revisions require account re-acceptance on both app/admin server rendering and protected APIs.
-- [ ] Track source revision and translation-source revision; flag stale legal, FAQ, and claims. **Partial:** every localized revision stores its source-revision number; automated stale-content flags and admin visibility remain.
-- [ ] Never silently serve English at a German public URL. Unpublished locale means no route, sitemap entry, or hreflang. **Partial:** exact locale/slug reads return 404 instead of falling back and the locale switch resolves logical localized slugs; sitemap and hreflang generation remain.
-- [ ] Generate localized title, description, slug, OG, robots, canonical; validate advanced canonical override.
-- [ ] Generate hreflang automatically from published localizations of one logical page.
-- [ ] Sitemap only published/public/indexable pages; exclude app/admin/auth/preview. Add matching robots behavior.
-- [ ] Add global site/canonical/title/description/OG/verification and structured organization/product settings. Generate JSON-LD from structured fields, not arbitrary JSON.
+- [x] Track source revision and translation-source revision; automatically flag stale legal, FAQ, and claims in the SEO audit.
+- [x] Never silently serve English at a German public URL. Unpublished locale means no route, sitemap entry, or hreflang; exact locale/slug reads return 404 and the locale switch resolves logical localized slugs.
+- [ ] Generate localized title, description, slug, OG, robots, canonical; validate advanced canonical override. **Partial:** all route-derived metadata and localized generated OG images exist; a canonical override is intentionally not exposed until its validation/use policy is defined.
+- [x] Generate hreflang and `x-default` automatically from published localizations of one logical page.
+- [x] Sitemap only published/public/indexable pages; exclude app/admin/auth/preview and add matching robots behavior.
+- [ ] Add global site/canonical/title/description/OG/verification and structured organization/product settings. Generate JSON-LD from structured fields, not arbitrary JSON. **Partial:** a validated canonical site origin, localized home metadata, and generated OG assets exist; editable verification/organization/product settings and JSON-LD remain.
 
 ### P1 — SEO audit
 
-- [ ] Report each public URL's locale, publication/index state, title/description, canonical, hreflang, and OG image with a compact error overview.
+- [x] Report each public URL's locale, publication/index state, title/description, canonical, hreflang, and OG image with a compact error overview.
 
 ## 5. Admin & Observability
 
 ### P0 — minimum safe operations
 
-- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** content editors now have a dedicated server- and API-guarded CMS boundary with no app/call/recording or operational-admin access; admin/superadmin permissions remain explicit, while `/admin/seo` and the role-specific support area remain.
+- [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** content editors now have dedicated server- and API-guarded CMS/SEO boundaries with no app/call/recording or operational-admin access; admin/superadmin permissions remain explicit, while the role-specific support area remains.
 - [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout events and suppression/lift safety events are immutable and include the applicable actor, target/source, reason, and time.
 - [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** the localized user console now consolidates paginated role-scoped lookup, ledger inspection, confirmed suspend/unsuspend, force logout, and idempotent manual credit grants; localized suppression controls and the kill-switch operator command also exist, but suppression lookup and in-app kill-switch control remain.
 
@@ -296,7 +302,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** every route and acceptance boundary is implemented and browser-verified locally; a monitored public support contact and production deployment remain.
 - [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live. **Partial:** localized implementation drafts are live locally, but formal review and final operator/subprocessor/contact details remain.
 - [x] CMS supports EN/DE drafts/revisions, authenticated noindex preview, immutable publication/history, rollback-as-new-draft, audit, and legal acceptance/re-acceptance.
-- [ ] Localized metadata, canonical, hreflang, robots, sitemap verified.
+- [x] Localized metadata, canonical, hreflang, robots, sitemap verified locally from published content.
 - [ ] Production domain/TLS, stable hosting, isolated Twilio ingress, production DB.
 - [ ] Secrets/keys managed with least privilege and rotation procedure.
 - [ ] Backups configured and restore-tested.
@@ -318,7 +324,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Account/data export/delete and session revocation tested. **Partial:** current logout and all-session revocation are exposed in `/app/account` and tested; session listing, data export/delete, and account deletion remain.
 - [ ] Support/complaint/suppression workflow with owners and targets. **Partial:** staff/complaint suppression and lift actions are RBAC-protected and audited, but complaint intake, ownership, escalation, and response targets remain.
 - [ ] CI and `main` branch protection.
-- [ ] SEO audit.
+- [x] SEO audit.
 - [ ] Quality/safety evaluation meets thresholds.
 
 ## Release decision record

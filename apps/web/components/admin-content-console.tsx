@@ -289,6 +289,7 @@ export function AdminContentConsole() {
                     <label className="field">
                       <span>{copy.sourceRevision}</span>
                       <input
+                        disabled={contentLocale === editor.sourceLocale}
                         min={1}
                         onChange={(event) => edit((current) => ({
                           ...current,

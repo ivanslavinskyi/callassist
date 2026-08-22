@@ -2,11 +2,14 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { isUiLocale } from "@/lib/i18n/messages";
+import { siteOrigin } from "@/lib/site-config";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteOrigin),
   title: "CallAssist — controlled AI phone calls",
-  description: "A personal voice assistant with live transcripts and approval gates"
+  description: "A personal voice assistant with live transcripts and approval gates",
+  applicationName: "CallAssist"
 };
 
 export const viewport: Viewport = {

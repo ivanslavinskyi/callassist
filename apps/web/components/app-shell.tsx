@@ -123,7 +123,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
           {isAuthenticated && role !== "content_editor" ? <Link className="topbar-link" href={localizeHref("/redeem")}>{messages.app.redeem}</Link> : null}
           {role && ["content_editor", "admin", "superadmin"].includes(role) ? (
-            <Link className="topbar-link" href={localizeHref("/admin/content")}>{messages.app.contentAdmin}</Link>
+            <>
+              <Link className="topbar-link" href={localizeHref("/admin/content")}>{messages.app.contentAdmin}</Link>
+              <Link className="topbar-link" href={localizeHref("/admin/seo")}>{messages.app.seoAdmin}</Link>
+            </>
           ) : null}
           {role && ["admin", "superadmin"].includes(role) ? <>
             <Link className="topbar-link" href={localizeHref("/admin/users")}>{messages.app.usersAdmin}</Link>

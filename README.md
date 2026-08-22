@@ -265,8 +265,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   Swiss German, multilingual input, and adversarial prompts.
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
-- Extend the localized CMS Core (drafts, EN/DE preview, immutable publish/history,
-  rollback and legal re-acceptance) with structured navigation and SEO controls.
+- Extend the localized CMS/SEO foundation with structured navigation, reusable FAQ,
+  and revision-managed Landing blocks.
 - Add durable background jobs, production deployment, observability, compliance,
   and staged invite-only/public beta release gates.
 
