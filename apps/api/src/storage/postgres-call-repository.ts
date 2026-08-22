@@ -75,6 +75,7 @@ import {
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
   type AdminSystemFacts,
+  type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
@@ -86,7 +87,10 @@ import {
   type RecipientSuppressionInput,
   type RedeemPromoRepositoryInput,
   type SafetyControlInput,
-  type StartAttemptInput
+  type StartAttemptInput,
+  type ProviderWebhookDeliveryInput,
+  type ProviderWebhookKind,
+  type ProviderWebhookOutcome
 } from "./call-repository";
 
 type DatabaseDate = Date | string;
@@ -318,6 +322,14 @@ type DurableJobAttemptRow = Omit<
 > & {
   startedAt: DatabaseDate;
   completedAt: DatabaseDate;
+};
+
+type ProviderWebhookBucketRow = {
+  kind: ProviderWebhookKind;
+  outcome: ProviderWebhookOutcome;
+  deliveryCount: number;
+  lastReceivedAt: DatabaseDate;
+  lastErrorCode: string | null;
 };
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
@@ -1499,7 +1511,8 @@ export class PostgresCallRepository implements CallRepository {
 
   async getAdminSystemFacts(
     now: string,
-    recentSince: string
+    recentSince: string,
+    webhookSince = recentSince
   ): Promise<AdminSystemFacts> {
     const [row] = await this.#sql<AdminSystemFactsRow[]>`
       SELECT
@@ -1597,6 +1610,25 @@ export class PostgresCallRepository implements CallRepository {
       ORDER BY durable_jobs.updated_at DESC, durable_jobs.id DESC
       LIMIT 20
     `;
+    const webhookRows = await this.#sql<ProviderWebhookBucketRow[]>`
+      SELECT
+        webhook_kind AS "kind",
+        outcome,
+        delivery_count AS "deliveryCount",
+        last_received_at AS "lastReceivedAt",
+        last_error_code AS "lastErrorCode"
+      FROM provider_webhook_delivery_buckets
+      WHERE provider = 'twilio'
+        AND bucket_started_at >= ${webhookSince}::timestamptz
+      ORDER BY
+        last_received_at ASC,
+        CASE outcome
+          WHEN 'rejected' THEN 1
+          WHEN 'unmatched' THEN 2
+          WHEN 'failed' THEN 3
+          ELSE 0
+        END ASC
+    `;
     return {
       outboundCalls: {
         enabled: row.outboundCallsEnabled,
@@ -1614,6 +1646,7 @@ export class PostgresCallRepository implements CallRepository {
       retentionOverdue: row.retentionOverdue,
       recentWarnings: row.recentWarnings,
       recentErrors: row.recentErrors,
+      webhooks: aggregateProviderWebhookFacts(webhookRows),
       jobs: {
         queued: row.jobsQueued,
         running: row.jobsRunning,
@@ -1636,6 +1669,63 @@ export class PostgresCallRepository implements CallRepository {
         }) => job)
       }
     };
+  }
+
+  async recordProviderWebhookDelivery(input: ProviderWebhookDeliveryInput) {
+    const receivedAt = new Date(input.receivedAt);
+    if (Number.isNaN(receivedAt.getTime())) {
+      throw new Error("WEBHOOK_RECEIVED_AT_INVALID");
+    }
+    const bucketStartedAt = startOfUtcHour(receivedAt);
+    const cutoff = startOfUtcHour(new Date(
+      receivedAt.getTime() - 30 * 24 * 60 * 60 * 1_000
+    ));
+    const errorCode = input.outcome === "accepted"
+      ? null
+      : safeProviderWebhookErrorCode(input.errorCode);
+    await this.#sql.begin(async (transaction) => {
+      await transaction`
+        DELETE FROM provider_webhook_delivery_buckets
+        WHERE bucket_started_at < ${cutoff}
+      `;
+      await transaction`
+        INSERT INTO provider_webhook_delivery_buckets (
+          provider,
+          webhook_kind,
+          outcome,
+          bucket_started_at,
+          delivery_count,
+          last_received_at,
+          last_error_code
+        ) VALUES (
+          'twilio',
+          ${input.kind},
+          ${input.outcome},
+          ${bucketStartedAt},
+          1,
+          ${receivedAt},
+          ${errorCode}
+        )
+        ON CONFLICT (
+          provider,
+          webhook_kind,
+          outcome,
+          bucket_started_at
+        ) DO UPDATE SET
+          delivery_count =
+            provider_webhook_delivery_buckets.delivery_count + 1,
+          last_received_at = GREATEST(
+            provider_webhook_delivery_buckets.last_received_at,
+            EXCLUDED.last_received_at
+          ),
+          last_error_code = CASE
+            WHEN EXCLUDED.last_received_at >=
+              provider_webhook_delivery_buckets.last_received_at
+              THEN EXCLUDED.last_error_code
+            ELSE provider_webhook_delivery_buckets.last_error_code
+          END
+      `;
+    });
   }
 
   async getCallOutcome(id: string) {
@@ -4792,6 +4882,61 @@ function mapDurableJobRow(row: DurableJobRow): DurableJob {
     updatedAt: toIso(row.updatedAt),
     completedAt: row.completedAt ? toIso(row.completedAt) : null
   };
+}
+
+function aggregateProviderWebhookFacts(
+  rows: ProviderWebhookBucketRow[]
+): Record<ProviderWebhookKind, AdminWebhookDeliveryFacts> {
+  const facts = emptyAdminWebhookFacts();
+  for (const row of rows) {
+    const kind = facts[row.kind];
+    kind[row.outcome] += row.deliveryCount;
+    const receivedAt = toIso(row.lastReceivedAt);
+    if (row.outcome === "accepted") {
+      if (!kind.lastAcceptedAt || receivedAt > kind.lastAcceptedAt) {
+        kind.lastAcceptedAt = receivedAt;
+      }
+    } else if (!kind.lastProblemAt || receivedAt >= kind.lastProblemAt) {
+      kind.lastProblemAt = receivedAt;
+      kind.lastProblemCode = row.lastErrorCode;
+    }
+  }
+  return facts;
+}
+
+function emptyAdminWebhookFacts(): Record<
+  ProviderWebhookKind,
+  AdminWebhookDeliveryFacts
+> {
+  return {
+    voice: emptyAdminWebhookDeliveryFacts(),
+    call_status: emptyAdminWebhookDeliveryFacts(),
+    recording_status: emptyAdminWebhookDeliveryFacts()
+  };
+}
+
+function emptyAdminWebhookDeliveryFacts(): AdminWebhookDeliveryFacts {
+  return {
+    accepted: 0,
+    rejected: 0,
+    unmatched: 0,
+    failed: 0,
+    lastAcceptedAt: null,
+    lastProblemAt: null,
+    lastProblemCode: null
+  };
+}
+
+function startOfUtcHour(value: Date) {
+  const result = new Date(value);
+  result.setUTCMinutes(0, 0, 0);
+  return result;
+}
+
+function safeProviderWebhookErrorCode(value?: string | null) {
+  return value && /^[a-z0-9_.:/-]{1,160}$/i.test(value)
+    ? value
+    : "WEBHOOK_DELIVERY_FAILED";
 }
 
 function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {

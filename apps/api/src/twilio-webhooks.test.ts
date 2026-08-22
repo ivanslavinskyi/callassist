@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import { buildWebhookApp } from "./app";
 import { CallService } from "./call-service";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
+import { CallRepositoryError } from "./storage/call-repository";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
@@ -67,6 +68,14 @@ async function createBrief(service: CallService) {
   return brief;
 }
 
+async function webhookFacts(service: CallService) {
+  const now = new Date();
+  return (await service.repository.getAdminSystemFacts(
+    now.toISOString(),
+    new Date(now.getTime() - 86_400_000).toISOString()
+  )).webhooks;
+}
+
 describe("Twilio webhooks", () => {
   it("does not expose internal API routes", async () => {
     const { app } = createHarness();
@@ -87,6 +96,38 @@ describe("Twilio webhooks", () => {
       payload: "CallSid=CA123"
     });
     expect(response.statusCode).toBe(403);
+    expect((await webhookFacts(service)).voice).toMatchObject({
+      rejected: 1,
+      lastProblemCode: "INVALID_TWILIO_SIGNATURE"
+    });
+  });
+
+  it("does not change a valid webhook response when evidence storage fails", async () => {
+    const { app, service } = createHarness();
+    const brief = await createBrief(service);
+    vi.spyOn(service, "recordProviderWebhookDelivery").mockRejectedValueOnce(
+      new Error("evidence store unavailable")
+    );
+    const parameters = { CallSid: "CA123" };
+    const path = `/webhooks/twilio/voice?callBriefId=${brief.id}`;
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      parameters
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: path,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-twilio-signature": signature
+      },
+      payload: new URLSearchParams(parameters).toString()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("<Connect>");
   });
 
   it("upgrades a signed media request to a WebSocket", async () => {
@@ -138,6 +179,7 @@ describe("Twilio webhooks", () => {
     expect(voiceResponse.body).toContain("wss://calls.example.test");
     expect(voiceResponse.body).not.toContain("<Say");
     expect(voiceResponse.body).not.toContain("<Gather");
+    expect((await webhookFacts(service)).voice.accepted).toBe(1);
 
     const statusParameters = {
       CallSid: "CA123",
@@ -161,6 +203,7 @@ describe("Twilio webhooks", () => {
     });
     expect(statusResponse.statusCode).toBe(204);
     expect((await service.get(brief.id))?.brief.status).toBe("in_progress");
+    expect((await webhookFacts(service)).call_status.accepted).toBe(1);
 
     await service.repository.attachProviderCall(
       reserved.attempt.id,
@@ -216,6 +259,43 @@ describe("Twilio webhooks", () => {
       providerRecordingId: "RE123",
       durationSeconds: 37,
       channels: 2
+    });
+    expect((await webhookFacts(service)).recording_status.accepted).toBe(1);
+  });
+
+  it("records unmatched and failed status deliveries without provider payloads", async () => {
+    const { app, service } = createHarness();
+    const parameters = { CallSid: "CA-missing", CallStatus: "completed" };
+    const path = "/webhooks/twilio/status";
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      parameters
+    );
+    const request = () => app.inject({
+      method: "POST" as const,
+      url: path,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-twilio-signature": signature
+      },
+      payload: new URLSearchParams(parameters).toString()
+    });
+
+    expect((await request()).statusCode).toBe(204);
+    expect((await webhookFacts(service)).call_status).toMatchObject({
+      unmatched: 1,
+      lastProblemCode: "WEBHOOK_TARGET_NOT_FOUND"
+    });
+
+    vi.spyOn(service, "handleTwilioStatus").mockRejectedValueOnce(
+      new CallRepositoryError("DURABLE_JOB_LEASE_LOST")
+    );
+    expect((await request()).statusCode).toBe(500);
+    expect((await webhookFacts(service)).call_status).toMatchObject({
+      unmatched: 1,
+      failed: 1,
+      lastProblemCode: "DURABLE_JOB_LEASE_LOST"
     });
   });
 });

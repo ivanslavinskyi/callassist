@@ -131,6 +131,17 @@ const adminDurableJobSchema = z.strictObject({
   updatedAt: z.iso.datetime()
 });
 
+const adminWebhookDeliverySchema = z.strictObject({
+  accepted: countSchema,
+  rejected: countSchema,
+  unmatched: countSchema,
+  failed: countSchema,
+  lastAcceptedAt: z.iso.datetime().nullable(),
+  lastAcceptedAgeSeconds: secondsSchema.nullable(),
+  lastProblemAt: z.iso.datetime().nullable(),
+  lastProblemCode: z.string().min(1).max(160).nullable()
+});
+
 export const adminSystemStatusSchema = z.strictObject({
   generatedAt: z.iso.datetime(),
   components: z.strictObject({
@@ -181,6 +192,13 @@ export const adminSystemStatusSchema = z.strictObject({
     providerReconciliationQueued: countSchema,
     oldestDueAt: z.iso.datetime().nullable(),
     recent: z.array(adminDurableJobSchema).max(20)
+  }),
+  webhooks: z.strictObject({
+    since: z.iso.datetime(),
+    retentionDays: z.literal(30),
+    voice: adminWebhookDeliverySchema,
+    callStatus: adminWebhookDeliverySchema,
+    recordingStatus: adminWebhookDeliverySchema
   }),
   recentTelemetry: z.strictObject({
     since: z.iso.datetime(),

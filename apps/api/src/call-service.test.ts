@@ -17,6 +17,37 @@ function createService() {
 }
 
 describe("CallService", () => {
+  it("reports privacy-safe webhook delivery age from the snapshot boundary", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository);
+    services.push(service);
+    await repository.recordProviderWebhookDelivery({
+      kind: "voice",
+      outcome: "accepted",
+      receivedAt: "2026-08-22T12:33:26.000Z"
+    });
+
+    const status = await service.getAdminSystemStatus(
+      false,
+      new Date("2026-08-22T12:34:56.000Z")
+    );
+
+    expect(status.webhooks).toMatchObject({
+      since: "2026-08-21T12:00:00.000Z",
+      retentionDays: 30,
+      voice: {
+        accepted: 1,
+        rejected: 0,
+        unmatched: 0,
+        failed: 0,
+        lastAcceptedAt: "2026-08-22T12:33:26.000Z",
+        lastAcceptedAgeSeconds: 90,
+        lastProblemAt: null,
+        lastProblemCode: null
+      }
+    });
+  });
+
   it("requires review before a compiled call becomes ready", async () => {
     const service = createService();
     const brief = await service.create({

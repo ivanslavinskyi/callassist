@@ -149,6 +149,40 @@ describe("admin operations contracts", () => {
         oldestDueAt: null,
         recent: []
       },
+      webhooks: {
+        since: "2026-08-21T12:00:00.000Z",
+        retentionDays: 30,
+        voice: {
+          accepted: 0,
+          rejected: 0,
+          unmatched: 0,
+          failed: 0,
+          lastAcceptedAt: null,
+          lastAcceptedAgeSeconds: null,
+          lastProblemAt: null,
+          lastProblemCode: null
+        },
+        callStatus: {
+          accepted: 0,
+          rejected: 0,
+          unmatched: 0,
+          failed: 0,
+          lastAcceptedAt: null,
+          lastAcceptedAgeSeconds: null,
+          lastProblemAt: null,
+          lastProblemCode: null
+        },
+        recordingStatus: {
+          accepted: 0,
+          rejected: 0,
+          unmatched: 0,
+          failed: 0,
+          lastAcceptedAt: null,
+          lastAcceptedAgeSeconds: null,
+          lastProblemAt: null,
+          lastProblemCode: null
+        }
+      },
       recentTelemetry: {
         since: "2026-08-21T12:00:00.000Z",
         warnings: 0,

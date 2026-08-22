@@ -193,6 +193,38 @@ export type AdminOperationsFacts = {
   };
 };
 
+export const providerWebhookKinds = [
+  "voice",
+  "call_status",
+  "recording_status"
+] as const;
+export type ProviderWebhookKind = typeof providerWebhookKinds[number];
+
+export const providerWebhookOutcomes = [
+  "accepted",
+  "rejected",
+  "unmatched",
+  "failed"
+] as const;
+export type ProviderWebhookOutcome = typeof providerWebhookOutcomes[number];
+
+export type ProviderWebhookDeliveryInput = {
+  kind: ProviderWebhookKind;
+  outcome: ProviderWebhookOutcome;
+  receivedAt: string;
+  errorCode?: string | null;
+};
+
+export type AdminWebhookDeliveryFacts = {
+  accepted: number;
+  rejected: number;
+  unmatched: number;
+  failed: number;
+  lastAcceptedAt: string | null;
+  lastProblemAt: string | null;
+  lastProblemCode: string | null;
+};
+
 export type AdminSystemFacts = {
   outboundCalls: {
     enabled: boolean;
@@ -208,6 +240,7 @@ export type AdminSystemFacts = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  webhooks: Record<ProviderWebhookKind, AdminWebhookDeliveryFacts>;
   jobs: {
     queued: number;
     running: number;
@@ -367,8 +400,12 @@ export interface CallRepository {
   ): Promise<AdminOperationsFacts>;
   getAdminSystemFacts(
     now: string,
-    recentSince: string
+    recentSince: string,
+    webhookSince?: string
   ): Promise<AdminSystemFacts>;
+  recordProviderWebhookDelivery(
+    input: ProviderWebhookDeliveryInput
+  ): Promise<void>;
   getCallOutcome(id: string): Promise<CallOutcomeView>;
   recordSystemCallOutcome(id: string): Promise<CallOutcomeView>;
   submitOwnerCallFeedback(

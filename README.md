@@ -194,10 +194,12 @@ The localized operational overview is available at `/en/admin` and `/de/admin`, 
 outcomes, recorded-duration and first-audio aggregates, reliability counters, and
 optional versioned cost estimates. `/en/admin/system` and `/de/admin/system` report
 the API/database request path, configured provider modes, bounded workload, recent
-durable warnings/errors, the transcription/retention/provider-reconciliation job backlog, recent retry and
-dead-letter state, and the global outbound-call control. Dead-letter retries are
-superadmin-only, require a reason, and retain immutable evidence. Provider entries
-are configuration state only and explicitly do not claim an upstream health probe.
+durable warnings/errors, PII-free hourly Twilio webhook delivery counts and
+last-accepted age, the transcription/retention/provider-reconciliation job backlog,
+recent retry and dead-letter state, and the global outbound-call control. Dead-letter
+retries are superadmin-only, require a reason, and retain immutable evidence. Webhook
+age and provider entries are operational signals only and explicitly do not claim an
+upstream health probe.
 Admins may stop new calls; only superadmins may resume them. Both operations require
 a reason and retain immutable safety evidence.
 
@@ -290,8 +292,8 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   Swiss German, multilingual input, and adversarial prompts.
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
-- Continue from the completed durable transcription/retention and Twilio status
-  reconciliation jobs with webhook-delivery visibility, a separate worker runtime,
+- Continue from the completed durable transcription/retention, Twilio status
+  reconciliation, and webhook-delivery visibility with a separate worker runtime,
   real-provider crash drills, and external monitoring.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.

@@ -55,6 +55,7 @@ import {
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
   type AdminSystemFacts,
+  type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallRepository,
@@ -65,7 +66,9 @@ import {
   type RecipientSuppressionInput,
   type RedeemPromoRepositoryInput,
   type SafetyControlInput,
-  type StartAttemptInput
+  type StartAttemptInput,
+  type ProviderWebhookDeliveryInput,
+  type ProviderWebhookKind
 } from "./call-repository";
 import {
   durableJobMaxAttempts,
@@ -106,6 +109,15 @@ type StoredPromoRedemption = {
   credits: number;
   idempotencyKey: string;
   redeemedAt: string;
+};
+
+type StoredProviderWebhookBucket = {
+  kind: ProviderWebhookKind;
+  outcome: ProviderWebhookDeliveryInput["outcome"];
+  bucketStartedAt: string;
+  deliveryCount: number;
+  lastReceivedAt: string;
+  lastErrorCode: string | null;
 };
 
 const interruptedStatuses = new Set<CallBrief["status"]>([
@@ -162,6 +174,10 @@ export class InMemoryCallRepository implements CallRepository {
     reason: string;
     createdAt: string;
   }> = [];
+  readonly #providerWebhookBuckets = new Map<
+    string,
+    StoredProviderWebhookBucket
+  >();
   readonly #recipientSuppressions = new Map<
     string,
     RecipientSuppressionInput & { createdAt: string }
@@ -724,7 +740,8 @@ export class InMemoryCallRepository implements CallRepository {
 
   async getAdminSystemFacts(
     now: string,
-    recentSince: string
+    recentSince: string,
+    webhookSince = recentSince
   ): Promise<AdminSystemFacts> {
     const snapshots = [...this.#calls.values()];
     const events = [...this.#callTelemetryEvents.values()]
@@ -732,6 +749,26 @@ export class InMemoryCallRepository implements CallRepository {
       .filter(({ occurredAt }) => occurredAt >= recentSince);
     const jobs = [...this.#durableJobs.values()];
     const queued = jobs.filter(({ status }) => status === "queued");
+    const webhooks = emptyAdminWebhookFacts();
+    for (const bucket of this.#providerWebhookBuckets.values()) {
+      if (bucket.bucketStartedAt < webhookSince) continue;
+      const facts = webhooks[bucket.kind];
+      facts[bucket.outcome] += bucket.deliveryCount;
+      if (bucket.outcome === "accepted") {
+        if (
+          !facts.lastAcceptedAt ||
+          bucket.lastReceivedAt > facts.lastAcceptedAt
+        ) {
+          facts.lastAcceptedAt = bucket.lastReceivedAt;
+        }
+      } else if (
+        !facts.lastProblemAt ||
+        bucket.lastReceivedAt >= facts.lastProblemAt
+      ) {
+        facts.lastProblemAt = bucket.lastReceivedAt;
+        facts.lastProblemCode = bucket.lastErrorCode;
+      }
+    }
     return {
       outboundCalls: {
         enabled: this.#outboundCallsEnabled,
@@ -768,6 +805,7 @@ export class InMemoryCallRepository implements CallRepository {
         .length,
       recentErrors: events.filter(({ severity }) => severity === "error")
         .length,
+      webhooks,
       jobs: {
         queued: queued.length,
         running: jobs.filter(({ status }) => status === "running").length,
@@ -799,6 +837,43 @@ export class InMemoryCallRepository implements CallRepository {
             completedAt: _completedAt, ...job }) => copy(job))
       }
     };
+  }
+
+  async recordProviderWebhookDelivery(input: ProviderWebhookDeliveryInput) {
+    const receivedAt = new Date(input.receivedAt);
+    if (Number.isNaN(receivedAt.getTime())) {
+      throw new Error("WEBHOOK_RECEIVED_AT_INVALID");
+    }
+    const bucketStartedAt = startOfUtcHour(receivedAt).toISOString();
+    const cutoff = startOfUtcHour(new Date(
+      receivedAt.getTime() - 30 * 24 * 60 * 60 * 1_000
+    )).toISOString();
+    for (const [key, bucket] of this.#providerWebhookBuckets) {
+      if (bucket.bucketStartedAt < cutoff) {
+        this.#providerWebhookBuckets.delete(key);
+      }
+    }
+    const key = `${input.kind}:${input.outcome}:${bucketStartedAt}`;
+    const errorCode = input.outcome === "accepted"
+      ? null
+      : safeProviderWebhookErrorCode(input.errorCode);
+    const existing = this.#providerWebhookBuckets.get(key);
+    if (existing) {
+      existing.deliveryCount += 1;
+      if (input.receivedAt >= existing.lastReceivedAt) {
+        existing.lastReceivedAt = input.receivedAt;
+        existing.lastErrorCode = errorCode;
+      }
+      return;
+    }
+    this.#providerWebhookBuckets.set(key, {
+      kind: input.kind,
+      outcome: input.outcome,
+      bucketStartedAt,
+      deliveryCount: 1,
+      lastReceivedAt: input.receivedAt,
+      lastErrorCode: errorCode
+    });
   }
 
   async getCallOutcome(id: string) {
@@ -2609,4 +2684,39 @@ function storedBriefIdentity(parsed: NormalizedCallBriefInput) {
     allowLanguageSwitch: parsed.allowLanguageSwitch,
     ...(parsed.fallbackLocale ? { fallbackLocale: parsed.fallbackLocale } : {})
   };
+}
+
+function emptyAdminWebhookFacts(): Record<
+  ProviderWebhookKind,
+  AdminWebhookDeliveryFacts
+> {
+  return {
+    voice: emptyAdminWebhookDeliveryFacts(),
+    call_status: emptyAdminWebhookDeliveryFacts(),
+    recording_status: emptyAdminWebhookDeliveryFacts()
+  };
+}
+
+function emptyAdminWebhookDeliveryFacts(): AdminWebhookDeliveryFacts {
+  return {
+    accepted: 0,
+    rejected: 0,
+    unmatched: 0,
+    failed: 0,
+    lastAcceptedAt: null,
+    lastProblemAt: null,
+    lastProblemCode: null
+  };
+}
+
+function startOfUtcHour(value: Date) {
+  const result = new Date(value);
+  result.setUTCMinutes(0, 0, 0);
+  return result;
+}
+
+function safeProviderWebhookErrorCode(value?: string | null) {
+  return value && /^[a-z0-9_.:/-]{1,160}$/i.test(value)
+    ? value
+    : "WEBHOOK_DELIVERY_FAILED";
 }

@@ -28,7 +28,9 @@ import {
   isUuid,
   type AdminCallCursor,
   type CallAdmissionPolicy,
-  type CallRepository
+  type CallRepository,
+  type AdminWebhookDeliveryFacts,
+  type ProviderWebhookDeliveryInput
 } from "./storage/call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
 import {
@@ -178,6 +180,10 @@ export class CallService {
     return event;
   }
 
+  recordProviderWebhookDelivery(input: ProviderWebhookDeliveryInput) {
+    return this.repository.recordProviderWebhookDelivery(input);
+  }
+
   listTelemetry(id: string) {
     return this.repository.listCallTelemetryEvents(id);
   }
@@ -244,10 +250,14 @@ export class CallService {
     const generatedAt = now.toISOString();
     const since = new Date(now.getTime() - 24 * 60 * 60 * 1_000)
       .toISOString();
+    const webhookSinceDate = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+    webhookSinceDate.setUTCMinutes(0, 0, 0);
+    const webhookSince = webhookSinceDate.toISOString();
     await this.repository.ping();
     const facts = await this.repository.getAdminSystemFacts(
       generatedAt,
-      since
+      since,
+      webhookSince
     );
     return adminSystemStatusSchema.parse({
       generatedAt,
@@ -287,6 +297,19 @@ export class CallService {
         retentionOverdue: facts.retentionOverdue
       },
       jobs: facts.jobs,
+      webhooks: {
+        since: webhookSince,
+        retentionDays: 30,
+        voice: adminWebhookDeliveryView(facts.webhooks.voice, generatedAt),
+        callStatus: adminWebhookDeliveryView(
+          facts.webhooks.call_status,
+          generatedAt
+        ),
+        recordingStatus: adminWebhookDeliveryView(
+          facts.webhooks.recording_status,
+          generatedAt
+        )
+      },
       recentTelemetry: {
         since,
         warnings: facts.recentWarnings,
@@ -1067,6 +1090,20 @@ function providerReconciliationFailureCode(
 
 function currentLease(lease: DurableJobLease): DurableJobLease {
   return { ...lease, checkedAt: new Date().toISOString() };
+}
+
+function adminWebhookDeliveryView(
+  facts: AdminWebhookDeliveryFacts,
+  generatedAt: string
+) {
+  return {
+    ...facts,
+    lastAcceptedAgeSeconds: facts.lastAcceptedAt
+      ? Math.max(0, Math.floor(
+          (Date.parse(generatedAt) - Date.parse(facts.lastAcceptedAt)) / 1_000
+        ))
+      : null
+  };
 }
 
 function mapBriefCompilerError(error: BriefCompilerError) {

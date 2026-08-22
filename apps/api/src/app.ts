@@ -64,7 +64,8 @@ import {
   CallRepositoryError,
   decodeAdminCallCursor,
   decodeCallBriefCursor,
-  isUuid
+  isUuid,
+  type ProviderWebhookDeliveryInput
 } from "./storage/call-repository";
 import {
   isTwilioCallStatus,
@@ -1884,6 +1885,16 @@ export function buildWebhookApp({
   logger = true
 }: BuildWebhookAppOptions) {
   const app = Fastify({ logger });
+  async function recordWebhookDelivery(
+    request: FastifyRequest,
+    input: ProviderWebhookDeliveryInput
+  ) {
+    try {
+      await service.recordProviderWebhookDelivery(input);
+    } catch (error) {
+      request.log.error(error, "Failed to record provider webhook delivery");
+    }
+  }
   void app.register(async (routes) => {
     await routes.register(websocket);
     await routes.register(formbody);
@@ -1891,23 +1902,55 @@ export function buildWebhookApp({
     routes.post<{ Querystring: { callBriefId?: string } }>(
       "/webhooks/twilio/voice",
       async (request, reply) => {
+        const receivedAt = new Date().toISOString();
         const parameters = normalizeTwilioParameters(request.body);
         if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          await recordWebhookDelivery(request, {
+            kind: "voice",
+            outcome: "rejected",
+            receivedAt,
+            errorCode: "INVALID_TWILIO_SIGNATURE"
+          });
           return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
         }
 
         const callBriefId = request.query.callBriefId;
         if (!callBriefId) {
+          await recordWebhookDelivery(request, {
+            kind: "voice",
+            outcome: "rejected",
+            receivedAt,
+            errorCode: "CALL_BRIEF_ID_REQUIRED"
+          });
           return reply.status(400).send({ error: "CALL_BRIEF_ID_REQUIRED" });
         }
-        const snapshot = await service.get(callBriefId);
-        if (!snapshot) {
-          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        try {
+          const snapshot = await service.get(callBriefId);
+          if (!snapshot) {
+            await recordWebhookDelivery(request, {
+              kind: "voice",
+              outcome: "unmatched",
+              receivedAt,
+              errorCode: "CALL_NOT_FOUND"
+            });
+            return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+          }
+          const twiml = twilioProvider.createVoiceTwiml(snapshot.brief);
+          await recordWebhookDelivery(request, {
+            kind: "voice",
+            outcome: "accepted",
+            receivedAt
+          });
+          return reply.type("text/xml; charset=utf-8").send(twiml);
+        } catch (error) {
+          await recordWebhookDelivery(request, {
+            kind: "voice",
+            outcome: "failed",
+            receivedAt,
+            errorCode: webhookProcessingErrorCode(error)
+          });
+          throw error;
         }
-
-        return reply
-          .type("text/xml; charset=utf-8")
-          .send(twilioProvider.createVoiceTwiml(snapshot.brief));
       }
     );
 
@@ -1929,31 +1972,69 @@ export function buildWebhookApp({
     routes.post<{ Querystring: { callBriefId?: string } }>(
       "/webhooks/twilio/status",
       async (request, reply) => {
+        const receivedAt = new Date().toISOString();
         const parameters = normalizeTwilioParameters(request.body);
         if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          await recordWebhookDelivery(request, {
+            kind: "call_status",
+            outcome: "rejected",
+            receivedAt,
+            errorCode: "INVALID_TWILIO_SIGNATURE"
+          });
           return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
         }
 
         const providerCallId = parameters.CallSid;
         const status = parameters.CallStatus;
         if (!providerCallId || !status || !isTwilioCallStatus(status)) {
+          await recordWebhookDelivery(request, {
+            kind: "call_status",
+            outcome: "rejected",
+            receivedAt,
+            errorCode: "INVALID_TWILIO_STATUS"
+          });
           return reply.status(400).send({ error: "INVALID_TWILIO_STATUS" });
         }
 
-        await service.handleTwilioStatus(
-          providerCallId,
-          status as TwilioCallStatus,
-          request.query.callBriefId
-        );
-        return reply.status(204).send();
+        try {
+          const snapshot = await service.handleTwilioStatus(
+            providerCallId,
+            status as TwilioCallStatus,
+            request.query.callBriefId
+          );
+          await recordWebhookDelivery(request, snapshot
+            ? { kind: "call_status", outcome: "accepted", receivedAt }
+            : {
+                kind: "call_status",
+                outcome: "unmatched",
+                receivedAt,
+                errorCode: "WEBHOOK_TARGET_NOT_FOUND"
+              });
+          return reply.status(204).send();
+        } catch (error) {
+          await recordWebhookDelivery(request, {
+            kind: "call_status",
+            outcome: "failed",
+            receivedAt,
+            errorCode: webhookProcessingErrorCode(error)
+          });
+          throw error;
+        }
       }
     );
 
     routes.post<{
       Querystring: { callBriefId?: string; recordingId?: string };
     }>("/webhooks/twilio/recording", async (request, reply) => {
+      const receivedAt = new Date().toISOString();
       const parameters = normalizeTwilioParameters(request.body);
       if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+        await recordWebhookDelivery(request, {
+          kind: "recording_status",
+          outcome: "rejected",
+          receivedAt,
+          errorCode: "INVALID_TWILIO_SIGNATURE"
+        });
         return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
       }
 
@@ -1970,21 +2051,47 @@ export function buildWebhookApp({
         !recordingId ||
         !isTwilioRecordingStatus(providerStatus)
       ) {
+        await recordWebhookDelivery(request, {
+          kind: "recording_status",
+          outcome: "rejected",
+          receivedAt,
+          errorCode: "INVALID_TWILIO_RECORDING_STATUS"
+        });
         return reply.status(400).send({ error: "INVALID_TWILIO_RECORDING_STATUS" });
       }
 
-      await service.handleTwilioRecordingStatus({
-        callBriefId,
-        recordingId,
-        providerCallId,
-        providerRecordingId,
-        providerStatus: providerStatus as TwilioRecordingStatus,
-        durationSeconds: optionalNonNegativeNumber(parameters.RecordingDuration),
-        channels: optionalPositiveNumber(parameters.RecordingChannels),
-        startedAt: optionalIsoDate(parameters.RecordingStartTime),
-        failureReason: parameters.RecordingErrorCode
-      });
-      return reply.status(204).send();
+      try {
+        const snapshot = await service.handleTwilioRecordingStatus({
+          callBriefId,
+          recordingId,
+          providerCallId,
+          providerRecordingId,
+          providerStatus: providerStatus as TwilioRecordingStatus,
+          durationSeconds: optionalNonNegativeNumber(
+            parameters.RecordingDuration
+          ),
+          channels: optionalPositiveNumber(parameters.RecordingChannels),
+          startedAt: optionalIsoDate(parameters.RecordingStartTime),
+          failureReason: parameters.RecordingErrorCode
+        });
+        await recordWebhookDelivery(request, snapshot
+          ? { kind: "recording_status", outcome: "accepted", receivedAt }
+          : {
+              kind: "recording_status",
+              outcome: "unmatched",
+              receivedAt,
+              errorCode: "WEBHOOK_TARGET_NOT_FOUND"
+            });
+        return reply.status(204).send();
+      } catch (error) {
+        await recordWebhookDelivery(request, {
+          kind: "recording_status",
+          outcome: "failed",
+          receivedAt,
+          errorCode: webhookProcessingErrorCode(error)
+        });
+        throw error;
+      }
     });
   });
 
@@ -2040,6 +2147,13 @@ function optionalIsoDate(value: string | undefined) {
   if (!value) return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function webhookProcessingErrorCode(error: unknown) {
+  if (error instanceof CallRepositoryError || error instanceof CallServiceError) {
+    return error.code;
+  }
+  return "WEBHOOK_PROCESSING_FAILED";
 }
 
 function normalizeTwilioParameters(body: unknown) {

@@ -1037,6 +1037,30 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(facts.firstAudioLatencyMs.samples).toBeGreaterThanOrEqual(1);
     expect(facts.firstAudioLatencyMs.total).toBeGreaterThanOrEqual(275);
 
+    await inspection`DELETE FROM provider_webhook_delivery_buckets`;
+    await repository.recordProviderWebhookDelivery({
+      kind: "voice",
+      outcome: "failed",
+      receivedAt: new Date(now.getTime() - 31 * 86_400_000).toISOString(),
+      errorCode: "OLD_FAILURE"
+    });
+    await repository.recordProviderWebhookDelivery({
+      kind: "voice",
+      outcome: "accepted",
+      receivedAt: new Date(now.getTime() - 20_000).toISOString()
+    });
+    await repository.recordProviderWebhookDelivery({
+      kind: "voice",
+      outcome: "accepted",
+      receivedAt: new Date(now.getTime() - 10_000).toISOString()
+    });
+    await repository.recordProviderWebhookDelivery({
+      kind: "call_status",
+      outcome: "failed",
+      receivedAt: new Date(now.getTime() - 5_000).toISOString(),
+      errorCode: "raw provider error with private text"
+    });
+
     const system = await repository.getAdminSystemFacts(
       now.toISOString(),
       new Date(now.getTime() - 86_400_000).toISOString()
@@ -1048,8 +1072,38 @@ describeWithDatabase("PostgresCallRepository", () => {
       },
       activeCalls: expect.any(Number),
       recentWarnings: expect.any(Number),
-      recentErrors: expect.any(Number)
+      recentErrors: expect.any(Number),
+      webhooks: {
+        voice: {
+          accepted: 2,
+          failed: 0,
+          lastAcceptedAt: expect.any(String)
+        },
+        call_status: {
+          failed: 1,
+          lastProblemCode: "WEBHOOK_DELIVERY_FAILED"
+        },
+        recording_status: {
+          accepted: 0,
+          rejected: 0,
+          unmatched: 0,
+          failed: 0
+        }
+      }
     });
+    const [storedWebhookFacts] = await inspection<{
+      rows: number;
+      total: number;
+    }[]>`
+      SELECT count(*)::int AS rows, sum(delivery_count)::int AS total
+      FROM provider_webhook_delivery_buckets
+    `;
+    expect(storedWebhookFacts).toEqual({ rows: 2, total: 3 });
+    await expect(inspection`
+      UPDATE provider_webhook_delivery_buckets
+      SET last_error_code = 'private provider error text'
+      WHERE outcome = 'failed'
+    `).rejects.toThrow("provider_webhook_delivery_error_code_check");
   });
 
   it("persists provider reconciliation targets and fences stale writes", async () => {

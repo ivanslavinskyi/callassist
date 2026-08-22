@@ -151,6 +151,35 @@ export function AdminSystemConsole() {
               </section>
             </div>
 
+            <section className="admin-system-panel">
+              <h2>{copy.webhooksTitle}</h2>
+              <p>{copy.webhooksIntro}</p>
+              <div className="admin-component-grid">
+                <WebhookCard
+                  copy={copy}
+                  delivery={status.webhooks.voice}
+                  label={copy.webhookKinds.voice}
+                  locale={locale}
+                />
+                <WebhookCard
+                  copy={copy}
+                  delivery={status.webhooks.callStatus}
+                  label={copy.webhookKinds.callStatus}
+                  locale={locale}
+                />
+                <WebhookCard
+                  copy={copy}
+                  delivery={status.webhooks.recordingStatus}
+                  label={copy.webhookKinds.recordingStatus}
+                  locale={locale}
+                />
+              </div>
+              <small>
+                {copy.webhookWindow} · {formatDate(status.webhooks.since, locale)}
+                {" · "}{copy.webhookRetention} · {status.webhooks.retentionDays} {copy.days}
+              </small>
+            </section>
+
             <section className="admin-system-panel admin-jobs-panel">
               <h2>{copy.jobsTitle}</h2>
               <p>{copy.jobsIntro}</p>
@@ -269,6 +298,47 @@ function ComponentCard({ copy, label, state, upstream = false }: {
       <span>{label}</span>
       <strong>{copy.componentStates[state]}</strong>
       {upstream ? <small>{copy.upstreamNotChecked}</small> : null}
+    </article>
+  );
+}
+
+function WebhookCard({ copy, delivery, label, locale }: {
+  copy: AdminOperationsCopy;
+  delivery: AdminSystemStatus["webhooks"]["voice"];
+  label: string;
+  locale: "en" | "de";
+}) {
+  return (
+    <article className="admin-component-card">
+      <strong>{label}</strong>
+      <dl className="admin-operations-list">
+        <Fact label={copy.webhookAccepted} value={String(delivery.accepted)} />
+        <Fact label={copy.webhookRejected} value={String(delivery.rejected)} />
+        <Fact label={copy.webhookUnmatched} value={String(delivery.unmatched)} />
+        <Fact label={copy.webhookFailed} value={String(delivery.failed)} />
+        <Fact
+          label={copy.webhookLastAccepted}
+          value={delivery.lastAcceptedAt
+            ? formatDate(delivery.lastAcceptedAt, locale)
+            : copy.notAvailable}
+        />
+        <Fact
+          label={copy.webhookAcceptedAge}
+          value={delivery.lastAcceptedAgeSeconds === null
+            ? copy.notAvailable
+            : formatSeconds(delivery.lastAcceptedAgeSeconds)}
+        />
+        <Fact
+          label={copy.webhookLastProblem}
+          value={delivery.lastProblemAt
+            ? formatDate(delivery.lastProblemAt, locale)
+            : copy.notAvailable}
+        />
+        <Fact
+          label={copy.webhookProblemCode}
+          value={delivery.lastProblemCode ?? copy.notAvailable}
+        />
+      </dl>
     </article>
   );
 }

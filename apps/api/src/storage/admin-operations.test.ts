@@ -138,6 +138,29 @@ describe("admin operational read models", () => {
       actorUserId: randomUUID(),
       reason: "Investigating provider failures"
     });
+    await repository.recordProviderWebhookDelivery({
+      kind: "voice",
+      outcome: "failed",
+      receivedAt: new Date(now.getTime() - 31 * 86_400_000).toISOString(),
+      errorCode: "OLD_FAILURE"
+    });
+    await repository.recordProviderWebhookDelivery({
+      kind: "voice",
+      outcome: "accepted",
+      receivedAt: new Date(now.getTime() - 30_000).toISOString()
+    });
+    await repository.recordProviderWebhookDelivery({
+      kind: "call_status",
+      outcome: "unmatched",
+      receivedAt: new Date(now.getTime() - 20_000).toISOString(),
+      errorCode: "WEBHOOK_TARGET_NOT_FOUND"
+    });
+    await repository.recordProviderWebhookDelivery({
+      kind: "recording_status",
+      outcome: "rejected",
+      receivedAt: new Date(now.getTime() - 10_000).toISOString(),
+      errorCode: "INVALID_TWILIO_SIGNATURE"
+    });
     const system = await repository.getAdminSystemFacts(
       now.toISOString(),
       new Date(now.getTime() - 86_400_000).toISOString()
@@ -150,7 +173,22 @@ describe("admin operational read models", () => {
       activeCalls: 0,
       transcriptionProcessing: 1,
       transcriptionFailed: 0,
-      retentionScheduled: 0
+      retentionScheduled: 0,
+      webhooks: {
+        voice: {
+          accepted: 1,
+          failed: 0,
+          lastAcceptedAt: expect.any(String)
+        },
+        call_status: {
+          unmatched: 1,
+          lastProblemCode: "WEBHOOK_TARGET_NOT_FOUND"
+        },
+        recording_status: {
+          rejected: 1,
+          lastProblemCode: "INVALID_TWILIO_SIGNATURE"
+        }
+      }
     });
   });
 });
