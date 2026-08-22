@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   adminOperationsOverviewSchema,
   adminOperationsWindowBounds,
+  adminDurableJobRetryInputSchema,
   adminOutboundCallControlInputSchema,
   adminSystemStatusSchema
 } from "./admin-operations";
@@ -125,7 +126,7 @@ describe("admin operations contracts", () => {
         uptimeSeconds: 10,
         backgroundTasks: 0,
         processingRecordings: 0,
-        retentionLoopEnabled: false
+        durableWorkerEnabled: false
       },
       workload: {
         activeCalls: 0,
@@ -135,6 +136,17 @@ describe("admin operations contracts", () => {
         transcriptionFailed: 0,
         retentionScheduled: 0,
         retentionOverdue: 0
+      },
+      jobs: {
+        queued: 0,
+        running: 0,
+        succeeded: 0,
+        deadLetter: 0,
+        retryQueued: 0,
+        transcriptionQueued: 0,
+        retentionQueued: 0,
+        oldestDueAt: null,
+        recent: []
       },
       recentTelemetry: {
         since: "2026-08-21T12:00:00.000Z",
@@ -150,5 +162,8 @@ describe("admin operations contracts", () => {
       enabled: true,
       reason: "x"
     }).success).toBe(false);
+    expect(adminDurableJobRetryInputSchema.safeParse({
+      reason: "Retry after provider recovery"
+    }).success).toBe(true);
   });
 });

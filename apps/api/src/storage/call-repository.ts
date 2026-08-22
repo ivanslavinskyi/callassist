@@ -23,6 +23,13 @@ import type {
   PromoCodeSummary,
   TranscriptSegment
 } from "@callassist/contracts";
+import type {
+  ClaimDurableJobInput,
+  DurableJob,
+  DurableJobAttempt,
+  DurableJobLease,
+  EnqueueDurableJobInput
+} from "../jobs/durable-job";
 
 export type ApprovalRequestDraft = Pick<
   ApprovalRequest,
@@ -201,6 +208,30 @@ export type AdminSystemFacts = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  jobs: {
+    queued: number;
+    running: number;
+    succeeded: number;
+    deadLetter: number;
+    retryQueued: number;
+    transcriptionQueued: number;
+    retentionQueued: number;
+    oldestDueAt: string | null;
+    recent: Array<Pick<
+      DurableJob,
+      | "id"
+      | "callId"
+      | "type"
+      | "status"
+      | "generation"
+      | "attemptCount"
+      | "maxAttempts"
+      | "runAfter"
+      | "leaseExpiresAt"
+      | "lastErrorCode"
+      | "updatedAt"
+    >>;
+  };
 };
 
 export function encodeCallBriefCursor(cursor: CallBriefCursor) {
@@ -395,22 +426,56 @@ export interface CallRepository {
   claimFinalTranscript(
     recordingId: string,
     model: string,
-    force?: boolean
+    force?: boolean,
+    lease?: DurableJobLease
   ): Promise<FinalTranscriptMutationResult | null>;
   completeFinalTranscript(
     recordingId: string,
     text: string,
-    segments: FinalTranscriptSegment[]
+    segments: FinalTranscriptSegment[],
+    lease?: DurableJobLease
   ): Promise<FinalTranscriptMutationResult>;
   failFinalTranscript(
     recordingId: string,
-    failureReason: string
+    failureReason: string,
+    lease?: DurableJobLease
   ): Promise<FinalTranscriptMutationResult>;
-  listTranscriptionCandidates(): Promise<string[]>;
-  listExpiredRecordingCallIds(now: string): Promise<string[]>;
-  markRecordingDeleted(id: string): Promise<RecordingMutationResult>;
+  markRecordingDeleted(
+    id: string,
+    lease?: DurableJobLease
+  ): Promise<RecordingMutationResult>;
+  enqueueDurableJob(input: EnqueueDurableJobInput): Promise<DurableJob>;
+  seedDurableJobs(now: string): Promise<number>;
+  claimDueDurableJob(
+    input: ClaimDurableJobInput
+  ): Promise<DurableJob | null>;
+  renewDurableJobLease(
+    jobId: string,
+    workerId: string,
+    now: string,
+    leaseExpiresAt: string
+  ): Promise<boolean>;
+  completeDurableJob(
+    jobId: string,
+    workerId: string,
+    now: string
+  ): Promise<boolean>;
+  failDurableJob(
+    jobId: string,
+    workerId: string,
+    errorCode: string,
+    now: string,
+    retryAt: string
+  ): Promise<DurableJob | null>;
+  listDurableJobs(): Promise<DurableJob[]>;
+  listDurableJobAttempts(jobId: string): Promise<DurableJobAttempt[]>;
+  retryDurableJob(
+    jobId: string,
+    actorUserId: string,
+    reason: string,
+    now: string
+  ): Promise<DurableJob>;
   recoverInterruptedCalls(): Promise<number>;
-  recoverInterruptedTranscriptions(): Promise<number>;
   ping(): Promise<void>;
   close(): Promise<void>;
 }
@@ -442,7 +507,10 @@ export class CallRepositoryError extends Error {
       | "RECORDING_NOT_FOUND"
       | "RECORDING_NOT_AVAILABLE"
       | "CALL_FEEDBACK_NOT_AVAILABLE"
-      | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT",
+      | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
+      | "DURABLE_JOB_LEASE_LOST"
+      | "DURABLE_JOB_NOT_FOUND"
+      | "DURABLE_JOB_NOT_RETRYABLE",
     message = code
   ) {
     super(message);

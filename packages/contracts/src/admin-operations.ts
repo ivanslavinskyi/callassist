@@ -104,6 +104,31 @@ const systemComponentStateSchema = z.enum([
   "disabled"
 ]);
 
+export const adminDurableJobTypeSchema = z.enum([
+  "final_transcription",
+  "recording_retention"
+]);
+export const adminDurableJobStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "dead_letter"
+]);
+
+const adminDurableJobSchema = z.strictObject({
+  id: z.uuid(),
+  callId: z.uuid(),
+  type: adminDurableJobTypeSchema,
+  status: adminDurableJobStatusSchema,
+  generation: z.number().int().positive(),
+  attemptCount: countSchema,
+  maxAttempts: z.number().int().positive().max(20),
+  runAfter: z.iso.datetime(),
+  leaseExpiresAt: z.iso.datetime().nullable(),
+  lastErrorCode: z.string().min(1).max(160).nullable(),
+  updatedAt: z.iso.datetime()
+});
+
 export const adminSystemStatusSchema = z.strictObject({
   generatedAt: z.iso.datetime(),
   components: z.strictObject({
@@ -132,7 +157,7 @@ export const adminSystemStatusSchema = z.strictObject({
     uptimeSeconds: secondsSchema,
     backgroundTasks: countSchema,
     processingRecordings: countSchema,
-    retentionLoopEnabled: z.boolean()
+    durableWorkerEnabled: z.boolean()
   }),
   workload: z.strictObject({
     activeCalls: countSchema,
@@ -143,6 +168,17 @@ export const adminSystemStatusSchema = z.strictObject({
     retentionScheduled: countSchema,
     retentionOverdue: countSchema
   }),
+  jobs: z.strictObject({
+    queued: countSchema,
+    running: countSchema,
+    succeeded: countSchema,
+    deadLetter: countSchema,
+    retryQueued: countSchema,
+    transcriptionQueued: countSchema,
+    retentionQueued: countSchema,
+    oldestDueAt: z.iso.datetime().nullable(),
+    recent: z.array(adminDurableJobSchema).max(20)
+  }),
   recentTelemetry: z.strictObject({
     since: z.iso.datetime(),
     warnings: countSchema,
@@ -150,6 +186,13 @@ export const adminSystemStatusSchema = z.strictObject({
   })
 });
 export type AdminSystemStatus = z.infer<typeof adminSystemStatusSchema>;
+
+export const adminDurableJobRetryInputSchema = z.strictObject({
+  reason: z.string().trim().min(3).max(500)
+});
+export type AdminDurableJobRetryInput = z.infer<
+  typeof adminDurableJobRetryInputSchema
+>;
 
 export const adminOutboundCallControlInputSchema = z.strictObject({
   enabled: z.boolean(),

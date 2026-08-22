@@ -45,6 +45,13 @@ import {
   unavailableOperationalCostPolicy,
   type OperationalCostPolicy
 } from "./config/operational-cost-policy";
+import {
+  DurableJobExecutionError,
+  durableJobMaxAttempts,
+  type DurableJob,
+  type DurableJobLease
+} from "./jobs/durable-job";
+import { DurableJobWorker } from "./jobs/durable-job-worker";
 
 type Subscriber = (event: CallEvent) => void;
 
@@ -81,14 +88,13 @@ export class CallServiceError extends Error {
 export class CallService {
   readonly #subscribers = new Map<string, Set<Subscriber>>();
   readonly #timers = new Map<string, Set<NodeJS.Timeout>>();
-  readonly #backgroundJobs = new Set<Promise<unknown>>();
   readonly #processingRecordings = new Set<string>();
   readonly #onBackgroundError: (error: unknown) => void;
   readonly #postCallTranscriber?: PostCallTranscriber;
   readonly #briefCompiler: BriefCompiler;
   readonly #admissionPolicy: CallAdmissionPolicy;
   readonly #operationalCostPolicy: OperationalCostPolicy;
-  #retentionTimer: NodeJS.Timeout | null = null;
+  readonly #durableJobWorker: DurableJobWorker;
 
   constructor(
     readonly repository: CallRepository,
@@ -105,26 +111,31 @@ export class CallService {
     this.#briefCompiler = briefCompiler;
     this.#admissionPolicy = admissionPolicy;
     this.#operationalCostPolicy = operationalCostPolicy;
+    this.#durableJobWorker = new DurableJobWorker(
+      repository,
+      {
+        ...(postCallTranscriber
+          ? {
+              final_transcription: (
+                job: DurableJob,
+                lease: DurableJobLease
+              ) => this.#processRecording(job, lease)
+            }
+          : {}),
+        recording_retention: (
+          job: DurableJob,
+          lease: DurableJobLease
+        ) => this.#processRecordingRetention(job, lease)
+      },
+      onBackgroundError
+    );
   }
 
   async initialize() {
     await this.repository.ping();
-    const [recoveredCalls] = await Promise.all([
-      this.repository.recoverInterruptedCalls(),
-      this.repository.recoverInterruptedTranscriptions()
-    ]);
-    if (this.#postCallTranscriber) {
-      const candidates = await this.repository.listTranscriptionCandidates();
-      for (const recordingId of candidates) {
-        this.#runBackground(() => this.#processRecording(recordingId));
-      }
-      this.#runBackground(() => this.#purgeExpiredRecordings());
-      this.#retentionTimer = setInterval(
-        () => this.#runBackground(() => this.#purgeExpiredRecordings()),
-        60 * 60 * 1_000
-      );
-      this.#retentionTimer.unref();
-    }
+    const recoveredCalls = await this.repository.recoverInterruptedCalls();
+    await this.repository.seedDurableJobs(new Date().toISOString());
+    this.#durableJobWorker.start();
     return recoveredCalls;
   }
 
@@ -246,9 +257,9 @@ export class CallService {
       outboundCalls: facts.outboundCalls,
       runtime: {
         uptimeSeconds: Math.max(0, Math.floor(process.uptime())),
-        backgroundTasks: this.#backgroundJobs.size,
+        backgroundTasks: this.#durableJobWorker.runningCount,
         processingRecordings: this.#processingRecordings.size,
-        retentionLoopEnabled: this.#retentionTimer !== null
+        durableWorkerEnabled: this.#durableJobWorker.enabled
       },
       workload: {
         activeCalls: facts.activeCalls,
@@ -259,12 +270,28 @@ export class CallService {
         retentionScheduled: facts.retentionScheduled,
         retentionOverdue: facts.retentionOverdue
       },
+      jobs: facts.jobs,
       recentTelemetry: {
         since,
         warnings: facts.recentWarnings,
         errors: facts.recentErrors
       }
     });
+  }
+
+  async retryAdminDurableJob(
+    jobId: string,
+    actorUserId: string,
+    reason: string
+  ) {
+    const job = await this.repository.retryDurableJob(
+      jobId,
+      actorUserId,
+      reason,
+      new Date().toISOString()
+    );
+    this.#durableJobWorker.wake();
+    return job;
   }
 
   async create(input: CreateCallBriefInput, userId: string | null = null) {
@@ -564,7 +591,7 @@ export class CallService {
       result.recording.status === "available" &&
       this.#postCallTranscriber
     ) {
-      this.#runBackground(() => this.#processRecording(result.recording.id));
+      this.#durableJobWorker.wake();
     }
     if (["available", "failed"].includes(result.recording.status)) {
       await this.#syncSystemOutcome(result.callId);
@@ -619,9 +646,15 @@ export class CallService {
     ) {
       throw new CallServiceError("RECORDING_NOT_AVAILABLE");
     }
-    this.#runBackground(() =>
-      this.#processRecording(snapshot.recording!.id, true)
-    );
+    await this.repository.enqueueDurableJob({
+      type: "final_transcription",
+      recordingId: snapshot.recording.id,
+      runAfter: new Date().toISOString(),
+      maxAttempts: durableJobMaxAttempts.final_transcription,
+      force: true,
+      restartTerminal: true
+    });
+    this.#durableJobWorker.wake();
     return snapshot;
   }
 
@@ -670,26 +703,21 @@ export class CallService {
 
   async close() {
     for (const id of this.#timers.keys()) this.#clearTimers(id);
-    if (this.#retentionTimer) clearInterval(this.#retentionTimer);
-    this.#retentionTimer = null;
-    await Promise.allSettled(this.#backgroundJobs);
+    await this.#durableJobWorker.close();
     await this.repository.close();
   }
 
-  async #processRecording(recordingId: string, force = false) {
-    if (
-      !this.#postCallTranscriber ||
-      this.#processingRecordings.has(recordingId)
-    ) {
-      return;
-    }
+  async #processRecording(job: DurableJob, lease: DurableJobLease) {
+    const recordingId = job.recordingId;
+    if (!this.#postCallTranscriber) return;
     this.#processingRecordings.add(recordingId);
     let callId: string | null = null;
     try {
       const claimed = await this.repository.claimFinalTranscript(
         recordingId,
         this.#postCallTranscriber.model,
-        force
+        job.forceRequested,
+        currentLease(lease)
       );
       if (!claimed) return;
       callId = claimed.callId;
@@ -717,22 +745,23 @@ export class CallService {
       const completed = await this.repository.completeFinalTranscript(
         recordingId,
         result.text,
-        result.segments
+        result.segments,
+        currentLease(lease)
       );
       this.#publish(completed.callId, {
         type: "final_transcript.updated",
         finalTranscript: completed.finalTranscript
       });
       await this.#syncSystemOutcome(completed.callId);
-      if (completed.snapshot.brief.audioRetentionDays === 0) {
-        await this.deleteRecording(completed.callId).catch(
-          this.#onBackgroundError
-        );
-      }
     } catch (error) {
       if (callId) {
+        const failureCode = transcriptionFailureCode(error);
         const failed = await this.repository
-          .failFinalTranscript(recordingId, transcriptionFailureCode(error))
+          .failFinalTranscript(
+            recordingId,
+            failureCode,
+            currentLease(lease)
+          )
           .catch(() => null);
         if (failed) {
           this.#publish(failed.callId, {
@@ -741,19 +770,38 @@ export class CallService {
           });
           await this.#syncSystemOutcome(failed.callId);
         }
+        throw new DurableJobExecutionError(failureCode, { cause: error });
       }
-      this.#onBackgroundError(error);
+      throw error;
     } finally {
       this.#processingRecordings.delete(recordingId);
     }
   }
 
-  async #purgeExpiredRecordings() {
-    const callIds = await this.repository.listExpiredRecordingCallIds(
-      new Date().toISOString()
-    );
-    for (const callId of callIds) {
-      await this.deleteRecording(callId).catch(this.#onBackgroundError);
+  async #processRecordingRetention(job: DurableJob, lease: DurableJobLease) {
+    const snapshot = await this.#require(job.callId);
+    const recording = snapshot.recording;
+    if (!recording || recording.status === "deleted") return;
+    if (recording.status !== "available" || !recording.providerRecordingId) {
+      throw new DurableJobExecutionError("RECORDING_NOT_AVAILABLE");
+    }
+    try {
+      await this.telephonyProvider.deleteRecording(
+        recording.providerRecordingId
+      );
+      const deleted = await this.repository.markRecordingDeleted(
+        job.callId,
+        currentLease(lease)
+      );
+      this.#publish(job.callId, {
+        type: "recording.updated",
+        recording: deleted.recording
+      });
+    } catch (error) {
+      throw new DurableJobExecutionError(
+        recordingRetentionFailureCode(error),
+        { cause: error }
+      );
     }
   }
 
@@ -839,12 +887,6 @@ export class CallService {
     for (const subscriber of this.#subscribers.get(id) ?? []) subscriber(event);
   }
 
-  #runBackground(operation: () => Promise<unknown>) {
-    const job = operation().finally(() => this.#backgroundJobs.delete(job));
-    this.#backgroundJobs.add(job);
-    void job.catch(this.#onBackgroundError);
-  }
-
   async #require(id: string): Promise<CallSnapshot> {
     const snapshot = await this.repository.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -858,6 +900,23 @@ function transcriptionFailureCode(error: unknown) {
     return error.message.slice(0, 120);
   }
   return "POST_CALL_TRANSCRIPTION_FAILED";
+}
+
+function recordingRetentionFailureCode(error: unknown) {
+  if (error instanceof Error && error.message.startsWith("TWILIO_")) {
+    return error.message.slice(0, 120);
+  }
+  if (
+    error instanceof CallRepositoryError &&
+    error.code === "DURABLE_JOB_LEASE_LOST"
+  ) {
+    return error.code;
+  }
+  return "RECORDING_RETENTION_DELETE_FAILED";
+}
+
+function currentLease(lease: DurableJobLease): DurableJobLease {
+  return { ...lease, checkedAt: new Date().toISOString() };
 }
 
 function mapBriefCompilerError(error: BriefCompilerError) {

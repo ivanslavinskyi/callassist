@@ -115,12 +115,14 @@ guessing. Retained audio remains the verification source for critical details.
 
 - Recording start failure keeps recipient media blocked and ends the call.
 - Duplicate callbacks are handled idempotently.
-- An API restart resets interrupted transcription work and retries from the recording.
-- Download or model failure keeps the recording and exposes a safe retry action.
+- An API restart leaves queued/running transcription work durable; an expired lease is
+  reclaimed and a stale worker is fenced from publishing its result.
+- Download or model failure keeps the recording, uses bounded automatic retry, and
+  exposes owner retry plus a reasoned superadmin dead-letter recovery action.
 - Empty model output fails rather than publishing an invented transcript.
 - Recordings larger than the current upload limit fail with `AUDIO_TOO_LARGE`; bounded
   overlapping-window transcription is deferred until real call duration requires it.
-- Recording deletion failures retain the deadline and retry during cleanup.
+- Recording deletion failures retain the deadline and retry as durable retention work.
 
 ## Verification
 

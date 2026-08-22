@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   getAdminSystemStatus,
   getCurrentUser,
+  retryAdminDurableJob,
   setAdminOutboundCalls
 } from "@/lib/api";
 import {
@@ -22,8 +23,10 @@ export function AdminSystemConsole() {
   const [status, setStatus] = useState<AdminSystemStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [controlLoading, setControlLoading] = useState(false);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -67,6 +70,26 @@ export function AdminSystemConsole() {
       setControlError(copy.controlError);
     } finally {
       setControlLoading(false);
+    }
+  }
+
+  async function retryJob(
+    event: FormEvent<HTMLFormElement>,
+    jobId: string
+  ) {
+    event.preventDefault();
+    const reason = String(new FormData(event.currentTarget).get("reason") ?? "")
+      .trim();
+    if (reason.length < 3 || !window.confirm(copy.retryJobConfirm)) return;
+    setRetryingJobId(jobId);
+    setJobError(null);
+    try {
+      setStatus(await retryAdminDurableJob(jobId, { reason }));
+      event.currentTarget.reset();
+    } catch {
+      setJobError(copy.retryJobError);
+    } finally {
+      setRetryingJobId(null);
     }
   }
 
@@ -120,13 +143,80 @@ export function AdminSystemConsole() {
                 <h2>{copy.runtimeTitle}</h2>
                 <dl className="admin-operations-list">
                   <Fact label={copy.uptime} value={formatSeconds(status.runtime.uptimeSeconds)} />
-                  <Fact label={copy.retentionLoop} value={status.runtime.retentionLoopEnabled ? copy.enabled : copy.disabled} />
+                  <Fact label={copy.durableWorker} value={status.runtime.durableWorkerEnabled ? copy.enabled : copy.disabled} />
                   <Fact label={copy.warnings} value={String(status.recentTelemetry.warnings)} />
                   <Fact label={copy.errors} value={String(status.recentTelemetry.errors)} />
                 </dl>
                 <small>{copy.recentTelemetryTitle} · {formatDate(status.recentTelemetry.since, locale)}</small>
               </section>
             </div>
+
+            <section className="admin-system-panel admin-jobs-panel">
+              <h2>{copy.jobsTitle}</h2>
+              <p>{copy.jobsIntro}</p>
+              <div className="admin-metric-grid">
+                <Metric label={copy.jobsQueued} value={status.jobs.queued} />
+                <Metric label={copy.jobsRunning} value={status.jobs.running} />
+                <Metric label={copy.jobsRetryQueued} value={status.jobs.retryQueued} />
+                <Metric label={copy.jobsDeadLetter} value={status.jobs.deadLetter} />
+                <Metric label={copy.jobsSucceeded} value={status.jobs.succeeded} />
+                <Metric label={copy.jobsTranscription} value={status.jobs.transcriptionQueued} />
+                <Metric label={copy.jobsRetention} value={status.jobs.retentionQueued} />
+                <Metric
+                  label={copy.jobsOldestDue}
+                  value={status.jobs.oldestDueAt
+                    ? formatDate(status.jobs.oldestDueAt, locale)
+                    : copy.notAvailable}
+                />
+              </div>
+              <h3>{copy.jobsRecent}</h3>
+              {status.jobs.recent.length === 0 ? <p>{copy.jobsEmpty}</p> : null}
+              <div className="admin-job-list">
+                {status.jobs.recent.map((job) => (
+                  <article className="admin-job-card" data-status={job.status} key={job.id}>
+                    <header>
+                      <div>
+                        <strong>{copy.jobTypes[job.type]}</strong>
+                        <span>{copy.jobStatuses[job.status]}</span>
+                      </div>
+                      <Link href={localizeHref(`/admin/calls/${job.callId}`)}>
+                        {copy.jobCall}
+                      </Link>
+                    </header>
+                    <dl className="admin-operations-list">
+                      <Fact label={copy.jobAttempt} value={`${job.attemptCount} / ${job.maxAttempts}`} />
+                      <Fact label={copy.jobRunAfter} value={formatDate(job.runAfter, locale)} />
+                      <Fact label={copy.jobLeaseUntil} value={job.leaseExpiresAt ? formatDate(job.leaseExpiresAt, locale) : copy.notAvailable} />
+                      <Fact label={copy.jobError} value={job.lastErrorCode ?? copy.notAvailable} />
+                    </dl>
+                    {job.status === "dead_letter" ? (
+                      <form onSubmit={(event) => void retryJob(event, job.id)}>
+                        <label className="field">
+                          <span>{copy.retryJobReason}</span>
+                          <input
+                            disabled={role !== "superadmin" || retryingJobId === job.id}
+                            maxLength={500}
+                            minLength={3}
+                            name="reason"
+                            placeholder={copy.retryJobPlaceholder}
+                            required
+                          />
+                        </label>
+                        <button
+                          className="secondary-button"
+                          disabled={role !== "superadmin" || retryingJobId === job.id}
+                          type="submit"
+                        >
+                          {copy.retryJob}
+                        </button>
+                        {role !== "superadmin" ? <small>{copy.retryJobRestricted}</small> : null}
+                      </form>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+              {jobError ? <p className="form-error" role="alert">{jobError}</p> : null}
+            </section>
 
             <section className="admin-outbound-control" data-enabled={status.outboundCalls.enabled}>
               <div>
@@ -184,6 +274,15 @@ function ComponentCard({ copy, label, state, upstream = false }: {
 
 function Fact({ label, value }: { label: string; value: string }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>;
+}
+
+function Metric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <article className="admin-metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
 }
 
 function formatSeconds(seconds: number) {

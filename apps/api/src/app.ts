@@ -5,6 +5,7 @@ import {
   ADMIN_CALL_LIST_LIMIT_MAX,
   accountStatusActionSchema,
   adminCallListFiltersSchema,
+  adminDurableJobRetryInputSchema,
   adminOperationsWindowSchema,
   adminOutboundCallControlInputSchema,
   adminUserSearchSchema,
@@ -1074,6 +1075,40 @@ export function buildApp({
         .send(await service.getAdminSystemStatus(realtimeConfigured));
     });
 
+    app.post<{ Params: { jobId: string } }>(
+      "/api/admin/system/jobs/:jobId/retry",
+      async (request, reply) => {
+        const actor = await authorizeAdminMutation(request, reply);
+        if (!actor) return;
+        if (actor.role !== "superadmin") {
+          return reply.status(403).send({
+            error: "DURABLE_JOB_RETRY_FORBIDDEN"
+          });
+        }
+        if (!isUuid(request.params.jobId)) {
+          return reply.status(400).send({ error: "INVALID_DURABLE_JOB_ID" });
+        }
+        const parsed = adminDurableJobRetryInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({
+            error: "INVALID_DURABLE_JOB_RETRY"
+          });
+        }
+        try {
+          await service.retryAdminDurableJob(
+            request.params.jobId,
+            actor.id,
+            parsed.data.reason
+          );
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await service.getAdminSystemStatus(realtimeConfigured));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      }
+    );
+
     app.get<{
       Querystring: {
         limit?: string;
@@ -2052,7 +2087,8 @@ function sendRepositoryError(
   }
 
   if (error instanceof CallRepositoryError) {
-    const status = error.code === "CALL_NOT_FOUND"
+    const status = ["CALL_NOT_FOUND", "DURABLE_JOB_NOT_FOUND"]
+      .includes(error.code)
       ? 404
       : error.code === "CREDIT_USER_NOT_FOUND"
         ? 404

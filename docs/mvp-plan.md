@@ -50,7 +50,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, localized CMS Core, and structured Landing/FAQ/navigation administration exist. Media administration, reviewed operator/contact details, and production release work remain.
 - **PARTIAL — localization:** operational UI and CMS-managed structured Landing/legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Route-derived canonical/hreflang/robots/sitemap/OG metadata and translation-freshness reporting exist; structured global/organization settings and additional editorial models remain.
 - **PARTIAL — observability:** audit/provider/SSE/health data, a privacy-safe durable technical event stream, versioned outcomes, owner feedback, Admin Calls/Inspector, operational cohorts/cost estimates, and local system controls exist; upstream probes, production monitoring/alerting, and invoice reconciliation remain.
-- **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
+- **PARTIAL — async work:** final transcription and recording retention now run through PostgreSQL-backed durable jobs with leases, fencing, bounded retries, attempt history, dead-letter state, and restart seeding. Provider/status reconciliation and a separately deployed worker runtime remain open.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
 - **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
 - **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. The PostgreSQL ownership suite has been executed successfully. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen.
@@ -131,14 +131,23 @@ The default Admin Calls response contains call and owner UUIDs, locale, lifecycl
 3. **5C — Admin Calls and Inspector — DONE.** The RBAC-protected list and detail read model provides deterministic operational filters, a bounded technical timeline and outcome provenance without private call text. Sensitive content is a separate superadmin-only, reasoned read with immutable access evidence.
 4. **5D — operational overview and cost visibility — DONE.** Privacy-safe creation cohorts now expose exact denominators, outcomes, duration/first-audio, retry/disconnect/recovery signals, versioned bounded cost estimates, local workload/configuration state, and audited outbound-call control.
 
-## Next checkpoint — durable jobs and recovery visibility (6A)
+## Completed checkpoint — durable transcription and retention jobs (6A1)
 
-- Move final transcription, retry, recording processing, retention deletion, and provider reconciliation from API-process lifecycle into durable idempotent jobs with leases, bounded retry policy, and dead-letter state.
-- Recover safely after process restart and concurrent-worker delivery; make duplicate work a tested no-op and retain controlled failure reasons without raw provider payloads.
-- Extend `/admin/system` with job backlog, age, retry, stuck/dead-letter visibility, and a separately authorized manual retry where it is operationally safe.
-- Add clean migration and crash/restart/concurrency coverage before production deployment work begins.
+- [x] Move final transcription, owner retry, and retention deletion from process-local promises/timers into PostgreSQL-backed jobs enqueued in the same repository transaction as the source state change.
+- [x] Add exclusive expiring leases, heartbeat renewal, fencing at user-visible writes, bounded exponential retries, terminal dead-letter state, immutable attempt history, startup seeding, and memory/PostgreSQL parity.
+- [x] Extend `/admin/system` with bounded privacy-safe queue counts, oldest due work, recent job state, controlled failure codes, call-inspector links, and a reasoned superadmin-only dead-letter retry with immutable evidence.
+- [x] Cover expired-worker fencing, retry/success, dead-letter restart generations, RBAC, immutable audit/attempt rows, and PostgreSQL claim concurrency.
 
-Acceptance for 6A: queued work survives API/worker restarts; duplicate or concurrent delivery cannot duplicate user-visible results; retries and terminal failures are bounded and inspectable; ordinary users cannot access operational job state; and no job payload or system response exposes credentials, private call text, or raw provider payloads.
+Acceptance for 6A1 is met: queued work survives API restarts; only the current lease may publish a result; retry/dead-letter transitions are bounded and inspectable; ordinary users cannot access operational job state; and job payloads/system responses contain neither credentials nor private call text.
+
+## Next checkpoint — provider and webhook reconciliation (6A2)
+
+- Add durable provider call/recording status reconciliation for callbacks that are delayed, duplicated, or permanently lost; retain controlled status/failure fields rather than raw provider payloads.
+- Add webhook delivery age/failure visibility and safe recovery actions to `/admin/system`, with explicit ownership and escalation semantics.
+- Extract the generic durable worker into an independently deployable runtime when the production topology is introduced, and prove shutdown/restart behavior across separate API and worker processes.
+- Add real-provider partial-failure and crash-boundary tests. Upstream operations may be retried, so correctness depends on provider idempotency plus repository fencing rather than claiming external exactly-once execution.
+
+Acceptance for 6A2: stale provider state is detected and reconciled without weakening signed webhook boundaries; operators can distinguish delayed callbacks from terminal failures; and API/worker deployment restarts do not strand provider synchronization.
 
 # Public Beta Foundation
 
@@ -290,7 +299,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 - [ ] Instrument brief/compiler/policy/approval/credit/Twilio/ringing/answer/disclosure/consent/recording/Realtime/first-audio/conversation/completion/transcription/outcome, including latency, retries, reconnects, provider IDs/status, model/version, channels/duration, feedback. **Partial:** the reconstructable lifecycle, first-audio latency, retries/disconnects/recovery, technical outcomes, owner feedback, and versioned cost derivation are durable; Realtime reconnect is explicitly unsupported until a recovery design exists.
 - [x] Build `/admin/calls/[id]`: summary, timeline, technical metadata, separately permissioned sensitive content. Never show secrets; audit sensitive views.
 - [x] Define event-specific metadata allow-lists excluding phone/name/brief/transcript text, credentials, cookies, OTPs, arbitrary exception bodies, and raw provider payloads from durable call events.
-- [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch. **Partial:** API/database request-path health, provider configuration (not upstream health), active/transcription/retention workload, recent warning/error counts, costs via the overview, and reasoned RBAC kill-switch control exist; durable job detail, provider probes, webhooks, and production alerts remain.
+- [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch. **Partial:** API/database request-path health, provider configuration (not upstream health), active workload, durable queue/retry/dead-letter detail, recent warning/error counts, costs via the overview, reasoned superadmin job recovery, and RBAC kill-switch control exist; provider probes, webhook delivery state, and production alerts remain.
 
 ## 6. Production & Compliance
 
@@ -311,8 +320,8 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P1 — durable jobs and CI
 
-- [ ] Use durable idempotent jobs for final transcription, retries, recording processing, retention deletion, provider reconciliation/status sync, and cleanup. Redis/BullMQ or an equivalent proven approach is acceptable.
-- [ ] Test restart, duplicate webhook, concurrent worker, and partial provider failure; expose stuck/dead-letter work.
+- [ ] Use durable idempotent jobs for final transcription, retries, recording processing, retention deletion, provider reconciliation/status sync, and cleanup. **Partial:** PostgreSQL-backed transcription and retention jobs now provide leases, fencing, bounded retry/dead-letter state, immutable attempts, and restart seeding; provider reconciliation/status sync and other cleanup remain.
+- [ ] Test restart, duplicate webhook, concurrent worker, and partial provider failure; expose stuck/dead-letter work. **Partial:** lease-expiry recovery, stale-worker fencing, duplicate enqueue, concurrent PostgreSQL claims, bounded retry, dead-letter visibility, and audited manual restart are covered; real-provider callback loss/partial failure remains for 6A2.
 - [ ] Add CI for clean install, lint, typecheck, tests, build, and safe migration validation; protect `main` with required checks/review.
 
 ## Validation retained from the supervised MVP roadmap — P1

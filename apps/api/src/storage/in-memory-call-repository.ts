@@ -67,6 +67,14 @@ import {
   type SafetyControlInput,
   type StartAttemptInput
 } from "./call-repository";
+import {
+  durableJobMaxAttempts,
+  type ClaimDurableJobInput,
+  type DurableJob,
+  type DurableJobAttempt,
+  type DurableJobLease,
+  type EnqueueDurableJobInput
+} from "../jobs/durable-job";
 
 type StoredPromoCode = PromoCodeSummary & {
   codeHash: string;
@@ -146,6 +154,14 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #promoCodes = new Map<string, StoredPromoCode>();
   readonly #promoCreationIdempotency = new Map<string, string>();
   readonly #promoRedemptions: StoredPromoRedemption[] = [];
+  readonly #durableJobs = new Map<string, DurableJob>();
+  readonly #durableJobAttempts: DurableJobAttempt[] = [];
+  readonly #durableJobAdminEvents: Array<{
+    jobId: string;
+    actorUserId: string;
+    reason: string;
+    createdAt: string;
+  }> = [];
   readonly #recipientSuppressions = new Map<
     string,
     RecipientSuppressionInput & { createdAt: string }
@@ -714,6 +730,8 @@ export class InMemoryCallRepository implements CallRepository {
     const events = [...this.#callTelemetryEvents.values()]
       .flatMap((stored) => stored.map(({ event }) => event))
       .filter(({ occurredAt }) => occurredAt >= recentSince);
+    const jobs = [...this.#durableJobs.values()];
+    const queued = jobs.filter(({ status }) => status === "queued");
     return {
       outboundCalls: {
         enabled: this.#outboundCallsEnabled,
@@ -749,7 +767,32 @@ export class InMemoryCallRepository implements CallRepository {
       recentWarnings: events.filter(({ severity }) => severity === "warning")
         .length,
       recentErrors: events.filter(({ severity }) => severity === "error")
-        .length
+        .length,
+      jobs: {
+        queued: queued.length,
+        running: jobs.filter(({ status }) => status === "running").length,
+        succeeded: jobs.filter(({ status }) => status === "succeeded").length,
+        deadLetter: jobs.filter(({ status }) => status === "dead_letter").length,
+        retryQueued: queued.filter(({ attemptCount }) => attemptCount > 0).length,
+        transcriptionQueued: queued.filter(
+          ({ type }) => type === "final_transcription"
+        ).length,
+        retentionQueued: queued.filter(
+          ({ type }) => type === "recording_retention"
+        ).length,
+        oldestDueAt: queued
+          .map(({ runAfter }) => runAfter)
+          .sort()[0] ?? null,
+        recent: jobs
+          .sort((left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            right.id.localeCompare(left.id)
+          )
+          .slice(0, 20)
+          .map(({ recordingId: _recordingId, forceRequested: _force,
+            leaseOwner: _owner, leasedAt: _leasedAt, createdAt: _createdAt,
+            completedAt: _completedAt, ...job }) => copy(job))
+      }
     };
   }
 
@@ -1427,6 +1470,12 @@ export class InMemoryCallRepository implements CallRepository {
           }
         }
       });
+      await this.enqueueDurableJob({
+        type: "final_transcription",
+        recordingId: input.recordingId,
+        runAfter: recording.completedAt ?? new Date().toISOString(),
+        maxAttempts: durableJobMaxAttempts.final_transcription
+      });
     } else if (input.providerStatus === "absent") {
       const failureCode = safeTelemetryCode(
         recording.failureReason,
@@ -1448,11 +1497,17 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
-  async claimFinalTranscript(recordingId: string, model: string, force = false) {
+  async claimFinalTranscript(
+    recordingId: string,
+    model: string,
+    force = false,
+    lease?: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
     if (recording.status !== "available") return null;
     if (snapshot.finalTranscript?.status === "completed" && !force) return null;
-    if (snapshot.finalTranscript?.status === "processing") return null;
+    if (snapshot.finalTranscript?.status === "processing" && !lease) return null;
     const now = new Date().toISOString();
     const retry = Boolean(snapshot.finalTranscript);
     const finalTranscript: FinalTranscript = snapshot.finalTranscript
@@ -1501,8 +1556,10 @@ export class InMemoryCallRepository implements CallRepository {
   async completeFinalTranscript(
     recordingId: string,
     text: string,
-    segments: FinalTranscriptSegment[]
+    segments: FinalTranscriptSegment[],
+    lease?: DurableJobLease
   ) {
+    this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
     const finalTranscript = snapshot.finalTranscript;
     if (!finalTranscript) {
@@ -1518,6 +1575,12 @@ export class InMemoryCallRepository implements CallRepository {
     recording.deleteAfter = new Date(
       now.getTime() + snapshot.brief.audioRetentionDays * 86_400_000
     ).toISOString();
+    await this.enqueueDurableJob({
+      type: "recording_retention",
+      recordingId,
+      runAfter: recording.deleteAfter,
+      maxAttempts: durableJobMaxAttempts.recording_retention
+    });
     const attempt = (this.#attempts.get(callId) ?? []).at(-1);
     this.#appendTelemetry(callId, {
       callAttemptId: attempt?.id ?? null,
@@ -1538,7 +1601,12 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
-  async failFinalTranscript(recordingId: string, failureReason: string) {
+  async failFinalTranscript(
+    recordingId: string,
+    failureReason: string,
+    lease?: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
     const { callId, snapshot } = this.#requireRecording(recordingId);
     const finalTranscript = snapshot.finalTranscript;
     if (!finalTranscript) {
@@ -1573,35 +1641,268 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
-  async listTranscriptionCandidates() {
-    return [...this.#calls.values()]
-      .filter(
-        (snapshot) =>
-          snapshot.recording?.status === "available" &&
-          snapshot.finalTranscript?.status !== "completed" &&
-          snapshot.finalTranscript?.status !== "processing"
-      )
-      .map((snapshot) => snapshot.recording!.id);
-  }
-
-  async listExpiredRecordingCallIds(now: string) {
-    return [...this.#calls.values()]
-      .filter(
-        (snapshot) =>
-          snapshot.recording?.status === "available" &&
-          snapshot.recording.deleteAfter !== null &&
-          snapshot.recording.deleteAfter <= now
-      )
-      .map((snapshot) => snapshot.brief.id);
-  }
-
-  async markRecordingDeleted(id: string) {
+  async markRecordingDeleted(id: string, lease?: DurableJobLease) {
+    this.#assertDurableJobLease(lease);
     const snapshot = this.#require(id);
     const recording = snapshot.recording;
     if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
     recording.status = "deleted";
     recording.deletedAt = new Date().toISOString();
     return { callId: id, recording: copy(recording), snapshot: copy(snapshot) };
+  }
+
+  async enqueueDurableJob(input: EnqueueDurableJobInput) {
+    const { callId } = this.#requireRecording(input.recordingId);
+    const key = durableJobKey(input.type, input.recordingId);
+    const existing = this.#durableJobs.get(key);
+    const now = new Date().toISOString();
+    if (!existing) {
+      const job: DurableJob = {
+        id: randomUUID(),
+        type: input.type,
+        recordingId: input.recordingId,
+        callId,
+        status: "queued",
+        generation: 1,
+        attemptCount: 0,
+        maxAttempts: input.maxAttempts,
+        runAfter: input.runAfter,
+        forceRequested: input.force ?? false,
+        leaseOwner: null,
+        leasedAt: null,
+        leaseExpiresAt: null,
+        lastErrorCode: null,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: null
+      };
+      this.#durableJobs.set(key, job);
+      return copy(job);
+    }
+    if (
+      input.restartTerminal &&
+      ["succeeded", "dead_letter"].includes(existing.status)
+    ) {
+      Object.assign(existing, {
+        status: "queued" as const,
+        generation: existing.generation + 1,
+        attemptCount: 0,
+        maxAttempts: input.maxAttempts,
+        runAfter: input.runAfter,
+        forceRequested: input.force ?? false,
+        leaseOwner: null,
+        leasedAt: null,
+        leaseExpiresAt: null,
+        lastErrorCode: null,
+        updatedAt: now,
+        completedAt: null
+      });
+    } else if (existing.status === "queued") {
+      existing.runAfter = existing.runAfter < input.runAfter
+        ? existing.runAfter
+        : input.runAfter;
+      existing.forceRequested ||= input.force ?? false;
+      existing.updatedAt = now;
+    }
+    return copy(existing);
+  }
+
+  async seedDurableJobs(now: string) {
+    const before = this.#durableJobs.size;
+    for (const snapshot of this.#calls.values()) {
+      const recording = snapshot.recording;
+      if (recording?.status !== "available") continue;
+      if (
+        snapshot.finalTranscript?.status !== "completed"
+      ) {
+        await this.enqueueDurableJob({
+          type: "final_transcription",
+          recordingId: recording.id,
+          runAfter: now,
+          maxAttempts: durableJobMaxAttempts.final_transcription
+        });
+      }
+      if (
+        recording.deleteAfter &&
+        snapshot.finalTranscript?.status === "completed"
+      ) {
+        await this.enqueueDurableJob({
+          type: "recording_retention",
+          recordingId: recording.id,
+          runAfter: recording.deleteAfter,
+          maxAttempts: durableJobMaxAttempts.recording_retention
+        });
+      }
+    }
+    return this.#durableJobs.size - before;
+  }
+
+  async claimDueDurableJob(input: ClaimDurableJobInput) {
+    for (const job of this.#durableJobs.values()) {
+      if (
+        job.status === "running" &&
+        input.types.includes(job.type) &&
+        job.leaseExpiresAt &&
+        job.leaseExpiresAt <= input.now
+      ) {
+        const deadLetter = job.attemptCount >= job.maxAttempts;
+        this.#durableJobAttempts.push({
+          id: randomUUID(),
+          jobId: job.id,
+          generation: job.generation,
+          attemptNumber: job.attemptCount,
+          workerId: job.leaseOwner!,
+          startedAt: job.leasedAt!,
+          completedAt: input.now,
+          outcome: deadLetter ? "dead_letter" : "lease_expired",
+          errorCode: "worker_lease_expired"
+        });
+        job.status = deadLetter ? "dead_letter" : "queued";
+        job.runAfter = input.now;
+        job.leaseOwner = null;
+        job.leasedAt = null;
+        job.leaseExpiresAt = null;
+        job.lastErrorCode = "worker_lease_expired";
+        job.updatedAt = input.now;
+        job.completedAt = deadLetter ? input.now : null;
+      }
+    }
+    const job = [...this.#durableJobs.values()]
+      .filter((candidate) =>
+        candidate.status === "queued" &&
+        candidate.runAfter <= input.now &&
+        input.types.includes(candidate.type)
+      )
+      .sort((left, right) =>
+        left.runAfter.localeCompare(right.runAfter) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id)
+      )[0];
+    if (!job) return null;
+    const forceRequested = job.forceRequested;
+    job.status = "running";
+    job.attemptCount += 1;
+    job.forceRequested = false;
+    job.leaseOwner = input.workerId;
+    job.leasedAt = input.now;
+    job.leaseExpiresAt = input.leaseExpiresAt;
+    job.updatedAt = input.now;
+    return copy({ ...job, forceRequested });
+  }
+
+  async renewDurableJobLease(
+    jobId: string,
+    workerId: string,
+    now: string,
+    leaseExpiresAt: string
+  ) {
+    const job = this.#findDurableJob(jobId);
+    if (!job || !durableJobLeaseIsValid(job, workerId, now)) return false;
+    job.leaseExpiresAt = leaseExpiresAt;
+    job.updatedAt = now;
+    return true;
+  }
+
+  async completeDurableJob(jobId: string, workerId: string, now: string) {
+    const job = this.#findDurableJob(jobId);
+    if (!job || !durableJobLeaseIsValid(job, workerId, now)) return false;
+    this.#durableJobAttempts.push({
+      id: randomUUID(),
+      jobId,
+      generation: job.generation,
+      attemptNumber: job.attemptCount,
+      workerId,
+      startedAt: job.leasedAt!,
+      completedAt: now,
+      outcome: "succeeded",
+      errorCode: null
+    });
+    job.status = "succeeded";
+    job.leaseOwner = null;
+    job.leasedAt = null;
+    job.leaseExpiresAt = null;
+    job.lastErrorCode = null;
+    job.updatedAt = now;
+    job.completedAt = now;
+    return true;
+  }
+
+  async failDurableJob(
+    jobId: string,
+    workerId: string,
+    errorCode: string,
+    now: string,
+    retryAt: string
+  ) {
+    const job = this.#findDurableJob(jobId);
+    if (!job || !durableJobLeaseIsValid(job, workerId, now)) return null;
+    const deadLetter = job.attemptCount >= job.maxAttempts;
+    this.#durableJobAttempts.push({
+      id: randomUUID(),
+      jobId,
+      generation: job.generation,
+      attemptNumber: job.attemptCount,
+      workerId,
+      startedAt: job.leasedAt!,
+      completedAt: now,
+      outcome: deadLetter ? "dead_letter" : "retry_scheduled",
+      errorCode
+    });
+    job.status = deadLetter ? "dead_letter" : "queued";
+    job.runAfter = deadLetter ? job.runAfter : retryAt;
+    job.leaseOwner = null;
+    job.leasedAt = null;
+    job.leaseExpiresAt = null;
+    job.lastErrorCode = errorCode;
+    job.updatedAt = now;
+    job.completedAt = deadLetter ? now : null;
+    return copy(job);
+  }
+
+  async listDurableJobs() {
+    return [...this.#durableJobs.values()].map(copy);
+  }
+
+  async listDurableJobAttempts(jobId: string) {
+    return this.#durableJobAttempts
+      .filter((attempt) => attempt.jobId === jobId)
+      .map(copy);
+  }
+
+  async retryDurableJob(
+    jobId: string,
+    actorUserId: string,
+    reason: string,
+    now: string
+  ) {
+    const job = this.#findDurableJob(jobId);
+    if (!job) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
+    if (job.status !== "dead_letter") {
+      throw new CallRepositoryError("DURABLE_JOB_NOT_RETRYABLE");
+    }
+    const boundedReason = requireAdminJobReason(reason);
+    job.status = "queued";
+    job.generation += 1;
+    job.attemptCount = 0;
+    job.runAfter = now;
+    job.forceRequested = job.type === "final_transcription";
+    job.leaseOwner = null;
+    job.leasedAt = null;
+    job.leaseExpiresAt = null;
+    job.lastErrorCode = null;
+    job.updatedAt = now;
+    job.completedAt = null;
+    this.#durableJobAdminEvents.push({
+      jobId,
+      actorUserId,
+      reason: boundedReason,
+      createdAt: now
+    });
+    return copy(job);
+  }
+
+  durableJobAdminEventsForTest() {
+    return copy(this.#durableJobAdminEvents);
   }
 
   async recoverInterruptedCalls() {
@@ -1639,34 +1940,6 @@ export class InMemoryCallRepository implements CallRepository {
         payload: {
           name: "call.recovered",
           metadata: { reason: "server_restarted" }
-        }
-      });
-      recovered += 1;
-    }
-    return recovered;
-  }
-
-  async recoverInterruptedTranscriptions() {
-    let recovered = 0;
-    for (const snapshot of this.#calls.values()) {
-      if (snapshot.finalTranscript?.status !== "processing") continue;
-      snapshot.finalTranscript.status = "failed";
-      snapshot.finalTranscript.failureReason = "server_restarted";
-      snapshot.finalTranscript.updatedAt = new Date().toISOString();
-      const attempt = (this.#attempts.get(snapshot.brief.id) ?? []).at(-1);
-      this.#appendTelemetry(snapshot.brief.id, {
-        callAttemptId: attempt?.id ?? null,
-        idempotencyKey: `transcription:${snapshot.finalTranscript.id}:recovered`,
-        occurredAt: snapshot.finalTranscript.updatedAt,
-        payload: {
-          name: "transcription.failed",
-          metadata: {
-            model: safeTelemetryCode(
-              snapshot.finalTranscript.model,
-              "unknown_model"
-            ),
-            failureCode: "server_restarted"
-          }
         }
       });
       recovered += 1;
@@ -1922,6 +2195,37 @@ export class InMemoryCallRepository implements CallRepository {
     }
     throw new CallRepositoryError("RECORDING_NOT_FOUND");
   }
+
+  #findDurableJob(jobId: string) {
+    return [...this.#durableJobs.values()].find(({ id }) => id === jobId);
+  }
+
+  #assertDurableJobLease(lease?: DurableJobLease) {
+    if (!lease) return;
+    const job = this.#findDurableJob(lease.jobId);
+    if (!job || !durableJobLeaseIsValid(
+      job,
+      lease.workerId,
+      lease.checkedAt
+    )) {
+      throw new CallRepositoryError("DURABLE_JOB_LEASE_LOST");
+    }
+  }
+}
+
+function durableJobKey(type: DurableJob["type"], recordingId: string) {
+  return `${type}:${recordingId}`;
+}
+
+function durableJobLeaseIsValid(
+  job: DurableJob,
+  workerId: string,
+  now: string
+) {
+  return job.status === "running" &&
+    job.leaseOwner === workerId &&
+    job.leaseExpiresAt !== null &&
+    job.leaseExpiresAt > now;
 }
 
 function requireSwissPhone(value: string) {
@@ -1940,6 +2244,14 @@ function requireSystemControlReason(value: string) {
   const reason = requireReason(value);
   if (reason.length > 500) {
     throw new Error("A safety-control reason must not exceed 500 characters");
+  }
+  return reason;
+}
+
+function requireAdminJobReason(value: string) {
+  const reason = requireSystemControlReason(value);
+  if (reason.length < 3) {
+    throw new Error("A durable-job retry reason must have at least 3 characters");
   }
   return reason;
 }

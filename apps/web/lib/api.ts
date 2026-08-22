@@ -9,6 +9,7 @@ import type {
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
+  AdminDurableJobRetryInput,
   AdminOperationsOverview,
   AdminOperationsWindow,
   AdminOutboundCallControlInput,
@@ -348,6 +349,16 @@ export async function setAdminOutboundCalls(
   return apiRequest<AdminSystemStatus>(
     "/api/admin/system/outbound-calls",
     { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export async function retryAdminDurableJob(
+  jobId: string,
+  input: AdminDurableJobRetryInput
+) {
+  return apiRequest<AdminSystemStatus>(
+    `/api/admin/system/jobs/${encodeURIComponent(jobId)}/retry`,
+    { method: "POST", body: JSON.stringify(input) }
   );
 }
 

@@ -982,7 +982,24 @@ describe("auth API", () => {
       outboundCalls: {
         enabled: false,
         reason: "Investigating elevated provider failures"
+      },
+      jobs: {
+        queued: 0,
+        running: 0,
+        deadLetter: 0,
+        recent: []
       }
+    });
+
+    const adminRetry = await app.inject({
+      method: "POST",
+      url: `/api/admin/system/jobs/${randomUUID()}/retry`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "Provider incident has cleared" }
+    });
+    expect(adminRetry.statusCode).toBe(403);
+    expect(adminRetry.json()).toEqual({
+      error: "DURABLE_JOB_RETRY_FORBIDDEN"
     });
 
     const adminEnable = await app.inject({
@@ -1000,6 +1017,17 @@ describe("auth API", () => {
     });
 
     await repository.setUserRoleForTest(adminId, "superadmin");
+    const missingJobRetry = await app.inject({
+      method: "POST",
+      url: `/api/admin/system/jobs/${randomUUID()}/retry`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "Provider incident has cleared" }
+    });
+    expect(missingJobRetry.statusCode).toBe(404);
+    expect(missingJobRetry.json()).toEqual({
+      error: "DURABLE_JOB_NOT_FOUND"
+    });
+
     const enabled = await app.inject({
       method: "PUT",
       url: "/api/admin/system/outbound-calls",

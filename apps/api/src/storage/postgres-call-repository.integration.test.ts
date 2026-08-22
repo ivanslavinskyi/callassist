@@ -1051,4 +1051,193 @@ describeWithDatabase("PostgresCallRepository", () => {
       recentErrors: expect.any(Number)
     });
   });
+
+  it("leases durable jobs with retry fencing and immutable attempt history", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "PostgreSQL durable job",
+      phoneNumber: "+41710000065",
+      objective: "Verify durable job lease transitions",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const attempt = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    const providerCallId = `CA-durable-${brief.id}`;
+    await repository.attachProviderCall(
+      attempt.attempt.id,
+      providerCallId,
+      "in-progress"
+    );
+    const begun = await repository.beginRecording(brief.id);
+    const providerRecordingId = `RE-durable-${brief.id}`;
+    await repository.attachProviderRecording(
+      begun.recording.id,
+      providerRecordingId,
+      "in-progress"
+    );
+    await repository.applyRecordingStatus({
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      providerCallId,
+      providerRecordingId,
+      providerStatus: "completed",
+      durationSeconds: 15,
+      channels: 2
+    });
+    const enqueued = await repository.enqueueDurableJob({
+      type: "final_transcription",
+      recordingId: begun.recording.id,
+      runAfter: "2000-01-01T00:00:00.000Z",
+      maxAttempts: 3
+    });
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE id <> ${enqueued.id} AND status = 'queued'
+    `;
+    await expect(repository.enqueueDurableJob({
+      type: "final_transcription",
+      recordingId: begun.recording.id,
+      runAfter: "2000-01-01T00:00:00.000Z",
+      maxAttempts: 3
+    })).resolves.toMatchObject({ id: enqueued.id, generation: 1 });
+
+    const unrelatedRetention = await repository.enqueueDurableJob({
+      type: "recording_retention",
+      recordingId: begun.recording.id,
+      runAfter: "2098-12-31T23:59:58.000Z",
+      maxAttempts: 2
+    });
+    await expect(repository.claimDueDurableJob({
+      types: ["recording_retention"],
+      workerId: "postgres-retention-worker",
+      now: "2098-12-31T23:59:58.000Z",
+      leaseExpiresAt: "2098-12-31T23:59:59.000Z"
+    })).resolves.toMatchObject({ id: unrelatedRetention.id });
+
+    const first = await repository.claimDueDurableJob({
+      types: ["final_transcription"],
+      workerId: "postgres-worker-a",
+      now: "2099-01-01T00:00:00.000Z",
+      leaseExpiresAt: "2099-01-01T00:01:00.000Z"
+    });
+    expect(first).toMatchObject({ id: enqueued.id, attemptCount: 1 });
+    expect((await repository.listDurableJobs()).find(
+      ({ id }) => id === unrelatedRetention.id
+    )).toMatchObject({
+      status: "running",
+      leaseOwner: "postgres-retention-worker"
+    });
+    expect(await repository.listDurableJobAttempts(unrelatedRetention.id))
+      .toEqual([]);
+    await expect(repository.claimDueDurableJob({
+      types: ["final_transcription"],
+      workerId: "postgres-worker-b",
+      now: "2099-01-01T00:00:01.000Z",
+      leaseExpiresAt: "2099-01-01T00:01:01.000Z"
+    })).resolves.toBeNull();
+
+    const retry = await repository.failDurableJob(
+      enqueued.id,
+      "postgres-worker-a",
+      "provider_timeout",
+      "2099-01-01T00:00:02.000Z",
+      "2099-01-01T00:00:07.000Z"
+    );
+    expect(retry).toMatchObject({
+      status: "queued",
+      attemptCount: 1,
+      lastErrorCode: "provider_timeout"
+    });
+    const second = await repository.claimDueDurableJob({
+      types: ["final_transcription"],
+      workerId: "postgres-worker-b",
+      now: "2099-01-01T00:00:07.000Z",
+      leaseExpiresAt: "2099-01-01T00:01:07.000Z"
+    });
+    expect(second).toMatchObject({ id: enqueued.id, attemptCount: 2 });
+    await expect(repository.completeDurableJob(
+      enqueued.id,
+      "postgres-worker-b",
+      "2099-01-01T00:00:08.000Z"
+    )).resolves.toBe(true);
+    const attempts = await repository.listDurableJobAttempts(enqueued.id);
+    expect(attempts.map(({ outcome }) => outcome)).toEqual([
+      "retry_scheduled",
+      "succeeded"
+    ]);
+    await expect(inspection`
+      UPDATE durable_job_attempts
+      SET error_code = 'tampered'
+      WHERE job_id = ${enqueued.id}
+    `).rejects.toThrow("immutable");
+
+    const restarted = await repository.enqueueDurableJob({
+      type: "final_transcription",
+      recordingId: begun.recording.id,
+      runAfter: "2099-01-01T00:00:09.000Z",
+      maxAttempts: 3,
+      force: true,
+      restartTerminal: true
+    });
+    expect(restarted).toMatchObject({
+      id: enqueued.id,
+      status: "queued",
+      generation: 2,
+      attemptCount: 0,
+      forceRequested: true
+    });
+    await inspection`
+      UPDATE durable_jobs
+      SET
+        status = 'dead_letter',
+        run_after = '2099-01-01T00:00:10.000Z',
+        lease_owner = NULL,
+        leased_at = NULL,
+        lease_expires_at = NULL,
+        updated_at = '2099-01-01T00:00:10.000Z'
+      WHERE id = ${enqueued.id}
+    `;
+    await expect(repository.retryDurableJob(
+      enqueued.id,
+      ownerA,
+      "Provider incident has cleared",
+      "2099-01-01T00:05:00.000Z"
+    )).resolves.toMatchObject({
+      id: enqueued.id,
+      status: "queued",
+      generation: 3,
+      attemptCount: 0,
+      forceRequested: true
+    });
+    const [adminEvent] = await inspection<{
+      actorUserId: string;
+      reason: string;
+    }[]>`
+      SELECT
+        actor_user_id AS "actorUserId",
+        reason
+      FROM durable_job_admin_events
+      WHERE job_id = ${enqueued.id}
+    `;
+    expect(adminEvent).toEqual({
+      actorUserId: ownerA,
+      reason: "Provider incident has cleared"
+    });
+    await expect(inspection`
+      DELETE FROM durable_job_admin_events
+      WHERE job_id = ${enqueued.id}
+    `).rejects.toThrow("immutable");
+  });
 });

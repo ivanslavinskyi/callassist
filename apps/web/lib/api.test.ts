@@ -43,6 +43,7 @@ import {
   grantCreditsAsAdmin,
   revokeAdminUserSessions,
   revokeAllOwnSessions,
+  retryAdminDurableJob,
   setAdminOutboundCalls,
   suppressRecipientAsStaff,
   startCall,
@@ -361,6 +362,9 @@ describe("API client headers", () => {
       enabled: false,
       reason: "Investigating elevated provider failures"
     });
+    await retryAdminDurableJob("72d810e8-106e-4a9d-a49a-9892d860ccbe", {
+      reason: "Provider recovered after incident"
+    });
 
     expect(fetchMock.mock.calls[0]?.[0]).toContain(
       "/api/admin/operations/overview?window=30d"
@@ -376,6 +380,14 @@ describe("API client headers", () => {
         enabled: false,
         reason: "Investigating elevated provider failures"
       })
+    });
+    expect(fetchMock.mock.calls[3]?.[0]).toContain(
+      "/api/admin/system/jobs/72d810e8-106e-4a9d-a49a-9892d860ccbe/retry"
+    );
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ reason: "Provider recovered after incident" })
     });
   });
 

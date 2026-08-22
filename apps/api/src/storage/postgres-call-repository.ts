@@ -56,6 +56,14 @@ import {
 import postgres from "postgres";
 import { decryptJson, encryptJson } from "../security/encryption";
 import {
+  durableJobMaxAttempts,
+  type ClaimDurableJobInput,
+  type DurableJob,
+  type DurableJobAttempt,
+  type DurableJobLease,
+  type EnqueueDurableJobInput
+} from "../jobs/durable-job";
+import {
   CallRepositoryError,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
@@ -272,6 +280,42 @@ type AdminSystemFactsRow = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  jobsQueued: number;
+  jobsRunning: number;
+  jobsSucceeded: number;
+  jobsDeadLetter: number;
+  jobsRetryQueued: number;
+  transcriptionQueued: number;
+  retentionQueued: number;
+  oldestJobDueAt: DatabaseDate | null;
+};
+
+type DurableJobRow = {
+  id: string;
+  type: DurableJob["type"];
+  recordingId: string;
+  callId: string;
+  status: DurableJob["status"];
+  generation: number;
+  attemptCount: number;
+  maxAttempts: number;
+  runAfter: DatabaseDate;
+  forceRequested: boolean;
+  leaseOwner: string | null;
+  leasedAt: DatabaseDate | null;
+  leaseExpiresAt: DatabaseDate | null;
+  lastErrorCode: string | null;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  completedAt: DatabaseDate | null;
+};
+
+type DurableJobAttemptRow = Omit<
+  DurableJobAttempt,
+  "startedAt" | "completedAt"
+> & {
+  startedAt: DatabaseDate;
+  completedAt: DatabaseDate;
 };
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
@@ -1506,11 +1550,43 @@ export class PostgresCallRepository implements CallRepository {
           SELECT count(*)::int FROM call_events
           WHERE occurred_at >= ${recentSince}::timestamptz
             AND severity = 'error'
-        ) AS "recentErrors"
+        ) AS "recentErrors",
+        (
+          SELECT count(*)::int FROM durable_jobs WHERE status = 'queued'
+        ) AS "jobsQueued",
+        (
+          SELECT count(*)::int FROM durable_jobs WHERE status = 'running'
+        ) AS "jobsRunning",
+        (
+          SELECT count(*)::int FROM durable_jobs WHERE status = 'succeeded'
+        ) AS "jobsSucceeded",
+        (
+          SELECT count(*)::int FROM durable_jobs WHERE status = 'dead_letter'
+        ) AS "jobsDeadLetter",
+        (
+          SELECT count(*)::int FROM durable_jobs
+          WHERE status = 'queued' AND attempt_count > 0
+        ) AS "jobsRetryQueued",
+        (
+          SELECT count(*)::int FROM durable_jobs
+          WHERE status = 'queued' AND job_type = 'final_transcription'
+        ) AS "transcriptionQueued",
+        (
+          SELECT count(*)::int FROM durable_jobs
+          WHERE status = 'queued' AND job_type = 'recording_retention'
+        ) AS "retentionQueued",
+        (
+          SELECT min(run_after) FROM durable_jobs WHERE status = 'queued'
+        ) AS "oldestJobDueAt"
       FROM system_controls
       WHERE key = 'outbound_calls'
     `;
     if (!row) throw new Error("Outbound-call system control is missing");
+    const recentJobs = await this.#sql<DurableJobRow[]>`
+      ${this.#durableJobSelect()}
+      ORDER BY durable_jobs.updated_at DESC, durable_jobs.id DESC
+      LIMIT 20
+    `;
     return {
       outboundCalls: {
         enabled: row.outboundCallsEnabled,
@@ -1527,7 +1603,26 @@ export class PostgresCallRepository implements CallRepository {
       retentionScheduled: row.retentionScheduled,
       retentionOverdue: row.retentionOverdue,
       recentWarnings: row.recentWarnings,
-      recentErrors: row.recentErrors
+      recentErrors: row.recentErrors,
+      jobs: {
+        queued: row.jobsQueued,
+        running: row.jobsRunning,
+        succeeded: row.jobsSucceeded,
+        deadLetter: row.jobsDeadLetter,
+        retryQueued: row.jobsRetryQueued,
+        transcriptionQueued: row.transcriptionQueued,
+        retentionQueued: row.retentionQueued,
+        oldestDueAt: row.oldestJobDueAt ? toIso(row.oldestJobDueAt) : null,
+        recent: recentJobs.map(mapDurableJobRow).map(({
+          recordingId: _recordingId,
+          forceRequested: _force,
+          leaseOwner: _owner,
+          leasedAt: _leasedAt,
+          createdAt: _createdAt,
+          completedAt: _completedAt,
+          ...job
+        }) => job)
+      }
     };
   }
 
@@ -2753,6 +2848,24 @@ export class PostgresCallRepository implements CallRepository {
             }
           }
         });
+        await transaction`
+          INSERT INTO durable_jobs (
+            id,
+            job_type,
+            recording_id,
+            status,
+            max_attempts,
+            run_after
+          ) VALUES (
+            ${randomUUID()},
+            'final_transcription',
+            ${input.recordingId},
+            'queued',
+            ${durableJobMaxAttempts.final_transcription},
+            ${now}
+          )
+          ON CONFLICT (job_type, recording_id) DO NOTHING
+        `;
       } else if (status === "failed" && input.providerStatus === "absent") {
         const failureCode = safeTelemetryCode(
           input.failureReason,
@@ -2773,9 +2886,17 @@ export class PostgresCallRepository implements CallRepository {
     return callId ? this.#recordingMutation(callId) : null;
   }
 
-  async claimFinalTranscript(recordingId: string, model: string, force = false) {
+  async claimFinalTranscript(
+    recordingId: string,
+    model: string,
+    force = false,
+    lease?: DurableJobLease
+  ) {
     const now = new Date();
     const callId = await this.#sql.begin(async (transaction) => {
+      if (lease) {
+        await requirePostgresDurableJobLease(transaction, lease);
+      }
       const [recording] = await transaction<
         {
           callId: string;
@@ -2807,7 +2928,7 @@ export class PostgresCallRepository implements CallRepository {
       `;
       if (
         recording.recordingStatus !== "available" ||
-        transcript?.transcriptStatus === "processing" ||
+        (transcript?.transcriptStatus === "processing" && !lease) ||
         (transcript?.transcriptStatus === "completed" && !force)
       ) {
         return null;
@@ -2870,12 +2991,16 @@ export class PostgresCallRepository implements CallRepository {
   async completeFinalTranscript(
     recordingId: string,
     text: string,
-    segments: FinalTranscriptSegment[]
+    segments: FinalTranscriptSegment[],
+    lease?: DurableJobLease
   ) {
     const now = new Date();
     const ciphertext = encryptJson(text, this.#encryptionKey);
     const segmentsCiphertext = encryptJson(segments, this.#encryptionKey);
     const callId = await this.#sql.begin(async (transaction) => {
+      if (lease) {
+        await requirePostgresDurableJobLease(transaction, lease);
+      }
       const [row] = await transaction<
         {
           callId: string;
@@ -2920,6 +3045,24 @@ export class PostgresCallRepository implements CallRepository {
           updated_at = ${now}
         WHERE id = ${recordingId}
       `;
+      await transaction`
+        INSERT INTO durable_jobs (
+          id,
+          job_type,
+          recording_id,
+          status,
+          max_attempts,
+          run_after
+        ) VALUES (
+          ${randomUUID()},
+          'recording_retention',
+          ${recordingId},
+          'queued',
+          ${durableJobMaxAttempts.recording_retention},
+          ${new Date(now.getTime() + row.retentionDays * 86_400_000)}
+        )
+        ON CONFLICT (job_type, recording_id) DO NOTHING
+      `;
       await this.#audit(transaction, row.callId, "final_transcript.completed", {
         recordingId
       });
@@ -2940,9 +3083,16 @@ export class PostgresCallRepository implements CallRepository {
     return this.#finalTranscriptMutation(callId);
   }
 
-  async failFinalTranscript(recordingId: string, failureReason: string) {
+  async failFinalTranscript(
+    recordingId: string,
+    failureReason: string,
+    lease?: DurableJobLease
+  ) {
     const now = new Date();
     const row = await this.#sql.begin(async (transaction) => {
+      if (lease) {
+        await requirePostgresDurableJobLease(transaction, lease);
+      }
       const [transcript] = await transaction<
         {
           callId: string;
@@ -3000,37 +3150,12 @@ export class PostgresCallRepository implements CallRepository {
     return this.#finalTranscriptMutation(row.callId);
   }
 
-  async listTranscriptionCandidates() {
-    const rows = await this.#sql<{ recordingId: string }[]>`
-      SELECT call_recordings.id AS "recordingId"
-      FROM call_recordings
-      LEFT JOIN final_transcripts
-        ON final_transcripts.call_recording_id = call_recordings.id
-      WHERE call_recordings.status = 'available'
-        AND (
-          final_transcripts.id IS NULL
-          OR final_transcripts.status = 'failed'
-        )
-      ORDER BY call_recordings.completed_at ASC
-    `;
-    return rows.map((row) => row.recordingId);
-  }
-
-  async listExpiredRecordingCallIds(now: string) {
-    const rows = await this.#sql<{ callId: string }[]>`
-      SELECT call_brief_id AS "callId"
-      FROM call_recordings
-      WHERE status = 'available'
-        AND delete_after IS NOT NULL
-        AND delete_after <= ${new Date(now)}
-      ORDER BY delete_after ASC
-    `;
-    return rows.map((row) => row.callId);
-  }
-
-  async markRecordingDeleted(id: string) {
+  async markRecordingDeleted(id: string, lease?: DurableJobLease) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
+      if (lease) {
+        await requirePostgresDurableJobLease(transaction, lease);
+      }
       const updated = await transaction`
         UPDATE call_recordings
         SET status = 'deleted', deleted_at = ${now}, updated_at = ${now}
@@ -3049,6 +3174,459 @@ export class PostgresCallRepository implements CallRepository {
       await this.#audit(transaction, id, "recording.deleted", {});
     });
     return this.#recordingMutation(id);
+  }
+
+  async enqueueDurableJob(input: EnqueueDurableJobInput) {
+    const now = new Date();
+    const jobId = await this.#sql.begin(async (transaction) => {
+      const [recording] = await transaction<{ callId: string }[]>`
+        SELECT call_brief_id AS "callId"
+        FROM call_recordings
+        WHERE id = ${input.recordingId}
+        FOR UPDATE
+      `;
+      if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const [existing] = await transaction<{
+        id: string;
+        status: DurableJob["status"];
+      }[]>`
+        SELECT id, status
+        FROM durable_jobs
+        WHERE job_type = ${input.type}
+          AND recording_id = ${input.recordingId}
+        FOR UPDATE
+      `;
+      if (!existing) {
+        const id = randomUUID();
+        await transaction`
+          INSERT INTO durable_jobs (
+            id,
+            job_type,
+            recording_id,
+            status,
+            max_attempts,
+            run_after,
+            force_requested,
+            created_at,
+            updated_at
+          ) VALUES (
+            ${id},
+            ${input.type},
+            ${input.recordingId},
+            'queued',
+            ${input.maxAttempts},
+            ${input.runAfter}::timestamptz,
+            ${input.force ?? false},
+            ${now},
+            ${now}
+          )
+        `;
+        return id;
+      }
+      if (
+        input.restartTerminal &&
+        ["succeeded", "dead_letter"].includes(existing.status)
+      ) {
+        await transaction`
+          UPDATE durable_jobs
+          SET
+            status = 'queued',
+            generation = generation + 1,
+            attempt_count = 0,
+            max_attempts = ${input.maxAttempts},
+            run_after = ${input.runAfter}::timestamptz,
+            force_requested = ${input.force ?? false},
+            lease_owner = NULL,
+            leased_at = NULL,
+            lease_expires_at = NULL,
+            last_error_code = NULL,
+            updated_at = ${now},
+            completed_at = NULL
+          WHERE id = ${existing.id}
+        `;
+      } else if (existing.status === "queued") {
+        await transaction`
+          UPDATE durable_jobs
+          SET
+            run_after = LEAST(run_after, ${input.runAfter}::timestamptz),
+            force_requested = force_requested OR ${input.force ?? false},
+            updated_at = ${now}
+          WHERE id = ${existing.id}
+        `;
+      }
+      return existing.id;
+    });
+    return this.#getDurableJob(jobId);
+  }
+
+  async seedDurableJobs(now: string) {
+    const [transcriptions, retention] = await this.#sql.begin(
+      async (transaction) => {
+        const transcriptionRows = await transaction`
+          INSERT INTO durable_jobs (
+            id,
+            job_type,
+            recording_id,
+            status,
+            max_attempts,
+            run_after
+          )
+          SELECT
+            gen_random_uuid(),
+            'final_transcription',
+            call_recordings.id,
+            'queued',
+            ${durableJobMaxAttempts.final_transcription},
+            ${now}::timestamptz
+          FROM call_recordings
+          LEFT JOIN final_transcripts
+            ON final_transcripts.call_recording_id = call_recordings.id
+          WHERE call_recordings.status = 'available'
+            AND (
+              final_transcripts.id IS NULL
+              OR final_transcripts.status IN ('processing', 'failed')
+            )
+          ON CONFLICT (job_type, recording_id) DO NOTHING
+          RETURNING id
+        `;
+        const retentionRows = await transaction`
+          INSERT INTO durable_jobs (
+            id,
+            job_type,
+            recording_id,
+            status,
+            max_attempts,
+            run_after
+          )
+          SELECT
+            gen_random_uuid(),
+            'recording_retention',
+            call_recordings.id,
+            'queued',
+            ${durableJobMaxAttempts.recording_retention},
+            call_recordings.delete_after
+          FROM call_recordings
+          INNER JOIN final_transcripts
+            ON final_transcripts.call_recording_id = call_recordings.id
+            AND final_transcripts.status = 'completed'
+          WHERE call_recordings.status = 'available'
+            AND call_recordings.delete_after IS NOT NULL
+          ON CONFLICT (job_type, recording_id) DO NOTHING
+          RETURNING id
+        `;
+        return [transcriptionRows, retentionRows] as const;
+      }
+    );
+    return transcriptions.count + retention.count;
+  }
+
+  async claimDueDurableJob(input: ClaimDurableJobInput) {
+    const claimed = await this.#sql.begin(async (transaction) => {
+      const expired = await transaction<{
+        id: string;
+        generation: number;
+        attemptCount: number;
+        maxAttempts: number;
+        leaseOwner: string;
+        leasedAt: DatabaseDate;
+      }[]>`
+        SELECT
+          id,
+          generation,
+          attempt_count AS "attemptCount",
+          max_attempts AS "maxAttempts",
+          lease_owner AS "leaseOwner",
+          leased_at AS "leasedAt"
+        FROM durable_jobs
+        WHERE status = 'running'
+          AND lease_expires_at <= ${input.now}::timestamptz
+          AND job_type = ANY(${input.types}::text[])
+        FOR UPDATE SKIP LOCKED
+      `;
+      for (const job of expired) {
+        const deadLetter = job.attemptCount >= job.maxAttempts;
+        await transaction`
+          INSERT INTO durable_job_attempts (
+            id,
+            job_id,
+            generation,
+            attempt_number,
+            worker_id,
+            started_at,
+            completed_at,
+            outcome,
+            error_code
+          ) VALUES (
+            ${randomUUID()},
+            ${job.id},
+            ${job.generation},
+            ${job.attemptCount},
+            ${job.leaseOwner},
+            ${job.leasedAt},
+            ${input.now}::timestamptz,
+            ${deadLetter ? "dead_letter" : "lease_expired"},
+            'worker_lease_expired'
+          )
+          ON CONFLICT (job_id, generation, attempt_number) DO NOTHING
+        `;
+        await transaction`
+          UPDATE durable_jobs
+          SET
+            status = ${deadLetter ? "dead_letter" : "queued"},
+            run_after = ${input.now}::timestamptz,
+            lease_owner = NULL,
+            leased_at = NULL,
+            lease_expires_at = NULL,
+            last_error_code = 'worker_lease_expired',
+            updated_at = ${input.now}::timestamptz,
+            completed_at = ${deadLetter ? input.now : null}::timestamptz
+          WHERE id = ${job.id}
+        `;
+      }
+
+      const [candidate] = await transaction<{
+        id: string;
+        forceRequested: boolean;
+      }[]>`
+        SELECT id, force_requested AS "forceRequested"
+        FROM durable_jobs
+        WHERE status = 'queued'
+          AND run_after <= ${input.now}::timestamptz
+          AND job_type = ANY(${input.types}::text[])
+        ORDER BY run_after ASC, created_at ASC, id ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      `;
+      if (!candidate) return null;
+      await transaction`
+        UPDATE durable_jobs
+        SET
+          status = 'running',
+          attempt_count = attempt_count + 1,
+          force_requested = false,
+          lease_owner = ${input.workerId},
+          leased_at = ${input.now}::timestamptz,
+          lease_expires_at = ${input.leaseExpiresAt}::timestamptz,
+          updated_at = ${input.now}::timestamptz
+        WHERE id = ${candidate.id}
+      `;
+      return candidate;
+    });
+    if (!claimed) return null;
+    const job = await this.#getDurableJob(claimed.id);
+    return { ...job, forceRequested: claimed.forceRequested };
+  }
+
+  async renewDurableJobLease(
+    jobId: string,
+    workerId: string,
+    now: string,
+    leaseExpiresAt: string
+  ) {
+    const rows = await this.#sql`
+      UPDATE durable_jobs
+      SET
+        lease_expires_at = ${leaseExpiresAt}::timestamptz,
+        updated_at = ${now}::timestamptz
+      WHERE id = ${jobId}
+        AND status = 'running'
+        AND lease_owner = ${workerId}
+        AND lease_expires_at > ${now}::timestamptz
+      RETURNING id
+    `;
+    return rows.count === 1;
+  }
+
+  async completeDurableJob(jobId: string, workerId: string, now: string) {
+    return this.#sql.begin(async (transaction) => {
+      const [job] = await transaction<{
+        generation: number;
+        attemptCount: number;
+        leasedAt: DatabaseDate;
+      }[]>`
+        SELECT
+          generation,
+          attempt_count AS "attemptCount",
+          leased_at AS "leasedAt"
+        FROM durable_jobs
+        WHERE id = ${jobId}
+          AND status = 'running'
+          AND lease_owner = ${workerId}
+          AND lease_expires_at > ${now}::timestamptz
+        FOR UPDATE
+      `;
+      if (!job) return false;
+      await transaction`
+        INSERT INTO durable_job_attempts (
+          id, job_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        ) VALUES (
+          ${randomUUID()}, ${jobId}, ${job.generation}, ${job.attemptCount},
+          ${workerId}, ${job.leasedAt}, ${now}::timestamptz,
+          'succeeded', NULL
+        )
+      `;
+      await transaction`
+        UPDATE durable_jobs
+        SET
+          status = 'succeeded',
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = NULL,
+          updated_at = ${now}::timestamptz,
+          completed_at = ${now}::timestamptz
+        WHERE id = ${jobId}
+      `;
+      return true;
+    });
+  }
+
+  async failDurableJob(
+    jobId: string,
+    workerId: string,
+    errorCode: string,
+    now: string,
+    retryAt: string
+  ) {
+    const found = await this.#sql.begin(async (transaction) => {
+      const [job] = await transaction<{
+        generation: number;
+        attemptCount: number;
+        maxAttempts: number;
+        leasedAt: DatabaseDate;
+      }[]>`
+        SELECT
+          generation,
+          attempt_count AS "attemptCount",
+          max_attempts AS "maxAttempts",
+          leased_at AS "leasedAt"
+        FROM durable_jobs
+        WHERE id = ${jobId}
+          AND status = 'running'
+          AND lease_owner = ${workerId}
+          AND lease_expires_at > ${now}::timestamptz
+        FOR UPDATE
+      `;
+      if (!job) return false;
+      const deadLetter = job.attemptCount >= job.maxAttempts;
+      await transaction`
+        INSERT INTO durable_job_attempts (
+          id, job_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        ) VALUES (
+          ${randomUUID()}, ${jobId}, ${job.generation}, ${job.attemptCount},
+          ${workerId}, ${job.leasedAt}, ${now}::timestamptz,
+          ${deadLetter ? "dead_letter" : "retry_scheduled"}, ${errorCode}
+        )
+      `;
+      await transaction`
+        UPDATE durable_jobs
+        SET
+          status = ${deadLetter ? "dead_letter" : "queued"},
+          run_after = ${deadLetter ? now : retryAt}::timestamptz,
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = ${errorCode},
+          updated_at = ${now}::timestamptz,
+          completed_at = ${deadLetter ? now : null}::timestamptz
+        WHERE id = ${jobId}
+      `;
+      return true;
+    });
+    return found ? this.#getDurableJob(jobId) : null;
+  }
+
+  async listDurableJobs() {
+    const rows = await this.#sql<DurableJobRow[]>`
+      ${this.#durableJobSelect()}
+      ORDER BY durable_jobs.created_at ASC, durable_jobs.id ASC
+    `;
+    return rows.map(mapDurableJobRow);
+  }
+
+  async listDurableJobAttempts(jobId: string) {
+    const rows = await this.#sql<DurableJobAttemptRow[]>`
+      SELECT
+        id,
+        job_id AS "jobId",
+        generation,
+        attempt_number AS "attemptNumber",
+        worker_id AS "workerId",
+        started_at AS "startedAt",
+        completed_at AS "completedAt",
+        outcome,
+        error_code AS "errorCode"
+      FROM durable_job_attempts
+      WHERE job_id = ${jobId}
+      ORDER BY generation ASC, attempt_number ASC
+    `;
+    return rows.map((row) => ({
+      ...row,
+      startedAt: toIso(row.startedAt),
+      completedAt: toIso(row.completedAt)
+    }));
+  }
+
+  async retryDurableJob(
+    jobId: string,
+    actorUserId: string,
+    reason: string,
+    now: string
+  ) {
+    const boundedReason = requireAdminJobReason(reason);
+    const found = await this.#sql.begin(async (transaction) => {
+      const [job] = await transaction<{
+        type: DurableJob["type"];
+        status: DurableJob["status"];
+      }[]>`
+        SELECT job_type AS "type", status
+        FROM durable_jobs
+        WHERE id = ${jobId}
+        FOR UPDATE
+      `;
+      if (!job) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
+      if (job.status !== "dead_letter") {
+        throw new CallRepositoryError("DURABLE_JOB_NOT_RETRYABLE");
+      }
+      await transaction`
+        UPDATE durable_jobs
+        SET
+          status = 'queued',
+          generation = generation + 1,
+          attempt_count = 0,
+          run_after = ${now}::timestamptz,
+          force_requested = ${job.type === "final_transcription"},
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = NULL,
+          updated_at = ${now}::timestamptz,
+          completed_at = NULL
+        WHERE id = ${jobId}
+      `;
+      await transaction`
+        INSERT INTO durable_job_admin_events (
+          id,
+          job_id,
+          actor_user_id,
+          action,
+          reason,
+          created_at
+        ) VALUES (
+          ${randomUUID()},
+          ${jobId},
+          ${actorUserId},
+          'retry',
+          ${boundedReason},
+          ${now}::timestamptz
+        )
+      `;
+      return true;
+    });
+    if (!found) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
+    return this.#getDurableJob(jobId);
   }
 
   async recoverInterruptedCalls() {
@@ -3111,64 +3689,6 @@ export class PostgresCallRepository implements CallRepository {
         }
       }
 
-      return rows.length;
-    });
-  }
-
-  async recoverInterruptedTranscriptions() {
-    const now = new Date();
-    return this.#sql.begin(async (transaction) => {
-      const rows = await transaction<
-        {
-          callId: string;
-          callAttemptId: string;
-          recordingId: string;
-          transcriptId: string;
-          model: string;
-        }[]
-      >`
-        UPDATE final_transcripts
-        SET
-          status = 'failed',
-          failure_reason = 'server_restarted',
-          updated_at = ${now},
-          completed_at = NULL
-        WHERE status = 'processing'
-        RETURNING
-          (
-            SELECT call_brief_id
-            FROM call_recordings
-            WHERE call_recordings.id = final_transcripts.call_recording_id
-          ) AS "callId",
-          (
-            SELECT call_attempt_id
-            FROM call_recordings
-            WHERE call_recordings.id = final_transcripts.call_recording_id
-          ) AS "callAttemptId",
-          call_recording_id AS "recordingId",
-          id AS "transcriptId",
-          model
-      `;
-      for (const row of rows) {
-        await this.#audit(
-          transaction,
-          row.callId,
-          "final_transcript.recovered_after_restart",
-          { recordingId: row.recordingId }
-        );
-        await this.#appendTelemetry(transaction, row.callId, {
-          callAttemptId: row.callAttemptId,
-          idempotencyKey: `transcription:${row.transcriptId}:recovered`,
-          occurredAt: now.toISOString(),
-          payload: {
-            name: "transcription.failed",
-            metadata: {
-              model: safeTelemetryCode(row.model, "unknown_model"),
-              failureCode: "server_restarted"
-            }
-          }
-        });
-      }
       return rows.length;
     });
   }
@@ -3333,6 +3853,32 @@ export class PostgresCallRepository implements CallRepository {
     const snapshot = await this.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     return snapshot;
+  }
+
+  #durableJobSelect() {
+    return this.#sql`
+      SELECT
+        durable_jobs.id,
+        durable_jobs.job_type AS "type",
+        durable_jobs.recording_id AS "recordingId",
+        call_recordings.call_brief_id AS "callId",
+        durable_jobs.status,
+        durable_jobs.generation,
+        durable_jobs.attempt_count AS "attemptCount",
+        durable_jobs.max_attempts AS "maxAttempts",
+        durable_jobs.run_after AS "runAfter",
+        durable_jobs.force_requested AS "forceRequested",
+        durable_jobs.lease_owner AS "leaseOwner",
+        durable_jobs.leased_at AS "leasedAt",
+        durable_jobs.lease_expires_at AS "leaseExpiresAt",
+        durable_jobs.last_error_code AS "lastErrorCode",
+        durable_jobs.created_at AS "createdAt",
+        durable_jobs.updated_at AS "updatedAt",
+        durable_jobs.completed_at AS "completedAt"
+      FROM durable_jobs
+      JOIN call_recordings
+        ON call_recordings.id = durable_jobs.recording_id
+    `;
   }
 
   async #selectAdminCallRows(
@@ -3613,6 +4159,15 @@ export class PostgresCallRepository implements CallRepository {
         LIMIT 1
       )
     `;
+  }
+
+  async #getDurableJob(jobId: string) {
+    const rows = await this.#sql<DurableJobRow[]>`
+      ${this.#durableJobSelect()}
+      WHERE durable_jobs.id = ${jobId}
+    `;
+    if (!rows[0]) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
+    return mapDurableJobRow(rows[0]);
   }
 
   async #settleLatestAttempt(
@@ -3970,6 +4525,36 @@ export class PostgresCallRepository implements CallRepository {
   }
 }
 
+async function requirePostgresDurableJobLease(
+  transaction: postgres.TransactionSql,
+  lease: DurableJobLease
+) {
+  const rows = await transaction`
+    SELECT id
+    FROM durable_jobs
+    WHERE id = ${lease.jobId}
+      AND status = 'running'
+      AND lease_owner = ${lease.workerId}
+      AND lease_expires_at > ${lease.checkedAt}::timestamptz
+    FOR UPDATE
+  `;
+  if (rows.count !== 1) {
+    throw new CallRepositoryError("DURABLE_JOB_LEASE_LOST");
+  }
+}
+
+function mapDurableJobRow(row: DurableJobRow): DurableJob {
+  return {
+    ...row,
+    runAfter: toIso(row.runAfter),
+    leasedAt: row.leasedAt ? toIso(row.leasedAt) : null,
+    leaseExpiresAt: row.leaseExpiresAt ? toIso(row.leaseExpiresAt) : null,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    completedAt: row.completedAt ? toIso(row.completedAt) : null
+  };
+}
+
 function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {
   return durableCallEventSchema.parse({
     id: row.id,
@@ -4200,6 +4785,14 @@ function requireSystemControlReason(value: string) {
   const reason = requireReason(value);
   if (reason.length > 500) {
     throw new Error("A safety-control reason must not exceed 500 characters");
+  }
+  return reason;
+}
+
+function requireAdminJobReason(value: string) {
+  const reason = requireSystemControlReason(value);
+  if (reason.length < 3) {
+    throw new Error("A durable-job retry reason must have at least 3 characters");
   }
   return reason;
 }
