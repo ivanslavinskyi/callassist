@@ -24,6 +24,11 @@ export type CreateAuthUserInput = Omit<RegistrationInput, "password"> & {
   passwordHash: string;
 };
 
+export type ListActiveSessionsResult = {
+  sessions: AuthSessionRecord[];
+  totalActive: number;
+};
+
 export type AccountAdminInput = {
   actorUserId: string;
   targetUserId: string;
@@ -68,7 +73,18 @@ export interface AuthRepository {
     tokenHash: string,
     now: string
   ): Promise<{ user: AuthUserRecord; session: AuthSessionRecord } | null>;
+  listActiveSessions(
+    userId: string,
+    now: string,
+    limit: number,
+    currentSessionId: string
+  ): Promise<ListActiveSessionsResult>;
   revokeSession(tokenHash: string, revokedAt: string): Promise<void>;
+  revokeSessionById(
+    userId: string,
+    sessionId: string,
+    revokedAt: string
+  ): Promise<boolean>;
   revokeUserSessions(userId: string, revokedAt: string): Promise<void>;
   changeAccountStatus(input: ChangeAccountStatusInput): Promise<AuthUserRecord>;
   revokeUserSessionsByAdmin(input: AccountAdminInput): Promise<void>;

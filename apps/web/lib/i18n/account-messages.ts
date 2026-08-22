@@ -1,4 +1,8 @@
-import type { CreditTransactionType } from "@callassist/contracts";
+import type {
+  AccountSessionBrowser,
+  AccountSessionPlatform,
+  CreditTransactionType
+} from "@callassist/contracts";
 import type { UiLocale } from "./messages";
 
 const en = {
@@ -26,6 +30,35 @@ const en = {
   credits: (count: number) => `${count} ${count === 1 ? "credit" : "credits"}`,
   sessionsTitle: "Session security",
   sessionsText: "Sign out this browser, or revoke every CallAssist session if a device is lost or your account may be exposed.",
+  activeSessions: "Active sessions",
+  sessionCount: (count: number) => `${count} active ${count === 1 ? "session" : "sessions"}`,
+  currentSession: "This session",
+  created: "Signed in",
+  lastSeen: "Last active",
+  expires: "Expires",
+  revokeSession: "Revoke session",
+  revokeSessionBusy: "Revoking session…",
+  revokeSessionTitle: "Revoke this session?",
+  revokeSessionDescription: (current: boolean) => current
+    ? "This browser will be signed out immediately. You will need to sign in again."
+    : "That browser will lose access immediately. Other sessions remain active.",
+  noSessions: "No active sessions were found.",
+  sessionsTruncated: "Only the 50 most recently active sessions are shown. Use sign out everywhere to revoke any older sessions too.",
+  browser: {
+    edge: "Microsoft Edge",
+    chrome: "Chrome",
+    firefox: "Firefox",
+    safari: "Safari",
+    other: "Other browser"
+  } satisfies Record<AccountSessionBrowser, string>,
+  platform: {
+    windows: "Windows",
+    macos: "macOS",
+    ios: "iOS",
+    android: "Android",
+    linux: "Linux",
+    other: "Unknown platform"
+  } satisfies Record<AccountSessionPlatform, string>,
   logout: "Sign out this browser",
   logoutBusy: "Signing out…",
   revokeAll: "Sign out everywhere",
@@ -45,10 +78,16 @@ const en = {
 } as const;
 
 type AccountMessages = {
-  [Key in keyof typeof en]: Key extends "credits"
+  [Key in keyof typeof en]: Key extends "credits" | "sessionCount"
     ? (count: number) => string
+    : Key extends "revokeSessionDescription"
+      ? (current: boolean) => string
     : Key extends "transaction"
       ? Record<CreditTransactionType, string>
+      : Key extends "browser"
+        ? Record<AccountSessionBrowser, string>
+        : Key extends "platform"
+          ? Record<AccountSessionPlatform, string>
       : string;
 };
 
@@ -77,6 +116,35 @@ const de: AccountMessages = {
   credits: (count: number) => `${count} Anrufguthaben`,
   sessionsTitle: "Sitzungssicherheit",
   sessionsText: "Melden Sie diesen Browser ab oder widerrufen Sie alle CallAssist-Sitzungen, wenn ein Gerät verloren ging oder das Konto gefährdet sein könnte.",
+  activeSessions: "Aktive Sitzungen",
+  sessionCount: (count: number) => `${count} aktive ${count === 1 ? "Sitzung" : "Sitzungen"}`,
+  currentSession: "Diese Sitzung",
+  created: "Angemeldet",
+  lastSeen: "Zuletzt aktiv",
+  expires: "Läuft ab",
+  revokeSession: "Sitzung widerrufen",
+  revokeSessionBusy: "Sitzung wird widerrufen…",
+  revokeSessionTitle: "Diese Sitzung widerrufen?",
+  revokeSessionDescription: (current: boolean) => current
+    ? "Dieser Browser wird sofort abgemeldet. Danach ist eine neue Anmeldung erforderlich."
+    : "Dieser Browser verliert sofort den Zugriff. Andere Sitzungen bleiben aktiv.",
+  noSessions: "Keine aktiven Sitzungen gefunden.",
+  sessionsTruncated: "Es werden nur die 50 zuletzt aktiven Sitzungen angezeigt. Mit „Überall abmelden“ werden auch ältere Sitzungen widerrufen.",
+  browser: {
+    edge: "Microsoft Edge",
+    chrome: "Chrome",
+    firefox: "Firefox",
+    safari: "Safari",
+    other: "Anderer Browser"
+  },
+  platform: {
+    windows: "Windows",
+    macos: "macOS",
+    ios: "iOS",
+    android: "Android",
+    linux: "Linux",
+    other: "Unbekannte Plattform"
+  },
   logout: "Diesen Browser abmelden",
   logoutBusy: "Abmeldung läuft…",
   revokeAll: "Überall abmelden",

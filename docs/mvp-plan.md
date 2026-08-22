@@ -52,8 +52,8 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - **PARTIAL — observability:** audit/provider/SSE data, separate liveness/readiness, PII-safe runtime logging boundaries, a privacy-safe durable technical event stream, versioned outcomes, owner feedback, Admin Calls/Inspector, operational cohorts/cost estimates, local system controls, bounded webhook-delivery evidence, truthful external-worker heartbeat state, and versioned snapshot alert rules/runbooks exist; upstream probes, external monitor/pager routing, named ownership, protected log storage, and invoice reconciliation remain.
 - **PARTIAL — production security:** bounded HTTP requests, API/web security headers, global unsafe-origin rejection, hardened production cookies, fail-closed API/worker configuration, migration drift detection, a high-severity dependency audit gate, Dependabot configuration, repository CI, versioned dual-read/new-write data encryption, resumable verified re-encryption, and a disposable local database recovery drill are implemented; external CI execution/branch protection, managed secrets/backups, infrastructure controls, an isolated production restore, focused security/privacy review, and deployment evidence remain.
 - **PARTIAL — async work:** final transcription, recording retention, and Twilio call/recording status reconciliation run through PostgreSQL-backed durable jobs with leases, fencing, bounded retries, attempt history, dead-letter state, restart seeding, and an independently runnable worker. Real-provider crash drills, cross-process persisted-state invalidation, external-worker heartbeat visibility, and local queue/worker alert thresholds are complete; remaining generic cleanup jobs and deployment notification routing remain open.
-- **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
-- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
+- **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, bounded active-session inventory, owner-scoped selective revocation, and tested self-service all-session revocation exist; full-data export/deletion and account deletion do not.
+- **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/session-inventory/selective/all-session-revoke endpoints, immutable minimized session-action evidence, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
 - **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. The PostgreSQL ownership suite has been executed successfully. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen.
 - **PARTIAL — destination rollout:** shared `libphonenumber-js/max` metadata parses and canonicalizes Swiss national/international input; contracts, call-start policy, and the Twilio adapter reject invalid or non-CH destinations. Production Twilio Voice Geographic Permissions still need to be restricted and captured as deployment evidence.
 
@@ -202,7 +202,17 @@ Acceptance for 6D is met locally: real PostgreSQL 17 custom archives restored fr
 
 Acceptance for 6E is met locally: migrations 0035–0036 applied idempotently; 107 existing ciphertexts were re-encrypted and decrypted under `local-1` with zero non-active values; an immediate second run rewrote zero rows while re-verifying all 107. The CI-shaped populated-database run separately rotated and verified 7,569 ciphertexts plus 40 feedback fingerprints, rewrote zero on replay, then restored all eight encrypted families. The remaining launch gates are managed-secret provisioning, isolated production backup/restore evidence, named owners, and one exercised production rotation with retained evidence.
 
-The next repository checkpoint is **6F — account data lifecycle**: session inventory and selective revocation, server-generated full-data export, and an explicit account deletion/anonymization workflow with provider deletion, suppression survival, audit minimization, and backup-expiry/replay semantics.
+## Completed checkpoint — account session inventory and revocation (6F1)
+
+- [x] Add a bounded active-session contract with current-session identity, lifecycle timestamps, total/truncated semantics, and categorized browser/platform values; never expose token hashes, raw User-Agent or IP.
+- [x] Add owner-scoped `GET /api/auth/sessions` and selective `DELETE /api/auth/sessions/:sessionId`; a foreign or stale ID returns the same not-found response, while revoking the current session clears its cookie.
+- [x] Make selective and all-session self-service revocation atomic with immutable, minimized PostgreSQL evidence containing only actor, optional session UUID, count, action and time.
+- [x] Integrate the inventory and destructive confirmations into the localized EN/DE account console while retaining current logout and sign-out-everywhere recovery actions.
+- [x] Cover bounded contracts, memory/PostgreSQL parity, cross-user isolation, current/other-session behavior, immutable evidence, client requests and production rendering.
+
+Acceptance for 6F1 is met locally: migration 0037 applies idempotently; the current session is always included first in the bounded inventory without exposing credentials or raw client data; a user cannot infer or revoke another user's session; current, selective and all-session paths invalidate exactly the intended tokens; and security-action evidence rejects update/delete. The complete gate passes 369 tests, restores all 37 migrations and 36 public tables, and builds the production account route in both locales.
+
+The next repository checkpoint is **6F2 — user data export**: define a versioned server-generated export schema, gather every owner-visible account/call/consent/credit/content-acceptance record without provider credentials or internal security secrets, add rate-limited download and immutable request evidence, and test cross-user isolation plus encrypted-field handling.
 
 # Public Beta Foundation
 
@@ -240,7 +250,7 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 ### P1 — acceptance and lifecycle
 
 - [x] Record append-only accepted Terms/AUP revision IDs and timestamps; require re-acceptance when a newer material revision is published.
-- [ ] Provide session listing/revocation, user data export, transcript/data deletion, and account deletion/anonymization with documented audit, suppression, backup, provider, and retention behavior. **Partial:** `/app/account` supports current logout and tested all-session revocation; session inventory/audit and the remaining data lifecycle are open.
+- [ ] Provide session listing/revocation, user data export, transcript/data deletion, and account deletion/anonymization with documented audit, suppression, backup, provider, and retention behavior. **Partial:** `/app/account` supports bounded session inventory, current/selective/all-session revocation, owner isolation and immutable minimized action evidence; export, data deletion and account deletion remain open.
 
 ## 2. Usage & Abuse Prevention
 
@@ -336,7 +346,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 ### P0 — minimum safe operations
 
 - [ ] Protect `/admin` with server-side RBAC. `content_editor`: CMS/SEO, no calls/recordings. `support`: appropriate support/call metadata, no CMS or recordings by default. Admin/superadmin permissions remain explicit. **Partial:** content editors now have dedicated server- and API-guarded CMS/SEO boundaries with no app/call/recording or operational-admin access; admin/superadmin permissions remain explicit, while the role-specific support area remains.
-- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** suspend/unsuspend/force-logout, suppression/lift, and sensitive call-content reads are immutable and include the applicable actor, target/source, reason, and time.
+- [ ] Audit staff login; user/session/status, credit, suppression, content/legal, kill-switch, export/deletion actions; and every sensitive call-content access. **Partial:** self-service selective/all-session revocation, suspend/unsuspend/force-logout, suppression/lift, and sensitive call-content reads are immutable and include the bounded applicable actor, target/source, reason/count, and time.
 - [ ] Provide user lookup, suspend/unsuspend, revoke sessions, ledger credit grant, suppression, and kill-switch controls before beta. **Partial:** the localized user console now consolidates paginated role-scoped lookup, ledger inspection, confirmed suspend/unsuspend, force logout, and idempotent manual credit grants; localized suppression controls and the kill-switch operator command also exist, but suppression lookup and in-app kill-switch control remain.
 
 ### P1 — admin areas
@@ -449,7 +459,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Privacy-safe operational cohorts, first-audio/reliability signals, bounded cost estimates, and local system controls.
 - [ ] Admin Users workflows. **Partial:** safe search, credit-ledger inspection, and consolidated status/session/grant actions exist; account deletion and related support context remain.
 - [x] Transactional promo codes and ledger grants.
-- [ ] Account/data export/delete and session revocation tested. **Partial:** current logout and all-session revocation are exposed in `/app/account` and tested; session listing, data export/delete, and account deletion remain.
+- [ ] Account/data export/delete and session revocation tested. **Partial:** bounded session inventory plus current/selective/all-session revocation are exposed in `/app/account`, owner-isolated, immutably evidenced and tested; data export/delete and account deletion remain.
 - [ ] Support/complaint/suppression workflow with owners and targets. **Partial:** staff/complaint suppression and lift actions are RBAC-protected and audited, but complaint intake, ownership, escalation, and response targets remain.
 - [ ] CI and `main` branch protection.
 - [x] SEO audit.

@@ -1,6 +1,11 @@
 "use client";
 
-import type { CreditUsage, User } from "@callassist/contracts";
+import type {
+  AccountSessionList,
+  AccountSessionSummary,
+  CreditUsage,
+  User
+} from "@callassist/contracts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -10,12 +15,18 @@ import { useUiLocale } from "./ui-locale-provider";
 import {
   getCreditUsage,
   getCurrentUser,
+  listOwnSessions,
   logout,
-  revokeAllOwnSessions
+  revokeAllOwnSessions,
+  revokeOwnSession
 } from "@/lib/api";
 import { accountMessages } from "@/lib/i18n/account-messages";
 
-type AccountData = { user: User; usage: CreditUsage };
+type AccountData = {
+  user: User;
+  usage: CreditUsage;
+  sessionInventory: AccountSessionList;
+};
 
 export function AccountConsole() {
   const router = useRouter();
@@ -24,19 +35,21 @@ export function AccountConsole() {
   const [data, setData] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [action, setAction] = useState<"logout" | "revoke" | null>(null);
+  const [action, setAction] = useState<"logout" | "revoke-all" | string | null>(null);
   const [actionError, setActionError] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<AccountSessionSummary | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
     try {
-      const [{ user }, usage] = await Promise.all([
+      const [{ user }, usage, sessionInventory] = await Promise.all([
         getCurrentUser(),
-        getCreditUsage()
+        getCreditUsage(),
+        listOwnSessions()
       ]);
-      setData({ user, usage });
+      setData({ user, usage, sessionInventory });
     } catch {
       setData(null);
       setLoadFailed(true);
@@ -47,11 +60,11 @@ export function AccountConsole() {
 
   useEffect(() => { void load(); }, [load]);
 
-  async function endSession(mode: "logout" | "revoke") {
+  async function endSession(mode: "logout" | "revoke-all") {
     setAction(mode);
     setActionError(false);
     try {
-      if (mode === "revoke") await revokeAllOwnSessions();
+      if (mode === "revoke-all") await revokeAllOwnSessions();
       else await logout();
       router.replace(localizeHref("/"));
       router.refresh();
@@ -59,6 +72,36 @@ export function AccountConsole() {
       setActionError(true);
       setAction(null);
       setConfirmRevoke(false);
+    }
+  }
+
+  async function revokeSelectedSession() {
+    if (!selectedSession) return;
+    setAction(selectedSession.id);
+    setActionError(false);
+    try {
+      await revokeOwnSession(selectedSession.id);
+      if (selectedSession.current) {
+        router.replace(localizeHref("/"));
+        router.refresh();
+        return;
+      }
+      setData((current) => current ? {
+        ...current,
+        sessionInventory: {
+          ...current.sessionInventory,
+          sessions: current.sessionInventory.sessions.filter(
+            ({ id }) => id !== selectedSession.id
+          ),
+          totalActive: Math.max(0, current.sessionInventory.totalActive - 1)
+        }
+      } : current);
+      setSelectedSession(null);
+      setAction(null);
+    } catch {
+      setActionError(true);
+      setSelectedSession(null);
+      setAction(null);
     }
   }
 
@@ -128,12 +171,44 @@ export function AccountConsole() {
             <section className="account-card account-sessions">
               <h2>{copy.sessionsTitle}</h2>
               <p>{copy.sessionsText}</p>
+              <div className="account-session-heading">
+                <h3>{copy.activeSessions}</h3>
+                <span>{copy.sessionCount(data.sessionInventory.totalActive)}</span>
+              </div>
+              {data.sessionInventory.sessions.length ? (
+                <ul className="account-session-list">
+                  {data.sessionInventory.sessions.map((session) => (
+                    <li key={session.id}>
+                      <div className="account-session-title">
+                        <strong>{copy.browser[session.browser]} · {copy.platform[session.platform]}</strong>
+                        {session.current ? <span>{copy.currentSession}</span> : null}
+                      </div>
+                      <dl>
+                        <div><dt>{copy.lastSeen}</dt><dd><time dateTime={session.lastSeenAt}>{dateFormatter.format(new Date(session.lastSeenAt))}</time></dd></div>
+                        <div><dt>{copy.created}</dt><dd><time dateTime={session.createdAt}>{dateFormatter.format(new Date(session.createdAt))}</time></dd></div>
+                        <div><dt>{copy.expires}</dt><dd><time dateTime={session.expiresAt}>{dateFormatter.format(new Date(session.expiresAt))}</time></dd></div>
+                      </dl>
+                      <button
+                        className="danger-button compact-button"
+                        disabled={action !== null}
+                        onClick={() => setSelectedSession(session)}
+                        type="button"
+                      >
+                        {action === session.id ? copy.revokeSessionBusy : copy.revokeSession}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="account-muted">{copy.noSessions}</p>}
+              {data.sessionInventory.truncated ? (
+                <p className="account-muted">{copy.sessionsTruncated}</p>
+              ) : null}
               <div className="account-actions">
                 <button className="secondary-button" disabled={action !== null} onClick={() => void endSession("logout")} type="button">
                   {action === "logout" ? copy.logoutBusy : copy.logout}
                 </button>
                 <button className="danger-button" disabled={action !== null} onClick={() => setConfirmRevoke(true)} type="button">
-                  {action === "revoke" ? copy.revokeBusy : copy.revokeAll}
+                  {action === "revoke-all" ? copy.revokeBusy : copy.revokeAll}
                 </button>
               </div>
               {actionError ? <p className="form-error" role="alert">{copy.actionError}</p> : null}
@@ -142,14 +217,26 @@ export function AccountConsole() {
         )}
       </main>
       <ConfirmDialog
-        busy={action === "revoke"}
-        confirmLabel={action === "revoke" ? copy.revokeBusy : copy.revokeAll}
+        busy={action === "revoke-all"}
+        confirmLabel={action === "revoke-all" ? copy.revokeBusy : copy.revokeAll}
         danger
         description={copy.revokeDescription}
         onCancel={() => setConfirmRevoke(false)}
-        onConfirm={() => void endSession("revoke")}
+        onConfirm={() => void endSession("revoke-all")}
         open={confirmRevoke}
         title={copy.revokeTitle}
+      />
+      <ConfirmDialog
+        busy={selectedSession ? action === selectedSession.id : false}
+        confirmLabel={selectedSession && action === selectedSession.id
+          ? copy.revokeSessionBusy
+          : copy.revokeSession}
+        danger
+        description={copy.revokeSessionDescription(selectedSession?.current ?? false)}
+        onCancel={() => setSelectedSession(null)}
+        onConfirm={() => void revokeSelectedSession()}
+        open={selectedSession !== null}
+        title={copy.revokeSessionTitle}
       />
     </AppShell>
   );

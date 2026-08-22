@@ -26,11 +26,20 @@ type AccountAdminEvent = {
   createdAt: string;
 };
 
+type AccountSessionEvent = {
+  eventType: "session.revoked" | "session.all_revoked";
+  actorUserId: string;
+  targetSessionId: string | null;
+  revokedSessionCount: number;
+  createdAt: string;
+};
+
 export class InMemoryAuthRepository implements AuthRepository {
   readonly mode = "memory" as const;
   readonly #users = new Map<string, AuthUserRecord>();
   readonly #sessions = new Map<string, AuthSessionRecord>();
   readonly #accountAdminEvents: AccountAdminEvent[] = [];
+  readonly #accountSessionEvents: AccountSessionEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -130,9 +139,33 @@ export class InMemoryAuthRepository implements AuthRepository {
     const session = this.#sessions.get(tokenHash);
     if (!session || session.revokedAt || session.expiresAt <= now) return null;
     const user = this.#users.get(session.userId);
-    return user?.status === "active" && user.phoneVerifiedAt
-      ? { user: structuredClone(user), session: structuredClone(session) }
-      : null;
+    if (user?.status !== "active" || !user.phoneVerifiedAt) return null;
+    session.lastSeenAt = now;
+    return { user: structuredClone(user), session: structuredClone(session) };
+  }
+
+  async listActiveSessions(
+    userId: string,
+    now: string,
+    limit: number,
+    currentSessionId: string
+  ) {
+    const active = [...this.#sessions.values()]
+      .filter((session) =>
+        session.userId === userId &&
+        !session.revokedAt &&
+        session.expiresAt > now
+      )
+      .sort((left, right) =>
+        Number(right.id === currentSessionId) - Number(left.id === currentSessionId) ||
+        right.lastSeenAt.localeCompare(left.lastSeenAt) ||
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.id.localeCompare(left.id)
+      );
+    return {
+      sessions: structuredClone(active.slice(0, limit)),
+      totalActive: active.length
+    };
   }
 
   async revokeSession(tokenHash: string, revokedAt: string) {
@@ -140,9 +173,49 @@ export class InMemoryAuthRepository implements AuthRepository {
     if (session) session.revokedAt ??= revokedAt;
   }
 
+  async revokeSessionById(
+    userId: string,
+    sessionId: string,
+    revokedAt: string
+  ) {
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === sessionId &&
+      candidate.userId === userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > revokedAt
+    );
+    if (!session) return false;
+    session.revokedAt = revokedAt;
+    this.#accountSessionEvents.push({
+      eventType: "session.revoked",
+      actorUserId: userId,
+      targetSessionId: sessionId,
+      revokedSessionCount: 1,
+      createdAt: revokedAt
+    });
+    return true;
+  }
+
   async revokeUserSessions(userId: string, revokedAt: string) {
+    let revokedSessionCount = 0;
     for (const session of this.#sessions.values()) {
-      if (session.userId === userId) session.revokedAt ??= revokedAt;
+      if (
+        session.userId === userId &&
+        !session.revokedAt &&
+        session.expiresAt > revokedAt
+      ) {
+        session.revokedAt = revokedAt;
+        revokedSessionCount += 1;
+      }
+    }
+    if (revokedSessionCount > 0) {
+      this.#accountSessionEvents.push({
+        eventType: "session.all_revoked",
+        actorUserId: userId,
+        targetSessionId: null,
+        revokedSessionCount,
+        createdAt: revokedAt
+      });
     }
   }
 
@@ -201,6 +274,10 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   accountAdminEventsForTest() {
     return structuredClone(this.#accountAdminEvents);
+  }
+
+  accountSessionEventsForTest() {
+    return structuredClone(this.#accountSessionEvents);
   }
 
   async close() {}

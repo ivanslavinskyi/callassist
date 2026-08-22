@@ -45,6 +45,18 @@ type SessionUserRow = UserRow & {
   sessionUserAgent: string | null;
 };
 
+type ActiveSessionRow = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: DatabaseDate;
+  revokedAt: DatabaseDate | null;
+  createdAt: DatabaseDate;
+  lastSeenAt: DatabaseDate;
+  userAgent: string | null;
+  totalActive: number;
+};
+
 type AdminUserRow = {
   id: string;
   role: UserRole;
@@ -253,6 +265,45 @@ export class PostgresAuthRepository implements AuthRepository {
     };
   }
 
+  async listActiveSessions(
+    userId: string,
+    now: string,
+    limit: number,
+    currentSessionId: string
+  ) {
+    const rows = await this.#sql<ActiveSessionRow[]>`
+      SELECT
+        id,
+        user_id AS "userId",
+        token_hash AS "tokenHash",
+        expires_at AS "expiresAt",
+        revoked_at AS "revokedAt",
+        created_at AS "createdAt",
+        last_seen_at AS "lastSeenAt",
+        user_agent AS "userAgent",
+        count(*) OVER()::integer AS "totalActive"
+      FROM sessions
+      WHERE user_id = ${userId}
+        AND revoked_at IS NULL
+        AND expires_at > ${new Date(now)}
+      ORDER BY (id = ${currentSessionId}) DESC, last_seen_at DESC, created_at DESC, id DESC
+      LIMIT ${limit}
+    `;
+    return {
+      sessions: rows.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        tokenHash: row.tokenHash,
+        expiresAt: toIso(row.expiresAt),
+        revokedAt: row.revokedAt ? toIso(row.revokedAt) : null,
+        createdAt: toIso(row.createdAt),
+        lastSeenAt: toIso(row.lastSeenAt),
+        userAgent: row.userAgent
+      })),
+      totalActive: rows[0]?.totalActive ?? 0
+    };
+  }
+
   async revokeSession(tokenHash: string, revokedAt: string) {
     await this.#sql`
       UPDATE sessions
@@ -261,12 +312,53 @@ export class PostgresAuthRepository implements AuthRepository {
     `;
   }
 
+  async revokeSessionById(
+    userId: string,
+    sessionId: string,
+    revokedAt: string
+  ) {
+    return this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ id: string }[]>`
+        UPDATE sessions
+        SET revoked_at = ${new Date(revokedAt)}
+        WHERE id = ${sessionId}
+          AND user_id = ${userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${new Date(revokedAt)}
+        RETURNING id
+      `;
+      if (rows.length === 0) return false;
+      await this.#accountSessionEvent(transaction, {
+        eventType: "session.revoked",
+        actorUserId: userId,
+        targetSessionId: sessionId,
+        revokedSessionCount: 1,
+        now: new Date(revokedAt)
+      });
+      return true;
+    });
+  }
+
   async revokeUserSessions(userId: string, revokedAt: string) {
-    await this.#sql`
-      UPDATE sessions
-      SET revoked_at = COALESCE(revoked_at, ${new Date(revokedAt)})
-      WHERE user_id = ${userId}
-    `;
+    await this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ id: string }[]>`
+        UPDATE sessions
+        SET revoked_at = ${new Date(revokedAt)}
+        WHERE user_id = ${userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${new Date(revokedAt)}
+        RETURNING id
+      `;
+      if (rows.length > 0) {
+        await this.#accountSessionEvent(transaction, {
+          eventType: "session.all_revoked",
+          actorUserId: userId,
+          targetSessionId: null,
+          revokedSessionCount: rows.length,
+          now: new Date(revokedAt)
+        });
+      }
+    });
   }
 
   async changeAccountStatus(input: ChangeAccountStatusInput) {
@@ -412,6 +504,27 @@ export class PostgresAuthRepository implements AuthRepository {
         ${randomUUID()}, ${input.eventType}, ${input.actorUserId},
         ${input.targetUserId}, ${input.previousStatus}, ${input.newStatus},
         ${input.reason}, ${transaction.json({})}, ${input.now}
+      )
+    `;
+  }
+
+  async #accountSessionEvent(
+    transaction: postgres.TransactionSql,
+    input: {
+      eventType: "session.revoked" | "session.all_revoked";
+      actorUserId: string;
+      targetSessionId: string | null;
+      revokedSessionCount: number;
+      now: Date;
+    }
+  ) {
+    await transaction`
+      INSERT INTO account_session_events (
+        id, event_type, actor_user_id, target_session_id,
+        revoked_session_count, created_at
+      ) VALUES (
+        ${randomUUID()}, ${input.eventType}, ${input.actorUserId},
+        ${input.targetSessionId}, ${input.revokedSessionCount}, ${input.now}
       )
     `;
   }

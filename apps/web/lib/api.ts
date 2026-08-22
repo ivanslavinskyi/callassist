@@ -1,4 +1,5 @@
 import type {
+  AccountSessionList,
   AccountStatusAction,
   ApprovalDecision,
   AdminCreditGrantInput,
@@ -419,6 +420,17 @@ export async function logout() {
 
 export async function revokeAllOwnSessions() {
   return apiRequest<void>("/api/auth/sessions/revoke", { method: "POST" });
+}
+
+export async function listOwnSessions() {
+  return apiRequest<AccountSessionList>("/api/auth/sessions");
+}
+
+export async function revokeOwnSession(sessionId: string) {
+  return apiRequest<void>(
+    `/api/auth/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" }
+  );
 }
 
 export async function requestRecipientOptOut(input: RecipientOptOutRequest) {

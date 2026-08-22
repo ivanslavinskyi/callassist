@@ -47,8 +47,9 @@ describeWithDatabase("PostgresAuthRepository", () => {
 
     const tokenHash = hashSessionToken(`test-${suffix}`);
     const now = new Date();
+    const sessionId = randomUUID();
     await repository.createSession({
-      id: randomUUID(),
+      id: sessionId,
       userId: user.id,
       tokenHash,
       expiresAt: new Date(now.getTime() + 60_000).toISOString(),
@@ -60,6 +61,71 @@ describeWithDatabase("PostgresAuthRepository", () => {
     expect(
       await repository.findUserBySessionTokenHash(tokenHash, now.toISOString())
     ).toMatchObject({ user: { id: user.id }, session: { userId: user.id } });
+
+    const secondSessionId = randomUUID();
+    await repository.createSession({
+      id: secondSessionId,
+      userId: user.id,
+      tokenHash: hashSessionToken(`second-${suffix}`),
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      revokedAt: null,
+      createdAt: now.toISOString(),
+      lastSeenAt: new Date(now.getTime() + 1).toISOString(),
+      userAgent: "Mozilla/5.0 Firefox/141.0"
+    });
+    await expect(repository.listActiveSessions(
+      user.id,
+      now.toISOString(),
+      50,
+      sessionId
+    )).resolves.toMatchObject({
+      totalActive: 2,
+      sessions: [
+        { id: sessionId },
+        { id: secondSessionId, userAgent: "Mozilla/5.0 Firefox/141.0" }
+      ]
+    });
+    await expect(repository.revokeSessionById(
+      user.id,
+      secondSessionId,
+      new Date().toISOString()
+    )).resolves.toBe(true);
+    await expect(repository.revokeSessionById(
+      user.id,
+      secondSessionId,
+      new Date().toISOString()
+    )).resolves.toBe(false);
+    const sessionEvents = await inspection<{
+      eventType: string;
+      targetSessionId: string | null;
+      revokedSessionCount: number;
+    }[]>`
+      SELECT
+        event_type AS "eventType",
+        target_session_id::text AS "targetSessionId",
+        revoked_session_count AS "revokedSessionCount"
+      FROM account_session_events
+      WHERE actor_user_id = ${user.id}
+    `;
+    expect(sessionEvents).toEqual([{
+      eventType: "session.revoked",
+      targetSessionId: secondSessionId,
+      revokedSessionCount: 1
+    }]);
+    await expect(inspection`
+      DELETE FROM account_session_events WHERE actor_user_id = ${user.id}
+    `).rejects.toThrow("immutable");
+
+    await repository.revokeUserSessions(user.id, new Date().toISOString());
+    const allRevokedEvents = await inspection<{
+      revokedSessionCount: number;
+    }[]>`
+      SELECT revoked_session_count AS "revokedSessionCount"
+      FROM account_session_events
+      WHERE actor_user_id = ${user.id}
+        AND event_type = 'session.all_revoked'
+    `;
+    expect(allRevokedEvents).toEqual([{ revokedSessionCount: 1 }]);
 
     await repository.revokeSession(tokenHash, new Date().toISOString());
     expect(

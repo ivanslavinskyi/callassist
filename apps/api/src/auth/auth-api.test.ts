@@ -188,7 +188,7 @@ describe("auth API", () => {
   });
 
   it("lets an authenticated user revoke every active session", async () => {
-    const { app } = createAuthApp();
+    const { app, repository } = createAuthApp();
     const firstCookie = await registerAndVerify(app, registration);
     const secondSession = await app.inject({
       method: "POST",
@@ -219,6 +219,111 @@ describe("auth API", () => {
       });
       expect(current.statusCode).toBe(401);
     }
+    expect(repository.accountSessionEventsForTest()).toMatchObject([{
+      eventType: "session.all_revoked",
+      revokedSessionCount: 2,
+      targetSessionId: null
+    }]);
+  });
+
+  it("lists bounded client categories and selectively revokes only owned sessions", async () => {
+    const { app, repository } = createAuthApp();
+    const firstCookie = await registerAndVerify(app, registration);
+    const secondSession = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/140.0 Safari/537.36"
+      },
+      payload: { email: registration.email, password: registration.password }
+    });
+    const secondCookie = String(secondSession.headers["set-cookie"]);
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/auth/sessions",
+      headers: { cookie: firstCookie }
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["cache-control"]).toBe("private, no-store");
+    const inventory = listed.json<{
+      sessions: Array<{
+        id: string;
+        browser: string;
+        platform: string;
+        current: boolean;
+      }>;
+      totalActive: number;
+      truncated: boolean;
+    }>();
+    expect(inventory).toMatchObject({ totalActive: 2, truncated: false });
+    expect(inventory.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ browser: "chrome", platform: "windows" }),
+      expect.objectContaining({ current: true })
+    ]));
+    expect(inventory.sessions[0]).not.toHaveProperty("tokenHash");
+    expect(inventory.sessions[0]).not.toHaveProperty("userAgent");
+
+    const foreignCookie = await registerAndVerify(app, {
+      ...registration,
+      email: "foreign-session@example.com",
+      phoneE164: "+41710000009"
+    });
+    const foreignInventory = (await app.inject({
+      method: "GET",
+      url: "/api/auth/sessions",
+      headers: { cookie: foreignCookie }
+    })).json<{ sessions: Array<{ id: string }> }>();
+    const foreignSessionId = foreignInventory.sessions[0]!.id;
+    const foreignRevoke = await app.inject({
+      method: "DELETE",
+      url: `/api/auth/sessions/${foreignSessionId}`,
+      headers: { cookie: firstCookie }
+    });
+    expect(foreignRevoke.statusCode).toBe(404);
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: foreignCookie }
+    })).statusCode).toBe(200);
+
+    const otherSession = inventory.sessions.find(({ current }) => !current)!;
+    const revoked = await app.inject({
+      method: "DELETE",
+      url: `/api/auth/sessions/${otherSession.id}`,
+      headers: { cookie: firstCookie }
+    });
+    expect(revoked.statusCode).toBe(204);
+    expect(revoked.headers["set-cookie"]).toBeUndefined();
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: secondCookie }
+    })).statusCode).toBe(401);
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: firstCookie }
+    })).statusCode).toBe(200);
+    expect(repository.accountSessionEventsForTest()).toMatchObject([{
+      eventType: "session.revoked",
+      targetSessionId: otherSession.id,
+      revokedSessionCount: 1
+    }]);
+
+    const currentSession = inventory.sessions.find(({ current }) => current)!;
+    const currentRevoked = await app.inject({
+      method: "DELETE",
+      url: `/api/auth/sessions/${currentSession.id}`,
+      headers: { cookie: firstCookie }
+    });
+    expect(currentRevoked.statusCode).toBe(204);
+    expect(currentRevoked.headers["set-cookie"]).toContain("Max-Age=0");
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: firstCookie }
+    })).statusCode).toBe(401);
   });
 
   it("uses a host-only high-priority secure cookie in production", async () => {

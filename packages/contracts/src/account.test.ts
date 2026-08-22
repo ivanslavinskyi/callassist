@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountSessionListSchema,
   accountStatusActionSchema,
   creditUsageSchema,
   loginInputSchema,
@@ -83,5 +84,28 @@ describe("registrationInputSchema", () => {
     }).success).toBe(false);
     expect(sessionRevocationActionSchema.safeParse({ reason: "  " }).success)
       .toBe(false);
+  });
+
+  it("keeps the account session inventory bounded and free of raw client data", () => {
+    const inventory = accountSessionListSchema.parse({
+      sessions: [{
+        id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+        browser: "firefox",
+        platform: "linux",
+        current: true,
+        expiresAt: "2026-09-19T10:00:00.000Z",
+        createdAt: "2026-08-19T10:00:00.000Z",
+        lastSeenAt: "2026-08-20T10:00:00.000Z"
+      }],
+      totalActive: 1,
+      truncated: false
+    });
+
+    expect(inventory.sessions[0]).not.toHaveProperty("tokenHash");
+    expect(inventory.sessions[0]).not.toHaveProperty("userAgent");
+    expect(accountSessionListSchema.safeParse({
+      ...inventory,
+      sessions: Array.from({ length: 51 }, () => inventory.sessions[0])
+    }).success).toBe(false);
   });
 });

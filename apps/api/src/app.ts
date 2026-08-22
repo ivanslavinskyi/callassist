@@ -554,6 +554,50 @@ export function buildApp({
       return reply.status(204).send();
     });
 
+    app.get("/api/auth/sessions", async (request, reply) => {
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(await authService.listSessions(
+          authenticated.user.id,
+          authenticated.sessionId
+        ));
+    });
+
+    app.delete<{
+      Params: { sessionId: string };
+    }>("/api/auth/sessions/:sessionId", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      if (!isUuid(request.params.sessionId)) {
+        return reply.status(404).send({ error: "SESSION_NOT_FOUND" });
+      }
+      try {
+        await authService.revokeOwnSession(
+          authenticated.user.id,
+          request.params.sessionId
+        );
+        if (authenticated.sessionId === request.params.sessionId) {
+          clearSessionCookie(reply, secureCookies);
+        }
+        return reply.status(204).send();
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
     app.get("/api/auth/me", async (request, reply) => {
       const user = await authService.authenticate(
         sessionTokenFromHeaders(request.headers, secureCookies)
@@ -1894,7 +1938,7 @@ function sendAuthError(
     ? 503
     : error.code === "INVALID_CREDENTIALS" || error.code === "INVALID_VERIFICATION"
       ? 401
-      : error.code === "USER_NOT_FOUND"
+      : error.code === "USER_NOT_FOUND" || error.code === "SESSION_NOT_FOUND"
         ? 404
         : [
             "ACCOUNT_STATUS_UNCHANGED",

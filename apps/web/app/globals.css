@@ -1435,6 +1435,18 @@ button:disabled { cursor: wait; opacity: .55; }
 .account-transactions li > span { color: var(--danger); font-size: 13px; font-weight: 800; }
 .account-transactions li > span[data-positive="true"] { color: var(--green); }
 .account-sessions { grid-column: 1 / -1; }
+.account-session-heading { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; margin-top: 22px; padding-top: 20px; }
+.account-session-heading h3 { font-size: 13px; margin: 0; }
+.account-session-heading span { color: var(--muted); font-size: 11px; }
+.account-session-list { display: grid; gap: 10px; list-style: none; margin: 14px 0 0; padding: 0; }
+.account-session-list > li { align-items: center; background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 14px; grid-template-columns: minmax(170px, .7fr) minmax(320px, 1.5fr) auto; padding: 14px; }
+.account-session-title { display: grid; gap: 6px; }
+.account-session-title strong { font-size: 12px; }
+.account-session-title span { color: var(--green); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.account-session-list dl { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; }
+.account-session-list dl > div { display: grid; gap: 4px; }
+.account-session-list dt { color: var(--muted); font-size: 10px; }
+.account-session-list dd { font-size: 10px; margin: 0; }
 .account-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .account-actions .danger-button { min-height: 42px; }
 .account-actions .primary-button { min-height: 42px; }
@@ -1590,6 +1602,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .public-steps { grid-template-columns: 1fr 1fr; }
   .public-safety, .public-use-cases { grid-template-columns: 1fr; }
   .account-grid { grid-template-columns: 1fr; }
+  .account-session-list > li { align-items: stretch; grid-template-columns: 1fr; }
   .admin-users-grid { grid-template-columns: 1fr; }
   .admin-call-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-call-row dl, .admin-inspector-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1646,6 +1659,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .account-card { padding: 22px; }
   .account-details > div, .account-usage-summary > div { grid-template-columns: 1fr; }
   .account-details dd, .account-usage-summary dd { text-align: left; }
+  .account-session-list dl { grid-template-columns: 1fr; }
   .account-actions { align-items: stretch; flex-direction: column; }
   .site-footer { align-items: flex-start; flex-direction: column; padding: 24px 20px 30px; }
   .content-page, .onboarding-page { padding: 42px 16px 64px; }

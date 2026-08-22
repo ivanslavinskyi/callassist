@@ -269,8 +269,11 @@ unanswered, canceled, and technical failures refund the reservation once.
 
 The localized account page at `/en/app/account` or `/de/app/account` shows the
 required first and last name, verified contact data, current usage, and ledger history.
-Users can end the current browser session or revoke all of their own sessions through
-`POST /api/auth/sessions/revoke`; both actions clear the current session cookie.
+It also lists up to 50 active sessions using bounded browser/platform categories rather
+than raw User-Agent values. Users can revoke one owner-scoped session, end the current
+browser session, or revoke all sessions; revoking the current/all sessions clears the
+cookie. Selective and all-session security actions append immutable, privacy-minimized
+audit evidence.
 
 Authenticated users can redeem a code at `/en/redeem` or `/de/redeem` through
 `POST /api/credits/promo-redemptions`. Active administrators can create bounded

@@ -90,6 +90,49 @@ export const sessionSchema = z.object({
 });
 export type Session = z.infer<typeof sessionSchema>;
 
+export const accountSessionBrowserSchema = z.enum([
+  "edge",
+  "chrome",
+  "firefox",
+  "safari",
+  "other"
+]);
+export type AccountSessionBrowser = z.infer<
+  typeof accountSessionBrowserSchema
+>;
+
+export const accountSessionPlatformSchema = z.enum([
+  "windows",
+  "macos",
+  "ios",
+  "android",
+  "linux",
+  "other"
+]);
+export type AccountSessionPlatform = z.infer<
+  typeof accountSessionPlatformSchema
+>;
+
+export const accountSessionSummarySchema = z.object({
+  id: z.uuid(),
+  browser: accountSessionBrowserSchema,
+  platform: accountSessionPlatformSchema,
+  current: z.boolean(),
+  expiresAt: z.iso.datetime(),
+  createdAt: z.iso.datetime(),
+  lastSeenAt: z.iso.datetime()
+});
+export type AccountSessionSummary = z.infer<
+  typeof accountSessionSummarySchema
+>;
+
+export const accountSessionListSchema = z.object({
+  sessions: z.array(accountSessionSummarySchema).max(50),
+  totalActive: z.number().int().nonnegative(),
+  truncated: z.boolean()
+});
+export type AccountSessionList = z.infer<typeof accountSessionListSchema>;
+
 export const creditTransactionTypeSchema = z.enum([
   "signup_grant",
   "promo_grant",

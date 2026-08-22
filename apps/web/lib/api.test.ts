@@ -25,6 +25,7 @@ import {
   getAdminEditorialCollection,
   getCallPreparationErrorMessage,
   login,
+  listOwnSessions,
   listAdminUsers,
   listAdminCalls,
   listAdminContentPages,
@@ -43,6 +44,7 @@ import {
   grantCreditsAsAdmin,
   revokeAdminUserSessions,
   revokeAllOwnSessions,
+  revokeOwnSession,
   retryAdminDurableJob,
   setAdminOutboundCalls,
   suppressRecipientAsStaff,
@@ -237,6 +239,30 @@ describe("API client headers", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(request).toMatchObject({ method: "POST", credentials: "include" });
     expect(new Headers(request.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("lists and selectively revokes the current user's sessions", async () => {
+    const sessionId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        sessions: [],
+        totalActive: 0,
+        truncated: false
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listOwnSessions()).resolves.toMatchObject({ totalActive: 0 });
+    await expect(revokeOwnSession(sessionId)).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/auth/sessions");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      `/api/auth/sessions/${sessionId}`
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "DELETE",
+      credentials: "include"
+    });
   });
 
   it("loads authenticated credit usage", async () => {

@@ -1,4 +1,7 @@
 import type {
+  AccountSessionBrowser,
+  AccountSessionList,
+  AccountSessionPlatform,
   AdministrableUserStatus,
   LoginInput,
   PhoneVerificationInput,
@@ -19,6 +22,7 @@ import { ApplicationRateLimiter } from "./rate-limiter";
 import type { VerificationProvider } from "./verification-provider";
 
 const minute = 60_000;
+const accountSessionInventoryLimit = 50;
 const dummyPasswordHash = hashPassword("callassist-invalid-account-password");
 
 export type AuthRequestContext = {
@@ -148,6 +152,10 @@ export class AuthService {
   }
 
   async authenticate(token: string | undefined) {
+    return (await this.authenticateSession(token))?.user ?? null;
+  }
+
+  async authenticateSession(token: string | undefined) {
     if (!token) return null;
     const result = await this.repository.findUserBySessionTokenHash(
       hashSessionToken(token),
@@ -156,7 +164,10 @@ export class AuthService {
     if (!result || result.user.status !== "active" || !result.user.phoneVerifiedAt) {
       return null;
     }
-    return toPublicUser(result.user);
+    return {
+      user: toPublicUser(result.user),
+      sessionId: result.session.id
+    };
   }
 
   async logout(token: string | undefined) {
@@ -173,6 +184,39 @@ export class AuthService {
       userId,
       this.#now().toISOString()
     );
+  }
+
+  async listSessions(
+    userId: string,
+    currentSessionId: string
+  ): Promise<AccountSessionList> {
+    const result = await this.repository.listActiveSessions(
+      userId,
+      this.#now().toISOString(),
+      accountSessionInventoryLimit,
+      currentSessionId
+    );
+    return {
+      sessions: result.sessions.map((session) => ({
+        id: session.id,
+        ...classifySessionClient(session.userAgent),
+        current: session.id === currentSessionId,
+        expiresAt: session.expiresAt,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt
+      })),
+      totalActive: result.totalActive,
+      truncated: result.totalActive > result.sessions.length
+    };
+  }
+
+  async revokeOwnSession(userId: string, sessionId: string) {
+    const revoked = await this.repository.revokeSessionById(
+      userId,
+      sessionId,
+      this.#now().toISOString()
+    );
+    if (!revoked) throw new AuthServiceError("SESSION_NOT_FOUND");
   }
 
   async listUsersAsAdmin(
@@ -294,6 +338,7 @@ export class AuthServiceError extends Error {
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
       | "USER_NOT_FOUND"
+      | "SESSION_NOT_FOUND"
       | "ACCOUNT_STATUS_UNCHANGED"
       | "ACCOUNT_STATUS_TRANSITION_INVALID",
     options?: { cause?: unknown; retryAfterSeconds?: number }
@@ -302,6 +347,34 @@ export class AuthServiceError extends Error {
     this.name = "AuthServiceError";
     this.retryAfterSeconds = options?.retryAfterSeconds;
   }
+}
+
+export function classifySessionClient(userAgent: string | null): {
+  browser: AccountSessionBrowser;
+  platform: AccountSessionPlatform;
+} {
+  const value = userAgent ?? "";
+  const browser: AccountSessionBrowser = /(?:edg|edge|edga|edgios)\//i.test(value)
+    ? "edge"
+    : /(?:chrome|crios)\//i.test(value)
+      ? "chrome"
+      : /(?:firefox|fxios)\//i.test(value)
+        ? "firefox"
+        : /safari\//i.test(value) && /version\//i.test(value)
+          ? "safari"
+          : "other";
+  const platform: AccountSessionPlatform = /android/i.test(value)
+    ? "android"
+    : /(?:iphone|ipad|ipod)/i.test(value)
+      ? "ios"
+      : /windows/i.test(value)
+        ? "windows"
+        : /(?:macintosh|mac os x)/i.test(value)
+          ? "macos"
+          : /linux/i.test(value)
+            ? "linux"
+            : "other";
+  return { browser, platform };
 }
 
 export function hashSessionToken(token: string) {
