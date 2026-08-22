@@ -1,21 +1,29 @@
+import { adminEditorialRevisionSchema } from "@callassist/contracts";
 import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
   AdminContentRevisionSummary,
+  AdminEditorialRevision,
   ContentDraftUpdateInput,
   ContentLocale,
   ContentPageKey,
+  EditorialCollectionKey,
+  EditorialDraftUpdateInput,
+  EditorialRevisionSummary,
   OnboardingAcceptanceInput,
   OnboardingStatus,
   PublishedContentIndex,
-  PublishedContentPage
+  PublishedContentPage,
+  PublishedFaq,
+  PublishedNavigation
 } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import {
   ContentRepositoryError,
   type ContentRepository,
-  type SeedContentPage
+  type SeedContentPage,
+  type SeedEditorialCollection
 } from "./content-repository";
 
 type DatabaseDate = Date | string;
@@ -114,6 +122,24 @@ type ContentAdminEventType =
   | "content.revision_published"
   | "content.rollback_draft_created";
 
+type EditorialRevisionRow = {
+  key: EditorialCollectionKey;
+  id: string;
+  number: number;
+  status: "draft" | "published";
+  snapshot: unknown[] | string;
+  createdByUserId: string | null;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  publishedAt: DatabaseDate | null;
+};
+
+type EditorialAdminEventType =
+  | "editorial.draft_created"
+  | "editorial.draft_updated"
+  | "editorial.revision_published"
+  | "editorial.rollback_draft_created";
+
 export class PostgresContentRepository implements ContentRepository {
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
@@ -162,6 +188,35 @@ export class PostgresContentRepository implements ContentRepository {
             ${page.title}, ${page.summary}, ${transaction.json(page.sections)},
             ${page.seoTitle}, ${page.seoDescription},
             ${page.revision.sourceRevisionNumber}, ${now}, ${now}
+          ) ON CONFLICT (id) DO NOTHING
+        `;
+      }
+    });
+  }
+
+  async initializeSeedEditorialCollections(
+    collections: SeedEditorialCollection[]
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      for (const collection of collections) {
+        const revision = collection.revision;
+        const createdAt = new Date(revision.createdAt);
+        await transaction`
+          INSERT INTO content_editorial_collections (
+            id, key, created_at, updated_at
+          ) VALUES (
+            ${collection.collectionId}, ${revision.key}, ${createdAt}, ${createdAt}
+          ) ON CONFLICT (id) DO NOTHING
+        `;
+        await transaction`
+          INSERT INTO content_editorial_revisions (
+            id, collection_id, revision_number, status, snapshot,
+            created_by_user_id, created_at, updated_at, published_at
+          ) VALUES (
+            ${revision.id}, ${collection.collectionId}, ${revision.number},
+            'published', ${transaction.json(revision.items)}, ${null},
+            ${createdAt}, ${new Date(revision.updatedAt)},
+            ${new Date(revision.publishedAt!)}
           ) ON CONFLICT (id) DO NOTHING
         `;
       }
@@ -267,6 +322,62 @@ export class PostgresContentRepository implements ContentRepository {
           }))
         };
       })
+    };
+  }
+
+  async getPublishedFaq(locale: ContentLocale): Promise<PublishedFaq | null> {
+    const revision = await this.#getEditorialRevision("faq", {
+      status: "published"
+    });
+    if (!revision || revision.key !== "faq" || !revision.publishedAt) return null;
+    return {
+      locale,
+      revision: {
+        id: revision.id,
+        number: revision.number,
+        publishedAt: revision.publishedAt
+      },
+      items: revision.items
+        .filter(({ enabled }) => enabled)
+        .sort(byEditorialSortOrder)
+        .map((item) => ({
+          id: item.id,
+          question: item.question[locale],
+          answer: item.answer[locale]
+        }))
+    };
+  }
+
+  async getPublishedNavigation(
+    locale: ContentLocale
+  ): Promise<PublishedNavigation | null> {
+    const [revision, index] = await Promise.all([
+      this.#getEditorialRevision("navigation", { status: "published" }),
+      this.listPublishedContentIndex()
+    ]);
+    if (
+      !revision || revision.key !== "navigation" || !revision.publishedAt
+    ) return null;
+    return {
+      locale,
+      revision: {
+        id: revision.id,
+        number: revision.number,
+        publishedAt: revision.publishedAt
+      },
+      items: revision.items
+        .filter(({ enabled }) => enabled)
+        .sort(byEditorialSortOrder)
+        .flatMap((item) => {
+          const href = navigationHref(item.destination, locale, index);
+          return href ? [{
+            id: item.id,
+            location: item.location,
+            destination: item.destination,
+            label: item.label[locale],
+            href
+          }] : [];
+        })
     };
   }
 
@@ -668,8 +779,389 @@ export class PostgresContentRepository implements ContentRepository {
     return this.#requireRevisionSummary(revisionId);
   }
 
+  async getAdminEditorialCollection(key: EditorialCollectionKey) {
+    const [published, draft] = await Promise.all([
+      this.#getEditorialRevision(key, { status: "published" }),
+      this.#getEditorialRevision(key, { status: "draft" })
+    ]);
+    return { published, draft };
+  }
+
+  async listAdminEditorialRevisions(
+    key: EditorialCollectionKey
+  ): Promise<EditorialRevisionSummary[]> {
+    const rows = await this.#sql<EditorialRevisionRow[]>`
+      SELECT
+        collection.key AS "key",
+        revision.id AS "id",
+        revision.revision_number AS "number",
+        revision.status AS "status",
+        revision.snapshot AS "snapshot",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        revision.updated_at AS "updatedAt",
+        revision.published_at AS "publishedAt"
+      FROM content_editorial_revisions revision
+      JOIN content_editorial_collections collection
+        ON collection.id = revision.collection_id
+      WHERE collection.key = ${key}
+      ORDER BY revision.revision_number DESC
+    `;
+    return rows.map((row) => editorialSummary(mapEditorialRevision(row)));
+  }
+
+  async createEditorialDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    createdAt: string
+  ) {
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [collection] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_editorial_collections
+        WHERE key = ${key} FOR UPDATE
+      `;
+      if (!collection) {
+        throw new ContentRepositoryError("EDITORIAL_COLLECTION_NOT_FOUND");
+      }
+      const [existing] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_editorial_revisions
+        WHERE collection_id = ${collection.id} AND status = 'draft'
+      `;
+      if (existing) throw new ContentRepositoryError("EDITORIAL_DRAFT_EXISTS");
+      const [source] = await transaction<{
+        id: string;
+        number: number;
+        snapshot: unknown[] | string;
+      }[]>`
+        SELECT id, revision_number AS "number", snapshot
+        FROM content_editorial_revisions
+        WHERE collection_id = ${collection.id} AND status = 'published'
+        ORDER BY revision_number DESC
+        LIMIT 1
+      `;
+      if (!source) {
+        throw new ContentRepositoryError("EDITORIAL_REVISION_NOT_FOUND");
+      }
+      return this.#copyEditorialRevisionToDraft(transaction, {
+        actorUserId,
+        collectionId: collection.id,
+        sourceRevisionId: source.id,
+        revisionNumber: source.number + 1,
+        snapshot: parseJsonArray(source.snapshot),
+        eventType: "editorial.draft_created",
+        reason: null,
+        createdAt
+      });
+    });
+    return this.#requireEditorialRevisionSummary(revisionId);
+  }
+
+  async updateEditorialDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    input: EditorialDraftUpdateInput,
+    updatedAt: string
+  ) {
+    if (input.key !== key) {
+      throw new ContentRepositoryError("EDITORIAL_COLLECTION_MISMATCH");
+    }
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [draft] = await transaction<{
+        id: string;
+        collectionId: string;
+      }[]>`
+        SELECT
+          revision.id,
+          revision.collection_id AS "collectionId"
+        FROM content_editorial_revisions revision
+        JOIN content_editorial_collections collection
+          ON collection.id = revision.collection_id
+        WHERE collection.key = ${key} AND revision.status = 'draft'
+        FOR UPDATE OF revision
+      `;
+      if (!draft) {
+        throw new ContentRepositoryError("EDITORIAL_DRAFT_NOT_FOUND");
+      }
+      await transaction`
+        UPDATE content_editorial_revisions
+        SET snapshot = ${transaction.json(input.items)},
+            updated_at = ${new Date(updatedAt)}
+        WHERE id = ${draft.id}
+      `;
+      await this.#insertEditorialAdminEvent(transaction, {
+        eventType: "editorial.draft_updated",
+        actorUserId,
+        collectionId: draft.collectionId,
+        revisionId: draft.id,
+        sourceRevisionId: null,
+        reason: null,
+        createdAt: updatedAt
+      });
+      return draft.id;
+    });
+    const revision = await this.#getEditorialRevisionById(revisionId);
+    if (!revision) {
+      throw new ContentRepositoryError("EDITORIAL_DRAFT_NOT_FOUND");
+    }
+    return revision;
+  }
+
+  async publishEditorialDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    reason: string,
+    publishedAt: string
+  ) {
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [row] = await transaction<EditorialRevisionRow[]>`
+        SELECT
+          collection.key AS "key",
+          revision.id AS "id",
+          revision.revision_number AS "number",
+          revision.status AS "status",
+          revision.snapshot AS "snapshot",
+          revision.created_by_user_id AS "createdByUserId",
+          revision.created_at AS "createdAt",
+          revision.updated_at AS "updatedAt",
+          revision.published_at AS "publishedAt"
+        FROM content_editorial_revisions revision
+        JOIN content_editorial_collections collection
+          ON collection.id = revision.collection_id
+        WHERE collection.key = ${key} AND revision.status = 'draft'
+        FOR UPDATE OF revision
+      `;
+      if (!row) throw new ContentRepositoryError("EDITORIAL_DRAFT_NOT_FOUND");
+      const revision = mapEditorialRevision(row);
+      if (revision.key === "navigation") {
+        await this.#assertNavigationDestinations(transaction, revision);
+      }
+      const [collection] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_editorial_collections WHERE key = ${key}
+      `;
+      await transaction`
+        UPDATE content_editorial_revisions
+        SET status = 'published',
+            updated_at = ${new Date(publishedAt)},
+            published_at = ${new Date(publishedAt)}
+        WHERE id = ${revision.id}
+      `;
+      await this.#insertEditorialAdminEvent(transaction, {
+        eventType: "editorial.revision_published",
+        actorUserId,
+        collectionId: collection!.id,
+        revisionId: revision.id,
+        sourceRevisionId: null,
+        reason,
+        createdAt: publishedAt
+      });
+      return revision.id;
+    });
+    return this.#requireEditorialRevisionSummary(revisionId);
+  }
+
+  async createEditorialRollbackDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    sourceRevisionNumber: number,
+    reason: string,
+    createdAt: string
+  ) {
+    const revisionId = await this.#sql.begin(async (transaction) => {
+      const [collection] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_editorial_collections
+        WHERE key = ${key} FOR UPDATE
+      `;
+      if (!collection) {
+        throw new ContentRepositoryError("EDITORIAL_COLLECTION_NOT_FOUND");
+      }
+      const [existing] = await transaction<{ id: string }[]>`
+        SELECT id FROM content_editorial_revisions
+        WHERE collection_id = ${collection.id} AND status = 'draft'
+      `;
+      if (existing) throw new ContentRepositoryError("EDITORIAL_DRAFT_EXISTS");
+      const [source] = await transaction<{
+        id: string;
+        snapshot: unknown[] | string;
+      }[]>`
+        SELECT id, snapshot
+        FROM content_editorial_revisions
+        WHERE collection_id = ${collection.id}
+          AND revision_number = ${sourceRevisionNumber}
+          AND status = 'published'
+      `;
+      if (!source) {
+        throw new ContentRepositoryError("EDITORIAL_REVISION_NOT_FOUND");
+      }
+      const [numberRow] = await transaction<{ nextNumber: number }[]>`
+        SELECT (max(revision_number) + 1)::integer AS "nextNumber"
+        FROM content_editorial_revisions
+        WHERE collection_id = ${collection.id}
+      `;
+      return this.#copyEditorialRevisionToDraft(transaction, {
+        actorUserId,
+        collectionId: collection.id,
+        sourceRevisionId: source.id,
+        revisionNumber: numberRow!.nextNumber,
+        snapshot: parseJsonArray(source.snapshot),
+        eventType: "editorial.rollback_draft_created",
+        reason,
+        createdAt
+      });
+    });
+    return this.#requireEditorialRevisionSummary(revisionId);
+  }
+
   async close() {
     await this.#sql.end({ timeout: 5 });
+  }
+
+  async #getEditorialRevision(
+    key: EditorialCollectionKey,
+    selector: { status: "draft" | "published" } | { revisionNumber: number }
+  ) {
+    const byNumber = "revisionNumber" in selector;
+    const status = byNumber ? null : selector.status;
+    const revisionNumber = byNumber ? selector.revisionNumber : null;
+    const rows = await this.#sql<EditorialRevisionRow[]>`
+      SELECT
+        collection.key AS "key",
+        revision.id AS "id",
+        revision.revision_number AS "number",
+        revision.status AS "status",
+        revision.snapshot AS "snapshot",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        revision.updated_at AS "updatedAt",
+        revision.published_at AS "publishedAt"
+      FROM content_editorial_revisions revision
+      JOIN content_editorial_collections collection
+        ON collection.id = revision.collection_id
+      WHERE collection.key = ${key}
+        AND (${status}::text IS NULL OR revision.status = ${status})
+        AND (${revisionNumber}::integer IS NULL
+          OR revision.revision_number = ${revisionNumber})
+      ORDER BY revision.revision_number DESC
+      LIMIT 1
+    `;
+    return rows[0] ? mapEditorialRevision(rows[0]) : null;
+  }
+
+  async #getEditorialRevisionById(revisionId: string) {
+    const rows = await this.#sql<EditorialRevisionRow[]>`
+      SELECT
+        collection.key AS "key",
+        revision.id AS "id",
+        revision.revision_number AS "number",
+        revision.status AS "status",
+        revision.snapshot AS "snapshot",
+        revision.created_by_user_id AS "createdByUserId",
+        revision.created_at AS "createdAt",
+        revision.updated_at AS "updatedAt",
+        revision.published_at AS "publishedAt"
+      FROM content_editorial_revisions revision
+      JOIN content_editorial_collections collection
+        ON collection.id = revision.collection_id
+      WHERE revision.id = ${revisionId}
+      LIMIT 1
+    `;
+    return rows[0] ? mapEditorialRevision(rows[0]) : null;
+  }
+
+  async #copyEditorialRevisionToDraft(
+    transaction: postgres.TransactionSql,
+    input: {
+      actorUserId: string;
+      collectionId: string;
+      sourceRevisionId: string;
+      revisionNumber: number;
+      snapshot: postgres.JSONValue;
+      eventType: Extract<
+        EditorialAdminEventType,
+        "editorial.draft_created" | "editorial.rollback_draft_created"
+      >;
+      reason: string | null;
+      createdAt: string;
+    }
+  ) {
+    const revisionId = randomUUID();
+    const createdAt = new Date(input.createdAt);
+    await transaction`
+      INSERT INTO content_editorial_revisions (
+        id, collection_id, revision_number, status, snapshot,
+        created_by_user_id, created_at, updated_at, published_at
+      ) VALUES (
+        ${revisionId}, ${input.collectionId}, ${input.revisionNumber}, 'draft',
+        ${transaction.json(input.snapshot)}, ${input.actorUserId}, ${createdAt},
+        ${createdAt}, ${null}
+      )
+    `;
+    await this.#insertEditorialAdminEvent(transaction, {
+      eventType: input.eventType,
+      actorUserId: input.actorUserId,
+      collectionId: input.collectionId,
+      revisionId,
+      sourceRevisionId: input.sourceRevisionId,
+      reason: input.reason,
+      createdAt: input.createdAt
+    });
+    return revisionId;
+  }
+
+  async #insertEditorialAdminEvent(
+    transaction: postgres.TransactionSql,
+    input: {
+      eventType: EditorialAdminEventType;
+      actorUserId: string;
+      collectionId: string;
+      revisionId: string;
+      sourceRevisionId: string | null;
+      reason: string | null;
+      createdAt: string;
+    }
+  ) {
+    await transaction`
+      INSERT INTO content_editorial_admin_events (
+        id, event_type, actor_user_id, collection_id, revision_id,
+        source_revision_id, reason, metadata, created_at
+      ) VALUES (
+        ${randomUUID()}, ${input.eventType}, ${input.actorUserId},
+        ${input.collectionId}, ${input.revisionId}, ${input.sourceRevisionId},
+        ${input.reason}, ${transaction.json({ schemaVersion: 1 })},
+        ${new Date(input.createdAt)}
+      )
+    `;
+  }
+
+  async #requireEditorialRevisionSummary(revisionId: string) {
+    const revision = await this.#getEditorialRevisionById(revisionId);
+    if (!revision) {
+      throw new ContentRepositoryError("EDITORIAL_REVISION_NOT_FOUND");
+    }
+    return editorialSummary(revision);
+  }
+
+  async #assertNavigationDestinations(
+    sql: postgres.Sql | postgres.TransactionSql,
+    revision: Extract<AdminEditorialRevision, { key: "navigation" }>
+  ) {
+    const routes = await sql<{ key: ContentPageKey; locale: ContentLocale }[]>`
+      SELECT page.key AS "key", localization.locale AS "locale"
+      FROM content_pages page
+      JOIN content_page_localizations localization
+        ON localization.page_id = page.id
+    `;
+    const available = new Set(routes.map(({ key, locale }) => `${key}:${locale}`));
+    const broken = revision.items.some((item) =>
+      item.enabled &&
+      item.destination !== "home" &&
+      item.destination !== "opt_out" &&
+      (["en", "de"] as const).some((locale) =>
+        !available.has(`${item.destination}:${locale}`)
+      )
+    );
+    if (broken) {
+      throw new ContentRepositoryError("EDITORIAL_DESTINATION_UNAVAILABLE");
+    }
   }
 
   async #copyRevisionToDraft(
@@ -924,6 +1416,51 @@ function mapRevisionSummary(row: RevisionSummaryRow): AdminContentRevisionSummar
     updatedAt: toIso(row.updatedAt),
     publishedAt: row.publishedAt ? toIso(row.publishedAt) : null
   };
+}
+
+function mapEditorialRevision(row: EditorialRevisionRow): AdminEditorialRevision {
+  return adminEditorialRevisionSchema.parse({
+    key: row.key,
+    id: row.id,
+    number: row.number,
+    status: row.status,
+    items: parseJsonArray(row.snapshot),
+    createdByUserId: row.createdByUserId,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    publishedAt: row.publishedAt ? toIso(row.publishedAt) : null
+  });
+}
+
+function editorialSummary(
+  revision: AdminEditorialRevision
+): EditorialRevisionSummary {
+  const { key: _key, items: _items, ...summary } = revision;
+  return summary;
+}
+
+function parseJsonArray(value: unknown[] | string): postgres.JSONValue {
+  return (typeof value === "string" ? JSON.parse(value) : value) as postgres.JSONValue;
+}
+
+function byEditorialSortOrder(
+  left: { sortOrder: number },
+  right: { sortOrder: number }
+) {
+  return left.sortOrder - right.sortOrder;
+}
+
+function navigationHref(
+  destination: PublishedNavigation["items"][number]["destination"],
+  locale: ContentLocale,
+  index: PublishedContentIndex
+) {
+  if (destination === "home") return `/${locale}`;
+  if (destination === "opt_out") return `/${locale}/opt-out`;
+  const localization = index.pages
+    .find(({ key }) => key === destination)
+    ?.localizations.find((candidate) => candidate.locale === locale);
+  return localization ? `/${locale}/${localization.slug}` : null;
 }
 
 function mapLegalReference(row: LegalReferenceRow) {

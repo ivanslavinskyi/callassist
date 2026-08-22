@@ -6,32 +6,40 @@ import {
   changeAdminUserStatus,
   confirmRecipientOptOut,
   createAdminContentDraft,
+  createAdminEditorialDraft,
   createCallBrief,
   createPromoCode,
   getCreditUsage,
   getOnboardingStatus,
   getPublishedContentIndex,
+  getPublishedFaq,
+  getPublishedNavigation,
   getAdminUserCreditLedger,
   getAdminContentPage,
+  getAdminEditorialCollection,
   getCallPreparationErrorMessage,
   login,
   listAdminUsers,
   listAdminContentPages,
   listAdminContentRevisions,
+  listAdminEditorialRevisions,
   liftRecipientSuppressionAsStaff,
   logout,
   registerAccount,
   redeemPromoCode,
   publishAdminContentDraft,
+  publishAdminEditorialDraft,
   recompileCallBrief,
   requestRecipientOptOut,
   rollbackAdminContentRevision,
+  rollbackAdminEditorialRevision,
   grantCreditsAsAdmin,
   revokeAdminUserSessions,
   revokeAllOwnSessions,
   suppressRecipientAsStaff,
   startCall,
-  updateAdminContentDraft
+  updateAdminContentDraft,
+  updateAdminEditorialDraft
 } from "./api";
 
 afterEach(() => {
@@ -87,6 +95,49 @@ describe("API client headers", () => {
     ]);
     expect(fetchMock.mock.calls.slice(3).map(([, init]) => init?.method)).toEqual([
       "POST", "PUT", "POST", "POST"
+    ]);
+  });
+
+  it("loads public FAQ/navigation and uses the editorial collection lifecycle", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({
+        faq: { items: [] },
+        navigation: { items: [] },
+        published: null,
+        draft: null,
+        revisions: []
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const id = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+
+    await getPublishedFaq("de");
+    await getPublishedNavigation("de");
+    await getAdminEditorialCollection("faq");
+    await listAdminEditorialRevisions("faq");
+    await createAdminEditorialDraft("faq");
+    await updateAdminEditorialDraft("faq", {
+      key: "faq",
+      items: [{
+        id,
+        sortOrder: 0,
+        enabled: true,
+        question: { en: "How?", de: "Wie?" },
+        answer: { en: "Carefully.", de: "Sorgfältig." }
+      }]
+    });
+    await publishAdminEditorialDraft("faq", "Reviewed FAQ update");
+    await rollbackAdminEditorialRevision("faq", 1, "Restore reviewed FAQ");
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/api/content/faq?locale=de"),
+      expect.stringContaining("/api/content/navigation?locale=de"),
+      expect.stringContaining("/api/admin/content/editorial/faq"),
+      expect.stringContaining("/api/admin/content/editorial/faq/revisions"),
+      expect.stringContaining("/api/admin/content/editorial/faq/drafts"),
+      expect.stringContaining("/api/admin/content/editorial/faq/draft"),
+      expect.stringContaining("/api/admin/content/editorial/faq/publish"),
+      expect.stringContaining("/api/admin/content/editorial/faq/revisions/1/rollback")
     ]);
   });
 

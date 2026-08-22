@@ -205,6 +205,7 @@ export function AdminContentConsole() {
 
   const selectedPage = pages.find((page) => page.key === selectedKey) ?? null;
   const isLegal = selectedKey === "terms" || selectedKey === "acceptable_use";
+  const isFaq = selectedKey === "faq";
   const currentRevision = revisions.find((revision) => revision.status === "published");
 
   return (
@@ -216,9 +217,14 @@ export function AdminContentConsole() {
             <h1>{copy.title}</h1>
             <p>{copy.intro}</p>
           </div>
-          <button className="secondary-button" disabled={busy !== null} onClick={signOut} type="button">
-            {copy.logout}
-          </button>
+          <div className="admin-content-heading-actions">
+            <Link className="secondary-button" href={localizeHref("/admin/content/editorial")}>
+              {copy.editorialModels}
+            </Link>
+            <button className="secondary-button" disabled={busy !== null} onClick={signOut} type="button">
+              {copy.logout}
+            </button>
+          </div>
         </header>
 
         <section className="admin-content-toolbar" aria-label={copy.title}>
@@ -314,7 +320,14 @@ export function AdminContentConsole() {
                       </label>
                     ) : null}
                   </div>
-                  <div className="admin-section-list">
+                  {isFaq ? (
+                    <div className="admin-content-empty editorial-reference-note">
+                      <p>{copy.faqItemsManaged}</p>
+                      <Link className="secondary-button" href={localizeHref("/admin/content/editorial")}>
+                        {copy.editorialModels}
+                      </Link>
+                    </div>
+                  ) : <div className="admin-section-list">
                     <h3>{copy.sections}</h3>
                     {editor.sections.map((section, index) => (
                       <SectionEditor
@@ -343,7 +356,7 @@ export function AdminContentConsole() {
                     >
                       {copy.addSection}
                     </button>
-                  </div>
+                  </div>}
                   <div className="admin-content-savebar">
                     <span>{dirty ? copy.unsaved : copy.saved}</span>
                     <button className="primary-button" disabled={busy !== null || !dirty} onClick={saveDraft} type="button">

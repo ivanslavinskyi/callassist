@@ -212,4 +212,69 @@ describe("ContentService", () => {
         current: { terms: { revisionNumber: 2 } }
       });
   });
+
+  it("publishes reusable FAQ and internal navigation through audited revisions", async () => {
+    const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
+    const initialFaq = await service.getPublishedFaq("de");
+    expect(initialFaq?.items).toHaveLength(8);
+    expect(initialFaq?.items[0]?.question).toContain("KI-Anruf");
+
+    await expect(service.getPublishedNavigation("de")).resolves.toEqual(
+      expect.objectContaining({
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            destination: "privacy",
+            href: "/de/datenschutz"
+          }),
+          expect.objectContaining({
+            destination: "opt_out",
+            href: "/de/opt-out"
+          })
+        ])
+      })
+    );
+
+    await service.createEditorialDraft(actorUserId, "faq");
+    const draft = (await service.getAdminEditorialCollection("faq")).draft!;
+    if (draft.key !== "faq") throw new Error("Expected FAQ draft");
+    await service.updateEditorialDraft(actorUserId, "faq", {
+      key: "faq",
+      items: draft.items.map((item, index) => index === 0
+        ? {
+            ...item,
+            question: { ...item.question, de: "Ist der KI-Anruf offengelegt?" }
+          }
+        : item)
+    });
+    const beforePublish = await service.getPublishedFaq("de");
+    expect(beforePublish).toMatchObject({ revision: { number: 1 } });
+    expect(beforePublish?.items[0]?.question).toBe(
+      "Weiss die empfangende Person, dass es ein KI-Anruf ist?"
+    );
+
+    await service.publishEditorialDraft(
+      actorUserId,
+      "faq",
+      "Publish reviewed FAQ wording"
+    );
+    const afterPublish = await service.getPublishedFaq("de");
+    expect(afterPublish).toMatchObject({ revision: { number: 2 } });
+    expect(afterPublish?.items[0]?.question).toBe(
+      "Ist der KI-Anruf offengelegt?"
+    );
+    await expect(service.createEditorialRollbackDraft(
+      actorUserId,
+      "faq",
+      1,
+      "Restore original FAQ wording"
+    )).resolves.toMatchObject({ number: 3, status: "draft" });
+    expect(repository.editorialAdminEventsForTest().map(({ eventType }) =>
+      eventType
+    )).toEqual([
+      "editorial.draft_created",
+      "editorial.draft_updated",
+      "editorial.revision_published",
+      "editorial.rollback_draft_created"
+    ]);
+  });
 });

@@ -4,7 +4,10 @@ import postgres from "postgres";
 import { PostgresAuthRepository } from "../auth/postgres-auth-repository";
 import { runMigrations } from "../db/migrate";
 import { PostgresContentRepository } from "./postgres-content-repository";
-import { seededContentPages } from "./seed-content";
+import {
+  seededContentPages,
+  seededEditorialCollections
+} from "./seed-content";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
@@ -20,6 +23,9 @@ describeWithDatabase("PostgresContentRepository", () => {
     contentRepository = new PostgresContentRepository(databaseUrl!);
     inspection = postgres(databaseUrl!, { max: 1 });
     await contentRepository.initializeSeedContent(seededContentPages);
+    await contentRepository.initializeSeedEditorialCollections(
+      seededEditorialCollections
+    );
   });
 
   afterAll(async () => {
@@ -248,6 +254,71 @@ describeWithDatabase("PostgresContentRepository", () => {
       SET reason = 'tampered'
       WHERE actor_user_id = ${editor.id}
     `).rejects.toThrow("immutable");
+  });
+
+  it("stores FAQ and navigation as immutable audited editorial snapshots", async () => {
+    const suffix = randomUUID();
+    const editor = await authRepository.createUser({
+      email: `editorial.${suffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(suffix),
+      firstName: "Editorial",
+      lastName: "Editor",
+      uiLocale: "en"
+    });
+    const initial = await contentRepository.getPublishedFaq("de");
+    expect(initial).not.toBeNull();
+    const draftSummary = await contentRepository.createEditorialDraft(
+      editor.id,
+      "faq",
+      "2026-08-24T11:00:00.000Z"
+    );
+    const detail = await contentRepository.getAdminEditorialCollection("faq");
+    if (detail.draft?.key !== "faq") throw new Error("Expected FAQ draft");
+    const targetId = detail.draft.items[0]!.id;
+    const targetQuestion = `Integration FAQ revision ${draftSummary.number}`;
+    await contentRepository.updateEditorialDraft(editor.id, "faq", {
+      key: "faq",
+      items: detail.draft.items.map((item) => item.id === targetId
+        ? {
+            ...item,
+            enabled: true,
+            question: { ...item.question, de: targetQuestion }
+          }
+        : item)
+    }, "2026-08-24T11:05:00.000Z");
+    await expect(contentRepository.getPublishedFaq("de")).resolves.toMatchObject({
+      revision: { number: initial!.revision.number }
+    });
+    await contentRepository.publishEditorialDraft(
+      editor.id,
+      "faq",
+      "Publish reviewed FAQ collection",
+      "2026-08-24T11:10:00.000Z"
+    );
+    const published = await contentRepository.getPublishedFaq("de");
+    expect(published).toMatchObject({
+      revision: { number: draftSummary.number }
+    });
+    expect(published!.items.find(({ id }) => id === targetId)?.question).toBe(
+      targetQuestion
+    );
+    await expect(inspection`
+      UPDATE content_editorial_revisions
+      SET snapshot = '[]'::jsonb
+      WHERE id = ${draftSummary.id}
+    `).rejects.toThrow("immutable");
+    const events = await inspection<{ eventType: string }[]>`
+      SELECT event_type AS "eventType"
+      FROM content_editorial_admin_events
+      WHERE actor_user_id = ${editor.id}
+      ORDER BY created_at
+    `;
+    expect(events.map(({ eventType }) => eventType)).toEqual([
+      "editorial.draft_created",
+      "editorial.draft_updated",
+      "editorial.revision_published"
+    ]);
   });
 });
 

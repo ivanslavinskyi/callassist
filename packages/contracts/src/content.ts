@@ -12,6 +12,125 @@ export const contentPageKeySchema = z.enum([
 ]);
 export type ContentPageKey = z.infer<typeof contentPageKeySchema>;
 
+export const editorialCollectionKeySchema = z.enum(["faq", "navigation"]);
+export type EditorialCollectionKey = z.infer<
+  typeof editorialCollectionKeySchema
+>;
+
+export const navigationDestinationSchema = z.enum([
+  "home",
+  "privacy",
+  "terms",
+  "acceptable_use",
+  "support",
+  "faq",
+  "opt_out"
+]);
+export type NavigationDestination = z.infer<
+  typeof navigationDestinationSchema
+>;
+
+const localizedEditorialTextSchema = z.object({
+  en: z.string().trim().min(1).max(4000),
+  de: z.string().trim().min(1).max(4000)
+});
+
+export const faqItemSchema = z.object({
+  id: z.uuid(),
+  sortOrder: z.number().int().nonnegative().max(999),
+  enabled: z.boolean(),
+  question: localizedEditorialTextSchema,
+  answer: localizedEditorialTextSchema
+});
+export type FaqItem = z.infer<typeof faqItemSchema>;
+
+export const navigationItemSchema = z.object({
+  id: z.uuid(),
+  sortOrder: z.number().int().nonnegative().max(999),
+  enabled: z.boolean(),
+  location: z.enum(["header", "footer"]),
+  destination: navigationDestinationSchema,
+  label: z.object({
+    en: z.string().trim().min(1).max(80),
+    de: z.string().trim().min(1).max(80)
+  })
+});
+export type NavigationItem = z.infer<typeof navigationItemSchema>;
+
+export const editorialRevisionSummarySchema = z.object({
+  id: z.uuid(),
+  number: z.number().int().positive(),
+  status: z.enum(["draft", "published"]),
+  createdByUserId: z.uuid().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  publishedAt: z.iso.datetime().nullable()
+});
+export type EditorialRevisionSummary = z.infer<
+  typeof editorialRevisionSummarySchema
+>;
+
+const editorialRevisionBaseSchema = editorialRevisionSummarySchema.extend({
+  key: editorialCollectionKeySchema
+});
+
+export const adminEditorialRevisionSchema = z.discriminatedUnion("key", [
+  editorialRevisionBaseSchema.extend({
+    key: z.literal("faq"),
+    items: z.array(faqItemSchema).max(80)
+  }),
+  editorialRevisionBaseSchema.extend({
+    key: z.literal("navigation"),
+    items: z.array(navigationItemSchema).max(40)
+  })
+]);
+export type AdminEditorialRevision = z.infer<
+  typeof adminEditorialRevisionSchema
+>;
+
+export const editorialDraftUpdateInputSchema = z.discriminatedUnion("key", [
+  z.object({ key: z.literal("faq"), items: z.array(faqItemSchema).max(80) }),
+  z.object({
+    key: z.literal("navigation"),
+    items: z.array(navigationItemSchema).max(40)
+  })
+]);
+export type EditorialDraftUpdateInput = z.infer<
+  typeof editorialDraftUpdateInputSchema
+>;
+
+export const publishedFaqSchema = z.object({
+  revision: editorialRevisionSummarySchema.pick({
+    id: true,
+    number: true,
+    publishedAt: true
+  }).extend({ publishedAt: z.iso.datetime() }),
+  locale: contentLocaleSchema,
+  items: z.array(z.object({
+    id: z.uuid(),
+    question: z.string().trim().min(1).max(4000),
+    answer: z.string().trim().min(1).max(4000)
+  }))
+});
+export type PublishedFaq = z.infer<typeof publishedFaqSchema>;
+
+export const publishedNavigationSchema = z.object({
+  revision: editorialRevisionSummarySchema.pick({
+    id: true,
+    number: true,
+    publishedAt: true
+  }).extend({ publishedAt: z.iso.datetime() }),
+  locale: contentLocaleSchema,
+  items: z.array(z.object({
+    id: z.uuid(),
+    location: z.enum(["header", "footer"]),
+    destination: navigationDestinationSchema,
+    label: z.string().trim().min(1).max(80),
+    href: z.string().startsWith("/")
+  }))
+});
+export type PublishedNavigation = z.infer<typeof publishedNavigationSchema>;
+
 export const contentPageTypeSchema = z.enum(["page", "landing"]);
 
 export const contentSectionSchema = z.object({

@@ -1,10 +1,14 @@
 "use client";
 
-import type { UserRole } from "@callassist/contracts";
+import type { PublishedNavigation, UserRole } from "@callassist/contracts";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { getCreditUsage, getCurrentUser } from "@/lib/api";
+import {
+  getCreditUsage,
+  getCurrentUser,
+  getPublishedNavigation
+} from "@/lib/api";
 import {
   contentPath,
   switchContentLocale
@@ -37,10 +41,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
+  const [publicNavigation, setPublicNavigation] = useState<
+    PublishedNavigation | null
+  >(null);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getPublishedNavigation(locale)
+      .then(({ navigation }) => {
+        if (active) setPublicNavigation(navigation);
+      })
+      .catch(() => {
+        if (active) setPublicNavigation(null);
+      });
+    return () => { active = false; };
+  }, [locale]);
 
   useEffect(() => {
     let active = true;
@@ -109,6 +128,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
+          {isAuthenticated === false ? publicNavigation?.items
+            .filter(({ location }) => location === "header")
+            .map((item) => (
+              <Link className="topbar-link" href={item.href} key={item.id}>
+                {item.label}
+              </Link>
+            )) : null}
           {isAuthenticated === true && role !== "content_editor" ? <>
             <Link className="topbar-link" href={localizeHref("/app#new-call")}>{messages.app.newCall}</Link>
             <Link className="topbar-link" href={localizeHref("/app#history")}>{messages.app.history}</Link>
@@ -173,12 +199,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       {children}
       <footer className="site-footer">
         <nav aria-label={messages.app.support}>
-          <Link href={contentPath(locale, "privacy")}>{messages.app.privacy}</Link>
-          <Link href={contentPath(locale, "terms")}>{messages.app.terms}</Link>
-          <Link href={contentPath(locale, "acceptable_use")}>{messages.app.acceptableUse}</Link>
-          <Link href={contentPath(locale, "faq")}>{messages.app.faq}</Link>
-          <Link href={contentPath(locale, "support")}>{messages.app.support}</Link>
-          <Link href={localizeHref("/opt-out")}>{messages.app.optOut}</Link>
+          {publicNavigation ? publicNavigation.items
+            .filter(({ location }) => location === "footer")
+            .map((item) => (
+              <Link href={item.href} key={item.id}>{item.label}</Link>
+            )) : <>
+              <Link href={contentPath(locale, "privacy")}>{messages.app.privacy}</Link>
+              <Link href={contentPath(locale, "terms")}>{messages.app.terms}</Link>
+              <Link href={contentPath(locale, "acceptable_use")}>{messages.app.acceptableUse}</Link>
+              <Link href={contentPath(locale, "faq")}>{messages.app.faq}</Link>
+              <Link href={contentPath(locale, "support")}>{messages.app.support}</Link>
+              <Link href={localizeHref("/opt-out")}>{messages.app.optOut}</Link>
+            </>}
         </nav>
         <small>CallAssist · Public beta</small>
       </footer>

@@ -259,6 +259,34 @@ describe("auth API", () => {
         ])
       })])
     });
+    const faq = await app.inject({
+      method: "GET",
+      url: "/api/content/faq?locale=de"
+    });
+    expect(faq.statusCode).toBe(200);
+    expect(faq.json()).toMatchObject({
+      faq: {
+        revision: { number: 1 },
+        items: expect.arrayContaining([
+          expect.objectContaining({ question: expect.stringContaining("KI-Anruf") })
+        ])
+      }
+    });
+    const navigation = await app.inject({
+      method: "GET",
+      url: "/api/content/navigation?locale=de"
+    });
+    expect(navigation.statusCode).toBe(200);
+    expect(navigation.json()).toMatchObject({
+      navigation: {
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            destination: "privacy",
+            href: "/de/datenschutz"
+          })
+        ])
+      }
+    });
 
     const cookie = await registerAndVerify(app, registration);
     const blockedBeforeAcceptance = await app.inject({
@@ -520,6 +548,46 @@ describe("auth API", () => {
         "content.draft_updated",
         "content.revision_published"
       ]);
+
+    const editorialCreated = await app.inject({
+      method: "POST",
+      url: "/api/admin/content/editorial/faq/drafts",
+      headers: { cookie }
+    });
+    expect(editorialCreated.statusCode).toBe(201);
+    const editorialDetail = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/editorial/faq",
+      headers: { cookie }
+    });
+    const faqDraft = editorialDetail.json().draft;
+    faqDraft.items[0].question.de = "Ist der KI-Anruf offengelegt?";
+    const editorialSaved = await app.inject({
+      method: "PUT",
+      url: "/api/admin/content/editorial/faq/draft",
+      headers: { cookie },
+      payload: { key: "faq", items: faqDraft.items }
+    });
+    expect(editorialSaved.statusCode).toBe(200);
+    const editorialPublished = await app.inject({
+      method: "POST",
+      url: "/api/admin/content/editorial/faq/publish",
+      headers: { cookie },
+      payload: { reason: "Publish reviewed FAQ wording" }
+    });
+    expect(editorialPublished.statusCode).toBe(200);
+    const faqAfter = await app.inject({
+      method: "GET",
+      url: "/api/content/faq?locale=de"
+    });
+    expect(faqAfter.json()).toMatchObject({
+      faq: {
+        revision: { number: 2 },
+        items: expect.arrayContaining([
+          expect.objectContaining({ question: "Ist der KI-Anruf offengelegt?" })
+        ])
+      }
+    });
   });
 
   it("requires a session and hides every call resource from other users", async () => {

@@ -1,9 +1,14 @@
 import type {
   ContentLocale,
   ContentPageKey,
-  ContentSection
+  ContentSection,
+  FaqItem,
+  NavigationItem
 } from "@callassist/contracts";
-import type { SeedContentPage } from "./content-repository";
+import type {
+  SeedContentPage,
+  SeedEditorialCollection
+} from "./content-repository";
 
 type SeedTranslation = {
   slug: string;
@@ -295,3 +300,87 @@ export const seededContentPages: SeedContentPage[] = definitions.flatMap(
       };
     })
 );
+
+const faqDefinition = definitions.find(({ key }) => key === "faq")!;
+const faqItems: FaqItem[] = faqDefinition.translations.en.sections.map(
+  (section, index) => ({
+    id: `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    sortOrder: index,
+    enabled: true,
+    question: {
+      en: section.heading,
+      de: faqDefinition.translations.de.sections[index]!.heading
+    },
+    answer: {
+      en: sectionAnswer(section),
+      de: sectionAnswer(faqDefinition.translations.de.sections[index]!)
+    }
+  })
+);
+
+const navigationItems: NavigationItem[] = [
+  navigationItem(1, "home", "header", "Home", "Start"),
+  navigationItem(2, "faq", "header", "FAQ", "FAQ"),
+  navigationItem(3, "support", "header", "Support", "Support"),
+  navigationItem(4, "privacy", "footer", "Privacy", "Datenschutz"),
+  navigationItem(5, "terms", "footer", "Terms", "Bedingungen"),
+  navigationItem(6, "acceptable_use", "footer", "Acceptable Use", "Nutzungsregeln"),
+  navigationItem(7, "faq", "footer", "FAQ", "FAQ"),
+  navigationItem(8, "support", "footer", "Support", "Support"),
+  navigationItem(9, "opt_out", "footer", "Block calls", "Anrufe sperren")
+];
+
+export const seededEditorialCollections: SeedEditorialCollection[] = [
+  {
+    collectionId: "80000000-0000-4000-8000-000000000001",
+    revision: {
+      key: "faq",
+      id: "81000000-0000-4000-8000-000000000001",
+      number: 1,
+      status: "published",
+      createdByUserId: null,
+      createdAt: publishedAt,
+      updatedAt: publishedAt,
+      publishedAt,
+      items: faqItems
+    }
+  },
+  {
+    collectionId: "80000000-0000-4000-8000-000000000002",
+    revision: {
+      key: "navigation",
+      id: "81000000-0000-4000-8000-000000000002",
+      number: 1,
+      status: "published",
+      createdByUserId: null,
+      createdAt: publishedAt,
+      updatedAt: publishedAt,
+      publishedAt,
+      items: navigationItems
+    }
+  }
+];
+
+function sectionAnswer(section: ContentSection) {
+  return [
+    ...section.paragraphs,
+    ...section.bullets.map((bullet) => `• ${bullet}`)
+  ].join("\n\n");
+}
+
+function navigationItem(
+  sequence: number,
+  destination: NavigationItem["destination"],
+  location: NavigationItem["location"],
+  en: string,
+  de: string
+): NavigationItem {
+  return {
+    id: `71000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+    sortOrder: sequence - 1,
+    enabled: true,
+    location,
+    destination,
+    label: { en, de }
+  };
+}

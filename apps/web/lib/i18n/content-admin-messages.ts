@@ -53,6 +53,8 @@ const en = {
   draftNotice: "Draft created from the current published revision.",
   unsaved: "Save this language before publishing.",
   logout: "Sign out",
+  editorialModels: "FAQ & Navigation",
+  faqItemsManaged: "Reusable FAQ questions and answers are managed in FAQ & Navigation. This page draft controls the standalone FAQ title, introduction, route, and SEO metadata.",
   revision: (number: number) => `Revision ${number}`,
   locales: (values: string[]) => `Languages: ${values.map((value) => value.toUpperCase()).join(", ")}`,
   pageName: {
@@ -119,6 +121,8 @@ const de: ContentAdminMessages = {
   draftNotice: "Entwurf aus der aktuell veröffentlichten Revision erstellt.",
   unsaved: "Speichern Sie diese Sprache vor der Veröffentlichung.",
   logout: "Abmelden",
+  editorialModels: "FAQ & Navigation",
+  faqItemsManaged: "Wiederverwendbare FAQ-Fragen und -Antworten werden unter FAQ & Navigation verwaltet. Dieser Seitenentwurf steuert Titel, Einleitung, Route und SEO-Metadaten der eigenständigen FAQ-Seite.",
   revision: (number: number) => `Revision ${number}`,
   locales: (values: string[]) => `Sprachen: ${values.map((value) => value.toUpperCase()).join(", ")}`,
   pageName: {

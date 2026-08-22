@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   contentDraftUpdateInputSchema,
+  editorialDraftUpdateInputSchema,
+  navigationItemSchema,
   onboardingAcceptanceInputSchema,
   publishedContentIndexSchema,
   publishedContentPageSchema
@@ -98,5 +100,35 @@ describe("content and onboarding contracts", () => {
         }]
       }]
     }).success).toBe(true);
+  });
+
+  it("accepts reusable bilingual FAQ items and internal-only navigation", () => {
+    const id = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    expect(editorialDraftUpdateInputSchema.safeParse({
+      key: "faq",
+      items: [{
+        id,
+        sortOrder: 0,
+        enabled: true,
+        question: { en: "How?", de: "Wie?" },
+        answer: { en: "Carefully.", de: "Sorgfältig." }
+      }]
+    }).success).toBe(true);
+    expect(navigationItemSchema.safeParse({
+      id,
+      sortOrder: 0,
+      enabled: true,
+      location: "footer",
+      destination: "privacy",
+      label: { en: "Privacy", de: "Datenschutz" }
+    }).success).toBe(true);
+    expect(navigationItemSchema.safeParse({
+      id,
+      sortOrder: 0,
+      enabled: true,
+      location: "footer",
+      destination: "https://example.com",
+      label: { en: "External", de: "Extern" }
+    }).success).toBe(false);
   });
 });

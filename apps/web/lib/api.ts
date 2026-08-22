@@ -5,6 +5,7 @@ import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
   AdminContentRevisionSummary,
+  AdminEditorialRevision,
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
@@ -12,6 +13,9 @@ import type {
   ContentLocale,
   ContentDraftUpdateInput,
   ContentPageKey,
+  EditorialCollectionKey,
+  EditorialDraftUpdateInput,
+  EditorialRevisionSummary,
   CreditUsage,
   CreateCallBriefInput,
   LoginInput,
@@ -22,6 +26,8 @@ import type {
   PromoCodeSummary,
   PromoRedemptionInput,
   PublishedContentIndex,
+  PublishedFaq,
+  PublishedNavigation,
   RecipientOptOutConfirmation,
   RecipientOptOutRequest,
   RegistrationInput,
@@ -133,6 +139,16 @@ export async function getPublishedContentIndex() {
   return apiRequest<PublishedContentIndex>("/api/content/index");
 }
 
+export async function getPublishedFaq(locale: ContentLocale) {
+  return apiRequest<{ faq: PublishedFaq }>(`/api/content/faq?locale=${locale}`);
+}
+
+export async function getPublishedNavigation(locale: ContentLocale) {
+  return apiRequest<{ navigation: PublishedNavigation }>(
+    `/api/content/navigation?locale=${locale}`
+  );
+}
+
 export async function listAdminContentPages() {
   return apiRequest<{ pages: AdminContentPageSummary[] }>(
     "/api/admin/content/pages"
@@ -189,6 +205,59 @@ export async function rollbackAdminContentRevision(
 ) {
   return apiRequest<{ draft: AdminContentRevisionSummary }>(
     `/api/admin/content/pages/${key}/revisions/${revisionNumber}/rollback`,
+    { method: "POST", body: JSON.stringify({ reason }) }
+  );
+}
+
+export async function getAdminEditorialCollection(key: EditorialCollectionKey) {
+  return apiRequest<{
+    published: AdminEditorialRevision | null;
+    draft: AdminEditorialRevision | null;
+  }>(`/api/admin/content/editorial/${key}`);
+}
+
+export async function listAdminEditorialRevisions(
+  key: EditorialCollectionKey
+) {
+  return apiRequest<{ revisions: EditorialRevisionSummary[] }>(
+    `/api/admin/content/editorial/${key}/revisions`
+  );
+}
+
+export async function createAdminEditorialDraft(key: EditorialCollectionKey) {
+  return apiRequest<{ draft: EditorialRevisionSummary }>(
+    `/api/admin/content/editorial/${key}/drafts`,
+    { method: "POST" }
+  );
+}
+
+export async function updateAdminEditorialDraft(
+  key: EditorialCollectionKey,
+  input: EditorialDraftUpdateInput
+) {
+  return apiRequest<{ draft: AdminEditorialRevision }>(
+    `/api/admin/content/editorial/${key}/draft`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export async function publishAdminEditorialDraft(
+  key: EditorialCollectionKey,
+  reason: string
+) {
+  return apiRequest<{ revision: EditorialRevisionSummary }>(
+    `/api/admin/content/editorial/${key}/publish`,
+    { method: "POST", body: JSON.stringify({ reason }) }
+  );
+}
+
+export async function rollbackAdminEditorialRevision(
+  key: EditorialCollectionKey,
+  revisionNumber: number,
+  reason: string
+) {
+  return apiRequest<{ draft: EditorialRevisionSummary }>(
+    `/api/admin/content/editorial/${key}/revisions/${revisionNumber}/rollback`,
     { method: "POST", body: JSON.stringify({ reason }) }
   );
 }

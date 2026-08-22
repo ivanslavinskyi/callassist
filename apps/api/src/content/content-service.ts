@@ -2,6 +2,8 @@ import type {
   ContentLocale,
   ContentDraftUpdateInput,
   ContentPageKey,
+  EditorialCollectionKey,
+  EditorialDraftUpdateInput,
   OnboardingAcceptanceInput
 } from "@callassist/contracts";
 import {
@@ -9,7 +11,10 @@ import {
   legalKey,
   type ContentRepository
 } from "./content-repository";
-import { seededContentPages } from "./seed-content";
+import {
+  seededContentPages,
+  seededEditorialCollections
+} from "./seed-content";
 
 export class ContentService {
   constructor(
@@ -19,6 +24,9 @@ export class ContentService {
 
   async initialize() {
     await this.repository.initializeSeedContent(seededContentPages);
+    await this.repository.initializeSeedEditorialCollections(
+      seededEditorialCollections
+    );
   }
 
   async getPublishedPage(locale: ContentLocale, slug: string) {
@@ -27,6 +35,14 @@ export class ContentService {
 
   async listPublishedContentIndex() {
     return this.repository.listPublishedContentIndex();
+  }
+
+  async getPublishedFaq(locale: ContentLocale) {
+    return this.repository.getPublishedFaq(locale);
+  }
+
+  async getPublishedNavigation(locale: ContentLocale) {
+    return this.repository.getPublishedNavigation(locale);
   }
 
   async getOnboardingStatus(userId: string, locale: ContentLocale) {
@@ -118,6 +134,73 @@ export class ContentService {
     reason: string
   ) {
     return this.repository.createRollbackDraft(
+      actorUserId,
+      key,
+      sourceRevisionNumber,
+      reason,
+      this.now().toISOString()
+    );
+  }
+
+  async getAdminEditorialCollection(key: EditorialCollectionKey) {
+    const collection = await this.repository.getAdminEditorialCollection(key);
+    if (!collection.published && !collection.draft) {
+      throw new ContentRepositoryError("EDITORIAL_COLLECTION_NOT_FOUND");
+    }
+    return collection;
+  }
+
+  async listAdminEditorialRevisions(key: EditorialCollectionKey) {
+    return this.repository.listAdminEditorialRevisions(key);
+  }
+
+  async createEditorialDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey
+  ) {
+    return this.repository.createEditorialDraft(
+      actorUserId,
+      key,
+      this.now().toISOString()
+    );
+  }
+
+  async updateEditorialDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    input: EditorialDraftUpdateInput
+  ) {
+    if (key !== input.key) {
+      throw new ContentRepositoryError("EDITORIAL_COLLECTION_MISMATCH");
+    }
+    return this.repository.updateEditorialDraft(
+      actorUserId,
+      key,
+      input,
+      this.now().toISOString()
+    );
+  }
+
+  async publishEditorialDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    reason: string
+  ) {
+    return this.repository.publishEditorialDraft(
+      actorUserId,
+      key,
+      reason,
+      this.now().toISOString()
+    );
+  }
+
+  async createEditorialRollbackDraft(
+    actorUserId: string,
+    key: EditorialCollectionKey,
+    sourceRevisionNumber: number,
+    reason: string
+  ) {
+    return this.repository.createEditorialRollbackDraft(
       actorUserId,
       key,
       sourceRevisionNumber,

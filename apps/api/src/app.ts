@@ -9,6 +9,8 @@ import {
   callBriefStatusSchema,
   contentAdminActionInputSchema,
   contentDraftUpdateInputSchema,
+  editorialCollectionKeySchema,
+  editorialDraftUpdateInputSchema,
   createCallBriefInputSchema,
   loginInputSchema,
   contentLocaleSchema,
@@ -275,6 +277,42 @@ export function buildApp({
         .header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
         .send(await contentService.listPublishedContentIndex());
     });
+
+    app.get<{ Querystring: { locale?: string } }>(
+      "/api/content/faq",
+      async (request, reply) => {
+        const locale = contentLocaleSchema.safeParse(request.query.locale);
+        if (!locale.success) {
+          return reply.status(400).send({ error: "INVALID_CONTENT_LOCALE" });
+        }
+        const faq = await contentService.getPublishedFaq(locale.data);
+        if (!faq) {
+          return reply.status(404).send({ error: "EDITORIAL_COLLECTION_NOT_FOUND" });
+        }
+        return reply
+          .header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+          .send({ faq });
+      }
+    );
+
+    app.get<{ Querystring: { locale?: string } }>(
+      "/api/content/navigation",
+      async (request, reply) => {
+        const locale = contentLocaleSchema.safeParse(request.query.locale);
+        if (!locale.success) {
+          return reply.status(400).send({ error: "INVALID_CONTENT_LOCALE" });
+        }
+        const navigation = await contentService.getPublishedNavigation(
+          locale.data
+        );
+        if (!navigation) {
+          return reply.status(404).send({ error: "EDITORIAL_COLLECTION_NOT_FOUND" });
+        }
+        return reply
+          .header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+          .send({ navigation });
+      }
+    );
 
     app.get<{
       Params: { slug: string };
@@ -661,6 +699,170 @@ export function buildApp({
           try {
             return reply.status(201).send({
               draft: await contentService.createRollbackDraft(
+                actor.id,
+                key.data,
+                revisionNumber,
+                input.data.reason
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.get<{ Params: { key: string } }>(
+        "/api/admin/content/editorial/:key",
+        async (request, reply) => {
+          const actor = await authorizeContentRead(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          try {
+            return reply
+              .header("Cache-Control", "private, no-store")
+              .send(await contentService.getAdminEditorialCollection(key.data));
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.get<{ Params: { key: string } }>(
+        "/api/admin/content/editorial/:key/revisions",
+        async (request, reply) => {
+          const actor = await authorizeContentRead(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send({
+              revisions: await contentService.listAdminEditorialRevisions(
+                key.data
+              )
+            });
+        }
+      );
+
+      app.post<{ Params: { key: string } }>(
+        "/api/admin/content/editorial/:key/drafts",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          try {
+            return reply.status(201).send({
+              draft: await contentService.createEditorialDraft(
+                actor.id,
+                key.data
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.put<{ Params: { key: string } }>(
+        "/api/admin/content/editorial/:key/draft",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          const input = editorialDraftUpdateInputSchema.safeParse(request.body);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          if (!input.success) {
+            return reply.status(400).send({
+              error: "INVALID_EDITORIAL_DRAFT",
+              issues: input.error.flatten()
+            });
+          }
+          try {
+            return reply.send({
+              draft: await contentService.updateEditorialDraft(
+                actor.id,
+                key.data,
+                input.data
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.post<{ Params: { key: string } }>(
+        "/api/admin/content/editorial/:key/publish",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          const input = contentAdminActionInputSchema.safeParse(request.body);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          if (!input.success) {
+            return reply.status(400).send({ error: "INVALID_CONTENT_ACTION" });
+          }
+          try {
+            return reply.send({
+              revision: await contentService.publishEditorialDraft(
+                actor.id,
+                key.data,
+                input.data.reason
+              )
+            });
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.post<{
+        Params: { key: string; revisionNumber: string };
+      }>(
+        "/api/admin/content/editorial/:key/revisions/:revisionNumber/rollback",
+        async (request, reply) => {
+          const actor = await authorizeContentMutation(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          const revisionNumber = Number(request.params.revisionNumber);
+          const input = contentAdminActionInputSchema.safeParse(request.body);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          if (
+            !Number.isInteger(revisionNumber) ||
+            revisionNumber < 1 ||
+            !input.success
+          ) {
+            return reply.status(400).send({ error: "INVALID_CONTENT_ACTION" });
+          }
+          try {
+            return reply.status(201).send({
+              draft: await contentService.createEditorialRollbackDraft(
                 actor.id,
                 key.data,
                 revisionNumber,
@@ -1487,17 +1689,28 @@ function sendContentError(
   error: unknown
 ) {
   if (error instanceof ContentRepositoryError) {
-    const status = ["LEGAL_REVISION_CHANGED", "CONTENT_DRAFT_EXISTS"]
+    const status = [
+      "LEGAL_REVISION_CHANGED",
+      "CONTENT_DRAFT_EXISTS",
+      "EDITORIAL_DRAFT_EXISTS",
+      "EDITORIAL_DESTINATION_UNAVAILABLE"
+    ]
       .includes(error.code)
       ? 409
       : [
           "USER_NOT_FOUND",
           "CONTENT_PAGE_NOT_FOUND",
           "CONTENT_DRAFT_NOT_FOUND",
-          "CONTENT_REVISION_NOT_FOUND"
+          "CONTENT_REVISION_NOT_FOUND",
+          "EDITORIAL_COLLECTION_NOT_FOUND",
+          "EDITORIAL_DRAFT_NOT_FOUND",
+          "EDITORIAL_REVISION_NOT_FOUND"
         ].includes(error.code)
         ? 404
-        : error.code === "CONTENT_REACCEPTANCE_INVALID"
+        : [
+            "CONTENT_REACCEPTANCE_INVALID",
+            "EDITORIAL_COLLECTION_MISMATCH"
+          ].includes(error.code)
           ? 400
           : 503;
     return reply.status(status).send({ error: error.code });

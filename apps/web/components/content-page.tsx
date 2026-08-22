@@ -1,7 +1,17 @@
-import type { PublishedContentPage } from "@callassist/contracts";
+import type {
+  PublishedContentPage,
+  PublishedFaq
+} from "@callassist/contracts";
 import { AppShell } from "./app-shell";
+import { FaqList } from "./faq-list";
 
-export function ContentPage({ page }: { page: PublishedContentPage }) {
+export function ContentPage({
+  page,
+  faq = null
+}: {
+  page: PublishedContentPage;
+  faq?: PublishedFaq | null;
+}) {
   const locale = page.locale === "de" ? "de-CH" : "en-CH";
   const published = new Intl.DateTimeFormat(locale, {
     dateStyle: "medium"
@@ -21,6 +31,7 @@ export function ContentPage({ page }: { page: PublishedContentPage }) {
             {" · "}{published}
           </small>
         </header>
+        {page.key === "faq" && faq ? <FaqList items={faq.items} /> : (
         <div className="content-sections">
           {page.sections.map((section) => (
             <section key={section.heading}>
@@ -36,6 +47,7 @@ export function ContentPage({ page }: { page: PublishedContentPage }) {
             </section>
           ))}
         </div>
+        )}
       </main>
     </AppShell>
   );

@@ -45,7 +45,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 ## Known partial implementation and beta gaps
 
-- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, and localized CMS Core exist. Landing/navigation/media administration, reviewed operator/contact details, and production release work remain.
+- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, localized CMS Core, and structured FAQ/navigation administration exist. Landing/media administration, reviewed operator/contact details, and production release work remain.
 - **PARTIAL — localization:** operational UI, public landing, and CMS-managed structured legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Route-derived canonical/hreflang/robots/sitemap/OG metadata and translation-freshness reporting exist; structured global/organization settings and additional editorial models remain.
 - **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
@@ -56,7 +56,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 ## Completed checkpoint — legal content and onboarding
 
-- [x] Add the minimal final-shape content foundation: logical pages, localized slugs, immutable published revision snapshots, EN/DE publication data, and translation-source revision tracking. Admin editing, preview, rollback, media, and navigation management remain the following CMS checkpoint.
+- [x] Add the minimal final-shape content foundation: logical pages, localized slugs, immutable published revision snapshots, EN/DE publication data, and translation-source revision tracking. Admin editing, preview, rollback, and navigation management now exist; Landing blocks and Media remain.
 - [x] Publish local pre-beta EN/DE Privacy, Terms, Acceptable Use, Support, and FAQ routes from structured content. These implementation drafts do not satisfy the separate Swiss legal/privacy review release gate.
 - [x] Store append-only user acceptance against the current published Terms and AUP revision IDs with timestamp and explicit onboarding acknowledgements.
 - [x] Require current acceptance server-side before rendering `/app` or current `/admin` pages and before authorizing call/credit/admin APIs; redirect authenticated users to localized onboarding when re-acceptance is required.
@@ -75,10 +75,19 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [x] Generate and test canonical URLs, published-localization-only hreflang plus `x-default`, index/follow metadata, localized Open Graph/Twitter metadata and 1200×630 images, `robots.txt`, and a database-driven sitemap.
 - [x] Add an RBAC-scoped localized `/admin/seo` report for `content_editor`, admin, and superadmin with route/index state, title/description bounds, canonical, hreflang, OG image, and stale-translation warnings.
 
-## Next checkpoint — structured editorial models
+## Completed checkpoint — reusable FAQ and Navigation
 
-- [ ] Add structured navigation and reusable FAQ management; defer the media library until a real asset workflow is required.
-- [ ] Model the localized Landing as reviewed ordered blocks and publish it through the existing revision boundary.
+- [x] Add separately revisioned bilingual FAQ and Navigation collections with one private draft, immutable published snapshots, history, rollback-as-new-draft, and append-only actor/reason/time audit events.
+- [x] Reuse the published FAQ collection on the standalone FAQ route and expose locale-specific public FAQ data without drafts or audit metadata.
+- [x] Restrict navigation destinations to known internal entities, resolve CMS page references to published locale-specific slugs, reject unresolved enabled destinations, and render the published header/footer collection with a safe static availability fallback.
+- [x] Add an RBAC-scoped `/admin/content/editorial` editor for order, enable/disable, EN/DE FAQ copy, internal navigation labels/location/destination, publish, history, and rollback.
+- [x] Cover contracts, memory/PostgreSQL repositories, immutable storage/audit triggers, public/admin APIs, and the web API client.
+
+## Next checkpoint — revision-managed Landing
+
+- [ ] Model localized Hero, How it works, Use cases, Safety & Privacy, Languages, reusable FAQ, and CTA as a bounded ordered/enabled block union rather than HTML or a universal page builder.
+- [ ] Publish Landing through the same private-draft, immutable-snapshot, preview, history, rollback, and audit boundary; make `/en` and `/de` read only the latest published revision.
+- [ ] Include Landing freshness and publication state in the existing SEO audit/index boundary. Defer the media library until a real asset workflow is required.
 
 # Public Beta Foundation
 
@@ -185,12 +194,12 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — localized CMS and publishing
 
-- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`. **Partial:** RBAC-scoped EN/DE Page/FAQ editing plus `/admin/seo` reporting are implemented; Landing blocks, reusable FAQ/navigation, and Media remain.
+- [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`. **Partial:** RBAC-scoped EN/DE Pages, reusable FAQ, internal Navigation, and `/admin/seo` reporting are implemented; Landing blocks and Media remain.
 - [x] Model logical `content_pages` separately from localized routing/editorial data, allowing `/en/privacy` and `/de/datenschutz`; expose draft/published state and editor-facing revision metadata.
 - [ ] Support `page`, `landing`, future `article`; no blog or universal builder for beta.
 - [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment. **Partial:** the full audited editorial lifecycle and database publication are implemented; public reads pick up publication through the existing 60-second revalidation window, while targeted on-publish revalidation remains.
-- [ ] Model Landing as ordered/enabled localized Hero, How it works, Use cases, Safety & Privacy, Languages, FAQ, CTA blocks; model reusable localized FAQ items.
-- [ ] Prefer navigation references to known internal entities and validate broken links.
+- [ ] Model Landing as ordered/enabled localized Hero, How it works, Use cases, Safety & Privacy, Languages, FAQ, CTA blocks. Reusable localized FAQ items are implemented as a separately published collection.
+- [x] Prefer navigation references to known internal entities and reject enabled destinations that cannot resolve for both public locales.
 - [ ] Add media metadata: file/MIME/dimensions/size, EN/DE alt, uploader/time, usage references.
 
 ### P0 — legal/localization/SEO correctness

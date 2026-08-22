@@ -3,7 +3,8 @@ import "server-only";
 import type {
   ContentLocale,
   PublishedContentIndex,
-  PublishedContentPage
+  PublishedContentPage,
+  PublishedFaq
 } from "@callassist/contracts";
 import { cache } from "react";
 
@@ -39,4 +40,19 @@ export const getPublishedContentIndex = cache(async (): Promise<
     throw new Error(`Unable to load published content index (HTTP ${response.status})`);
   }
   return response.json() as Promise<PublishedContentIndex>;
+});
+
+export const getPublishedFaq = cache(async (
+  locale: ContentLocale
+): Promise<PublishedFaq | null> => {
+  const response = await fetch(
+    `${internalApiUrl}/api/content/faq?locale=${locale}`,
+    { next: { revalidate: 60 } }
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Unable to load published FAQ (HTTP ${response.status})`);
+  }
+  const payload = await response.json() as { faq: PublishedFaq };
+  return payload.faq;
 });
