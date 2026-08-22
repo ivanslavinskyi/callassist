@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  CALL_TELEMETRY_SCHEMA_VERSION,
+  callTelemetryEventInputSchema,
+  describeCallTelemetryEvent,
+  durableCallEventSchema,
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput,
   parseSwissDestinationPhone,
@@ -7,8 +11,14 @@ import {
   type ApprovalRequest,
   type CallBrief,
   type CallCompilation,
+  type CallTelemetryEventInput,
+  type CallTelemetryEventName,
+  type CallTelemetrySeverity,
+  type CallTelemetrySource,
+  type CallTelemetryStage,
   type CreditTransaction,
   type CreditUsage,
+  type DurableCallEvent,
   type CallRecording,
   type CallLocale,
   type CallSnapshot,
@@ -25,6 +35,7 @@ import { decryptJson, encryptJson } from "../security/encryption";
 import {
   CallRepositoryError,
   buildRuntimeBriefFields,
+  connectedProviderStatuses,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
@@ -126,6 +137,21 @@ type FinalTranscriptRow = {
   createdAt: DatabaseDate;
   updatedAt: DatabaseDate;
   completedAt: DatabaseDate | null;
+};
+
+type CallTelemetryEventRow = {
+  id: string;
+  callBriefId: string;
+  callAttemptId: string | null;
+  userId: string | null;
+  sequence: number;
+  schemaVersion: number;
+  eventName: CallTelemetryEventName;
+  source: CallTelemetrySource;
+  stage: CallTelemetryStage;
+  severity: CallTelemetrySeverity;
+  metadata: unknown | string;
+  occurredAt: DatabaseDate;
 };
 
 type CreditTransactionRow = Omit<CreditTransaction, "createdAt"> & {
@@ -292,6 +318,24 @@ export class PostgresCallRepository implements CallRepository {
         policyDecision: compilation.policyDecision.status,
         snapshotHash: compilation.snapshotHash
       });
+      await this.#appendTelemetry(transaction, id, {
+        idempotencyKey: `brief:${compilation.revision}:created`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "brief.created",
+          metadata: {
+            locale: parsed.locale,
+            compilationRevision: compilation.revision,
+            status: runtime.status
+          }
+        }
+      });
+      await this.#appendCompilationTelemetry(
+        transaction,
+        id,
+        compilation,
+        now.toISOString()
+      );
     });
 
     const snapshot = await this.#require(id);
@@ -814,6 +858,12 @@ export class PostgresCallRepository implements CallRepository {
         revision: String(compilation.revision),
         status: runtime.status
       });
+      await this.#appendCompilationTelemetry(
+        transaction,
+        id,
+        compilation,
+        now.toISOString()
+      );
     });
 
     return this.#require(id);
@@ -899,6 +949,39 @@ export class PostgresCallRepository implements CallRepository {
     };
   }
 
+  async appendCallTelemetryEvent(
+    id: string,
+    input: CallTelemetryEventInput
+  ) {
+    return this.#sql.begin((transaction) =>
+      this.#appendTelemetry(transaction, id, input)
+    );
+  }
+
+  async listCallTelemetryEvents(id: string) {
+    const call = await this.#sql`SELECT id FROM call_briefs WHERE id = ${id}`;
+    if (call.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const rows = await this.#sql<CallTelemetryEventRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        call_attempt_id AS "callAttemptId",
+        user_id AS "userId",
+        sequence,
+        schema_version AS "schemaVersion",
+        event_name AS "eventName",
+        source,
+        stage,
+        severity,
+        metadata,
+        occurred_at AS "occurredAt"
+      FROM call_events
+      WHERE call_brief_id = ${id}
+      ORDER BY sequence ASC
+    `;
+    return rows.map(mapCallTelemetryEvent);
+  }
+
   async approveCompilation(id: string) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
@@ -941,6 +1024,14 @@ export class PostgresCallRepository implements CallRepository {
       await this.#audit(transaction, id, "call.compilation_approved", {
         snapshotHash: compilation.snapshotHash,
         status: "ready"
+      });
+      await this.#appendTelemetry(transaction, id, {
+        idempotencyKey: `compilation:${compilation.revision}:approved`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "compilation.approved",
+          metadata: { revision: compilation.revision }
+        }
       });
     });
     return this.#require(id);
@@ -1125,6 +1216,26 @@ export class PostgresCallRepository implements CallRepository {
       await this.#audit(transaction, id, "call.status_changed", {
         status: "dialing"
       });
+      await this.#appendTelemetry(transaction, id, {
+        callAttemptId: attemptId,
+        idempotencyKey: `attempt:${attemptId}:started`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "attempt.started",
+          metadata: { provider: input.provider }
+        }
+      });
+      if (userId) {
+        await this.#appendTelemetry(transaction, id, {
+          callAttemptId: attemptId,
+          idempotencyKey: `attempt:${attemptId}:credit:reserved`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "credit.reserved",
+            metadata: { credits: 1 }
+          }
+        });
+      }
     });
     const attempt = await this.getLatestAttempt(id);
     if (!attempt || attempt.id !== attemptId) {
@@ -1139,7 +1250,12 @@ export class PostgresCallRepository implements CallRepository {
     providerStatus: string
   ) {
     const row = await this.#sql.begin(async (transaction) => {
-      const [updated] = await transaction<{ callId: string }[]>`
+      const [updated] = await transaction<
+        {
+          callId: string;
+          provider: CallAttemptRecord["provider"];
+        }[]
+      >`
         UPDATE call_attempts
         SET
           provider_call_id = ${providerCallId},
@@ -1149,14 +1265,44 @@ export class PostgresCallRepository implements CallRepository {
           END
         WHERE id = ${attemptId}
           AND (provider_call_id IS NULL OR provider_call_id = ${providerCallId})
-        RETURNING call_brief_id AS "callId"
+        RETURNING call_brief_id AS "callId", provider
       `;
       if (!updated) return null;
-      await this.#settleAttempt(
+      const settlement = await this.#settleAttempt(
         transaction,
         attemptId,
         creditSettlementForStatus("dialing", providerStatus)
       );
+      const safeProviderStatus = safeTelemetryCode(
+        providerStatus,
+        "unknown_provider_status"
+      );
+      await this.#appendTelemetry(transaction, updated.callId, {
+        callAttemptId: attemptId,
+        idempotencyKey: `attempt:${attemptId}:provider:created`,
+        occurredAt: new Date().toISOString(),
+        payload: {
+          name: "provider.call_created",
+          metadata: {
+            provider: updated.provider,
+            providerStatus: safeProviderStatus
+          }
+        }
+      });
+      await this.#appendConnectionTelemetry(
+        transaction,
+        updated.callId,
+        attemptId,
+        providerStatus
+      );
+      if (settlement) {
+        await this.#appendSettlementTelemetry(
+          transaction,
+          updated.callId,
+          attemptId,
+          settlement
+        );
+      }
       return updated;
     });
     if (!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
@@ -1218,11 +1364,50 @@ export class PostgresCallRepository implements CallRepository {
           END
         WHERE id = ${row.attemptId}
       `;
-      await this.#settleAttempt(
+      const settlement = await this.#settleAttempt(
         transaction,
         row.attemptId,
         creditSettlementForStatus(callStatus, providerStatus)
       );
+      const occurredAt = now.toISOString();
+      const safeProviderStatus = safeTelemetryCode(
+        providerStatus,
+        "unknown_provider_status"
+      );
+      await this.#appendTelemetry(transaction, row.callId, {
+        callAttemptId: row.attemptId,
+        idempotencyKey: `attempt:${row.attemptId}:provider-status:${safeProviderStatus}:${callStatus}`,
+        occurredAt,
+        payload: {
+          name: "provider.status_changed",
+          metadata: {
+            providerStatus: safeProviderStatus,
+            callStatus,
+            applied: applyCallStatus
+          }
+        }
+      });
+      if (
+        !terminalStatuses.has(row.currentStatus) &&
+        connectedProviderStatuses.has(providerStatus)
+      ) {
+        await this.#appendConnectionTelemetry(
+          transaction,
+          row.callId,
+          row.attemptId,
+          providerStatus,
+          occurredAt
+        );
+      }
+      if (settlement) {
+        await this.#appendSettlementTelemetry(
+          transaction,
+          row.callId,
+          row.attemptId,
+          settlement,
+          occurredAt
+        );
+      }
 
       if (applyCallStatus) {
         await transaction`
@@ -1266,11 +1451,33 @@ export class PostgresCallRepository implements CallRepository {
       `;
       if (updated.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
       await this.#syncAttempt(transaction, id, status, now);
-      await this.#settleLatestAttempt(
+      const settlement = await this.#settleLatestAttempt(
         transaction,
         id,
         creditSettlementForStatus(status)
       );
+      const attemptId = settlement?.attemptId ?? await this.#latestAttemptId(
+        transaction,
+        id
+      );
+      if (attemptId && status === "in_progress") {
+        await this.#appendConnectionTelemetry(
+          transaction,
+          id,
+          attemptId,
+          "in-progress",
+          now.toISOString()
+        );
+      }
+      if (settlement) {
+        await this.#appendSettlementTelemetry(
+          transaction,
+          id,
+          settlement.attemptId,
+          settlement.settlement,
+          now.toISOString()
+        );
+      }
       await this.#audit(transaction, id, "call.status_changed", { status });
     });
     return this.#require(id);
@@ -1430,7 +1637,20 @@ export class PostgresCallRepository implements CallRepository {
         WHERE id = ${id}
       `;
       await this.#syncAttempt(transaction, id, "stopped", now);
-      await this.#settleLatestAttempt(transaction, id, "call_refund");
+      const settlement = await this.#settleLatestAttempt(
+        transaction,
+        id,
+        "call_refund"
+      );
+      if (settlement) {
+        await this.#appendSettlementTelemetry(
+          transaction,
+          id,
+          settlement.attemptId,
+          settlement.settlement,
+          now.toISOString()
+        );
+      }
       await transaction`
         UPDATE call_recordings
         SET status = 'processing', updated_at = ${now}
@@ -1508,6 +1728,15 @@ export class PostgresCallRepository implements CallRepository {
       await this.#audit(transaction, id, "recording.consent_granted", {
         recordingId
       });
+      await this.#appendTelemetry(transaction, id, {
+        callAttemptId: attempt.attemptId,
+        idempotencyKey: `attempt:${attempt.attemptId}:consent:granted`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "consent.granted",
+          metadata: { method: "dtmf_1" }
+        }
+      });
       return attempt.providerCallId;
     });
 
@@ -1525,7 +1754,9 @@ export class PostgresCallRepository implements CallRepository {
   ) {
     const now = new Date();
     const [row] = await this.#sql.begin(async (transaction) => {
-      const rows = await transaction<{ callId: string }[]>`
+      const rows = await transaction<
+        { callId: string; callAttemptId: string }[]
+      >`
         UPDATE call_recordings
         SET
           provider_recording_id = COALESCE(
@@ -1548,7 +1779,9 @@ export class PostgresCallRepository implements CallRepository {
             provider_recording_id IS NULL
             OR provider_recording_id = ${providerRecordingId}
           )
-        RETURNING call_brief_id AS "callId"
+        RETURNING
+          call_brief_id AS "callId",
+          call_attempt_id AS "callAttemptId"
       `;
       const updated = rows[0];
       if (updated) {
@@ -1556,6 +1789,20 @@ export class PostgresCallRepository implements CallRepository {
           providerRecordingId,
           providerStatus,
           recordingId
+        });
+        await this.#appendTelemetry(transaction, updated.callId, {
+          callAttemptId: updated.callAttemptId,
+          idempotencyKey: `recording:${recordingId}:started`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "recording.started",
+            metadata: {
+              providerStatus: safeTelemetryCode(
+                providerStatus,
+                "unknown_provider_status"
+              )
+            }
+          }
         });
       }
       return rows;
@@ -1567,20 +1814,37 @@ export class PostgresCallRepository implements CallRepository {
   async failRecording(recordingId: string, failureReason: string) {
     const now = new Date();
     const [row] = await this.#sql.begin(async (transaction) => {
-      const rows = await transaction<{ callId: string }[]>`
+      const rows = await transaction<
+        { callId: string; callAttemptId: string }[]
+      >`
         UPDATE call_recordings
         SET
           status = 'failed',
           failure_reason = ${failureReason},
           updated_at = ${now}
         WHERE id = ${recordingId} AND status IN ('starting', 'recording')
-        RETURNING call_brief_id AS "callId"
+        RETURNING
+          call_brief_id AS "callId",
+          call_attempt_id AS "callAttemptId"
       `;
       const updated = rows[0];
       if (updated) {
         await this.#audit(transaction, updated.callId, "recording.failed", {
           failureReason,
           recordingId
+        });
+        const failureCode = safeTelemetryCode(
+          failureReason,
+          "recording_failed"
+        );
+        await this.#appendTelemetry(transaction, updated.callId, {
+          callAttemptId: updated.callAttemptId,
+          idempotencyKey: `recording:${recordingId}:failed:${failureCode}`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "recording.failed",
+            metadata: { failureCode }
+          }
         });
       }
       return rows;
@@ -1595,14 +1859,20 @@ export class PostgresCallRepository implements CallRepository {
       const [row] = await transaction<
         {
           callId: string;
+          callAttemptId: string;
           providerRecordingId: string | null;
           recordingStatus: CallRecording["status"];
+          durationSeconds: number | null;
+          channels: number | null;
         }[]
       >`
         SELECT
           call_recordings.call_brief_id AS "callId",
+          call_recordings.call_attempt_id AS "callAttemptId",
           call_recordings.provider_recording_id AS "providerRecordingId",
-          call_recordings.status AS "recordingStatus"
+          call_recordings.status AS "recordingStatus",
+          call_recordings.duration_seconds AS "durationSeconds",
+          call_recordings.channels
         FROM call_recordings
         JOIN call_attempts
           ON call_attempts.id = call_recordings.call_attempt_id
@@ -1673,6 +1943,44 @@ export class PostgresCallRepository implements CallRepository {
         providerStatus: input.providerStatus,
         recordingId: input.recordingId
       });
+      if (status === "recording" && input.providerStatus === "in-progress") {
+        await this.#appendTelemetry(transaction, row.callId, {
+          callAttemptId: row.callAttemptId,
+          idempotencyKey: `recording:${input.recordingId}:started`,
+          occurredAt: startedAt.toISOString(),
+          payload: {
+            name: "recording.started",
+            metadata: { providerStatus: "in-progress" }
+          }
+        });
+      } else if (status === "available" && input.providerStatus === "completed") {
+        await this.#appendTelemetry(transaction, row.callId, {
+          callAttemptId: row.callAttemptId,
+          idempotencyKey: `recording:${input.recordingId}:completed`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "recording.completed",
+            metadata: {
+              durationSeconds: input.durationSeconds ?? row.durationSeconds,
+              channels: input.channels ?? row.channels
+            }
+          }
+        });
+      } else if (status === "failed" && input.providerStatus === "absent") {
+        const failureCode = safeTelemetryCode(
+          input.failureReason,
+          "recording_absent"
+        );
+        await this.#appendTelemetry(transaction, row.callId, {
+          callAttemptId: row.callAttemptId,
+          idempotencyKey: `recording:${input.recordingId}:failed:${failureCode}`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "recording.failed",
+            metadata: { failureCode }
+          }
+        });
+      }
       return row.callId;
     });
     return callId ? this.#recordingMutation(callId) : null;
@@ -1684,11 +1992,13 @@ export class PostgresCallRepository implements CallRepository {
       const [recording] = await transaction<
         {
           callId: string;
+          callAttemptId: string;
           recordingStatus: CallRecording["status"];
         }[]
       >`
         SELECT
           call_recordings.call_brief_id AS "callId",
+          call_recordings.call_attempt_id AS "callAttemptId",
           call_recordings.status AS "recordingStatus"
         FROM call_recordings
         WHERE call_recordings.id = ${recordingId}
@@ -1715,6 +2025,7 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         return null;
       }
+      const transcriptId = transcript?.transcriptId ?? randomUUID();
 
       if (transcript) {
         await transaction`
@@ -1739,7 +2050,7 @@ export class PostgresCallRepository implements CallRepository {
             created_at,
             updated_at
           ) VALUES (
-            ${randomUUID()},
+            ${transcriptId},
             ${recordingId},
             'processing',
             ${model},
@@ -1751,6 +2062,18 @@ export class PostgresCallRepository implements CallRepository {
       await this.#audit(transaction, recording.callId, "final_transcript.started", {
         model,
         recordingId
+      });
+      await this.#appendTelemetry(transaction, recording.callId, {
+        callAttemptId: recording.callAttemptId,
+        idempotencyKey: `transcription:${transcriptId}:started:${now.toISOString()}`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "transcription.started",
+          metadata: {
+            model: safeTelemetryCode(model, "unknown_model"),
+            retry: Boolean(transcript)
+          }
+        }
       });
       return recording.callId;
     });
@@ -1767,11 +2090,20 @@ export class PostgresCallRepository implements CallRepository {
     const segmentsCiphertext = encryptJson(segments, this.#encryptionKey);
     const callId = await this.#sql.begin(async (transaction) => {
       const [row] = await transaction<
-        { callId: string; retentionDays: number }[]
+        {
+          callId: string;
+          callAttemptId: string;
+          retentionDays: number;
+          transcriptId: string;
+          model: string;
+        }[]
       >`
         SELECT
           call_recordings.call_brief_id AS "callId",
-          call_briefs.audio_retention_days AS "retentionDays"
+          call_recordings.call_attempt_id AS "callAttemptId",
+          call_briefs.audio_retention_days AS "retentionDays",
+          final_transcripts.id AS "transcriptId",
+          final_transcripts.model
         FROM call_recordings
         JOIN call_briefs ON call_briefs.id = call_recordings.call_brief_id
         JOIN final_transcripts
@@ -1804,6 +2136,18 @@ export class PostgresCallRepository implements CallRepository {
       await this.#audit(transaction, row.callId, "final_transcript.completed", {
         recordingId
       });
+      await this.#appendTelemetry(transaction, row.callId, {
+        callAttemptId: row.callAttemptId,
+        idempotencyKey: `transcription:${row.transcriptId}:completed:${now.toISOString()}`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "transcription.completed",
+          metadata: {
+            model: safeTelemetryCode(row.model, "unknown_model"),
+            segmentCount: segments.length
+          }
+        }
+      });
       return row.callId;
     });
     return this.#finalTranscriptMutation(callId);
@@ -1811,8 +2155,28 @@ export class PostgresCallRepository implements CallRepository {
 
   async failFinalTranscript(recordingId: string, failureReason: string) {
     const now = new Date();
-    const [row] = await this.#sql.begin(async (transaction) => {
-      const rows = await transaction<{ callId: string }[]>`
+    const row = await this.#sql.begin(async (transaction) => {
+      const [transcript] = await transaction<
+        {
+          callId: string;
+          callAttemptId: string;
+          transcriptId: string;
+          model: string;
+        }[]
+      >`
+        SELECT
+          call_recordings.call_brief_id AS "callId",
+          call_recordings.call_attempt_id AS "callAttemptId",
+          final_transcripts.id AS "transcriptId",
+          final_transcripts.model
+        FROM final_transcripts
+        JOIN call_recordings
+          ON call_recordings.id = final_transcripts.call_recording_id
+        WHERE call_recordings.id = ${recordingId}
+        FOR UPDATE OF final_transcripts
+      `;
+      if (!transcript) return null;
+      await transaction`
         UPDATE final_transcripts
         SET
           status = 'failed',
@@ -1821,21 +2185,29 @@ export class PostgresCallRepository implements CallRepository {
           failure_reason = ${failureReason},
           updated_at = ${now},
           completed_at = NULL
-        WHERE call_recording_id = ${recordingId}
-        RETURNING (
-          SELECT call_brief_id
-          FROM call_recordings
-          WHERE id = ${recordingId}
-        ) AS "callId"
+        WHERE id = ${transcript.transcriptId}
       `;
-      const updated = rows[0];
-      if (updated) {
-        await this.#audit(transaction, updated.callId, "final_transcript.failed", {
-          failureReason,
-          recordingId
-        });
-      }
-      return rows;
+      await this.#audit(transaction, transcript.callId, "final_transcript.failed", {
+        failureReason,
+        recordingId
+      });
+      const failureCode = safeTelemetryCode(
+        failureReason,
+        "transcription_failed"
+      );
+      await this.#appendTelemetry(transaction, transcript.callId, {
+        callAttemptId: transcript.callAttemptId,
+        idempotencyKey: `transcription:${transcript.transcriptId}:failed:${now.toISOString()}`,
+        occurredAt: now.toISOString(),
+        payload: {
+          name: "transcription.failed",
+          metadata: {
+            model: safeTelemetryCode(transcript.model, "unknown_model"),
+            failureCode
+          }
+        }
+      });
+      return transcript;
     });
     if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
     return this.#finalTranscriptMutation(row.callId);
@@ -1903,6 +2275,7 @@ export class PostgresCallRepository implements CallRepository {
       `;
 
       for (const { id } of rows) {
+        const attemptId = await this.#latestAttemptId(transaction, id);
         await transaction`
           UPDATE approval_requests
           SET status = 'expired', decided_at = ${now}
@@ -1923,10 +2296,32 @@ export class PostgresCallRepository implements CallRepository {
             LIMIT 1
           )
         `;
-        await this.#settleLatestAttempt(transaction, id, "call_refund");
+        const settlement = await this.#settleLatestAttempt(
+          transaction,
+          id,
+          "call_refund"
+        );
         await this.#audit(transaction, id, "call.recovered_after_restart", {
           status: "failed"
         });
+        await this.#appendTelemetry(transaction, id, {
+          callAttemptId: attemptId,
+          idempotencyKey: "call:recovered:server-restarted",
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "call.recovered",
+            metadata: { reason: "server_restarted" }
+          }
+        });
+        if (settlement) {
+          await this.#appendSettlementTelemetry(
+            transaction,
+            id,
+            settlement.attemptId,
+            settlement.settlement,
+            now.toISOString()
+          );
+        }
       }
 
       return rows.length;
@@ -1936,7 +2331,15 @@ export class PostgresCallRepository implements CallRepository {
   async recoverInterruptedTranscriptions() {
     const now = new Date();
     return this.#sql.begin(async (transaction) => {
-      const rows = await transaction<{ callId: string; recordingId: string }[]>`
+      const rows = await transaction<
+        {
+          callId: string;
+          callAttemptId: string;
+          recordingId: string;
+          transcriptId: string;
+          model: string;
+        }[]
+      >`
         UPDATE final_transcripts
         SET
           status = 'failed',
@@ -1950,7 +2353,14 @@ export class PostgresCallRepository implements CallRepository {
             FROM call_recordings
             WHERE call_recordings.id = final_transcripts.call_recording_id
           ) AS "callId",
-          call_recording_id AS "recordingId"
+          (
+            SELECT call_attempt_id
+            FROM call_recordings
+            WHERE call_recordings.id = final_transcripts.call_recording_id
+          ) AS "callAttemptId",
+          call_recording_id AS "recordingId",
+          id AS "transcriptId",
+          model
       `;
       for (const row of rows) {
         await this.#audit(
@@ -1959,6 +2369,18 @@ export class PostgresCallRepository implements CallRepository {
           "final_transcript.recovered_after_restart",
           { recordingId: row.recordingId }
         );
+        await this.#appendTelemetry(transaction, row.callId, {
+          callAttemptId: row.callAttemptId,
+          idempotencyKey: `transcription:${row.transcriptId}:recovered`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "transcription.failed",
+            metadata: {
+              model: safeTelemetryCode(row.model, "unknown_model"),
+              failureCode: "server_restarted"
+            }
+          }
+        });
       }
       return rows.length;
     });
@@ -2178,7 +2600,23 @@ export class PostgresCallRepository implements CallRepository {
       ORDER BY created_at DESC
       LIMIT 1
     `;
-    if (attempt) await this.#settleAttempt(transaction, attempt.id, type);
+    if (!attempt) return null;
+    const settlement = await this.#settleAttempt(transaction, attempt.id, type);
+    return settlement ? { attemptId: attempt.id, settlement } : null;
+  }
+
+  async #latestAttemptId(
+    transaction: postgres.TransactionSql,
+    callBriefId: string
+  ) {
+    const [attempt] = await transaction<{ id: string }[]>`
+      SELECT id
+      FROM call_attempts
+      WHERE call_brief_id = ${callBriefId}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    return attempt?.id ?? null;
   }
 
   async #settleAttempt(
@@ -2186,15 +2624,15 @@ export class PostgresCallRepository implements CallRepository {
     attemptId: string,
     type: "call_charge" | "call_refund" | null
   ) {
-    if (!type) return;
+    if (!type) return null;
     const [attempt] = await transaction<{ userId: string | null }[]>`
       SELECT user_id AS "userId"
       FROM call_attempts
       WHERE id = ${attemptId}
     `;
-    if (!attempt?.userId) return;
+    if (!attempt?.userId) return null;
     await this.#lockCreditAccount(transaction, attempt.userId);
-    await transaction`
+    const settled = await transaction<{ type: "call_charge" | "call_refund" }[]>`
       INSERT INTO credit_transactions (
         id, user_id, amount, type, call_attempt_id, reason,
         idempotency_key, created_at
@@ -2223,7 +2661,9 @@ export class PostgresCallRepository implements CallRepository {
             AND type = 'call_reservation'
         )
       ON CONFLICT DO NOTHING
+      RETURNING type
     `;
+    return settled[0]?.type ?? null;
   }
 
   async #lockCreditAccount(
@@ -2301,6 +2741,187 @@ export class PostgresCallRepository implements CallRepository {
     `;
   }
 
+  async #appendConnectionTelemetry(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    callAttemptId: string,
+    providerStatus: string,
+    occurredAt = new Date().toISOString()
+  ) {
+    if (providerStatus !== "in-progress" && providerStatus !== "completed") {
+      return;
+    }
+    await this.#appendTelemetry(transaction, callBriefId, {
+      callAttemptId,
+      idempotencyKey: `attempt:${callAttemptId}:connection`,
+      occurredAt,
+      payload: {
+        name: "connection.confirmed",
+        metadata: { providerStatus }
+      }
+    });
+  }
+
+  async #appendSettlementTelemetry(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    callAttemptId: string,
+    settlement: "call_charge" | "call_refund",
+    occurredAt = new Date().toISOString()
+  ) {
+    const normalized = settlement === "call_charge" ? "charge" : "refund";
+    await this.#appendTelemetry(transaction, callBriefId, {
+      callAttemptId,
+      idempotencyKey: `attempt:${callAttemptId}:credit:${normalized}`,
+      occurredAt,
+      payload: {
+        name: "credit.settled",
+        metadata: {
+          settlement: normalized,
+          connected: settlement === "call_charge"
+        }
+      }
+    });
+  }
+
+  async #appendCompilationTelemetry(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    compilation: CallCompilation,
+    occurredAt: string
+  ) {
+    await this.#appendTelemetry(transaction, callBriefId, {
+      idempotencyKey: `compilation:${compilation.revision}:completed`,
+      occurredAt,
+      payload: {
+        name: "compilation.completed",
+        metadata: {
+          revision: compilation.revision,
+          compilerModel: compilation.compilerModel,
+          compilerVersion: compilation.compilerVersion,
+          policyStatus: compilation.policyDecision.status
+        }
+      }
+    });
+    await this.#appendTelemetry(transaction, callBriefId, {
+      idempotencyKey: `policy:${compilation.revision}:evaluated`,
+      occurredAt,
+      payload: {
+        name: "policy.evaluated",
+        metadata: {
+          policyVersion: compilation.policyDecision.policyVersion,
+          status: compilation.policyDecision.status,
+          riskLevel: compilation.policyDecision.riskLevel,
+          reasonCodes: compilation.policyDecision.reasonCodes
+        }
+      }
+    });
+  }
+
+  async #appendTelemetry(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    input: CallTelemetryEventInput
+  ): Promise<DurableCallEvent> {
+    const parsed = callTelemetryEventInputSchema.parse(input);
+    await transaction`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended(${`call-event:${callBriefId}`}, 0)
+      )
+    `;
+    const existingRows = await transaction<CallTelemetryEventRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        call_attempt_id AS "callAttemptId",
+        user_id AS "userId",
+        sequence,
+        schema_version AS "schemaVersion",
+        event_name AS "eventName",
+        source,
+        stage,
+        severity,
+        metadata,
+        occurred_at AS "occurredAt"
+      FROM call_events
+      WHERE call_brief_id = ${callBriefId}
+        AND idempotency_key = ${parsed.idempotencyKey}
+      LIMIT 1
+    `;
+    if (existingRows[0]) return mapCallTelemetryEvent(existingRows[0]);
+
+    const [call] = await transaction<{ userId: string | null }[]>`
+      SELECT user_id AS "userId"
+      FROM call_briefs
+      WHERE id = ${callBriefId}
+    `;
+    if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+    if (parsed.callAttemptId) {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${parsed.callAttemptId}
+          AND call_brief_id = ${callBriefId}
+      `;
+      if (attempt.count === 0) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+    }
+    const [{ nextSequence }] = await transaction<{ nextSequence: number }[]>`
+      SELECT COALESCE(MAX(sequence), 0)::int + 1 AS "nextSequence"
+      FROM call_events
+      WHERE call_brief_id = ${callBriefId}
+    `;
+    const descriptor = describeCallTelemetryEvent(parsed.payload.name);
+    const rows = await transaction<CallTelemetryEventRow[]>`
+      INSERT INTO call_events (
+        id,
+        call_brief_id,
+        call_attempt_id,
+        user_id,
+        sequence,
+        schema_version,
+        event_name,
+        source,
+        stage,
+        severity,
+        metadata,
+        idempotency_key,
+        occurred_at,
+        created_at
+      ) VALUES (
+        ${randomUUID()},
+        ${callBriefId},
+        ${parsed.callAttemptId},
+        ${call.userId},
+        ${nextSequence},
+        ${CALL_TELEMETRY_SCHEMA_VERSION},
+        ${parsed.payload.name},
+        ${descriptor.source},
+        ${descriptor.stage},
+        ${descriptor.severity},
+        ${transaction.json(parsed.payload.metadata)},
+        ${parsed.idempotencyKey},
+        ${new Date(parsed.occurredAt ?? Date.now())},
+        ${new Date()}
+      )
+      RETURNING
+        id,
+        call_brief_id AS "callBriefId",
+        call_attempt_id AS "callAttemptId",
+        user_id AS "userId",
+        sequence,
+        schema_version AS "schemaVersion",
+        event_name AS "eventName",
+        source,
+        stage,
+        severity,
+        metadata,
+        occurred_at AS "occurredAt"
+    `;
+    return mapCallTelemetryEvent(rows[0]!);
+  }
+
   async #audit(
     transaction: postgres.TransactionSql,
     callBriefId: string,
@@ -2321,6 +2942,27 @@ export class PostgresCallRepository implements CallRepository {
   }
 }
 
+function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {
+  return durableCallEventSchema.parse({
+    id: row.id,
+    callBriefId: row.callBriefId,
+    callAttemptId: row.callAttemptId,
+    userId: row.userId,
+    sequence: row.sequence,
+    schemaVersion: row.schemaVersion,
+    source: row.source,
+    stage: row.stage,
+    severity: row.severity,
+    occurredAt: toIso(row.occurredAt),
+    payload: {
+      name: row.eventName,
+      metadata: typeof row.metadata === "string"
+        ? JSON.parse(row.metadata)
+        : row.metadata
+    }
+  });
+}
+
 function requireSwissPhone(value: string) {
   const parsed = parseSwissDestinationPhone(value);
   if (!parsed) throw new Error("A valid Swiss E.164 phone number is required");
@@ -2331,6 +2973,13 @@ function requireReason(value: string) {
   const reason = value.trim();
   if (!reason) throw new Error("A safety-control reason is required");
   return reason;
+}
+
+function safeTelemetryCode(value: string | null | undefined, fallback: string) {
+  const normalized = value?.trim();
+  return normalized && /^[a-z0-9_.:/-]{1,160}$/i.test(normalized)
+    ? normalized
+    : fallback;
 }
 
 function mapPromoCode(row: PromoCodeRow): PromoCodeSummary {

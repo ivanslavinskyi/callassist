@@ -391,6 +391,23 @@ describe("OpenAIRealtimeBridge", () => {
     expect(events).toContain("transcript.delta");
     unsubscribe();
     twilioSocket.close();
+    await new Promise((resolve) => setImmediate(resolve));
+    const telemetry = await service.listTelemetry(created.id);
+    expect(telemetry.map(({ payload }) => payload.name)).toEqual(
+      expect.arrayContaining([
+        "realtime.ready",
+        "disclosure.started",
+        "conversation.started",
+        "conversation.ended"
+      ])
+    );
+    expect(
+      telemetry.find(({ payload }) => payload.name === "conversation.ended")
+        ?.payload
+    ).toEqual({
+      name: "conversation.ended",
+      metadata: { reason: "socket_closed" }
+    });
     await service.close();
   });
 
@@ -483,6 +500,21 @@ describe("OpenAIRealtimeBridge", () => {
     );
     expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
     expect(openAISocket.readyState).toBe(WebSocket.CLOSED);
+    await new Promise((resolve) => setImmediate(resolve));
+    const telemetry = await service.listTelemetry(created.id);
+    expect(
+      telemetry.filter(({ payload }) => payload.name === "consent.failed")
+    ).toEqual([
+      expect.objectContaining({
+        payload: {
+          name: "consent.failed",
+          metadata: { reason: "timeout" }
+        }
+      })
+    ]);
+    expect(
+      telemetry.some(({ payload }) => payload.name === "conversation.started")
+    ).toBe(false);
     await service.close();
   });
 });

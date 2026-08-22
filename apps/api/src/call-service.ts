@@ -5,6 +5,7 @@ import {
   type CallBrief,
   type CallEvent,
   type CallSnapshot,
+  type CallTelemetryEventInput,
   type CreateCallBriefInput,
   type TranscriptSegment
 } from "@callassist/contracts";
@@ -113,6 +114,20 @@ export class CallService {
 
   list(input: import("./storage/call-repository").ListCallBriefsInput) {
     return this.repository.list(input);
+  }
+
+  async recordTelemetry(id: string, input: CallTelemetryEventInput) {
+    const callAttemptId = input.callAttemptId === undefined
+      ? (await this.repository.getLatestAttempt(id))?.id ?? null
+      : input.callAttemptId;
+    return this.repository.appendCallTelemetryEvent(id, {
+      ...input,
+      callAttemptId
+    });
+  }
+
+  listTelemetry(id: string) {
+    return this.repository.listCallTelemetryEvents(id);
   }
 
   async create(input: CreateCallBriefInput, userId: string | null = null) {

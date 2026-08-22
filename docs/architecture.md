@@ -120,6 +120,14 @@ The main API listens on port `4000`. In Twilio mode, a separate Fastify listener
 
 Production should preserve this boundary with a dedicated ingress route or service rather than exposing the main API.
 
+## Durable call telemetry
+
+The live `CallEvent` union remains an ephemeral SSE/UI envelope. Operational reconstruction uses the separately named, schema-versioned `DurableCallEvent` contract and append-only `call_events` rows. Each row has a per-call sequence and call/attempt/owner correlation plus deterministic source, stage, and severity fields. PostgreSQL rejects updates and deletes; the memory repository mirrors the same contract for deterministic tests.
+
+Each event name owns a strict, bounded metadata schema. Durable telemetry may contain lifecycle states, controlled failure codes, compiler/provider/model versions, recording duration/channels, and credit settlement classification. It never contains phone numbers, names, objectives, approved facts, transcript text, credentials, raw provider payloads, or arbitrary exception bodies. Staff/action `audit_events` remain a separate evidence stream, and live SSE behavior is unchanged.
+
+State transitions and their durable events share a PostgreSQL transaction where practical. Per-call advisory locking, sequence uniqueness, and idempotency keys make callback replay safe. A credit charge is emitted only with provider-confirmed connection evidence (`in-progress` or provider `completed`); busy, no-answer, stopped, recovery, and other pre-connection terminal paths emit one refund. A terminal domain status by itself is not treated as proof of a conversation.
+
 ## Call language
 
 Language is a required `CallBrief` property rather than a profile default. One operator can therefore create calls in different languages without mixing instructions or transcripts.

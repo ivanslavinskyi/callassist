@@ -1,6 +1,7 @@
 import type {
   CallBrief,
   CallLocale,
+  CallTelemetryPayload,
   CallVoiceGender,
   CompiledOpening,
   TranscriptSegment
@@ -65,6 +66,11 @@ type ResponsePurpose =
   | "conversation"
   | "no_consent"
   | "recording_failure";
+
+type ConversationEndReason = Extract<
+  CallTelemetryPayload,
+  { name: "conversation.ended" }
+>["metadata"]["reason"];
 
 const languageNames: Record<CallLocale, string> = {
   "de-CH": "Swiss Standard German",
@@ -150,10 +156,12 @@ export class OpenAIRealtimeBridge {
     let pendingKeypadResponse = false;
     let keypadEventSequence = 0;
     let closed = false;
+    let consentFailureRecorded = false;
     let consentTimer: ReturnType<typeof setTimeout> | null = null;
     let hangupTimer: ReturnType<typeof setTimeout> | null = null;
     const storedTranscripts = new Set<string>();
     let transcriptWrites = Promise.resolve();
+    let telemetryWrites = Promise.resolve();
 
     const clearConsentTimer = () => {
       if (!consentTimer) return;
@@ -167,11 +175,44 @@ export class OpenAIRealtimeBridge {
       hangupTimer = null;
     };
 
-    const close = () => {
+    const recordTelemetry = (
+      idempotencyKey: string,
+      payload: CallTelemetryPayload
+    ) => {
+      if (!callBriefId) return;
+      const id = callBriefId;
+      telemetryWrites = telemetryWrites
+        .then(() => this.#service.recordTelemetry(id, {
+          idempotencyKey,
+          payload
+        }))
+        .then(() => undefined)
+        .catch(() => {
+          this.#logger.error(
+            { callBriefId: id, eventName: payload.name },
+            "Failed to store call telemetry"
+          );
+        });
+    };
+
+    const close = (reason: ConversationEndReason = "socket_closed") => {
       if (closed) return;
       closed = true;
       clearConsentTimer();
       clearHangupTimer();
+      if (!consentGranted && !consentFailureRecorded && callBriefId) {
+        consentFailureRecorded = true;
+        recordTelemetry("realtime:consent:failed:stream-ended", {
+          name: "consent.failed",
+          metadata: { reason: "stream_ended_before_consent" }
+        });
+      }
+      if (conversationStarted) {
+        recordTelemetry("realtime:conversation:ended", {
+          name: "conversation.ended",
+          metadata: { reason }
+        });
+      }
       if (openAISocket?.readyState === WebSocket.OPEN) openAISocket.close();
       if (twilioSocket.readyState === WebSocket.OPEN) twilioSocket.close();
     };
@@ -232,6 +273,10 @@ export class OpenAIRealtimeBridge {
         return;
       }
       conversationStarted = true;
+      recordTelemetry("realtime:conversation:started", {
+        name: "conversation.started",
+        metadata: {}
+      });
       createAudioResponse(
         buildInitialResponseInstructions(currentBrief, currentOpening),
         "opening"
@@ -241,6 +286,11 @@ export class OpenAIRealtimeBridge {
     const playNoConsentAndEnd = () => {
       if (!currentBrief || consentStarting || consentGranted || closed) return;
       clearConsentTimer();
+      consentFailureRecorded = true;
+      recordTelemetry("realtime:consent:failed:timeout", {
+        name: "consent.failed",
+        metadata: { reason: "timeout" }
+      });
       createAudioResponse(
         buildNoConsentInstructions(currentBrief),
         "no_consent"
@@ -265,8 +315,22 @@ export class OpenAIRealtimeBridge {
       switch (event.type) {
         case "session.updated":
           openAIReady = true;
+          recordTelemetry("realtime:ready", {
+            name: "realtime.ready",
+            metadata: {
+              model: safeTelemetryToken(this.#model, "unknown_model"),
+              transcriptionModel: safeTelemetryToken(
+                this.#transcriptionModel,
+                "unknown_model"
+              )
+            }
+          });
           if (!consentPromptStarted) {
             consentPromptStarted = true;
+            recordTelemetry("realtime:disclosure:started", {
+              name: "disclosure.started",
+              metadata: {}
+            });
             createAudioResponse(
               buildConsentAnnouncementInstructions(brief),
               "consent_prompt"
@@ -306,11 +370,17 @@ export class OpenAIRealtimeBridge {
           } else if (completedPurpose === "no_consent") {
             sendPlaybackMark(noConsentMark);
             clearHangupTimer();
-            hangupTimer = setTimeout(close, this.#hangupFallbackTimeoutMs);
+            hangupTimer = setTimeout(
+              () => close("no_consent"),
+              this.#hangupFallbackTimeoutMs
+            );
           } else if (completedPurpose === "recording_failure") {
             sendPlaybackMark(recordingFailureMark);
             clearHangupTimer();
-            hangupTimer = setTimeout(close, this.#hangupFallbackTimeoutMs);
+            hangupTimer = setTimeout(
+              () => close("recording_failure"),
+              this.#hangupFallbackTimeoutMs
+            );
           }
           break;
         }
@@ -453,12 +523,12 @@ export class OpenAIRealtimeBridge {
       });
       openAISocket.on("error", () => {
         this.#logger.error({ callBriefId: brief.id }, "OpenAI Realtime connection failed");
-        close();
+        close("openai_error");
       });
       openAISocket.on("close", () => {
         if (!closed) {
           this.#logger.info({ callBriefId: brief.id }, "OpenAI Realtime connection closed");
-          close();
+          close("openai_closed");
         }
       });
     };
@@ -467,7 +537,7 @@ export class OpenAIRealtimeBridge {
       const message = parseJson<TwilioMessage>(data);
       if (!message) return;
       if (message.event === "start" && !openAISocket) {
-        void connectOpenAI(message).catch(() => close());
+        void connectOpenAI(message).catch(() => close("openai_error"));
       } else if (message.event === "media" && message.media?.payload) {
         if (openAIReady && consentGranted && openingPlaybackComplete) {
           sendOpenAI({
@@ -524,6 +594,11 @@ export class OpenAIRealtimeBridge {
           .catch(() => {
             if (closed) return;
             consentStarting = false;
+            consentFailureRecorded = true;
+            recordTelemetry("realtime:consent:failed:recording-start", {
+              name: "consent.failed",
+              metadata: { reason: "recording_start_failed" }
+            });
             if (responseActive) {
               recordingFailureAfterResponse = true;
             } else {
@@ -577,19 +652,24 @@ export class OpenAIRealtimeBridge {
         } else if (message.mark.name === openingMark && consentGranted) {
           openingPlaybackComplete = true;
         } else if (message.mark.name === noConsentMark && !consentGranted) {
-          close();
+          close("no_consent");
         } else if (message.mark.name === recordingFailureMark) {
-          close();
+          close("recording_failure");
         }
       } else if (message.event === "stop") {
-        close();
+        close("stream_stopped");
       }
     });
-    twilioSocket.on("error", close);
+    twilioSocket.on("error", () => close("socket_closed"));
     twilioSocket.on("close", () => {
-      if (!closed) close();
+      if (!closed) close("socket_closed");
     });
   }
+}
+
+function safeTelemetryToken(value: string, fallback: string) {
+  const normalized = value.trim();
+  return /^[a-z0-9_.:/-]{1,160}$/i.test(normalized) ? normalized : fallback;
 }
 
 const keypadResponseInstructions =

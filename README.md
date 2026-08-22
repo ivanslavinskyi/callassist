@@ -265,9 +265,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   Swiss German, multilingual input, and adversarial prompts.
 - Add complaint intake/ownership, remaining abuse thresholds, and distributed
   endpoint rate limits before accepting public data at multiple API instances.
-- Start the observability phase with append-only, privacy-safe durable call telemetry
-  that is separate from live SSE and staff audit; then add versioned outcomes,
-  owner-scoped feedback, and the RBAC-protected Admin Calls/Inspector workflow.
+- Continue the observability phase from the completed append-only, privacy-safe
+  durable call telemetry foundation: add versioned outcomes, owner-scoped feedback,
+  and then the RBAC-protected Admin Calls/Inspector workflow.
 - Add durable background jobs, production deployment, observability, compliance,
   and staged invite-only/public beta release gates.
 

@@ -3,8 +3,10 @@ import type {
   ApprovalRequest,
   CallBrief,
   CallCompilation,
+  CallTelemetryEventInput,
   CreditTransaction,
   CreditUsage,
+  DurableCallEvent,
   CallRecording,
   CallLocale,
   CallSnapshot,
@@ -223,6 +225,11 @@ export interface CallRepository {
     compilation: CallCompilation
   ): Promise<CallSnapshot>;
   get(id: string): Promise<CallSnapshot | null>;
+  appendCallTelemetryEvent(
+    id: string,
+    input: CallTelemetryEventInput
+  ): Promise<DurableCallEvent>;
+  listCallTelemetryEvents(id: string): Promise<DurableCallEvent[]>;
   approveCompilation(id: string): Promise<CallSnapshot>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
   startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
@@ -337,7 +344,6 @@ export function creditSettlementForStatus(
 ): Extract<CreditTransaction["type"], "call_charge" | "call_refund"> | null {
   if (
     callStatus === "in_progress" ||
-    callStatus === "completed" ||
     (providerStatus && connectedProviderStatuses.has(providerStatus))
   ) {
     return "call_charge";

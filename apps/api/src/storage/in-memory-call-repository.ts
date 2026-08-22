@@ -1,13 +1,19 @@
 import { randomUUID } from "node:crypto";
 import {
+  CALL_TELEMETRY_SCHEMA_VERSION,
+  callTelemetryEventInputSchema,
+  describeCallTelemetryEvent,
+  durableCallEventSchema,
   normalizeCreateCallBriefInput,
   parseSwissDestinationPhone,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
   type CallCompilation,
+  type CallTelemetryEventInput,
   type CreditTransaction,
   type CreditUsage,
+  type DurableCallEvent,
   type CallRecording,
   type CallLocale,
   type CallSnapshot,
@@ -21,6 +27,7 @@ import {
 import {
   CallRepositoryError,
   buildRuntimeBriefFields,
+  connectedProviderStatuses,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
   encodeCallBriefCursor,
@@ -42,6 +49,11 @@ type StoredPromoCode = PromoCodeSummary & {
   codeHash: string;
   actorUserId: string;
   reason: string;
+  idempotencyKey: string;
+};
+
+type StoredCallTelemetryEvent = {
+  event: DurableCallEvent;
   idempotencyKey: string;
 };
 
@@ -76,6 +88,10 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #owners = new Map<string, string | null>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
+  readonly #callTelemetryEvents = new Map<
+    string,
+    StoredCallTelemetryEvent[]
+  >();
   readonly #creditTransactions: Array<
     CreditTransaction & { userId: string; idempotencyKey: string }
   > = [];
@@ -151,6 +167,19 @@ export class InMemoryCallRepository implements CallRepository {
       finalTranscript: null
     });
     this.#owners.set(brief.id, userId);
+    this.#appendTelemetry(brief.id, {
+      idempotencyKey: `brief:${compilation.revision}:created`,
+      occurredAt: now,
+      payload: {
+        name: "brief.created",
+        metadata: {
+          locale: brief.locale,
+          compilationRevision: compilation.revision,
+          status: brief.status
+        }
+      }
+    });
+    this.#appendCompilationTelemetry(brief.id, compilation, now);
 
     return copy(brief);
   }
@@ -419,12 +448,27 @@ export class InMemoryCallRepository implements CallRepository {
     };
     snapshot.compilation = copy(compilation);
     snapshot.pendingApproval = null;
+    this.#appendCompilationTelemetry(id, compilation, now);
     return copy(snapshot);
   }
 
   async get(id: string) {
     const snapshot = this.#calls.get(id);
     return snapshot ? copy(snapshot) : null;
+  }
+
+  async appendCallTelemetryEvent(
+    id: string,
+    input: CallTelemetryEventInput
+  ) {
+    return copy(this.#appendTelemetry(id, input));
+  }
+
+  async listCallTelemetryEvents(id: string) {
+    this.#require(id);
+    return copy(
+      (this.#callTelemetryEvents.get(id) ?? []).map(({ event }) => event)
+    );
   }
 
   async approveCompilation(id: string) {
@@ -440,6 +484,14 @@ export class InMemoryCallRepository implements CallRepository {
     snapshot.compilation.approvedAt = now;
     snapshot.brief.status = "ready";
     snapshot.brief.updatedAt = now;
+    this.#appendTelemetry(id, {
+      idempotencyKey: `compilation:${snapshot.compilation.revision}:approved`,
+      occurredAt: now,
+      payload: {
+        name: "compilation.approved",
+        metadata: { revision: snapshot.compilation.revision }
+      }
+    });
     return copy(snapshot);
   }
 
@@ -509,6 +561,26 @@ export class InMemoryCallRepository implements CallRepository {
     }
     snapshot.brief.status = "dialing";
     snapshot.brief.updatedAt = now;
+    this.#appendTelemetry(id, {
+      callAttemptId: attempt.id,
+      idempotencyKey: `attempt:${attempt.id}:started`,
+      occurredAt: now,
+      payload: {
+        name: "attempt.started",
+        metadata: { provider: attempt.provider }
+      }
+    });
+    if (userId !== null) {
+      this.#appendTelemetry(id, {
+        callAttemptId: attempt.id,
+        idempotencyKey: `attempt:${attempt.id}:credit:reserved`,
+        occurredAt: now,
+        payload: {
+          name: "credit.reserved",
+          metadata: { credits: 1 }
+        }
+      });
+    }
     return { attempt: copy(attempt), snapshot: copy(snapshot) };
   }
 
@@ -526,15 +598,39 @@ export class InMemoryCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
       }
-      if (!attempt.providerCallId) {
+      const providerWasAttached = !attempt.providerCallId;
+      if (providerWasAttached) {
         attempt.providerCallId = providerCallId;
         attempt.providerStatus = providerStatus;
       }
-      this.#settleAttempt(
+      if (providerWasAttached) {
+        const safeProviderStatus = safeTelemetryCode(
+          providerStatus,
+          "unknown_provider_status"
+        );
+        this.#appendTelemetry(callId, {
+          callAttemptId: attempt.id,
+          idempotencyKey: `attempt:${attempt.id}:provider:created`,
+          payload: {
+            name: "provider.call_created",
+            metadata: {
+              provider: attempt.provider,
+              providerStatus: safeProviderStatus
+            }
+          }
+        });
+      }
+      const settlement = this.#settleAttempt(
         callId,
         attempt,
         creditSettlementForStatus(attempt.status, providerStatus)
       );
+      if (connectedProviderStatuses.has(providerStatus)) {
+        this.#appendConnectionTelemetry(callId, attempt.id, providerStatus);
+      }
+      if (settlement) {
+        this.#appendSettlementTelemetry(callId, attempt.id, settlement);
+      }
       return copy(this.#require(callId));
     }
     throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
@@ -555,16 +651,47 @@ export class InMemoryCallRepository implements CallRepository {
       if (!attempt) continue;
       const snapshot = this.#require(callId);
       const now = new Date().toISOString();
+      const previousCallStatus = snapshot.brief.status;
+      const applyCallStatus = shouldApplyProviderCallStatus(
+        previousCallStatus,
+        callStatus
+      );
+      const safeProviderStatus = safeTelemetryCode(
+        providerStatus,
+        "unknown_provider_status"
+      );
       attempt.providerCallId ??= providerCallId;
       attempt.providerStatus = providerStatus;
       if (terminalStatuses.has(callStatus)) attempt.endedAt ??= now;
       if (callStatus === "failed") attempt.failureReason ??= providerStatus;
-      this.#settleAttempt(
+      const settlement = this.#settleAttempt(
         callId,
         attempt,
         creditSettlementForStatus(callStatus, providerStatus)
       );
-      if (shouldApplyProviderCallStatus(snapshot.brief.status, callStatus)) {
+      this.#appendTelemetry(callId, {
+        callAttemptId: attempt.id,
+        idempotencyKey: `attempt:${attempt.id}:provider-status:${safeProviderStatus}:${callStatus}`,
+        occurredAt: now,
+        payload: {
+          name: "provider.status_changed",
+          metadata: {
+            providerStatus: safeProviderStatus,
+            callStatus,
+            applied: applyCallStatus
+          }
+        }
+      });
+      if (
+        !terminalStatuses.has(previousCallStatus) &&
+        connectedProviderStatuses.has(providerStatus)
+      ) {
+        this.#appendConnectionTelemetry(callId, attempt.id, providerStatus, now);
+      }
+      if (settlement) {
+        this.#appendSettlementTelemetry(callId, attempt.id, settlement, now);
+      }
+      if (applyCallStatus) {
         attempt.status = callStatus;
         snapshot.brief.status = callStatus;
         snapshot.brief.updatedAt = now;
@@ -583,6 +710,7 @@ export class InMemoryCallRepository implements CallRepository {
 
   async updateStatus(id: string, status: CallBrief["status"]) {
     const snapshot = this.#require(id);
+    const previousStatus = snapshot.brief.status;
     snapshot.brief.status = status;
     snapshot.brief.updatedAt = new Date().toISOString();
     const attempts = this.#attempts.get(id) ?? [];
@@ -590,11 +718,27 @@ export class InMemoryCallRepository implements CallRepository {
     if (attempt) {
       attempt.status = status;
       if (terminalStatuses.has(status)) attempt.endedAt = snapshot.brief.updatedAt;
-      this.#settleAttempt(
+      const settlement = this.#settleAttempt(
         id,
         attempt,
         creditSettlementForStatus(status)
       );
+      if (status === "in_progress" && !terminalStatuses.has(previousStatus)) {
+        this.#appendConnectionTelemetry(
+          id,
+          attempt.id,
+          "in-progress",
+          snapshot.brief.updatedAt
+        );
+      }
+      if (settlement) {
+        this.#appendSettlementTelemetry(
+          id,
+          attempt.id,
+          settlement,
+          snapshot.brief.updatedAt
+        );
+      }
     }
     return copy(snapshot);
   }
@@ -662,7 +806,15 @@ export class InMemoryCallRepository implements CallRepository {
     if (attempt) {
       attempt.status = "stopped";
       attempt.endedAt = snapshot.brief.updatedAt;
-      this.#settleAttempt(id, attempt, "call_refund");
+      const settlement = this.#settleAttempt(id, attempt, "call_refund");
+      if (settlement) {
+        this.#appendSettlementTelemetry(
+          id,
+          attempt.id,
+          settlement,
+          snapshot.brief.updatedAt
+        );
+      }
     }
     if (
       snapshot.recording?.status === "starting" ||
@@ -702,6 +854,15 @@ export class InMemoryCallRepository implements CallRepository {
       failureReason: null
     };
     snapshot.recording = recording;
+    this.#appendTelemetry(id, {
+      callAttemptId: attempt.id,
+      idempotencyKey: `attempt:${attempt.id}:consent:granted`,
+      occurredAt: consentGrantedAt,
+      payload: {
+        name: "consent.granted",
+        metadata: { method: "dtmf_1" }
+      }
+    });
     return {
       providerCallId: attempt.providerCallId,
       recording: copy(recording),
@@ -719,6 +880,20 @@ export class InMemoryCallRepository implements CallRepository {
     if (recording.status === "starting") recording.status = "recording";
     recording.startedAt ??= new Date().toISOString();
     if (recording.status !== "failed") recording.failureReason = null;
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    const providerStatus = safeTelemetryCode(
+      _providerStatus,
+      "unknown_provider_status"
+    );
+    this.#appendTelemetry(callId, {
+      callAttemptId: attempt?.id ?? null,
+      idempotencyKey: `recording:${recordingId}:started`,
+      occurredAt: recording.startedAt,
+      payload: {
+        name: "recording.started",
+        metadata: { providerStatus }
+      }
+    });
     return {
       callId,
       recording: copy(recording),
@@ -732,6 +907,19 @@ export class InMemoryCallRepository implements CallRepository {
       recording.status = "failed";
       recording.failureReason = failureReason;
     }
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    const failureCode = safeTelemetryCode(
+      failureReason,
+      "recording_failed"
+    );
+    this.#appendTelemetry(callId, {
+      callAttemptId: attempt?.id ?? null,
+      idempotencyKey: `recording:${recordingId}:failed:${failureCode}`,
+      payload: {
+        name: "recording.failed",
+        metadata: { failureCode }
+      }
+    });
     return {
       callId,
       recording: copy(recording),
@@ -780,6 +968,43 @@ export class InMemoryCallRepository implements CallRepository {
       recording.status = "failed";
       recording.failureReason = input.failureReason ?? "recording_absent";
     }
+    if (input.providerStatus === "in-progress") {
+      this.#appendTelemetry(input.callBriefId, {
+        callAttemptId: attempt.id,
+        idempotencyKey: `recording:${input.recordingId}:started`,
+        occurredAt: recording.startedAt ?? undefined,
+        payload: {
+          name: "recording.started",
+          metadata: { providerStatus: "in-progress" }
+        }
+      });
+    } else if (input.providerStatus === "completed") {
+      this.#appendTelemetry(input.callBriefId, {
+        callAttemptId: attempt.id,
+        idempotencyKey: `recording:${input.recordingId}:completed`,
+        occurredAt: recording.completedAt ?? undefined,
+        payload: {
+          name: "recording.completed",
+          metadata: {
+            durationSeconds: recording.durationSeconds,
+            channels: recording.channels
+          }
+        }
+      });
+    } else if (input.providerStatus === "absent") {
+      const failureCode = safeTelemetryCode(
+        recording.failureReason,
+        "recording_absent"
+      );
+      this.#appendTelemetry(input.callBriefId, {
+        callAttemptId: attempt.id,
+        idempotencyKey: `recording:${input.recordingId}:failed:${failureCode}`,
+        payload: {
+          name: "recording.failed",
+          metadata: { failureCode }
+        }
+      });
+    }
     return {
       callId: input.callBriefId,
       recording: copy(recording),
@@ -793,6 +1018,7 @@ export class InMemoryCallRepository implements CallRepository {
     if (snapshot.finalTranscript?.status === "completed" && !force) return null;
     if (snapshot.finalTranscript?.status === "processing") return null;
     const now = new Date().toISOString();
+    const retry = Boolean(snapshot.finalTranscript);
     const finalTranscript: FinalTranscript = snapshot.finalTranscript
       ? {
           ...snapshot.finalTranscript,
@@ -816,6 +1042,19 @@ export class InMemoryCallRepository implements CallRepository {
           completedAt: null
         };
     snapshot.finalTranscript = finalTranscript;
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    this.#appendTelemetry(callId, {
+      callAttemptId: attempt?.id ?? null,
+      idempotencyKey: `transcription:${finalTranscript.id}:started:${now}`,
+      occurredAt: now,
+      payload: {
+        name: "transcription.started",
+        metadata: {
+          model: safeTelemetryCode(model, "unknown_model"),
+          retry
+        }
+      }
+    });
     return {
       callId,
       finalTranscript: copy(finalTranscript),
@@ -843,6 +1082,19 @@ export class InMemoryCallRepository implements CallRepository {
     recording.deleteAfter = new Date(
       now.getTime() + snapshot.brief.audioRetentionDays * 86_400_000
     ).toISOString();
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    this.#appendTelemetry(callId, {
+      callAttemptId: attempt?.id ?? null,
+      idempotencyKey: `transcription:${finalTranscript.id}:completed:${finalTranscript.updatedAt}`,
+      occurredAt: finalTranscript.completedAt,
+      payload: {
+        name: "transcription.completed",
+        metadata: {
+          model: safeTelemetryCode(finalTranscript.model, "unknown_model"),
+          segmentCount: segments.length
+        }
+      }
+    });
     return {
       callId,
       finalTranscript: copy(finalTranscript),
@@ -861,6 +1113,23 @@ export class InMemoryCallRepository implements CallRepository {
     finalTranscript.segments = [];
     finalTranscript.failureReason = failureReason;
     finalTranscript.updatedAt = new Date().toISOString();
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    const failureCode = safeTelemetryCode(
+      failureReason,
+      "transcription_failed"
+    );
+    this.#appendTelemetry(callId, {
+      callAttemptId: attempt?.id ?? null,
+      idempotencyKey: `transcription:${finalTranscript.id}:failed:${finalTranscript.updatedAt}`,
+      occurredAt: finalTranscript.updatedAt,
+      payload: {
+        name: "transcription.failed",
+        metadata: {
+          model: safeTelemetryCode(finalTranscript.model, "unknown_model"),
+          failureCode
+        }
+      }
+    });
     return {
       callId,
       finalTranscript: copy(finalTranscript),
@@ -913,8 +1182,29 @@ export class InMemoryCallRepository implements CallRepository {
         attempt.status = "failed";
         attempt.endedAt = snapshot.brief.updatedAt;
         attempt.failureReason = "server_restarted";
-        this.#settleAttempt(snapshot.brief.id, attempt, "call_refund");
+        const settlement = this.#settleAttempt(
+          snapshot.brief.id,
+          attempt,
+          "call_refund"
+        );
+        if (settlement) {
+          this.#appendSettlementTelemetry(
+            snapshot.brief.id,
+            attempt.id,
+            settlement,
+            snapshot.brief.updatedAt
+          );
+        }
       }
+      this.#appendTelemetry(snapshot.brief.id, {
+        callAttemptId: attempt?.id ?? null,
+        idempotencyKey: "call:recovered:server-restarted",
+        occurredAt: snapshot.brief.updatedAt,
+        payload: {
+          name: "call.recovered",
+          metadata: { reason: "server_restarted" }
+        }
+      });
       recovered += 1;
     }
     return recovered;
@@ -927,6 +1217,22 @@ export class InMemoryCallRepository implements CallRepository {
       snapshot.finalTranscript.status = "failed";
       snapshot.finalTranscript.failureReason = "server_restarted";
       snapshot.finalTranscript.updatedAt = new Date().toISOString();
+      const attempt = (this.#attempts.get(snapshot.brief.id) ?? []).at(-1);
+      this.#appendTelemetry(snapshot.brief.id, {
+        callAttemptId: attempt?.id ?? null,
+        idempotencyKey: `transcription:${snapshot.finalTranscript.id}:recovered`,
+        occurredAt: snapshot.finalTranscript.updatedAt,
+        payload: {
+          name: "transcription.failed",
+          metadata: {
+            model: safeTelemetryCode(
+              snapshot.finalTranscript.model,
+              "unknown_model"
+            ),
+            failureCode: "server_restarted"
+          }
+        }
+      });
       recovered += 1;
     }
     return recovered;
@@ -935,6 +1241,116 @@ export class InMemoryCallRepository implements CallRepository {
   async ping() {}
 
   async close() {}
+
+  #appendConnectionTelemetry(
+    callBriefId: string,
+    callAttemptId: string,
+    providerStatus: string,
+    occurredAt?: string
+  ) {
+    if (providerStatus !== "in-progress" && providerStatus !== "completed") {
+      return;
+    }
+    this.#appendTelemetry(callBriefId, {
+      callAttemptId,
+      idempotencyKey: `attempt:${callAttemptId}:connection`,
+      occurredAt,
+      payload: {
+        name: "connection.confirmed",
+        metadata: { providerStatus }
+      }
+    });
+  }
+
+  #appendSettlementTelemetry(
+    callBriefId: string,
+    callAttemptId: string,
+    settlement: "call_charge" | "call_refund",
+    occurredAt?: string
+  ) {
+    const normalized = settlement === "call_charge" ? "charge" : "refund";
+    this.#appendTelemetry(callBriefId, {
+      callAttemptId,
+      idempotencyKey: `attempt:${callAttemptId}:credit:${normalized}`,
+      occurredAt,
+      payload: {
+        name: "credit.settled",
+        metadata: {
+          settlement: normalized,
+          connected: settlement === "call_charge"
+        }
+      }
+    });
+  }
+
+  #appendCompilationTelemetry(
+    callBriefId: string,
+    compilation: CallCompilation,
+    occurredAt: string
+  ) {
+    this.#appendTelemetry(callBriefId, {
+      idempotencyKey: `compilation:${compilation.revision}:completed`,
+      occurredAt,
+      payload: {
+        name: "compilation.completed",
+        metadata: {
+          revision: compilation.revision,
+          compilerModel: compilation.compilerModel,
+          compilerVersion: compilation.compilerVersion,
+          policyStatus: compilation.policyDecision.status
+        }
+      }
+    });
+    this.#appendTelemetry(callBriefId, {
+      idempotencyKey: `policy:${compilation.revision}:evaluated`,
+      occurredAt,
+      payload: {
+        name: "policy.evaluated",
+        metadata: {
+          policyVersion: compilation.policyDecision.policyVersion,
+          status: compilation.policyDecision.status,
+          riskLevel: compilation.policyDecision.riskLevel,
+          reasonCodes: compilation.policyDecision.reasonCodes
+        }
+      }
+    });
+  }
+
+  #appendTelemetry(
+    callBriefId: string,
+    input: CallTelemetryEventInput
+  ): DurableCallEvent {
+    const snapshot = this.#require(callBriefId);
+    const parsed = callTelemetryEventInputSchema.parse(input);
+    const stored = this.#callTelemetryEvents.get(callBriefId) ?? [];
+    const existing = stored.find(
+      ({ idempotencyKey }) => idempotencyKey === parsed.idempotencyKey
+    );
+    if (existing) return existing.event;
+    if (
+      parsed.callAttemptId &&
+      !(this.#attempts.get(callBriefId) ?? []).some(
+        ({ id }) => id === parsed.callAttemptId
+      )
+    ) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    const descriptor = describeCallTelemetryEvent(parsed.payload.name);
+    const event = durableCallEventSchema.parse({
+      id: randomUUID(),
+      callBriefId,
+      callAttemptId: parsed.callAttemptId,
+      userId: this.#owners.get(snapshot.brief.id) ?? null,
+      sequence: stored.length + 1,
+      schemaVersion: CALL_TELEMETRY_SCHEMA_VERSION,
+      ...descriptor,
+      occurredAt: parsed.occurredAt ?? new Date().toISOString(),
+      payload: parsed.payload
+    });
+    stored.push({ event, idempotencyKey: parsed.idempotencyKey });
+    this.#callTelemetryEvents.set(callBriefId, stored);
+    return event;
+  }
 
   #assertWithinCallLimits(
     userId: string,
@@ -982,21 +1398,21 @@ export class InMemoryCallRepository implements CallRepository {
     callBriefId: string,
     attempt: CallAttemptRecord,
     type: "call_charge" | "call_refund" | null
-  ) {
-    if (!type) return;
+  ): "call_charge" | "call_refund" | null {
+    if (!type) return null;
     const userId = this.#owners.get(callBriefId);
-    if (!userId) return;
+    if (!userId) return null;
     const hasReservation = this.#creditTransactions.some(
       (entry) =>
         entry.callAttemptId === attempt.id && entry.type === "call_reservation"
     );
-    if (!hasReservation) return;
+    if (!hasReservation) return null;
     const alreadySettled = this.#creditTransactions.some(
       (entry) =>
         entry.callAttemptId === attempt.id &&
         (entry.type === "call_charge" || entry.type === "call_refund")
     );
-    if (alreadySettled) return;
+    if (alreadySettled) return null;
     this.#creditTransactions.push({
       id: randomUUID(),
       userId,
@@ -1012,6 +1428,7 @@ export class InMemoryCallRepository implements CallRepository {
       idempotencyKey: `call:${attempt.id}:${type === "call_refund" ? "refund" : "charge"}`,
       createdAt: new Date().toISOString()
     });
+    return type;
   }
 
   #require(id: string) {
@@ -1040,6 +1457,13 @@ function requireReason(value: string) {
   const reason = value.trim();
   if (!reason) throw new Error("A safety-control reason is required");
   return reason;
+}
+
+function safeTelemetryCode(value: string | null | undefined, fallback: string) {
+  const normalized = value?.trim();
+  return normalized && /^[a-z0-9_.:/-]{1,160}$/i.test(normalized)
+    ? normalized
+    : fallback;
 }
 
 function samePromoDefinition(

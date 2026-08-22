@@ -186,6 +186,36 @@ describeWithDatabase("PostgresCallRepository", () => {
       .toHaveLength(0);
     expect(unansweredUsage.transactions.filter(({ type }) => type === "call_refund"))
       .toHaveLength(1);
+    const unansweredEvents = await repository.listCallTelemetryEvents(
+      fulfilled!.value.attempt.callBriefId
+    );
+    expect(
+      unansweredEvents.filter(
+        ({ payload }) => payload.name === "connection.confirmed"
+      )
+    ).toHaveLength(0);
+    expect(
+      unansweredEvents.filter(({ payload }) => payload.name === "credit.settled")
+    ).toEqual([
+      expect.objectContaining({
+        payload: {
+          name: "credit.settled",
+          metadata: { settlement: "refund", connected: false }
+        }
+      })
+    ]);
+    expect(unansweredEvents.map(({ sequence }) => sequence)).toEqual(
+      unansweredEvents.map((_, index) => index + 1)
+    );
+    expect(JSON.stringify(unansweredEvents)).not.toContain("+41710000008");
+    expect(JSON.stringify(unansweredEvents)).not.toContain(
+      "Verify atomic PostgreSQL credit accounting"
+    );
+    await expect(inspection`
+      UPDATE call_events
+      SET severity = 'warning'
+      WHERE call_brief_id = ${fulfilled!.value.attempt.callBriefId}
+    `).rejects.toThrow("immutable");
 
     const answered = await createReady("Credit successful connection");
     const answeredAttempt = await repository.startAttempt(answered.id, {
@@ -217,12 +247,47 @@ describeWithDatabase("PostgresCallRepository", () => {
       "completed",
       answered.id
     );
+    const lateRinging = await repository.applyProviderStatus(
+      answeredProviderCallId,
+      "ringing",
+      "dialing",
+      answered.id
+    );
+    expect(lateRinging?.snapshot.brief.status).toBe("completed");
     const chargedUsage = await repository.getCreditUsage(creditOwner);
     expect(chargedUsage.balance).toBe(2);
     expect(chargedUsage.transactions.filter(({ type }) => type === "call_charge"))
       .toHaveLength(1);
     expect(chargedUsage.transactions.filter(({ type }) => type === "call_refund"))
       .toHaveLength(1);
+    const answeredEvents = await repository.listCallTelemetryEvents(answered.id);
+    expect(
+      answeredEvents.filter(({ payload }) => payload.name === "connection.confirmed")
+    ).toHaveLength(1);
+    expect(
+      answeredEvents.filter(({ payload }) => payload.name === "credit.settled")
+    ).toEqual([
+      expect.objectContaining({
+        payload: {
+          name: "credit.settled",
+          metadata: { settlement: "charge", connected: true }
+        }
+      })
+    ]);
+    expect(
+      answeredEvents.find(
+        ({ payload }) =>
+          payload.name === "provider.status_changed" &&
+          payload.metadata.providerStatus === "ringing"
+      )?.payload
+    ).toEqual({
+      name: "provider.status_changed",
+      metadata: {
+        providerStatus: "ringing",
+        callStatus: "dialing",
+        applied: false
+      }
+    });
 
     const preDial = await createReady("Credit pre-dial refund");
     await repository.startAttempt(preDial.id, {
