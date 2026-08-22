@@ -2,7 +2,8 @@ export type RuntimeSignal = "SIGINT" | "SIGTERM";
 
 export function createGracefulShutdown(
   close: () => Promise<void>,
-  onError: (error: unknown) => void = console.error
+  onError: (error: unknown) => void = () =>
+    writePiiSafeOperationalError("runtime_shutdown_failed")
 ) {
   let closing: Promise<void> | null = null;
   return () => {
@@ -35,3 +36,4 @@ export function registerProcessShutdown(
     }
   };
 }
+import { writePiiSafeOperationalError } from "./pii-safe-logger";

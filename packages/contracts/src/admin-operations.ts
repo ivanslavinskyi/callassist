@@ -142,6 +142,34 @@ const adminWebhookDeliverySchema = z.strictObject({
   lastProblemCode: z.string().min(1).max(160).nullable()
 });
 
+export const operationalAlertCodeSchema = z.enum([
+  "external_worker_unavailable",
+  "durable_jobs_dead_letter",
+  "durable_job_backlog",
+  "retention_overdue",
+  "webhook_processing_failures",
+  "recent_technical_errors"
+]);
+export type OperationalAlertCode = z.infer<
+  typeof operationalAlertCodeSchema
+>;
+
+const operationalAlertSchema = z.strictObject({
+  code: operationalAlertCodeSchema,
+  severity: z.enum(["warning", "critical"]),
+  observed: countSchema,
+  threshold: z.number().int().positive(),
+  unit: z.enum(["count", "seconds"]),
+  runbook: z.enum([
+    "worker-unavailable",
+    "durable-job-failure",
+    "durable-job-backlog",
+    "retention-overdue",
+    "webhook-processing-failure",
+    "application-errors"
+  ])
+});
+
 export const adminSystemStatusSchema = z.strictObject({
   generatedAt: z.iso.datetime(),
   components: z.strictObject({
@@ -213,6 +241,10 @@ export const adminSystemStatusSchema = z.strictObject({
     since: z.iso.datetime(),
     warnings: countSchema,
     errors: countSchema
+  }),
+  alerts: z.strictObject({
+    policyVersion: z.literal("2026-08-22"),
+    active: z.array(operationalAlertSchema).max(6)
   })
 });
 export type AdminSystemStatus = z.infer<typeof adminSystemStatusSchema>;

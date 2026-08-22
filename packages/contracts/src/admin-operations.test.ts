@@ -196,6 +196,10 @@ describe("admin operations contracts", () => {
         since: "2026-08-21T12:00:00.000Z",
         warnings: 0,
         errors: 0
+      },
+      alerts: {
+        policyVersion: "2026-08-22",
+        active: []
       }
     }).success).toBe(true);
     expect(adminOutboundCallControlInputSchema.safeParse({

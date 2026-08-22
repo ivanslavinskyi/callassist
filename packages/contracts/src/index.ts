@@ -8,5 +8,6 @@ export * from "./call-outcome";
 export * from "./call-telemetry";
 export * from "./content";
 export * from "./credits";
+export * from "./health";
 export * from "./phone";
 export * from "./safety";

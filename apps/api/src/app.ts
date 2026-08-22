@@ -28,6 +28,8 @@ import {
   recipientOptOutConfirmationSchema,
   recipientOptOutRequestSchema,
   registrationInputSchema,
+  serviceLivenessSchema,
+  serviceReadinessSchema,
   sessionRevocationActionSchema,
   sensitiveCallAccessInputSchema,
   staffRecipientSuppressionLiftSchema,
@@ -39,6 +41,7 @@ import {
   type User
 } from "@callassist/contracts";
 import Fastify, {
+  LogController,
   type FastifyBaseLogger,
   type FastifyReply,
   type FastifyRequest
@@ -56,6 +59,10 @@ import {
   type EndpointRateLimitRule
 } from "./config/endpoint-rate-limit-policy";
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
+import {
+  piiSafeLoggerOptions,
+  registerPiiSafeRequestLogging
+} from "./runtime/pii-safe-logger";
 import {
   RecipientOptOutService,
   RecipientOptOutServiceError
@@ -115,7 +122,11 @@ export function buildApp({
       })
     : undefined
 }: BuildAppOptions) {
-  const app = Fastify({ logger });
+  const app = Fastify({
+    logger: logger ? piiSafeLoggerOptions : false,
+    logController: new LogController({ disableRequestLogging: logger })
+  });
+  if (logger) registerPiiSafeRequestLogging(app);
   const webOrigins = resolveWebOrigins(webOrigin);
 
   void app.register(cors, {
@@ -1369,20 +1380,29 @@ export function buildApp({
     });
   }
 
-  app.get("/health", async (_request, reply) => {
+  app.get("/health/live", async (_request, reply) => {
+    return reply
+      .header("Cache-Control", "no-store")
+      .send(serviceLivenessSchema.parse({ status: "alive" }));
+  });
+
+  app.get("/health/ready", async (_request, reply) => {
     try {
       await service.ping();
-      return {
-        status: "ok",
-        mode: service.repository.mode,
-        telephony: service.telephonyProvider.mode
-      };
+      return reply
+        .header("Cache-Control", "no-store")
+        .send(serviceReadinessSchema.parse({
+          status: "ready",
+          checks: { database: "ready" }
+        }));
     } catch {
-      return reply.status(503).send({
-        status: "unavailable",
-        mode: service.repository.mode,
-        telephony: service.telephonyProvider.mode
-      });
+      return reply
+        .header("Cache-Control", "no-store")
+        .status(503)
+        .send(serviceReadinessSchema.parse({
+          status: "not_ready",
+          checks: { database: "unavailable" }
+        }));
     }
   });
 
@@ -1883,7 +1903,11 @@ export function buildWebhookApp({
   realtimeBridge,
   logger = true
 }: BuildWebhookAppOptions) {
-  const app = Fastify({ logger });
+  const app = Fastify({
+    logger: logger ? piiSafeLoggerOptions : false,
+    logController: new LogController({ disableRequestLogging: logger })
+  });
+  if (logger) registerPiiSafeRequestLogging(app);
   async function recordWebhookDelivery(
     request: FastifyRequest,
     input: ProviderWebhookDeliveryInput

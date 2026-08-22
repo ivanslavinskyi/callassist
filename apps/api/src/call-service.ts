@@ -57,6 +57,8 @@ import {
   type DurableJobLease
 } from "./jobs/durable-job";
 import { DurableJobWorker } from "./jobs/durable-job-worker";
+import { evaluateOperationalAlerts } from "./operations/operational-alerts";
+import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
 
 type Subscriber = (event: CallEvent) => void;
 type LiveEventMode = "disabled" | "publish" | "subscribe" | "both";
@@ -112,7 +114,8 @@ export class CallService {
   constructor(
     readonly repository: CallRepository,
     readonly telephonyProvider: TelephonyProvider = new MockTelephonyProvider(),
-    onBackgroundError: (error: unknown) => void = console.error,
+    onBackgroundError: (error: unknown) => void = () =>
+      writePiiSafeOperationalError("background_call_operation_failed"),
     postCallTranscriber?: PostCallTranscriber,
     briefCompiler: BriefCompiler = new DeterministicBriefCompiler(),
     admissionPolicy: CallAdmissionPolicy = defaultCallAdmissionPolicy,
@@ -303,7 +306,7 @@ export class CallService {
       since,
       webhookSince
     );
-    return adminSystemStatusSchema.parse({
+    const snapshot = {
       generatedAt,
       components: {
         api: { state: "healthy" },
@@ -365,6 +368,10 @@ export class CallService {
         warnings: facts.recentWarnings,
         errors: facts.recentErrors
       }
+    } as const;
+    return adminSystemStatusSchema.parse({
+      ...snapshot,
+      alerts: evaluateOperationalAlerts(snapshot, now)
     });
   }
 

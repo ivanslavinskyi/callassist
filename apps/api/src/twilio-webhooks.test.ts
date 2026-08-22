@@ -86,6 +86,12 @@ describe("Twilio webhooks", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("does not expose deployment health routes", async () => {
+    const { app } = createHarness();
+    const response = await app.inject({ method: "GET", url: "/health/live" });
+    expect(response.statusCode).toBe(404);
+  });
+
   it("rejects an unsigned voice webhook", async () => {
     const { app, service } = createHarness();
     const brief = await createBrief(service);

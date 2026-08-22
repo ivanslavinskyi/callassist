@@ -125,6 +125,27 @@ const en = {
   recentTelemetryTitle: "Recent telemetry (24h)",
   warnings: "Warnings",
   errors: "Errors",
+  alertsTitle: "Active operational alerts",
+  alertsIntro: "Deterministic snapshot signals from policy version",
+  alertsNone: "No operational alert threshold is currently breached.",
+  alertObserved: "Observed / threshold",
+  alertRunbook: "Runbook",
+  alertSeverities: {
+    warning: "Warning",
+    critical: "Critical"
+  },
+  alertUnits: {
+    count: "count",
+    seconds: "seconds"
+  },
+  alertCodes: {
+    external_worker_unavailable: "External worker unavailable",
+    durable_jobs_dead_letter: "Dead-letter work requires review",
+    durable_job_backlog: "Durable-job queue is overdue",
+    retention_overdue: "Recording retention deletion is overdue",
+    webhook_processing_failures: "Webhook processing failures detected",
+    recent_technical_errors: "Recent technical errors detected"
+  },
   webhooksTitle: "Twilio webhook delivery",
   webhooksIntro: "PII-free hourly delivery aggregates for Twilio HTTP callback attempts. Age is informational, not an upstream health probe. Review reconciliation jobs below; only a superadmin may retry dead-letter work.",
   webhookKinds: {
@@ -333,6 +354,27 @@ const de: AdminOperationsCopy = {
   recentTelemetryTitle: "Letzte Telemetrie (24 Std.)",
   warnings: "Warnungen",
   errors: "Fehler",
+  alertsTitle: "Aktive Betriebsalarme",
+  alertsIntro: "Deterministische Momentaufnahmen aus Richtlinienversion",
+  alertsNone: "Derzeit ist kein betrieblicher Alarmgrenzwert überschritten.",
+  alertObserved: "Messwert / Grenzwert",
+  alertRunbook: "Runbook",
+  alertSeverities: {
+    warning: "Warnung",
+    critical: "Kritisch"
+  },
+  alertUnits: {
+    count: "Anzahl",
+    seconds: "Sekunden"
+  },
+  alertCodes: {
+    external_worker_unavailable: "Externer Worker nicht verfügbar",
+    durable_jobs_dead_letter: "Dead-Letter-Aufgaben benötigen Prüfung",
+    durable_job_backlog: "Durable-Job-Warteschlange ist überfällig",
+    retention_overdue: "Aufbewahrungslöschung ist überfällig",
+    webhook_processing_failures: "Webhook-Verarbeitungsfehler erkannt",
+    recent_technical_errors: "Aktuelle technische Fehler erkannt"
+  },
   webhooksTitle: "Twilio-Webhook-Zustellung",
   webhooksIntro: "PII-freie stündliche Zustellungsaggregate für Twilio-HTTP-Callback-Versuche. Das Alter ist ein Hinweis und keine externe Zustandsprüfung. Anbieterabgleichs-Jobs stehen unten; nur Superadmins dürfen Dead-Letter-Arbeit wiederholen.",
   webhookKinds: {

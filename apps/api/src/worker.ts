@@ -7,6 +7,7 @@ import {
   createGracefulShutdown,
   registerProcessShutdown
 } from "./runtime/graceful-shutdown";
+import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
 
 const {
   repository,
@@ -16,7 +17,7 @@ const {
 const service = new CallService(
   repository,
   telephonyProvider,
-  (error) => console.error("Durable worker operation failed", error),
+  () => writePiiSafeOperationalError("durable_worker_operation_failed"),
   postCallTranscriber,
   undefined,
   undefined,
@@ -35,7 +36,7 @@ const shutdown = createGracefulShutdown(
     await initialization.catch(() => undefined);
     await service.close();
   },
-  (error) => console.error("Durable worker shutdown failed", error)
+  () => writePiiSafeOperationalError("durable_worker_shutdown_failed")
 );
 registerProcessShutdown(shutdown);
 

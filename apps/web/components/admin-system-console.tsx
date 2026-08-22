@@ -173,6 +173,29 @@ export function AdminSystemConsole() {
             </div>
 
             <section className="admin-system-panel">
+              <h2>{copy.alertsTitle}</h2>
+              <p>{copy.alertsIntro} {status.alerts.policyVersion}.</p>
+              {status.alerts.active.length === 0 ? <p>{copy.alertsNone}</p> : null}
+              <div className="admin-alert-list">
+                {status.alerts.active.map((alert) => (
+                  <article className="admin-alert-card" data-severity={alert.severity} key={alert.code}>
+                    <header>
+                      <strong>{copy.alertCodes[alert.code]}</strong>
+                      <span>{copy.alertSeverities[alert.severity]}</span>
+                    </header>
+                    <dl className="admin-operations-list">
+                      <Fact
+                        label={copy.alertObserved}
+                        value={`${alert.observed} / ${alert.threshold} ${copy.alertUnits[alert.unit]}`}
+                      />
+                      <Fact label={copy.alertRunbook} value={alert.runbook} />
+                    </dl>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="admin-system-panel">
               <h2>{copy.webhooksTitle}</h2>
               <p>{copy.webhooksIntro}</p>
               <div className="admin-component-grid">

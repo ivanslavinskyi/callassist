@@ -124,6 +124,12 @@ content in the notification. `/admin/system` reports fresh/stale/offline externa
 worker heartbeats and active work; production alerting still requires deployment
 monitoring and notification routing.
 
+Deployment probes must use the main API's separate non-cacheable health contracts:
+`GET /health/live` is process-only and `GET /health/ready` checks PostgreSQL. The
+Twilio-only listener deliberately exposes neither route. Operational thresholds,
+PII-safe logging rules, ownership requirements, and response procedures are defined
+in [the operations readiness runbook](docs/operations-readiness.md).
+
 `pnpm env:init` creates `.env` with independent encryption and keyed promo-code
 hash keys and never overwrites an existing file. Existing deployments may temporarily
 fall back to `DATA_ENCRYPTION_KEY`, but should set and rotate a separate
@@ -225,6 +231,10 @@ recent retry and dead-letter state, and the global outbound-call control. Dead-l
 retries are superadmin-only, require a reason, and retain immutable evidence. Webhook
 age and provider entries are operational signals only and explicitly do not claim an
 upstream health probe.
+The same view evaluates versioned snapshot alerts for external-worker availability,
+dead-letter/backlogged work, overdue retention, callback processing failures, and
+recent technical errors. They are local policy results, not proof of notification;
+production routing and named on-call ownership remain release work.
 Admins may stop new calls; only superadmins may resume them. Both operations require
 a reason and retain immutable safety evidence.
 
@@ -320,7 +330,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
 - Continue from the completed durable transcription/retention, Twilio status
   reconciliation, webhook-delivery visibility, split worker runtime, real-provider
   crash drills, cross-process live state, and worker heartbeat visibility with
-  production probes, alerts, and incident ownership.
+  production upstream probes, monitor/pager routing, protected log storage, and named
+  incident ownership. Local liveness/readiness, PII-safe logger boundaries, versioned
+  snapshot alerts, and role-based runbooks are complete.
 - Add production deployment, alerting, compliance,
   and staged invite-only/public beta release gates.
 

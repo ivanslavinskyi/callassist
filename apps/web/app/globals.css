@@ -291,6 +291,15 @@ main:focus { outline: none; }
 .admin-job-card > form { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(240px, 1fr) auto; }
 .admin-job-card > form .secondary-button { min-height: 42px; width: auto; }
 .admin-job-card > form > small { color: var(--muted); font-size: 9px; grid-column: 1 / -1; }
+.admin-alert-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.admin-alert-card { background: var(--canvas); border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 12px; padding: 16px; }
+.admin-alert-card[data-severity="warning"] { border-color: color-mix(in srgb, #b7791f 45%, var(--line)); }
+.admin-alert-card[data-severity="critical"] { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+.admin-alert-card > header { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
+.admin-alert-card > header strong { font-size: 12px; }
+.admin-alert-card > header span { border-radius: 99px; font-size: 9px; font-weight: 800; padding: 5px 8px; }
+.admin-alert-card[data-severity="warning"] > header span { background: #fff2cf; color: #7a5308; }
+.admin-alert-card[data-severity="critical"] > header span { background: #fde6e1; color: var(--danger); }
 .admin-outbound-control { border-color: color-mix(in srgb, var(--danger) 28%, var(--line)); display: grid; gap: 28px; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); }
 .admin-outbound-control[data-enabled="false"] { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
 .admin-outbound-control[data-enabled="false"] .admin-control-state { background: #fde6e1; color: var(--danger); }
@@ -1557,6 +1566,8 @@ button:disabled { cursor: wait; opacity: .55; }
   .admin-cost-state[data-state="partial"] { background: #3a321d; color: #f0cb73; }
   .admin-job-card > header span { background: #203a30; color: #b8dfca; }
   .admin-job-card[data-status="dead_letter"] > header span { background: #3b2424; color: #f0aaa2; }
+  .admin-alert-card[data-severity="warning"] > header span { background: #3a321d; color: #f0cb73; }
+  .admin-alert-card[data-severity="critical"] > header span { background: #3b2424; color: #f0aaa2; }
   .admin-outbound-control[data-enabled="false"] .admin-control-state { background: #3b2424; color: #f0aaa2; }
   .status-pill { background: #213a31; }
   .status-awaiting_approval, .status-review_required, .status-needs_clarification { background: #3a321d; color: #f0cb73; }

@@ -176,8 +176,18 @@ The view distinguishes local component configuration from upstream health. Twili
 API-embedded worker from external-worker topology. In external mode they expose the
 fresh/stale/offline heartbeat state, healthy/stale instance counts, active leased-job
 count, and last-seen age without exposing a worker identifier. The current view deliberately does
-not infer alert severity from raw counts: production alert thresholds, probes,
-notification routing, and ownership belong to the deployment/monitoring checkpoint.
+evaluates a versioned set of snapshot alert thresholds for worker availability,
+dead-letter/backlogged jobs, overdue retention, callback processing, and recent
+technical errors. These signals do not claim delivery to a production pager:
+provider probes, notification routing, and named ownership remain deployment work.
+
+The main API also separates `GET /health/live` (process-only) from
+`GET /health/ready` (PostgreSQL-backed). Both are non-cacheable and expose a bounded
+contract without exception or configuration detail. The isolated Twilio listener
+continues to expose no health or authenticated application routes. Generic Fastify
+logs use registered route templates, safe error shapes, and explicit redaction rather
+than raw URLs, headers, request bodies, identifiers, private call text, or provider
+payloads. See `docs/operations-readiness.md` for thresholds and response procedures.
 
 Admins and superadmins may read both views. Either role may immediately disable new
 outbound calls with a 3–500 character reason, but only a superadmin may re-enable

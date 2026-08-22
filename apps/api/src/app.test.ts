@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app";
 import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import {
@@ -213,16 +213,64 @@ describe("call API", () => {
     expect(started.json().brief.status).toBe("dialing");
   });
 
-  it("reports the active storage mode", async () => {
-    const app = createApp();
-    const response = await app.inject({ method: "GET", url: "/health" });
+  it("reports liveness without touching a dependency", async () => {
+    const repository = new InMemoryCallRepository();
+    const ping = vi.spyOn(repository, "ping");
+    const service = new CallService(repository);
+    const app = buildApp({
+      service,
+      allowAnonymousCallsForTesting: true,
+      logger: false
+    });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/health/live" });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual({ status: "alive" });
+    expect(ping).not.toHaveBeenCalled();
+  });
+
+  it("reports database-backed readiness", async () => {
+    const app = createApp();
+    const response = await app.inject({ method: "GET", url: "/health/ready" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.json()).toEqual({
-      status: "ok",
-      mode: "memory",
-      telephony: "mock"
+      status: "ready",
+      checks: { database: "ready" }
     });
+  });
+
+  it("fails readiness without leaking a dependency error", async () => {
+    const repository = new InMemoryCallRepository();
+    vi.spyOn(repository, "ping").mockRejectedValueOnce(
+      new Error("postgres://private-user:private-password@internal-host")
+    );
+    const service = new CallService(repository);
+    const app = buildApp({
+      service,
+      allowAnonymousCallsForTesting: true,
+      logger: false
+    });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/health/ready" });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.body).not.toContain("private");
+    expect(response.json()).toEqual({
+      status: "not_ready",
+      checks: { database: "unavailable" }
+    });
+  });
+
+  it("does not retain the ambiguous legacy health route", async () => {
+    const app = createApp();
+    expect((await app.inject({ method: "GET", url: "/health" })).statusCode)
+      .toBe(404);
   });
 
   it.each(["http://localhost:3000", "http://127.0.0.1:3000"])(

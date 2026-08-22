@@ -454,15 +454,7 @@ export class OpenAIRealtimeBridge {
           }
           break;
         case "error":
-          this.#logger.error(
-            {
-              callBriefId: brief.id,
-              type: event.error?.type,
-              code: event.error?.code,
-              param: event.error?.param
-            },
-            "OpenAI Realtime returned an error"
-          );
+          this.#logger.error({}, "OpenAI Realtime returned an error");
           break;
       }
     };

@@ -22,7 +22,10 @@ export async function setOutboundCallsFromCli(args = process.argv.slice(2)) {
   } finally {
     await repository.close();
   }
-  console.info(`Outbound calls ${enabled ? "enabled" : "disabled"}: ${reason}`);
+  process.stdout.write(`${JSON.stringify({
+    event: "outbound_call_control_updated",
+    enabled
+  })}\n`);
 }
 
 const isEntrypoint =

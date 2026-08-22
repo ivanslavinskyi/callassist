@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CallRepository } from "../storage/call-repository";
+import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import {
   durableJobErrorCode,
   durableJobRetryDelayMs,
@@ -46,7 +47,8 @@ export class DurableJobWorker {
   constructor(
     readonly repository: CallRepository,
     readonly handlers: Partial<Record<DurableJobType, DurableJobHandler>>,
-    readonly onError: (error: unknown) => void = console.error,
+    readonly onError: (error: unknown) => void = () =>
+      writePiiSafeOperationalError("durable_worker_operation_failed"),
     options: DurableJobWorkerOptions = {}
   ) {
     this.#workerId = options.workerId ?? `api-${randomUUID()}`;

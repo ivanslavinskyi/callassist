@@ -49,8 +49,8 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 - **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, server route guards, localized CMS Core, and structured Landing/FAQ/navigation administration exist. Media administration, reviewed operator/contact details, and production release work remain.
 - **PARTIAL — localization:** operational UI and CMS-managed structured Landing/legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. Route-derived canonical/hreflang/robots/sitemap/OG metadata and translation-freshness reporting exist; structured global/organization settings and additional editorial models remain.
-- **PARTIAL — observability:** audit/provider/SSE/health data, a privacy-safe durable technical event stream, versioned outcomes, owner feedback, Admin Calls/Inspector, operational cohorts/cost estimates, local system controls, bounded webhook-delivery evidence, and truthful external-worker heartbeat state exist; upstream probes, production monitoring/alerting, and invoice reconciliation remain.
-- **PARTIAL — async work:** final transcription, recording retention, and Twilio call/recording status reconciliation run through PostgreSQL-backed durable jobs with leases, fencing, bounded retries, attempt history, dead-letter state, restart seeding, and an independently runnable worker. Real-provider crash drills, cross-process persisted-state invalidation, and external-worker heartbeat visibility are complete; remaining generic cleanup jobs and deployment alerting remain open.
+- **PARTIAL — observability:** audit/provider/SSE data, separate liveness/readiness, PII-safe runtime logging boundaries, a privacy-safe durable technical event stream, versioned outcomes, owner feedback, Admin Calls/Inspector, operational cohorts/cost estimates, local system controls, bounded webhook-delivery evidence, truthful external-worker heartbeat state, and versioned snapshot alert rules/runbooks exist; upstream probes, external monitor/pager routing, named ownership, protected log storage, and invoice reconciliation remain.
+- **PARTIAL — async work:** final transcription, recording retention, and Twilio call/recording status reconciliation run through PostgreSQL-backed durable jobs with leases, fencing, bounded retries, attempt history, dead-letter state, restart seeding, and an independently runnable worker. Real-provider crash drills, cross-process persisted-state invalidation, external-worker heartbeat visibility, and local queue/worker alert thresholds are complete; remaining generic cleanup jobs and deployment notification routing remain open.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
 - **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
 - **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. The PostgreSQL ownership suite has been executed successfully. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen.
@@ -122,7 +122,7 @@ The default Admin Calls response contains call and owner UUIDs, locale, lifecycl
 
 - [x] Add privacy-safe operational aggregates for call volume, connection/consent/failure/outcome rates, duration, first-audio latency, reconnects/retries, and estimated provider/model cost.
 - [x] Build localized `/admin` overview and `/admin/system` views for API/database/configured-provider state, active calls, transcription/retention work, recent failures, and the existing outbound-call control.
-- [x] Define snapshot freshness and unavailable/no-sample/not-supported semantics; expose raw warning/error counts without pretending they are production alert status, and cover aggregation, RBAC, privacy, UI states, and PostgreSQL query behavior without introducing a second source of truth.
+- [x] Define snapshot freshness and unavailable/no-sample/not-supported semantics; expose raw warning/error counts and separately versioned deterministic snapshot alerts without pretending notification delivery exists, and cover aggregation, RBAC, privacy, UI states, and PostgreSQL query behavior without introducing a second source of truth.
 
 ### Delivery order for this checkpoint
 
@@ -159,7 +159,16 @@ Acceptance for 6A2 is met: stale call and recording state is durably detected an
 - [x] Expose healthy/stale/offline external-worker state, instance counts, active jobs, and last-seen age in the shared admin contract and localized `/admin/system` UI without worker IDs or private job payloads.
 - [x] Cover source de-duplication, cross-service delivery, heartbeat lifecycle, stale/fresh aggregation, PostgreSQL notification transport, migration, contracts, and runtime shutdown behavior.
 
-Acceptance for 6A3 is met: post-call worker changes reach an already-open API SSE stream without polling; missed notifications cannot lose state; `/admin/system` no longer mistakes an API-local disabled timer for external-worker health; and both graceful stop and stale-crash states are distinguishable. Production alert thresholds, uptime checks, routing, and ownership remain a deployment concern.
+Acceptance for 6A3 is met: post-call worker changes reach an already-open API SSE stream without polling; missed notifications cannot lose state; `/admin/system` no longer mistakes an API-local disabled timer for external-worker health; and both graceful stop and stale-crash states are distinguishable.
+
+## Completed checkpoint — operational readiness foundation (6B)
+
+- [x] Replace the ambiguous combined health route with non-cacheable `GET /health/live` (process-only) and `GET /health/ready` (PostgreSQL-backed), returning bounded contracts and no dependency exception text. Keep both absent from the isolated Twilio ingress.
+- [x] Configure the API and webhook Fastify runtimes to log registered route templates rather than raw URLs, redact known identity/content/credential/provider-ID fields, and replace arbitrary error messages/stacks with controlled shapes. Make standalone worker failures event-code-only.
+- [x] Evaluate a versioned privacy-safe snapshot alert policy in `/admin/system` for external-worker availability, dead-letter and overdue queued work, retention deletion, webhook processing failures, and recent technical errors; expose severity, observed value, threshold, unit, and stable runbook code in EN/DE admin UI.
+- [x] Document health semantics, logging allow/deny rules, thresholds, containment/recovery/verification flows, and role ownership for worker, job, retention, webhook, application, provider, rollback, abuse, complaint, privacy, and support incidents.
+
+Acceptance for 6B is met locally: probes can distinguish a live process from a database-ready API; generic request/error logs do not intentionally serialize raw request/private content; alert evaluation is deterministic and contract-tested; and every signal maps to a documented response. Production monitor/pager integration, protected log transport/retention, upstream provider and invoice alerts, named human assignments, and drills remain explicit deployment gates.
 
 # Public Beta Foundation
 
@@ -298,7 +307,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P1 — admin areas
 
-- [ ] `/admin`: user, call, outcome/consent/failure, cost, and system-health metrics. **Partial:** privacy-safe call/outcome/consent/failure cohorts, exact denominators, latency/reliability, bounded cost estimates, and local system status exist; user metrics, upstream probes, and production alerting remain.
+- [ ] `/admin`: user, call, outcome/consent/failure, cost, and system-health metrics. **Partial:** privacy-safe call/outcome/consent/failure cohorts, exact denominators, latency/reliability, bounded cost estimates, local system status, and versioned snapshot alerts exist; user metrics, upstream probes, and production notification routing remain.
 - [ ] `/admin/users` and detail: identity/verification, activity/status, ledger/promos, calls/feedback/safety/complaints, and audited grant/suspend/session/delete actions. **Partial:** the localized RBAC-protected console supports paginated name/email/role/status search, a privacy-minimized credit ledger, and reasoned grant/suspend/unsuspend/session actions with destructive confirmations; calls, feedback, safety/complaints, promo history, and account deletion remain.
 - [x] `/admin/calls` and detail: privacy-minimized owner context, locale, status/outcome, duration, consent, recording/transcription, failure stage, deterministic operational filters, technical timeline, outcome history, and a separately authorized sensitive-content boundary.
 - [ ] `/admin/safety`: blocks, repeat recipients, no-consent/declines, opt-outs, complaints, suspicious registration/credits, anomaly review and actions. **Partial:** an RBAC-protected localized form now creates staff/complaint suppressions and audited lifts; list/search, anomaly queues, call context, and complaint review remain.
@@ -311,7 +320,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 - [ ] Instrument brief/compiler/policy/approval/credit/Twilio/ringing/answer/disclosure/consent/recording/Realtime/first-audio/conversation/completion/transcription/outcome, including latency, retries, reconnects, provider IDs/status, model/version, channels/duration, feedback. **Partial:** the reconstructable lifecycle, first-audio latency, retries/disconnects/recovery, technical outcomes, owner feedback, and versioned cost derivation are durable; Realtime reconnect is explicitly unsupported until a recovery design exists.
 - [x] Build `/admin/calls/[id]`: summary, timeline, technical metadata, separately permissioned sensitive content. Never show secrets; audit sensitive views.
 - [x] Define event-specific metadata allow-lists excluding phone/name/brief/transcript text, credentials, cookies, OTPs, arbitrary exception bodies, and raw provider payloads from durable call events.
-- [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch. **Partial:** API/database request-path health, provider configuration (not upstream health), active workload, durable queue/retry/dead-letter detail, external-worker heartbeat liveness, privacy-safe webhook-delivery aggregates and age, recent warning/error counts, costs via the overview, reasoned superadmin job recovery, and RBAC kill-switch control exist; provider probes and production alerts remain.
+- [ ] `/admin/system`: API/DB/Twilio/OpenAI health, active calls, jobs/failures, webhooks, retention, transcription, costs, alerts, and kill switch. **Partial:** separate API liveness/database readiness, provider configuration (not upstream health), active workload, durable queue/retry/dead-letter detail, external-worker heartbeat liveness, privacy-safe webhook-delivery aggregates and age, versioned snapshot alerts, costs via the overview, reasoned superadmin job recovery, and RBAC kill-switch control exist; provider probes and external notification routing remain.
 
 ## 6. Production & Compliance
 
@@ -319,9 +328,9 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 - [ ] Deploy stable web/API/Twilio ingress on production domain/TLS; Quick Tunnel is development-only. Preserve isolation of main authenticated API/SSE from Twilio ingress.
 - [ ] Provision production Postgres, managed secrets, least privilege, repeatable migrations, encrypted backups/retention, and documented successful restore test/recovery targets.
-- [ ] Add PII-safe structured logs, error and uptime/health monitoring, provider/cost dashboards and alerts.
+- [ ] Add PII-safe structured logs, error and uptime/health monitoring, provider/cost dashboards and alerts. **Partial:** route-template request logs, controlled error serialization, explicit redaction, event-only worker failures, split liveness/readiness, local admin alerts, and cost estimates exist; protected log transport/retention, real uptime/error collection and paging, provider probes, and invoice/budget alerts remain.
 - [ ] Enforce request limits, endpoint rate limits, secure headers, session security, CSRF where applicable, dependency scanning, configuration validation, and a focused security review. **Partial:** expensive endpoint rate limits and origin checks are implemented; the remaining headers/scanning/review work is still open.
-- [ ] Document rollback, incident, provider outage, abuse, complaint, kill-switch, and support procedures with owners.
+- [ ] Document rollback, incident, provider outage, abuse, complaint, kill-switch, and support procedures with owners. **Partial:** repository runbooks define procedures and accountable roles; named primary/backup humans, monitored channels, response hours, and completed drills remain required.
 
 ### P0 — privacy and Swiss launch review
 
@@ -387,15 +396,15 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [ ] Production domain/TLS, stable hosting, isolated Twilio ingress, production DB.
 - [ ] Secrets/keys managed with least privilege and rotation procedure.
 - [ ] Backups configured and restore-tested.
-- [ ] PII-safe logs, error/health/uptime monitoring, provider/cost alerts.
-- [ ] Sensitive text, credentials, sessions, OTPs, raw provider payloads excluded from generic logs/telemetry.
+- [ ] PII-safe logs, error/health/uptime monitoring, provider/cost alerts. **Partial:** code-level logging/health/alert foundations are complete; deployment transport, monitoring, paging and upstream/invoice integration remain.
+- [x] Sensitive text, credentials, sessions, OTPs, raw provider payloads excluded from generic logs/telemetry through bounded durable-event schemas and runtime logger serialization/redaction policy.
 - [ ] Security/privacy risk and Swiss legal/privacy launch reviews complete.
 - [ ] Disclosure and consent precede recording/model processing in production tests.
-- [ ] Incident/abuse/complaint/outage/rollback/support procedures and owners ready.
+- [ ] Incident/abuse/complaint/outage/rollback/support procedures and owners ready. **Partial:** procedures and role owners are documented; named assignments and exercised drills remain.
 
 ## P1 — broad-beta requirement; invite-alpha waiver only
 
-- [ ] Durable jobs and recovery/dead-letter visibility.
+- [x] Durable jobs and recovery/dead-letter visibility.
 - [x] Admin Calls and failure-stage filters.
 - [x] Call Inspector timeline and sensitive-access audit.
 - [x] Separate technical telemetry; `audit_events` remains action audit.
