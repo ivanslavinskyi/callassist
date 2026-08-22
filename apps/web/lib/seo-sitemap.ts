@@ -10,6 +10,7 @@ export function buildSitemap(index: PublishedContentIndex): MetadataRoute.Sitema
   };
   const routes: MetadataRoute.Sitemap = ["en", "de"].map((locale) => ({
     url: absoluteSiteUrl(`/${locale}`),
+    lastModified: index.landing?.revision.publishedAt,
     changeFrequency: "weekly",
     priority: 1,
     alternates: { languages: homeAlternates }

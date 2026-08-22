@@ -12,7 +12,11 @@ export const contentPageKeySchema = z.enum([
 ]);
 export type ContentPageKey = z.infer<typeof contentPageKeySchema>;
 
-export const editorialCollectionKeySchema = z.enum(["faq", "navigation"]);
+export const editorialCollectionKeySchema = z.enum([
+  "faq",
+  "navigation",
+  "landing"
+]);
 export type EditorialCollectionKey = z.infer<
   typeof editorialCollectionKeySchema
 >;
@@ -57,6 +61,110 @@ export const navigationItemSchema = z.object({
 });
 export type NavigationItem = z.infer<typeof navigationItemSchema>;
 
+const localizedLandingShortTextSchema = z.object({
+  en: z.string().trim().min(1).max(180),
+  de: z.string().trim().min(1).max(180)
+});
+
+const localizedLandingLongTextSchema = z.object({
+  en: z.string().trim().min(1).max(1200),
+  de: z.string().trim().min(1).max(1200)
+});
+
+const localizedLandingListSchema = z.object({
+  en: z.array(z.string().trim().min(1).max(240)).min(1).max(12),
+  de: z.array(z.string().trim().min(1).max(240)).min(1).max(12)
+});
+
+const landingBlockBaseSchema = z.object({
+  id: z.uuid(),
+  sortOrder: z.number().int().nonnegative().max(99),
+  enabled: z.boolean()
+});
+
+export const landingBlockSchema = z.discriminatedUnion("blockType", [
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("hero"),
+    eyebrow: localizedLandingShortTextSchema,
+    title: localizedLandingShortTextSchema,
+    lead: localizedLandingLongTextSchema,
+    badges: localizedLandingListSchema,
+    primaryCtaLabel: localizedLandingShortTextSchema,
+    secondaryCtaLabel: localizedLandingShortTextSchema,
+    seoTitle: localizedLandingShortTextSchema,
+    seoDescription: localizedLandingLongTextSchema
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("how_it_works"),
+    eyebrow: localizedLandingShortTextSchema,
+    title: localizedLandingShortTextSchema,
+    steps: z.array(z.object({
+      id: z.uuid(),
+      title: localizedLandingShortTextSchema,
+      text: localizedLandingLongTextSchema
+    })).min(1).max(8)
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("use_cases"),
+    eyebrow: localizedLandingShortTextSchema,
+    title: localizedLandingShortTextSchema,
+    text: localizedLandingLongTextSchema,
+    items: localizedLandingListSchema
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("safety_privacy"),
+    eyebrow: localizedLandingShortTextSchema,
+    title: localizedLandingShortTextSchema,
+    text: localizedLandingLongTextSchema,
+    limitsTitle: localizedLandingShortTextSchema,
+    limits: localizedLandingListSchema
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("languages"),
+    title: localizedLandingShortTextSchema,
+    text: localizedLandingLongTextSchema
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("faq"),
+    eyebrow: localizedLandingShortTextSchema,
+    title: localizedLandingShortTextSchema,
+    itemLimit: z.number().int().min(1).max(12)
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("cta"),
+    title: localizedLandingShortTextSchema,
+    text: localizedLandingLongTextSchema,
+    primaryCtaLabel: localizedLandingShortTextSchema
+  })
+]);
+export type LandingBlock = z.infer<typeof landingBlockSchema>;
+
+const requiredLandingBlockTypes = [
+  "hero",
+  "how_it_works",
+  "use_cases",
+  "safety_privacy",
+  "languages",
+  "faq",
+  "cta"
+] as const;
+
+export const landingBlocksSchema = z.array(landingBlockSchema)
+  .length(requiredLandingBlockTypes.length)
+  .superRefine((blocks, context) => {
+    const types = new Set(blocks.map(({ blockType }) => blockType));
+    const ids = new Set(blocks.map(({ id }) => id));
+    if (types.size !== requiredLandingBlockTypes.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Landing requires exactly one block of every supported type"
+      });
+    }
+    if (ids.size !== blocks.length) {
+      context.addIssue({ code: "custom", message: "Landing block IDs must be unique" });
+    }
+  });
+
 export const editorialRevisionSummarySchema = z.object({
   id: z.uuid(),
   number: z.number().int().positive(),
@@ -82,6 +190,10 @@ export const adminEditorialRevisionSchema = z.discriminatedUnion("key", [
   editorialRevisionBaseSchema.extend({
     key: z.literal("navigation"),
     items: z.array(navigationItemSchema).max(40)
+  }),
+  editorialRevisionBaseSchema.extend({
+    key: z.literal("landing"),
+    items: landingBlocksSchema
   })
 ]);
 export type AdminEditorialRevision = z.infer<
@@ -93,6 +205,10 @@ export const editorialDraftUpdateInputSchema = z.discriminatedUnion("key", [
   z.object({
     key: z.literal("navigation"),
     items: z.array(navigationItemSchema).max(40)
+  }),
+  z.object({
+    key: z.literal("landing"),
+    items: landingBlocksSchema
   })
 ]);
 export type EditorialDraftUpdateInput = z.infer<
@@ -130,6 +246,174 @@ export const publishedNavigationSchema = z.object({
   }))
 });
 export type PublishedNavigation = z.infer<typeof publishedNavigationSchema>;
+
+export const publishedLandingBlockSchema = z.discriminatedUnion("blockType", [
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("hero"),
+    eyebrow: z.string(),
+    title: z.string(),
+    lead: z.string(),
+    badges: z.array(z.string()),
+    primaryCtaLabel: z.string(),
+    secondaryCtaLabel: z.string(),
+    seoTitle: z.string(),
+    seoDescription: z.string()
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("how_it_works"),
+    eyebrow: z.string(),
+    title: z.string(),
+    steps: z.array(z.object({ id: z.uuid(), title: z.string(), text: z.string() }))
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("use_cases"),
+    eyebrow: z.string(),
+    title: z.string(),
+    text: z.string(),
+    items: z.array(z.string())
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("safety_privacy"),
+    eyebrow: z.string(),
+    title: z.string(),
+    text: z.string(),
+    limitsTitle: z.string(),
+    limits: z.array(z.string())
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("languages"),
+    title: z.string(),
+    text: z.string()
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("faq"),
+    eyebrow: z.string(),
+    title: z.string(),
+    itemLimit: z.number().int().min(1).max(12)
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("cta"),
+    title: z.string(),
+    text: z.string(),
+    primaryCtaLabel: z.string()
+  })
+]);
+export type PublishedLandingBlock = z.infer<
+  typeof publishedLandingBlockSchema
+>;
+
+export function localizeLandingBlock(
+  block: LandingBlock,
+  locale: ContentLocale
+): PublishedLandingBlock {
+  const base = {
+    id: block.id,
+    sortOrder: block.sortOrder,
+    enabled: block.enabled
+  };
+  switch (block.blockType) {
+    case "hero":
+      return {
+        ...base,
+        blockType: block.blockType,
+        eyebrow: block.eyebrow[locale],
+        title: block.title[locale],
+        lead: block.lead[locale],
+        badges: block.badges[locale],
+        primaryCtaLabel: block.primaryCtaLabel[locale],
+        secondaryCtaLabel: block.secondaryCtaLabel[locale],
+        seoTitle: block.seoTitle[locale],
+        seoDescription: block.seoDescription[locale]
+      };
+    case "how_it_works":
+      return {
+        ...base,
+        blockType: block.blockType,
+        eyebrow: block.eyebrow[locale],
+        title: block.title[locale],
+        steps: block.steps.map((step) => ({
+          id: step.id,
+          title: step.title[locale],
+          text: step.text[locale]
+        }))
+      };
+    case "use_cases":
+      return {
+        ...base,
+        blockType: block.blockType,
+        eyebrow: block.eyebrow[locale],
+        title: block.title[locale],
+        text: block.text[locale],
+        items: block.items[locale]
+      };
+    case "safety_privacy":
+      return {
+        ...base,
+        blockType: block.blockType,
+        eyebrow: block.eyebrow[locale],
+        title: block.title[locale],
+        text: block.text[locale],
+        limitsTitle: block.limitsTitle[locale],
+        limits: block.limits[locale]
+      };
+    case "languages":
+      return {
+        ...base,
+        blockType: block.blockType,
+        title: block.title[locale],
+        text: block.text[locale]
+      };
+    case "faq":
+      return {
+        ...base,
+        blockType: block.blockType,
+        eyebrow: block.eyebrow[locale],
+        title: block.title[locale],
+        itemLimit: block.itemLimit
+      };
+    case "cta":
+      return {
+        ...base,
+        blockType: block.blockType,
+        title: block.title[locale],
+        text: block.text[locale],
+        primaryCtaLabel: block.primaryCtaLabel[locale]
+      };
+  }
+}
+
+export const publishedLandingSchema = z.object({
+  revision: editorialRevisionSummarySchema.pick({
+    id: true,
+    number: true,
+    publishedAt: true
+  }).extend({ publishedAt: z.iso.datetime() }),
+  locale: contentLocaleSchema,
+  blocks: z.array(publishedLandingBlockSchema).max(7),
+  seo: z.object({
+    title: z.string().trim().min(1).max(180),
+    description: z.string().trim().min(1).max(1200)
+  })
+});
+export type PublishedLanding = z.infer<typeof publishedLandingSchema>;
+
+export const publishedLandingIndexSchema = z.object({
+  revision: z.object({
+    id: z.uuid(),
+    number: z.number().int().positive(),
+    publishedAt: z.iso.datetime()
+  }),
+  sourceLocale: contentLocaleSchema,
+  localizations: z.array(z.object({
+    locale: contentLocaleSchema,
+    seoTitle: z.string().trim().min(1).max(180),
+    seoDescription: z.string().trim().min(1).max(1200),
+    translationStale: z.boolean()
+  })).length(2)
+});
+export type PublishedLandingIndex = z.infer<
+  typeof publishedLandingIndexSchema
+>;
 
 export const contentPageTypeSchema = z.enum(["page", "landing"]);
 
@@ -192,7 +476,8 @@ export type PublishedContentIndexPage = z.infer<
 >;
 
 export const publishedContentIndexSchema = z.object({
-  pages: z.array(publishedContentIndexPageSchema)
+  pages: z.array(publishedContentIndexPageSchema),
+  landing: publishedLandingIndexSchema.nullable()
 });
 export type PublishedContentIndex = z.infer<
   typeof publishedContentIndexSchema

@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest";
 import { buildSeoAudit } from "./seo-audit";
 
 const index: PublishedContentIndex = {
+  landing: {
+    revision: {
+      id: "81000000-0000-4000-8000-000000000003",
+      number: 4,
+      publishedAt: "2026-08-26T12:00:00.000Z"
+    },
+    sourceLocale: "en",
+    localizations: [
+      { locale: "en", seoTitle: "CallAssist — AI phone assistance under your control", seoDescription: "Supervised AI phone calls for people with speech impairments or local-language barriers.", translationStale: false },
+      { locale: "de", seoTitle: "CallAssist — KI-Telefonassistenz unter Ihrer Kontrolle", seoDescription: "Begleitete KI-Telefonanrufe für Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere.", translationStale: false }
+    ]
+  },
   pages: [{
     key: "privacy",
     pageType: "page",
@@ -37,5 +49,9 @@ describe("SEO audit", () => {
       "translation_stale",
       "description_short"
     ]));
+    expect(audit.find((route) => route.url.endsWith("/de"))).toMatchObject({
+      revisionNumber: 4,
+      publishedAt: "2026-08-26T12:00:00.000Z"
+    });
   });
 });

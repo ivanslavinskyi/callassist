@@ -4,7 +4,8 @@ import type {
   ContentLocale,
   PublishedContentIndex,
   PublishedContentPage,
-  PublishedFaq
+  PublishedFaq,
+  PublishedLanding
 } from "@callassist/contracts";
 import { cache } from "react";
 
@@ -55,4 +56,19 @@ export const getPublishedFaq = cache(async (
   }
   const payload = await response.json() as { faq: PublishedFaq };
   return payload.faq;
+});
+
+export const getPublishedLanding = cache(async (
+  locale: ContentLocale
+): Promise<PublishedLanding | null> => {
+  const response = await fetch(
+    `${internalApiUrl}/api/content/landing?locale=${locale}`,
+    { next: { revalidate: 60 } }
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Unable to load published Landing (HTTP ${response.status})`);
+  }
+  const payload = await response.json() as { landing: PublishedLanding };
+  return payload.landing;
 });

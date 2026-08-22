@@ -1,13 +1,17 @@
 import type {
   PublishedContentIndexPage,
-  PublishedContentPage
+  PublishedContentPage,
+  PublishedLanding
 } from "@callassist/contracts";
 import type { Metadata } from "next";
 import type { UiLocale } from "./i18n/messages";
 import { homeSeo } from "./site-config";
 
-export function homeMetadata(locale: UiLocale): Metadata {
-  const seo = homeSeo[locale];
+export function homeMetadata(
+  locale: UiLocale,
+  landing?: PublishedLanding | null
+): Metadata {
+  const seo = landing?.seo ?? homeSeo[locale];
   const canonical = `/${locale}`;
   return {
     title: seo.title,

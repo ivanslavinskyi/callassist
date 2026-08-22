@@ -5,6 +5,18 @@ import { buildSitemap } from "./seo-sitemap";
 describe("published sitemap", () => {
   it("includes only available localizations with canonical alternates", () => {
     const index: PublishedContentIndex = {
+      landing: {
+        revision: {
+          id: "81000000-0000-4000-8000-000000000003",
+          number: 2,
+          publishedAt: "2026-08-26T12:00:00.000Z"
+        },
+        sourceLocale: "en",
+        localizations: [
+          { locale: "en", seoTitle: "CallAssist", seoDescription: "English Landing description", translationStale: false },
+          { locale: "de", seoTitle: "CallAssist", seoDescription: "Deutsche Landing-Beschreibung", translationStale: false }
+        ]
+      },
       pages: [{
         key: "support",
         pageType: "page",
@@ -35,5 +47,7 @@ describe("published sitemap", () => {
       en: "http://localhost:3000/en/support",
       "x-default": "http://localhost:3000/en/support"
     });
+    expect(sitemap[0]?.lastModified).toBe("2026-08-26T12:00:00.000Z");
+    expect(sitemap[1]?.lastModified).toBe("2026-08-26T12:00:00.000Z");
   });
 });

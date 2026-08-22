@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { publishedContentPageSchema } from "@callassist/contracts";
-import { seededContentPages } from "./seed-content";
+import {
+  adminEditorialRevisionSchema,
+  publishedContentPageSchema
+} from "@callassist/contracts";
+import {
+  seededContentPages,
+  seededEditorialCollections
+} from "./seed-content";
 
 describe("seeded public content", () => {
   it("contains a valid EN and DE publication with unique sections for every page", () => {
@@ -27,5 +33,18 @@ describe("seeded public content", () => {
     for (const locales of logicalPages.values()) {
       expect([...locales].sort()).toEqual(["de", "en"]);
     }
+  });
+
+  it("contains valid FAQ, Navigation, and bounded Landing publications", () => {
+    expect(seededEditorialCollections.map(({ revision }) => revision.key).sort())
+      .toEqual(["faq", "landing", "navigation"]);
+    for (const { revision } of seededEditorialCollections) {
+      expect(adminEditorialRevisionSchema.safeParse(revision).success).toBe(true);
+    }
+    const landing = seededEditorialCollections.find(
+      ({ revision }) => revision.key === "landing"
+    )!.revision;
+    if (landing.key !== "landing") throw new Error("Expected Landing seed");
+    expect(new Set(landing.items.map(({ blockType }) => blockType)).size).toBe(7);
   });
 });

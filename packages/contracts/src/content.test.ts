@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contentDraftUpdateInputSchema,
   editorialDraftUpdateInputSchema,
+  localizeLandingBlock,
   navigationItemSchema,
   onboardingAcceptanceInputSchema,
   publishedContentIndexSchema,
@@ -98,7 +99,8 @@ describe("content and onboarding contracts", () => {
           sourceRevisionNumber: 1,
           translationStale: true
         }]
-      }]
+      }],
+      landing: null
     }).success).toBe(true);
   });
 
@@ -130,5 +132,34 @@ describe("content and onboarding contracts", () => {
       destination: "https://example.com",
       label: { en: "External", de: "Extern" }
     }).success).toBe(false);
+  });
+
+  it("rejects unbounded Landing drafts that omit required block types", () => {
+    expect(editorialDraftUpdateInputSchema.safeParse({
+      key: "landing",
+      items: []
+    }).success).toBe(false);
+  });
+
+  it("localizes structured Landing blocks through one shared transformation", () => {
+    const block = localizeLandingBlock({
+      id: "72000000-0000-4000-8000-000000000001",
+      blockType: "hero",
+      sortOrder: 0,
+      enabled: true,
+      eyebrow: { en: "Accessible calls", de: "Barrierefreie Anrufe" },
+      title: { en: "Your call", de: "Ihr Anruf" },
+      lead: { en: "English lead", de: "Deutscher Einstieg" },
+      badges: { en: ["Beta"], de: ["Beta"] },
+      primaryCtaLabel: { en: "Try", de: "Testen" },
+      secondaryCtaLabel: { en: "Sign in", de: "Anmelden" },
+      seoTitle: { en: "English SEO", de: "Deutscher SEO-Titel" },
+      seoDescription: { en: "English description", de: "Deutsche Beschreibung" }
+    }, "de");
+    expect(block).toMatchObject({
+      blockType: "hero",
+      title: "Ihr Anruf",
+      seoTitle: "Deutscher SEO-Titel"
+    });
   });
 });

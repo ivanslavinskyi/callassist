@@ -41,6 +41,10 @@ export class ContentService {
     return this.repository.getPublishedFaq(locale);
   }
 
+  async getPublishedLanding(locale: ContentLocale) {
+    return this.repository.getPublishedLanding(locale);
+  }
+
   async getPublishedNavigation(locale: ContentLocale) {
     return this.repository.getPublishedNavigation(locale);
   }
@@ -148,6 +152,14 @@ export class ContentService {
       throw new ContentRepositoryError("EDITORIAL_COLLECTION_NOT_FOUND");
     }
     return collection;
+  }
+
+  async getAdminEditorialPreview(key: EditorialCollectionKey) {
+    const { draft } = await this.repository.getAdminEditorialCollection(key);
+    if (!draft) {
+      throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+    }
+    return draft;
   }
 
   async listAdminEditorialRevisions(key: EditorialCollectionKey) {

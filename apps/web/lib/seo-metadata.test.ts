@@ -1,6 +1,7 @@
 import type {
   PublishedContentIndexPage,
-  PublishedContentPage
+  PublishedContentPage,
+  PublishedLanding
 } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
 import { contentPageMetadata, homeMetadata } from "./seo-metadata";
@@ -38,6 +39,19 @@ const indexPage: PublishedContentIndexPage = {
     { locale: "en", slug: "privacy", title: "Privacy", seoTitle: "Privacy | CallAssist", seoDescription: "Privacy information.", sourceRevisionNumber: 2, translationStale: false }
   ]
 };
+const landing: PublishedLanding = {
+  revision: {
+    id: "81000000-0000-4000-8000-000000000003",
+    number: 3,
+    publishedAt: "2026-08-26T12:00:00.000Z"
+  },
+  locale: "de",
+  blocks: [],
+  seo: {
+    title: "Veröffentlichte Landing | CallAssist",
+    description: "Die veröffentlichte CMS-Beschreibung der deutschen Landingpage."
+  }
+};
 
 describe("public SEO metadata", () => {
   it("generates localized canonical, hreflang, OG, and Twitter metadata", () => {
@@ -61,7 +75,9 @@ describe("public SEO metadata", () => {
   });
 
   it("gives both localized home pages canonical alternates", () => {
-    expect(homeMetadata("de")).toMatchObject({
+    expect(homeMetadata("de", landing)).toMatchObject({
+      title: landing.seo.title,
+      description: landing.seo.description,
       alternates: {
         canonical: "/de",
         languages: { en: "/en", de: "/de", "x-default": "/en" }

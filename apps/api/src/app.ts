@@ -296,6 +296,23 @@ export function buildApp({
     );
 
     app.get<{ Querystring: { locale?: string } }>(
+      "/api/content/landing",
+      async (request, reply) => {
+        const locale = contentLocaleSchema.safeParse(request.query.locale);
+        if (!locale.success) {
+          return reply.status(400).send({ error: "INVALID_CONTENT_LOCALE" });
+        }
+        const landing = await contentService.getPublishedLanding(locale.data);
+        if (!landing) {
+          return reply.status(404).send({ error: "EDITORIAL_COLLECTION_NOT_FOUND" });
+        }
+        return reply
+          .header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+          .send({ landing });
+      }
+    );
+
+    app.get<{ Querystring: { locale?: string } }>(
       "/api/content/navigation",
       async (request, reply) => {
         const locale = contentLocaleSchema.safeParse(request.query.locale);
@@ -726,6 +743,29 @@ export function buildApp({
             return reply
               .header("Cache-Control", "private, no-store")
               .send(await contentService.getAdminEditorialCollection(key.data));
+          } catch (error) {
+            return sendContentError(reply, error);
+          }
+        }
+      );
+
+      app.get<{ Params: { key: string } }>(
+        "/api/admin/content/editorial/:key/preview",
+        async (request, reply) => {
+          const actor = await authorizeContentRead(request, reply);
+          if (!actor) return;
+          const key = editorialCollectionKeySchema.safeParse(request.params.key);
+          if (!key.success) {
+            return reply.status(404).send({
+              error: "EDITORIAL_COLLECTION_NOT_FOUND"
+            });
+          }
+          try {
+            return reply
+              .header("Cache-Control", "private, no-store")
+              .send({
+                draft: await contentService.getAdminEditorialPreview(key.data)
+              });
           } catch (error) {
             return sendContentError(reply, error);
           }

@@ -13,6 +13,7 @@ import {
   getOnboardingStatus,
   getPublishedContentIndex,
   getPublishedFaq,
+  getPublishedLanding,
   getPublishedNavigation,
   getAdminUserCreditLedger,
   getAdminContentPage,
@@ -49,11 +50,14 @@ afterEach(() => {
 describe("API client headers", () => {
   it("loads the public published-content index for SEO consumers", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ pages: [] }),
+      JSON.stringify({ pages: [], landing: null }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     ));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(getPublishedContentIndex()).resolves.toEqual({ pages: [] });
+    await expect(getPublishedContentIndex()).resolves.toEqual({
+      pages: [],
+      landing: null
+    });
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/content/index");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
   });
@@ -98,10 +102,11 @@ describe("API client headers", () => {
     ]);
   });
 
-  it("loads public FAQ/navigation and uses the editorial collection lifecycle", async () => {
+  it("loads public Landing/FAQ/navigation and uses the editorial collection lifecycle", async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({
         faq: { items: [] },
+        landing: { blocks: [] },
         navigation: { items: [] },
         published: null,
         draft: null,
@@ -112,6 +117,7 @@ describe("API client headers", () => {
     const id = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
 
     await getPublishedFaq("de");
+    await getPublishedLanding("de");
     await getPublishedNavigation("de");
     await getAdminEditorialCollection("faq");
     await listAdminEditorialRevisions("faq");
@@ -131,6 +137,7 @@ describe("API client headers", () => {
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       expect.stringContaining("/api/content/faq?locale=de"),
+      expect.stringContaining("/api/content/landing?locale=de"),
       expect.stringContaining("/api/content/navigation?locale=de"),
       expect.stringContaining("/api/admin/content/editorial/faq"),
       expect.stringContaining("/api/admin/content/editorial/faq/revisions"),

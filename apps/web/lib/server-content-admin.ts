@@ -1,8 +1,15 @@
 import "server-only";
 
-import type { ContentLocale, ContentPageKey } from "@callassist/contracts";
+import type {
+  ContentLocale,
+  ContentPageKey,
+  EditorialCollectionKey
+} from "@callassist/contracts";
 import { headers } from "next/headers";
-import { fetchServerContentPreview } from "./server-admin-content";
+import {
+  fetchServerContentPreview,
+  fetchServerEditorialPreview
+} from "./server-admin-content";
 
 const internalApiUrl = (
   process.env.INTERNAL_API_URL ??
@@ -20,5 +27,14 @@ export async function getServerContentPreview(
     cookie: requestHeaders.get("cookie") ?? "",
     key,
     locale
+  });
+}
+
+export async function getServerEditorialPreview(key: EditorialCollectionKey) {
+  const requestHeaders = await headers();
+  return fetchServerEditorialPreview({
+    apiUrl: internalApiUrl,
+    cookie: requestHeaders.get("cookie") ?? "",
+    key
   });
 }

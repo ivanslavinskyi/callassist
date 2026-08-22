@@ -3,6 +3,7 @@ import type {
   ContentPageKey,
   ContentSection,
   FaqItem,
+  LandingBlock,
   NavigationItem
 } from "@callassist/contracts";
 import type {
@@ -330,6 +331,126 @@ const navigationItems: NavigationItem[] = [
   navigationItem(9, "opt_out", "footer", "Block calls", "Anrufe sperren")
 ];
 
+const landingBlocks: LandingBlock[] = [
+  {
+    id: "72000000-0000-4000-8000-000000000001",
+    blockType: "hero",
+    sortOrder: 0,
+    enabled: true,
+    eyebrow: localized("Accessible phone assistance", "Barrierefreie Telefonassistenz"),
+    title: localized(
+      "Your call. Your intent. An AI assistant that speaks for you.",
+      "Ihr Anruf. Ihr Anliegen. Ein KI-Assistent, der für Sie spricht."
+    ),
+    lead: localized(
+      "CallAssist helps people with speech impairments or local-language barriers prepare, review, and supervise everyday phone calls.",
+      "CallAssist hilft Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere, alltägliche Telefonanrufe vorzubereiten, zu prüfen und zu begleiten."
+    ),
+    badges: localizedList(
+      ["Free public beta", "3 calls included", "Switzerland only"],
+      ["Kostenlose öffentliche Beta", "3 Anrufe inklusive", "Nur Schweiz"]
+    ),
+    primaryCtaLabel: localized("Try the beta", "Beta testen"),
+    secondaryCtaLabel: localized("Sign in", "Anmelden"),
+    seoTitle: localized(
+      "CallAssist — AI phone assistance under your control",
+      "CallAssist — KI-Telefonassistenz unter Ihrer Kontrolle"
+    ),
+    seoDescription: localized(
+      "Supervised AI phone calls for people with speech impairments or local-language barriers.",
+      "Begleitete KI-Telefonanrufe für Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere."
+    )
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000002",
+    blockType: "how_it_works",
+    sortOrder: 1,
+    enabled: true,
+    eyebrow: localized("How it works", "So funktioniert es"),
+    title: localized(
+      "You remain in control from brief to result.",
+      "Vom Auftrag bis zum Ergebnis behalten Sie die Kontrolle."
+    ),
+    steps: [
+      landingStep(1, "Describe", "Beschreiben", "Set the recipient, objective, language, and facts the assistant may share.", "Empfänger, Ziel, Sprache und freigegebene Fakten festlegen."),
+      landingStep(2, "Review", "Prüfen", "CallAssist compiles a bounded plan for you to check and explicitly approve.", "CallAssist erstellt einen begrenzten Plan, den Sie prüfen und ausdrücklich genehmigen."),
+      landingStep(3, "Call", "Anrufen", "The assistant identifies itself and waits for consent before conversation processing or recording.", "Der Assistent stellt sich vor und wartet vor Verarbeitung oder Aufnahme auf die Einwilligung."),
+      landingStep(4, "Result", "Ergebnis", "Follow the live call, stop it at any time, and review the result and transcript.", "Anruf live verfolgen, jederzeit stoppen und Ergebnis sowie Transkript prüfen.")
+    ]
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000003",
+    blockType: "use_cases",
+    sortOrder: 2,
+    enabled: true,
+    eyebrow: localized("Everyday assistance", "Hilfe im Alltag"),
+    title: localized("Supported everyday tasks", "Unterstützte Alltagsaufgaben"),
+    text: localized(
+      "Use CallAssist for bounded, reviewable requests where you remain responsible for the approved facts and objective.",
+      "Nutzen Sie CallAssist für begrenzte, prüfbare Anliegen, bei denen Sie für die freigegebenen Fakten und das Ziel verantwortlich bleiben."
+    ),
+    items: localizedList(
+      ["Request information", "Arrange an appointment", "Check a document or status", "Deliver a neutral message"],
+      ["Informationen anfragen", "Termin vereinbaren", "Dokument oder Status klären", "Neutrale Nachricht übermitteln"]
+    )
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000004",
+    blockType: "safety_privacy",
+    sortOrder: 3,
+    enabled: true,
+    eyebrow: localized("Designed for a limited beta", "Für eine begrenzte Beta konzipiert"),
+    title: localized("Clear boundaries before every call.", "Klare Grenzen vor jedem Anruf."),
+    text: localized(
+      "Recording starts only after recipient consent. You choose 0, 7, or 30 days of audio retention and can delete retained audio manually. AI output can be wrong, so every call plan must be reviewed.",
+      "Die Aufnahme startet erst nach der Einwilligung. Sie wählen 0, 7 oder 30 Tage Audioaufbewahrung und können gespeicherte Aufnahmen manuell löschen. KI kann Fehler machen, deshalb muss jeder Anrufplan geprüft werden."
+    ),
+    limitsTitle: localized("Not supported", "Nicht unterstützt"),
+    limits: localizedList(
+      ["Emergencies", "Harassment or deception", "Spam, bulk marketing, or political persuasion", "High-stakes legal, medical, or financial negotiation"],
+      ["Notfälle", "Belästigung oder Täuschung", "Spam, Massenwerbung oder politische Überzeugungsarbeit", "Rechtliche, medizinische oder finanzielle Verhandlungen mit hohem Risiko"]
+    )
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000005",
+    blockType: "languages",
+    sortOrder: 4,
+    enabled: true,
+    title: localized(
+      "Website and call language are separate",
+      "Website- und Anrufsprache sind getrennt"
+    ),
+    text: localized(
+      "Use the website in English or German, then choose the appropriate supported language for each call. A controlled fallback language is optional.",
+      "Nutzen Sie die Website auf Deutsch oder Englisch und wählen Sie für jeden Anruf eine passende unterstützte Sprache. Eine kontrollierte Ausweichsprache ist optional."
+    )
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000006",
+    blockType: "faq",
+    sortOrder: 5,
+    enabled: true,
+    eyebrow: localized("Frequently asked questions", "Häufig gestellte Fragen"),
+    title: localized("Know what to expect before you call.", "Wissen, was Sie vor dem Anruf erwartet."),
+    itemLimit: 4
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000007",
+    blockType: "cta",
+    sortOrder: 6,
+    enabled: true,
+    title: localized(
+      "Prepare your first supervised call.",
+      "Bereiten Sie den ersten begleiteten Anruf vor."
+    ),
+    text: localized(
+      "Create an account with your real first and last name, verify your mobile number, and receive three beta call credits.",
+      "Erstellen Sie ein Konto mit Ihrem echten Vor- und Nachnamen, bestätigen Sie Ihre Mobilnummer und erhalten Sie drei Beta-Anrufguthaben."
+    ),
+    primaryCtaLabel: localized("Try the beta", "Beta testen")
+  }
+];
+
 export const seededEditorialCollections: SeedEditorialCollection[] = [
   {
     collectionId: "80000000-0000-4000-8000-000000000001",
@@ -358,6 +479,20 @@ export const seededEditorialCollections: SeedEditorialCollection[] = [
       publishedAt,
       items: navigationItems
     }
+  },
+  {
+    collectionId: "80000000-0000-4000-8000-000000000003",
+    revision: {
+      key: "landing",
+      id: "81000000-0000-4000-8000-000000000003",
+      number: 1,
+      status: "published",
+      createdByUserId: null,
+      createdAt: publishedAt,
+      updatedAt: publishedAt,
+      publishedAt,
+      items: landingBlocks
+    }
   }
 ];
 
@@ -382,5 +517,27 @@ function navigationItem(
     location,
     destination,
     label: { en, de }
+  };
+}
+
+function localized(en: string, de: string) {
+  return { en, de };
+}
+
+function localizedList(en: string[], de: string[]) {
+  return { en, de };
+}
+
+function landingStep(
+  sequence: number,
+  enTitle: string,
+  deTitle: string,
+  enText: string,
+  deText: string
+) {
+  return {
+    id: `73000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+    title: localized(enTitle, deTitle),
+    text: localized(enText, deText)
   };
 }

@@ -5,6 +5,7 @@ import type {
   EditorialCollectionKey,
   EditorialRevisionSummary,
   FaqItem,
+  LandingBlock,
   NavigationItem
 } from "@callassist/contracts";
 import Link from "next/link";
@@ -87,7 +88,9 @@ export function AdminEditorialConsole() {
     try {
       const input = editor.key === "faq"
         ? { key: "faq" as const, items: normaliseFaq(editor.items) }
-        : { key: "navigation" as const, items: normaliseNavigation(editor.items) };
+        : editor.key === "navigation"
+          ? { key: "navigation" as const, items: normaliseNavigation(editor.items) }
+          : { key: "landing" as const, items: normaliseLanding(editor.items) };
       const { draft } = await updateAdminEditorialDraft(key, input);
       setEditor(structuredClone(draft));
       setDirty(false);
@@ -155,6 +158,14 @@ export function AdminEditorialConsole() {
     setNotice(null);
   }
 
+  function updateLanding(items: LandingBlock[]) {
+    setEditor((current) => current?.key === "landing"
+      ? { ...current, items }
+      : current);
+    setDirty(true);
+    setNotice(null);
+  }
+
   const currentPublished = revisions.find(({ status }) => status === "published");
 
   return (
@@ -181,6 +192,7 @@ export function AdminEditorialConsole() {
             >
               <option value="faq">FAQ</option>
               <option value="navigation">Navigation</option>
+              <option value="landing">Landing</option>
             </select>
           </label>
           <div className="admin-content-status">
@@ -200,7 +212,7 @@ export function AdminEditorialConsole() {
             <section className="admin-content-editor">
               {!editor ? (
                 <div className="admin-content-empty">
-                  <h2>{key === "faq" ? "FAQ" : "Navigation"}</h2>
+                  <h2>{collectionName(key)}</h2>
                   <p>{copy.noDraft}</p>
                   <button
                     className="primary-button"
@@ -215,20 +227,31 @@ export function AdminEditorialConsole() {
                 <div className="admin-content-editor-heading">
                   <div>
                     <span className="eyebrow">{copy.draftLabel} · r{editor.number}</span>
-                    <h2>{editor.key === "faq" ? "FAQ" : "Navigation"}</h2>
+                    <h2>{collectionName(editor.key)}</h2>
                   </div>
-                  <button
-                    className="secondary-button"
-                    onClick={() => editor.key === "faq"
-                      ? updateFaq([...editor.items, newFaqItem(editor.items.length)])
-                      : updateNavigation([
-                          ...editor.items,
-                          newNavigationItem(editor.items.length)
-                        ])}
-                    type="button"
-                  >
-                    {copy.addItem}
-                  </button>
+                  <div className="admin-content-editor-actions">
+                    {editor.key === "landing" && !dirty ? (
+                      <Link
+                        className="secondary-button"
+                        href={localizeHref("/admin/content/editorial/landing/preview")}
+                        target="_blank"
+                      >
+                        {copy.previewDraft}
+                      </Link>
+                    ) : null}
+                    {editor.key !== "landing" ? <button
+                      className="secondary-button"
+                      onClick={() => editor.key === "faq"
+                        ? updateFaq([...editor.items, newFaqItem(editor.items.length)])
+                        : updateNavigation([
+                            ...editor.items,
+                            newNavigationItem(editor.items.length)
+                          ])}
+                      type="button"
+                    >
+                      {copy.addItem}
+                    </button> : null}
+                  </div>
                 </div>
 
                 <div className="editorial-item-list">
@@ -242,7 +265,7 @@ export function AdminEditorialConsole() {
                       onMove={(offset) => updateFaq(move(editor.items, index, offset))}
                       onRemove={() => updateFaq(removeAt(editor.items, index))}
                     />
-                  )) : editor.items.map((item, index) => (
+                  )) : editor.key === "navigation" ? editor.items.map((item, index) => (
                     <NavigationEditor
                       copy={copy}
                       index={index}
@@ -251,6 +274,15 @@ export function AdminEditorialConsole() {
                       onChange={(next) => updateNavigation(replaceAt(editor.items, index, next))}
                       onMove={(offset) => updateNavigation(move(editor.items, index, offset))}
                       onRemove={() => updateNavigation(removeAt(editor.items, index))}
+                    />
+                  )) : editor.items.map((item, index) => (
+                    <LandingEditor
+                      copy={copy}
+                      index={index}
+                      item={item}
+                      key={item.id}
+                      onChange={(next) => updateLanding(replaceAt(editor.items, index, next))}
+                      onMove={(offset) => updateLanding(move(editor.items, index, offset))}
                     />
                   ))}
                 </div>
@@ -410,13 +442,132 @@ function NavigationEditor({ copy, index, item, onChange, onMove, onRemove }: {
   );
 }
 
+function LandingEditor({ copy, index, item, onChange, onMove }: {
+  copy: EditorialMessages;
+  index: number;
+  item: LandingBlock;
+  onChange: (item: LandingBlock) => void;
+  onMove: (offset: -1 | 1) => void;
+}) {
+  return (
+    <fieldset className="admin-section-editor editorial-item landing-block-editor">
+      <legend>{copy.blockName[item.blockType]}</legend>
+      <ItemControls
+        copy={copy}
+        enabled={item.enabled}
+        index={index}
+        onEnabled={(enabled) => onChange({ ...item, enabled })}
+        onMove={onMove}
+      />
+      {item.blockType === "hero" ? <>
+        <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LocalizedArea label={copy.textField} maxLength={1200} onChange={(lead) => onChange({ ...item, lead })} rows={4} value={item.lead} />
+        <LocalizedList label={copy.badgesField} onChange={(badges) => onChange({ ...item, badges })} value={item.badges} />
+        <LocalizedInput label={copy.primaryCta} maxLength={180} onChange={(primaryCtaLabel) => onChange({ ...item, primaryCtaLabel })} value={item.primaryCtaLabel} />
+        <LocalizedInput label={copy.secondaryCta} maxLength={180} onChange={(secondaryCtaLabel) => onChange({ ...item, secondaryCtaLabel })} value={item.secondaryCtaLabel} />
+        <LocalizedInput label={copy.seoTitle} maxLength={180} onChange={(seoTitle) => onChange({ ...item, seoTitle })} value={item.seoTitle} />
+        <LocalizedArea label={copy.seoDescription} maxLength={1200} onChange={(seoDescription) => onChange({ ...item, seoDescription })} rows={3} value={item.seoDescription} />
+      </> : null}
+      {item.blockType === "how_it_works" ? <>
+        <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <div className="landing-step-list">
+          {item.steps.map((step, stepIndex) => (
+            <fieldset className="landing-step-editor" key={step.id}>
+              <legend>{copy.step} {stepIndex + 1}</legend>
+              <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({
+                ...item,
+                steps: replaceAt(item.steps, stepIndex, { ...step, title })
+              })} value={step.title} />
+              <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange({
+                ...item,
+                steps: replaceAt(item.steps, stepIndex, { ...step, text })
+              })} rows={3} value={step.text} />
+              {item.steps.length > 1 ? <button className="danger-button" onClick={() => onChange({
+                ...item,
+                steps: removeAt(item.steps, stepIndex)
+              })} type="button">{copy.remove}</button> : null}
+            </fieldset>
+          ))}
+          {item.steps.length < 8 ? <button className="secondary-button" onClick={() => onChange({
+            ...item,
+            steps: [...item.steps, {
+              id: crypto.randomUUID(),
+              title: { en: "", de: "" },
+              text: { en: "", de: "" }
+            }]
+          })} type="button">{copy.addStep}</button> : null}
+        </div>
+      </> : null}
+      {item.blockType === "use_cases" ? <>
+        <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange({ ...item, text })} rows={4} value={item.text} />
+        <LocalizedList label={copy.itemsField} onChange={(items) => onChange({ ...item, items })} value={item.items} />
+      </> : null}
+      {item.blockType === "safety_privacy" ? <>
+        <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange({ ...item, text })} rows={4} value={item.text} />
+        <LocalizedInput label={copy.limitsTitle} maxLength={180} onChange={(limitsTitle) => onChange({ ...item, limitsTitle })} value={item.limitsTitle} />
+        <LocalizedList label={copy.limitsField} onChange={(limits) => onChange({ ...item, limits })} value={item.limits} />
+      </> : null}
+      {item.blockType === "languages" ? <>
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange({ ...item, text })} rows={4} value={item.text} />
+      </> : null}
+      {item.blockType === "faq" ? <>
+        <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <label className="field">
+          <span>{copy.faqLimit}</span>
+          <input max={12} min={1} onChange={(event) => onChange({ ...item, itemLimit: Number(event.target.value) })} type="number" value={item.itemLimit} />
+        </label>
+      </> : null}
+      {item.blockType === "cta" ? <>
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange({ ...item, text })} rows={4} value={item.text} />
+        <LocalizedInput label={copy.primaryCta} maxLength={180} onChange={(primaryCtaLabel) => onChange({ ...item, primaryCtaLabel })} value={item.primaryCtaLabel} />
+      </> : null}
+    </fieldset>
+  );
+}
+
+function LocalizedInput({ label, maxLength, onChange, value }: {
+  label: string;
+  maxLength: number;
+  onChange: (value: { en: string; de: string }) => void;
+  value: { en: string; de: string };
+}) {
+  return <div className="editorial-localized-fields"><TextInput label={`${label} · EN`} maxLength={maxLength} onChange={(en) => onChange({ ...value, en })} value={value.en} /><TextInput label={`${label} · DE`} maxLength={maxLength} onChange={(de) => onChange({ ...value, de })} value={value.de} /></div>;
+}
+
+function LocalizedArea({ label, maxLength, onChange, rows, value }: {
+  label: string;
+  maxLength: number;
+  onChange: (value: { en: string; de: string }) => void;
+  rows: number;
+  value: { en: string; de: string };
+}) {
+  return <div className="editorial-localized-fields"><TextArea label={`${label} · EN`} maxLength={maxLength} onChange={(en) => onChange({ ...value, en })} rows={rows} value={value.en} /><TextArea label={`${label} · DE`} maxLength={maxLength} onChange={(de) => onChange({ ...value, de })} rows={rows} value={value.de} /></div>;
+}
+
+function LocalizedList({ label, onChange, value }: {
+  label: string;
+  onChange: (value: { en: string[]; de: string[] }) => void;
+  value: { en: string[]; de: string[] };
+}) {
+  return <div className="editorial-localized-fields"><TextArea label={`${label} · EN`} maxLength={2400} onChange={(en) => onChange({ ...value, en: en.split("\n") })} rows={5} value={value.en.join("\n")} /><TextArea label={`${label} · DE`} maxLength={2400} onChange={(de) => onChange({ ...value, de: de.split("\n") })} rows={5} value={value.de.join("\n")} /></div>;
+}
+
 function ItemControls({ copy, enabled, index, onEnabled, onMove, onRemove }: {
   copy: EditorialMessages;
   enabled: boolean;
   index: number;
   onEnabled: (enabled: boolean) => void;
   onMove: (offset: -1 | 1) => void;
-  onRemove: () => void;
+  onRemove?: () => void;
 }) {
   return (
     <div className="editorial-item-controls">
@@ -426,7 +577,7 @@ function ItemControls({ copy, enabled, index, onEnabled, onMove, onRemove }: {
       </label>
       <button aria-label={copy.moveUp} className="secondary-button" disabled={index === 0} onClick={() => onMove(-1)} type="button">↑</button>
       <button aria-label={copy.moveDown} className="secondary-button" onClick={() => onMove(1)} type="button">↓</button>
-      <button className="danger-button" onClick={onRemove} type="button">{copy.remove}</button>
+      {onRemove ? <button className="danger-button" onClick={onRemove} type="button">{copy.remove}</button> : null}
     </div>
   );
 }
@@ -488,6 +639,40 @@ function normaliseNavigation(items: NavigationItem[]) {
   }));
 }
 
+function normaliseLanding(items: LandingBlock[]): LandingBlock[] {
+  return items.map((item, sortOrder) => {
+    if (item.blockType === "hero") {
+      return {
+        ...item,
+        sortOrder,
+        badges: normaliseLocalizedList(item.badges)
+      };
+    }
+    if (item.blockType === "use_cases") {
+      return {
+        ...item,
+        sortOrder,
+        items: normaliseLocalizedList(item.items)
+      };
+    }
+    if (item.blockType === "safety_privacy") {
+      return {
+        ...item,
+        sortOrder,
+        limits: normaliseLocalizedList(item.limits)
+      };
+    }
+    return { ...item, sortOrder };
+  });
+}
+
+function normaliseLocalizedList(value: { en: string[]; de: string[] }) {
+  return {
+    en: value.en.map((item) => item.trim()).filter(Boolean),
+    de: value.de.map((item) => item.trim()).filter(Boolean)
+  };
+}
+
 function replaceAt<T>(items: T[], index: number, value: T) {
   return items.map((item, itemIndex) => itemIndex === index ? value : item);
 }
@@ -511,6 +696,12 @@ function formatDate(value: string, locale: "en" | "de") {
   }).format(new Date(value));
 }
 
+function collectionName(key: EditorialCollectionKey) {
+  if (key === "faq") return "FAQ";
+  if (key === "navigation") return "Navigation";
+  return "Landing";
+}
+
 const destinations: NavigationItem["destination"][] = [
   "home",
   "privacy",
@@ -523,8 +714,8 @@ const destinations: NavigationItem["destination"][] = [
 
 const en = {
   eyebrow: "Structured editorial content",
-  title: "FAQ and navigation",
-  intro: "Manage reusable bilingual FAQ items and internal-only navigation, then publish one reviewed immutable revision.",
+  title: "Landing, FAQ and navigation",
+  intro: "Manage bounded bilingual Landing blocks, reusable FAQ items, and internal-only navigation, then publish one reviewed immutable revision.",
   pages: "Pages",
   collection: "Collection",
   publishedLabel: "Published",
@@ -536,6 +727,7 @@ const en = {
   createDraft: "Start draft",
   creating: "Starting…",
   draftCreated: "Draft created.",
+  previewDraft: "Preview saved draft",
   addItem: "Add item",
   item: "Item",
   enabled: "Enabled",
@@ -564,7 +756,30 @@ const en = {
   rollback: "Create rollback draft",
   rollbackCreated: "Rollback draft created.",
   rollbackConfirm: "A new draft will be copied from this published revision.",
-  current: "Current"
+  current: "Current",
+  eyebrowField: "Eyebrow",
+  titleField: "Title",
+  textField: "Text",
+  badgesField: "Badges (one per line)",
+  itemsField: "Items (one per line)",
+  limitsTitle: "Limitations title",
+  limitsField: "Limitations (one per line)",
+  primaryCta: "Primary CTA label",
+  secondaryCta: "Secondary CTA label",
+  seoTitle: "SEO title",
+  seoDescription: "SEO description",
+  faqLimit: "Published FAQ items",
+  step: "Step",
+  addStep: "Add step",
+  blockName: {
+    hero: "Hero",
+    how_it_works: "How it works",
+    use_cases: "Use cases",
+    safety_privacy: "Safety & Privacy",
+    languages: "Languages",
+    faq: "Reusable FAQ",
+    cta: "CTA"
+  } satisfies Record<LandingBlock["blockType"], string>
 };
 
 type EditorialMessages = typeof en;
@@ -572,8 +787,8 @@ type EditorialMessages = typeof en;
 const de: EditorialMessages = {
   ...en,
   eyebrow: "Strukturierte redaktionelle Inhalte",
-  title: "FAQ und Navigation",
-  intro: "Verwalten Sie wiederverwendbare zweisprachige FAQ-Einträge und ausschliesslich interne Navigation und veröffentlichen Sie eine geprüfte unveränderliche Revision.",
+  title: "Landing, FAQ und Navigation",
+  intro: "Verwalten Sie begrenzte zweisprachige Landing-Blöcke, wiederverwendbare FAQ-Einträge und ausschliesslich interne Navigation und veröffentlichen Sie eine geprüfte unveränderliche Revision.",
   pages: "Seiten",
   collection: "Sammlung",
   publishedLabel: "Veröffentlicht",
@@ -585,6 +800,7 @@ const de: EditorialMessages = {
   createDraft: "Entwurf starten",
   creating: "Wird erstellt…",
   draftCreated: "Entwurf erstellt.",
+  previewDraft: "Gespeicherten Entwurf ansehen",
   addItem: "Eintrag hinzufügen",
   item: "Eintrag",
   enabled: "Aktiv",
@@ -613,7 +829,30 @@ const de: EditorialMessages = {
   rollback: "Rollback-Entwurf erstellen",
   rollbackCreated: "Rollback-Entwurf erstellt.",
   rollbackConfirm: "Aus dieser veröffentlichten Revision wird ein neuer Entwurf erstellt.",
-  current: "Aktuell"
+  current: "Aktuell",
+  eyebrowField: "Übertitel",
+  titleField: "Titel",
+  textField: "Text",
+  badgesField: "Badges (einer pro Zeile)",
+  itemsField: "Einträge (einer pro Zeile)",
+  limitsTitle: "Titel der Einschränkungen",
+  limitsField: "Einschränkungen (eine pro Zeile)",
+  primaryCta: "Primäre CTA-Beschriftung",
+  secondaryCta: "Sekundäre CTA-Beschriftung",
+  seoTitle: "SEO-Titel",
+  seoDescription: "SEO-Beschreibung",
+  faqLimit: "Veröffentlichte FAQ-Einträge",
+  step: "Schritt",
+  addStep: "Schritt hinzufügen",
+  blockName: {
+    hero: "Hero",
+    how_it_works: "So funktioniert es",
+    use_cases: "Anwendungsfälle",
+    safety_privacy: "Sicherheit & Datenschutz",
+    languages: "Sprachen",
+    faq: "Wiederverwendbare FAQ",
+    cta: "CTA"
+  }
 };
 
 const messages = { en, de };

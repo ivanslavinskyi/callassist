@@ -1,4 +1,7 @@
-import { adminEditorialRevisionSchema } from "@callassist/contracts";
+import {
+  adminEditorialRevisionSchema,
+  localizeLandingBlock
+} from "@callassist/contracts";
 import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
@@ -15,6 +18,7 @@ import type {
   PublishedContentIndex,
   PublishedContentPage,
   PublishedFaq,
+  PublishedLanding,
   PublishedNavigation
 } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
@@ -293,6 +297,9 @@ export class PostgresContentRepository implements ContentRepository {
       pages.push(row);
       grouped.set(row.key, pages);
     }
+    const landingRevision = await this.#getEditorialRevision("landing", {
+      status: "published"
+    });
     return {
       pages: [...grouped.entries()].map(([key, pages]) => {
         const exemplar = pages[0]!;
@@ -321,7 +328,10 @@ export class PostgresContentRepository implements ContentRepository {
               page.sourceRevisionNumber < sourceRevisionNumber
           }))
         };
-      })
+      }),
+      landing: landingRevision?.key === "landing" && landingRevision.publishedAt
+        ? landingIndex(landingRevision)
+        : null
     };
   }
 
@@ -345,6 +355,35 @@ export class PostgresContentRepository implements ContentRepository {
           question: item.question[locale],
           answer: item.answer[locale]
         }))
+    };
+  }
+
+  async getPublishedLanding(
+    locale: ContentLocale
+  ): Promise<PublishedLanding | null> {
+    const revision = await this.#getEditorialRevision("landing", {
+      status: "published"
+    });
+    if (!revision || revision.key !== "landing" || !revision.publishedAt) {
+      return null;
+    }
+    const hero = revision.items.find(({ blockType }) => blockType === "hero");
+    if (!hero || hero.blockType !== "hero") return null;
+    return {
+      locale,
+      revision: {
+        id: revision.id,
+        number: revision.number,
+        publishedAt: revision.publishedAt
+      },
+      blocks: revision.items
+        .filter(({ enabled }) => enabled)
+        .sort(byEditorialSortOrder)
+        .map((block) => localizeLandingBlock(block, locale)),
+      seo: {
+        title: hero.seoTitle[locale],
+        description: hero.seoDescription[locale]
+      }
     };
   }
 
@@ -1461,6 +1500,29 @@ function navigationHref(
     .find(({ key }) => key === destination)
     ?.localizations.find((candidate) => candidate.locale === locale);
   return localization ? `/${locale}/${localization.slug}` : null;
+}
+
+function landingIndex(
+  revision: Extract<AdminEditorialRevision, { key: "landing" }>
+): NonNullable<PublishedContentIndex["landing"]> {
+  const hero = revision.items.find(({ blockType }) => blockType === "hero");
+  if (!hero || hero.blockType !== "hero" || !revision.publishedAt) {
+    throw new ContentRepositoryError("EDITORIAL_REVISION_NOT_FOUND");
+  }
+  return {
+    revision: {
+      id: revision.id,
+      number: revision.number,
+      publishedAt: revision.publishedAt
+    },
+    sourceLocale: "en",
+    localizations: (["en", "de"] as const).map((locale) => ({
+      locale,
+      seoTitle: hero.seoTitle[locale],
+      seoDescription: hero.seoDescription[locale],
+      translationStale: false
+    }))
+  };
 }
 
 function mapLegalReference(row: LegalReferenceRow) {

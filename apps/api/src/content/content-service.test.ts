@@ -277,4 +277,64 @@ describe("ContentService", () => {
       "editorial.rollback_draft_created"
     ]);
   });
+
+  it("keeps Landing drafts private and publishes ordered localized blocks into SEO state", async () => {
+    const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
+    const initial = await service.getPublishedLanding("de");
+    expect(initial).toMatchObject({
+      revision: { number: 1 },
+      locale: "de",
+      blocks: [
+        { blockType: "hero" },
+        { blockType: "how_it_works" },
+        { blockType: "use_cases" },
+        { blockType: "safety_privacy" },
+        { blockType: "languages" },
+        { blockType: "faq" },
+        { blockType: "cta" }
+      ]
+    });
+    await service.createEditorialDraft(actorUserId, "landing");
+    const draft = (await service.getAdminEditorialCollection("landing")).draft!;
+    if (draft.key !== "landing") throw new Error("Expected Landing draft");
+    const reordered = [...draft.items];
+    [reordered[1], reordered[2]] = [reordered[2]!, reordered[1]!];
+    await service.updateEditorialDraft(actorUserId, "landing", {
+      key: "landing",
+      items: reordered.map((block, sortOrder) => block.blockType === "hero"
+        ? {
+            ...block,
+            sortOrder,
+            seoTitle: {
+              ...block.seoTitle,
+              de: "CallAssist — geprüfte Landing-Revision"
+            }
+          }
+        : { ...block, sortOrder })
+    });
+    expect((await service.getPublishedLanding("de"))?.blocks[1]?.blockType)
+      .toBe("how_it_works");
+    await service.publishEditorialDraft(
+      actorUserId,
+      "landing",
+      "Publish reviewed Landing blocks"
+    );
+    const published = await service.getPublishedLanding("de");
+    expect(published).toMatchObject({
+      revision: { number: 2 },
+      seo: { title: "CallAssist — geprüfte Landing-Revision" }
+    });
+    expect(published?.blocks[1]?.blockType).toBe("use_cases");
+    const index = await service.listPublishedContentIndex();
+    expect(index.landing).toMatchObject({
+      revision: { number: 2 },
+      localizations: expect.arrayContaining([
+        expect.objectContaining({
+          locale: "de",
+          seoTitle: "CallAssist — geprüfte Landing-Revision",
+          translationStale: false
+        })
+      ])
+    });
+  });
 });

@@ -1,36 +1,96 @@
 "use client";
 
+import type {
+  PublishedFaq,
+  PublishedLanding,
+  PublishedLandingBlock
+} from "@callassist/contracts";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { AppShell } from "./app-shell";
+import { FaqList } from "./faq-list";
 import { useUiLocale } from "./ui-locale-provider";
-import { publicMessages } from "@/lib/i18n/public-messages";
 
-export function PublicHome() {
-  const { locale, localizeHref } = useUiLocale();
-  const copy = publicMessages[locale];
+export function PublicHome({
+  landing,
+  faq
+}: {
+  landing: PublishedLanding;
+  faq: PublishedFaq | null;
+}) {
+  const { localizeHref } = useUiLocale();
 
   return (
     <AppShell>
-      <main className="public-home" id="main-content" tabIndex={-1}>
+      <PublicHomeContent
+        faq={faq}
+        landing={landing}
+        loginHref={localizeHref("/login")}
+        registerHref={localizeHref("/register")}
+      />
+    </AppShell>
+  );
+}
+
+export function PublicHomeContent({
+  landing,
+  faq,
+  loginHref,
+  previewBanner,
+  registerHref
+}: {
+  landing: PublishedLanding;
+  faq: PublishedFaq | null;
+  loginHref: string;
+  previewBanner?: ReactNode;
+  registerHref: string;
+}) {
+  return (
+    <main className="public-home" id="main-content" tabIndex={-1}>
+      {previewBanner}
+      {landing.blocks.map((block) => (
+        <LandingBlockView
+          block={block}
+          faq={faq}
+          key={block.id}
+          loginHref={loginHref}
+          registerHref={registerHref}
+        />
+      ))}
+    </main>
+  );
+}
+
+function LandingBlockView({ block, faq, loginHref, registerHref }: {
+  block: PublishedLandingBlock;
+  faq: PublishedFaq | null;
+  loginHref: string;
+  registerHref: string;
+}) {
+  switch (block.blockType) {
+    case "hero":
+      return (
         <section className="public-hero">
-          <span className="eyebrow">{copy.eyebrow}</span>
-          <h1>{copy.title}</h1>
-          <p>{copy.lead}</p>
+          <span className="eyebrow">{block.eyebrow}</span>
+          <h1>{block.title}</h1>
+          <p>{block.lead}</p>
           <div className="public-actions">
-            <Link className="primary-button compact-button" href={localizeHref("/register")}>{copy.tryBeta}</Link>
-            <Link className="secondary-button" href={localizeHref("/login")}>{copy.signIn}</Link>
+            <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
+            <Link className="secondary-button" href={loginHref}>{block.secondaryCtaLabel}</Link>
           </div>
-          <ul className="public-badges" aria-label={copy.eyebrow}>
-            {copy.badges.map((badge) => <li key={badge}>{badge}</li>)}
+          <ul className="public-badges" aria-label={block.eyebrow}>
+            {block.badges.map((badge) => <li key={badge}>{badge}</li>)}
           </ul>
         </section>
-
-        <section className="public-section" aria-labelledby="how-it-works">
-          <span className="eyebrow">{copy.howEyebrow}</span>
-          <h2 id="how-it-works">{copy.howTitle}</h2>
+      );
+    case "how_it_works":
+      return (
+        <section className="public-section" aria-labelledby={`landing-${block.id}`}>
+          <span className="eyebrow">{block.eyebrow}</span>
+          <h2 id={`landing-${block.id}`}>{block.title}</h2>
           <ol className="public-steps">
-            {copy.steps.map((step, index) => (
-              <li key={step.title}>
+            {block.steps.map((step, index) => (
+              <li key={step.id}>
                 <span>{index + 1}</span>
                 <h3>{step.title}</h3>
                 <p>{step.text}</p>
@@ -38,38 +98,60 @@ export function PublicHome() {
             ))}
           </ol>
         </section>
-
-        <section className="public-section public-safety" aria-labelledby="safety-boundaries">
+      );
+    case "use_cases":
+      return (
+        <section className="public-section public-use-cases" aria-labelledby={`landing-${block.id}`}>
           <div>
-            <span className="eyebrow">{copy.safetyEyebrow}</span>
-            <h2 id="safety-boundaries">{copy.safetyTitle}</h2>
-            <p>{copy.safetyText}</p>
+            <span className="eyebrow">{block.eyebrow}</span>
+            <h2 id={`landing-${block.id}`}>{block.title}</h2>
+            <p>{block.text}</p>
+          </div>
+          <ul>
+            {block.items.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </section>
+      );
+    case "safety_privacy":
+      return (
+        <section className="public-section public-safety" aria-labelledby={`landing-${block.id}`}>
+          <div>
+            <span className="eyebrow">{block.eyebrow}</span>
+            <h2 id={`landing-${block.id}`}>{block.title}</h2>
+            <p>{block.text}</p>
           </div>
           <div className="public-use-grid">
             <article>
-              <h3>{copy.usesTitle}</h3>
-              <ul>{copy.uses.map((item) => <li key={item}>{item}</li>)}</ul>
-            </article>
-            <article>
-              <h3>{copy.limitsTitle}</h3>
-              <ul>{copy.limits.map((item) => <li key={item}>{item}</li>)}</ul>
+              <h3>{block.limitsTitle}</h3>
+              <ul>{block.limits.map((item) => <li key={item}>{item}</li>)}</ul>
             </article>
           </div>
         </section>
-
+      );
+    case "languages":
+      return (
         <section className="public-section public-language">
-          <h2>{copy.languagesTitle}</h2>
-          <p>{copy.languagesText}</p>
+          <h2>{block.title}</h2>
+          <p>{block.text}</p>
         </section>
-
+      );
+    case "faq":
+      return (
+        <section className="public-section public-faq" aria-labelledby={`landing-${block.id}`}>
+          <span className="eyebrow">{block.eyebrow}</span>
+          <h2 id={`landing-${block.id}`}>{block.title}</h2>
+          {faq ? <FaqList items={faq.items.slice(0, block.itemLimit)} /> : null}
+        </section>
+      );
+    case "cta":
+      return (
         <section className="public-final-cta">
           <div>
-            <h2>{copy.finalTitle}</h2>
-            <p>{copy.finalText}</p>
+            <h2>{block.title}</h2>
+            <p>{block.text}</p>
           </div>
-          <Link className="primary-button compact-button" href={localizeHref("/register")}>{copy.tryBeta}</Link>
+          <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
         </section>
-      </main>
-    </AppShell>
-  );
+      );
+  }
 }

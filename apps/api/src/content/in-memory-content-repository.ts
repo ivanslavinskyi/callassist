@@ -1,3 +1,4 @@
+import { localizeLandingBlock } from "@callassist/contracts";
 import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
@@ -14,6 +15,7 @@ import type {
   PublishedContentIndex,
   PublishedContentPage,
   PublishedFaq,
+  PublishedLanding,
   PublishedNavigation
 } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
@@ -161,7 +163,8 @@ export class InMemoryContentRepository implements ContentRepository {
               .sort((left, right) => left.locale.localeCompare(right.locale))
           };
         })
-        .sort((left, right) => left.key.localeCompare(right.key))
+        .sort((left, right) => left.key.localeCompare(right.key)),
+      landing: this.#landingIndex()
     };
   }
 
@@ -183,6 +186,33 @@ export class InMemoryContentRepository implements ContentRepository {
           question: item.question[locale],
           answer: item.answer[locale]
         }))
+    };
+  }
+
+  async getPublishedLanding(
+    locale: ContentLocale
+  ): Promise<PublishedLanding | null> {
+    const revision = this.#latestEditorial("landing", "published");
+    if (!revision || revision.key !== "landing" || !revision.publishedAt) {
+      return null;
+    }
+    const hero = revision.items.find(({ blockType }) => blockType === "hero");
+    if (!hero || hero.blockType !== "hero") return null;
+    return {
+      locale,
+      revision: {
+        id: revision.id,
+        number: revision.number,
+        publishedAt: revision.publishedAt
+      },
+      blocks: revision.items
+        .filter(({ enabled }) => enabled)
+        .sort(bySortOrder)
+        .map((block) => localizeLandingBlock(block, locale)),
+      seo: {
+        title: hero.seoTitle[locale],
+        description: hero.seoDescription[locale]
+      }
     };
   }
 
@@ -655,6 +685,29 @@ export class InMemoryContentRepository implements ContentRepository {
       candidate.key === destination && candidate.locale === locale
     );
     return page ? `/${locale}/${page.slug}` : null;
+  }
+
+  #landingIndex(): PublishedContentIndex["landing"] {
+    const revision = this.#latestEditorial("landing", "published");
+    if (!revision || revision.key !== "landing" || !revision.publishedAt) {
+      return null;
+    }
+    const hero = revision.items.find(({ blockType }) => blockType === "hero");
+    if (!hero || hero.blockType !== "hero") return null;
+    return {
+      revision: {
+        id: revision.id,
+        number: revision.number,
+        publishedAt: revision.publishedAt
+      },
+      sourceLocale: "en",
+      localizations: (["en", "de"] as const).map((locale) => ({
+        locale,
+        seoTitle: hero.seoTitle[locale],
+        seoDescription: hero.seoDescription[locale],
+        translationStale: false
+      }))
+    };
   }
 
   #assertNavigationDestinations(

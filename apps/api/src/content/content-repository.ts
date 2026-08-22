@@ -14,6 +14,7 @@ import type {
   PublishedContentIndex,
   PublishedContentPage,
   PublishedFaq,
+  PublishedLanding,
   PublishedNavigation
 } from "@callassist/contracts";
 
@@ -40,6 +41,7 @@ export interface ContentRepository {
   ): Promise<PublishedContentPage | null>;
   listPublishedContentIndex(): Promise<PublishedContentIndex>;
   getPublishedFaq(locale: ContentLocale): Promise<PublishedFaq | null>;
+  getPublishedLanding(locale: ContentLocale): Promise<PublishedLanding | null>;
   getPublishedNavigation(
     locale: ContentLocale
   ): Promise<PublishedNavigation | null>;

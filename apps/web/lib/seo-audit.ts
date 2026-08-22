@@ -29,16 +29,22 @@ export type SeoAuditRoute = {
 
 export function buildSeoAudit(index: PublishedContentIndex): SeoAuditRoute[] {
   const routes: SeoAuditRoute[] = (["en", "de"] as const).map((locale) => {
-    const seo = homeSeo[locale];
+    const localization = index.landing?.localizations.find(
+      (candidate) => candidate.locale === locale
+    );
+    const seo = localization ? {
+      title: localization.seoTitle,
+      description: localization.seoDescription
+    } : homeSeo[locale];
     return routeAudit({
       key: "home",
       locale,
       pathname: `/${locale}`,
       title: seo.title,
       description: seo.description,
-      revisionNumber: null,
-      publishedAt: null,
-      translationStale: false,
+      revisionNumber: index.landing?.revision.number ?? null,
+      publishedAt: index.landing?.revision.publishedAt ?? null,
+      translationStale: localization?.translationStale ?? false,
       alternates: {
         en: absoluteSiteUrl("/en"),
         de: absoluteSiteUrl("/de"),

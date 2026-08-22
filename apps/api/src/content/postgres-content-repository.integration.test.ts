@@ -320,6 +320,79 @@ describeWithDatabase("PostgresContentRepository", () => {
       "editorial.revision_published"
     ]);
   });
+
+  it("keeps Landing drafts private and publishes their ordered localized SEO snapshot", async () => {
+    const suffix = randomUUID();
+    const editor = await authRepository.createUser({
+      email: `landing.${suffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(suffix),
+      firstName: "Landing",
+      lastName: "Editor",
+      uiLocale: "de"
+    });
+    const initial = await contentRepository.getPublishedLanding("de");
+    expect(initial).not.toBeNull();
+    const draftSummary = await contentRepository.createEditorialDraft(
+      editor.id,
+      "landing",
+      "2026-08-24T12:00:00.000Z"
+    );
+    const detail = await contentRepository.getAdminEditorialCollection("landing");
+    if (detail.draft?.key !== "landing") {
+      throw new Error("Expected Landing draft");
+    }
+    const title = `Landing integration revision ${draftSummary.number}`;
+    const reordered = [...detail.draft.items];
+    [reordered[1], reordered[2]] = [reordered[2]!, reordered[1]!];
+    const expectedSecondBlock = reordered[1]!.blockType;
+    await contentRepository.updateEditorialDraft(editor.id, "landing", {
+      key: "landing",
+      items: reordered.map((block, sortOrder) => block.blockType === "hero"
+        ? {
+            ...block,
+            sortOrder,
+            seoTitle: { ...block.seoTitle, de: title }
+          }
+        : { ...block, sortOrder })
+    }, "2026-08-24T12:05:00.000Z");
+    await expect(contentRepository.getPublishedLanding("de")).resolves
+      .toMatchObject({ revision: { number: initial!.revision.number } });
+    await contentRepository.publishEditorialDraft(
+      editor.id,
+      "landing",
+      "Publish reviewed Landing collection",
+      "2026-08-24T12:10:00.000Z"
+    );
+    const published = await contentRepository.getPublishedLanding("de");
+    expect(published).toMatchObject({
+      revision: { number: draftSummary.number },
+      seo: { title }
+    });
+    expect(published?.blocks[1]?.blockType).toBe(expectedSecondBlock);
+    const index = await contentRepository.listPublishedContentIndex();
+    expect(index.landing).toMatchObject({
+      revision: { number: draftSummary.number },
+      localizations: expect.arrayContaining([
+        expect.objectContaining({
+          locale: "de",
+          seoTitle: title,
+          translationStale: false
+        })
+      ])
+    });
+    const events = await inspection<{ eventType: string }[]>`
+      SELECT event_type AS "eventType"
+      FROM content_editorial_admin_events
+      WHERE actor_user_id = ${editor.id}
+      ORDER BY created_at
+    `;
+    expect(events.map(({ eventType }) => eventType)).toEqual([
+      "editorial.draft_created",
+      "editorial.draft_updated",
+      "editorial.revision_published"
+    ]);
+  });
 });
 
 function phoneFromUuid(value: string) {

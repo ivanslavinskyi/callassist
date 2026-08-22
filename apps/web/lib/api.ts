@@ -27,6 +27,7 @@ import type {
   PromoRedemptionInput,
   PublishedContentIndex,
   PublishedFaq,
+  PublishedLanding,
   PublishedNavigation,
   RecipientOptOutConfirmation,
   RecipientOptOutRequest,
@@ -141,6 +142,12 @@ export async function getPublishedContentIndex() {
 
 export async function getPublishedFaq(locale: ContentLocale) {
   return apiRequest<{ faq: PublishedFaq }>(`/api/content/faq?locale=${locale}`);
+}
+
+export async function getPublishedLanding(locale: ContentLocale) {
+  return apiRequest<{ landing: PublishedLanding }>(
+    `/api/content/landing?locale=${locale}`
+  );
 }
 
 export async function getPublishedNavigation(locale: ContentLocale) {

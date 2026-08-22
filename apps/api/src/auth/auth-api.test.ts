@@ -248,6 +248,12 @@ describe("auth API", () => {
     expect(contentIndex.statusCode).toBe(200);
     expect(contentIndex.headers["cache-control"]).toContain("max-age=60");
     expect(contentIndex.json()).toMatchObject({
+      landing: {
+        revision: { number: 1 },
+        localizations: expect.arrayContaining([
+          expect.objectContaining({ locale: "de", translationStale: false })
+        ])
+      },
       pages: expect.arrayContaining([expect.objectContaining({
         key: "privacy",
         localizations: expect.arrayContaining([
@@ -270,6 +276,27 @@ describe("auth API", () => {
         items: expect.arrayContaining([
           expect.objectContaining({ question: expect.stringContaining("KI-Anruf") })
         ])
+      }
+    });
+    const landing = await app.inject({
+      method: "GET",
+      url: "/api/content/landing?locale=de"
+    });
+    expect(landing.statusCode).toBe(200);
+    expect(landing.headers["cache-control"]).toContain("max-age=60");
+    expect(landing.json()).toMatchObject({
+      landing: {
+        locale: "de",
+        revision: { number: 1 },
+        blocks: [
+          { blockType: "hero" },
+          { blockType: "how_it_works" },
+          { blockType: "use_cases" },
+          { blockType: "safety_privacy" },
+          { blockType: "languages" },
+          { blockType: "faq", itemLimit: 4 },
+          { blockType: "cta" }
+        ]
       }
     });
     const navigation = await app.inject({
@@ -587,6 +614,41 @@ describe("auth API", () => {
           expect.objectContaining({ question: "Ist der KI-Anruf offengelegt?" })
         ])
       }
+    });
+
+    const landingCreated = await app.inject({
+      method: "POST",
+      url: "/api/admin/content/editorial/landing/drafts",
+      headers: { cookie }
+    });
+    expect(landingCreated.statusCode).toBe(201);
+    const landingPreview = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/editorial/landing/preview",
+      headers: { cookie }
+    });
+    expect(landingPreview.statusCode).toBe(200);
+    expect(landingPreview.headers["cache-control"]).toBe("private, no-store");
+    expect(landingPreview.json()).toMatchObject({
+      draft: {
+        key: "landing",
+        number: 2,
+        items: expect.arrayContaining([
+          expect.objectContaining({ blockType: "hero" })
+        ])
+      }
+    });
+    const anonymousLandingPreview = await app.inject({
+      method: "GET",
+      url: "/api/admin/content/editorial/landing/preview"
+    });
+    expect(anonymousLandingPreview.statusCode).toBe(401);
+    const publicLanding = await app.inject({
+      method: "GET",
+      url: "/api/content/landing?locale=de"
+    });
+    expect(publicLanding.json()).toMatchObject({
+      landing: { revision: { number: 1 } }
     });
   });
 
