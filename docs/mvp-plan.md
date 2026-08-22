@@ -98,6 +98,22 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [ ] Add a durable technical `call_events` stream distinct from immutable staff/action audit, with stage, latency, consent, duration, failure category, and cost-safe fields.
 - [ ] Add RBAC-protected `/admin/calls` list/detail views with useful status/outcome/consent/failure/language/date filters and privacy-minimized recipient/user context.
 
+### Delivery order for this checkpoint
+
+1. **5A — durable telemetry foundation.** Keep the existing `CallEvent` contract as an ephemeral SSE/UI envelope and introduce a separately named, schema-versioned durable event record. Add append-only `call_events` storage, immutable database enforcement, deterministic event names/stages/severity, correlation to call/attempt/user, and event-specific bounded metadata schemas. Write events in the same transaction as the corresponding PostgreSQL state transition where practical; mirror behavior in memory for tests.
+2. **5B — outcomes and owner feedback.** Keep technical terminal classification separate from semantic task outcome. Store immutable/versioned outcomes with provenance (`system`, `user`, or authorized staff) and never infer `resolved` from provider completion alone. Add owner-scoped Yes/Partly/No goal feedback, Good/Some errors/Poor transcript quality, and an optional length-bounded comment.
+3. **5C — Admin Calls and Inspector.** Build the RBAC-protected list only after the event/outcome read model exists, then add the detail timeline, failure-stage filters, privacy-minimized identity context, and separately authorized/audited access to sensitive call content.
+
+Immediate implementation scope is **5A only**:
+
+- Add contracts and migration for append-only technical events without changing the current SSE behavior or call workflow.
+- Instrument the minimum reconstructable lifecycle: brief creation/compilation/policy, approval, credit reservation/settlement, provider creation/status, confirmed connection, disclosure/consent, recording, Realtime readiness/conversation end, and final transcription.
+- Use explicit event-specific metadata allow-lists. Exclude phone/name/objective/facts/transcript text, credentials, cookies, OTPs, provider request payloads, and arbitrary exception bodies.
+- Make repeated callbacks/retries idempotent without losing distinct legitimate transitions, and preserve the existing rule that busy/no-answer/pre-connection failures are refunded while charging occurs only after provider-confirmed connection.
+- Add contract, memory/PostgreSQL, immutability, callback-reordering, retry/idempotency, and sensitive-data exclusion tests.
+
+Acceptance for 5A: a completed connection, busy/no-answer attempt, consent failure, recording failure, and transcription failure can each be reconstructed from durable events; events remain immutable and PII-safe; current call/SSE behavior and credit settlement do not change.
+
 # Public Beta Foundation
 
 ## 1. Identity & Tenancy
