@@ -94,6 +94,11 @@ export type Messages = {
     account: string;
     signIn: string;
     createAccount: string;
+    privacy: string;
+    terms: string;
+    acceptableUse: string;
+    support: string;
+    faq: string;
     optOut: string;
     redeem: string;
     safety: string;
@@ -291,6 +296,11 @@ const en: Messages = {
     account: "Account",
     signIn: "Sign in",
     createAccount: "Try the beta",
+    privacy: "Privacy",
+    terms: "Terms",
+    acceptableUse: "Acceptable use",
+    support: "Support",
+    faq: "FAQ",
     optOut: "Stop calls",
     redeem: "Redeem",
     safety: "Safety",
@@ -450,6 +460,11 @@ const de: Messages = {
     account: "Konto",
     signIn: "Anmelden",
     createAccount: "Beta testen",
+    privacy: "Datenschutz",
+    terms: "Bedingungen",
+    acceptableUse: "Nutzungsregeln",
+    support: "Support",
+    faq: "FAQ",
     optOut: "Anrufe sperren",
     redeem: "Code einlösen",
     safety: "Sicherheit",

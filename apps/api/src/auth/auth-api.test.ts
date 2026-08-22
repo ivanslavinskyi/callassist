@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { buildApp } from "../app";
 import { CallService } from "../call-service";
 import { CreditService } from "../credits/credit-service";
+import { ContentService } from "../content/content-service";
+import { InMemoryContentRepository } from "../content/in-memory-content-repository";
+import { seededContentPages } from "../content/seed-content";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { AuthService } from "./auth-service";
 import { InMemoryAuthRepository } from "./in-memory-auth-repository";
@@ -14,7 +17,7 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-function createAuthApp() {
+function createAuthApp(contentService?: ContentService) {
   const repository = new InMemoryAuthRepository();
   const callRepository = new InMemoryCallRepository();
   const callService = new CallService(callRepository);
@@ -32,6 +35,7 @@ function createAuthApp() {
     service: callService,
     authService,
     creditService,
+    contentService,
     logger: false,
     secureCookies: false
   });
@@ -211,6 +215,149 @@ describe("auth API", () => {
       });
       expect(current.statusCode).toBe(401);
     }
+  });
+
+  it("serves localized policy pages and enforces current onboarding acceptance", async () => {
+    const contentRepository = new InMemoryContentRepository();
+    const contentService = new ContentService(
+      contentRepository,
+      () => new Date("2026-08-22T12:00:00.000Z")
+    );
+    await contentService.initialize();
+    const { app } = createAuthApp(contentService);
+
+    const privacy = await app.inject({
+      method: "GET",
+      url: "/api/content/pages/datenschutz?locale=de"
+    });
+    expect(privacy.statusCode).toBe(200);
+    expect(privacy.json().page).toMatchObject({
+      key: "privacy",
+      locale: "de",
+      revision: { number: 1 }
+    });
+    const wrongLocale = await app.inject({
+      method: "GET",
+      url: "/api/content/pages/datenschutz?locale=en"
+    });
+    expect(wrongLocale.statusCode).toBe(404);
+
+    const cookie = await registerAndVerify(app, registration);
+    const blockedBeforeAcceptance = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs",
+      headers: { cookie }
+    });
+    expect(blockedBeforeAcceptance.statusCode).toBe(403);
+    expect(blockedBeforeAcceptance.json()).toEqual({
+      error: "ONBOARDING_REQUIRED"
+    });
+
+    const status = await app.inject({
+      method: "GET",
+      url: "/api/onboarding/status?locale=de",
+      headers: { cookie }
+    });
+    expect(status.statusCode).toBe(200);
+    const current = status.json().current;
+    expect(status.json()).toMatchObject({ required: true, accepted: null });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/onboarding/accept",
+      headers: { cookie },
+      payload: {
+        locale: "de",
+        termsRevisionId: current.terms.id,
+        acceptableUseRevisionId: current.acceptableUse.id,
+        acceptTerms: true,
+        acceptAcceptableUse: true,
+        acknowledgeConsent: false,
+        acknowledgeRetention: true,
+        acknowledgeUseLimits: true,
+        acknowledgeCredits: true
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const stale = await app.inject({
+      method: "POST",
+      url: "/api/onboarding/accept",
+      headers: { cookie },
+      payload: {
+        locale: "de",
+        termsRevisionId: randomUUID(),
+        acceptableUseRevisionId: current.acceptableUse.id,
+        acceptTerms: true,
+        acceptAcceptableUse: true,
+        acknowledgeConsent: true,
+        acknowledgeRetention: true,
+        acknowledgeUseLimits: true,
+        acknowledgeCredits: true
+      }
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: "LEGAL_REVISION_CHANGED" });
+
+    const acceptance = {
+      locale: "de",
+      termsRevisionId: current.terms.id,
+      acceptableUseRevisionId: current.acceptableUse.id,
+      acceptTerms: true,
+      acceptAcceptableUse: true,
+      acknowledgeConsent: true,
+      acknowledgeRetention: true,
+      acknowledgeUseLimits: true,
+      acknowledgeCredits: true
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const accepted = await app.inject({
+        method: "POST",
+        url: "/api/onboarding/accept",
+        headers: { cookie },
+        payload: acceptance
+      });
+      expect(accepted.statusCode).toBe(200);
+      expect(accepted.json()).toMatchObject({ required: false });
+    }
+    expect(contentRepository.acceptancesForTest()).toHaveLength(1);
+
+    const allowedAfterAcceptance = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs",
+      headers: { cookie }
+    });
+    expect(allowedAfterAcceptance.statusCode).toBe(200);
+
+    const revisionTwo = seededContentPages
+      .filter(({ key }) => key === "acceptable_use")
+      .map((page, index) => ({
+        ...page,
+        revisionLocalizationId: `71000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        revision: {
+          ...page.revision,
+          id: "72000000-0000-4000-8000-000000000002",
+          number: 2,
+          publishedAt: "2026-08-23T00:00:00.000Z"
+        }
+      }));
+    await contentRepository.initializeSeedContent(revisionTwo);
+
+    const blockedAfterChange = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs",
+      headers: { cookie }
+    });
+    expect(blockedAfterChange.statusCode).toBe(403);
+    const changedStatus = await app.inject({
+      method: "GET",
+      url: "/api/onboarding/status?locale=de",
+      headers: { cookie }
+    });
+    expect(changedStatus.json()).toMatchObject({
+      required: true,
+      current: { acceptableUse: { revisionNumber: 2 } }
+    });
   });
 
   it("requires a session and hides every call resource from other users", async () => {

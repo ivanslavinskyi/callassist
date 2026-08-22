@@ -9,6 +9,8 @@ import {
   callBriefStatusSchema,
   createCallBriefInputSchema,
   loginInputSchema,
+  contentLocaleSchema,
+  onboardingAcceptanceInputSchema,
   phoneVerificationInputSchema,
   promoCodeCreateInputSchema,
   promoRedemptionInputSchema,
@@ -34,6 +36,8 @@ import { AuthServiceError, type AuthService } from "./auth/auth-service";
 import { decodeAdminUserCursor } from "./auth/auth-repository";
 import { CallServiceError, type CallService } from "./call-service";
 import type { CreditService } from "./credits/credit-service";
+import { ContentRepositoryError } from "./content/content-repository";
+import type { ContentService } from "./content/content-service";
 import {
   defaultEndpointRateLimitPolicy,
   type EndpointRateLimitPolicy,
@@ -61,6 +65,7 @@ type BuildAppOptions = {
   service: CallService;
   authService?: AuthService;
   creditService?: CreditService;
+  contentService?: ContentService;
   allowAnonymousCallsForTesting?: boolean;
   logger?: boolean;
   secureCookies?: boolean;
@@ -81,6 +86,7 @@ export function buildApp({
   service,
   authService,
   creditService,
+  contentService,
   allowAnonymousCallsForTesting = false,
   logger = true,
   secureCookies = process.env.NODE_ENV === "production",
@@ -126,6 +132,14 @@ export function buildApp({
       await reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
       return null;
     }
+    if (
+      contentService &&
+      user &&
+      !(await contentService.hasCurrentAcceptance(user.id))
+    ) {
+      await reply.status(403).send({ error: "ONBOARDING_REQUIRED" });
+      return null;
+    }
     const userId = user?.id ?? null;
     if (options.callId) {
       try {
@@ -168,6 +182,13 @@ export function buildApp({
       await reply.status(403).send({ error: "ADMIN_ACTION_FORBIDDEN" });
       return null;
     }
+    if (
+      contentService &&
+      !(await contentService.hasCurrentAcceptance(user.id))
+    ) {
+      await reply.status(403).send({ error: "ONBOARDING_REQUIRED" });
+      return null;
+    }
     return user;
   }
 
@@ -198,6 +219,26 @@ export function buildApp({
       .status(429)
       .send({ error: "RATE_LIMITED" });
     return false;
+  }
+
+  if (contentService) {
+    app.get<{
+      Params: { slug: string };
+      Querystring: { locale?: string };
+    }>("/api/content/pages/:slug", async (request, reply) => {
+      const locale = contentLocaleSchema.safeParse(request.query.locale);
+      if (!locale.success || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(request.params.slug)) {
+        return reply.status(400).send({ error: "INVALID_CONTENT_PAGE_REQUEST" });
+      }
+      const page = await contentService.getPublishedPage(
+        locale.data,
+        request.params.slug
+      );
+      if (!page) return reply.status(404).send({ error: "CONTENT_PAGE_NOT_FOUND" });
+      return reply
+        .header("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+        .send({ page });
+    });
   }
 
   if (recipientOptOutService) {
@@ -355,6 +396,51 @@ export function buildApp({
         .header("Cache-Control", "private, no-store")
         .send({ user });
     });
+
+    if (contentService) {
+      app.get<{
+        Querystring: { locale?: string };
+      }>("/api/onboarding/status", async (request, reply) => {
+        const user = await authService.authenticate(
+          sessionTokenFromHeaders(request.headers)
+        );
+        if (!user) {
+          return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+        }
+        const locale = contentLocaleSchema.safeParse(
+          request.query.locale ?? user.uiLocale
+        );
+        if (!locale.success) {
+          return reply.status(400).send({ error: "INVALID_CONTENT_LOCALE" });
+        }
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await contentService.getOnboardingStatus(user.id, locale.data));
+      });
+
+      app.post("/api/onboarding/accept", async (request, reply) => {
+        if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+          return reply.status(403).send({ error: "INVALID_ORIGIN" });
+        }
+        const user = await authService.authenticate(
+          sessionTokenFromHeaders(request.headers)
+        );
+        if (!user) {
+          return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+        }
+        const parsed = onboardingAcceptanceInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_ONBOARDING_ACCEPTANCE" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await contentService.acceptOnboarding(user.id, parsed.data));
+        } catch (error) {
+          return sendContentError(reply, error);
+        }
+      });
+    }
 
     app.get("/api/usage", async (request, reply) => {
       const access = await authorizeCallAccess(request, reply);
@@ -923,7 +1009,11 @@ export function buildApp({
   );
 
   app.addHook("onClose", async () => {
-    await Promise.all([service.close(), authService?.close()]);
+    await Promise.all([
+      service.close(),
+      authService?.close(),
+      contentService?.close()
+    ]);
   });
 
   return app;
@@ -1158,6 +1248,21 @@ export function buildWebhookApp({
   });
 
   return app;
+}
+
+function sendContentError(
+  reply: { status(code: number): { send(payload: unknown): unknown } },
+  error: unknown
+) {
+  if (error instanceof ContentRepositoryError) {
+    const status = error.code === "LEGAL_REVISION_CHANGED"
+      ? 409
+      : error.code === "USER_NOT_FOUND"
+        ? 404
+        : 503;
+    return reply.status(status).send({ error: error.code });
+  }
+  throw error;
 }
 
 function optionalNonNegativeNumber(value: string | undefined) {

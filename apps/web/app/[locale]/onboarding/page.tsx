@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import type { ReactNode } from "react";
-import { adminAreaRedirect } from "@/lib/route-access";
+import { OnboardingForm } from "@/components/onboarding-form";
+import { isUiLocale } from "@/lib/i18n/messages";
+import { onboardingPageRedirect } from "@/lib/route-access";
 import {
   getServerCurrentUser,
   getServerOnboardingStatus
 } from "@/lib/server-auth";
-import { isUiLocale } from "@/lib/i18n/messages";
 
 export const metadata: Metadata = {
+  title: "CallAssist onboarding",
   robots: { index: false, follow: false }
 };
 
-export default async function AdminLayout({ children, params }: {
-  children: ReactNode;
+export default async function OnboardingPage({ params }: {
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
@@ -22,7 +22,8 @@ export default async function AdminLayout({ children, params }: {
     getServerCurrentUser(),
     getServerOnboardingStatus(locale)
   ]);
-  const destination = adminAreaRedirect(user, onboarding, locale);
+  const destination = onboardingPageRedirect(user, onboarding, locale);
   if (destination) redirect(destination);
-  return children;
+  if (!onboarding) redirect(`/${locale}/login`);
+  return <OnboardingForm initialStatus={onboarding} />;
 }

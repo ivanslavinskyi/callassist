@@ -4,6 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { getCreditUsage, getCurrentUser } from "@/lib/api";
+import {
+  contentPath,
+  switchContentLocale
+} from "@/lib/i18n/content-routing";
 import { useUiLocale } from "./ui-locale-provider";
 
 export function Brand() {
@@ -91,7 +95,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   function changeLocale(nextLocale: "en" | "de") {
     document.cookie = `callassist_ui_locale=${nextLocale};path=/;max-age=31536000;samesite=lax`;
-    router.push(pathname.replace(`/${locale}`, `/${nextLocale}`));
+    router.push(
+      switchContentLocale(pathname, nextLocale) ??
+      pathname.replace(`/${locale}`, `/${nextLocale}`)
+    );
   }
   return (
     <div className="app-shell">
@@ -157,6 +164,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       {children}
+      <footer className="site-footer">
+        <nav aria-label={messages.app.support}>
+          <Link href={contentPath(locale, "privacy")}>{messages.app.privacy}</Link>
+          <Link href={contentPath(locale, "terms")}>{messages.app.terms}</Link>
+          <Link href={contentPath(locale, "acceptable_use")}>{messages.app.acceptableUse}</Link>
+          <Link href={contentPath(locale, "faq")}>{messages.app.faq}</Link>
+          <Link href={contentPath(locale, "support")}>{messages.app.support}</Link>
+          <Link href={localizeHref("/opt-out")}>{messages.app.optOut}</Link>
+        </nav>
+        <small>CallAssist · Public beta</small>
+      </footer>
     </div>
   );
 }

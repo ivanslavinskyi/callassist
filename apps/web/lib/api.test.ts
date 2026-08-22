@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  acceptOnboarding,
   approveAndStartCall,
   changeAdminUserStatus,
   confirmRecipientOptOut,
   createCallBrief,
   createPromoCode,
   getCreditUsage,
+  getOnboardingStatus,
   getAdminUserCreditLedger,
   getCallPreparationErrorMessage,
   login,
@@ -124,6 +126,51 @@ describe("API client headers", () => {
     await expect(getCreditUsage()).resolves.toMatchObject({ balance: 3 });
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/usage");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
+  });
+
+  it("loads and accepts the current onboarding revisions", async () => {
+    const status = {
+      required: true,
+      current: {
+        terms: { id: "72d810e8-106e-4a9d-a49a-9892d860ccbe" },
+        acceptableUse: { id: "4b742964-54b4-457c-a9c6-91b30293189d" }
+      },
+      accepted: null
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(status), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...status,
+        required: false
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getOnboardingStatus("de");
+    await acceptOnboarding({
+      locale: "de",
+      termsRevisionId: status.current.terms.id,
+      acceptableUseRevisionId: status.current.acceptableUse.id,
+      acceptTerms: true,
+      acceptAcceptableUse: true,
+      acknowledgeConsent: true,
+      acknowledgeRetention: true,
+      acknowledgeUseLimits: true,
+      acknowledgeCredits: true
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/onboarding/status?locale=de"
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include"
+    });
   });
 
   it("loads filtered admin users and a selected credit ledger", async () => {

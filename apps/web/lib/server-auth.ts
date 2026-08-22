@@ -1,8 +1,11 @@
 import "server-only";
 
-import type { User } from "@callassist/contracts";
+import type { ContentLocale, User } from "@callassist/contracts";
 import { headers } from "next/headers";
-import { fetchServerCurrentUser } from "./server-current-user";
+import {
+  fetchServerCurrentUser,
+  fetchServerOnboardingStatus
+} from "./server-current-user";
 
 const internalApiUrl = (
   process.env.INTERNAL_API_URL ??
@@ -15,5 +18,14 @@ export async function getServerCurrentUser(): Promise<User | null> {
   return fetchServerCurrentUser({
     apiUrl: internalApiUrl,
     cookie: requestHeaders.get("cookie") ?? ""
+  });
+}
+
+export async function getServerOnboardingStatus(locale: ContentLocale) {
+  const requestHeaders = await headers();
+  return fetchServerOnboardingStatus({
+    apiUrl: internalApiUrl,
+    cookie: requestHeaders.get("cookie") ?? "",
+    locale
   });
 }

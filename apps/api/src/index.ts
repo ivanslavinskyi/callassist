@@ -8,6 +8,8 @@ import {
   OpenAIBriefCompiler
 } from "./brief-compiler/brief-compiler";
 import { CallService } from "./call-service";
+import { ContentService } from "./content/content-service";
+import { createContentRepositoryFromEnv } from "./content/create-content-repository";
 import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
 import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
 import {
@@ -25,6 +27,8 @@ import { OpenAIPostCallTranscriber } from "./transcription/openai-post-call-tran
 
 const repository = createCallRepositoryFromEnv();
 const authRepository = createAuthRepositoryFromEnv();
+const contentService = new ContentService(createContentRepositoryFromEnv());
+await contentService.initialize();
 const telephonyProvider = createTelephonyProviderFromEnv();
 const realtimeApiKey =
   telephonyProvider instanceof TwilioTelephonyProvider
@@ -60,6 +64,7 @@ const app = buildApp({
   service,
   authService,
   creditService,
+  contentService,
   endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv()
 });
 const realtimeBridge =

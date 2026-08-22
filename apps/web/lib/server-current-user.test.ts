@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchServerCurrentUser } from "./server-current-user";
+import {
+  fetchServerCurrentUser,
+  fetchServerOnboardingStatus
+} from "./server-current-user";
 
 const user = {
   id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
@@ -51,5 +54,26 @@ describe("server-side session lookup", () => {
       cookie: "",
       fetcher: unavailable
     })).rejects.toThrow("HTTP 503");
+  });
+
+  it("loads localized onboarding status with the request cookie", async () => {
+    const status = {
+      required: true,
+      current: { terms: {}, acceptableUse: {} },
+      accepted: null
+    };
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(status),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    ));
+    await expect(fetchServerOnboardingStatus({
+      apiUrl: "http://api.internal",
+      cookie: "callassist_session=secret",
+      locale: "de",
+      fetcher
+    })).resolves.toEqual(status);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api.internal/api/onboarding/status?locale=de"
+    );
   });
 });

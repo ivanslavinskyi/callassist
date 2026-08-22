@@ -6,9 +6,12 @@ import type {
   AdminUserList,
   CallBrief,
   CallSnapshot,
+  ContentLocale,
   CreditUsage,
   CreateCallBriefInput,
   LoginInput,
+  OnboardingAcceptanceInput,
+  OnboardingStatus,
   PhoneVerificationInput,
   PromoCodeCreateInput,
   PromoCodeSummary,
@@ -101,6 +104,19 @@ export async function login(input: LoginInput) {
 
 export async function getCurrentUser() {
   return apiRequest<{ user: User }>("/api/auth/me");
+}
+
+export async function getOnboardingStatus(locale: ContentLocale) {
+  return apiRequest<OnboardingStatus>(
+    `/api/onboarding/status?locale=${encodeURIComponent(locale)}`
+  );
+}
+
+export async function acceptOnboarding(input: OnboardingAcceptanceInput) {
+  return apiRequest<OnboardingStatus>("/api/onboarding/accept", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }
 
 export async function getCreditUsage() {

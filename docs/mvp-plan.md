@@ -2,7 +2,7 @@
 
 ## Current state
 
-CallAssist is a working supervised telephony/AI MVP. It already compiles a multilingual brief into a versioned plan, lets the operator review and approve it, places an outbound PSTN call through Twilio, discloses the AI identity, obtains DTMF consent, bridges the conversation to OpenAI Realtime, streams a live transcript, records both channels after consent, and produces a separate whole-recording final transcript. PostgreSQL persistence, encrypted private fields, audit events, recording retention (0/7/30 days), manual recording deletion, and the current EN/DE Dashboard, call-detail, registration, phone-verification, and login experience are also present.
+CallAssist is a working supervised telephony/AI MVP. It already compiles a multilingual brief into a versioned plan, lets the operator review and approve it, places an outbound PSTN call through Twilio, discloses the AI identity, obtains DTMF consent, bridges the conversation to OpenAI Realtime, streams a live transcript, records both channels after consent, and produces a separate whole-recording final transcript. PostgreSQL persistence, encrypted private fields, audit events, recording retention (0/7/30 days), manual recording deletion, and the current EN/DE Dashboard, call-detail, registration, phone-verification, login, legal/support/FAQ, and onboarding experience are also present.
 
 The objective is **not to rebuild the call workflow**. It is to turn the supervised MVP into a safe, observable, supportable, and deliberately limited public beta. Until the **Public Beta Foundation** milestone is complete, do not actively expand the AI agent. The dominant risks are identity, authorization, abuse and cost control, operational visibility, public/legal content, privacy, and production operations.
 
@@ -45,14 +45,30 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 ## Known partial implementation and beta gaps
 
-- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, and server route guards exist; onboarding and standalone legal/support pages remain.
-- **PARTIAL — localization:** operational UI and the initial public landing are EN/DE; CMS publishing, localized legal/support content, full SEO metadata, and translation freshness remain absent.
+- **PARTIAL — product UI:** the localized public landing, authenticated `/app` Dashboard/call detail, account/usage, legal/support/FAQ routes, acceptance-gated onboarding, and server route guards exist. CMS administration, reviewed operator/contact details, and production release work remain.
+- **PARTIAL — localization:** operational UI, public landing, and structured legal/support/FAQ content are EN/DE with locale-specific slugs and no silent fallback. CMS publishing, full SEO metadata, and automated translation-freshness flags remain absent.
 - **PARTIAL — observability:** audit/provider/SSE/health data exists, but no durable technical event stream, admin inspector, cost view, or production monitoring.
 - **PARTIAL — async work:** transcription recovery and retention work remain substantially coupled to API process lifecycle.
 - **PARTIAL — data lifecycle:** recording deletion, transcript export, current logout, and tested self-service all-session revocation exist; session listing, full-data export/deletion, and account deletion do not.
 - **PARTIAL — identity foundation:** user/session tables, repositories, shared contracts, scrypt password handling, register/verify/resend/login/logout/me/all-session-revoke endpoints, localized register/verify/login screens, Twilio Verify integration, opaque server-side session cookies, credentialed web API requests, server-side app/admin route guards, and process-local auth/expensive-endpoint rate limits exist. Password recovery and distributed rate limits remain.
 - **PARTIAL — tenancy rollout:** new call briefs are owned by the authenticated user; all browser list/read/write/action/SSE/media endpoints authenticate, scope by owner, and return the same not-found response for another user's ID. The PostgreSQL ownership suite has been executed successfully. Legacy pre-authentication rows remain nullable and intentionally invisible until an explicit migration/archive policy is chosen.
 - **PARTIAL — destination rollout:** shared `libphonenumber-js/max` metadata parses and canonicalizes Swiss national/international input; contracts, call-start policy, and the Twilio adapter reject invalid or non-CH destinations. Production Twilio Voice Geographic Permissions still need to be restricted and captured as deployment evidence.
+
+## Completed checkpoint — legal content and onboarding
+
+- [x] Add the minimal final-shape content foundation: logical pages, localized slugs, immutable published revision snapshots, EN/DE publication data, and translation-source revision tracking. Admin editing, preview, rollback, media, and navigation management remain the following CMS checkpoint.
+- [x] Publish local pre-beta EN/DE Privacy, Terms, Acceptable Use, Support, and FAQ routes from structured content. These implementation drafts do not satisfy the separate Swiss legal/privacy review release gate.
+- [x] Store append-only user acceptance against the current published Terms and AUP revision IDs with timestamp and explicit onboarding acknowledgements.
+- [x] Require current acceptance server-side before rendering `/app` or current `/admin` pages and before authorizing call/credit/admin APIs; redirect authenticated users to localized onboarding when re-acceptance is required.
+- [x] Add contract, seed-content, PostgreSQL repository, API, route-boundary, and live-browser coverage; initial acceptance, stale submissions, and forced re-acceptance after a legal revision changes are automated.
+
+## Next checkpoint — CMS publishing and SEO boundary
+
+- [ ] Add RBAC-scoped `/admin/content` and `/admin/seo` entry points for `content_editor`, admin, and superadmin without granting call or recording access to content editors.
+- [ ] Add draft creation/editing, immutable publish snapshots, localized preview, history, rollback-as-new-revision, and content/legal audit events.
+- [ ] Move the current seeded pages into the managed publishing workflow while retaining deterministic bootstrap data for clean local environments.
+- [ ] Add structured navigation and reusable FAQ management; defer the media library until a real asset workflow is required.
+- [ ] Generate and test canonical URLs, hreflang, robots, sitemap, localized OG metadata, and translation-staleness indicators from published content.
 
 # Public Beta Foundation
 
@@ -89,7 +105,7 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 
 ### P1 — acceptance and lifecycle
 
-- [ ] Record accepted Terms/AUP revision IDs and timestamps; support required re-acceptance.
+- [x] Record append-only accepted Terms/AUP revision IDs and timestamps; require re-acceptance when a newer material revision is published.
 - [ ] Provide session listing/revocation, user data export, transcript/data deletion, and account deletion/anonymization with documented audit, suppression, backup, provider, and retention behavior. **Partial:** `/app/account` supports current logout and tested all-session revocation; session inventory/audit and the remaining data lifecycle are open.
 
 ## 2. Usage & Abuse Prevention
@@ -135,7 +151,7 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 - [x] Move—not rewrite—the Dashboard to `/en/app` and `/de/app`; move call detail to `/en/app/calls/[id]` and `/de/app/calls/[id]`, preserving current review, LiveCall, transcript, recording, history, search/filter/pagination, and accessibility behavior. The former local-development URLs are removed without compatibility redirects.
 - [x] Add localized EN/DE login, registration, and phone-verification screens with separate required first and last names.
 - [x] Add `/app/account` with integrated usage and session actions; protect all app routes server-side.
-- [ ] Add localized How it works, Privacy, Terms, Acceptable Use, Support, and Opt-out. App/admin/auth routes are `noindex` (not a security control).
+- [x] Add localized How it works, Privacy, Terms, Acceptable Use, Support, and Opt-out. App/admin/auth/onboarding routes are `noindex` (not a security control).
 - [x] Show credits, New call, History, and account/session actions in the app header.
 
 ### P0 — landing and onboarding
@@ -144,8 +160,8 @@ Acceptance: concurrent starts cannot overspend, duplicate callbacks are idempote
 - [x] Explain: describe -> compile -> review/approve -> call -> result.
 - [x] Explain disclosure, consent-gated processing/recording, retention/deletion control, and beta fallibility.
 - [x] List supported information/appointment/document/status/neutral-message cases and prohibit emergencies, harassment, deception, spam/bulk marketing, political persuasion, and high-stakes legal/medical/financial negotiation.
-- [ ] Separate website languages from call languages; FAQ covers disclosure, consent, recording, transcripts, retention/deletion, Swiss numbers, and credits. **Partial:** the landing explains the website/call-language boundary; the FAQ remains open.
-- [ ] Add accessible onboarding with current Terms/AUP acceptance and explicit consent/retention/use/credit explanations.
+- [x] Separate website languages from call languages; FAQ covers disclosure, consent, recording, transcripts, retention/deletion, Swiss numbers, and credits.
+- [x] Add accessible onboarding with current Terms/AUP acceptance and explicit consent/retention/use/credit explanations.
 
 ### P1 — outcomes and feedback
 
@@ -160,18 +176,18 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 ### P0 — localized CMS and publishing
 
 - [ ] Add `/admin/content` for Landing, Pages, FAQ, Navigation, Media, and separate `/admin/seo`.
-- [ ] Model logical `content_pages` (`key`, `page_type`, status/timestamps) separately from `content_page_localizations` (locale, slug, title/content, SEO/OG, canonical override, robots, timestamps), allowing `/en/privacy` and `/de/datenschutz`.
+- [ ] Model logical `content_pages` separately from localized routing/editorial data, allowing `/en/privacy` and `/de/datenschutz`. **Partial:** logical pages, localized slugs, revision-localized structured content, titles/descriptions, and timestamps exist; CMS status, OG/canonical/robots controls, and editor-facing publication state remain.
 - [ ] Support `page`, `landing`, future `article`; no blog or universal builder for beta.
-- [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment.
+- [ ] Store revision snapshots with editor/revision/times; support draft, authenticated or signed short-lived noindex preview, publish, history, rollback. Publish via DB update and cache revalidation, without deployment. **Partial:** published EN/DE snapshots are versioned and database-immutable, and public reads are cached; editor attribution, draft/preview/history/rollback UI, audit, and targeted revalidation remain.
 - [ ] Model Landing as ordered/enabled localized Hero, How it works, Use cases, Safety & Privacy, Languages, FAQ, CTA blocks; model reusable localized FAQ items.
 - [ ] Prefer navigation references to known internal entities and validate broken links.
 - [ ] Add media metadata: file/MIME/dimensions/size, EN/DE alt, uploader/time, usage references.
 
 ### P0 — legal/localization/SEO correctness
 
-- [ ] Let Terms/AUP revisions require account re-acceptance.
-- [ ] Track source revision and translation-source revision; flag stale legal, FAQ, and claims.
-- [ ] Never silently serve English at a German public URL. Unpublished locale means no route, sitemap entry, or hreflang.
+- [x] Let Terms/AUP revisions require account re-acceptance on both app/admin server rendering and protected APIs.
+- [ ] Track source revision and translation-source revision; flag stale legal, FAQ, and claims. **Partial:** every localized revision stores its source-revision number; automated stale-content flags and admin visibility remain.
+- [ ] Never silently serve English at a German public URL. Unpublished locale means no route, sitemap entry, or hreflang. **Partial:** exact locale/slug reads return 404 instead of falling back and the locale switch resolves logical localized slugs; sitemap and hreflang generation remain.
 - [ ] Generate localized title, description, slug, OG, robots, canonical; validate advanced canonical override.
 - [ ] Generate hreflang automatically from published localizations of one logical page.
 - [ ] Sitemap only published/public/indexable pages; exclude app/admin/auth/preview. Add matching robots behavior.
@@ -218,7 +234,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — privacy and Swiss launch review
 
-- [ ] Publish reviewed EN/DE Privacy, Terms, AUP, Support/contact, Opt-out, retention/deletion, and subprocessors information.
+- [ ] Publish reviewed EN/DE Privacy, Terms, AUP, Support/contact, Opt-out, retention/deletion, and subprocessors information. **Partial:** structured EN/DE implementation drafts now describe current retention, Twilio/OpenAI processing, support/data-request boundaries, and opt-out; reviewed operator/contact details and Swiss legal/privacy approval remain mandatory.
 - [ ] Perform formal privacy/security risk assessment for phone numbers, names, recordings, transcripts, possible health/speech-disability data, and provider/AI processing. Obtain Swiss legal/privacy review and separately assess DPIA necessity without predetermining the conclusion.
 - [ ] Verify consent evidence, retention/deletion, data requests, provider deletion, backup expiry, sensitive staff access audit, encryption, and key management end to end.
 - [ ] Preserve the conservative consent boundary in production.
@@ -273,9 +289,9 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Recipient suppression/opt-out checked before provider call.
 - [x] Audited admin suspension and session revocation/blocking.
 - [x] Global kill switch blocks new calls without implicitly ending active calls.
-- [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** EN/DE landing, registration, verification, login, and SMS-verified public opt-out routes are live; onboarding and support remain.
-- [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live.
-- [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance.
+- [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** every route and acceptance boundary is implemented and browser-verified locally; a monitored public support contact and production deployment remain.
+- [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live. **Partial:** localized implementation drafts are live locally, but formal review and final operator/subprocessor/contact details remain.
+- [ ] CMS supports EN/DE revisions, preview, rollback, legal acceptance. **Partial:** the EN/DE revision model and legal acceptance/re-acceptance work; CMS editing, preview, history, rollback, and publication audit remain.
 - [ ] Localized metadata, canonical, hreflang, robots, sitemap verified.
 - [ ] Production domain/TLS, stable hosting, isolated Twilio ingress, production DB.
 - [ ] Secrets/keys managed with least privilege and rotation procedure.
