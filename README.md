@@ -172,7 +172,10 @@ tokens. Administrators can search the accounts visible to their role at
 `/en/admin/users` and `/de/admin/users`. Search responses expose verification state,
 but not phone numbers, password hashes, or session credentials. Ordinary admins see
 only `user` accounts, while superadmins may inspect staff roles. Broader user-detail
-and account-action UI remains roadmap work.
+data remains roadmap work. The selected-user panel consolidates reasoned
+suspend/unsuspend, force-logout, and manual credit-grant actions. Destructive actions
+require confirmation, and credit grants are available only for active, phone-verified
+targets within the acting administrator's permission scope.
 
 Phone verification grants exactly three signup credits through the append-only
 credit ledger. `GET /api/usage` returns the authenticated user's reconciled balance,

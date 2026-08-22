@@ -1,4 +1,5 @@
 import type {
+  AccountStatusAction,
   ApprovalDecision,
   AdminCreditGrantInput,
   AdminUserCreditLedger,
@@ -17,6 +18,7 @@ import type {
   RegistrationInput,
   StaffRecipientSuppression,
   StaffRecipientSuppressionLift,
+  SessionRevocationAction,
   User,
   UserRole,
   UserStatus,
@@ -125,6 +127,26 @@ export async function listAdminUsers(options: {
 export async function getAdminUserCreditLedger(userId: string) {
   return apiRequest<AdminUserCreditLedger>(
     `/api/admin/users/${encodeURIComponent(userId)}/credits`
+  );
+}
+
+export async function changeAdminUserStatus(
+  userId: string,
+  input: AccountStatusAction
+) {
+  return apiRequest<{ user: User }>(
+    `/api/admin/users/${encodeURIComponent(userId)}/status`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export async function revokeAdminUserSessions(
+  userId: string,
+  input: SessionRevocationAction
+) {
+  return apiRequest<void>(
+    `/api/admin/users/${encodeURIComponent(userId)}/sessions/revoke`,
+    { method: "POST", body: JSON.stringify(input) }
   );
 }
 

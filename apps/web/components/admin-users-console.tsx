@@ -4,22 +4,28 @@ import type {
   AdminUserCreditLedger,
   AdminUserSummary,
   CreditTransaction,
+  CreditUsage,
   UserRole,
   UserStatus
 } from "@callassist/contracts";
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AppShell } from "@/components/app-shell";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useUiLocale } from "@/components/ui-locale-provider";
 import {
+  changeAdminUserStatus,
   getAdminUserCreditLedger,
   getCurrentUser,
-  listAdminUsers
+  grantCreditsAsAdmin,
+  listAdminUsers,
+  revokeAdminUserSessions
 } from "@/lib/api";
 import {
   adminUserMessages,
   getAdminUserErrorMessage
 } from "@/lib/i18n/admin-user-messages";
+import { getCreditErrorMessage } from "@/lib/i18n/credit-messages";
 
 type Access = "loading" | "allowed" | "forbidden";
 type Filters = { search?: string; role?: UserRole; status?: UserStatus };
@@ -37,6 +43,7 @@ export function AdminUsersConsole() {
   const { locale, localizeHref } = useUiLocale();
   const copy = adminUserMessages[locale];
   const [access, setAccess] = useState<Access>("loading");
+  const [actorId, setActorId] = useState<string | null>(null);
   const [canSeeStaff, setCanSeeStaff] = useState(false);
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -57,6 +64,7 @@ export function AdminUsersConsole() {
           setAccess("forbidden");
           return;
         }
+        setActorId(user.id);
         setCanSeeStaff(user.role === "superadmin");
         setAccess("allowed");
         setLoadingUsers(true);
@@ -136,6 +144,23 @@ export function AdminUsersConsole() {
     } finally {
       setLoadingLedgerId(null);
     }
+  }
+
+  function updateSelectedUserStatus(userId: string, status: UserStatus) {
+    setUsers((current) => current.map((user) =>
+      user.id === userId ? { ...user, status } : user
+    ));
+    setLedger((current) => current?.user.id === userId
+      ? { ...current, user: { ...current.user, status } }
+      : current
+    );
+  }
+
+  function updateSelectedUsage(userId: string, usage: CreditUsage) {
+    setLedger((current) => current?.user.id === userId
+      ? { ...current, usage }
+      : current
+    );
   }
 
   return (
@@ -235,7 +260,15 @@ export function AdminUsersConsole() {
             </section>
             <section className="admin-ledger-panel">
               {ledgerError ? <p className="form-error" role="alert">{ledgerError}</p> : null}
-              {ledger ? <Ledger ledger={ledger} locale={locale} /> : (
+              {ledger ? (
+                <Ledger
+                  actorId={actorId}
+                  ledger={ledger}
+                  locale={locale}
+                  onStatusChange={updateSelectedUserStatus}
+                  onUsageChange={updateSelectedUsage}
+                />
+              ) : (
                 <div className="admin-ledger-empty">
                   <h2>{copy.selectTitle}</h2>
                   <p>{copy.selectHelp}</p>
@@ -249,7 +282,19 @@ export function AdminUsersConsole() {
   );
 }
 
-function Ledger({ ledger, locale }: { ledger: AdminUserCreditLedger; locale: "en" | "de" }) {
+function Ledger({
+  actorId,
+  ledger,
+  locale,
+  onStatusChange,
+  onUsageChange
+}: {
+  actorId: string | null;
+  ledger: AdminUserCreditLedger;
+  locale: "en" | "de";
+  onStatusChange: (userId: string, status: UserStatus) => void;
+  onUsageChange: (userId: string, usage: CreditUsage) => void;
+}) {
   const copy = adminUserMessages[locale];
   return (
     <>
@@ -259,7 +304,18 @@ function Ledger({ ledger, locale }: { ledger: AdminUserCreditLedger; locale: "en
       <dl className="admin-ledger-summary">
         <div><dt>{copy.balance}</dt><dd>{ledger.usage.balance}</dd></div>
         <div><dt>{copy.activeCall}</dt><dd>{ledger.usage.activeCallBriefId ?? copy.noActiveCall}</dd></div>
+        <div><dt>{copy.status}</dt><dd data-status={ledger.user.status}>{copy.statuses[ledger.user.status]}</dd></div>
+        <div><dt>{copy.phoneVerification}</dt><dd>{ledger.user.phoneVerified ? copy.verified : copy.unverified}</dd></div>
       </dl>
+      <AdminUserActions
+        actorId={actorId}
+        key={ledger.user.id}
+        locale={locale}
+        onStatusChange={onStatusChange}
+        onUsageChange={onUsageChange}
+        user={ledger.user}
+      />
+      <h3 className="admin-ledger-history-title">{copy.transactionHistory}</h3>
       {ledger.usage.transactions.length === 0 ? (
         <p className="admin-empty">{copy.noTransactions}</p>
       ) : (
@@ -281,6 +337,267 @@ function Ledger({ ledger, locale }: { ledger: AdminUserCreditLedger; locale: "en
       )}
     </>
   );
+}
+
+type PendingAction =
+  | { kind: "status"; reason: string; status: "active" | "suspended" }
+  | { kind: "sessions"; reason: string }
+  | { kind: "grant"; credits: number; reason: string };
+
+function AdminUserActions({
+  actorId,
+  locale,
+  onStatusChange,
+  onUsageChange,
+  user
+}: {
+  actorId: string | null;
+  locale: "en" | "de";
+  onStatusChange: (userId: string, status: UserStatus) => void;
+  onUsageChange: (userId: string, usage: CreditUsage) => void;
+  user: AdminUserSummary;
+}) {
+  const copy = adminUserMessages[locale];
+  const [busy, setBusy] = useState<PendingAction["kind"] | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [statusReason, setStatusReason] = useState("");
+  const [sessionReason, setSessionReason] = useState("");
+  const [grantCredits, setGrantCredits] = useState("1");
+  const [grantReason, setGrantReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const grantKey = useRef<string | null>(null);
+  const displayName = `${user.firstName} ${user.lastName}`;
+  const isSelf = actorId === user.id;
+  const isDeleted = user.status === "deleted";
+  const canGrant = !isSelf && user.status === "active" && user.phoneVerified;
+  const nextStatus = user.status === "active" ? "suspended" : "active";
+
+  function prepareStatusChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending({ kind: "status", status: nextStatus, reason: statusReason.trim() });
+  }
+
+  function prepareSessionRevocation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending({ kind: "sessions", reason: sessionReason.trim() });
+  }
+
+  function prepareGrant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending({
+      kind: "grant",
+      credits: Number(grantCredits),
+      reason: grantReason.trim()
+    });
+  }
+
+  async function confirmAction() {
+    if (!pending) return;
+    setBusy(pending.kind);
+    setError(null);
+    setNotice(null);
+    try {
+      if (pending.kind === "status") {
+        const result = await changeAdminUserStatus(user.id, {
+          status: pending.status,
+          reason: pending.reason
+        });
+        onStatusChange(user.id, result.user.status);
+        setStatusReason("");
+        setNotice(copy.statusSuccess(displayName, copy.statuses[result.user.status]));
+      } else if (pending.kind === "sessions") {
+        await revokeAdminUserSessions(user.id, { reason: pending.reason });
+        setSessionReason("");
+        setNotice(copy.logoutSuccess(displayName));
+      } else {
+        grantKey.current ??= crypto.randomUUID();
+        const result = await grantCreditsAsAdmin({
+          targetEmail: user.email,
+          credits: pending.credits,
+          reason: pending.reason,
+          idempotencyKey: grantKey.current
+        });
+        onUsageChange(user.id, result.usage);
+        setGrantCredits("1");
+        setGrantReason("");
+        grantKey.current = null;
+        setNotice(copy.grantSuccess(pending.credits, displayName));
+      }
+    } catch (caught) {
+      setError(pending.kind === "grant"
+        ? getCreditErrorMessage(caught, locale)
+        : getAdminUserErrorMessage(caught, locale)
+      );
+    } finally {
+      setBusy(null);
+      setPending(null);
+    }
+  }
+
+  const dialog = pending ? getDialogCopy(pending, displayName, copy) : null;
+
+  return (
+    <section className="admin-user-actions">
+      <div className="admin-user-actions-heading">
+        <h3>{copy.actionsTitle}</h3>
+        <p>{copy.actionsHelp}</p>
+      </div>
+      {isSelf ? (
+        <p className="admin-action-unavailable">{copy.selfActionsUnavailable}</p>
+      ) : isDeleted ? (
+        <p className="admin-action-unavailable">{copy.deletedActionsUnavailable}</p>
+      ) : (
+        <div className="admin-action-list">
+          <form
+            aria-label={user.status === "active" ? copy.suspendTitle : copy.unsuspendTitle}
+            className="admin-action-card"
+            onSubmit={prepareStatusChange}
+          >
+            <div>
+              <h4>{user.status === "active" ? copy.suspendTitle : copy.unsuspendTitle}</h4>
+              <p>{user.status === "active" ? copy.suspendHelp : copy.unsuspendHelp}</p>
+            </div>
+            <ReasonField
+              label={copy.operationalReason}
+              onChange={setStatusReason}
+              placeholder={copy.statusReasonPlaceholder}
+              value={statusReason}
+            />
+            <button
+              className={user.status === "active" ? "danger-button" : "secondary-button"}
+              disabled={busy !== null}
+              type="submit"
+            >
+              {busy === "status"
+                ? (user.status === "active" ? copy.suspending : copy.unsuspending)
+                : (user.status === "active" ? copy.suspend : copy.unsuspend)}
+            </button>
+          </form>
+          <form aria-label={copy.logoutTitle} className="admin-action-card" onSubmit={prepareSessionRevocation}>
+            <div>
+              <h4>{copy.logoutTitle}</h4>
+              <p>{copy.logoutHelp}</p>
+            </div>
+            <ReasonField
+              label={copy.operationalReason}
+              onChange={setSessionReason}
+              placeholder={copy.logoutReasonPlaceholder}
+              value={sessionReason}
+            />
+            <button className="danger-button" disabled={busy !== null} type="submit">
+              {busy === "sessions" ? copy.loggingOut : copy.forceLogout}
+            </button>
+          </form>
+          <form
+            aria-label={copy.grantTitle}
+            className="admin-action-card"
+            onChange={() => { grantKey.current = null; }}
+            onSubmit={prepareGrant}
+          >
+            <div>
+              <h4>{copy.grantTitle}</h4>
+              <p>{canGrant ? copy.grantHelp : copy.grantUnavailable}</p>
+            </div>
+            <label className="field">
+              <span>{copy.credits}</span>
+              <input
+                disabled={!canGrant || busy !== null}
+                max={100}
+                min={1}
+                onChange={(event) => setGrantCredits(event.target.value)}
+                required
+                type="number"
+                value={grantCredits}
+              />
+            </label>
+            <ReasonField
+              disabled={!canGrant || busy !== null}
+              label={copy.operationalReason}
+              onChange={setGrantReason}
+              placeholder={copy.grantReasonPlaceholder}
+              value={grantReason}
+            />
+            <button className="secondary-button" disabled={!canGrant || busy !== null} type="submit">
+              {busy === "grant" ? copy.granting : copy.grant}
+            </button>
+          </form>
+        </div>
+      )}
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      {notice ? <p className="auth-success" role="status">{notice}</p> : null}
+      <ConfirmDialog
+        busy={busy !== null}
+        confirmLabel={dialog?.confirmLabel ?? ""}
+        danger={dialog?.danger}
+        description={dialog?.description ?? ""}
+        onCancel={() => setPending(null)}
+        onConfirm={() => void confirmAction()}
+        open={pending !== null}
+        title={dialog?.title ?? ""}
+      />
+    </section>
+  );
+}
+
+function ReasonField({
+  disabled = false,
+  label,
+  onChange,
+  placeholder,
+  value
+}: {
+  disabled?: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  value: string;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <textarea
+        disabled={disabled}
+        maxLength={500}
+        minLength={3}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        required
+        rows={3}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function getDialogCopy(
+  action: PendingAction,
+  displayName: string,
+  copy: (typeof adminUserMessages)["en"]
+) {
+  if (action.kind === "status") {
+    const suspending = action.status === "suspended";
+    return {
+      title: suspending ? copy.confirmSuspendTitle : copy.confirmUnsuspendTitle,
+      description: copy.statusConfirmDescription(displayName, action.status),
+      confirmLabel: suspending ? copy.suspend : copy.unsuspend,
+      danger: suspending
+    };
+  }
+  if (action.kind === "sessions") {
+    return {
+      title: copy.confirmLogoutTitle,
+      description: copy.logoutConfirmDescription(displayName),
+      confirmLabel: copy.forceLogout,
+      danger: true
+    };
+  }
+  return {
+    title: copy.confirmGrantTitle,
+    description: copy.grantConfirmDescription(action.credits, displayName),
+    confirmLabel: copy.grant,
+    danger: false
+  };
 }
 
 function TransactionSource({ transaction, locale }: { transaction: CreditTransaction; locale: "en" | "de" }) {

@@ -29,7 +29,7 @@
 
 * { box-sizing: border-box; }
 
-html { background: var(--canvas); }
+html { background: var(--canvas); overflow-x: clip; }
 
 body {
   margin: 0;
@@ -131,7 +131,7 @@ main:focus { outline: none; }
 .admin-users-heading h1 { font-family: var(--font-display), sans-serif; font-size: clamp(30px, 4vw, 44px); letter-spacing: -.045em; margin: 0; }
 .admin-users-heading > p, .admin-access-card p { color: var(--muted); font-size: 14px; line-height: 1.65; max-width: 720px; }
 .admin-access-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); max-width: 680px; padding: 30px; }
-.admin-users-grid { display: grid; gap: 22px; grid-template-columns: minmax(0, 1.25fr) minmax(340px, .75fr); }
+.admin-users-grid { align-items: start; display: grid; gap: 22px; grid-template-columns: minmax(0, 1.25fr) minmax(340px, .75fr); }
 .admin-user-list-panel, .admin-ledger-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); min-width: 0; padding: 24px; }
 .admin-ledger-panel { align-self: start; position: sticky; top: 18px; }
 .admin-user-filters { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(180px, 1fr) minmax(125px, .55fr) minmax(125px, .55fr) auto; }
@@ -160,6 +160,20 @@ main:focus { outline: none; }
 .admin-ledger-summary div { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; min-width: 0; padding: 13px; }
 .admin-ledger-summary dt { color: var(--muted); font-size: 10px; margin-bottom: 5px; }
 .admin-ledger-summary dd { font-size: 13px; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
+.admin-ledger-summary dd[data-status="active"] { color: var(--green); }
+.admin-ledger-summary dd[data-status="suspended"], .admin-ledger-summary dd[data-status="deleted"] { color: var(--danger); }
+.admin-user-actions { border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); margin: 24px 0; padding: 22px 0; }
+.admin-user-actions-heading h3, .admin-ledger-history-title { font-size: 15px; margin: 0; }
+.admin-user-actions-heading p, .admin-action-card p, .admin-action-unavailable { color: var(--muted); font-size: 11px; line-height: 1.55; margin: 7px 0 0; }
+.admin-action-list { display: grid; gap: 12px; margin-top: 16px; }
+.admin-action-card { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 12px; padding: 14px; }
+.admin-action-card h4 { font-size: 12px; margin: 0; }
+.admin-action-card .field span { font-size: 10px; }
+.admin-action-card textarea { min-height: 76px; resize: vertical; }
+.admin-action-card .danger-button, .admin-action-card .secondary-button { min-height: 44px; width: 100%; }
+.admin-action-unavailable { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.admin-user-actions > .form-error, .admin-user-actions > .auth-success { margin-top: 14px; }
+.admin-ledger-history-title { margin-bottom: 12px; }
 .admin-ledger-list { display: grid; gap: 10px; list-style: none; margin: 0; max-height: 620px; overflow-y: auto; padding: 0 4px 0 0; }
 .admin-ledger-list li { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; padding: 13px; }
 .admin-ledger-transaction-heading { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
@@ -1217,7 +1231,8 @@ button:disabled { cursor: wait; opacity: .55; }
 }
 
 @media (max-width: 680px) {
-  .topbar { height: 66px; padding: 0 20px; }
+  .topbar { gap: 12px; height: 66px; overflow: hidden; padding: 0 20px; }
+  .topbar-actions { flex: 1 1 0; width: 0; }
   .topbar-meta { display: none; }
   .credit-balance { font-size: 0; gap: 5px; padding: 7px 9px; }
   .credit-balance::after { content: attr(data-balance); font-size: 11px; }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   approveAndStartCall,
+  changeAdminUserStatus,
   confirmRecipientOptOut,
   createCallBrief,
   createPromoCode,
@@ -17,6 +18,7 @@ import {
   recompileCallBrief,
   requestRecipientOptOut,
   grantCreditsAsAdmin,
+  revokeAdminUserSessions,
   suppressRecipientAsStaff,
   startCall
 } from "./api";
@@ -142,6 +144,42 @@ describe("API client headers", () => {
     for (const call of fetchMock.mock.calls) {
       expect(call[1]).toMatchObject({ credentials: "include" });
     }
+  });
+
+  it("sends reasoned account status and session actions to the selected user", async () => {
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        user: { id: userId, status: "suspended" }
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await changeAdminUserStatus(userId, {
+      status: "suspended",
+      reason: "Repeated abuse reports"
+    });
+    await revokeAdminUserSessions(userId, {
+      reason: "Credential reset requested"
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining(`/api/admin/users/${userId}/status`),
+      expect.stringContaining(`/api/admin/users/${userId}/sessions/revoke`)
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "PUT",
+      credentials: "include",
+      body: JSON.stringify({
+        status: "suspended",
+        reason: "Repeated abuse reports"
+      })
+    });
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ reason: "Credential reset requested" })
+    });
   });
 
   it("sends promo redemption, promo creation, and manual grants to dedicated routes", async () => {

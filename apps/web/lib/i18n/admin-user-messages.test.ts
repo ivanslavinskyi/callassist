@@ -16,4 +16,19 @@ describe("admin user messages", () => {
       "de"
     )).toContain("Suchfilter");
   });
+
+  it("explains rejected account actions without masking the reason", () => {
+    expect(getAdminUserErrorMessage(
+      new ApiError("SELF_ADMIN_ACTION_FORBIDDEN", 403),
+      "en"
+    )).toContain("own account");
+    expect(getAdminUserErrorMessage(
+      new ApiError("ACCOUNT_STATUS_UNCHANGED", 409),
+      "de"
+    )).toContain("Status bereits");
+    expect(getAdminUserErrorMessage(
+      new ApiError("INVALID_SESSION_REVOCATION_ACTION", 400),
+      "en"
+    )).toContain("three characters");
+  });
 });
