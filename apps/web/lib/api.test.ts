@@ -6,6 +6,7 @@ import {
   approveAndStartCall,
   changeAdminUserStatus,
   confirmRecipientOptOut,
+  completePasswordRecovery,
   createAdminContentDraft,
   createAdminEditorialDraft,
   createCallBrief,
@@ -54,9 +55,11 @@ import {
   setAdminOutboundCalls,
   suppressRecipientAsStaff,
   startCall,
+  startPasswordRecovery,
   submitCallFeedback,
   updateAdminContentDraft,
-  updateAdminEditorialDraft
+  updateAdminEditorialDraft,
+  verifyPasswordRecovery
 } from "./api";
 
 afterEach(() => {
@@ -221,6 +224,45 @@ describe("API client headers", () => {
       expect((call[1] as RequestInit).credentials).toBe("include");
       expect(new Headers((call[1] as RequestInit).headers).get("Content-Type")).toBe("application/json");
     }
+  });
+
+  it("keeps the password recovery grant in JSON request bodies", async () => {
+    const recoveryId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const recoveryToken = "A".repeat(43);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "verification_required",
+        recoveryId
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "password_reset_required",
+        recoveryToken
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "password_reset"
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startPasswordRecovery({ email: "nina@example.com" });
+    await verifyPasswordRecovery({ recoveryId, code: "123456" });
+    await completePasswordRecovery({
+      recoveryToken,
+      newPassword: "a-new-secure-password"
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringMatching(/\/api\/auth\/recovery\/start$/),
+      expect.stringMatching(/\/api\/auth\/recovery\/verify$/),
+      expect.stringMatching(/\/api\/auth\/recovery\/complete$/)
+    ]);
+    expect(fetchMock.mock.calls.every(([, init]) =>
+      (init as RequestInit).credentials === "include"
+    )).toBe(true);
+    expect(String(fetchMock.mock.calls[2]?.[0])).not.toContain(recoveryToken);
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      recoveryToken,
+      newPassword: "a-new-secure-password"
+    });
   });
 
   it("handles a bodyless logout response", async () => {

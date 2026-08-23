@@ -12,6 +12,12 @@ import {
   accountStatusActionSchema,
   creditUsageSchema,
   loginInputSchema,
+  passwordRecoveryCompleteInputSchema,
+  passwordRecoveryCompleteResponseSchema,
+  passwordRecoveryStartInputSchema,
+  passwordRecoveryStartResponseSchema,
+  passwordRecoveryVerifyInputSchema,
+  passwordRecoveryVerifyResponseSchema,
   phoneVerificationInputSchema,
   registrationInputSchema,
   sessionRevocationActionSchema
@@ -58,6 +64,42 @@ describe("registrationInputSchema", () => {
         code: "123456"
       }).email
     ).toBe("nina.keller@example.com");
+  });
+
+  it("keeps password recovery payloads strict and tokens URL-safe", () => {
+    expect(passwordRecoveryStartInputSchema.parse({
+      email: " Nina.Keller@Example.com "
+    })).toEqual({ email: "nina.keller@example.com" });
+    expect(passwordRecoveryStartInputSchema.safeParse({
+      email: validRegistration.email,
+      revealAccount: true
+    }).success).toBe(false);
+
+    const recoveryId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const recoveryToken = "A".repeat(43);
+    expect(passwordRecoveryStartResponseSchema.parse({
+      status: "verification_required",
+      recoveryId
+    })).toMatchObject({ recoveryId });
+    expect(passwordRecoveryVerifyInputSchema.safeParse({
+      recoveryId,
+      code: "123456"
+    }).success).toBe(true);
+    expect(passwordRecoveryVerifyResponseSchema.parse({
+      status: "password_reset_required",
+      recoveryToken
+    })).toMatchObject({ recoveryToken });
+    expect(passwordRecoveryCompleteInputSchema.safeParse({
+      recoveryToken,
+      newPassword: "a-new-long-password"
+    }).success).toBe(true);
+    expect(passwordRecoveryCompleteInputSchema.safeParse({
+      recoveryToken: "not a URL-safe token",
+      newPassword: "a-new-long-password"
+    }).success).toBe(false);
+    expect(passwordRecoveryCompleteResponseSchema.parse({
+      status: "password_reset"
+    })).toEqual({ status: "password_reset" });
   });
 
   it("validates reconciled credit usage without exposing idempotency keys", () => {

@@ -192,13 +192,17 @@ do not run it against an unapproved recipient or expose the mock verification dr
 through a public application endpoint.
 
 The API includes the identity foundation endpoints under `/api/auth`: registration,
-phone verification/resend, login, logout, and current-session lookup. Registration
-requires separate first and last names and a Twilio Verify SMS confirmation. Local
-development uses `VERIFICATION_DRIVER=mock` and `MOCK_VERIFICATION_CODE=000000`;
+phone verification/resend, login, verified-phone password recovery, logout, and
+current-session lookup. Registration requires separate first and last names and a
+Twilio Verify SMS confirmation. Recovery uses a generic non-enumerating start, a
+durable eight-attempt OTP challenge, and a 15-minute single-use grant whose digest is
+stored; completion changes the scrypt password and revokes every session atomically.
+Local development uses `VERIFICATION_DRIVER=mock` and `MOCK_VERIFICATION_CODE=000000`;
 never use the mock driver in a public environment.
 
 The web app exposes the corresponding localized flows at `/en/register`, `/en/verify`,
-`/en/login` and their `/de` equivalents. Browser API requests include credentials so
+`/en/login`, `/en/recover` and their `/de` equivalents. Recovery capabilities stay
+in page memory rather than URLs or browser storage. Browser API requests include credentials so
 the opaque HttpOnly session cookie is used without exposing its token to JavaScript.
 The localized `/app` tree is guarded through a server-side current-session lookup,
 and every existing `/admin` page additionally requires an `admin` or `superadmin`

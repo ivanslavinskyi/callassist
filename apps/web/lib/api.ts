@@ -37,6 +37,12 @@ import type {
   OnboardingAcceptanceInput,
   OnboardingStatus,
   OwnerCallFeedbackInput,
+  PasswordRecoveryCompleteInput,
+  PasswordRecoveryCompleteResponse,
+  PasswordRecoveryStartInput,
+  PasswordRecoveryStartResponse,
+  PasswordRecoveryVerifyInput,
+  PasswordRecoveryVerifyResponse,
   PhoneVerificationInput,
   PromoCodeCreateInput,
   PromoCodeSummary,
@@ -133,6 +139,29 @@ export async function login(input: LoginInput) {
     method: "POST",
     body: JSON.stringify(input)
   });
+}
+
+export async function startPasswordRecovery(input: PasswordRecoveryStartInput) {
+  return apiRequest<PasswordRecoveryStartResponse>("/api/auth/recovery/start", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function verifyPasswordRecovery(input: PasswordRecoveryVerifyInput) {
+  return apiRequest<PasswordRecoveryVerifyResponse>(
+    "/api/auth/recovery/verify",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function completePasswordRecovery(
+  input: PasswordRecoveryCompleteInput
+) {
+  return apiRequest<PasswordRecoveryCompleteResponse>(
+    "/api/auth/recovery/complete",
+    { method: "POST", body: JSON.stringify(input) }
+  );
 }
 
 export async function getCurrentUser() {

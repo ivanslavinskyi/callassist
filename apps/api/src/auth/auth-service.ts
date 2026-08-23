@@ -4,6 +4,9 @@ import type {
   AccountSessionPlatform,
   AdministrableUserStatus,
   LoginInput,
+  PasswordRecoveryCompleteInput,
+  PasswordRecoveryStartInput,
+  PasswordRecoveryVerifyInput,
   PhoneVerificationInput,
   RegistrationInput,
   User,
@@ -20,9 +23,12 @@ import {
 import { hashPassword, verifyPassword } from "./password";
 import { ApplicationRateLimiter } from "./rate-limiter";
 import type { VerificationProvider } from "./verification-provider";
+import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 
 const minute = 60_000;
 const accountSessionInventoryLimit = 50;
+const passwordRecoveryChallengeTtlMs = 10 * minute;
+const passwordRecoveryGrantTtlMs = 15 * minute;
 const dummyPasswordHash = hashPassword("callassist-invalid-account-password");
 
 export type AuthRequestContext = {
@@ -148,7 +154,98 @@ export class AuthService {
       throw new AuthServiceError("PHONE_VERIFICATION_REQUIRED");
     }
     await this.#signupCreditGranter.grantSignupCredits(user.id);
-    return this.#createSession(user, context);
+    return this.#createSession(user, context, user.passwordHash);
+  }
+
+  async startPasswordRecovery(
+    input: PasswordRecoveryStartInput,
+    context: AuthRequestContext
+  ) {
+    this.#limit("password-recovery-start:ip", context.ip, 10, 60 * minute);
+    this.#limit("password-recovery-start:email", input.email, 3, 60 * minute);
+    const recoveryId = randomUUID();
+    const user = await this.repository.findUserByEmail(input.email);
+    if (
+      user?.status === "active" &&
+      user.phoneVerifiedAt &&
+      this.#allowed("password-recovery-start:phone", user.phoneE164, 3, 60 * minute)
+    ) {
+      const now = this.#now();
+      try {
+        const created = await this.repository.createPasswordRecoveryChallenge({
+          id: recoveryId,
+          userId: user.id,
+          now: now.toISOString(),
+          expiresAt: new Date(
+            now.getTime() + passwordRecoveryChallengeTtlMs
+          ).toISOString()
+        });
+        if (created) await this.verificationProvider.send(user.phoneE164);
+      } catch {
+        await this.repository.invalidatePasswordRecoveryChallenge(
+          recoveryId,
+          this.#now().toISOString()
+        ).catch(() => undefined);
+        writePiiSafeOperationalError("password_recovery_verification_send_failed");
+      }
+    }
+    return { status: "verification_required" as const, recoveryId };
+  }
+
+  async verifyPasswordRecovery(
+    input: PasswordRecoveryVerifyInput,
+    context: AuthRequestContext
+  ) {
+    this.#limit("password-recovery-verify:ip", context.ip, 20, 15 * minute);
+    this.#limit("password-recovery-verify:id", input.recoveryId, 8, 15 * minute);
+    const now = this.#now();
+    const challenge = await this.repository.consumePasswordRecoveryChallengeAttempt(
+      input.recoveryId,
+      now.toISOString()
+    );
+    if (!challenge) throw new AuthServiceError("INVALID_RECOVERY");
+    let approved = false;
+    try {
+      approved = await this.verificationProvider.check(
+        challenge.user.phoneE164,
+        input.code
+      );
+    } catch {
+      writePiiSafeOperationalError("password_recovery_verification_check_failed");
+      throw new AuthServiceError("INVALID_RECOVERY");
+    }
+    if (!approved) throw new AuthServiceError("INVALID_RECOVERY");
+    const recoveryToken = randomBytes(32).toString("base64url");
+    const created = await this.repository.createPasswordRecoveryGrant({
+      id: randomUUID(),
+      recoveryId: challenge.id,
+      userId: challenge.user.id,
+      tokenHash: hashPasswordRecoveryToken(recoveryToken),
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + passwordRecoveryGrantTtlMs).toISOString()
+    });
+    if (!created) throw new AuthServiceError("INVALID_RECOVERY");
+    return {
+      status: "password_reset_required" as const,
+      recoveryToken
+    };
+  }
+
+  async completePasswordRecovery(
+    input: PasswordRecoveryCompleteInput,
+    context: AuthRequestContext
+  ) {
+    const tokenHash = hashPasswordRecoveryToken(input.recoveryToken);
+    this.#limit("password-recovery-complete:ip", context.ip, 10, 15 * minute);
+    this.#limit("password-recovery-complete:token", tokenHash, 3, 15 * minute);
+    const passwordHash = await hashPassword(input.newPassword);
+    const reset = await this.repository.resetPasswordWithRecoveryGrant({
+      tokenHash,
+      passwordHash,
+      now: this.#now().toISOString()
+    });
+    if (!reset) throw new AuthServiceError("INVALID_RECOVERY");
+    return { status: "password_reset" as const };
   }
 
   async authenticate(token: string | undefined) {
@@ -301,7 +398,8 @@ export class AuthService {
 
   async #createSession(
     user: AuthUserRecord,
-    context: AuthRequestContext
+    context: AuthRequestContext,
+    expectedPasswordHash?: string
   ): Promise<AuthenticatedSession> {
     const now = this.#now();
     const expiresAt = new Date(now.getTime() + this.#sessionTtlMs).toISOString();
@@ -315,18 +413,22 @@ export class AuthService {
         revokedAt: null,
         createdAt: now.toISOString(),
         lastSeenAt: now.toISOString(),
-        userAgent: context.userAgent?.slice(0, 300) ?? null
+        userAgent: context.userAgent?.slice(0, 300) ?? null,
+        expectedPasswordHash
       });
     } catch (error) {
       if (
         error instanceof AuthRepositoryError &&
         error.code === "SESSION_CREATION_DENIED"
       ) {
-        throw new AuthServiceError("ACCOUNT_SUSPENDED");
+        throw new AuthServiceError(
+          expectedPasswordHash === undefined
+            ? "ACCOUNT_SUSPENDED"
+            : "INVALID_CREDENTIALS"
+        );
       }
       throw error;
     }
-    await this.repository.updateLastLogin(user.id, now.toISOString());
     return { user: toPublicUser(user), token, expiresAt };
   }
 
@@ -337,6 +439,10 @@ export class AuthService {
         retryAfterSeconds: result.retryAfterSeconds
       });
     }
+  }
+
+  #allowed(scope: string, identifier: string, limit: number, windowMs: number) {
+    return this.#rateLimiter.consume(scope, identifier, limit, windowMs).allowed;
   }
 }
 
@@ -349,6 +455,7 @@ export class AuthServiceError extends Error {
       | "PHONE_VERIFICATION_REQUIRED"
       | "ACCOUNT_SUSPENDED"
       | "INVALID_VERIFICATION"
+      | "INVALID_RECOVERY"
       | "VERIFICATION_UNAVAILABLE"
       | "RATE_LIMITED"
       | "ADMIN_ACTION_FORBIDDEN"
@@ -395,6 +502,10 @@ export function classifySessionClient(userAgent: string | null): {
 
 export function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("base64url");
+}
+
+export function hashPasswordRecoveryToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 function mapAdminRepositoryError(error: unknown) {

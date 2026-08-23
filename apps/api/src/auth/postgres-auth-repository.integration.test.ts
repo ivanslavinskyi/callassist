@@ -359,6 +359,129 @@ describeWithDatabase("PostgresAuthRepository", () => {
     `).rejects.toThrow("immutable");
   });
 
+  it("caps recovery attempts and atomically consumes a grant with immutable evidence", async () => {
+    const suffix = randomUUID();
+    const user = await repository.createUser({
+      email: `recover.${suffix}@example.com`,
+      passwordHash: "old-password-hash",
+      phoneE164: phoneFromUuid(suffix, "69"),
+      firstName: "Recovery",
+      lastName: "Test",
+      uiLocale: "en"
+    });
+    const now = new Date();
+    await repository.markPhoneVerified(user.id, now.toISOString());
+    const sessionTokenHash = hashSessionToken(`recovery-session-${suffix}`);
+    await repository.createSession({
+      id: randomUUID(),
+      userId: user.id,
+      tokenHash: sessionTokenHash,
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      revokedAt: null,
+      createdAt: now.toISOString(),
+      lastSeenAt: now.toISOString(),
+      userAgent: "recovery-integration-test"
+    });
+
+    const exhaustedChallengeId = randomUUID();
+    await expect(repository.createPasswordRecoveryChallenge({
+      id: exhaustedChallengeId,
+      userId: user.id,
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString()
+    })).resolves.toBe(true);
+    for (let attempt = 1; attempt <= 8; attempt += 1) {
+      await expect(repository.consumePasswordRecoveryChallengeAttempt(
+        exhaustedChallengeId,
+        now.toISOString()
+      )).resolves.toMatchObject({ attemptCount: attempt });
+    }
+    await expect(repository.consumePasswordRecoveryChallengeAttempt(
+      exhaustedChallengeId,
+      now.toISOString()
+    )).resolves.toBeNull();
+
+    const recoveryId = randomUUID();
+    await expect(repository.createPasswordRecoveryChallenge({
+      id: recoveryId,
+      userId: user.id,
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString()
+    })).resolves.toBe(true);
+    await expect(repository.consumePasswordRecoveryChallengeAttempt(
+      recoveryId,
+      now.toISOString()
+    )).resolves.toMatchObject({ id: recoveryId, user: { id: user.id } });
+    const tokenHash = suffix.replaceAll("-", "").repeat(2);
+    await expect(repository.createPasswordRecoveryGrant({
+      id: randomUUID(),
+      recoveryId,
+      userId: user.id,
+      tokenHash,
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString()
+    })).resolves.toBe(true);
+    await expect(repository.createPasswordRecoveryGrant({
+      id: randomUUID(),
+      recoveryId,
+      userId: user.id,
+      tokenHash: "f".repeat(64),
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString()
+    })).resolves.toBe(false);
+
+    const completedAt = new Date(now.getTime() + 1_000).toISOString();
+    await expect(repository.resetPasswordWithRecoveryGrant({
+      tokenHash,
+      passwordHash: "new-password-hash",
+      now: completedAt
+    })).resolves.toBe(true);
+    await expect(repository.resetPasswordWithRecoveryGrant({
+      tokenHash,
+      passwordHash: "replayed-password-hash",
+      now: completedAt
+    })).resolves.toBe(false);
+    await expect(repository.findUserBySessionTokenHash(
+      sessionTokenHash,
+      completedAt
+    )).resolves.toBeNull();
+    await expect(repository.findUserByEmail(user.email)).resolves.toMatchObject({
+      passwordHash: "new-password-hash",
+      lastLoginAt: null
+    });
+    await expect(repository.createSession({
+      id: randomUUID(),
+      userId: user.id,
+      tokenHash: hashSessionToken(`stale-login-${suffix}`),
+      expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      revokedAt: null,
+      createdAt: completedAt,
+      lastSeenAt: completedAt,
+      userAgent: "stale-login-integration-test",
+      expectedPasswordHash: "old-password-hash"
+    })).rejects.toEqual(expect.objectContaining<Partial<AuthRepositoryError>>({
+      code: "SESSION_CREATION_DENIED"
+    }));
+    const events = await inspection<{
+      challengeId: string;
+      revokedSessionCount: number;
+    }[]>`
+      SELECT
+        challenge_id::text AS "challengeId",
+        revoked_session_count AS "revokedSessionCount"
+      FROM password_recovery_events
+      WHERE user_id = ${user.id}
+    `;
+    expect(events).toEqual([{
+      challengeId: recoveryId,
+      revokedSessionCount: 1
+    }]);
+    await expect(inspection`
+      UPDATE password_recovery_events SET revoked_session_count = 99
+      WHERE user_id = ${user.id}
+    `).rejects.toThrow("immutable");
+  });
+
   it("paginates admin user search and hides privileged targets from ordinary admins", async () => {
     const actorSuffix = randomUUID();
     const firstSuffix = randomUUID();

@@ -24,6 +24,9 @@ import {
   contentPageKeySchema,
   onboardingAcceptanceInputSchema,
   ownerCallFeedbackInputSchema,
+  passwordRecoveryCompleteInputSchema,
+  passwordRecoveryStartInputSchema,
+  passwordRecoveryVerifyInputSchema,
   phoneVerificationInputSchema,
   promoCodeCreateInputSchema,
   promoRedemptionInputSchema,
@@ -556,6 +559,67 @@ export function buildApp({
         return reply
           .header("Cache-Control", "private, no-store")
           .send({ user: session.user });
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/recovery/start", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = passwordRecoveryStartInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_RECOVERY_START" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "no-store")
+          .status(202)
+          .send(await authService.startPasswordRecovery(
+            parsed.data,
+            authContext(request)
+          ));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/recovery/verify", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = passwordRecoveryVerifyInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_RECOVERY_VERIFICATION" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "no-store")
+          .send(await authService.verifyPasswordRecovery(
+            parsed.data,
+            authContext(request)
+          ));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/recovery/complete", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const parsed = passwordRecoveryCompleteInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_RECOVERY_COMPLETION" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "no-store")
+          .send(await authService.completePasswordRecovery(
+            parsed.data,
+            authContext(request)
+          ));
       } catch (error) {
         return sendAuthError(reply, error);
       }
@@ -2137,7 +2201,9 @@ function sendAuthError(
   }
   const status = error.code === "VERIFICATION_UNAVAILABLE"
     ? 503
-    : error.code === "INVALID_CREDENTIALS" || error.code === "INVALID_VERIFICATION"
+    : error.code === "INVALID_CREDENTIALS" ||
+        error.code === "INVALID_VERIFICATION" ||
+        error.code === "INVALID_RECOVERY"
       ? 401
       : error.code === "USER_NOT_FOUND" || error.code === "SESSION_NOT_FOUND"
         ? 404

@@ -61,6 +61,52 @@ export type VerificationResendInput = z.infer<
   typeof verificationResendInputSchema
 >;
 
+export const passwordRecoveryStartInputSchema = z.strictObject({
+  email: z.string().trim().toLowerCase().email().max(320)
+});
+export type PasswordRecoveryStartInput = z.infer<
+  typeof passwordRecoveryStartInputSchema
+>;
+
+export const passwordRecoveryStartResponseSchema = z.strictObject({
+  status: z.literal("verification_required"),
+  recoveryId: z.uuid()
+});
+export type PasswordRecoveryStartResponse = z.infer<
+  typeof passwordRecoveryStartResponseSchema
+>;
+
+export const passwordRecoveryVerifyInputSchema = z.strictObject({
+  recoveryId: z.uuid(),
+  code: z.string().trim().regex(/^\d{4,10}$/)
+});
+export type PasswordRecoveryVerifyInput = z.infer<
+  typeof passwordRecoveryVerifyInputSchema
+>;
+
+export const passwordRecoveryVerifyResponseSchema = z.strictObject({
+  status: z.literal("password_reset_required"),
+  recoveryToken: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/)
+});
+export type PasswordRecoveryVerifyResponse = z.infer<
+  typeof passwordRecoveryVerifyResponseSchema
+>;
+
+export const passwordRecoveryCompleteInputSchema = z.strictObject({
+  recoveryToken: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
+  newPassword: z.string().min(12).max(128)
+});
+export type PasswordRecoveryCompleteInput = z.infer<
+  typeof passwordRecoveryCompleteInputSchema
+>;
+
+export const passwordRecoveryCompleteResponseSchema = z.strictObject({
+  status: z.literal("password_reset")
+});
+export type PasswordRecoveryCompleteResponse = z.infer<
+  typeof passwordRecoveryCompleteResponseSchema
+>;
+
 export const loginInputSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
   password: z.string().min(1).max(128)

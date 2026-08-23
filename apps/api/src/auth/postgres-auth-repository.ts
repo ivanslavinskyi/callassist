@@ -16,6 +16,7 @@ import {
   type AuthUserRecord,
   type ChangeAccountStatusInput,
   type ClaimAccountDeletionInput,
+  type CreateAuthSessionInput,
   type CreateAuthUserInput,
   type FailAccountDeletionInput,
   type ListAdminUsersInput,
@@ -91,6 +92,22 @@ type AccountDeletionRow = {
   requestedAt: DatabaseDate;
   updatedAt: DatabaseDate;
   completedAt: DatabaseDate | null;
+};
+
+type PasswordRecoveryChallengeRow = {
+  id: string;
+  userId: string;
+  attemptCount: number;
+  expiresAt: DatabaseDate;
+  createdAt: DatabaseDate;
+};
+
+type PasswordRecoveryGrantRow = {
+  id: string;
+  recoveryId: string;
+  userId: string;
+  expiresAt: DatabaseDate;
+  consumedAt: DatabaseDate | null;
 };
 
 function toIso(value: DatabaseDate) {
@@ -213,24 +230,27 @@ export class PostgresAuthRepository implements AuthRepository {
     return this.#mapUser(row);
   }
 
-  async updateLastLogin(userId: string, loggedInAt: string) {
-    await this.#sql`
-      UPDATE users SET last_login_at = ${new Date(loggedInAt)} WHERE id = ${userId}
-    `;
-  }
-
-  async createSession(input: AuthSessionRecord) {
+  async createSession(input: CreateAuthSessionInput) {
     await this.#sql.begin(async (transaction) => {
       const [user] = await transaction<{
         status: UserStatus;
         phoneVerifiedAt: DatabaseDate | null;
+        passwordHash: string;
       }[]>`
-        SELECT status, phone_verified_at AS "phoneVerifiedAt"
+        SELECT
+          status,
+          phone_verified_at AS "phoneVerifiedAt",
+          password_hash AS "passwordHash"
         FROM users
         WHERE id = ${input.userId}
-        FOR SHARE
+        FOR UPDATE
       `;
-      if (user?.status !== "active" || !user.phoneVerifiedAt) {
+      if (
+        user?.status !== "active" ||
+        !user.phoneVerifiedAt ||
+        (input.expectedPasswordHash !== undefined &&
+          input.expectedPasswordHash !== user.passwordHash)
+      ) {
         throw new AuthRepositoryError("SESSION_CREATION_DENIED");
       }
       await transaction`
@@ -242,6 +262,11 @@ export class PostgresAuthRepository implements AuthRepository {
           ${input.revokedAt ? new Date(input.revokedAt) : null},
           ${new Date(input.createdAt)}, ${new Date(input.lastSeenAt)}, ${input.userAgent}
         )
+      `;
+      await transaction`
+        UPDATE users
+        SET last_login_at = ${new Date(input.lastSeenAt)}
+        WHERE id = ${input.userId}
       `;
     });
   }
@@ -792,6 +817,228 @@ export class PostgresAuthRepository implements AuthRepository {
           ${new Date(input.now)}
         )
       `;
+    });
+  }
+
+  async createPasswordRecoveryChallenge(input: {
+    id: string;
+    userId: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const [user] = await transaction<AdminUserRow[]>`
+        SELECT id, role, status
+        FROM users
+        WHERE id = ${input.userId}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return false;
+      await transaction`
+        UPDATE password_recovery_challenges
+        SET invalidated_at = ${new Date(input.now)}
+        WHERE user_id = ${input.userId}
+          AND verified_at IS NULL
+          AND invalidated_at IS NULL
+      `;
+      await transaction`
+        INSERT INTO password_recovery_challenges (
+          id, user_id, attempt_count, expires_at, created_at
+        ) VALUES (
+          ${input.id}, ${input.userId}, 0,
+          ${new Date(input.expiresAt)}, ${new Date(input.now)}
+        )
+      `;
+      return true;
+    });
+  }
+
+  async invalidatePasswordRecoveryChallenge(recoveryId: string, now: string) {
+    await this.#sql`
+      UPDATE password_recovery_challenges
+      SET invalidated_at = COALESCE(invalidated_at, ${new Date(now)})
+      WHERE id = ${recoveryId}
+    `;
+  }
+
+  async consumePasswordRecoveryChallengeAttempt(
+    recoveryId: string,
+    now: string
+  ) {
+    return this.#sql.begin(async (transaction) => {
+      const [challenge] = await transaction<PasswordRecoveryChallengeRow[]>`
+        UPDATE password_recovery_challenges AS challenges
+        SET
+          attempt_count = attempt_count + 1,
+          last_attempt_at = ${new Date(now)}
+        FROM users
+        WHERE challenges.id = ${recoveryId}
+          AND users.id = challenges.user_id
+          AND users.status = 'active'
+          AND users.phone_verified_at IS NOT NULL
+          AND challenges.verified_at IS NULL
+          AND challenges.invalidated_at IS NULL
+          AND challenges.expires_at > ${new Date(now)}
+          AND challenges.attempt_count < 8
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        RETURNING
+          challenges.id,
+          challenges.user_id AS "userId",
+          challenges.attempt_count AS "attemptCount",
+          challenges.expires_at AS "expiresAt",
+          challenges.created_at AS "createdAt"
+      `;
+      if (!challenge) return null;
+      const [user] = await transaction<UserRow[]>`
+        SELECT ${this.#userColumns()}
+        FROM users
+        WHERE id = ${challenge.userId}
+        FOR SHARE
+      `;
+      if (!user) return null;
+      return {
+        id: challenge.id,
+        user: this.#mapUser(user),
+        attemptCount: challenge.attemptCount,
+        expiresAt: toIso(challenge.expiresAt),
+        createdAt: toIso(challenge.createdAt)
+      };
+    });
+  }
+
+  async createPasswordRecoveryGrant(input: {
+    id: string;
+    recoveryId: string;
+    userId: string;
+    tokenHash: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const [challenge] = await transaction<{ id: string }[]>`
+        SELECT challenges.id
+        FROM password_recovery_challenges AS challenges
+        JOIN users ON users.id = challenges.user_id
+        WHERE challenges.id = ${input.recoveryId}
+          AND challenges.user_id = ${input.userId}
+          AND challenges.verified_at IS NULL
+          AND challenges.invalidated_at IS NULL
+          AND challenges.expires_at > ${new Date(input.now)}
+          AND users.status = 'active'
+          AND users.phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE OF challenges
+      `;
+      if (!challenge) return false;
+      await transaction`
+        UPDATE password_recovery_challenges
+        SET verified_at = ${new Date(input.now)}
+        WHERE id = ${input.recoveryId}
+      `;
+      await transaction`
+        INSERT INTO password_recovery_grants (
+          id, challenge_id, user_id, token_hash,
+          expires_at, consumed_at, created_at
+        ) VALUES (
+          ${input.id}, ${input.recoveryId}, ${input.userId}, ${input.tokenHash},
+          ${new Date(input.expiresAt)}, ${null}, ${new Date(input.now)}
+        )
+      `;
+      return true;
+    }).catch((error) => {
+      if (isUniqueViolation(error)) return false;
+      throw error;
+    });
+  }
+
+  async resetPasswordWithRecoveryGrant(input: {
+    tokenHash: string;
+    passwordHash: string;
+    now: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const [grant] = await transaction<PasswordRecoveryGrantRow[]>`
+        SELECT
+          id,
+          challenge_id AS "recoveryId",
+          user_id AS "userId",
+          expires_at AS "expiresAt",
+          consumed_at AS "consumedAt"
+        FROM password_recovery_grants
+        WHERE token_hash = ${input.tokenHash}
+        FOR UPDATE
+      `;
+      if (
+        !grant ||
+        grant.consumedAt ||
+        toIso(grant.expiresAt) <= input.now
+      ) return false;
+      const [user] = await transaction<AdminUserRow[]>`
+        SELECT id, role, status
+        FROM users
+        WHERE id = ${grant.userId}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return false;
+      const now = new Date(input.now);
+      await transaction`
+        UPDATE users
+        SET password_hash = ${input.passwordHash}, last_login_at = NULL
+        WHERE id = ${grant.userId}
+      `;
+      const revokedSessions = await transaction<{ id: string }[]>`
+        UPDATE sessions
+        SET revoked_at = COALESCE(revoked_at, ${now})
+        WHERE user_id = ${grant.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        RETURNING id
+      `;
+      if (revokedSessions.length > 0) {
+        await this.#accountSessionEvent(transaction, {
+          eventType: "session.all_revoked",
+          actorUserId: grant.userId,
+          targetSessionId: null,
+          revokedSessionCount: revokedSessions.length,
+          now
+        });
+      }
+      await transaction`
+        UPDATE password_recovery_grants
+        SET consumed_at = ${now}
+        WHERE id = ${grant.id}
+      `;
+      await transaction`
+        INSERT INTO password_recovery_events (
+          id, user_id, challenge_id, revoked_session_count, created_at
+        ) VALUES (
+          ${randomUUID()}, ${grant.userId}, ${grant.recoveryId},
+          ${revokedSessions.length}, ${now}
+        )
+      `;
+      return true;
     });
   }
 

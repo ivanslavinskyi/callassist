@@ -21,6 +21,10 @@ export type AuthSessionRecord = {
   userAgent: string | null;
 };
 
+export type CreateAuthSessionInput = AuthSessionRecord & {
+  expectedPasswordHash?: string;
+};
+
 export type CreateAuthUserInput = Omit<RegistrationInput, "password"> & {
   passwordHash: string;
 };
@@ -79,6 +83,14 @@ export type RetryAccountDeletionInput = AccountAdminInput & {
   now: string;
 };
 
+export type PasswordRecoveryChallengeRecord = {
+  id: string;
+  user: AuthUserRecord;
+  attemptCount: number;
+  expiresAt: string;
+  createdAt: string;
+};
+
 export type AdminUserCursor = { createdAt: string; id: string };
 
 export type ListAdminUsersInput = {
@@ -107,8 +119,7 @@ export interface AuthRepository {
     targetUserId: string
   ): Promise<AdminUserSummary>;
   markPhoneVerified(userId: string, verifiedAt: string): Promise<AuthUserRecord>;
-  updateLastLogin(userId: string, loggedInAt: string): Promise<void>;
-  createSession(input: AuthSessionRecord): Promise<void>;
+  createSession(input: CreateAuthSessionInput): Promise<void>;
   findUserBySessionTokenHash(
     tokenHash: string,
     now: string
@@ -152,6 +163,33 @@ export interface AuthRepository {
   failAccountDeletion(input: FailAccountDeletionInput): Promise<boolean>;
   completeAccountDeletion(input: AccountDeletionLeaseInput): Promise<boolean>;
   retryAccountDeletion(input: RetryAccountDeletionInput): Promise<void>;
+  createPasswordRecoveryChallenge(input: {
+    id: string;
+    userId: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean>;
+  invalidatePasswordRecoveryChallenge(
+    recoveryId: string,
+    now: string
+  ): Promise<void>;
+  consumePasswordRecoveryChallengeAttempt(
+    recoveryId: string,
+    now: string
+  ): Promise<PasswordRecoveryChallengeRecord | null>;
+  createPasswordRecoveryGrant(input: {
+    id: string;
+    recoveryId: string;
+    userId: string;
+    tokenHash: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean>;
+  resetPasswordWithRecoveryGrant(input: {
+    tokenHash: string;
+    passwordHash: string;
+    now: string;
+  }): Promise<boolean>;
   close(): Promise<void>;
 }
 

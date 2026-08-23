@@ -11,7 +11,10 @@ import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { AuthService } from "./auth-service";
 import { AccountDeletionService } from "./account-deletion-service";
 import { InMemoryAuthRepository } from "./in-memory-auth-repository";
-import { MockVerificationProvider } from "./verification-provider";
+import {
+  MockVerificationProvider,
+  type VerificationProvider
+} from "./verification-provider";
 
 const apps: ReturnType<typeof buildApp>[] = [];
 
@@ -21,14 +24,19 @@ afterEach(async () => {
 
 function createAuthApp(
   contentService?: ContentService,
-  options: { production?: boolean; secureCookies?: boolean } = {}
+  options: {
+    production?: boolean;
+    secureCookies?: boolean;
+    verificationProvider?: VerificationProvider;
+  } = {}
 ) {
   const repository = new InMemoryAuthRepository();
   const callRepository = new InMemoryCallRepository();
   const callService = new CallService(callRepository);
   const authService = new AuthService({
     repository,
-    verificationProvider: new MockVerificationProvider("123456"),
+    verificationProvider: options.verificationProvider ??
+      new MockVerificationProvider("123456"),
     signupCreditGranter: callService
   });
   const accountDeletionService = new AccountDeletionService({
@@ -1749,6 +1757,171 @@ describe("auth API", () => {
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({ error: "INVALID_VERIFICATION" });
     expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("recovers a verified account without enumeration and revokes every session", async () => {
+    const { app, repository } = createAuthApp();
+    const firstCookie = await registerAndVerify(app, registration);
+    const secondLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        email: registration.email,
+        password: registration.password
+      }
+    });
+    expect(secondLogin.statusCode).toBe(200);
+    const secondCookie = String(secondLogin.headers["set-cookie"]);
+
+    const unknown = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/start",
+      payload: { email: "absent@example.com" }
+    });
+    const known = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/start",
+      payload: { email: registration.email }
+    });
+    expect([unknown.statusCode, known.statusCode]).toEqual([202, 202]);
+    expect(unknown.json()).toMatchObject({ status: "verification_required" });
+    expect(known.json()).toMatchObject({ status: "verification_required" });
+    expect(Object.keys(unknown.json()).sort()).toEqual(
+      Object.keys(known.json()).sort()
+    );
+    expect(unknown.json().recoveryId).not.toBe(known.json().recoveryId);
+    expect(known.headers["cache-control"]).toBe("no-store");
+
+    const approved = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/verify",
+      payload: { recoveryId: known.json().recoveryId, code: "123456" }
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({
+      status: "password_reset_required"
+    });
+    expect(Object.keys(approved.json()).sort()).toEqual([
+      "recoveryToken",
+      "status"
+    ]);
+
+    const newPassword = "a-new-secure-password";
+    const completed = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/complete",
+      payload: {
+        recoveryToken: approved.json().recoveryToken,
+        newPassword
+      }
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toEqual({ status: "password_reset" });
+    expect(completed.headers["set-cookie"]).toBeUndefined();
+
+    for (const cookie of [firstCookie, secondCookie]) {
+      const current = await app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { cookie }
+      });
+      expect(current.statusCode).toBe(401);
+    }
+    const oldLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: registration.email, password: registration.password }
+    });
+    expect(oldLogin.statusCode).toBe(401);
+    const freshLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: registration.email, password: newPassword }
+    });
+    expect(freshLogin.statusCode).toBe(200);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/complete",
+      payload: {
+        recoveryToken: approved.json().recoveryToken,
+        newPassword: "another-secure-password"
+      }
+    });
+    expect(replay.statusCode).toBe(401);
+    expect(replay.json()).toEqual({ error: "INVALID_RECOVERY" });
+    expect(repository.passwordRecoveryEventsForTest()).toMatchObject([{
+      revokedSessionCount: 2
+    }]);
+  });
+
+  it("keeps recovery generic for suspended and deletion-pending accounts", async () => {
+    const { app, repository } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+    const current = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    });
+    const userId = current.json().user.id as string;
+    await repository.setUserStatusForTest(userId, "suspended");
+    const suspended = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/start",
+      payload: { email: registration.email }
+    });
+    expect(suspended.statusCode).toBe(202);
+    expect((await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/verify",
+      payload: { recoveryId: suspended.json().recoveryId, code: "123456" }
+    })).json()).toEqual({ error: "INVALID_RECOVERY" });
+
+    await repository.setUserStatusForTest(userId, "active");
+    await repository.requestAccountDeletion({
+      requestId: randomUUID(),
+      userId,
+      now: new Date().toISOString(),
+      maxAttempts: 5
+    });
+    const deletionPending = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/start",
+      payload: { email: registration.email }
+    });
+    expect(deletionPending.statusCode).toBe(202);
+    expect((await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/verify",
+      payload: { recoveryId: deletionPending.json().recoveryId, code: "123456" }
+    })).json()).toEqual({ error: "INVALID_RECOVERY" });
+  });
+
+  it("does not disclose an eligible account when recovery verification fails upstream", async () => {
+    let checks = 0;
+    const verificationProvider: VerificationProvider = {
+      mode: "mock",
+      async send() {},
+      async check(_phoneE164, code) {
+        checks += 1;
+        if (checks === 1) return code === "123456";
+        throw new Error("provider details must not escape");
+      }
+    };
+    const { app } = createAuthApp(undefined, { verificationProvider });
+    await registerAndVerify(app, registration);
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/start",
+      payload: { email: registration.email }
+    });
+    const verified = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/verify",
+      payload: { recoveryId: started.json().recoveryId, code: "123456" }
+    });
+    expect(verified.statusCode).toBe(401);
+    expect(verified.json()).toEqual({ error: "INVALID_RECOVERY" });
   });
 
   it("invalidates an existing session when the account is suspended", async () => {

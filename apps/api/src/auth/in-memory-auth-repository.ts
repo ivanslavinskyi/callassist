@@ -9,6 +9,7 @@ import type {
   AuthUserRecord,
   ChangeAccountStatusInput,
   ClaimAccountDeletionInput,
+  CreateAuthSessionInput,
   CreateAuthUserInput,
   FailAccountDeletionInput,
   ListAdminUsersInput
@@ -53,6 +54,34 @@ type AccountDeletionEvent = {
   createdAt: string;
 };
 
+type PasswordRecoveryChallenge = {
+  id: string;
+  userId: string;
+  attemptCount: number;
+  expiresAt: string;
+  verifiedAt: string | null;
+  invalidatedAt: string | null;
+  lastAttemptAt: string | null;
+  createdAt: string;
+};
+
+type PasswordRecoveryGrant = {
+  id: string;
+  recoveryId: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  createdAt: string;
+};
+
+type PasswordRecoveryEvent = {
+  userId: string;
+  recoveryId: string;
+  revokedSessionCount: number;
+  createdAt: string;
+};
+
 export class InMemoryAuthRepository implements AuthRepository {
   readonly mode = "memory" as const;
   readonly #users = new Map<string, AuthUserRecord>();
@@ -62,6 +91,9 @@ export class InMemoryAuthRepository implements AuthRepository {
   readonly #accountDataExportEvents: AccountDataExportEvent[] = [];
   readonly #accountDeletions = new Map<string, AccountDeletionRequestRecord>();
   readonly #accountDeletionEvents: AccountDeletionEvent[] = [];
+  readonly #passwordRecoveryChallenges = new Map<string, PasswordRecoveryChallenge>();
+  readonly #passwordRecoveryGrants = new Map<string, PasswordRecoveryGrant>();
+  readonly #passwordRecoveryEvents: PasswordRecoveryEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -145,16 +177,20 @@ export class InMemoryAuthRepository implements AuthRepository {
     return structuredClone(user);
   }
 
-  async updateLastLogin(userId: string, loggedInAt: string) {
-    this.#requireUser(userId).lastLoginAt = loggedInAt;
-  }
-
-  async createSession(input: AuthSessionRecord) {
+  async createSession(input: CreateAuthSessionInput) {
     const user = this.#users.get(input.userId);
-    if (!user || user.status !== "active" || !user.phoneVerifiedAt) {
+    if (
+      !user ||
+      user.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      (input.expectedPasswordHash !== undefined &&
+        input.expectedPasswordHash !== user.passwordHash)
+    ) {
       throw new AuthRepositoryError("SESSION_CREATION_DENIED");
     }
-    this.#sessions.set(input.tokenHash, structuredClone(input));
+    const { expectedPasswordHash: _expectedPasswordHash, ...session } = input;
+    this.#sessions.set(input.tokenHash, structuredClone(session));
+    user.lastLoginAt = input.lastSeenAt;
   }
 
   async findUserBySessionTokenHash(tokenHash: string, now: string) {
@@ -482,6 +518,153 @@ export class InMemoryAuthRepository implements AuthRepository {
     });
   }
 
+  async createPasswordRecoveryChallenge(input: {
+    id: string;
+    userId: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    const user = this.#users.get(input.userId);
+    if (
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      this.#hasPendingAccountDeletion(input.userId)
+    ) return false;
+    for (const challenge of this.#passwordRecoveryChallenges.values()) {
+      if (
+        challenge.userId === input.userId &&
+        !challenge.verifiedAt &&
+        !challenge.invalidatedAt
+      ) challenge.invalidatedAt = input.now;
+    }
+    this.#passwordRecoveryChallenges.set(input.id, {
+      id: input.id,
+      userId: input.userId,
+      attemptCount: 0,
+      expiresAt: input.expiresAt,
+      verifiedAt: null,
+      invalidatedAt: null,
+      lastAttemptAt: null,
+      createdAt: input.now
+    });
+    return true;
+  }
+
+  async invalidatePasswordRecoveryChallenge(recoveryId: string, now: string) {
+    const challenge = this.#passwordRecoveryChallenges.get(recoveryId);
+    if (challenge && !challenge.invalidatedAt) challenge.invalidatedAt = now;
+  }
+
+  async consumePasswordRecoveryChallengeAttempt(
+    recoveryId: string,
+    now: string
+  ) {
+    const challenge = this.#passwordRecoveryChallenges.get(recoveryId);
+    if (
+      !challenge ||
+      challenge.expiresAt <= now ||
+      challenge.verifiedAt ||
+      challenge.invalidatedAt ||
+      challenge.attemptCount >= 8
+    ) return null;
+    const user = this.#users.get(challenge.userId);
+    if (
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      this.#hasPendingAccountDeletion(user.id)
+    ) return null;
+    challenge.attemptCount += 1;
+    challenge.lastAttemptAt = now;
+    return {
+      id: challenge.id,
+      user: structuredClone(user),
+      attemptCount: challenge.attemptCount,
+      expiresAt: challenge.expiresAt,
+      createdAt: challenge.createdAt
+    };
+  }
+
+  async createPasswordRecoveryGrant(input: {
+    id: string;
+    recoveryId: string;
+    userId: string;
+    tokenHash: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    const challenge = this.#passwordRecoveryChallenges.get(input.recoveryId);
+    const user = this.#users.get(input.userId);
+    if (
+      !challenge ||
+      challenge.userId !== input.userId ||
+      challenge.expiresAt <= input.now ||
+      challenge.verifiedAt ||
+      challenge.invalidatedAt ||
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      this.#hasPendingAccountDeletion(input.userId) ||
+      [...this.#passwordRecoveryGrants.values()].some(
+        (grant) => grant.recoveryId === input.recoveryId
+      )
+    ) return false;
+    challenge.verifiedAt = input.now;
+    this.#passwordRecoveryGrants.set(input.tokenHash, {
+      id: input.id,
+      recoveryId: input.recoveryId,
+      userId: input.userId,
+      tokenHash: input.tokenHash,
+      expiresAt: input.expiresAt,
+      consumedAt: null,
+      createdAt: input.now
+    });
+    return true;
+  }
+
+  async resetPasswordWithRecoveryGrant(input: {
+    tokenHash: string;
+    passwordHash: string;
+    now: string;
+  }) {
+    const grant = this.#passwordRecoveryGrants.get(input.tokenHash);
+    if (!grant || grant.consumedAt || grant.expiresAt <= input.now) return false;
+    const user = this.#users.get(grant.userId);
+    if (
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      this.#hasPendingAccountDeletion(user.id)
+    ) return false;
+    user.passwordHash = input.passwordHash;
+    user.lastLoginAt = null;
+    let revokedSessionCount = 0;
+    for (const session of this.#sessions.values()) {
+      if (
+        session.userId === user.id &&
+        !session.revokedAt &&
+        session.expiresAt > input.now
+      ) {
+        session.revokedAt = input.now;
+        revokedSessionCount += 1;
+      }
+    }
+    if (revokedSessionCount > 0) {
+      this.#accountSessionEvents.push({
+        eventType: "session.all_revoked",
+        actorUserId: user.id,
+        targetSessionId: null,
+        revokedSessionCount,
+        createdAt: input.now
+      });
+    }
+    grant.consumedAt = input.now;
+    this.#passwordRecoveryEvents.push({
+      userId: user.id,
+      recoveryId: grant.recoveryId,
+      revokedSessionCount,
+      createdAt: input.now
+    });
+    return true;
+  }
+
   async setUserStatusForTest(userId: string, status: AuthUserRecord["status"]) {
     this.#requireUser(userId).status = status;
   }
@@ -506,7 +689,16 @@ export class InMemoryAuthRepository implements AuthRepository {
     return structuredClone(this.#accountDeletionEvents);
   }
 
+  passwordRecoveryEventsForTest() {
+    return structuredClone(this.#passwordRecoveryEvents);
+  }
+
   async close() {}
+
+  #hasPendingAccountDeletion(userId: string) {
+    const request = this.#accountDeletions.get(userId);
+    return Boolean(request && request.status !== "completed");
+  }
 
   #requireUser(userId: string) {
     const user = this.#users.get(userId);

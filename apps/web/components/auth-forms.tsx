@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 import {
+  completePasswordRecovery,
   login,
   registerAccount,
   resendPhoneVerification,
+  startPasswordRecovery,
+  verifyPasswordRecovery,
   verifyPhone
 } from "@/lib/api";
 import { authMessages, getAuthErrorMessage } from "@/lib/i18n/auth-messages";
@@ -211,11 +214,164 @@ export function LoginForm() {
           <span>{copy.login.password}</span>
           <input autoComplete="current-password" maxLength={128} name="password" required type="password" />
         </label>
+        <Link className="auth-inline-link" href={localizeHref("/recover")}>{copy.login.forgot}</Link>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {verificationEmail ? <Link className="auth-inline-link" href={`${localizeHref("/verify")}?email=${encodeURIComponent(verificationEmail)}`}>{copy.login.verify}</Link> : null}
         <SubmitButton busy={busy} busyLabel={copy.login.submitting} label={copy.login.submit} />
       </form>
       <p className="auth-alternative">{copy.login.newAccount} <Link href={localizeHref("/register")}>{copy.login.register}</Link></p>
+    </AuthFrame>
+  );
+}
+
+type RecoveryStage = "start" | "verify" | "reset" | "success";
+
+export function PasswordRecoveryForm() {
+  const { locale, localizeHref } = useUiLocale();
+  const copy = authMessages[locale];
+  const [stage, setStage] = useState<RecoveryStage>("start");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recoveryId, setRecoveryId] = useState<string | null>(null);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
+
+  async function start(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const data = new FormData(event.currentTarget);
+    try {
+      const result = await startPasswordRecovery({
+        email: String(data.get("email") ?? "").trim()
+      });
+      setRecoveryId(result.recoveryId);
+      setStage("verify");
+    } catch (caught) {
+      setError(getAuthErrorMessage(caught, locale));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!recoveryId) return restart();
+    setBusy(true);
+    setError(null);
+    const data = new FormData(event.currentTarget);
+    try {
+      const result = await verifyPasswordRecovery({
+        recoveryId,
+        code: String(data.get("code") ?? "").trim()
+      });
+      setRecoveryToken(result.recoveryToken);
+      setRecoveryId(null);
+      setStage("reset");
+    } catch (caught) {
+      setError(getAuthErrorMessage(caught, locale));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function complete(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!recoveryToken) return restart();
+    const data = new FormData(event.currentTarget);
+    const newPassword = String(data.get("newPassword") ?? "");
+    if (newPassword !== String(data.get("confirmPassword") ?? "")) {
+      setError(copy.errors.passwordMismatch);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await completePasswordRecovery({ recoveryToken, newPassword });
+      setRecoveryToken(null);
+      setStage("success");
+    } catch (caught) {
+      setError(getAuthErrorMessage(caught, locale));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function restart() {
+    setRecoveryId(null);
+    setRecoveryToken(null);
+    setError(null);
+    setBusy(false);
+    setStage("start");
+  }
+
+  if (stage === "success") {
+    return (
+      <AuthFrame>
+        <span className="eyebrow">{copy.eyebrow}</span>
+        <h1>{copy.recovery.successTitle}</h1>
+        <p className="auth-intro" role="status">{copy.recovery.successIntro}</p>
+        <Link className="primary-button auth-submit" href={localizeHref("/login")}>{copy.recovery.signIn}</Link>
+      </AuthFrame>
+    );
+  }
+
+  if (stage === "verify") {
+    return (
+      <AuthFrame>
+        <span className="eyebrow">{copy.eyebrow}</span>
+        <h1>{copy.recovery.codeTitle}</h1>
+        <p className="auth-intro">{copy.recovery.codeIntro}</p>
+        <form className="auth-form" onSubmit={verify}>
+          <label className="field">
+            <span>{copy.recovery.code}</span>
+            <input autoComplete="one-time-code" inputMode="numeric" maxLength={10} minLength={4} name="code" pattern="[0-9]{4,10}" placeholder={copy.recovery.codePlaceholder} required />
+          </label>
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          <SubmitButton busy={busy} busyLabel={copy.recovery.verifying} label={copy.recovery.verify} />
+          <button className="text-button auth-text-button" disabled={busy} onClick={restart} type="button">{copy.recovery.restart}</button>
+        </form>
+      </AuthFrame>
+    );
+  }
+
+  if (stage === "reset") {
+    return (
+      <AuthFrame>
+        <span className="eyebrow">{copy.eyebrow}</span>
+        <h1>{copy.recovery.resetTitle}</h1>
+        <p className="auth-intro">{copy.recovery.resetIntro}</p>
+        <form className="auth-form" onSubmit={complete}>
+          <label className="field">
+            <span>{copy.recovery.password}</span>
+            <input autoComplete="new-password" maxLength={128} minLength={12} name="newPassword" required type="password" />
+            <small>{copy.recovery.passwordHelp}</small>
+          </label>
+          <label className="field">
+            <span>{copy.recovery.confirmPassword}</span>
+            <input autoComplete="new-password" maxLength={128} minLength={12} name="confirmPassword" required type="password" />
+          </label>
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          <SubmitButton busy={busy} busyLabel={copy.recovery.completing} label={copy.recovery.complete} />
+          <button className="text-button auth-text-button" disabled={busy} onClick={restart} type="button">{copy.recovery.restart}</button>
+        </form>
+      </AuthFrame>
+    );
+  }
+
+  return (
+    <AuthFrame>
+      <span className="eyebrow">{copy.eyebrow}</span>
+      <h1>{copy.recovery.title}</h1>
+      <p className="auth-intro">{copy.recovery.intro}</p>
+      <form className="auth-form" onSubmit={start}>
+        <label className="field">
+          <span>{copy.recovery.email}</span>
+          <input autoComplete="email" maxLength={320} name="email" required type="email" />
+        </label>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <SubmitButton busy={busy} busyLabel={copy.recovery.starting} label={copy.recovery.start} />
+      </form>
+      <p className="auth-alternative"><Link href={localizeHref("/login")}>{copy.recovery.back}</Link></p>
     </AuthFrame>
   );
 }
