@@ -16,6 +16,7 @@ export type MigrationCatalogEntry = {
   name: string;
   sequence: number;
   checksumSha256: string;
+  legacyCrlfChecksumSha256: string;
   sql: string;
 };
 
@@ -26,14 +27,18 @@ export async function readMigrationCatalog(
     .filter((name) => name.endsWith(".sql"))
     .sort();
   const entries = await Promise.all(names.map(async (name) => {
-    const sql = await readFile(join(directory, name), "utf8");
+    const sql = (await readFile(join(directory, name), "utf8"))
+      .replace(/\r\n?/g, "\n");
     const match = /^(\d{4})_[a-z0-9_]+\.sql$/.exec(name);
     if (!match) throw new Error(`Invalid migration filename: ${name}`);
     if (!sql.trim()) throw new Error(`Migration is empty: ${name}`);
+    const checksum = (value: string) =>
+      createHash("sha256").update(value).digest("hex");
     return {
       name,
       sequence: Number(match[1]),
-      checksumSha256: createHash("sha256").update(sql).digest("hex"),
+      checksumSha256: checksum(sql),
+      legacyCrlfChecksumSha256: checksum(sql.replace(/\n/g, "\r\n")),
       sql
     };
   }));
@@ -108,8 +113,19 @@ export async function runMigrations(
     for (const migration of catalog) {
       const existing = applied.get(migration.name);
       if (existing?.checksumSha256) {
-        if (existing.checksumSha256 !== migration.checksumSha256) {
+        if (
+          existing.checksumSha256 !== migration.checksumSha256 &&
+          existing.checksumSha256 !== migration.legacyCrlfChecksumSha256
+        ) {
           throw new Error(`Applied migration checksum mismatch: ${migration.name}`);
+        }
+        if (existing.checksumSha256 !== migration.checksumSha256) {
+          await sql`
+            UPDATE schema_migrations
+            SET checksum_sha256 = ${migration.checksumSha256}
+            WHERE name = ${migration.name}
+              AND checksum_sha256 = ${existing.checksumSha256}
+          `;
         }
         continue;
       }

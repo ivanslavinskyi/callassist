@@ -38,6 +38,29 @@ describe("migration catalog", () => {
     expect(catalog[0]?.checksumSha256).not.toBe(catalog[1]?.checksumSha256);
   });
 
+  it("normalizes line endings before hashing and applying migrations", async () => {
+    const lfDirectory = await temporaryDirectory();
+    const crlfDirectory = await temporaryDirectory();
+    await writeFile(join(lfDirectory, "0001_initial.sql"), "SELECT 1;\nSELECT 2;\n");
+    await writeFile(
+      join(crlfDirectory, "0001_initial.sql"),
+      "SELECT 1;\r\nSELECT 2;\r\n"
+    );
+
+    const [lfCatalog, crlfCatalog] = await Promise.all([
+      readMigrationCatalog(lfDirectory),
+      readMigrationCatalog(crlfDirectory)
+    ]);
+
+    expect(crlfCatalog[0]?.sql).toBe(lfCatalog[0]?.sql);
+    expect(crlfCatalog[0]?.checksumSha256)
+      .toBe(lfCatalog[0]?.checksumSha256);
+    expect(crlfCatalog[0]?.legacyCrlfChecksumSha256)
+      .toBe(lfCatalog[0]?.legacyCrlfChecksumSha256);
+    expect(lfCatalog[0]?.legacyCrlfChecksumSha256)
+      .not.toBe(lfCatalog[0]?.checksumSha256);
+  });
+
   it("rejects gaps, duplicate sequence numbers, bad names and empty SQL", async () => {
     expect(() => validateMigrationSequence([
       { name: "0001_initial.sql", sequence: 1 },
