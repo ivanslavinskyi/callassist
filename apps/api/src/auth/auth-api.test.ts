@@ -12,6 +12,10 @@ import { AuthService } from "./auth-service";
 import { AccountDeletionService } from "./account-deletion-service";
 import { InMemoryAuthRepository } from "./in-memory-auth-repository";
 import {
+  RateLimiterUnavailableError,
+  type RateLimiter
+} from "./rate-limiter";
+import {
   MockVerificationProvider,
   type VerificationProvider
 } from "./verification-provider";
@@ -28,6 +32,8 @@ function createAuthApp(
     production?: boolean;
     secureCookies?: boolean;
     verificationProvider?: VerificationProvider;
+    rateLimiter?: RateLimiter;
+    endpointRateLimiter?: RateLimiter;
   } = {}
 ) {
   const repository = new InMemoryAuthRepository();
@@ -37,7 +43,8 @@ function createAuthApp(
     repository,
     verificationProvider: options.verificationProvider ??
       new MockVerificationProvider("123456"),
-    signupCreditGranter: callService
+    signupCreditGranter: callService,
+    rateLimiter: options.rateLimiter
   });
   const accountDeletionService = new AccountDeletionService({
     authRepository: repository,
@@ -56,7 +63,8 @@ function createAuthApp(
     accountDeletionService,
     logger: false,
     production: options.production,
-    secureCookies: options.secureCookies ?? false
+    secureCookies: options.secureCookies ?? false,
+    endpointRateLimiter: options.endpointRateLimiter ?? options.rateLimiter
   });
   apps.push(app);
   return {
@@ -65,6 +73,20 @@ function createAuthApp(
     callRepository,
     callService,
     accountDeletionService
+  };
+}
+
+function unavailableRateLimiter(): RateLimiter {
+  const unavailable = async () => {
+    throw new RateLimiterUnavailableError();
+  };
+  return {
+    mode: "postgres",
+    shared: true,
+    consume: unavailable,
+    consumeMany: unavailable,
+    getStatus: unavailable,
+    async close() {}
   };
 }
 
@@ -140,6 +162,59 @@ const callBrief = {
 };
 
 describe("auth API", () => {
+  it("fails closed before registration when the shared limiter is unavailable", async () => {
+    const { app, repository } = createAuthApp(undefined, {
+      rateLimiter: unavailableRateLimiter()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: registration
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["retry-after"]).toBe("1");
+    expect(response.json()).toEqual({ error: "RATE_LIMIT_UNAVAILABLE" });
+    expect(await repository.findUserByEmail(registration.email)).toBeNull();
+  });
+
+  it("keeps admin system status available when limiter telemetry is unavailable", async () => {
+    const { app, repository } = createAuthApp(undefined, {
+      endpointRateLimiter: unavailableRateLimiter()
+    });
+    const adminRegistration = {
+      ...registration,
+      email: "limiter-admin@example.com",
+      phoneE164: "+41710000041"
+    };
+    const cookie = await registerAndVerify(app, adminRegistration);
+    const me = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    });
+    await repository.setUserRoleForTest(me.json().user.id, "admin");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/admin/system",
+      headers: { cookie }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().rateLimits).toEqual({
+      state: "unavailable",
+      mode: "postgres",
+      shared: true,
+      activeBuckets: null,
+      metricsSince: null,
+      allowed: null,
+      denied: null,
+      topDeniedScopes: []
+    });
+  });
+
   it("step-up deletes only an owned terminal call and remains idempotent", async () => {
     const { app, callRepository } = createAuthApp();
     const ownerCookie = await registerAndVerify(app, registration);
@@ -1380,6 +1455,15 @@ describe("auth API", () => {
       outboundCalls: {
         enabled: false,
         reason: "Investigating elevated provider failures"
+      },
+      rateLimits: {
+        state: "healthy",
+        mode: "memory",
+        shared: false,
+        activeBuckets: expect.any(Number),
+        allowed: expect.any(Number),
+        denied: expect.any(Number),
+        topDeniedScopes: expect.any(Array)
       },
       jobs: {
         queued: 0,

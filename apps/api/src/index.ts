@@ -3,6 +3,7 @@ import { buildApp, buildWebhookApp } from "./app";
 import { AuthService } from "./auth/auth-service";
 import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
+import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
 import {
   DeterministicBriefCompiler,
@@ -43,6 +44,7 @@ const {
   postCallTranscriber
 } = createCallRuntimeDependenciesFromEnv();
 const authRepository = createAuthRepositoryFromEnv();
+const rateLimiter = createRateLimiterFromEnv();
 const durableWorkerMode = durableWorkerModeFromEnv();
 const contentService = new ContentService(createContentRepositoryFromEnv());
 await contentService.initialize();
@@ -62,6 +64,7 @@ const service = new CallService(
 const authService = new AuthService({
   repository: authRepository,
   verificationProvider: createVerificationProviderFromEnv(),
+  rateLimiter,
   signupCreditGranter: service
 });
 const accountDeletionService = new AccountDeletionService({
@@ -84,6 +87,7 @@ const app = buildApp({
   creditService,
   contentService,
   accountDeletionService,
+  endpointRateLimiter: rateLimiter,
   endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv(),
   realtimeConfigured: telephonyProvider instanceof TwilioTelephonyProvider
 });

@@ -138,10 +138,12 @@ Unsafe browser requests with a foreign `Origin` are rejected before route dispat
 while `SameSite=Lax` session cookies provide the primary CSRF boundary. Production
 sessions use a `Secure`, `HttpOnly`, high-priority `__Host-` cookie.
 
-`pnpm env:init` creates `.env` with independent encryption and keyed promo-code
-hash keys and never overwrites an existing file. Existing deployments may temporarily
-fall back to `DATA_ENCRYPTION_KEY`, but should set and rotate a separate
-`PROMO_CODE_HASH_KEY` before issuing codes.
+`pnpm env:init` creates `.env` with independent encryption, promo-code HMAC and
+rate-limit HMAC keys and never overwrites an existing file. Existing local development
+environments may temporarily derive rate-limit HMACs from `DATA_ENCRYPTION_KEY`;
+production requires an explicit independent `RATE_LIMIT_HASH_KEY`. Existing promo
+deployments may temporarily fall back to `DATA_ENCRYPTION_KEY`, but should set and
+rotate a separate `PROMO_CODE_HASH_KEY` before issuing codes.
 
 PostgreSQL deployments write private JSON as authenticated `v2` envelopes containing
 an authenticated key ID. `DATA_ENCRYPTION_ACTIVE_KEY_ID` names the write key,
@@ -304,15 +306,18 @@ toward abuse quotas even when their credit is refunded; quota accounting and cre
 charging are deliberately separate. Override these values with the `CALL_MAX_*`
 variables in `.env`.
 
-Expensive authenticated endpoints have a separate process-local fixed-window rate
-limit by hashed user ID and hashed IP. The shared IP budget is five times the user
+Expensive authenticated endpoints have a separate fixed-window rate limit by keyed
+HMAC digests of user ID and IP. PostgreSQL deployments share those buckets atomically
+across API instances; memory mode is for single-process development. The shared IP budget is five times the user
 budget. Defaults are 15 brief preparations/hour, 10 start requests/15 minutes,
 10 promo redemption attempts/hour, 30 recording downloads/hour, 5 transcription
 retries/day, and 2 account-data exports/day. A rejected request
 returns `429 RATE_LIMITED` with `Retry-After`; the limits are configured through the
 `API_RATE_LIMIT_*` variables. Invalid payloads and unauthorized resources are rejected
-before consuming these expensive-operation budgets. Move this state to a shared
-durable store before operating more than one API instance.
+before consuming these expensive-operation budgets. Store outages fail closed with
+`503 RATE_LIMIT_UNAVAILABLE` before the expensive side effect. Privacy-safe aggregate
+status is visible in Admin System; the complete policy and rotation boundary are in
+[`docs/rate-limit-policy.md`](docs/rate-limit-policy.md).
 
 Operators can pause or resume all new PostgreSQL-backed outbound calls without ending
 an active call. A non-empty reason is mandatory and each change is appended to the
@@ -384,8 +389,9 @@ The PostgreSQL integration test uses `TEST_DATABASE_URL`, which `pnpm env:init` 
   deterministic server-side policy boundary.
 - Evaluate semantic preservation, call success, latency, live/final transcription,
   Swiss German, multilingual input, and adversarial prompts.
-- Add complaint intake/ownership, remaining abuse thresholds, and distributed
-  endpoint rate limits before accepting public data at multiple API instances.
+- Add complaint intake/ownership, mass-account correlation, infrastructure abuse
+  thresholds, and alert routing before accepting unrestricted public data. Shared
+  cross-instance application limits are complete.
 - Continue from the completed durable transcription/retention, Twilio status
   reconciliation, webhook-delivery visibility, split worker runtime, real-provider
   crash drills, cross-process live state, and worker heartbeat visibility with

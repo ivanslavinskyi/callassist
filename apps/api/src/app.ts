@@ -51,7 +51,11 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest
 } from "fastify";
-import { ApplicationRateLimiter } from "./auth/rate-limiter";
+import {
+  ApplicationRateLimiter,
+  RateLimiterUnavailableError,
+  type RateLimiter
+} from "./auth/rate-limiter";
 import { AccountDataExportService } from "./account-data-export-service";
 import {
   AccountDeletionService,
@@ -74,7 +78,8 @@ import {
 import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
 import {
   piiSafeLoggerOptions,
-  registerPiiSafeRequestLogging
+  registerPiiSafeRequestLogging,
+  writePiiSafeOperationalError
 } from "./runtime/pii-safe-logger";
 import {
   RecipientOptOutService,
@@ -111,7 +116,7 @@ type BuildAppOptions = {
   production?: boolean;
   secureCookies?: boolean;
   webOrigin?: string | string[];
-  endpointRateLimiter?: ApplicationRateLimiter;
+  endpointRateLimiter?: RateLimiter;
   endpointRateLimitPolicy?: EndpointRateLimitPolicy;
   recipientOptOutService?: RecipientOptOutService;
   realtimeConfigured?: boolean;
@@ -156,7 +161,8 @@ export function buildApp({
   recipientOptOutService = authService
     ? new RecipientOptOutService({
         repository: service.repository,
-        verificationProvider: authService.verificationProvider
+        verificationProvider: authService.verificationProvider,
+        rateLimiter: endpointRateLimiter
       })
     : undefined
 }: BuildAppOptions) {
@@ -341,26 +347,58 @@ export function buildApp({
     scope: string,
     rule: EndpointRateLimitRule
   ) {
-    const result = endpointRateLimiter.consumeMany([
-      {
-        scope: `endpoint:${scope}:ip`,
-        identifier: request.ip,
-        limit: rule.ipLimit,
-        windowMs: rule.windowMs
-      },
-      ...(userId ? [{
-        scope: `endpoint:${scope}:user`,
-        identifier: userId,
-        limit: rule.userLimit,
-        windowMs: rule.windowMs
-      }] : [])
-    ]);
+    let result;
+    try {
+      result = await endpointRateLimiter.consumeMany([
+        {
+          scope: `endpoint:${scope}:ip`,
+          identifier: request.ip,
+          limit: rule.ipLimit,
+          windowMs: rule.windowMs
+        },
+        ...(userId ? [{
+          scope: `endpoint:${scope}:user`,
+          identifier: userId,
+          limit: rule.userLimit,
+          windowMs: rule.windowMs
+        }] : [])
+      ]);
+    } catch (error) {
+      if (!(error instanceof RateLimiterUnavailableError)) throw error;
+      writePiiSafeOperationalError("endpoint_rate_limit_unavailable");
+      await reply
+        .header("Retry-After", "1")
+        .status(503)
+        .send({ error: "RATE_LIMIT_UNAVAILABLE" });
+      return false;
+    }
     if (result.allowed) return true;
     await reply
       .header("Retry-After", String(result.retryAfterSeconds))
       .status(429)
       .send({ error: "RATE_LIMITED" });
     return false;
+  }
+
+  async function getAdminSystemView() {
+    const [system, rateLimits] = await Promise.all([
+      service.getAdminSystemStatus(realtimeConfigured),
+      endpointRateLimiter.getStatus().catch((error) => {
+        if (!(error instanceof RateLimiterUnavailableError)) throw error;
+        writePiiSafeOperationalError("rate_limit_status_unavailable");
+        return {
+          state: "unavailable" as const,
+          mode: endpointRateLimiter.mode,
+          shared: endpointRateLimiter.shared,
+          activeBuckets: null,
+          metricsSince: null,
+          allowed: null,
+          denied: null,
+          topDeniedScopes: []
+        };
+      })
+    ]);
+    return { ...system, rateLimits };
   }
 
   if (contentService) {
@@ -1301,7 +1339,7 @@ export function buildApp({
       if (!actor) return;
       return reply
         .header("Cache-Control", "private, no-store")
-        .send(await service.getAdminSystemStatus(realtimeConfigured));
+        .send(await getAdminSystemView());
     });
 
     app.put("/api/admin/system/outbound-calls", async (request, reply) => {
@@ -1326,7 +1364,7 @@ export function buildApp({
       });
       return reply
         .header("Cache-Control", "private, no-store")
-        .send(await service.getAdminSystemStatus(realtimeConfigured));
+        .send(await getAdminSystemView());
     });
 
     app.post<{ Params: { jobId: string } }>(
@@ -1356,7 +1394,7 @@ export function buildApp({
           );
           return reply
             .header("Cache-Control", "private, no-store")
-            .send(await service.getAdminSystemStatus(realtimeConfigured));
+            .send(await getAdminSystemView());
         } catch (error) {
           return sendRepositoryError(reply, error);
         }
@@ -2100,7 +2138,8 @@ export function buildApp({
       accountDeletionService?.close(),
       service.close(),
       authService?.close(),
-      contentService?.close()
+      contentService?.close(),
+      endpointRateLimiter.close()
     ]);
   });
 
@@ -2199,7 +2238,11 @@ function sendAuthError(
     reply.header("Retry-After", String(error.retryAfterSeconds ?? 1));
     return reply.status(429).send({ error: error.code });
   }
-  const status = error.code === "VERIFICATION_UNAVAILABLE"
+  if (error.code === "RATE_LIMIT_UNAVAILABLE") {
+    reply.header("Retry-After", "1");
+  }
+  const status = error.code === "VERIFICATION_UNAVAILABLE" ||
+    error.code === "RATE_LIMIT_UNAVAILABLE"
     ? 503
     : error.code === "INVALID_CREDENTIALS" ||
         error.code === "INVALID_VERIFICATION" ||
@@ -2242,8 +2285,14 @@ function sendRecipientOptOutError(
     reply.header("Retry-After", String(error.retryAfterSeconds ?? 1));
     return reply.status(429).send({ error: error.code });
   }
+  if (error.code === "RATE_LIMIT_UNAVAILABLE") {
+    reply.header("Retry-After", "1");
+  }
   return reply
-    .status(error.code === "VERIFICATION_UNAVAILABLE" ? 503 : 401)
+    .status([
+      "VERIFICATION_UNAVAILABLE",
+      "RATE_LIMIT_UNAVAILABLE"
+    ].includes(error.code) ? 503 : 401)
     .send({ error: error.code });
 }
 

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app";
-import { ApplicationRateLimiter } from "./auth/rate-limiter";
+import {
+  ApplicationRateLimiter,
+  RateLimiterUnavailableError,
+  type RateLimiter
+} from "./auth/rate-limiter";
 import {
   BriefCompilerError,
   type BriefCompiler
@@ -31,6 +35,20 @@ function createApp(briefCompiler?: BriefCompiler) {
   });
   apps.push(app);
   return app;
+}
+
+function unavailableRateLimiter(): RateLimiter {
+  const unavailable = async () => {
+    throw new RateLimiterUnavailableError();
+  };
+  return {
+    mode: "postgres",
+    shared: true,
+    consume: unavailable,
+    consumeMany: unavailable,
+    getStatus: unavailable,
+    async close() {}
+  };
 }
 
 describe("call API", () => {
@@ -453,6 +471,40 @@ describe("call API", () => {
     expect(response.statusCode).toBe(502);
     expect(response.json()).toEqual({ error: "TELEPHONY_START_FAILED" });
     expect((await service.get(brief.id))?.brief.status).toBe("failed");
+  });
+
+  it("fails closed before an expensive operation when the limiter is unavailable", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository, undefined, () => undefined);
+    const app = buildApp({
+      service,
+      allowAnonymousCallsForTesting: true,
+      logger: false,
+      endpointRateLimiter: unavailableRateLimiter()
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      payload: {
+        recipientName: "Unavailable limiter office",
+        phoneNumber: "+41523686688",
+        objective: "Prove no brief is stored without an abuse-control decision",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["retry-after"]).toBe("1");
+    expect(response.json()).toEqual({ error: "RATE_LIMIT_UNAVAILABLE" });
+    expect((await repository.list({ limit: 1, userId: null })).items).toEqual([]);
   });
 
   it("rate-limits expensive endpoint families and returns Retry-After", async () => {

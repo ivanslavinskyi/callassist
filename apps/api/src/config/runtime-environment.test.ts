@@ -17,6 +17,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     DATA_ENCRYPTION_KEY: key,
     DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "primary-1",
     PROMO_CODE_HASH_KEY: Buffer.alloc(32, 8).toString("base64"),
+    RATE_LIMIT_HASH_KEY: Buffer.alloc(32, 6).toString("base64"),
     OPENAI_API_KEY: "openai-private",
     TWILIO_ACCOUNT_SID: "AC123",
     TWILIO_AUTH_TOKEN: "twilio-private",
@@ -57,6 +58,7 @@ describe("production runtime configuration", () => {
     environment.PUBLIC_BASE_URL = "http://localhost:4001";
     environment.WEB_ORIGIN = "http://localhost:3000";
     environment.PROMO_CODE_HASH_KEY = key;
+    environment.RATE_LIMIT_HASH_KEY = key;
     environment.TWILIO_WEBHOOK_PORT = "4000";
 
     expect(() => validateRuntimeEnvironment(environment, "api"))
@@ -74,6 +76,7 @@ describe("production runtime configuration", () => {
           "PUBLIC_BASE_URL must contain only non-local HTTPS origins",
           "WEB_ORIGIN must contain only non-local HTTPS origins",
           "PROMO_CODE_HASH_KEY must be independent",
+          "RATE_LIMIT_HASH_KEY must be independent",
           "PORT and TWILIO_WEBHOOK_PORT must differ"
         ])
       );
@@ -94,6 +97,14 @@ describe("production runtime configuration", () => {
 
     expect(() => validateRuntimeEnvironment(environment, "api"))
       .toThrow("PROMO_CODE_HASH_KEY must be independent");
+  });
+
+  it("keeps the rate-limit HMAC key independent from other secret families", () => {
+    const environment = productionEnvironment();
+    environment.RATE_LIMIT_HASH_KEY = environment.PROMO_CODE_HASH_KEY;
+
+    expect(() => validateRuntimeEnvironment(environment, "api"))
+      .toThrow("RATE_LIMIT_HASH_KEY must differ from PROMO_CODE_HASH_KEY");
   });
 
   it("does not require API-only verification and browser settings in a worker", () => {

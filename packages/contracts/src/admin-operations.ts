@@ -250,6 +250,28 @@ export const adminSystemStatusSchema = z.strictObject({
 });
 export type AdminSystemStatus = z.infer<typeof adminSystemStatusSchema>;
 
+export const adminRateLimitStatusSchema = z.strictObject({
+  state: z.enum(["healthy", "unavailable"]),
+  mode: z.enum(["memory", "postgres"]),
+  shared: z.boolean(),
+  activeBuckets: countSchema.nullable(),
+  metricsSince: z.iso.datetime().nullable(),
+  allowed: countSchema.nullable(),
+  denied: countSchema.nullable(),
+  topDeniedScopes: z.array(z.strictObject({
+    scope: z.string().regex(/^[a-z0-9][a-z0-9:_-]{0,119}$/),
+    denied: countSchema
+  })).max(10)
+});
+export type AdminRateLimitStatus = z.infer<
+  typeof adminRateLimitStatusSchema
+>;
+
+export const adminSystemViewSchema = adminSystemStatusSchema.extend({
+  rateLimits: adminRateLimitStatusSchema
+});
+export type AdminSystemView = z.infer<typeof adminSystemViewSchema>;
+
 export const adminDurableJobRetryInputSchema = z.strictObject({
   reason: z.string().trim().min(3).max(500)
 });

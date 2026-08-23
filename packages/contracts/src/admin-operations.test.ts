@@ -4,6 +4,7 @@ import {
   adminOperationsWindowBounds,
   adminDurableJobRetryInputSchema,
   adminOutboundCallControlInputSchema,
+  adminRateLimitStatusSchema,
   adminSystemStatusSchema
 } from "./admin-operations";
 
@@ -213,5 +214,32 @@ describe("admin operations contracts", () => {
     expect(adminDurableJobRetryInputSchema.safeParse({
       reason: "Retry after provider recovery"
     }).success).toBe(true);
+  });
+
+  it("exposes only bounded aggregate rate-limit telemetry", () => {
+    expect(adminRateLimitStatusSchema.parse({
+      state: "healthy",
+      mode: "postgres",
+      shared: true,
+      activeBuckets: 42,
+      metricsSince: "2026-08-22T12:00:00.000Z",
+      allowed: 100,
+      denied: 3,
+      topDeniedScopes: [{ scope: "auth:login:ip", denied: 3 }]
+    })).toEqual(expect.objectContaining({
+      shared: true,
+      denied: 3
+    }));
+    expect(adminRateLimitStatusSchema.safeParse({
+      state: "healthy",
+      mode: "postgres",
+      shared: true,
+      activeBuckets: 1,
+      metricsSince: null,
+      allowed: 1,
+      denied: 0,
+      topDeniedScopes: [],
+      identifier: "private@example.com"
+    }).success).toBe(false);
   });
 });

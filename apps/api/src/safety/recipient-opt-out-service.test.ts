@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApplicationRateLimiter } from "../auth/rate-limiter";
+import {
+  ApplicationRateLimiter,
+  RateLimiterUnavailableError,
+  type RateLimiter
+} from "../auth/rate-limiter";
 import { MockVerificationProvider } from "../auth/verification-provider";
 import {
   RecipientOptOutService,
@@ -7,6 +11,21 @@ import {
 } from "./recipient-opt-out-service";
 
 describe("RecipientOptOutService", () => {
+  it("does not send a verification when the shared limiter is unavailable", async () => {
+    const send = vi.fn();
+    const service = new RecipientOptOutService({
+      repository: { suppressRecipient: vi.fn().mockResolvedValue(true) },
+      verificationProvider: { mode: "mock", send, check: vi.fn() },
+      rateLimiter: unavailableRateLimiter()
+    });
+
+    await expect(service.requestVerification(
+      { phoneE164: "+41791234567" },
+      { ip: "192.0.2.3" }
+    )).rejects.toMatchObject({ code: "RATE_LIMIT_UNAVAILABLE" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("suppresses only after the recipient proves control of the phone", async () => {
     const suppressRecipient = vi.fn().mockResolvedValue(true);
     const service = new RecipientOptOutService({
@@ -59,3 +78,17 @@ describe("RecipientOptOutService", () => {
     } satisfies Partial<RecipientOptOutServiceError>));
   });
 });
+
+function unavailableRateLimiter(): RateLimiter {
+  const unavailable = async () => {
+    throw new RateLimiterUnavailableError();
+  };
+  return {
+    mode: "postgres",
+    shared: true,
+    consume: unavailable,
+    consumeMany: unavailable,
+    getStatus: unavailable,
+    async close() {}
+  };
+}

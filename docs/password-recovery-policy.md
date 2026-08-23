@@ -14,7 +14,7 @@ Status: implemented application baseline in checkpoint 6F4. This flow restores a
 
 ## Abuse boundaries
 
-The application limiter hashes identifiers before storing bounded process-local buckets. Current defaults are:
+The shared limiter stores only keyed HMAC-SHA-256 identifier digests in bounded PostgreSQL buckets when the API uses PostgreSQL. Current defaults are:
 
 | Action | Boundary | Limit |
 | --- | --- | --- |
@@ -26,7 +26,7 @@ The application limiter hashes identifiers before storing bounded process-local 
 | Complete | IP | 10 per 15 minutes |
 | Complete | recovery-token digest | 3 per 15 minutes |
 
-The database attempt counter prevents a process restart or a second API process from resetting the per-challenge OTP budget. The broader IP/email/phone/token bucket state is still process-local. It must move behind the shared durable rate-limit boundary before horizontal API scaling; provider limits remain defense in depth rather than the primary policy.
+The durable challenge counter and the broader IP/email/phone/token budgets survive a process restart and are shared by every PostgreSQL-backed API instance. Provider limits remain defense in depth rather than the primary policy. Single-process development may use the bounded in-memory implementation, which is explicitly not a horizontal-scaling mode.
 
 ## Public and operational behavior
 
@@ -34,10 +34,10 @@ The database attempt counter prevents a process restart or a second API process 
 - Validation failures describe malformed request structure only. They do not describe account eligibility.
 - The localized EN/DE page keeps the recovery UUID and grant only in React memory. Reloading or navigating away intentionally discards them and requires a fresh start.
 - Raw email, phone, OTP, new password, recovery UUID, grant, and token digest are absent from immutable recovery evidence. Standard request logging records the route template rather than the raw URL or body.
-- Equal response structure and error codes prevent direct account-state disclosure. SMS-provider latency is not a formal constant-time boundary; queued delivery or response padding should be evaluated with the shared abuse-control checkpoint before public scale.
+- Equal response structure and error codes prevent direct account-state disclosure. If the limiter is unavailable, an eligibility-sensitive recovery start stays generic but suppresses SMS; explicit recovery actions fail closed. SMS-provider latency is not a formal constant-time boundary, so queued delivery or response padding should still be evaluated before public scale.
 
 ## Remaining boundaries
 
-- Shared cross-instance rate-limit storage, WAF/infrastructure limits, monitoring thresholds, and external alert routing remain deployment work.
+- WAF/infrastructure limits, mass-account correlation, production monitoring thresholds, and external alert routing remain deployment work. The shared application-store policy is documented in `docs/rate-limit-policy.md`.
 - Changing a verified phone number requires a separate re-verification design. A user who lost both password and verified-phone control needs a separately reviewed support/identity-proofing policy; staff cannot bypass this recovery grant today.
 - Expired unused challenge/grant retention and cleanup must be included in the final production retention schedule. Recovery events are intentionally immutable security evidence and follow that schedule rather than containing recoverable credentials.

@@ -21,7 +21,12 @@ import {
   type ListAdminUsersInput
 } from "./auth-repository";
 import { hashPassword, verifyPassword } from "./password";
-import { ApplicationRateLimiter } from "./rate-limiter";
+import {
+  ApplicationRateLimiter,
+  RateLimiterUnavailableError,
+  type RateLimitEntry,
+  type RateLimiter
+} from "./rate-limiter";
 import type { VerificationProvider } from "./verification-provider";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 
@@ -49,7 +54,7 @@ export type SignupCreditGranter = {
 export class AuthService {
   readonly repository: AuthRepository;
   readonly verificationProvider: VerificationProvider;
-  readonly #rateLimiter: ApplicationRateLimiter;
+  readonly #rateLimiter: RateLimiter;
   readonly #now: () => Date;
   readonly #sessionTtlMs: number;
   readonly #signupCreditGranter: SignupCreditGranter;
@@ -57,7 +62,7 @@ export class AuthService {
   constructor(options: {
     repository: AuthRepository;
     verificationProvider: VerificationProvider;
-    rateLimiter?: ApplicationRateLimiter;
+    rateLimiter?: RateLimiter;
     now?: () => Date;
     sessionTtlMs?: number;
     signupCreditGranter: SignupCreditGranter;
@@ -71,10 +76,12 @@ export class AuthService {
   }
 
   async register(input: RegistrationInput, context: AuthRequestContext) {
-    this.#limit("register:ip", context.ip, 5, 60 * minute);
-    this.#limit("register:email", input.email, 3, 60 * minute);
-    this.#limit("register:phone", input.phoneE164, 3, 60 * minute);
-    this.#limit("verification-send:phone", input.phoneE164, 3, 60 * minute);
+    await this.#limitMany([
+      limitEntry("register:ip", context.ip, 5, 60 * minute),
+      limitEntry("register:email", input.email, 3, 60 * minute),
+      limitEntry("register:phone", input.phoneE164, 3, 60 * minute),
+      limitEntry("verification-send:phone", input.phoneE164, 3, 60 * minute)
+    ]);
     const passwordHash = await hashPassword(input.password);
     const { password: _password, ...profile } = input;
     let user: AuthUserRecord;
@@ -98,13 +105,15 @@ export class AuthService {
     input: VerificationResendInput,
     context: AuthRequestContext
   ) {
-    this.#limit("verification-send:ip", context.ip, 10, 60 * minute);
-    this.#limit("verification-send:email", input.email, 3, 60 * minute);
+    await this.#limitMany([
+      limitEntry("verification-send:ip", context.ip, 10, 60 * minute),
+      limitEntry("verification-send:email", input.email, 3, 60 * minute)
+    ]);
     const user = await this.repository.findUserByEmail(input.email);
     if (!user || user.phoneVerifiedAt || user.status !== "active") {
       return { status: "verification_required" as const };
     }
-    this.#limit("verification-send:phone", user.phoneE164, 3, 60 * minute);
+    await this.#limit("verification-send:phone", user.phoneE164, 3, 60 * minute);
     try {
       await this.verificationProvider.send(user.phoneE164);
     } catch (error) {
@@ -114,13 +123,15 @@ export class AuthService {
   }
 
   async verifyPhone(input: PhoneVerificationInput, context: AuthRequestContext) {
-    this.#limit("verification-attempt:ip", context.ip, 20, 15 * minute);
-    this.#limit("verification-attempt:email", input.email, 8, 15 * minute);
+    await this.#limitMany([
+      limitEntry("verification-attempt:ip", context.ip, 20, 15 * minute),
+      limitEntry("verification-attempt:email", input.email, 8, 15 * minute)
+    ]);
     const user = await this.repository.findUserByEmail(input.email);
     if (!user || user.status !== "active") {
       throw new AuthServiceError("INVALID_VERIFICATION");
     }
-    this.#limit("verification-attempt:phone", user.phoneE164, 8, 15 * minute);
+    await this.#limit("verification-attempt:phone", user.phoneE164, 8, 15 * minute);
     let approved = false;
     try {
       approved = await this.verificationProvider.check(user.phoneE164, input.code);
@@ -137,8 +148,10 @@ export class AuthService {
   }
 
   async login(input: LoginInput, context: AuthRequestContext) {
-    this.#limit("login:ip", context.ip, 30, 15 * minute);
-    this.#limit("login:email", input.email, 10, 15 * minute);
+    await this.#limitMany([
+      limitEntry("login:ip", context.ip, 30, 15 * minute),
+      limitEntry("login:email", input.email, 10, 15 * minute)
+    ]);
     const user = await this.repository.findUserByEmail(input.email);
     const passwordMatches = await verifyPassword(
       input.password,
@@ -161,14 +174,21 @@ export class AuthService {
     input: PasswordRecoveryStartInput,
     context: AuthRequestContext
   ) {
-    this.#limit("password-recovery-start:ip", context.ip, 10, 60 * minute);
-    this.#limit("password-recovery-start:email", input.email, 3, 60 * minute);
+    await this.#limitMany([
+      limitEntry("password-recovery-start:ip", context.ip, 10, 60 * minute),
+      limitEntry("password-recovery-start:email", input.email, 3, 60 * minute)
+    ]);
     const recoveryId = randomUUID();
     const user = await this.repository.findUserByEmail(input.email);
     if (
       user?.status === "active" &&
       user.phoneVerifiedAt &&
-      this.#allowed("password-recovery-start:phone", user.phoneE164, 3, 60 * minute)
+      await this.#allowed(
+        "password-recovery-start:phone",
+        user.phoneE164,
+        3,
+        60 * minute
+      )
     ) {
       const now = this.#now();
       try {
@@ -196,8 +216,15 @@ export class AuthService {
     input: PasswordRecoveryVerifyInput,
     context: AuthRequestContext
   ) {
-    this.#limit("password-recovery-verify:ip", context.ip, 20, 15 * minute);
-    this.#limit("password-recovery-verify:id", input.recoveryId, 8, 15 * minute);
+    await this.#limitMany([
+      limitEntry("password-recovery-verify:ip", context.ip, 20, 15 * minute),
+      limitEntry(
+        "password-recovery-verify:id",
+        input.recoveryId,
+        8,
+        15 * minute
+      )
+    ]);
     const now = this.#now();
     const challenge = await this.repository.consumePasswordRecoveryChallengeAttempt(
       input.recoveryId,
@@ -236,8 +263,20 @@ export class AuthService {
     context: AuthRequestContext
   ) {
     const tokenHash = hashPasswordRecoveryToken(input.recoveryToken);
-    this.#limit("password-recovery-complete:ip", context.ip, 10, 15 * minute);
-    this.#limit("password-recovery-complete:token", tokenHash, 3, 15 * minute);
+    await this.#limitMany([
+      limitEntry(
+        "password-recovery-complete:ip",
+        context.ip,
+        10,
+        15 * minute
+      ),
+      limitEntry(
+        "password-recovery-complete:token",
+        tokenHash,
+        3,
+        15 * minute
+      )
+    ]);
     const passwordHash = await hashPassword(input.newPassword);
     const reset = await this.repository.resetPasswordWithRecoveryGrant({
       tokenHash,
@@ -432,18 +471,57 @@ export class AuthService {
     return { user: toPublicUser(user), token, expiresAt };
   }
 
-  #limit(scope: string, identifier: string, limit: number, windowMs: number) {
-    const result = this.#rateLimiter.consume(scope, identifier, limit, windowMs);
-    if (!result.allowed) {
-      throw new AuthServiceError("RATE_LIMITED", {
-        retryAfterSeconds: result.retryAfterSeconds
-      });
+  async #limit(scope: string, identifier: string, limit: number, windowMs: number) {
+    return this.#limitMany([limitEntry(scope, identifier, limit, windowMs)]);
+  }
+
+  async #limitMany(entries: RateLimitEntry[]) {
+    try {
+      const result = await this.#rateLimiter.consumeMany(entries);
+      if (!result.allowed) {
+        throw new AuthServiceError("RATE_LIMITED", {
+          retryAfterSeconds: result.retryAfterSeconds
+        });
+      }
+    } catch (error) {
+      if (error instanceof RateLimiterUnavailableError) {
+        writePiiSafeOperationalError("auth_rate_limit_unavailable");
+        throw new AuthServiceError("RATE_LIMIT_UNAVAILABLE", { cause: error });
+      }
+      throw error;
     }
   }
 
-  #allowed(scope: string, identifier: string, limit: number, windowMs: number) {
-    return this.#rateLimiter.consume(scope, identifier, limit, windowMs).allowed;
+  async #allowed(
+    scope: string,
+    identifier: string,
+    limit: number,
+    windowMs: number
+  ) {
+    try {
+      return (await this.#rateLimiter.consume(
+        scope,
+        identifier,
+        limit,
+        windowMs
+      )).allowed;
+    } catch (error) {
+      if (error instanceof RateLimiterUnavailableError) {
+        writePiiSafeOperationalError("auth_silent_rate_limit_unavailable");
+        return false;
+      }
+      throw error;
+    }
   }
+}
+
+function limitEntry(
+  scope: string,
+  identifier: string,
+  limit: number,
+  windowMs: number
+): RateLimitEntry {
+  return { scope, identifier, limit, windowMs };
 }
 
 export class AuthServiceError extends Error {
@@ -458,6 +536,7 @@ export class AuthServiceError extends Error {
       | "INVALID_RECOVERY"
       | "VERIFICATION_UNAVAILABLE"
       | "RATE_LIMITED"
+      | "RATE_LIMIT_UNAVAILABLE"
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
       | "USER_NOT_FOUND"

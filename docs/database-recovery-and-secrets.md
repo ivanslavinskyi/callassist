@@ -105,6 +105,7 @@ browser, source-control, CI-log or support-channel exposure.
 | Twilio/OpenAI credentials | Create/activate a new provider credential, deploy all consumers, perform bounded provider checks, then revoke the old credential. Disable calls throughout an incident rotation. |
 | Session exposure | Revoke all server-side sessions with the existing audited control and require login again; rotating unrelated encryption keys does not revoke sessions. |
 | `PROMO_CODE_HASH_KEY` | Deactivate every outstanding promo campaign/code before replacement, deploy the new independent key, and issue new codes. A future key-ID scheme is required for overlap without invalidation. |
+| `RATE_LIMIT_HASH_KEY` | Keep the old key through the maximum seven-day bucket window or clear the ephemeral rate-limit tables during a controlled maintenance window, then deploy the new independent key to every API instance at once. A mixed-key fleet would create separate budgets and is forbidden. |
 | Data-encryption keyring | Never replace `DATA_ENCRYPTION_KEY` alone. Introduce a new active ID/key while retaining the old key in `DATA_ENCRYPTION_PREVIOUS_KEYS`, map legacy `v1` rows with `DATA_ENCRYPTION_LEGACY_V1_KEY_ID`, run the confirmed re-encryption procedure below, verify a restore with the full keyring, and retire the old key only after affected backups expire or have an approved recovery path. |
 
 A suspected data-encryption-key compromise is a release-blocking security incident,

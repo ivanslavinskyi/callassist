@@ -48,6 +48,13 @@ export function validateRuntimeEnvironment(
       "PROMO_CODE_HASH_KEY",
       issues
     );
+    requireBase64Key(
+      environment.RATE_LIMIT_HASH_KEY,
+      "RATE_LIMIT_HASH_KEY",
+      issues
+    );
+    const rateLimitHashKey = decodeBase64Key(environment.RATE_LIMIT_HASH_KEY);
+    const promoCodeHashKey = decodeBase64Key(environment.PROMO_CODE_HASH_KEY);
     if (environment.PROMO_CODE_HASH_KEY?.trim() && dataEncryptionMaterial) {
       try {
         const promoKey = parseDataEncryptionKey(
@@ -59,6 +66,14 @@ export function validateRuntimeEnvironment(
       } catch {
         // The field-specific validation above reports the bounded issue.
       }
+    }
+    if (rateLimitHashKey && dataEncryptionMaterial &&
+      dataEncryptionMaterialUsesKey(dataEncryptionMaterial, rateLimitHashKey)) {
+      issues.push("RATE_LIMIT_HASH_KEY must be independent");
+    }
+    if (rateLimitHashKey && promoCodeHashKey &&
+      rateLimitHashKey.equals(promoCodeHashKey)) {
+      issues.push("RATE_LIMIT_HASH_KEY must differ from PROMO_CODE_HASH_KEY");
     }
     const origins = environment.WEB_ORIGIN
       ?.split(",")
@@ -112,6 +127,12 @@ function requireBase64Key(
   name: string,
   issues: string[]
 ) {
+  if (!decodeBase64Key(value)) {
+    issues.push(`${name} must be a base64-encoded 32-byte key`);
+  }
+}
+
+function decodeBase64Key(value: string | undefined) {
   const encoded = value?.trim();
   const decoded = encoded && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
     ? Buffer.from(encoded, "base64")
@@ -120,9 +141,7 @@ function requireBase64Key(
     ? decoded.toString("base64").replace(/=+$/, "") ===
       encoded!.replace(/=+$/, "")
     : false;
-  if (!decoded || decoded.length !== 32 || !canonical) {
-    issues.push(`${name} must be a base64-encoded 32-byte key`);
-  }
+  return decoded?.length === 32 && canonical ? decoded : null;
 }
 
 function requirePostgresUrl(value: string | undefined, issues: string[]) {

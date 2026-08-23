@@ -3,7 +3,12 @@ import type {
   RecipientOptOutRequest
 } from "@callassist/contracts";
 import type { VerificationProvider } from "../auth/verification-provider";
-import { ApplicationRateLimiter } from "../auth/rate-limiter";
+import {
+  ApplicationRateLimiter,
+  RateLimiterUnavailableError,
+  type RateLimiter
+} from "../auth/rate-limiter";
+import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import type { RecipientSuppressionInput } from "../storage/call-repository";
 
 const minute = 60_000;
@@ -25,13 +30,13 @@ type RecipientOptOutRepository = {
 export class RecipientOptOutService {
   readonly #repository: RecipientOptOutRepository;
   readonly #verificationProvider: VerificationProvider;
-  readonly #rateLimiter: ApplicationRateLimiter;
+  readonly #rateLimiter: RateLimiter;
   readonly #rateLimitPolicy: RecipientOptOutRateLimitPolicy;
 
   constructor(options: {
     repository: RecipientOptOutRepository;
     verificationProvider: VerificationProvider;
-    rateLimiter?: ApplicationRateLimiter;
+    rateLimiter?: RateLimiter;
     rateLimitPolicy?: RecipientOptOutRateLimitPolicy;
   }) {
     this.#repository = options.repository;
@@ -44,7 +49,7 @@ export class RecipientOptOutService {
     input: RecipientOptOutRequest,
     context: { ip: string }
   ) {
-    this.#limit(
+    await this.#limit(
       "verification-send",
       input.phoneE164,
       context.ip,
@@ -64,7 +69,7 @@ export class RecipientOptOutService {
     input: RecipientOptOutConfirmation,
     context: { ip: string }
   ) {
-    this.#limit(
+    await this.#limit(
       "verification-attempt",
       input.phoneE164,
       context.ip,
@@ -93,26 +98,37 @@ export class RecipientOptOutService {
     return { status: "suppressed" as const };
   }
 
-  #limit(
+  async #limit(
     scope: string,
     phoneE164: string,
     ip: string,
     rule: { phoneLimit: number; ipLimit: number; windowMs: number }
   ) {
-    const result = this.#rateLimiter.consumeMany([
-      {
-        scope: `recipient-opt-out:${scope}:phone`,
-        identifier: phoneE164,
-        limit: rule.phoneLimit,
-        windowMs: rule.windowMs
-      },
-      {
-        scope: `recipient-opt-out:${scope}:ip`,
-        identifier: ip,
-        limit: rule.ipLimit,
-        windowMs: rule.windowMs
+    let result;
+    try {
+      result = await this.#rateLimiter.consumeMany([
+        {
+          scope: `recipient-opt-out:${scope}:phone`,
+          identifier: phoneE164,
+          limit: rule.phoneLimit,
+          windowMs: rule.windowMs
+        },
+        {
+          scope: `recipient-opt-out:${scope}:ip`,
+          identifier: ip,
+          limit: rule.ipLimit,
+          windowMs: rule.windowMs
+        }
+      ]);
+    } catch (error) {
+      if (error instanceof RateLimiterUnavailableError) {
+        writePiiSafeOperationalError("recipient_opt_out_rate_limit_unavailable");
+        throw new RecipientOptOutServiceError("RATE_LIMIT_UNAVAILABLE", {
+          cause: error
+        });
       }
-    ]);
+      throw error;
+    }
     if (!result.allowed) {
       throw new RecipientOptOutServiceError("RATE_LIMITED", {
         retryAfterSeconds: result.retryAfterSeconds
@@ -128,7 +144,8 @@ export class RecipientOptOutServiceError extends Error {
     readonly code:
       | "INVALID_OPT_OUT_VERIFICATION"
       | "VERIFICATION_UNAVAILABLE"
-      | "RATE_LIMITED",
+      | "RATE_LIMITED"
+      | "RATE_LIMIT_UNAVAILABLE",
     options?: { cause?: unknown; retryAfterSeconds?: number }
   ) {
     super(code, options?.cause === undefined ? undefined : { cause: options.cause });

@@ -1,6 +1,10 @@
 "use client";
 
-import type { AdminSystemStatus, UserRole } from "@callassist/contracts";
+import type {
+  AdminSystemStatus,
+  AdminSystemView,
+  UserRole
+} from "@callassist/contracts";
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
@@ -20,7 +24,7 @@ export function AdminSystemConsole() {
   const { locale, localizeHref } = useUiLocale();
   const copy = adminOperationsMessages[locale];
   const [role, setRole] = useState<UserRole | null>(null);
-  const [status, setStatus] = useState<AdminSystemStatus | null>(null);
+  const [status, setStatus] = useState<AdminSystemView | null>(null);
   const [loading, setLoading] = useState(true);
   const [controlLoading, setControlLoading] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
@@ -125,6 +129,35 @@ export function AdminSystemConsole() {
                 <ComponentCard label={copy.components.realtime} state={status.components.realtime.state} copy={copy} upstream />
                 <ComponentCard label={copy.components.transcription} state={status.components.transcription.state} copy={copy} upstream />
               </div>
+            </section>
+
+            <section className="admin-system-panel">
+              <h2>{copy.rateLimitsTitle}</h2>
+              <p>{copy.rateLimitsIntro}</p>
+              <dl className="admin-operations-list">
+                <Fact label={copy.rateLimitState} value={copy.rateLimitStates[status.rateLimits.state]} />
+                <Fact label={copy.rateLimitMode} value={copy.rateLimitModes[status.rateLimits.mode]} />
+                <Fact label={copy.rateLimitShared} value={copy.rateLimitSharedValues[status.rateLimits.shared ? "yes" : "no"]} />
+                <Fact label={copy.rateLimitActiveBuckets} value={formatOptionalCount(status.rateLimits.activeBuckets, copy.notAvailable)} />
+                <Fact label={copy.rateLimitAllowed} value={formatOptionalCount(status.rateLimits.allowed, copy.notAvailable)} />
+                <Fact label={copy.rateLimitDenied} value={formatOptionalCount(status.rateLimits.denied, copy.notAvailable)} />
+                <Fact
+                  label={copy.rateLimitSince}
+                  value={status.rateLimits.metricsSince
+                    ? formatDate(status.rateLimits.metricsSince, locale)
+                    : copy.notAvailable}
+                />
+              </dl>
+              <h3>{copy.rateLimitTopDenied}</h3>
+              {status.rateLimits.topDeniedScopes.length === 0
+                ? <p>{copy.rateLimitNoDenials}</p>
+                : (
+                    <dl className="admin-operations-list">
+                      {status.rateLimits.topDeniedScopes.map((entry) => (
+                        <Fact key={entry.scope} label={entry.scope} value={String(entry.denied)} />
+                      ))}
+                    </dl>
+                  )}
             </section>
 
             <div className="admin-system-grid">
@@ -404,6 +437,10 @@ function formatSeconds(seconds: number) {
   const hours = Math.floor(seconds / 3_600);
   const minutes = Math.floor((seconds % 3_600) / 60);
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function formatOptionalCount(value: number | null, fallback: string) {
+  return value === null ? fallback : String(value);
 }
 
 function formatDate(value: string, locale: "en" | "de") {

@@ -16,7 +16,7 @@ import type {
   AdminOperationsOverview,
   AdminOperationsWindow,
   AdminOutboundCallControlInput,
-  AdminSystemStatus,
+  AdminSystemView,
   AdminEditorialRevision,
   AdminUserCreditLedger,
   AdminUserList,
@@ -401,13 +401,13 @@ export async function getAdminOperationsOverview(
 }
 
 export async function getAdminSystemStatus() {
-  return apiRequest<AdminSystemStatus>("/api/admin/system");
+  return apiRequest<AdminSystemView>("/api/admin/system");
 }
 
 export async function setAdminOutboundCalls(
   input: AdminOutboundCallControlInput
 ) {
-  return apiRequest<AdminSystemStatus>(
+  return apiRequest<AdminSystemView>(
     "/api/admin/system/outbound-calls",
     { method: "PUT", body: JSON.stringify(input) }
   );
@@ -417,7 +417,7 @@ export async function retryAdminDurableJob(
   jobId: string,
   input: AdminDurableJobRetryInput
 ) {
-  return apiRequest<AdminSystemStatus>(
+  return apiRequest<AdminSystemView>(
     `/api/admin/system/jobs/${encodeURIComponent(jobId)}/retry`,
     { method: "POST", body: JSON.stringify(input) }
   );
