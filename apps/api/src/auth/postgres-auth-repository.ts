@@ -108,10 +108,31 @@ type PasswordRecoveryGrantRow = {
   userId: string;
   expiresAt: DatabaseDate;
   consumedAt: DatabaseDate | null;
+  invalidatedAt: DatabaseDate | null;
+};
+
+type PhoneChangeChallengeRow = {
+  id: string;
+  userId: string;
+  initiatingSessionId: string;
+  newPhoneE164: string;
+  attemptCount: number;
+  expiresAt: DatabaseDate;
+  createdAt: DatabaseDate;
 };
 
 function toIso(value: DatabaseDate) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function mapPhoneChangeChallenge(
+  row: PhoneChangeChallengeRow
+) {
+  return {
+    ...row,
+    expiresAt: toIso(row.expiresAt),
+    createdAt: toIso(row.createdAt)
+  };
 }
 
 export class PostgresAuthRepository implements AuthRepository {
@@ -972,26 +993,25 @@ export class PostgresAuthRepository implements AuthRepository {
     now: string;
   }) {
     return this.#sql.begin(async (transaction) => {
-      const [grant] = await transaction<PasswordRecoveryGrantRow[]>`
+      const [candidate] = await transaction<PasswordRecoveryGrantRow[]>`
         SELECT
           id,
           challenge_id AS "recoveryId",
           user_id AS "userId",
           expires_at AS "expiresAt",
-          consumed_at AS "consumedAt"
+          consumed_at AS "consumedAt",
+          invalidated_at AS "invalidatedAt"
         FROM password_recovery_grants
         WHERE token_hash = ${input.tokenHash}
-        FOR UPDATE
       `;
       if (
-        !grant ||
-        grant.consumedAt ||
-        toIso(grant.expiresAt) <= input.now
+        !candidate || candidate.consumedAt || candidate.invalidatedAt ||
+        toIso(candidate.expiresAt) <= input.now
       ) return false;
       const [user] = await transaction<AdminUserRow[]>`
         SELECT id, role, status
         FROM users
-        WHERE id = ${grant.userId}
+        WHERE id = ${candidate.userId}
           AND status = 'active'
           AND phone_verified_at IS NOT NULL
           AND NOT EXISTS (
@@ -1002,6 +1022,22 @@ export class PostgresAuthRepository implements AuthRepository {
         FOR UPDATE
       `;
       if (!user) return false;
+      const [grant] = await transaction<PasswordRecoveryGrantRow[]>`
+        SELECT
+          id,
+          challenge_id AS "recoveryId",
+          user_id AS "userId",
+          expires_at AS "expiresAt",
+          consumed_at AS "consumedAt",
+          invalidated_at AS "invalidatedAt"
+        FROM password_recovery_grants
+        WHERE token_hash = ${input.tokenHash}
+        FOR UPDATE
+      `;
+      if (
+        !grant || grant.userId !== user.id || grant.consumedAt ||
+        grant.invalidatedAt || toIso(grant.expiresAt) <= input.now
+      ) return false;
       const now = new Date(input.now);
       await transaction`
         UPDATE users
@@ -1039,6 +1075,258 @@ export class PostgresAuthRepository implements AuthRepository {
         )
       `;
       return true;
+    });
+  }
+
+  async createPhoneChangeChallenge(input: {
+    id: string;
+    userId: string;
+    initiatingSessionId: string;
+    expectedPasswordHash: string;
+    newPhoneE164: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const now = new Date(input.now);
+      const [user] = await transaction<UserRow[]>`
+        SELECT ${this.#userColumns()}
+        FROM users
+        WHERE id = ${input.userId}
+          AND password_hash = ${input.expectedPasswordHash}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user || user.phoneE164 === input.newPhoneE164) return false;
+      const [session] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM sessions
+        WHERE id = ${input.initiatingSessionId}
+          AND user_id = ${input.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        FOR UPDATE
+      `;
+      if (!session) return false;
+      await transaction`
+        DELETE FROM phone_change_challenges
+        WHERE created_at < ${new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000)}
+      `;
+      await transaction`
+        UPDATE phone_change_challenges
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+      `;
+      await transaction`
+        INSERT INTO phone_change_challenges (
+          id, user_id, initiating_session_id, new_phone_e164,
+          attempt_count, expires_at, created_at
+        ) VALUES (
+          ${input.id}, ${input.userId}, ${input.initiatingSessionId},
+          ${input.newPhoneE164}, 0, ${new Date(input.expiresAt)}, ${now}
+        )
+      `;
+      return true;
+    });
+  }
+
+  async invalidatePhoneChangeChallenge(
+    phoneChangeId: string,
+    userId: string,
+    now: string
+  ) {
+    await this.#sql`
+      UPDATE phone_change_challenges
+      SET invalidated_at = COALESCE(invalidated_at, ${new Date(now)})
+      WHERE id = ${phoneChangeId}
+        AND user_id = ${userId}
+        AND completed_at IS NULL
+    `;
+  }
+
+  async consumePhoneChangeChallengeAttempt(input: {
+    phoneChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const now = new Date(input.now);
+      const [user] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM users
+        WHERE id = ${input.userId}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return null;
+      const [session] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM sessions
+        WHERE id = ${input.sessionId}
+          AND user_id = ${input.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        FOR UPDATE
+      `;
+      if (!session) return null;
+      const [challenge] = await transaction<PhoneChangeChallengeRow[]>`
+        UPDATE phone_change_challenges
+        SET
+          attempt_count = attempt_count + 1,
+          last_attempt_at = ${now}
+        WHERE id = ${input.phoneChangeId}
+          AND user_id = ${input.userId}
+          AND initiating_session_id = ${input.sessionId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > ${now}
+          AND attempt_count < 8
+        RETURNING
+          id,
+          user_id AS "userId",
+          initiating_session_id AS "initiatingSessionId",
+          new_phone_e164 AS "newPhoneE164",
+          attempt_count AS "attemptCount",
+          expires_at AS "expiresAt",
+          created_at AS "createdAt"
+      `;
+      return challenge ? mapPhoneChangeChallenge(challenge) : null;
+    });
+  }
+
+  async completePhoneChange(input: {
+    phoneChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const now = new Date(input.now);
+      const [user] = await transaction<UserRow[]>`
+        SELECT ${this.#userColumns()}
+        FROM users
+        WHERE id = ${input.userId}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return null;
+      const [session] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM sessions
+        WHERE id = ${input.sessionId}
+          AND user_id = ${input.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        FOR UPDATE
+      `;
+      if (!session) return null;
+      const [challenge] = await transaction<PhoneChangeChallengeRow[]>`
+        SELECT
+          id,
+          user_id AS "userId",
+          initiating_session_id AS "initiatingSessionId",
+          new_phone_e164 AS "newPhoneE164",
+          attempt_count AS "attemptCount",
+          expires_at AS "expiresAt",
+          created_at AS "createdAt"
+        FROM phone_change_challenges
+        WHERE id = ${input.phoneChangeId}
+          AND user_id = ${input.userId}
+          AND initiating_session_id = ${input.sessionId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > ${now}
+          AND attempt_count > 0
+        FOR UPDATE
+      `;
+      if (!challenge) return null;
+      const [updated] = await transaction<UserRow[]>`
+        UPDATE users
+        SET
+          phone_e164 = ${challenge.newPhoneE164},
+          phone_verified_at = ${now}
+        WHERE id = ${input.userId}
+        RETURNING ${this.#userColumns()}
+      `;
+      if (!updated) return null;
+      const revokedSessions = await transaction<{ id: string }[]>`
+        UPDATE sessions
+        SET revoked_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND id <> ${input.sessionId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        RETURNING id
+      `;
+      const invalidatedRecoveryChallenges = await transaction<{ id: string }[]>`
+        UPDATE password_recovery_challenges
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND invalidated_at IS NULL
+        RETURNING id
+      `;
+      const invalidatedRecoveryGrants = await transaction<{ id: string }[]>`
+        UPDATE password_recovery_grants
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND consumed_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING id
+      `;
+      await transaction`
+        UPDATE phone_change_challenges
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND id <> ${input.phoneChangeId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+      `;
+      await transaction`
+        UPDATE phone_change_challenges
+        SET completed_at = ${now}
+        WHERE id = ${input.phoneChangeId}
+      `;
+      await transaction`
+        INSERT INTO phone_change_events (
+          id, user_id, challenge_id, revoked_session_count,
+          invalidated_recovery_challenge_count,
+          invalidated_recovery_grant_count, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.userId}, ${input.phoneChangeId},
+          ${revokedSessions.length}, ${invalidatedRecoveryChallenges.length},
+          ${invalidatedRecoveryGrants.length}, ${now}
+        )
+      `;
+      return {
+        user: this.#mapUser(updated),
+        revokedSessionCount: revokedSessions.length,
+        invalidatedRecoveryChallengeCount: invalidatedRecoveryChallenges.length,
+        invalidatedRecoveryGrantCount: invalidatedRecoveryGrants.length
+      };
+    }).catch((error) => {
+      if (isUniqueViolation(error)) return null;
+      throw error;
     });
   }
 

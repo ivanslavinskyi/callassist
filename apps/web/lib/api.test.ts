@@ -5,6 +5,7 @@ import {
   accessAdminCallSensitiveContent,
   approveAndStartCall,
   changeAdminUserStatus,
+  confirmPhoneChange,
   confirmRecipientOptOut,
   completePasswordRecovery,
   createAdminContentDraft,
@@ -55,6 +56,7 @@ import {
   setAdminOutboundCalls,
   suppressRecipientAsStaff,
   startCall,
+  startPhoneChange,
   startPasswordRecovery,
   submitCallFeedback,
   updateAdminContentDraft,
@@ -262,6 +264,40 @@ describe("API client headers", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
       recoveryToken,
       newPassword: "a-new-secure-password"
+    });
+  });
+
+  it("keeps phone-change capabilities in authenticated JSON bodies", async () => {
+    const phoneChangeId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "verification_required",
+        phoneChangeId
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "phone_changed",
+        user: { phoneE164: "+41791234567" },
+        revokedSessionCount: 1
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startPhoneChange({
+      newPhoneE164: "+41791234567",
+      currentPassword: "current-password"
+    });
+    await confirmPhoneChange({ phoneChangeId, code: "123456" });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringMatching(/\/api\/auth\/phone-change\/start$/),
+      expect.stringMatching(/\/api\/auth\/phone-change\/confirm$/)
+    ]);
+    expect(fetchMock.mock.calls.every(([, init]) =>
+      (init as RequestInit).credentials === "include"
+    )).toBe(true);
+    expect(String(fetchMock.mock.calls[1]?.[0])).not.toContain(phoneChangeId);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      phoneChangeId,
+      code: "123456"
     });
   });
 

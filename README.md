@@ -194,11 +194,15 @@ do not run it against an unapproved recipient or expose the mock verification dr
 through a public application endpoint.
 
 The API includes the identity foundation endpoints under `/api/auth`: registration,
-phone verification/resend, login, verified-phone password recovery, logout, and
+phone verification/resend, login, verified-phone password recovery, authenticated
+verified-phone change, logout, and
 current-session lookup. Registration requires separate first and last names and a
 Twilio Verify SMS confirmation. Recovery uses a generic non-enumerating start, a
 durable eight-attempt OTP challenge, and a 15-minute single-use grant whose digest is
 stored; completion changes the scrypt password and revokes every session atomically.
+Phone change requires the current password and a session-bound 10-minute OTP challenge
+for the unique replacement number; completion keeps only the initiating session and
+invalidates unused recovery capabilities created for the old phone.
 Local development uses `VERIFICATION_DRIVER=mock` and `MOCK_VERIFICATION_CODE=000000`;
 never use the mock driver in a public environment.
 
@@ -275,6 +279,8 @@ unanswered, canceled, and technical failures refund the reservation once.
 
 The localized account page at `/en/app/account` or `/de/app/account` shows the
 required first and last name, verified contact data, current usage, and ledger history.
+The same localized account UI can replace the verified mobile after password and SMS
+step-up without exposing the challenge in a URL or browser storage.
 It also lists up to 50 active sessions using bounded browser/platform categories rather
 than raw User-Agent values. Users can revoke one owner-scoped session, end the current
 browser session, or revoke all sessions; revoking the current/all sessions clears the

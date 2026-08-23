@@ -1843,6 +1843,219 @@ describe("auth API", () => {
     expect(response.headers["set-cookie"]).toBeUndefined();
   });
 
+  it("changes a verified phone only for the initiating session and invalidates old recovery", async () => {
+    const { app, repository } = createAuthApp();
+    const ownerCookie = await registerAndVerify(app, registration);
+    const secondLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: registration.email, password: registration.password }
+    });
+    expect(secondLogin.statusCode).toBe(200);
+    const secondCookie = String(secondLogin.headers["set-cookie"]);
+
+    const recoveryStart = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/start",
+      payload: { email: registration.email }
+    });
+    const recoveryVerify = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/verify",
+      payload: {
+        recoveryId: recoveryStart.json().recoveryId,
+        code: "123456"
+      }
+    });
+    expect(recoveryVerify.statusCode).toBe(200);
+    const staleRecoveryToken = recoveryVerify.json().recoveryToken as string;
+
+    const occupiedRegistration = {
+      ...registration,
+      email: "occupied-phone@example.com",
+      phoneE164: "+41710000042",
+      firstName: "Other",
+      lastName: "Owner"
+    };
+    const occupiedCookie = await registerAndVerify(app, occupiedRegistration);
+    const occupied = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/start",
+      headers: { cookie: ownerCookie },
+      payload: {
+        newPhoneE164: occupiedRegistration.phoneE164,
+        currentPassword: registration.password
+      }
+    });
+    expect(occupied.statusCode).toBe(202);
+    const occupiedConfirmation = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/confirm",
+      headers: { cookie: ownerCookie },
+      payload: {
+        phoneChangeId: occupied.json().phoneChangeId,
+        code: "123456"
+      }
+    });
+    expect(occupiedConfirmation.statusCode).toBe(401);
+    expect(occupiedConfirmation.json()).toEqual({
+      error: "INVALID_PHONE_CHANGE"
+    });
+
+    const wrongPassword = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/start",
+      headers: { cookie: ownerCookie },
+      payload: {
+        newPhoneE164: "+41710000043",
+        currentPassword: "wrong-password"
+      }
+    });
+    expect(wrongPassword.statusCode).toBe(401);
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/start",
+      headers: { cookie: ownerCookie },
+      payload: {
+        newPhoneE164: "+41710000043",
+        currentPassword: registration.password
+      }
+    });
+    expect(started.statusCode).toBe(202);
+    expect(started.headers["cache-control"]).toBe("private, no-store");
+    const phoneChangeId = started.json().phoneChangeId as string;
+
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/confirm",
+      headers: { cookie: occupiedCookie },
+      payload: { phoneChangeId, code: "123456" }
+    });
+    expect(foreign.statusCode).toBe(401);
+    expect(foreign.json()).toEqual({ error: "INVALID_PHONE_CHANGE" });
+
+    const wrongCode = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/confirm",
+      headers: { cookie: ownerCookie },
+      payload: { phoneChangeId, code: "000000" }
+    });
+    expect(wrongCode.statusCode).toBe(401);
+
+    const changed = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/confirm",
+      headers: { cookie: ownerCookie },
+      payload: { phoneChangeId, code: "123456" }
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.headers["cache-control"]).toBe("private, no-store");
+    expect(changed.json()).toMatchObject({
+      status: "phone_changed",
+      user: { phoneE164: "+41710000043" },
+      revokedSessionCount: 1
+    });
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: ownerCookie }
+    })).json().user.phoneE164).toBe("+41710000043");
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: secondCookie }
+    })).statusCode).toBe(401);
+
+    const staleRecovery = await app.inject({
+      method: "POST",
+      url: "/api/auth/recovery/complete",
+      payload: {
+        recoveryToken: staleRecoveryToken,
+        newPassword: "a-stale-recovery-password"
+      }
+    });
+    expect(staleRecovery.statusCode).toBe(401);
+    expect(staleRecovery.json()).toEqual({ error: "INVALID_RECOVERY" });
+    expect(repository.phoneChangeEventsForTest()).toEqual([
+      expect.objectContaining({
+        challengeId: phoneChangeId,
+        revokedSessionCount: 1,
+        invalidatedRecoveryChallengeCount: 1,
+        invalidatedRecoveryGrantCount: 1
+      })
+    ]);
+    expect((await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/confirm",
+      headers: { cookie: ownerCookie },
+      payload: { phoneChangeId, code: "123456" }
+    })).statusCode).toBe(401);
+  });
+
+  it("invalidates a phone-change challenge when SMS delivery fails", async () => {
+    const failingPhone = "+41710000044";
+    const requested = new Set<string>();
+    const verificationProvider: VerificationProvider = {
+      mode: "mock",
+      async send(phoneE164) {
+        if (phoneE164 === failingPhone) throw new Error("provider unavailable");
+        requested.add(phoneE164);
+      },
+      async check(phoneE164, code) {
+        return requested.has(phoneE164) && code === "123456";
+      }
+    };
+    const { app, repository } = createAuthApp(undefined, {
+      verificationProvider
+    });
+    const cookie = await registerAndVerify(app, registration);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/start",
+      headers: { cookie },
+      payload: {
+        newPhoneE164: failingPhone,
+        currentPassword: registration.password
+      }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "VERIFICATION_UNAVAILABLE" });
+    expect(repository.phoneChangeChallengesForTest()).toEqual([
+      expect.objectContaining({
+        newPhoneE164: failingPhone,
+        completedAt: null,
+        invalidatedAt: expect.any(String)
+      })
+    ]);
+    expect((await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    })).json().user.phoneE164).toBe(registration.phoneE164);
+  });
+
+  it("does not create a challenge for the already verified number", async () => {
+    const { app, repository } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/phone-change/start",
+      headers: { cookie },
+      payload: {
+        newPhoneE164: registration.phoneE164,
+        currentPassword: registration.password
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "PHONE_CHANGE_NOT_AVAILABLE" });
+    expect(repository.phoneChangeChallengesForTest()).toEqual([]);
+  });
+
   it("recovers a verified account without enumeration and revokes every session", async () => {
     const { app, repository } = createAuthApp();
     const firstCookie = await registerAndVerify(app, registration);

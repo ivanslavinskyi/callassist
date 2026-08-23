@@ -27,6 +27,8 @@ import {
   passwordRecoveryCompleteInputSchema,
   passwordRecoveryStartInputSchema,
   passwordRecoveryVerifyInputSchema,
+  phoneChangeConfirmInputSchema,
+  phoneChangeStartInputSchema,
   phoneVerificationInputSchema,
   promoCodeCreateInputSchema,
   promoRedemptionInputSchema,
@@ -655,6 +657,63 @@ export function buildApp({
         return reply
           .header("Cache-Control", "no-store")
           .send(await authService.completePasswordRecovery(
+            parsed.data,
+            authContext(request)
+          ));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/phone-change/start", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      const parsed = phoneChangeStartInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_PHONE_CHANGE_START" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .status(202)
+          .send(await authService.startPhoneChange(
+            authenticated.user,
+            authenticated.sessionId,
+            parsed.data,
+            authContext(request)
+          ));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/phone-change/confirm", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      const parsed = phoneChangeConfirmInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_PHONE_CHANGE_CONFIRMATION" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await authService.confirmPhoneChange(
+            authenticated.user,
+            authenticated.sessionId,
             parsed.data,
             authContext(request)
           ));
@@ -2246,13 +2305,15 @@ function sendAuthError(
     ? 503
     : error.code === "INVALID_CREDENTIALS" ||
         error.code === "INVALID_VERIFICATION" ||
-        error.code === "INVALID_RECOVERY"
+        error.code === "INVALID_RECOVERY" ||
+        error.code === "INVALID_PHONE_CHANGE"
       ? 401
       : error.code === "USER_NOT_FOUND" || error.code === "SESSION_NOT_FOUND"
         ? 404
         : [
             "ACCOUNT_STATUS_UNCHANGED",
-            "ACCOUNT_STATUS_TRANSITION_INVALID"
+            "ACCOUNT_STATUS_TRANSITION_INVALID",
+            "PHONE_CHANGE_NOT_AVAILABLE"
           ].includes(error.code)
           ? 409
           : 403;

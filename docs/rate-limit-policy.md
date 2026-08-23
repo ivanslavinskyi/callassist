@@ -26,7 +26,7 @@ in-memory implementation exists for local tests and single-process development o
 
 | Boundary | Behavior when a decision cannot be obtained |
 | --- | --- |
-| Registration, verification, login, and explicit recovery actions | Fail closed with `503 RATE_LIMIT_UNAVAILABLE` and `Retry-After: 1` before identity/session mutation or provider work. |
+| Registration, verification, login, recovery, and verified-phone change | Fail closed with `503 RATE_LIMIT_UNAVAILABLE` and `Retry-After: 1` before identity/session mutation or provider work. |
 | Eligibility-sensitive recovery phone/SMS check | Return the normal generic recovery-start response but do not send SMS. This preserves non-enumeration while failing closed on the privileged side effect. |
 | Public recipient opt-out verification | Fail closed with `503 RATE_LIMIT_UNAVAILABLE` and do not send or check an SMS or change suppression state. |
 | Expensive/cost-bearing endpoint | Fail closed with `503 RATE_LIMIT_UNAVAILABLE` before brief creation, provider work, credit mutation, export, deletion, download, or retry. |

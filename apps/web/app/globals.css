@@ -1445,7 +1445,14 @@ button:disabled { cursor: wait; opacity: .55; }
 .account-transactions time { color: var(--muted); font-size: 10px; }
 .account-transactions li > span { color: var(--danger); font-size: 13px; font-weight: 800; }
 .account-transactions li > span[data-positive="true"] { color: var(--green); }
-.account-export, .account-deletion, .account-sessions { grid-column: 1 / -1; }
+.account-phone-change, .account-export, .account-deletion, .account-sessions { grid-column: 1 / -1; }
+.account-phone-change > p { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 760px; }
+.account-phone-change-fields { display: grid; gap: 14px; margin: 20px 0; max-width: 560px; }
+.account-phone-change-fields label { display: grid; gap: 7px; }
+.account-phone-change-fields label > span { font-size: 12px; font-weight: 760; }
+.account-phone-change-fields input { background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; color: var(--ink); min-height: 46px; padding: 0 13px; }
+.account-phone-change-fields input:focus { border-color: var(--accent); outline: 3px solid color-mix(in srgb, var(--accent) 16%, transparent); }
+.account-phone-change-fields small { color: var(--muted); font-size: 11px; }
 .account-export > p { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 760px; }
 .account-export > ul { color: var(--muted); display: grid; font-size: 13px; gap: 8px; line-height: 1.55; margin: 0; padding-left: 20px; }
 .account-deletion > p { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 760px; }

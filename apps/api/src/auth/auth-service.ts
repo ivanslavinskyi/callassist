@@ -7,6 +7,8 @@ import type {
   PasswordRecoveryCompleteInput,
   PasswordRecoveryStartInput,
   PasswordRecoveryVerifyInput,
+  PhoneChangeConfirmInput,
+  PhoneChangeStartInput,
   PhoneVerificationInput,
   RegistrationInput,
   User,
@@ -34,6 +36,7 @@ const minute = 60_000;
 const accountSessionInventoryLimit = 50;
 const passwordRecoveryChallengeTtlMs = 10 * minute;
 const passwordRecoveryGrantTtlMs = 15 * minute;
+const phoneChangeChallengeTtlMs = 10 * minute;
 const dummyPasswordHash = hashPassword("callassist-invalid-account-password");
 
 export type AuthRequestContext = {
@@ -287,6 +290,113 @@ export class AuthService {
     return { status: "password_reset" as const };
   }
 
+  async startPhoneChange(
+    user: User,
+    sessionId: string,
+    input: PhoneChangeStartInput,
+    context: AuthRequestContext
+  ) {
+    await this.#limitMany([
+      limitEntry("phone-change-start:ip", context.ip, 10, 60 * minute),
+      limitEntry("phone-change-start:user", user.id, 3, 60 * minute),
+      limitEntry(
+        "phone-change-start:phone",
+        input.newPhoneE164,
+        3,
+        60 * minute
+      )
+    ]);
+    if (user.phoneE164 === input.newPhoneE164) {
+      throw new AuthServiceError("PHONE_CHANGE_NOT_AVAILABLE");
+    }
+    const record = await this.confirmOwnPassword(user, input.currentPassword);
+    const now = this.#now();
+    const phoneChangeId = randomUUID();
+    const created = await this.repository.createPhoneChangeChallenge({
+      id: phoneChangeId,
+      userId: user.id,
+      initiatingSessionId: sessionId,
+      expectedPasswordHash: record.passwordHash,
+      newPhoneE164: input.newPhoneE164,
+      now: now.toISOString(),
+      expiresAt: new Date(
+        now.getTime() + phoneChangeChallengeTtlMs
+      ).toISOString()
+    });
+    if (!created) {
+      throw new AuthServiceError("PHONE_CHANGE_NOT_AVAILABLE");
+    }
+    try {
+      await this.verificationProvider.send(input.newPhoneE164);
+    } catch (error) {
+      await this.repository.invalidatePhoneChangeChallenge(
+        phoneChangeId,
+        user.id,
+        this.#now().toISOString()
+      ).catch(() => undefined);
+      writePiiSafeOperationalError("phone_change_verification_send_failed");
+      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+    }
+    return { status: "verification_required" as const, phoneChangeId };
+  }
+
+  async confirmPhoneChange(
+    user: User,
+    sessionId: string,
+    input: PhoneChangeConfirmInput,
+    context: AuthRequestContext
+  ) {
+    await this.#limitMany([
+      limitEntry("phone-change-confirm:ip", context.ip, 20, 15 * minute),
+      limitEntry("phone-change-confirm:user", user.id, 8, 15 * minute),
+      limitEntry("phone-change-confirm:id", input.phoneChangeId, 8, 15 * minute)
+    ]);
+    const now = this.#now();
+    const challenge = await this.repository.consumePhoneChangeChallengeAttempt({
+      phoneChangeId: input.phoneChangeId,
+      userId: user.id,
+      sessionId,
+      now: now.toISOString()
+    });
+    if (!challenge) throw new AuthServiceError("INVALID_PHONE_CHANGE");
+    await this.#limit(
+      "phone-change-confirm:phone",
+      challenge.newPhoneE164,
+      8,
+      15 * minute
+    );
+    let approved = false;
+    try {
+      approved = await this.verificationProvider.check(
+        challenge.newPhoneE164,
+        input.code
+      );
+    } catch (error) {
+      writePiiSafeOperationalError("phone_change_verification_check_failed");
+      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+    }
+    if (!approved) throw new AuthServiceError("INVALID_PHONE_CHANGE");
+    const completed = await this.repository.completePhoneChange({
+      phoneChangeId: challenge.id,
+      userId: user.id,
+      sessionId,
+      now: this.#now().toISOString()
+    });
+    if (!completed) {
+      await this.repository.invalidatePhoneChangeChallenge(
+        challenge.id,
+        user.id,
+        this.#now().toISOString()
+      ).catch(() => undefined);
+      throw new AuthServiceError("INVALID_PHONE_CHANGE");
+    }
+    return {
+      status: "phone_changed" as const,
+      user: toPublicUser(completed.user),
+      revokedSessionCount: completed.revokedSessionCount
+    };
+  }
+
   async authenticate(token: string | undefined) {
     return (await this.authenticateSession(token))?.user ?? null;
   }
@@ -320,6 +430,7 @@ export class AuthService {
     ) {
       throw new AuthServiceError("INVALID_CREDENTIALS");
     }
+    return record;
   }
 
   async logout(token: string | undefined) {
@@ -537,6 +648,8 @@ export class AuthServiceError extends Error {
       | "VERIFICATION_UNAVAILABLE"
       | "RATE_LIMITED"
       | "RATE_LIMIT_UNAVAILABLE"
+      | "INVALID_PHONE_CHANGE"
+      | "PHONE_CHANGE_NOT_AVAILABLE"
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
       | "USER_NOT_FOUND"

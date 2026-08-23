@@ -43,6 +43,10 @@ import type {
   PasswordRecoveryStartResponse,
   PasswordRecoveryVerifyInput,
   PasswordRecoveryVerifyResponse,
+  PhoneChangeConfirmInput,
+  PhoneChangeConfirmResponse,
+  PhoneChangeStartInput,
+  PhoneChangeStartResponse,
   PhoneVerificationInput,
   PromoCodeCreateInput,
   PromoCodeSummary,
@@ -160,6 +164,20 @@ export async function completePasswordRecovery(
 ) {
   return apiRequest<PasswordRecoveryCompleteResponse>(
     "/api/auth/recovery/complete",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function startPhoneChange(input: PhoneChangeStartInput) {
+  return apiRequest<PhoneChangeStartResponse>(
+    "/api/auth/phone-change/start",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function confirmPhoneChange(input: PhoneChangeConfirmInput) {
+  return apiRequest<PhoneChangeConfirmResponse>(
+    "/api/auth/phone-change/confirm",
     { method: "POST", body: JSON.stringify(input) }
   );
 }

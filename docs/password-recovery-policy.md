@@ -1,6 +1,6 @@
 # Password and account recovery policy
 
-Status: implemented application baseline in checkpoint 6F4. This flow restores access only when the account still controls its previously verified phone number; phone-number replacement and support-assisted identity recovery are deliberately outside this boundary.
+Status: implemented application baseline in checkpoint 6F4. This flow restores access only when the account still controls its previously verified phone number. Authenticated replacement of a controlled new number is separately implemented by `docs/phone-change-policy.md`; support-assisted identity recovery remains outside this boundary.
 
 ## Security invariants
 
@@ -39,5 +39,5 @@ The durable challenge counter and the broader IP/email/phone/token budgets survi
 ## Remaining boundaries
 
 - WAF/infrastructure limits, mass-account correlation, production monitoring thresholds, and external alert routing remain deployment work. The shared application-store policy is documented in `docs/rate-limit-policy.md`.
-- Changing a verified phone number requires a separate re-verification design. A user who lost both password and verified-phone control needs a separately reviewed support/identity-proofing policy; staff cannot bypass this recovery grant today.
+- Successful self-service phone change invalidates every unused challenge and grant issued for the old phone. A user who lost both password and verified-phone control still needs a separately reviewed support/identity-proofing policy; staff cannot bypass either verification flow today.
 - Expired unused challenge/grant retention and cleanup must be included in the final production retention schedule. Recovery events are intentionally immutable security evidence and follow that schedule rather than containing recoverable credentials.

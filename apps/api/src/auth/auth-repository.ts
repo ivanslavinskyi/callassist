@@ -91,6 +91,23 @@ export type PasswordRecoveryChallengeRecord = {
   createdAt: string;
 };
 
+export type PhoneChangeChallengeRecord = {
+  id: string;
+  userId: string;
+  initiatingSessionId: string;
+  newPhoneE164: string;
+  attemptCount: number;
+  expiresAt: string;
+  createdAt: string;
+};
+
+export type PhoneChangeCompletionRecord = {
+  user: AuthUserRecord;
+  revokedSessionCount: number;
+  invalidatedRecoveryChallengeCount: number;
+  invalidatedRecoveryGrantCount: number;
+};
+
 export type AdminUserCursor = { createdAt: string; id: string };
 
 export type ListAdminUsersInput = {
@@ -190,6 +207,32 @@ export interface AuthRepository {
     passwordHash: string;
     now: string;
   }): Promise<boolean>;
+  createPhoneChangeChallenge(input: {
+    id: string;
+    userId: string;
+    initiatingSessionId: string;
+    expectedPasswordHash: string;
+    newPhoneE164: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean>;
+  invalidatePhoneChangeChallenge(
+    phoneChangeId: string,
+    userId: string,
+    now: string
+  ): Promise<void>;
+  consumePhoneChangeChallengeAttempt(input: {
+    phoneChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }): Promise<PhoneChangeChallengeRecord | null>;
+  completePhoneChange(input: {
+    phoneChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }): Promise<PhoneChangeCompletionRecord | null>;
   close(): Promise<void>;
 }
 

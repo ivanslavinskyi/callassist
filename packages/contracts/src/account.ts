@@ -35,13 +35,15 @@ export type SessionRevocationAction = z.infer<
   typeof sessionRevocationActionSchema
 >;
 
+export const accountPhoneSchema = z
+  .string()
+  .trim()
+  .regex(/^\+[1-9]\d{7,14}$/, "Use international phone format");
+
 export const registrationInputSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
   password: z.string().min(12).max(128),
-  phoneE164: z
-    .string()
-    .trim()
-    .regex(/^\+[1-9]\d{7,14}$/, "Use international phone format"),
+  phoneE164: accountPhoneSchema,
   firstName: personNamePartSchema,
   lastName: personNamePartSchema,
   uiLocale: z.enum(["en", "de"])
@@ -127,6 +129,39 @@ export const userSchema = z.object({
   lastLoginAt: z.iso.datetime().nullable()
 });
 export type User = z.infer<typeof userSchema>;
+
+export const phoneChangeStartInputSchema = z.strictObject({
+  newPhoneE164: accountPhoneSchema,
+  currentPassword: z.string().min(1).max(128)
+});
+export type PhoneChangeStartInput = z.infer<
+  typeof phoneChangeStartInputSchema
+>;
+
+export const phoneChangeStartResponseSchema = z.strictObject({
+  status: z.literal("verification_required"),
+  phoneChangeId: z.uuid()
+});
+export type PhoneChangeStartResponse = z.infer<
+  typeof phoneChangeStartResponseSchema
+>;
+
+export const phoneChangeConfirmInputSchema = z.strictObject({
+  phoneChangeId: z.uuid(),
+  code: z.string().trim().regex(/^\d{4,10}$/)
+});
+export type PhoneChangeConfirmInput = z.infer<
+  typeof phoneChangeConfirmInputSchema
+>;
+
+export const phoneChangeConfirmResponseSchema = z.strictObject({
+  status: z.literal("phone_changed"),
+  user: userSchema,
+  revokedSessionCount: z.number().int().nonnegative()
+});
+export type PhoneChangeConfirmResponse = z.infer<
+  typeof phoneChangeConfirmResponseSchema
+>;
 
 export const sessionSchema = z.object({
   id: z.uuid(),

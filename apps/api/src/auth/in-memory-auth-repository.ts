@@ -72,6 +72,7 @@ type PasswordRecoveryGrant = {
   tokenHash: string;
   expiresAt: string;
   consumedAt: string | null;
+  invalidatedAt: string | null;
   createdAt: string;
 };
 
@@ -79,6 +80,28 @@ type PasswordRecoveryEvent = {
   userId: string;
   recoveryId: string;
   revokedSessionCount: number;
+  createdAt: string;
+};
+
+type PhoneChangeChallenge = {
+  id: string;
+  userId: string;
+  initiatingSessionId: string;
+  newPhoneE164: string;
+  attemptCount: number;
+  expiresAt: string;
+  completedAt: string | null;
+  invalidatedAt: string | null;
+  lastAttemptAt: string | null;
+  createdAt: string;
+};
+
+type PhoneChangeEvent = {
+  userId: string;
+  challengeId: string;
+  revokedSessionCount: number;
+  invalidatedRecoveryChallengeCount: number;
+  invalidatedRecoveryGrantCount: number;
   createdAt: string;
 };
 
@@ -94,6 +117,8 @@ export class InMemoryAuthRepository implements AuthRepository {
   readonly #passwordRecoveryChallenges = new Map<string, PasswordRecoveryChallenge>();
   readonly #passwordRecoveryGrants = new Map<string, PasswordRecoveryGrant>();
   readonly #passwordRecoveryEvents: PasswordRecoveryEvent[] = [];
+  readonly #phoneChangeChallenges = new Map<string, PhoneChangeChallenge>();
+  readonly #phoneChangeEvents: PhoneChangeEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -615,6 +640,7 @@ export class InMemoryAuthRepository implements AuthRepository {
       tokenHash: input.tokenHash,
       expiresAt: input.expiresAt,
       consumedAt: null,
+      invalidatedAt: null,
       createdAt: input.now
     });
     return true;
@@ -626,7 +652,10 @@ export class InMemoryAuthRepository implements AuthRepository {
     now: string;
   }) {
     const grant = this.#passwordRecoveryGrants.get(input.tokenHash);
-    if (!grant || grant.consumedAt || grant.expiresAt <= input.now) return false;
+    if (
+      !grant || grant.consumedAt || grant.invalidatedAt ||
+      grant.expiresAt <= input.now
+    ) return false;
     const user = this.#users.get(grant.userId);
     if (
       user?.status !== "active" ||
@@ -665,6 +694,193 @@ export class InMemoryAuthRepository implements AuthRepository {
     return true;
   }
 
+  async createPhoneChangeChallenge(input: {
+    id: string;
+    userId: string;
+    initiatingSessionId: string;
+    expectedPasswordHash: string;
+    newPhoneE164: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    const user = this.#users.get(input.userId);
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === input.initiatingSessionId &&
+      candidate.userId === input.userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > input.now
+    );
+    if (
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      user.passwordHash !== input.expectedPasswordHash ||
+      !session ||
+      this.#hasPendingAccountDeletion(input.userId) ||
+      user.phoneE164 === input.newPhoneE164
+    ) return false;
+    for (const challenge of this.#phoneChangeChallenges.values()) {
+      if (
+        challenge.userId === input.userId &&
+        !challenge.completedAt &&
+        !challenge.invalidatedAt
+      ) challenge.invalidatedAt = input.now;
+    }
+    this.#phoneChangeChallenges.set(input.id, {
+      id: input.id,
+      userId: input.userId,
+      initiatingSessionId: input.initiatingSessionId,
+      newPhoneE164: input.newPhoneE164,
+      attemptCount: 0,
+      expiresAt: input.expiresAt,
+      completedAt: null,
+      invalidatedAt: null,
+      lastAttemptAt: null,
+      createdAt: input.now
+    });
+    return true;
+  }
+
+  async invalidatePhoneChangeChallenge(
+    phoneChangeId: string,
+    userId: string,
+    now: string
+  ) {
+    const challenge = this.#phoneChangeChallenges.get(phoneChangeId);
+    if (
+      challenge?.userId === userId &&
+      !challenge.completedAt &&
+      !challenge.invalidatedAt
+    ) challenge.invalidatedAt = now;
+  }
+
+  async consumePhoneChangeChallengeAttempt(input: {
+    phoneChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    const challenge = this.#phoneChangeChallenges.get(input.phoneChangeId);
+    const user = this.#users.get(input.userId);
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === input.sessionId &&
+      candidate.userId === input.userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > input.now
+    );
+    if (
+      !challenge ||
+      challenge.userId !== input.userId ||
+      challenge.initiatingSessionId !== input.sessionId ||
+      challenge.expiresAt <= input.now ||
+      challenge.completedAt ||
+      challenge.invalidatedAt ||
+      challenge.attemptCount >= 8 ||
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      !session ||
+      this.#hasPendingAccountDeletion(input.userId)
+    ) return null;
+    challenge.attemptCount += 1;
+    challenge.lastAttemptAt = input.now;
+    return structuredClone({
+      id: challenge.id,
+      userId: challenge.userId,
+      initiatingSessionId: challenge.initiatingSessionId,
+      newPhoneE164: challenge.newPhoneE164,
+      attemptCount: challenge.attemptCount,
+      expiresAt: challenge.expiresAt,
+      createdAt: challenge.createdAt
+    });
+  }
+
+  async completePhoneChange(input: {
+    phoneChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    const challenge = this.#phoneChangeChallenges.get(input.phoneChangeId);
+    const user = this.#users.get(input.userId);
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === input.sessionId &&
+      candidate.userId === input.userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > input.now
+    );
+    if (
+      !challenge ||
+      challenge.userId !== input.userId ||
+      challenge.initiatingSessionId !== input.sessionId ||
+      challenge.expiresAt <= input.now ||
+      challenge.completedAt ||
+      challenge.invalidatedAt ||
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      !session ||
+      this.#hasPendingAccountDeletion(input.userId) ||
+      [...this.#users.values()].some((candidate) =>
+        candidate.id !== input.userId &&
+        candidate.phoneE164 === challenge.newPhoneE164
+      )
+    ) return null;
+
+    user.phoneE164 = challenge.newPhoneE164;
+    user.phoneVerifiedAt = input.now;
+    challenge.completedAt = input.now;
+    let revokedSessionCount = 0;
+    for (const candidate of this.#sessions.values()) {
+      if (
+        candidate.userId === input.userId &&
+        candidate.id !== input.sessionId &&
+        !candidate.revokedAt &&
+        candidate.expiresAt > input.now
+      ) {
+        candidate.revokedAt = input.now;
+        revokedSessionCount += 1;
+      }
+    }
+    let invalidatedRecoveryChallengeCount = 0;
+    for (const recovery of this.#passwordRecoveryChallenges.values()) {
+      if (recovery.userId === input.userId && !recovery.invalidatedAt) {
+        recovery.invalidatedAt = input.now;
+        invalidatedRecoveryChallengeCount += 1;
+      }
+    }
+    let invalidatedRecoveryGrantCount = 0;
+    for (const grant of this.#passwordRecoveryGrants.values()) {
+      if (
+        grant.userId === input.userId &&
+        !grant.consumedAt &&
+        !grant.invalidatedAt
+      ) {
+        grant.invalidatedAt = input.now;
+        invalidatedRecoveryGrantCount += 1;
+      }
+    }
+    for (const pending of this.#phoneChangeChallenges.values()) {
+      if (
+        pending.userId === input.userId &&
+        pending.id !== input.phoneChangeId &&
+        !pending.completedAt &&
+        !pending.invalidatedAt
+      ) pending.invalidatedAt = input.now;
+    }
+    this.#phoneChangeEvents.push({
+      userId: input.userId,
+      challengeId: input.phoneChangeId,
+      revokedSessionCount,
+      invalidatedRecoveryChallengeCount,
+      invalidatedRecoveryGrantCount,
+      createdAt: input.now
+    });
+    return {
+      user: structuredClone(user),
+      revokedSessionCount,
+      invalidatedRecoveryChallengeCount,
+      invalidatedRecoveryGrantCount
+    };
+  }
+
   async setUserStatusForTest(userId: string, status: AuthUserRecord["status"]) {
     this.#requireUser(userId).status = status;
   }
@@ -691,6 +907,14 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   passwordRecoveryEventsForTest() {
     return structuredClone(this.#passwordRecoveryEvents);
+  }
+
+  phoneChangeEventsForTest() {
+    return structuredClone(this.#phoneChangeEvents);
+  }
+
+  phoneChangeChallengesForTest() {
+    return structuredClone([...this.#phoneChangeChallenges.values()]);
   }
 
   async close() {}

@@ -18,6 +18,10 @@ import {
   passwordRecoveryStartResponseSchema,
   passwordRecoveryVerifyInputSchema,
   passwordRecoveryVerifyResponseSchema,
+  phoneChangeConfirmInputSchema,
+  phoneChangeConfirmResponseSchema,
+  phoneChangeStartInputSchema,
+  phoneChangeStartResponseSchema,
   phoneVerificationInputSchema,
   registrationInputSchema,
   sessionRevocationActionSchema
@@ -100,6 +104,47 @@ describe("registrationInputSchema", () => {
     expect(passwordRecoveryCompleteResponseSchema.parse({
       status: "password_reset"
     })).toEqual({ status: "password_reset" });
+  });
+
+  it("keeps authenticated phone-change payloads strict", () => {
+    const phoneChangeId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    expect(phoneChangeStartInputSchema.parse({
+      newPhoneE164: " +41791234567 ",
+      currentPassword: "a-long-test-password"
+    })).toEqual({
+      newPhoneE164: "+41791234567",
+      currentPassword: "a-long-test-password"
+    });
+    expect(phoneChangeStartInputSchema.safeParse({
+      newPhoneE164: "+41791234567",
+      currentPassword: "a-long-test-password",
+      userId: "not-client-controlled"
+    }).success).toBe(false);
+    expect(phoneChangeStartResponseSchema.parse({
+      status: "verification_required",
+      phoneChangeId
+    })).toMatchObject({ phoneChangeId });
+    expect(phoneChangeConfirmInputSchema.safeParse({
+      phoneChangeId,
+      code: "123456"
+    }).success).toBe(true);
+    expect(phoneChangeConfirmResponseSchema.parse({
+      status: "phone_changed",
+      user: {
+        id: phoneChangeId,
+        email: validRegistration.email,
+        phoneE164: "+41791234567",
+        phoneVerifiedAt: "2026-08-23T10:00:00.000Z",
+        firstName: "Nina",
+        lastName: "Keller",
+        role: "user",
+        status: "active",
+        uiLocale: "de",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        lastLoginAt: null
+      },
+      revokedSessionCount: 2
+    })).toMatchObject({ status: "phone_changed", revokedSessionCount: 2 });
   });
 
   it("validates reconciled credit usage without exposing idempotency keys", () => {

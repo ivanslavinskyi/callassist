@@ -10,7 +10,7 @@ import {
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { AppShell } from "./app-shell";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUiLocale } from "./ui-locale-provider";
@@ -22,6 +22,8 @@ import {
   logout,
   requestAccountDataExport,
   requestAccountDeletion,
+  startPhoneChange,
+  confirmPhoneChange,
   revokeAllOwnSessions,
   revokeOwnSession
 } from "@/lib/api";
@@ -51,6 +53,13 @@ export function AccountConsole() {
   const [deletionConfirmation, setDeletionConfirmation] = useState("");
   const [deletionBusy, setDeletionBusy] = useState(false);
   const [deletionError, setDeletionError] = useState(false);
+  const [phoneChangeId, setPhoneChangeId] = useState<string | null>(null);
+  const [newPhoneE164, setNewPhoneE164] = useState("");
+  const [phoneChangePassword, setPhoneChangePassword] = useState("");
+  const [phoneChangeCode, setPhoneChangeCode] = useState("");
+  const [phoneChangeBusy, setPhoneChangeBusy] = useState(false);
+  const [phoneChangeError, setPhoneChangeError] = useState(false);
+  const [phoneChangeSuccess, setPhoneChangeSuccess] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -175,6 +184,65 @@ export function AccountConsole() {
     }
   }
 
+  async function beginPhoneChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPhoneChangeBusy(true);
+    setPhoneChangeError(false);
+    setPhoneChangeSuccess(false);
+    try {
+      const result = await startPhoneChange({
+        newPhoneE164: newPhoneE164.trim(),
+        currentPassword: phoneChangePassword
+      });
+      setPhoneChangeId(result.phoneChangeId);
+      setPhoneChangePassword("");
+      setPhoneChangeCode("");
+    } catch {
+      setPhoneChangeError(true);
+    } finally {
+      setPhoneChangeBusy(false);
+    }
+  }
+
+  async function finishPhoneChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!phoneChangeId) return;
+    setPhoneChangeBusy(true);
+    setPhoneChangeError(false);
+    try {
+      const result = await confirmPhoneChange({
+        phoneChangeId,
+        code: phoneChangeCode.trim()
+      });
+      setData((current) => current ? {
+        ...current,
+        user: result.user,
+        sessionInventory: {
+          sessions: current.sessionInventory.sessions.filter(
+            ({ current: isCurrent }) => isCurrent
+          ),
+          totalActive: 1,
+          truncated: false
+        }
+      } : current);
+      setNewPhoneE164("");
+      setPhoneChangeCode("");
+      setPhoneChangeId(null);
+      setPhoneChangeSuccess(true);
+    } catch {
+      setPhoneChangeError(true);
+    } finally {
+      setPhoneChangeBusy(false);
+    }
+  }
+
+  function cancelPhoneChange() {
+    setPhoneChangeId(null);
+    setPhoneChangeCode("");
+    setPhoneChangePassword("");
+    setPhoneChangeError(false);
+  }
+
   const dateFormatter = new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-CH", {
     dateStyle: "medium",
     timeStyle: "short"
@@ -214,6 +282,77 @@ export function AccountConsole() {
                   <dd>{data.user.lastLoginAt ? dateFormatter.format(new Date(data.user.lastLoginAt)) : copy.never}</dd>
                 </div>
               </dl>
+            </section>
+
+            <section className="account-card account-phone-change">
+              <h2>{copy.phoneChangeTitle}</h2>
+              <p>{copy.phoneChangeText}</p>
+              <p className="account-muted">{copy.phoneChangeSecurity}</p>
+              {phoneChangeId ? (
+                <form onSubmit={finishPhoneChange}>
+                  <div className="account-phone-change-fields">
+                    <label>
+                      <span>{copy.phoneChangeCode}</span>
+                      <input
+                        autoComplete="one-time-code"
+                        inputMode="numeric"
+                        onChange={(event) => setPhoneChangeCode(event.target.value)}
+                        pattern="[0-9]{4,10}"
+                        required
+                        type="text"
+                        value={phoneChangeCode}
+                      />
+                      <small>{copy.phoneChangeCodeHint}</small>
+                    </label>
+                  </div>
+                  <div className="account-actions">
+                    <button className="primary-button compact-button" disabled={phoneChangeBusy} type="submit">
+                      {phoneChangeBusy ? copy.phoneChangeVerifying : copy.phoneChangeVerify}
+                    </button>
+                    <button className="secondary-button" disabled={phoneChangeBusy} onClick={cancelPhoneChange} type="button">
+                      {copy.phoneChangeCancel}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={beginPhoneChange}>
+                  <div className="account-phone-change-fields">
+                    <label>
+                      <span>{copy.phoneChangeNewPhone}</span>
+                      <input
+                        autoComplete="tel"
+                        inputMode="tel"
+                        onChange={(event) => setNewPhoneE164(event.target.value)}
+                        pattern="\+[1-9][0-9]{7,14}"
+                        placeholder="+41…"
+                        required
+                        type="tel"
+                        value={newPhoneE164}
+                      />
+                    </label>
+                    <label>
+                      <span>{copy.phoneChangeCurrentPassword}</span>
+                      <input
+                        autoComplete="current-password"
+                        maxLength={128}
+                        onChange={(event) => setPhoneChangePassword(event.target.value)}
+                        required
+                        type="password"
+                        value={phoneChangePassword}
+                      />
+                    </label>
+                  </div>
+                  <button className="primary-button compact-button" disabled={phoneChangeBusy} type="submit">
+                    {phoneChangeBusy ? copy.phoneChangeSending : copy.phoneChangeSend}
+                  </button>
+                </form>
+              )}
+              {phoneChangeError ? (
+                <p className="form-error" role="alert">{copy.phoneChangeError}</p>
+              ) : null}
+              {phoneChangeSuccess ? (
+                <p className="auth-success" role="status">{copy.phoneChangeSuccess}</p>
+              ) : null}
             </section>
 
             <section className="account-card account-usage" id="usage">

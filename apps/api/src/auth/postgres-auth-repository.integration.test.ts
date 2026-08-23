@@ -482,6 +482,260 @@ describeWithDatabase("PostgresAuthRepository", () => {
     `).rejects.toThrow("immutable");
   });
 
+  it("atomically changes a verified phone and invalidates old access capabilities", async () => {
+    const suffix = randomUUID();
+    const user = await repository.createUser({
+      email: `phone-change.${suffix}@example.com`,
+      passwordHash: "phone-change-password-hash",
+      phoneE164: phoneFromUuid(suffix, "58"),
+      firstName: "Phone",
+      lastName: "Change",
+      uiLocale: "en"
+    });
+    const now = new Date();
+    await repository.markPhoneVerified(user.id, now.toISOString());
+    const currentSessionId = randomUUID();
+    const currentTokenHash = hashSessionToken(`phone-current-${suffix}`);
+    const otherTokenHash = hashSessionToken(`phone-other-${suffix}`);
+    for (const [id, tokenHash] of [
+      [currentSessionId, currentTokenHash],
+      [randomUUID(), otherTokenHash]
+    ]) {
+      await repository.createSession({
+        id,
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+        revokedAt: null,
+        createdAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+        userAgent: "phone-change-integration-test"
+      });
+    }
+
+    const recoveryId = randomUUID();
+    await repository.createPasswordRecoveryChallenge({
+      id: recoveryId,
+      userId: user.id,
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString()
+    });
+    await repository.consumePasswordRecoveryChallengeAttempt(
+      recoveryId,
+      now.toISOString()
+    );
+    const recoveryTokenHash = suffix.replaceAll("-", "").repeat(2);
+    await repository.createPasswordRecoveryGrant({
+      id: randomUUID(),
+      recoveryId,
+      userId: user.id,
+      tokenHash: recoveryTokenHash,
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString()
+    });
+
+    const phoneChangeId = randomUUID();
+    const newPhoneE164 = phoneFromUuid(randomUUID(), "59");
+    await expect(repository.createPhoneChangeChallenge({
+      id: phoneChangeId,
+      userId: user.id,
+      initiatingSessionId: currentSessionId,
+      expectedPasswordHash: "phone-change-password-hash",
+      newPhoneE164,
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString()
+    })).resolves.toBe(true);
+    await expect(repository.consumePhoneChangeChallengeAttempt({
+      phoneChangeId,
+      userId: user.id,
+      sessionId: randomUUID(),
+      now: now.toISOString()
+    })).resolves.toBeNull();
+    await expect(repository.consumePhoneChangeChallengeAttempt({
+      phoneChangeId,
+      userId: user.id,
+      sessionId: currentSessionId,
+      now: now.toISOString()
+    })).resolves.toMatchObject({
+      id: phoneChangeId,
+      newPhoneE164,
+      attemptCount: 1
+    });
+
+    const completedAt = new Date(now.getTime() + 1_000).toISOString();
+    await expect(repository.completePhoneChange({
+      phoneChangeId,
+      userId: user.id,
+      sessionId: currentSessionId,
+      now: completedAt
+    })).resolves.toMatchObject({
+      user: { phoneE164: newPhoneE164, phoneVerifiedAt: completedAt },
+      revokedSessionCount: 1,
+      invalidatedRecoveryChallengeCount: 1,
+      invalidatedRecoveryGrantCount: 1
+    });
+    await expect(repository.completePhoneChange({
+      phoneChangeId,
+      userId: user.id,
+      sessionId: currentSessionId,
+      now: completedAt
+    })).resolves.toBeNull();
+    await expect(repository.findUserBySessionTokenHash(
+      currentTokenHash,
+      completedAt
+    )).resolves.toMatchObject({ user: { phoneE164: newPhoneE164 } });
+    await expect(repository.findUserBySessionTokenHash(
+      otherTokenHash,
+      completedAt
+    )).resolves.toBeNull();
+    await expect(repository.resetPasswordWithRecoveryGrant({
+      tokenHash: recoveryTokenHash,
+      passwordHash: "must-not-apply",
+      now: completedAt
+    })).resolves.toBe(false);
+
+    const exhaustedPhoneChangeId = randomUUID();
+    await expect(repository.createPhoneChangeChallenge({
+      id: exhaustedPhoneChangeId,
+      userId: user.id,
+      initiatingSessionId: currentSessionId,
+      expectedPasswordHash: "phone-change-password-hash",
+      newPhoneE164: phoneFromUuid(randomUUID(), "54"),
+      now: completedAt,
+      expiresAt: new Date(
+        new Date(completedAt).getTime() + 10 * 60_000
+      ).toISOString()
+    })).resolves.toBe(true);
+    for (let attempt = 1; attempt <= 8; attempt += 1) {
+      await expect(repository.consumePhoneChangeChallengeAttempt({
+        phoneChangeId: exhaustedPhoneChangeId,
+        userId: user.id,
+        sessionId: currentSessionId,
+        now: completedAt
+      })).resolves.toMatchObject({ attemptCount: attempt });
+    }
+    await expect(repository.consumePhoneChangeChallengeAttempt({
+      phoneChangeId: exhaustedPhoneChangeId,
+      userId: user.id,
+      sessionId: currentSessionId,
+      now: completedAt
+    })).resolves.toBeNull();
+
+    const events = await inspection<{
+      challengeId: string;
+      revokedSessionCount: number;
+      invalidatedRecoveryChallengeCount: number;
+      invalidatedRecoveryGrantCount: number;
+    }[]>`
+      SELECT
+        challenge_id::text AS "challengeId",
+        revoked_session_count AS "revokedSessionCount",
+        invalidated_recovery_challenge_count AS "invalidatedRecoveryChallengeCount",
+        invalidated_recovery_grant_count AS "invalidatedRecoveryGrantCount"
+      FROM phone_change_events
+      WHERE user_id = ${user.id}
+    `;
+    expect(events).toEqual([{
+      challengeId: phoneChangeId,
+      revokedSessionCount: 1,
+      invalidatedRecoveryChallengeCount: 1,
+      invalidatedRecoveryGrantCount: 1
+    }]);
+    await inspection`
+      UPDATE phone_change_challenges
+      SET created_at = ${new Date(now.getTime() - 31 * 24 * 60 * 60 * 1_000)}
+      WHERE id = ${phoneChangeId}
+    `;
+    await repository.createPhoneChangeChallenge({
+      id: randomUUID(),
+      userId: user.id,
+      initiatingSessionId: currentSessionId,
+      expectedPasswordHash: "phone-change-password-hash",
+      newPhoneE164: phoneFromUuid(randomUUID(), "53"),
+      now: completedAt,
+      expiresAt: new Date(
+        new Date(completedAt).getTime() + 10 * 60_000
+      ).toISOString()
+    });
+    const [retention] = await inspection<{
+      challengeExists: boolean;
+      eventExists: boolean;
+    }[]>`
+      SELECT
+        EXISTS(
+          SELECT 1 FROM phone_change_challenges WHERE id = ${phoneChangeId}
+        ) AS "challengeExists",
+        EXISTS(
+          SELECT 1 FROM phone_change_events WHERE challenge_id = ${phoneChangeId}
+        ) AS "eventExists"
+    `;
+    expect(retention).toEqual({ challengeExists: false, eventExists: true });
+    await expect(inspection`
+      DELETE FROM phone_change_events WHERE challenge_id = ${phoneChangeId}
+    `).rejects.toThrow("immutable");
+  });
+
+  it("lets only one concurrent account claim the same verified phone", async () => {
+    const now = new Date();
+    const targetPhone = phoneFromUuid(randomUUID(), "57");
+    const contenders = await Promise.all(["first", "second"].map(async (label) => {
+      const suffix = randomUUID();
+      const user = await repository.createUser({
+        email: `phone-race-${label}.${suffix}@example.com`,
+        passwordHash: "phone-race-password-hash",
+        phoneE164: phoneFromUuid(suffix, label === "first" ? "55" : "56"),
+        firstName: "Phone",
+        lastName: label,
+        uiLocale: "en"
+      });
+      await repository.markPhoneVerified(user.id, now.toISOString());
+      const sessionId = randomUUID();
+      await repository.createSession({
+        id: sessionId,
+        userId: user.id,
+        tokenHash: hashSessionToken(`phone-race-${suffix}`),
+        expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+        revokedAt: null,
+        createdAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+        userAgent: "phone-race-integration-test"
+      });
+      const phoneChangeId = randomUUID();
+      await repository.createPhoneChangeChallenge({
+        id: phoneChangeId,
+        userId: user.id,
+        initiatingSessionId: sessionId,
+        expectedPasswordHash: "phone-race-password-hash",
+        newPhoneE164: targetPhone,
+        now: now.toISOString(),
+        expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString()
+      });
+      await repository.consumePhoneChangeChallengeAttempt({
+        phoneChangeId,
+        userId: user.id,
+        sessionId,
+        now: now.toISOString()
+      });
+      return { user, sessionId, phoneChangeId };
+    }));
+
+    const results = await Promise.all(contenders.map((contender) =>
+      repository.completePhoneChange({
+        phoneChangeId: contender.phoneChangeId,
+        userId: contender.user.id,
+        sessionId: contender.sessionId,
+        now: new Date(now.getTime() + 1_000).toISOString()
+      })
+    ));
+    expect(results.filter(Boolean)).toHaveLength(1);
+    const [row] = await inspection<{ count: number }[]>`
+      SELECT count(*)::integer AS count
+      FROM users
+      WHERE phone_e164 = ${targetPhone}
+    `;
+    expect(row?.count).toBe(1);
+  });
+
   it("paginates admin user search and hides privileged targets from ordinary admins", async () => {
     const actorSuffix = randomUUID();
     const firstSuffix = randomUUID();
