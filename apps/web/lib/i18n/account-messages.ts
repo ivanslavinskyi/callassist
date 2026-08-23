@@ -1,4 +1,5 @@
 import type {
+  AccountDeletionStatus,
   AccountSessionBrowser,
   AccountSessionPlatform,
   CreditTransactionType
@@ -77,6 +78,28 @@ const en = {
   revokeTitle: "Sign out on every device?",
   revokeDescription: "All CallAssist sessions, including this browser, will be revoked. You will need to sign in again.",
   actionError: "The session action could not be completed. Please try again.",
+  deletionTitle: "Delete account and private data",
+  deletionText: "This starts a durable deletion request. CallAssist first removes provider recordings and private call content, then anonymizes your identity and signs out every device.",
+  deletionIrreversible: "This cannot be undone. Global recipient opt-outs and minimal immutable deletion evidence are retained for safety and accountability.",
+  deletionExportFirst: "Download your data before starting if you want to keep a copy.",
+  deletionPassword: "Current password",
+  deletionConfirmation: "Type DELETE MY ACCOUNT",
+  deletionConfirmationHint: "Enter the phrase exactly to enable deletion.",
+  deletionAction: "Delete my account",
+  deletionBusy: "Submitting deletion requestâ€¦",
+  deletionError: "The deletion request could not be submitted. Check your password and confirmation, then try again.",
+  deletionStatusTitle: "Deletion request status",
+  deletionAttempt: (attempt: number, maximum: number) => `Attempt ${attempt} of ${maximum}`,
+  deletionNextAttempt: "The worker will retry automatically.",
+  deletionNeedsSupport: "Automatic retries are exhausted. Support can restart this request without restoring any already-deleted data.",
+  deletionStatuses: {
+    queued: "Queued",
+    processing: "Deleting data",
+    waiting_for_calls: "Waiting for an active call to finish",
+    retrying: "Retry scheduled",
+    needs_support: "Support action required",
+    completed: "Completed"
+  } satisfies Record<AccountDeletionStatus, string>,
   transaction: {
     signup_grant: "Signup credit",
     promo_grant: "Promo credit",
@@ -91,6 +114,8 @@ const en = {
 type AccountMessages = {
   [Key in keyof typeof en]: Key extends "credits" | "sessionCount"
     ? (count: number) => string
+    : Key extends "deletionAttempt"
+      ? (attempt: number, maximum: number) => string
     : Key extends "revokeSessionDescription"
       ? (current: boolean) => string
     : Key extends "transaction"
@@ -99,6 +124,8 @@ type AccountMessages = {
         ? Record<AccountSessionBrowser, string>
       : Key extends "platform"
           ? Record<AccountSessionPlatform, string>
+        : Key extends "deletionStatuses"
+          ? Record<AccountDeletionStatus, string>
         : Key extends "exportIncludes"
           ? readonly string[]
       : string;
@@ -176,6 +203,28 @@ const de: AccountMessages = {
   revokeTitle: "Auf allen Geräten abmelden?",
   revokeDescription: "Alle CallAssist-Sitzungen, einschliesslich dieses Browsers, werden widerrufen. Danach ist eine neue Anmeldung erforderlich.",
   actionError: "Die Sitzungsaktion konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.",
+  deletionTitle: "Konto und private Daten lÃ¶schen",
+  deletionText: "Damit starten Sie einen dauerhaften LÃ¶schauftrag. CallAssist entfernt zuerst Aufzeichnungen beim Anbieter und private Anrufinhalte, anonymisiert danach Ihre IdentitÃ¤t und meldet alle GerÃ¤te ab.",
+  deletionIrreversible: "Dies kann nicht rÃ¼ckgÃ¤ngig gemacht werden. Globale EmpfÃ¤nger-Sperren und minimale unverÃ¤nderliche LÃ¶schnachweise bleiben fÃ¼r Sicherheit und Rechenschaft erhalten.",
+  deletionExportFirst: "Laden Sie Ihre Daten vorher herunter, wenn Sie eine Kopie behalten mÃ¶chten.",
+  deletionPassword: "Aktuelles Passwort",
+  deletionConfirmation: "DELETE MY ACCOUNT eingeben",
+  deletionConfirmationHint: "Geben Sie die Formulierung exakt ein, um die LÃ¶schung freizuschalten.",
+  deletionAction: "Mein Konto lÃ¶schen",
+  deletionBusy: "LÃ¶schauftrag wird Ã¼bermitteltâ€¦",
+  deletionError: "Der LÃ¶schauftrag konnte nicht Ã¼bermittelt werden. PrÃ¼fen Sie Passwort und BestÃ¤tigung und versuchen Sie es erneut.",
+  deletionStatusTitle: "Status des LÃ¶schauftrags",
+  deletionAttempt: (attempt: number, maximum: number) => `Versuch ${attempt} von ${maximum}`,
+  deletionNextAttempt: "Der Worker versucht es automatisch erneut.",
+  deletionNeedsSupport: "Die automatischen Versuche sind ausgeschÃ¶pft. Der Support kann den Auftrag neu starten, ohne bereits gelÃ¶schte Daten wiederherzustellen.",
+  deletionStatuses: {
+    queued: "Eingereiht",
+    processing: "Daten werden gelÃ¶scht",
+    waiting_for_calls: "Warten auf das Ende eines aktiven Anrufs",
+    retrying: "Wiederholung geplant",
+    needs_support: "Support-Aktion erforderlich",
+    completed: "Abgeschlossen"
+  },
   transaction: {
     signup_grant: "Startguthaben",
     promo_grant: "Aktionsguthaben",

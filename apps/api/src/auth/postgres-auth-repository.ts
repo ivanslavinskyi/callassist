@@ -8,12 +8,16 @@ import postgres from "postgres";
 import {
   AuthRepositoryError,
   type AccountAdminInput,
+  type AccountDeletionLeaseInput,
+  type AccountDeletionRequestRecord,
   type AccountDataExportEventInput,
   type AuthRepository,
   type AuthSessionRecord,
   type AuthUserRecord,
   type ChangeAccountStatusInput,
+  type ClaimAccountDeletionInput,
   type CreateAuthUserInput,
+  type FailAccountDeletionInput,
   type ListAdminUsersInput,
   encodeAdminUserCursor
 } from "./auth-repository";
@@ -70,6 +74,23 @@ type AdminUserSummaryRow = Omit<
 > & {
   createdAt: DatabaseDate;
   lastLoginAt: DatabaseDate | null;
+};
+
+type AccountDeletionRow = {
+  requestId: string;
+  userId: string;
+  status: AccountDeletionRequestRecord["status"];
+  generation: number;
+  attemptCount: number;
+  maxAttempts: number;
+  runAfter: DatabaseDate;
+  leaseOwner: string | null;
+  leasedAt: DatabaseDate | null;
+  leaseExpiresAt: DatabaseDate | null;
+  lastErrorCode: string | null;
+  requestedAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  completedAt: DatabaseDate | null;
 };
 
 function toIso(value: DatabaseDate) {
@@ -432,6 +453,348 @@ export class PostgresAuthRepository implements AuthRepository {
     `;
   }
 
+  async requestAccountDeletion(input: {
+    requestId: string;
+    userId: string;
+    now: string;
+    maxAttempts: number;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const [user] = await transaction<AdminUserRow[]>`
+        SELECT id, role, status
+        FROM users
+        WHERE id = ${input.userId}
+        FOR UPDATE
+      `;
+      if (!user || user.role !== "user" || user.status !== "active") {
+        throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_AVAILABLE");
+      }
+      const [existing] = await transaction<AccountDeletionRow[]>`
+        SELECT ${this.#accountDeletionColumns()}
+        FROM account_deletion_requests
+        WHERE user_id = ${input.userId}
+        LIMIT 1
+      `;
+      if (existing) return this.#mapAccountDeletion(existing);
+      const now = new Date(input.now);
+      const [created] = await transaction<AccountDeletionRow[]>`
+        INSERT INTO account_deletion_requests (
+          id, user_id, status, generation, attempt_count, max_attempts,
+          run_after, requested_at, updated_at
+        ) VALUES (
+          ${input.requestId}, ${input.userId}, 'queued', 1, 0,
+          ${input.maxAttempts}, ${now}, ${now}, ${now}
+        )
+        RETURNING ${this.#accountDeletionColumns()}
+      `;
+      await transaction`
+        INSERT INTO account_deletion_events (
+          id, request_id, event_type, actor_user_id, reason, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.requestId},
+          'account_deletion.requested', ${input.userId}, ${null}, ${now}
+        )
+      `;
+      if (!created) throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_FOUND");
+      return this.#mapAccountDeletion(created);
+    });
+  }
+
+  async findAccountDeletionByUser(userId: string) {
+    const [row] = await this.#sql<AccountDeletionRow[]>`
+      SELECT ${this.#accountDeletionColumns()}
+      FROM account_deletion_requests
+      WHERE user_id = ${userId}
+      LIMIT 1
+    `;
+    return row ? this.#mapAccountDeletion(row) : null;
+  }
+
+  async claimAccountDeletion(input: ClaimAccountDeletionInput) {
+    return this.#sql.begin(async (transaction) => {
+      await transaction`
+        INSERT INTO account_deletion_attempts (
+          id, request_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        )
+        SELECT
+          gen_random_uuid(), id, generation, attempt_count, lease_owner,
+          leased_at, ${new Date(input.now)}, 'lease_expired', 'LEASE_EXPIRED'
+        FROM account_deletion_requests
+        WHERE status = 'processing'
+          AND lease_expires_at <= ${new Date(input.now)}
+        ON CONFLICT (request_id, generation, attempt_number) DO NOTHING
+      `;
+      await transaction`
+        UPDATE account_deletion_requests
+        SET
+          status = 'retrying',
+          run_after = ${new Date(input.now)},
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = 'LEASE_EXPIRED',
+          updated_at = ${new Date(input.now)}
+        WHERE status = 'processing'
+          AND lease_expires_at <= ${new Date(input.now)}
+      `;
+      const [candidate] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM account_deletion_requests
+        WHERE status IN ('queued', 'waiting_for_calls', 'retrying')
+          AND run_after <= ${new Date(input.now)}
+        ORDER BY run_after ASC, requested_at ASC, id ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      `;
+      if (!candidate) return null;
+      const [claimed] = await transaction<AccountDeletionRow[]>`
+        UPDATE account_deletion_requests
+        SET
+          status = 'processing',
+          attempt_count = attempt_count + 1,
+          lease_owner = ${input.workerId},
+          leased_at = ${new Date(input.now)},
+          lease_expires_at = ${new Date(input.leaseExpiresAt)},
+          updated_at = ${new Date(input.now)}
+        WHERE id = ${candidate.id}
+        RETURNING ${this.#accountDeletionColumns()}
+      `;
+      return claimed ? this.#mapAccountDeletion(claimed) : null;
+    });
+  }
+
+  async renewAccountDeletionLease(input: AccountDeletionLeaseInput & {
+    leaseExpiresAt: string;
+  }) {
+    const rows = await this.#sql<{ id: string }[]>`
+      UPDATE account_deletion_requests
+      SET
+        lease_expires_at = ${new Date(input.leaseExpiresAt)},
+        updated_at = ${new Date(input.now)}
+      WHERE id = ${input.requestId}
+        AND status = 'processing'
+        AND lease_owner = ${input.workerId}
+      RETURNING id
+    `;
+    return rows.length === 1;
+  }
+
+  async deferAccountDeletionForActiveCall(input: AccountDeletionLeaseInput & {
+    retryAt: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const rows = await transaction<{ userId: string }[]>`
+        UPDATE account_deletion_requests
+        SET
+          status = 'waiting_for_calls',
+          attempt_count = GREATEST(0, attempt_count - 1),
+          run_after = ${new Date(input.retryAt)},
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = 'ACTIVE_CALL_IN_PROGRESS',
+          updated_at = ${new Date(input.now)}
+        WHERE id = ${input.requestId}
+          AND status = 'processing'
+          AND lease_owner = ${input.workerId}
+        RETURNING user_id AS "userId"
+      `;
+      const row = rows[0];
+      if (!row) return false;
+      await transaction`
+        INSERT INTO account_deletion_events (
+          id, request_id, event_type, actor_user_id, reason, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.requestId},
+          'account_deletion.active_call_delayed', ${row.userId}, ${null},
+          ${new Date(input.now)}
+        )
+      `;
+      return true;
+    });
+  }
+
+  async failAccountDeletion(input: FailAccountDeletionInput) {
+    return this.#sql.begin(async (transaction) => {
+      const [request] = await transaction<AccountDeletionRow[]>`
+        SELECT ${this.#accountDeletionColumns()}
+        FROM account_deletion_requests
+        WHERE id = ${input.requestId}
+          AND status = 'processing'
+          AND lease_owner = ${input.workerId}
+        FOR UPDATE
+      `;
+      if (!request) return false;
+      const exhausted = request.attemptCount >= request.maxAttempts;
+      await transaction`
+        INSERT INTO account_deletion_attempts (
+          id, request_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        ) VALUES (
+          ${randomUUID()}, ${input.requestId}, ${request.generation},
+          ${request.attemptCount}, ${input.workerId},
+          ${new Date(toIso(request.leasedAt!))}, ${new Date(input.now)},
+          ${exhausted ? "needs_support" : "retry_scheduled"},
+          ${input.errorCode}
+        )
+      `;
+      await transaction`
+        UPDATE account_deletion_requests
+        SET
+          status = ${exhausted ? "needs_support" : "retrying"},
+          run_after = ${new Date(input.retryAt)},
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = ${input.errorCode},
+          updated_at = ${new Date(input.now)}
+        WHERE id = ${input.requestId}
+      `;
+      return true;
+    });
+  }
+
+  async completeAccountDeletion(input: AccountDeletionLeaseInput) {
+    return this.#sql.begin(async (transaction) => {
+      const [request] = await transaction<AccountDeletionRow[]>`
+        SELECT ${this.#accountDeletionColumns()}
+        FROM account_deletion_requests
+        WHERE id = ${input.requestId}
+          AND status = 'processing'
+          AND lease_owner = ${input.workerId}
+        FOR UPDATE
+      `;
+      if (!request) return false;
+      const [deletableUser] = await transaction<AdminUserRow[]>`
+        SELECT id, role, status
+        FROM users
+        WHERE id = ${request.userId}
+          AND status IN ('active', 'suspended')
+        FOR UPDATE
+      `;
+      if (!deletableUser) {
+        throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_AVAILABLE");
+      }
+      const [remainingCall] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM call_briefs
+        WHERE user_id = ${request.userId}
+          AND data_deleted_at IS NULL
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (remainingCall) {
+        throw new AuthRepositoryError("ACCOUNT_DELETION_CALLS_REMAIN");
+      }
+      const now = new Date(input.now);
+      const revokedSessions = await transaction<{ id: string }[]>`
+        UPDATE sessions
+        SET revoked_at = COALESCE(revoked_at, ${now})
+        WHERE user_id = ${request.userId}
+          AND revoked_at IS NULL
+        RETURNING id
+      `;
+      if (revokedSessions.length > 0) {
+        await this.#accountSessionEvent(transaction, {
+          eventType: "session.all_revoked",
+          actorUserId: request.userId,
+          targetSessionId: null,
+          revokedSessionCount: revokedSessions.length,
+          now
+        });
+      }
+      const anonymizedUsers = await transaction<{ id: string }[]>`
+        UPDATE users
+        SET
+          email = ${`deleted+${request.userId}@invalid.callassist.local`},
+          phone_e164 = ${`deleted:${request.userId}`},
+          first_name = 'Deleted',
+          last_name = 'Account',
+          password_hash = ${`deleted:${randomUUID()}`},
+          phone_verified_at = NULL,
+          last_login_at = NULL,
+          status = 'deleted'
+        WHERE id = ${request.userId}
+          AND status IN ('active', 'suspended')
+        RETURNING id
+      `;
+      if (anonymizedUsers.length !== 1) {
+        throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_AVAILABLE");
+      }
+      await transaction`
+        INSERT INTO account_deletion_attempts (
+          id, request_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        ) VALUES (
+          ${randomUUID()}, ${request.requestId}, ${request.generation},
+          ${request.attemptCount}, ${input.workerId},
+          ${new Date(toIso(request.leasedAt!))}, ${now}, 'succeeded', ${null}
+        )
+      `;
+      await transaction`
+        UPDATE account_deletion_requests
+        SET
+          status = 'completed',
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = NULL,
+          updated_at = ${now},
+          completed_at = ${now}
+        WHERE id = ${request.requestId}
+      `;
+      await transaction`
+        INSERT INTO account_deletion_events (
+          id, request_id, event_type, actor_user_id, reason, created_at
+        ) VALUES (
+          ${randomUUID()}, ${request.requestId},
+          'account_deletion.completed', ${request.userId}, ${null}, ${now}
+        )
+      `;
+      return true;
+    });
+  }
+
+  async retryAccountDeletion(input: {
+    requestId: string;
+    actorUserId: string;
+    targetUserId: string;
+    reason: string;
+    now: string;
+  }) {
+    const reason = requireAdminReason(input.reason);
+    await this.#sql.begin(async (transaction) => {
+      await this.#authorizeAdminAction(transaction, input);
+      const rows = await transaction<{ id: string }[]>`
+        UPDATE account_deletion_requests
+        SET
+          status = 'queued',
+          generation = generation + 1,
+          attempt_count = 0,
+          run_after = ${new Date(input.now)},
+          last_error_code = NULL,
+          updated_at = ${new Date(input.now)}
+        WHERE id = ${input.requestId}
+          AND user_id = ${input.targetUserId}
+          AND status = 'needs_support'
+        RETURNING id
+      `;
+      if (rows.length === 0) {
+        throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO account_deletion_events (
+          id, request_id, event_type, actor_user_id, reason, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.requestId},
+          'account_deletion.retry_requested', ${input.actorUserId}, ${reason},
+          ${new Date(input.now)}
+        )
+      `;
+    });
+  }
+
   async close() {
     await this.#sql.end({ timeout: 5 });
   }
@@ -589,6 +952,25 @@ export class PostgresAuthRepository implements AuthRepository {
     `;
   }
 
+  #accountDeletionColumns() {
+    return this.#sql`
+      id AS "requestId",
+      user_id AS "userId",
+      status AS "status",
+      generation AS "generation",
+      attempt_count AS "attemptCount",
+      max_attempts AS "maxAttempts",
+      run_after AS "runAfter",
+      lease_owner AS "leaseOwner",
+      leased_at AS "leasedAt",
+      lease_expires_at AS "leaseExpiresAt",
+      last_error_code AS "lastErrorCode",
+      requested_at AS "requestedAt",
+      updated_at AS "updatedAt",
+      completed_at AS "completedAt"
+    `;
+  }
+
   #mapUser(row: UserRow): AuthUserRecord {
     return {
       ...row,
@@ -603,6 +985,27 @@ export class PostgresAuthRepository implements AuthRepository {
       ...row,
       createdAt: toIso(row.createdAt),
       lastLoginAt: row.lastLoginAt ? toIso(row.lastLoginAt) : null
+    };
+  }
+
+  #mapAccountDeletion(row: AccountDeletionRow): AccountDeletionRequestRecord {
+    return {
+      requestId: row.requestId,
+      userId: row.userId,
+      status: row.status,
+      generation: row.generation,
+      attemptCount: row.attemptCount,
+      maxAttempts: row.maxAttempts,
+      requestedAt: toIso(row.requestedAt),
+      updatedAt: toIso(row.updatedAt),
+      nextAttemptAt: ["queued", "waiting_for_calls", "retrying"].includes(row.status)
+        ? toIso(row.runAfter)
+        : null,
+      completedAt: row.completedAt ? toIso(row.completedAt) : null,
+      lastErrorCode: row.lastErrorCode,
+      leaseOwner: row.leaseOwner,
+      leasedAt: row.leasedAt ? toIso(row.leasedAt) : null,
+      leaseExpiresAt: row.leaseExpiresAt ? toIso(row.leaseExpiresAt) : null
     };
   }
 

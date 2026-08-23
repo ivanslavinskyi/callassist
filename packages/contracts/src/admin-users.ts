@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { creditUsageSchema, userRoleSchema, userStatusSchema } from "./account";
+import {
+  accountDeletionRequestSchema,
+  creditUsageSchema,
+  userRoleSchema,
+  userStatusSchema
+} from "./account";
 import { personNamePartSchema } from "./call-brief";
 
 export const adminUserSearchSchema = z.string().trim().min(1).max(100);
@@ -25,7 +30,8 @@ export type AdminUserList = z.infer<typeof adminUserListSchema>;
 
 export const adminUserCreditLedgerSchema = z.object({
   user: adminUserSummarySchema,
-  usage: creditUsageSchema
+  usage: creditUsageSchema,
+  accountDeletion: accountDeletionRequestSchema.nullable()
 });
 export type AdminUserCreditLedger = z.infer<
   typeof adminUserCreditLedgerSchema

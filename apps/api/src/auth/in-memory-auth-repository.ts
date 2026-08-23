@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type {
   AccountAdminInput,
+  AccountDeletionLeaseInput,
+  AccountDeletionRequestRecord,
   AccountDataExportEventInput,
   AuthRepository,
   AuthSessionRecord,
   AuthUserRecord,
   ChangeAccountStatusInput,
+  ClaimAccountDeletionInput,
   CreateAuthUserInput,
+  FailAccountDeletionInput,
   ListAdminUsersInput
 } from "./auth-repository";
 import {
@@ -37,6 +41,18 @@ type AccountSessionEvent = {
 
 type AccountDataExportEvent = AccountDataExportEventInput;
 
+type AccountDeletionEvent = {
+  eventType:
+    | "account_deletion.requested"
+    | "account_deletion.active_call_delayed"
+    | "account_deletion.retry_requested"
+    | "account_deletion.completed";
+  requestId: string;
+  actorUserId: string;
+  reason: string | null;
+  createdAt: string;
+};
+
 export class InMemoryAuthRepository implements AuthRepository {
   readonly mode = "memory" as const;
   readonly #users = new Map<string, AuthUserRecord>();
@@ -44,6 +60,8 @@ export class InMemoryAuthRepository implements AuthRepository {
   readonly #accountAdminEvents: AccountAdminEvent[] = [];
   readonly #accountSessionEvents: AccountSessionEvent[] = [];
   readonly #accountDataExportEvents: AccountDataExportEvent[] = [];
+  readonly #accountDeletions = new Map<string, AccountDeletionRequestRecord>();
+  readonly #accountDeletionEvents: AccountDeletionEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -273,6 +291,197 @@ export class InMemoryAuthRepository implements AuthRepository {
     this.#accountDataExportEvents.push(structuredClone(input));
   }
 
+  async requestAccountDeletion(input: {
+    requestId: string;
+    userId: string;
+    now: string;
+    maxAttempts: number;
+  }) {
+    const user = this.#requireUser(input.userId);
+    if (user.status !== "active" || user.role !== "user") {
+      throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_AVAILABLE");
+    }
+    const existing = this.#accountDeletions.get(input.userId);
+    if (existing) return structuredClone(existing);
+    const request: AccountDeletionRequestRecord = {
+      requestId: input.requestId,
+      userId: input.userId,
+      status: "queued",
+      generation: 1,
+      attemptCount: 0,
+      maxAttempts: input.maxAttempts,
+      requestedAt: input.now,
+      updatedAt: input.now,
+      nextAttemptAt: input.now,
+      completedAt: null,
+      lastErrorCode: null,
+      leaseOwner: null,
+      leasedAt: null,
+      leaseExpiresAt: null
+    };
+    this.#accountDeletions.set(input.userId, request);
+    this.#accountDeletionEvents.push({
+      eventType: "account_deletion.requested",
+      requestId: input.requestId,
+      actorUserId: input.userId,
+      reason: null,
+      createdAt: input.now
+    });
+    return structuredClone(request);
+  }
+
+  async findAccountDeletionByUser(userId: string) {
+    const request = this.#accountDeletions.get(userId);
+    return request ? structuredClone(request) : null;
+  }
+
+  async claimAccountDeletion(input: ClaimAccountDeletionInput) {
+    for (const request of this.#accountDeletions.values()) {
+      if (
+        request.status === "processing" &&
+        request.leaseExpiresAt &&
+        request.leaseExpiresAt <= input.now
+      ) {
+        request.status = "retrying";
+        request.leaseOwner = null;
+        request.leasedAt = null;
+        request.leaseExpiresAt = null;
+        request.nextAttemptAt = input.now;
+        request.lastErrorCode = "LEASE_EXPIRED";
+        request.updatedAt = input.now;
+      }
+    }
+    const request = [...this.#accountDeletions.values()]
+      .filter((candidate) =>
+        ["queued", "waiting_for_calls", "retrying"].includes(candidate.status) &&
+        candidate.nextAttemptAt !== null &&
+        candidate.nextAttemptAt <= input.now
+      )
+      .sort((left, right) =>
+        (left.nextAttemptAt ?? "").localeCompare(right.nextAttemptAt ?? "") ||
+        left.requestedAt.localeCompare(right.requestedAt)
+      )[0];
+    if (!request) return null;
+    request.status = "processing";
+    request.attemptCount += 1;
+    request.leaseOwner = input.workerId;
+    request.leasedAt = input.now;
+    request.leaseExpiresAt = input.leaseExpiresAt;
+    request.nextAttemptAt = null;
+    request.updatedAt = input.now;
+    return structuredClone(request);
+  }
+
+  async renewAccountDeletionLease(input: AccountDeletionLeaseInput & {
+    leaseExpiresAt: string;
+  }) {
+    const request = this.#accountDeletionById(input.requestId);
+    if (request?.status !== "processing" || request.leaseOwner !== input.workerId) {
+      return false;
+    }
+    request.leaseExpiresAt = input.leaseExpiresAt;
+    request.updatedAt = input.now;
+    return true;
+  }
+
+  async deferAccountDeletionForActiveCall(input: AccountDeletionLeaseInput & {
+    retryAt: string;
+  }) {
+    const request = this.#accountDeletionById(input.requestId);
+    if (request?.status !== "processing" || request.leaseOwner !== input.workerId) {
+      return false;
+    }
+    request.status = "waiting_for_calls";
+    request.attemptCount = Math.max(0, request.attemptCount - 1);
+    request.nextAttemptAt = input.retryAt;
+    request.lastErrorCode = "ACTIVE_CALL_IN_PROGRESS";
+    request.updatedAt = input.now;
+    this.#clearAccountDeletionLease(request);
+    this.#accountDeletionEvents.push({
+      eventType: "account_deletion.active_call_delayed",
+      requestId: request.requestId,
+      actorUserId: request.userId,
+      reason: null,
+      createdAt: input.now
+    });
+    return true;
+  }
+
+  async failAccountDeletion(input: FailAccountDeletionInput) {
+    const request = this.#accountDeletionById(input.requestId);
+    if (request?.status !== "processing" || request.leaseOwner !== input.workerId) {
+      return false;
+    }
+    const exhausted = request.attemptCount >= request.maxAttempts;
+    request.status = exhausted ? "needs_support" : "retrying";
+    request.nextAttemptAt = exhausted ? null : input.retryAt;
+    request.lastErrorCode = input.errorCode;
+    request.updatedAt = input.now;
+    this.#clearAccountDeletionLease(request);
+    return true;
+  }
+
+  async completeAccountDeletion(input: AccountDeletionLeaseInput) {
+    const request = this.#accountDeletionById(input.requestId);
+    if (request?.status !== "processing" || request.leaseOwner !== input.workerId) {
+      return false;
+    }
+    const user = this.#requireUser(request.userId);
+    user.email = `deleted+${user.id}@invalid.callassist.local`;
+    user.phoneE164 = `deleted:${user.id}`;
+    user.firstName = "Deleted";
+    user.lastName = "Account";
+    user.passwordHash = `deleted:${randomUUID()}`;
+    user.phoneVerifiedAt = null;
+    user.lastLoginAt = null;
+    user.status = "deleted";
+    this.#revokeSessions(user.id, input.now);
+    request.status = "completed";
+    request.completedAt = input.now;
+    request.nextAttemptAt = null;
+    request.lastErrorCode = null;
+    request.updatedAt = input.now;
+    this.#clearAccountDeletionLease(request);
+    this.#accountDeletionEvents.push({
+      eventType: "account_deletion.completed",
+      requestId: request.requestId,
+      actorUserId: user.id,
+      reason: null,
+      createdAt: input.now
+    });
+    return true;
+  }
+
+  async retryAccountDeletion(input: {
+    requestId: string;
+    actorUserId: string;
+    targetUserId: string;
+    reason: string;
+    now: string;
+  }) {
+    const reason = requireAdminReason(input.reason);
+    this.#authorizeAdminAction(input);
+    const request = this.#accountDeletionById(input.requestId);
+    if (
+      !request ||
+      request.userId !== input.targetUserId ||
+      request.status !== "needs_support"
+    ) throw new AuthRepositoryError("ACCOUNT_DELETION_NOT_FOUND");
+    request.status = "queued";
+    request.generation += 1;
+    request.attemptCount = 0;
+    request.nextAttemptAt = input.now;
+    request.lastErrorCode = null;
+    request.updatedAt = input.now;
+    this.#accountDeletionEvents.push({
+      eventType: "account_deletion.retry_requested",
+      requestId: request.requestId,
+      actorUserId: input.actorUserId,
+      reason,
+      createdAt: input.now
+    });
+  }
+
   async setUserStatusForTest(userId: string, status: AuthUserRecord["status"]) {
     this.#requireUser(userId).status = status;
   }
@@ -291,6 +500,10 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   accountDataExportEventsForTest() {
     return structuredClone(this.#accountDataExportEvents);
+  }
+
+  accountDeletionEventsForTest() {
+    return structuredClone(this.#accountDeletionEvents);
   }
 
   async close() {}
@@ -341,6 +554,18 @@ export class InMemoryAuthRepository implements AuthRepository {
     for (const session of this.#sessions.values()) {
       if (session.userId === userId) session.revokedAt ??= revokedAt;
     }
+  }
+
+  #accountDeletionById(requestId: string) {
+    return [...this.#accountDeletions.values()].find(
+      (request) => request.requestId === requestId
+    );
+  }
+
+  #clearAccountDeletionLease(request: AccountDeletionRequestRecord) {
+    request.leaseOwner = null;
+    request.leasedAt = null;
+    request.leaseExpiresAt = null;
   }
 }
 

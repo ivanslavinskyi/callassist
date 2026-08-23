@@ -1,4 +1,5 @@
 import type {
+  AccountDeletionStatus,
   CreditTransactionType,
   UserRole,
   UserStatus
@@ -41,6 +42,24 @@ const en = {
   activeCall: "Active call",
   noActiveCall: "No active call",
   phoneVerification: "Phone verification",
+  accountDeletion: "Account deletion",
+  noAccountDeletion: "Not requested",
+  deletionStatuses: {
+    queued: "Queued",
+    processing: "Processing",
+    waiting_for_calls: "Waiting for active call",
+    retrying: "Retrying",
+    needs_support: "Support required",
+    completed: "Completed"
+  } satisfies Record<AccountDeletionStatus, string>,
+  deletionRecoveryTitle: "Restart exhausted deletion",
+  deletionRecoveryHelp: "The owner already confirmed deletion. Restart the durable request after the provider or operational issue is resolved.",
+  deletionRecoveryReasonPlaceholder: "e.g. Provider incident resolved in ticket 123",
+  deletionRecoveryAction: "Restart deletion",
+  deletionRecoveryBusy: "Restarting…",
+  deletionRecoveryConfirmTitle: "Restart account deletion?",
+  deletionRecoveryConfirmDescription: "Processing will resume and may permanently delete remaining provider and account data.",
+  deletionRecoverySuccess: "The deletion request was queued with a new retry generation.",
   transactionHistory: "Transaction history",
   actionsTitle: "Account actions",
   actionsHelp: "Every action is server-authorized and recorded with the operational reason.",
@@ -135,6 +154,7 @@ type AdminUserMessages = {
     | "roles"
     | "statuses"
     | "transactions"
+    | "deletionStatuses"
   >]: string;
 } & {
   resultCount: (count: number) => string;
@@ -148,6 +168,7 @@ type AdminUserMessages = {
   roles: Record<UserRole, string>;
   statuses: Record<UserStatus, string>;
   transactions: Record<CreditTransactionType, string>;
+  deletionStatuses: Record<AccountDeletionStatus, string>;
 };
 
 const de: AdminUserMessages = {
@@ -185,6 +206,24 @@ const de: AdminUserMessages = {
   activeCall: "Aktiver Anruf",
   noActiveCall: "Kein aktiver Anruf",
   phoneVerification: "Telefonbestätigung",
+  accountDeletion: "Kontolöschung",
+  noAccountDeletion: "Nicht angefordert",
+  deletionStatuses: {
+    queued: "Eingereiht",
+    processing: "In Bearbeitung",
+    waiting_for_calls: "Warten auf aktiven Anruf",
+    retrying: "Wiederholung läuft",
+    needs_support: "Support erforderlich",
+    completed: "Abgeschlossen"
+  },
+  deletionRecoveryTitle: "Ausgeschöpfte Löschung neu starten",
+  deletionRecoveryHelp: "Der Eigentümer hat die Löschung bereits bestätigt. Starten Sie den dauerhaften Auftrag neu, nachdem das Anbieter- oder Betriebsproblem behoben wurde.",
+  deletionRecoveryReasonPlaceholder: "z. B. Anbieter-Störung in Ticket 123 behoben",
+  deletionRecoveryAction: "Löschung neu starten",
+  deletionRecoveryBusy: "Wird neu gestartet…",
+  deletionRecoveryConfirmTitle: "Kontolöschung neu starten?",
+  deletionRecoveryConfirmDescription: "Die Verarbeitung wird fortgesetzt und kann verbleibende Anbieter- und Kontodaten dauerhaft löschen.",
+  deletionRecoverySuccess: "Der Löschauftrag wurde mit einer neuen Wiederholungsgeneration eingereiht.",
   transactionHistory: "Transaktionsverlauf",
   actionsTitle: "Kontoaktionen",
   actionsHelp: "Jede Aktion wird serverseitig autorisiert und mit dem betrieblichen Grund protokolliert.",

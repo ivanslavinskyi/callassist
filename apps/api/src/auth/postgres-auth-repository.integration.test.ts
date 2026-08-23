@@ -433,6 +433,102 @@ describeWithDatabase("PostgresAuthRepository", () => {
       repository.findUserByIdForAdmin(actor.id, staff.id)
     ).resolves.toMatchObject({ id: staff.id, role: "support" });
   });
+
+  it("leases and atomically finalizes account anonymization with immutable evidence", async () => {
+    const suffix = randomUUID();
+    const originalEmail = `delete-me.${suffix}@example.com`;
+    const user = await repository.createUser({
+      email: originalEmail,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(suffix, "65"),
+      firstName: "Private",
+      lastName: "Person",
+      uiLocale: "de"
+    });
+    await repository.markPhoneVerified(user.id, new Date().toISOString());
+    const tokenHash = hashSessionToken(`delete-session-${suffix}`);
+    const requestedAt = new Date();
+    await repository.createSession({
+      id: randomUUID(),
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(requestedAt.getTime() + 60_000).toISOString(),
+      revokedAt: null,
+      createdAt: requestedAt.toISOString(),
+      lastSeenAt: requestedAt.toISOString(),
+      userAgent: "account-deletion-integration-test"
+    });
+    const requestId = randomUUID();
+    await expect(repository.requestAccountDeletion({
+      requestId,
+      userId: user.id,
+      now: requestedAt.toISOString(),
+      maxAttempts: 5
+    })).resolves.toMatchObject({ status: "queued", generation: 1 });
+    const claimed = await repository.claimAccountDeletion({
+      workerId: "integration-worker",
+      now: requestedAt.toISOString(),
+      leaseExpiresAt: new Date(requestedAt.getTime() + 60_000).toISOString()
+    });
+    expect(claimed).toMatchObject({
+      requestId,
+      status: "processing",
+      attemptCount: 1
+    });
+    const completedAt = new Date(requestedAt.getTime() + 1_000).toISOString();
+    await expect(repository.completeAccountDeletion({
+      requestId,
+      workerId: "integration-worker",
+      now: completedAt
+    })).resolves.toBe(true);
+
+    expect(await repository.findUserByEmail(originalEmail)).toBeNull();
+    expect(await repository.findAccountDeletionByUser(user.id)).toMatchObject({
+      status: "completed",
+      completedAt
+    });
+    await expect(repository.findUserBySessionTokenHash(
+      tokenHash,
+      completedAt
+    )).resolves.toBeNull();
+    const [tombstone] = await inspection<{
+      email: string;
+      phone: string;
+      firstName: string;
+      lastName: string;
+      status: string;
+      verified: boolean;
+    }[]>`
+      SELECT
+        email,
+        phone_e164 AS phone,
+        first_name AS "firstName",
+        last_name AS "lastName",
+        status,
+        phone_verified_at IS NOT NULL AS verified
+      FROM users
+      WHERE id = ${user.id}
+    `;
+    expect(tombstone).toEqual({
+      email: `deleted+${user.id}@invalid.callassist.local`,
+      phone: `deleted:${user.id}`,
+      firstName: "Deleted",
+      lastName: "Account",
+      status: "deleted",
+      verified: false
+    });
+    const attempts = await inspection<{ outcome: string }[]>`
+      SELECT outcome FROM account_deletion_attempts WHERE request_id = ${requestId}
+    `;
+    expect(attempts).toEqual([{ outcome: "succeeded" }]);
+    await expect(inspection`
+      UPDATE account_deletion_attempts SET error_code = 'tampered'
+      WHERE request_id = ${requestId}
+    `).rejects.toThrow("immutable");
+    await expect(inspection`
+      DELETE FROM account_deletion_events WHERE request_id = ${requestId}
+    `).rejects.toThrow("immutable");
+  });
 });
 
 function phoneFromUuid(value: string, prefix: string) {

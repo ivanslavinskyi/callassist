@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  AccountDeletionRequest,
   AdminUserCreditLedger,
   AdminUserSummary,
   CreditTransaction,
@@ -19,6 +20,7 @@ import {
   getCurrentUser,
   grantCreditsAsAdmin,
   listAdminUsers,
+  retryAdminAccountDeletion,
   revokeAdminUserSessions
 } from "@/lib/api";
 import {
@@ -306,6 +308,12 @@ function Ledger({
         <div><dt>{copy.activeCall}</dt><dd>{ledger.usage.activeCallBriefId ?? copy.noActiveCall}</dd></div>
         <div><dt>{copy.status}</dt><dd data-status={ledger.user.status}>{copy.statuses[ledger.user.status]}</dd></div>
         <div><dt>{copy.phoneVerification}</dt><dd>{ledger.user.phoneVerified ? copy.verified : copy.unverified}</dd></div>
+        <div>
+          <dt>{copy.accountDeletion}</dt>
+          <dd>{ledger.accountDeletion
+            ? copy.deletionStatuses[ledger.accountDeletion.status]
+            : copy.noAccountDeletion}</dd>
+        </div>
       </dl>
       <AdminUserActions
         actorId={actorId}
@@ -315,6 +323,13 @@ function Ledger({
         onUsageChange={onUsageChange}
         user={ledger.user}
       />
+      {ledger.accountDeletion?.status === "needs_support" ? (
+        <AccountDeletionRecovery
+          deletion={ledger.accountDeletion}
+          locale={locale}
+          userId={ledger.user.id}
+        />
+      ) : null}
       <h3 className="admin-ledger-history-title">{copy.transactionHistory}</h3>
       {ledger.usage.transactions.length === 0 ? (
         <p className="admin-empty">{copy.noTransactions}</p>
@@ -535,6 +550,78 @@ function AdminUserActions({
         onConfirm={() => void confirmAction()}
         open={pending !== null}
         title={dialog?.title ?? ""}
+      />
+    </section>
+  );
+}
+
+function AccountDeletionRecovery({
+  deletion,
+  locale,
+  userId
+}: {
+  deletion: AccountDeletionRequest;
+  locale: "en" | "de";
+  userId: string;
+}) {
+  const copy = adminUserMessages[locale];
+  const [reason, setReason] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [completed, setCompleted] = useState(false);
+
+  async function retryDeletion() {
+    setBusy(true);
+    setError(null);
+    try {
+      await retryAdminAccountDeletion(userId, deletion.requestId, {
+        reason: reason.trim()
+      });
+      setCompleted(true);
+      setReason("");
+    } catch (caught) {
+      setError(getAdminUserErrorMessage(caught, locale));
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  }
+
+  if (completed) {
+    return <p className="auth-success" role="status">{copy.deletionRecoverySuccess}</p>;
+  }
+
+  return (
+    <section className="admin-user-actions">
+      <div className="admin-user-actions-heading">
+        <h3>{copy.deletionRecoveryTitle}</h3>
+        <p>{copy.deletionRecoveryHelp}</p>
+      </div>
+      <form className="admin-action-card" onSubmit={(event) => {
+        event.preventDefault();
+        setConfirming(true);
+      }}>
+        <ReasonField
+          label={copy.operationalReason}
+          onChange={setReason}
+          placeholder={copy.deletionRecoveryReasonPlaceholder}
+          value={reason}
+        />
+        <button className="danger-button" disabled={busy} type="submit">
+          {busy ? copy.deletionRecoveryBusy : copy.deletionRecoveryAction}
+        </button>
+      </form>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <ConfirmDialog
+        busy={busy}
+        confirmLabel={busy ? copy.deletionRecoveryBusy : copy.deletionRecoveryAction}
+        danger
+        description={copy.deletionRecoveryConfirmDescription}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => void retryDeletion()}
+        open={confirming}
+        title={copy.deletionRecoveryConfirmTitle}
       />
     </section>
   );

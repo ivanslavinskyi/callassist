@@ -11,6 +11,7 @@ import {
   createCallBrief,
   createPromoCode,
   deleteCallData,
+  getAccountDeletion,
   getCreditUsage,
   getAdminCallInspector,
   getAdminOperationsOverview,
@@ -41,6 +42,7 @@ import {
   recompileCallBrief,
   requestRecipientOptOut,
   requestAccountDataExport,
+  requestAccountDeletion,
   rollbackAdminContentRevision,
   rollbackAdminEditorialRevision,
   grantCreditsAsAdmin,
@@ -48,6 +50,7 @@ import {
   revokeAllOwnSessions,
   revokeOwnSession,
   retryAdminDurableJob,
+  retryAdminAccountDeletion,
   setAdminOutboundCalls,
   suppressRecipientAsStaff,
   startCall,
@@ -288,6 +291,49 @@ describe("API client headers", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
       credentials: "include"
+    });
+  });
+
+  it("loads and submits the durable account deletion request", async () => {
+    const requestId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const response = {
+      request: {
+        requestId,
+        status: "queued",
+        attemptCount: 0,
+        maxAttempts: 5,
+        requestedAt: "2026-08-23T10:00:00.000Z",
+        updatedAt: "2026-08-23T10:00:00.000Z",
+        nextAttemptAt: "2026-08-23T10:00:00.000Z",
+        completedAt: null,
+        lastErrorCode: null
+      }
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ request: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(response), {
+        status: 202,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAccountDeletion()).resolves.toEqual({ request: null });
+    await expect(requestAccountDeletion({
+      requestId,
+      password: "correct horse battery staple",
+      confirmation: "DELETE MY ACCOUNT"
+    })).resolves.toEqual(response);
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({
+        requestId,
+        password: "correct horse battery staple",
+        confirmation: "DELETE MY ACCOUNT"
+      })
     });
   });
 
@@ -536,6 +582,28 @@ describe("API client headers", () => {
       method: "POST",
       credentials: "include",
       body: JSON.stringify({ reason: "Credential reset requested" })
+    });
+  });
+
+  it("sends a reasoned retry for exhausted account deletion", async () => {
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const requestId = "8a39abbe-0678-4e81-93f6-861ab7ebf9b1";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ status: "queued" }),
+      { status: 202, headers: { "Content-Type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(retryAdminAccountDeletion(userId, requestId, {
+      reason: "Provider incident resolved in ticket 123"
+    })).resolves.toEqual({ status: "queued" });
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      `/api/admin/users/${userId}/account-deletion/${requestId}/retry`
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ reason: "Provider incident resolved in ticket 123" })
     });
   });
 

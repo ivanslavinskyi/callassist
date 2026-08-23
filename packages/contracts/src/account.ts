@@ -224,3 +224,46 @@ export const callDataDeletionResultSchema = z.strictObject({
 export type CallDataDeletionResult = z.infer<
   typeof callDataDeletionResultSchema
 >;
+
+export const ACCOUNT_DELETION_CONFIRMATION = "DELETE MY ACCOUNT" as const;
+
+export const accountDeletionInputSchema = z.strictObject({
+  requestId: z.uuid(),
+  password: z.string().min(1).max(128),
+  confirmation: z.literal(ACCOUNT_DELETION_CONFIRMATION)
+});
+export type AccountDeletionInput = z.infer<typeof accountDeletionInputSchema>;
+
+export const accountDeletionStatusSchema = z.enum([
+  "queued",
+  "processing",
+  "waiting_for_calls",
+  "retrying",
+  "needs_support",
+  "completed"
+]);
+export type AccountDeletionStatus = z.infer<
+  typeof accountDeletionStatusSchema
+>;
+
+export const accountDeletionRequestSchema = z.strictObject({
+  requestId: z.uuid(),
+  status: accountDeletionStatusSchema,
+  attemptCount: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive(),
+  requestedAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  nextAttemptAt: z.iso.datetime().nullable(),
+  completedAt: z.iso.datetime().nullable(),
+  lastErrorCode: z.string().max(160).nullable()
+});
+export type AccountDeletionRequest = z.infer<
+  typeof accountDeletionRequestSchema
+>;
+
+export const accountDeletionResponseSchema = z.strictObject({
+  request: accountDeletionRequestSchema.nullable()
+});
+export type AccountDeletionResponse = z.infer<
+  typeof accountDeletionResponseSchema
+>;

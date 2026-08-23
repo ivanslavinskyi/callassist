@@ -469,7 +469,8 @@ describe("call API", () => {
       recordingDownload: oneRequest,
       transcriptionRetry: oneRequest,
       dataExport: oneRequest,
-      callDataDeletion: oneRequest
+      callDataDeletion: oneRequest,
+      accountDeletion: oneRequest
     };
     const app = buildApp({
       service,

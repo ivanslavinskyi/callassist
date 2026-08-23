@@ -1,6 +1,8 @@
 "use client";
 
-import type {
+import {
+  ACCOUNT_DELETION_CONFIRMATION,
+  type AccountDeletionRequest,
   AccountSessionList,
   AccountSessionSummary,
   CreditUsage,
@@ -13,11 +15,13 @@ import { AppShell } from "./app-shell";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUiLocale } from "./ui-locale-provider";
 import {
+  getAccountDeletion,
   getCreditUsage,
   getCurrentUser,
   listOwnSessions,
   logout,
   requestAccountDataExport,
+  requestAccountDeletion,
   revokeAllOwnSessions,
   revokeOwnSession
 } from "@/lib/api";
@@ -27,6 +31,7 @@ type AccountData = {
   user: User;
   usage: CreditUsage;
   sessionInventory: AccountSessionList;
+  deletion: AccountDeletionRequest | null;
 };
 
 export function AccountConsole() {
@@ -42,17 +47,27 @@ export function AccountConsole() {
   const [selectedSession, setSelectedSession] = useState<AccountSessionSummary | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(false);
+  const [deletionPassword, setDeletionPassword] = useState("");
+  const [deletionConfirmation, setDeletionConfirmation] = useState("");
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [deletionError, setDeletionError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
     try {
-      const [{ user }, usage, sessionInventory] = await Promise.all([
+      const [{ user }, usage, sessionInventory, deletionResponse] = await Promise.all([
         getCurrentUser(),
         getCreditUsage(),
-        listOwnSessions()
+        listOwnSessions(),
+        getAccountDeletion()
       ]);
-      setData({ user, usage, sessionInventory });
+      setData({
+        user,
+        usage,
+        sessionInventory,
+        deletion: deletionResponse.request
+      });
     } catch {
       setData(null);
       setLoadFailed(true);
@@ -62,6 +77,19 @@ export function AccountConsole() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!data?.deletion || data.deletion.status === "completed") return;
+    const timer = window.setInterval(() => {
+      void getAccountDeletion().then(({ request }) => {
+        setData((current) => current ? { ...current, deletion: request } : current);
+      }).catch(() => {
+        router.replace(localizeHref("/"));
+        router.refresh();
+      });
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [data?.deletion, localizeHref, router]);
 
   async function endSession(mode: "logout" | "revoke-all") {
     setAction(mode);
@@ -125,6 +153,25 @@ export function AccountConsole() {
       setExportError(true);
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function startAccountDeletion() {
+    setDeletionBusy(true);
+    setDeletionError(false);
+    try {
+      const { request } = await requestAccountDeletion({
+        requestId: crypto.randomUUID(),
+        password: deletionPassword,
+        confirmation: ACCOUNT_DELETION_CONFIRMATION
+      });
+      setData((current) => current ? { ...current, deletion: request } : current);
+      setDeletionPassword("");
+      setDeletionConfirmation("");
+    } catch {
+      setDeletionError(true);
+    } finally {
+      setDeletionBusy(false);
     }
   }
 
@@ -209,6 +256,77 @@ export function AccountConsole() {
                 </button>
               </div>
               {exportError ? <p className="form-error" role="alert">{copy.exportError}</p> : null}
+            </section>
+
+            <section className="account-card account-deletion">
+              <h2>{copy.deletionTitle}</h2>
+              <p>{copy.deletionText}</p>
+              <p className="account-deletion-warning">{copy.deletionIrreversible}</p>
+              {data.deletion ? (
+                <div className="account-deletion-status" role="status" aria-live="polite">
+                  <span>{copy.deletionStatusTitle}</span>
+                  <strong data-status={data.deletion.status}>
+                    {copy.deletionStatuses[data.deletion.status]}
+                  </strong>
+                  <small>{copy.deletionAttempt(
+                    data.deletion.attemptCount,
+                    data.deletion.maxAttempts
+                  )}</small>
+                  {data.deletion.status === "retrying" ? (
+                    <p>{copy.deletionNextAttempt}</p>
+                  ) : null}
+                  {data.deletion.status === "needs_support" ? (
+                    <p>{copy.deletionNeedsSupport}</p>
+                  ) : null}
+                </div>
+              ) : (
+                <form onSubmit={(event) => {
+                  event.preventDefault();
+                  void startAccountDeletion();
+                }}>
+                  <p className="account-muted">{copy.deletionExportFirst}</p>
+                  <div className="account-deletion-fields">
+                    <label>
+                      <span>{copy.deletionPassword}</span>
+                      <input
+                        autoComplete="current-password"
+                        disabled={deletionBusy}
+                        maxLength={128}
+                        onChange={(event) => setDeletionPassword(event.target.value)}
+                        required
+                        type="password"
+                        value={deletionPassword}
+                      />
+                    </label>
+                    <label>
+                      <span>{copy.deletionConfirmation}</span>
+                      <input
+                        autoComplete="off"
+                        disabled={deletionBusy}
+                        onChange={(event) => setDeletionConfirmation(event.target.value)}
+                        required
+                        type="text"
+                        value={deletionConfirmation}
+                      />
+                      <small>{copy.deletionConfirmationHint}</small>
+                    </label>
+                  </div>
+                  <button
+                    className="danger-button"
+                    disabled={
+                      deletionBusy ||
+                      deletionConfirmation !== ACCOUNT_DELETION_CONFIRMATION ||
+                      deletionPassword.length === 0
+                    }
+                    type="submit"
+                  >
+                    {deletionBusy ? copy.deletionBusy : copy.deletionAction}
+                  </button>
+                  {deletionError ? (
+                    <p className="form-error" role="alert">{copy.deletionError}</p>
+                  ) : null}
+                </form>
+              )}
             </section>
 
             <section className="account-card account-sessions">

@@ -1,4 +1,6 @@
 import type {
+  AccountDeletionInput,
+  AccountDeletionResponse,
   AccountSessionList,
   AccountStatusAction,
   ApprovalDecision,
@@ -164,6 +166,17 @@ export async function requestAccountDataExport() {
   const filename = disposition.match(/filename="([^"]+)"/i)?.[1]
     ?? "callassist-data.json";
   return { blob: await response.blob(), filename };
+}
+
+export async function getAccountDeletion() {
+  return apiRequest<AccountDeletionResponse>("/api/account/deletion");
+}
+
+export async function requestAccountDeletion(input: AccountDeletionInput) {
+  return apiRequest<AccountDeletionResponse>("/api/account/deletion", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }
 
 export async function getPublishedContentIndex() {
@@ -401,8 +414,19 @@ export async function revokeAdminUserSessions(
   userId: string,
   input: SessionRevocationAction
 ) {
-  return apiRequest<void>(
+  return apiRequest<{ status: "queued" }>(
     `/api/admin/users/${encodeURIComponent(userId)}/sessions/revoke`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function retryAdminAccountDeletion(
+  userId: string,
+  requestId: string,
+  input: SessionRevocationAction
+) {
+  return apiRequest<void>(
+    `/api/admin/users/${encodeURIComponent(userId)}/account-deletion/${encodeURIComponent(requestId)}/retry`,
     { method: "POST", body: JSON.stringify(input) }
   );
 }

@@ -9,6 +9,7 @@ import { InMemoryContentRepository } from "../content/in-memory-content-reposito
 import { seededContentPages } from "../content/seed-content";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { AuthService } from "./auth-service";
+import { AccountDeletionService } from "./account-deletion-service";
 import { InMemoryAuthRepository } from "./in-memory-auth-repository";
 import { MockVerificationProvider } from "./verification-provider";
 
@@ -30,6 +31,10 @@ function createAuthApp(
     verificationProvider: new MockVerificationProvider("123456"),
     signupCreditGranter: callService
   });
+  const accountDeletionService = new AccountDeletionService({
+    authRepository: repository,
+    callService
+  });
   const creditService = new CreditService({
     repository: callRepository,
     authRepository: repository,
@@ -40,12 +45,19 @@ function createAuthApp(
     authService,
     creditService,
     contentService,
+    accountDeletionService,
     logger: false,
     production: options.production,
     secureCookies: options.secureCookies ?? false
   });
   apps.push(app);
-  return { app, repository, callRepository };
+  return {
+    app,
+    repository,
+    callRepository,
+    callService,
+    accountDeletionService
+  };
 }
 
 const registration = {
@@ -2193,6 +2205,205 @@ describe("auth API", () => {
     expect(privileged.statusCode).toBe(200);
     expect(privileged.json().items).toContainEqual(
       expect.objectContaining({ id: staffId, role: "support" })
+    );
+  });
+
+  it("queues password-confirmed account deletion and revokes sessions after finalization", async () => {
+    const { app, repository, accountDeletionService } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+    const me = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    });
+    const userId = me.json().user.id as string;
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/account/deletion",
+      headers: { cookie, origin: "http://localhost:3000" },
+      payload: {
+        requestId: randomUUID(),
+        password: registration.password,
+        confirmation: "DELETE"
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const requestId = randomUUID();
+    const queued = await app.inject({
+      method: "POST",
+      url: "/api/account/deletion",
+      headers: { cookie, origin: "http://localhost:3000" },
+      payload: {
+        requestId,
+        password: registration.password,
+        confirmation: "DELETE MY ACCOUNT"
+      }
+    });
+    expect(queued.statusCode).toBe(202);
+    expect(queued.json().request).toMatchObject({
+      requestId,
+      status: "queued",
+      attemptCount: 0
+    });
+
+    await accountDeletionService.runOnce();
+    expect(await repository.findAccountDeletionByUser(userId)).toMatchObject({
+      status: "completed",
+      completedAt: expect.any(String)
+    });
+    expect(await repository.findUserByEmail(registration.email)).toBeNull();
+    expect(repository.accountDeletionEventsForTest().map(({ eventType }) => eventType))
+      .toEqual([
+        "account_deletion.requested",
+        "account_deletion.completed"
+      ]);
+
+    const signedOut = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    });
+    expect(signedOut.statusCode).toBe(401);
+  });
+
+  it("delays account deletion for active calls and blocks new call mutations", async () => {
+    const { app, repository, accountDeletionService } = createAuthApp();
+    const input = {
+      ...registration,
+      email: "active-deletion@example.com",
+      phoneE164: "+41710000021"
+    };
+    const cookie = await registerAndVerify(app, input);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie, origin: "http://localhost:3000" },
+      payload: callBrief
+    });
+    expect(created.statusCode).toBe(201);
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${created.json().id}/approve-and-start`,
+      headers: { cookie, origin: "http://localhost:3000" }
+    });
+    expect(started.statusCode).toBe(200);
+
+    const queued = await app.inject({
+      method: "POST",
+      url: "/api/account/deletion",
+      headers: { cookie, origin: "http://localhost:3000" },
+      payload: {
+        requestId: randomUUID(),
+        password: input.password,
+        confirmation: "DELETE MY ACCOUNT"
+      }
+    });
+    expect(queued.statusCode).toBe(202);
+
+    const blockedMutation = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie, origin: "http://localhost:3000" },
+      payload: callBrief
+    });
+    expect(blockedMutation.statusCode).toBe(409);
+    expect(blockedMutation.json()).toEqual({ error: "ACCOUNT_DELETION_PENDING" });
+
+    await accountDeletionService.runOnce();
+    const user = await repository.findUserByEmail(input.email);
+    expect(user).not.toBeNull();
+    expect(await repository.findAccountDeletionByUser(user!.id)).toMatchObject({
+      status: "waiting_for_calls",
+      attemptCount: 0,
+      lastErrorCode: "ACTIVE_CALL_IN_PROGRESS"
+    });
+  });
+
+  it("exposes exhausted deletion to admins and records a reasoned recovery generation", async () => {
+    const { app, repository } = createAuthApp();
+    const adminInput = {
+      ...registration,
+      email: "deletion-admin@example.com",
+      phoneE164: "+41710000022"
+    };
+    const targetInput = {
+      ...registration,
+      email: "deletion-target@example.com",
+      phoneE164: "+41710000023"
+    };
+    const adminCookie = await registerAndVerify(app, adminInput);
+    const targetCookie = await registerAndVerify(app, targetInput);
+    const adminId = (await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: adminCookie }
+    })).json().user.id as string;
+    const targetId = (await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: targetCookie }
+    })).json().user.id as string;
+    await repository.setUserRoleForTest(adminId, "admin");
+    const requestId = randomUUID();
+    await repository.requestAccountDeletion({
+      requestId,
+      userId: targetId,
+      now: "2026-08-23T10:00:00.000Z",
+      maxAttempts: 5
+    });
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const now = `2026-08-23T10:0${attempt}:00.000Z`;
+      const claimed = await repository.claimAccountDeletion({
+        workerId: "test-worker",
+        now,
+        leaseExpiresAt: `2026-08-23T10:0${attempt}:30.000Z`
+      });
+      expect(claimed?.attemptCount).toBe(attempt);
+      await repository.failAccountDeletion({
+        requestId,
+        workerId: "test-worker",
+        now,
+        retryAt: `2026-08-23T10:0${attempt + 1}:00.000Z`,
+        errorCode: "PROVIDER_RECORDING_DELETE_FAILED"
+      });
+    }
+    expect(await repository.findAccountDeletionByUser(targetId)).toMatchObject({
+      status: "needs_support",
+      attemptCount: 5
+    });
+
+    const ledger = await app.inject({
+      method: "GET",
+      url: `/api/admin/users/${targetId}/credits`,
+      headers: { cookie: adminCookie }
+    });
+    expect(ledger.statusCode).toBe(200);
+    expect(ledger.json().accountDeletion).toMatchObject({
+      requestId,
+      status: "needs_support"
+    });
+
+    const retried = await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${targetId}/account-deletion/${requestId}/retry`,
+      headers: { cookie: adminCookie, origin: "http://localhost:3000" },
+      payload: { reason: "Provider incident resolved in support ticket 123" }
+    });
+    expect(retried.statusCode).toBe(202);
+    expect(await repository.findAccountDeletionByUser(targetId)).toMatchObject({
+      status: "queued",
+      generation: 2,
+      attemptCount: 0,
+      lastErrorCode: null
+    });
+    expect(repository.accountDeletionEventsForTest()).toContainEqual(
+      expect.objectContaining({
+        eventType: "account_deletion.retry_requested",
+        actorUserId: adminId,
+        reason: "Provider incident resolved in support ticket 123"
+      })
     );
   });
 });

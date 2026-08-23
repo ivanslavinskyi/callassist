@@ -1,6 +1,6 @@
 # Data deletion and account anonymization policy
 
-Status: implementation baseline for checkpoint 6F3. This document is a technical lifecycle policy, not a substitute for the final Swiss legal/privacy review.
+Status: implemented application baseline through checkpoint 6F3b. This document is a technical lifecycle policy, not a substitute for the final Swiss legal/privacy review or production backup evidence.
 
 ## Principles
 
@@ -36,13 +36,17 @@ Status: implementation baseline for checkpoint 6F3. This document is a technical
 
 Only a terminal, owner-visible call is eligible. The request requires the current password, the exact `DELETE` phrase, and a client-generated UUID. The server checks origin, session, ownership, rate limit, and password. It then deletes any provider recording, atomically redacts local private content, cancels outstanding work for that call, and appends immutable minimized evidence. A repeated request with the same UUID returns the original completion time; a different user or UUID receives the same not-found boundary as any inaccessible call.
 
-## Account deletion flow (next 6F3 slice)
+## Account deletion flow (implemented in 6F3b)
 
-Account-wide deletion will reuse the provider-first call primitive through a durable, leased request with `queued`, `running`, `succeeded`, and `needs_support` public states. The account remains accessible while a provider failure is retryable; successful finalization atomically tombstones identity and revokes sessions. An in-flight call delays execution rather than being silently interrupted. Exhausted provider retries enter support escalation with PII-safe error codes only.
+Account-wide deletion reuses the provider-first call primitive through a durable leased request with owner-visible `queued`, `processing`, `waiting_for_calls`, `retrying`, `needs_support`, and terminal `completed` states. Creation requires an active owner session, current-password step-up, the exact `DELETE MY ACCOUNT` phrase, a client UUID, an allowed origin, and a per-user/IP limit. An existing request is returned idempotently instead of creating competing jobs.
+
+While a request is open, browser call mutations are rejected with `ACCOUNT_DELETION_PENDING`. A dialing, connected, or approval-paused call changes the request to `waiting_for_calls` without consuming its bounded provider-failure budget. Inactive pre-call drafts are safely stopped, and terminal calls are processed in bounded batches through the 6F3a provider-first primitive. Provider failures use exponential backoff and immutable attempt evidence; the fifth failed attempt enters `needs_support`. Admin or superadmin recovery requires an operational reason, creates a new retry generation, and does not restore content already removed by an earlier attempt.
+
+Only after no visible owned call remains does finalization tombstone email, phone, first/last name and password, clear phone verification and last-login time, mark the user `deleted`, revoke every remaining session, append immutable completion evidence, and mark the request `completed`. PostgreSQL performs those final identity/session/request/evidence changes in one transaction and rejects finalization if an undeleted call raced into the account. Global recipient suppressions are never selected or mutated by this flow.
 
 ## Backups and support
 
-Deletion removes data from the live primary store and configured providers. Encrypted backups are not rewritten in place and must expire according to the production backup schedule. Any restored backup must be isolated, replay all deletion evidence created after the backup, pass verification, and only then be eligible to serve traffic. The production retention duration, named controller/support owner, response SLA, and exercised restore-and-replay evidence remain launch gates.
+Deletion removes data from the live primary store and configured providers. Encrypted backups are not rewritten in place and must expire according to the production backup schedule. Any restored backup must be isolated, replay deletion evidence held outside that backup, pass verification, and only then be eligible to serve traffic. Migration 0041 and the application worker do not by themselves satisfy this cross-backup requirement. The production retention duration, independently retained deletion journal, named controller/support owner, response SLA, and exercised restore-and-replay evidence remain launch gates.
 
 ## Swiss privacy references
 

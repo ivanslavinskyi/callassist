@@ -3,6 +3,7 @@ import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import {
   ADMIN_CALL_LIST_LIMIT_MAX,
+  accountDeletionInputSchema,
   accountStatusActionSchema,
   callDataDeletionInputSchema,
   adminCallListFiltersSchema,
@@ -49,8 +50,15 @@ import Fastify, {
 } from "fastify";
 import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import { AccountDataExportService } from "./account-data-export-service";
+import {
+  AccountDeletionService,
+  AccountDeletionServiceError
+} from "./auth/account-deletion-service";
 import { AuthServiceError, type AuthService } from "./auth/auth-service";
-import { decodeAdminUserCursor } from "./auth/auth-repository";
+import {
+  AuthRepositoryError,
+  decodeAdminUserCursor
+} from "./auth/auth-repository";
 import { CallServiceError, type CallService } from "./call-service";
 import type { CreditService } from "./credits/credit-service";
 import { ContentRepositoryError } from "./content/content-repository";
@@ -105,6 +113,7 @@ type BuildAppOptions = {
   recipientOptOutService?: RecipientOptOutService;
   realtimeConfigured?: boolean;
   accountDataExportService?: AccountDataExportService;
+  accountDeletionService?: AccountDeletionService;
 };
 
 type BuildWebhookAppOptions = {
@@ -133,6 +142,12 @@ export function buildApp({
         authService,
         callRepository: service.repository,
         contentRepository: contentService.repository
+      })
+    : undefined,
+  accountDeletionService = authService
+    ? new AccountDeletionService({
+        authRepository: authService.repository,
+        callService: service
       })
     : undefined,
   recipientOptOutService = authService
@@ -195,6 +210,14 @@ export function buildApp({
     ) {
       await reply.status(403).send({ error: "ONBOARDING_REQUIRED" });
       return null;
+    }
+    if (options.mutation && user && accountDeletionService) {
+      try {
+        await accountDeletionService.assertAccountAvailable(user.id);
+      } catch (error) {
+        await sendAccountDeletionError(reply, error);
+        return null;
+      }
     }
     const userId = user?.id ?? null;
     if (options.callId) {
@@ -647,6 +670,58 @@ export function buildApp({
           .header("X-Content-Type-Options", "nosniff")
           .type("application/json; charset=utf-8")
           .send(data);
+      });
+    }
+
+    if (accountDeletionService) {
+      app.get("/api/account/deletion", async (request, reply) => {
+        const user = await authService.authenticate(
+          sessionTokenFromHeaders(request.headers, secureCookies)
+        );
+        if (!user) {
+          return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+        }
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send({ request: await accountDeletionService.getForUser(user.id) });
+      });
+
+      app.post("/api/account/deletion", async (request, reply) => {
+        if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+          return reply.status(403).send({ error: "INVALID_ORIGIN" });
+        }
+        const user = await authService.authenticate(
+          sessionTokenFromHeaders(request.headers, secureCookies)
+        );
+        if (!user) {
+          return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+        }
+        const parsed = accountDeletionInputSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "INVALID_ACCOUNT_DELETION" });
+        }
+        if (!(await enforceEndpointRateLimit(
+          request,
+          reply,
+          user.id,
+          "account-deletion",
+          endpointRateLimitPolicy.accountDeletion
+        ))) return;
+        try {
+          await authService.confirmOwnPassword(user, parsed.data.password);
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .status(202)
+            .send({
+              request: await accountDeletionService.request(
+                user.id,
+                parsed.data.requestId
+              )
+            });
+        } catch (error) {
+          if (error instanceof AuthServiceError) return sendAuthError(reply, error);
+          return sendAccountDeletionError(reply, error);
+        }
       });
     }
 
@@ -1391,7 +1466,13 @@ export function buildApp({
           const usage = await service.getCreditUsage(user.id);
           return reply
             .header("Cache-Control", "private, no-store")
-            .send({ user, usage });
+            .send({
+              user,
+              usage,
+              accountDeletion: accountDeletionService
+                ? await accountDeletionService.getForUser(user.id)
+                : null
+            });
         } catch (error) {
           return sendAuthError(reply, error);
         }
@@ -1450,6 +1531,36 @@ export function buildApp({
         }
       }
     );
+
+    if (accountDeletionService) {
+      app.post<{ Params: { userId: string; requestId: string } }>(
+        "/api/admin/users/:userId/account-deletion/:requestId/retry",
+        async (request, reply) => {
+          const actor = await authorizeAdminMutation(request, reply);
+          if (!actor) return;
+          if (!isUuid(request.params.userId) || !isUuid(request.params.requestId)) {
+            return reply.status(404).send({ error: "ACCOUNT_DELETION_NOT_FOUND" });
+          }
+          const parsed = sessionRevocationActionSchema.safeParse(request.body);
+          if (!parsed.success) {
+            return reply.status(400).send({
+              error: "INVALID_ACCOUNT_DELETION_RETRY"
+            });
+          }
+          try {
+            await accountDeletionService.retryAsAdmin({
+              requestId: request.params.requestId,
+              actorUserId: actor.id,
+              targetUserId: request.params.userId,
+              reason: parsed.data.reason
+            });
+            return reply.status(202).send({ status: "queued" });
+          } catch (error) {
+            return sendAccountDeletionError(reply, error);
+          }
+        }
+      );
+    }
 
     app.post("/api/admin/recipient-suppressions", async (request, reply) => {
       const actor = await authorizeAdminMutation(request, reply);
@@ -1922,6 +2033,7 @@ export function buildApp({
 
   app.addHook("onClose", async () => {
     await Promise.all([
+      accountDeletionService?.close(),
       service.close(),
       authService?.close(),
       contentService?.close()
@@ -2036,6 +2148,20 @@ function sendAuthError(
           ? 409
           : 403;
   return reply.status(status).send({ error: error.code });
+}
+
+function sendAccountDeletionError(
+  reply: { status(code: number): { send(payload: unknown): unknown } },
+  error: unknown
+) {
+  if (error instanceof AccountDeletionServiceError) {
+    return reply.status(409).send({ error: error.code });
+  }
+  if (error instanceof AuthRepositoryError) {
+    const status = error.code === "ACCOUNT_DELETION_NOT_FOUND" ? 404 : 409;
+    return reply.status(status).send({ error: error.code });
+  }
+  throw error;
 }
 
 function sendRecipientOptOutError(

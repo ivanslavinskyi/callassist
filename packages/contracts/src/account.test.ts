@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_DATA_EXPORT_SCHEMA_VERSION,
+  ACCOUNT_DELETION_CONFIRMATION,
   CALL_DATA_DELETION_CONFIRMATION,
   accountDataExportSchema,
+  accountDeletionInputSchema,
+  accountDeletionRequestSchema,
   callDataDeletionInputSchema,
   callDataDeletionResultSchema,
   accountSessionListSchema,
@@ -170,5 +173,29 @@ describe("registrationInputSchema", () => {
       requestId: request.requestId,
       deletedAt: "2026-08-22T10:00:00.000Z"
     });
+  });
+
+  it("validates durable account deletion confirmation and owner-visible status", () => {
+    const input = accountDeletionInputSchema.parse({
+      requestId: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+      password: "a-long-test-password",
+      confirmation: ACCOUNT_DELETION_CONFIRMATION
+    });
+    expect(input.confirmation).toBe("DELETE MY ACCOUNT");
+    expect(accountDeletionInputSchema.safeParse({
+      ...input,
+      confirmation: "DELETE"
+    }).success).toBe(false);
+    expect(accountDeletionRequestSchema.parse({
+      requestId: input.requestId,
+      status: "retrying",
+      attemptCount: 2,
+      maxAttempts: 5,
+      requestedAt: "2026-08-23T10:00:00.000Z",
+      updatedAt: "2026-08-23T10:01:00.000Z",
+      nextAttemptAt: "2026-08-23T10:02:00.000Z",
+      completedAt: null,
+      lastErrorCode: "PROVIDER_RECORDING_DELETE_FAILED"
+    })).toMatchObject({ status: "retrying", attemptCount: 2 });
   });
 });

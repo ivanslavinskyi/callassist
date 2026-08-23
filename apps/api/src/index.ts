@@ -1,6 +1,7 @@
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
 import { AuthService } from "./auth/auth-service";
+import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
 import {
@@ -42,6 +43,7 @@ const {
   postCallTranscriber
 } = createCallRuntimeDependenciesFromEnv();
 const authRepository = createAuthRepositoryFromEnv();
+const durableWorkerMode = durableWorkerModeFromEnv();
 const contentService = new ContentService(createContentRepositoryFromEnv());
 await contentService.initialize();
 const briefCompiler = createBriefCompiler();
@@ -55,12 +57,18 @@ const service = new CallService(
   briefCompiler,
   callAdmissionPolicyFromEnv(),
   operationalCostPolicyFromEnv(),
-  { durableWorkerMode: durableWorkerModeFromEnv() }
+  { durableWorkerMode }
 );
 const authService = new AuthService({
   repository: authRepository,
   verificationProvider: createVerificationProviderFromEnv(),
   signupCreditGranter: service
+});
+const accountDeletionService = new AccountDeletionService({
+  authRepository,
+  callService: service,
+  workerEnabled: durableWorkerMode === "embedded",
+  onError: (error) => app.log.error(error, "Account deletion worker failed")
 });
 const creditService = new CreditService({
   repository,
@@ -75,6 +83,7 @@ const app = buildApp({
   authService,
   creditService,
   contentService,
+  accountDeletionService,
   endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv(),
   realtimeConfigured: telephonyProvider instanceof TwilioTelephonyProvider
 });
@@ -109,6 +118,7 @@ if (webhookApp) {
   });
 }
 const recoveredCalls = await service.initialize();
+accountDeletionService.start();
 const port = Number(process.env.PORT ?? 4000);
 await app.listen({ host: "0.0.0.0", port });
 

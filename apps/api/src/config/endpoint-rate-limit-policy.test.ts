@@ -10,7 +10,8 @@ describe("endpoint rate-limit policy", () => {
       recordingDownload: { userLimit: 30, ipLimit: 150, windowMs: 3_600_000 },
       transcriptionRetry: { userLimit: 5, ipLimit: 25, windowMs: 86_400_000 },
       dataExport: { userLimit: 2, ipLimit: 10, windowMs: 86_400_000 },
-      callDataDeletion: { userLimit: 5, ipLimit: 25, windowMs: 86_400_000 }
+      callDataDeletion: { userLimit: 5, ipLimit: 25, windowMs: 86_400_000 },
+      accountDeletion: { userLimit: 3, ipLimit: 15, windowMs: 86_400_000 }
     });
   });
 

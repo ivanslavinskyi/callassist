@@ -1,4 +1,5 @@
 import type {
+  AccountDeletionRequest,
   AdministrableUserStatus,
   AdminUserSummary,
   RegistrationInput,
@@ -46,6 +47,36 @@ export type AccountDataExportEventInput = {
   callCount: number;
   byteCount: number;
   createdAt: string;
+};
+
+export type AccountDeletionRequestRecord = AccountDeletionRequest & {
+  userId: string;
+  generation: number;
+  leaseOwner: string | null;
+  leasedAt: string | null;
+  leaseExpiresAt: string | null;
+};
+
+export type ClaimAccountDeletionInput = {
+  workerId: string;
+  now: string;
+  leaseExpiresAt: string;
+};
+
+export type AccountDeletionLeaseInput = {
+  requestId: string;
+  workerId: string;
+  now: string;
+};
+
+export type FailAccountDeletionInput = AccountDeletionLeaseInput & {
+  errorCode: string;
+  retryAt: string;
+};
+
+export type RetryAccountDeletionInput = AccountAdminInput & {
+  requestId: string;
+  now: string;
 };
 
 export type AdminUserCursor = { createdAt: string; id: string };
@@ -100,6 +131,27 @@ export interface AuthRepository {
   recordAccountDataExport(
     input: AccountDataExportEventInput
   ): Promise<void>;
+  requestAccountDeletion(input: {
+    requestId: string;
+    userId: string;
+    now: string;
+    maxAttempts: number;
+  }): Promise<AccountDeletionRequestRecord>;
+  findAccountDeletionByUser(
+    userId: string
+  ): Promise<AccountDeletionRequestRecord | null>;
+  claimAccountDeletion(
+    input: ClaimAccountDeletionInput
+  ): Promise<AccountDeletionRequestRecord | null>;
+  renewAccountDeletionLease(input: AccountDeletionLeaseInput & {
+    leaseExpiresAt: string;
+  }): Promise<boolean>;
+  deferAccountDeletionForActiveCall(input: AccountDeletionLeaseInput & {
+    retryAt: string;
+  }): Promise<boolean>;
+  failAccountDeletion(input: FailAccountDeletionInput): Promise<boolean>;
+  completeAccountDeletion(input: AccountDeletionLeaseInput): Promise<boolean>;
+  retryAccountDeletion(input: RetryAccountDeletionInput): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -135,7 +187,10 @@ export class AuthRepositoryError extends Error {
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
       | "ACCOUNT_STATUS_UNCHANGED"
-      | "ACCOUNT_STATUS_TRANSITION_INVALID",
+      | "ACCOUNT_STATUS_TRANSITION_INVALID"
+      | "ACCOUNT_DELETION_NOT_AVAILABLE"
+      | "ACCOUNT_DELETION_NOT_FOUND"
+      | "ACCOUNT_DELETION_CALLS_REMAIN",
     message = code
   ) {
     super(message);
