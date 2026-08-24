@@ -273,9 +273,27 @@ describe("call API", () => {
     );
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
+    const readUntil = async (expected: string) => {
+      let text = "";
+      return Promise.race([
+        (async () => {
+          while (!text.includes(expected)) {
+            const chunk = await reader.read();
+            if (chunk.done) throw new Error("SSE stream ended unexpectedly");
+            text += decoder.decode(chunk.value, { stream: true });
+          }
+          return text;
+        })(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Timed out waiting for SSE event")), 1_000)
+        )
+      ]);
+    };
 
     expect(response.status).toBe(200);
-    expect(decoder.decode((await reader.read()).value)).toContain("connected");
+    const connected = await readUntil('"type":"call.updated"');
+    expect(connected).toContain("connected");
+    expect(connected).toContain(brief.id);
 
     service.publishTranscriptDelta(
       brief.id,
@@ -284,13 +302,7 @@ describe("call API", () => {
       "Hello live",
       "en-GB"
     );
-    const eventChunk = await Promise.race([
-      reader.read(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Timed out waiting for SSE event")), 1_000)
-      )
-    ]);
-    const eventText = decoder.decode(eventChunk.value);
+    const eventText = await readUntil('"type":"transcript.delta"');
     expect(eventText).toContain('"type":"transcript.delta"');
     expect(eventText).toContain("Hello live");
 

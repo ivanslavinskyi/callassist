@@ -2202,13 +2202,14 @@ export function buildApp({
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       };
       const unsubscribe = service.subscribe(request.params.id, send);
+      send({ type: "call.updated", brief: snapshot.brief });
       const heartbeat = setInterval(
         () => {
           if (!closed && !reply.raw.destroyed && !reply.raw.writableEnded) {
             reply.raw.write(": heartbeat\n\n");
           }
         },
-        15_000
+        5_000
       );
 
       const cleanup = () => {
