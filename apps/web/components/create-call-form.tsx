@@ -11,7 +11,7 @@ import {
   type CallLocale,
   type CreateCallBriefInput
 } from "@callassist/contracts";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import {
   createCallBrief,
   getCallPreparationErrorMessage
@@ -49,7 +49,10 @@ const legacyDemoFacts = [
 type CreateCallFormProps = {
   onCreated: (brief: CallBrief) => void;
   initialValue?: CreateCallBriefInput;
-  saveCallBrief?: (input: CreateCallBriefInput) => Promise<CallBrief>;
+  saveCallBrief?: (
+    input: CreateCallBriefInput,
+    idempotencyKey?: string
+  ) => Promise<CallBrief>;
   heading?: string;
   submitLabel?: string;
   onCancel?: () => void;
@@ -78,6 +81,7 @@ export function CreateCallForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const creationIdempotencyKey = useRef<string | null>(null);
 
   const fallbackLanguages = useMemo(
     () => SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== form.locale),
@@ -117,6 +121,7 @@ export function CreateCallForm({
     field: Value,
     value: CreateCallBriefInput[Value]
   ) {
+    creationIdempotencyKey.current = null;
     setForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -126,14 +131,19 @@ export function CreateCallForm({
     setError(null);
 
     try {
-      const brief = await saveCallBrief({
-        ...form,
-        phoneNumber: normalizePhoneNumber(form.phoneNumber),
-        allowedFacts: factsText
-          .split("\n")
-          .map((fact) => fact.trim())
-          .filter(Boolean)
-      });
+      creationIdempotencyKey.current ??= crypto.randomUUID();
+      const brief = await saveCallBrief(
+        {
+          ...form,
+          phoneNumber: normalizePhoneNumber(form.phoneNumber),
+          allowedFacts: factsText
+            .split("\n")
+            .map((fact) => fact.trim())
+            .filter(Boolean)
+        },
+        creationIdempotencyKey.current
+      );
+      creationIdempotencyKey.current = null;
       onCreated(brief);
     } catch (error) {
       setError(getCallPreparationErrorMessage(error, {
@@ -448,7 +458,10 @@ export function CreateCallForm({
             <span>{copy.approvedInformation}</span>
             <textarea
               value={factsText}
-              onChange={(event) => setFactsText(event.target.value)}
+              onChange={(event) => {
+                creationIdempotencyKey.current = null;
+                setFactsText(event.target.value);
+              }}
               rows={5}
               placeholder={copy.approvedInformationPlaceholder}
             />

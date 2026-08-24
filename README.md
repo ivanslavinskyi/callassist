@@ -19,9 +19,12 @@ CallAssist is a privacy-conscious AI voice assistant for controlled outbound pho
   clarification to fixed, material issue codes.
 - Lets the operator review, edit, recompile, and approve-and-call the same versioned
   brief without re-entering its fields.
+- Makes initial brief preparation retry-safe with a browser-stable UUID and a
+  PostgreSQL uniqueness boundary, so a lost response cannot create duplicate briefs.
 - Requires DTMF consent before recipient audio is sent to the model or recorded.
 - Starts a dual-channel Twilio recording only after consent is confirmed.
-- Streams a fast draft transcript to the web console over SSE.
+- Streams a fast draft transcript to the web console over a heartbeat-backed SSE
+  connection whose subscription follows the response lifecycle through proxies.
 - Creates a context-preserving post-call transcript from the complete consented
   recording with one `gpt-transcribe` request. A conservative local aligner can
   add approximate roles and timestamps from live event metadata without copying

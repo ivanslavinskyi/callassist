@@ -95,6 +95,41 @@ describeWithDatabase("PostgresCallRepository", () => {
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
 
+  it("deduplicates concurrent call-brief creation by idempotency key", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Concurrent retry office",
+      phoneNumber: "+41710000006",
+      objective: "Verify concurrent preparation retries create one brief",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const idempotencyKey = randomUUID();
+
+    const [first, retry] = await Promise.all([
+      repository.create(input, compilation, ownerA, idempotencyKey),
+      repository.create(input, compilation, ownerA, idempotencyKey)
+    ]);
+
+    expect(retry.id).toBe(first.id);
+    await expect(
+      repository.findByCreationRequest(ownerA, idempotencyKey)
+    ).resolves.toMatchObject({ id: first.id });
+    const [count] = await inspection<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM call_briefs
+      WHERE creation_idempotency_key = ${idempotencyKey}
+    `;
+    expect(count?.count).toBe(1);
+  });
+
   it("atomically redacts owner call content and preserves immutable minimized evidence", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "Deletion test clinic",

@@ -1,3 +1,4 @@
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app";
 import {
@@ -21,6 +22,10 @@ afterEach(async () => {
 });
 
 function createApp(briefCompiler?: BriefCompiler) {
+  return createAppWithService(briefCompiler).app;
+}
+
+function createAppWithService(briefCompiler?: BriefCompiler) {
   const service = new CallService(
     new InMemoryCallRepository(),
     undefined,
@@ -34,7 +39,7 @@ function createApp(briefCompiler?: BriefCompiler) {
     logger: false
   });
   apps.push(app);
-  return app;
+  return { app, service };
 }
 
 function unavailableRateLimiter(): RateLimiter {
@@ -188,6 +193,108 @@ describe("call API", () => {
     });
     expect(approveResponse.statusCode).toBe(200);
     expect(approveResponse.json().brief.status).toBe("ready");
+  });
+
+  it("returns the same call brief when a creation request is retried", async () => {
+    const app = createApp();
+    const idempotencyKey = "00000000-0000-4000-8000-000000000101";
+    const request = {
+      method: "POST" as const,
+      url: "/api/call-briefs",
+      headers: { "idempotency-key": idempotencyKey },
+      payload: {
+        recipientName: "Retry-safe office",
+        phoneNumber: "+41710000009",
+        objective: "Confirm that retrying preparation does not create a duplicate",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      }
+    };
+
+    const first = await app.inject(request);
+    const retry = await app.inject(request);
+
+    expect(first.statusCode).toBe(201);
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json().id).toBe(first.json().id);
+    const list = await app.inject({ method: "GET", url: "/api/call-briefs" });
+    expect(list.json<{ items: unknown[] }>().items).toHaveLength(1);
+  });
+
+  it("rejects an invalid call creation idempotency key", async () => {
+    const app = createApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { "idempotency-key": "not-a-uuid" },
+      payload: {
+        recipientName: "Invalid key office",
+        phoneNumber: "+41710000008",
+        objective: "Confirm invalid idempotency keys are rejected",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "INVALID_IDEMPOTENCY_KEY" });
+  });
+
+  it("keeps the event stream subscribed after the request has completed", async () => {
+    const { app, service } = createAppWithService();
+    const brief = await service.create({
+      recipientName: "Live transcript office",
+      phoneNumber: "+41710000007",
+      objective: "Verify live transcript delivery over the event stream",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const { port } = app.server.address() as AddressInfo;
+    const controller = new AbortController();
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/call-briefs/${brief.id}/events`,
+      { signal: controller.signal }
+    );
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+
+    expect(response.status).toBe(200);
+    expect(decoder.decode((await reader.read()).value)).toContain("connected");
+
+    service.publishTranscriptDelta(
+      brief.id,
+      "recipient:1",
+      "recipient",
+      "Hello live",
+      "en-GB"
+    );
+    const eventChunk = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out waiting for SSE event")), 1_000)
+      )
+    ]);
+    const eventText = decoder.decode(eventChunk.value);
+    expect(eventText).toContain('"type":"transcript.delta"');
+    expect(eventText).toContain("Hello live");
+
+    controller.abort();
   });
 
   it("updates an existing brief and approves and starts it with one request", async () => {

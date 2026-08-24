@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
@@ -1822,6 +1823,19 @@ export function buildApp({
         issues: parsed.error.flatten()
       });
     }
+    const idempotencyHeader = request.headers["idempotency-key"];
+    if (
+      idempotencyHeader !== undefined &&
+      (typeof idempotencyHeader !== "string" || !isUuid(idempotencyHeader))
+    ) {
+      return reply.status(400).send({ error: "INVALID_IDEMPOTENCY_KEY" });
+    }
+    const creationIdempotencyKey = idempotencyHeader ?? randomUUID();
+    const existing = await service.findByCreationRequest(
+      access.userId,
+      creationIdempotencyKey
+    );
+    if (existing) return reply.status(201).send(existing);
     if (!(await enforceEndpointRateLimit(
       request,
       reply,
@@ -1832,7 +1846,11 @@ export function buildApp({
 
     try {
       return reply.status(201).send(
-        await service.create(parsed.data, access.userId)
+        await service.create(
+          parsed.data,
+          access.userId,
+          creationIdempotencyKey
+        )
       );
     } catch (error) {
       logCallPreparationError(request.log, error);
@@ -2165,7 +2183,8 @@ export function buildApp({
       const headers: Record<string, string> = {
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
-        "Content-Type": "text/event-stream"
+        "Content-Type": "text/event-stream",
+        "X-Accel-Buffering": "no"
       };
       const requestOrigin = request.headers.origin;
       if (requestOrigin && webOrigins.includes(requestOrigin)) {
@@ -2174,21 +2193,32 @@ export function buildApp({
         headers.Vary = "Origin";
       }
       reply.raw.writeHead(200, headers);
-      reply.raw.write(": connected\n\n");
+      reply.raw.flushHeaders();
+      reply.raw.write("retry: 2000\n: connected\n\n");
 
+      let closed = false;
       const send = (event: CallEvent) => {
+        if (closed || reply.raw.destroyed || reply.raw.writableEnded) return;
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       };
       const unsubscribe = service.subscribe(request.params.id, send);
       const heartbeat = setInterval(
-        () => reply.raw.write(": heartbeat\n\n"),
+        () => {
+          if (!closed && !reply.raw.destroyed && !reply.raw.writableEnded) {
+            reply.raw.write(": heartbeat\n\n");
+          }
+        },
         15_000
       );
 
-      request.raw.on("close", () => {
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
         clearInterval(heartbeat);
         unsubscribe();
-      });
+      };
+      reply.raw.once("close", cleanup);
+      reply.raw.once("error", cleanup);
     }
   );
 

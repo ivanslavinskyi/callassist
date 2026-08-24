@@ -446,8 +446,15 @@ export class PostgresCallRepository implements CallRepository {
   async create(
     input: CreateCallBriefInput,
     compilation: CallCompilation,
-    userId: string | null = null
+    userId: string | null = null,
+    creationIdempotencyKey: string = randomUUID()
   ) {
+    const existing = await this.findByCreationRequest(
+      userId,
+      creationIdempotencyKey
+    );
+    if (existing) return existing;
+
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
     const id = randomUUID();
@@ -464,12 +471,13 @@ export class PostgresCallRepository implements CallRepository {
       this.#encryptionKey
     );
 
-    await this.#sql.begin(async (transaction) => {
+    const inserted = await this.#sql.begin(async (transaction) => {
       if (userId) await this.#lockActiveUser(transaction, userId);
-      await transaction`
+      const insertedRows = await transaction<{ id: string }[]>`
         INSERT INTO call_briefs (
           id,
           user_id,
+          creation_idempotency_key,
           recipient_name,
           phone_number,
           objective,
@@ -495,6 +503,7 @@ export class PostgresCallRepository implements CallRepository {
         ) VALUES (
           ${id},
           ${userId},
+          ${creationIdempotencyKey},
           ${parsed.recipientName},
           ${parsed.phoneNumber},
           ${runtime.objective},
@@ -518,7 +527,12 @@ export class PostgresCallRepository implements CallRepository {
           ${now},
           ${now}
         )
+        ON CONFLICT (creation_idempotency_key)
+          WHERE creation_idempotency_key IS NOT NULL
+          DO NOTHING
+        RETURNING id
       `;
+      if (insertedRows.length === 0) return false;
       await this.#audit(transaction, id, "call.created", {
         locale: parsed.locale,
         status: runtime.status,
@@ -543,10 +557,34 @@ export class PostgresCallRepository implements CallRepository {
         compilation,
         now.toISOString()
       );
+      return true;
     });
+
+    if (!inserted) {
+      const raced = await this.findByCreationRequest(
+        userId,
+        creationIdempotencyKey
+      );
+      if (raced) return raced;
+      throw new CallRepositoryError("CALL_CREATION_IDEMPOTENCY_CONFLICT");
+    }
 
     const snapshot = await this.#require(id);
     return snapshot.brief;
+  }
+
+  async findByCreationRequest(
+    userId: string | null,
+    creationIdempotencyKey: string
+  ) {
+    const [row] = await this.#sql<CallBriefRow[]>`
+      ${this.#briefSelect()}
+      WHERE creation_idempotency_key = ${creationIdempotencyKey}
+        AND user_id IS NOT DISTINCT FROM ${userId}::uuid
+        AND data_deleted_at IS NULL
+      LIMIT 1
+    `;
+    return row ? this.#mapBrief(row) : null;
   }
 
   async isOwnedBy(id: string, userId: string | null) {

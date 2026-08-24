@@ -399,18 +399,43 @@ export class CallService {
     return job;
   }
 
-  async create(input: CreateCallBriefInput, userId: string | null = null) {
+  async create(
+    input: CreateCallBriefInput,
+    userId: string | null = null,
+    creationIdempotencyKey: string = randomUUID()
+  ) {
     try {
+      const existing = await this.repository.findByCreationRequest(
+        userId,
+        creationIdempotencyKey
+      );
+      if (existing) return existing;
+
       const compilation = await this.#briefCompiler.compile(
         normalizeCreateCallBriefInput(input)
       );
-      return this.repository.create(input, compilation, userId);
+      return this.repository.create(
+        input,
+        compilation,
+        userId,
+        creationIdempotencyKey
+      );
     } catch (error) {
       if (error instanceof BriefCompilerError) {
         throw mapBriefCompilerError(error);
       }
       throw error;
     }
+  }
+
+  findByCreationRequest(
+    userId: string | null,
+    creationIdempotencyKey: string
+  ) {
+    return this.repository.findByCreationRequest(
+      userId,
+      creationIdempotencyKey
+    );
   }
 
   async assertOwned(id: string, userId: string | null) {

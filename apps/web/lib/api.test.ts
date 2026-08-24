@@ -790,22 +790,29 @@ describe("API client headers", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await createCallBrief({
-      recipientName: "Praxis",
-      phoneNumber: "+41710000000",
-      objective: "Einen Termin fuer naechste Woche vereinbaren",
-      assistantProfileId: "sebastian",
-      representedPersonFirstName: "Nina",
-      representedPersonLastName: "Keller",
-      assistanceReason: "language_barrier",
-      locale: "de-CH",
-      allowLanguageSwitch: false,
-      allowedFacts: []
-    });
+    const idempotencyKey = "00000000-0000-4000-8000-000000000102";
+    await createCallBrief(
+      {
+        recipientName: "Praxis",
+        phoneNumber: "+41710000000",
+        objective: "Einen Termin fuer naechste Woche vereinbaren",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
+        assistanceReason: "language_barrier",
+        locale: "de-CH",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      },
+      idempotencyKey
+    );
 
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(request.headers).get("Content-Type")).toBe(
       "application/json"
+    );
+    expect(new Headers(request.headers).get("Idempotency-Key")).toBe(
+      idempotencyKey
     );
   });
 

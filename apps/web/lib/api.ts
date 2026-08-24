@@ -618,9 +618,13 @@ export async function listCallBriefs(options: {
   );
 }
 
-export async function createCallBrief(input: CreateCallBriefInput) {
+export async function createCallBrief(
+  input: CreateCallBriefInput,
+  idempotencyKey = crypto.randomUUID()
+) {
   return apiRequest<CallBrief>("/api/call-briefs", {
     method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input)
   });
 }

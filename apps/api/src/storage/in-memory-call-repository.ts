@@ -150,6 +150,10 @@ export class InMemoryCallRepository implements CallRepository {
   readonly mode = "memory" as const;
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #owners = new Map<string, string | null>();
+  readonly #creationRequests = new Map<
+    string,
+    { callId: string; userId: string | null }
+  >();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
   readonly #callTelemetryEvents = new Map<
     string,
@@ -243,8 +247,21 @@ export class InMemoryCallRepository implements CallRepository {
   async create(
     input: CreateCallBriefInput,
     compilation: CallCompilation,
-    userId: string | null = null
+    userId: string | null = null,
+    creationIdempotencyKey: string = randomUUID()
   ) {
+    const creationRequest = this.#creationRequests.get(creationIdempotencyKey);
+    if (creationRequest) {
+      if (
+        creationRequest.userId === userId &&
+        !this.#callDataDeletions.has(creationRequest.callId)
+      ) {
+        const existing = this.#calls.get(creationRequest.callId);
+        if (existing) return copy(existing.brief);
+      }
+      throw new CallRepositoryError("CALL_CREATION_IDEMPOTENCY_CONFLICT");
+    }
+
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
     const now = new Date().toISOString();
@@ -265,6 +282,10 @@ export class InMemoryCallRepository implements CallRepository {
       finalTranscript: null
     });
     this.#owners.set(brief.id, userId);
+    this.#creationRequests.set(
+      creationIdempotencyKey,
+      { callId: brief.id, userId }
+    );
     this.#appendTelemetry(brief.id, {
       idempotencyKey: `brief:${compilation.revision}:created`,
       occurredAt: now,
@@ -280,6 +301,20 @@ export class InMemoryCallRepository implements CallRepository {
     this.#appendCompilationTelemetry(brief.id, compilation, now);
 
     return copy(brief);
+  }
+
+  async findByCreationRequest(
+    userId: string | null,
+    creationIdempotencyKey: string
+  ) {
+    const request = this.#creationRequests.get(creationIdempotencyKey);
+    if (
+      !request ||
+      request.userId !== userId ||
+      this.#callDataDeletions.has(request.callId)
+    ) return null;
+    const snapshot = this.#calls.get(request.callId);
+    return snapshot ? copy(snapshot.brief) : null;
   }
 
   async isOwnedBy(id: string, userId: string | null) {

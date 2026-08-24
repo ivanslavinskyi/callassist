@@ -279,6 +279,15 @@ Acceptance for 6F5 is met locally: twenty concurrent decisions split across two 
 
 Acceptance for 6F6 is met locally: another account or another session cannot consume the challenge; the current phone remains unchanged until provider approval; successful completion keeps the initiating session while revoking all others; a grant proved through the old phone cannot reset the password afterward; and concurrent accounts cannot both claim the same number. Migration 0044 brings the repository to 44 migrations and 48 public tables. The complete gate passes 410 tests (268 API, 80 web, 62 contracts), lint/typecheck, production builds including the localized Account route, dependency audit, migration drift check, fresh-database migration, and a disposable 48-table backup/restore drill. Support-assisted phone loss remains explicitly unavailable rather than becoming an admin bypass.
 
+## Completed stabilization checkpoint — retry-safe preparation and live transcript
+
+- [x] Carry one UUID idempotency key across retries of an unchanged call-preparation form and reset it after success or any form edit.
+- [x] Return an already completed matching request before rate-limit consumption or recompilation, and enforce concurrent deduplication with memory/PostgreSQL parity plus a unique database index.
+- [x] Bind SSE cleanup to the response lifecycle, keep the stream active with heartbeats, and disable common proxy buffering so live transcript deltas remain visible during a call.
+- [x] Cover API replay, invalid keys, concurrent PostgreSQL insertion, browser request headers, and a real HTTP event stream with regressions.
+
+Acceptance is met locally: repeated and concurrent preparation requests return one brief ID and one database row, while an open event stream receives a transcript delta after request-body completion. Migration 0045 brings the repository to 45 migrations and 48 public tables. The complete automated suite passes 415 tests (273 API, 80 web, 62 contracts), typecheck/lint, migration drift validation, and production builds.
+
 The next repository checkpoint is **6F7 — sensitive-action step-up and suspicious-session response**: inventory sensitive owner/admin operations, assign explicit assurance levels, issue bounded server-side recent-auth/OTP grants without browser-readable credentials, invalidate grants on password/phone/session security changes, define privacy-safe suspicious-session signals and response actions, add security-change notification boundaries, and prove cross-session/replay/RBAC behavior. Support identity proofing and production notification delivery remain separate reviewed rollout gates.
 
 # Public Beta Foundation

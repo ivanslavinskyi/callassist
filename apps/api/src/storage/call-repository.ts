@@ -395,8 +395,13 @@ export interface CallRepository {
   create(
     input: CreateCallBriefInput,
     compilation: CallCompilation,
-    userId?: string | null
+    userId?: string | null,
+    creationIdempotencyKey?: string
   ): Promise<CallBrief>;
+  findByCreationRequest(
+    userId: string | null,
+    creationIdempotencyKey: string
+  ): Promise<CallBrief | null>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   findCallDataDeletion(
     id: string,
@@ -608,6 +613,7 @@ export class CallRepositoryError extends Error {
       | "CALL_DATA_DELETION_IDEMPOTENCY_CONFLICT"
       | "CALL_FEEDBACK_NOT_AVAILABLE"
       | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
+      | "CALL_CREATION_IDEMPOTENCY_CONFLICT"
       | "DURABLE_JOB_LEASE_LOST"
       | "DURABLE_JOB_NOT_FOUND"
       | "DURABLE_JOB_NOT_RETRYABLE"
