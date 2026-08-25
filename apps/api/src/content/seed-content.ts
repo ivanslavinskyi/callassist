@@ -236,35 +236,33 @@ const definitions: SeedDefinition[] = [
       en: {
         slug: "faq",
         title: "Frequently asked questions",
-        summary: "Answers about disclosure, consent, recording, transcripts, retention, Swiss destinations, and beta credits.",
+        summary: "Answers about how CallAssist behaves before, during, and after a beta call.",
         seoTitle: "Frequently asked questions | CallAssist",
         seoDescription: "Common questions about using the CallAssist beta.",
         sections: [
           { heading: "Does the recipient know it is an AI call?", paragraphs: ["Yes. The assistant states that it is an AI assistant acting for the named user before asking for consent."], bullets: [] },
-          { heading: "When does processing and recording begin?", paragraphs: ["Recipient audio is not sent to the conversation model and recording does not begin until the recipient presses 1 after the disclosure."], bullets: [] },
-          { heading: "Can I turn recording off?", paragraphs: ["Choose delete after final transcript for zero-day audio retention. The temporary consent-gated recording is used to create the final transcript and then deleted."], bullets: [] },
-          { heading: "How long is audio retained?", paragraphs: ["The available choices are 0, 7, or 30 days. Retained audio can also be deleted manually from the call detail."], bullets: [] },
-          { heading: "Are transcripts always accurate?", paragraphs: ["No. Live and final transcripts can contain errors. Verify important names, dates, numbers, and commitments independently."], bullets: [] },
-          { heading: "Which numbers can be called?", paragraphs: ["The beta accepts valid Swiss destinations only. Production Twilio geographic permissions must also be restricted before launch."], bullets: [] },
-          { heading: "How do credits work?", paragraphs: ["Phone verification grants three beta credits once. One credit is charged only after a provider-confirmed successful connection; busy, no-answer, cancellation, and pre-connection technical failure are refunded."], bullets: [] },
-          { heading: "Are website and call languages the same?", paragraphs: ["No. The website is currently English or German. You select a supported call language separately for each brief and may allow one controlled fallback language."], bullets: [] }
+          { heading: "Can CallAssist say something I did not approve?", paragraphs: ["You approve the objective, facts and prepared call plan, not every sentence word for word. CallAssist may phrase ordinary questions naturally, but it is instructed not to invent concrete facts or make commitments outside the reviewed plan."], bullets: [] },
+          { heading: "What happens if the recipient asks an unexpected question?", paragraphs: ["CallAssist must not guess. It can ask a short clarifying question. If the answer is not in the objective or approved facts, it says that the information is unavailable and can offer to pass the question back to you."], bullets: [] },
+          { heading: "Which phone numbers can I call during the beta?", paragraphs: ["The beta accepts valid Swiss destination numbers only."], bullets: [] },
+          { heading: "What happens if nobody answers?", paragraphs: ["The attempt ends as unanswered and the reserved beta credit is refunded. A credit is charged only after the phone provider confirms a connection."], bullets: [] },
+          { heading: "When does processing and recording begin?", paragraphs: ["Recipient audio is not sent to the conversation model and recording does not begin until the recipient hears the disclosure and presses 1 to consent."], bullets: [] },
+          { heading: "Can I delete retained audio and my call data?", paragraphs: ["Yes. Retained audio can be deleted manually from the call detail. For a completed call, password-confirmed call-data deletion removes provider audio and redacts the call brief, transcripts, approval text and feedback comment; minimized credit, consent, safety, technical and audit evidence remains."], bullets: [] }
         ]
       },
       de: {
         slug: "faq",
         title: "Häufig gestellte Fragen",
-        summary: "Antworten zu Offenlegung, Einwilligung, Aufnahme, Transkripten, Aufbewahrung, Schweizer Zielen und Beta-Guthaben.",
+        summary: "Antworten dazu, wie sich CallAssist vor, während und nach einem Beta-Anruf verhält.",
         seoTitle: "Häufig gestellte Fragen | CallAssist",
         seoDescription: "Häufige Fragen zur Nutzung der CallAssist-Beta.",
         sections: [
-          { heading: "Weiss die empfangende Person, dass es ein KI-Anruf ist?", paragraphs: ["Ja. Der Assistent nennt sich als KI-Assistent des namentlich genannten Benutzers, bevor er um Einwilligung bittet."], bullets: [] },
-          { heading: "Wann beginnen Verarbeitung und Aufnahme?", paragraphs: ["Empfängeraudio wird erst nach der Offenlegung und dem Drücken der 1 an das Gesprächsmodell übertragen und aufgenommen."], bullets: [] },
-          { heading: "Kann ich die Aufnahme ausschalten?", paragraphs: ["Wählen Sie Löschen nach Endtranskript für eine Audioaufbewahrung von null Tagen. Die temporäre Aufnahme dient dem Endtranskript und wird danach gelöscht."], bullets: [] },
-          { heading: "Wie lange wird Audio aufbewahrt?", paragraphs: ["Zur Auswahl stehen 0, 7 oder 30 Tage. Gespeicherte Aufnahmen können zusätzlich manuell in der Anrufansicht gelöscht werden."], bullets: [] },
-          { heading: "Sind Transkripte immer korrekt?", paragraphs: ["Nein. Live- und Endtranskripte können Fehler enthalten. Prüfen Sie wichtige Namen, Daten, Zahlen und Verpflichtungen unabhängig."], bullets: [] },
-          { heading: "Welche Nummern können angerufen werden?", paragraphs: ["Die Beta akzeptiert nur gültige Schweizer Ziele. Vor dem Start müssen zusätzlich die geografischen Twilio-Berechtigungen eingeschränkt werden."], bullets: [] },
-          { heading: "Wie funktioniert das Guthaben?", paragraphs: ["Die Telefonbestätigung vergibt einmalig drei Beta-Guthaben. Ein Guthaben wird erst nach einer bestätigten Verbindung belastet; Besetzt, keine Antwort, Abbruch und technische Fehler vor der Verbindung werden erstattet."], bullets: [] },
-          { heading: "Sind Website- und Anrufsprache identisch?", paragraphs: ["Nein. Die Website ist derzeit auf Deutsch oder Englisch verfügbar. Die Anrufsprache wird pro Entwurf separat gewählt; optional ist eine kontrollierte Ausweichsprache möglich."], bullets: [] }
+          { heading: "Weiss die angerufene Person, dass ein KI-Assistent anruft?", paragraphs: ["Ja. Der Assistent erklärt vor der Einwilligung, dass er als KI-Assistent für die namentlich genannte Person anruft."], bullets: [] },
+          { heading: "Kann CallAssist etwas sagen, das ich nicht freigegeben habe?", paragraphs: ["Sie geben Ziel, Fakten und den vorbereiteten Gesprächsplan frei, nicht jeden Satz Wort für Wort. CallAssist kann gewöhnliche Fragen natürlich formulieren, darf aber keine konkreten Fakten erfinden oder Zusagen ausserhalb des geprüften Plans machen."], bullets: [] },
+          { heading: "Was passiert bei einer unerwarteten Rückfrage?", paragraphs: ["CallAssist darf nicht raten. Der Assistent kann kurz nachfragen. Fehlt die Antwort in Ziel oder freigegebenen Fakten, sagt er, dass diese Information nicht vorliegt, und kann anbieten, die Frage an Sie weiterzugeben."], bullets: [] },
+          { heading: "Welche Telefonnummern kann ich während der Beta anrufen?", paragraphs: ["Die Beta akzeptiert nur gültige Schweizer Zielnummern."], bullets: [] },
+          { heading: "Was passiert, wenn niemand abnimmt?", paragraphs: ["Der Versuch endet als unbeantwortet und das reservierte Beta-Guthaben wird zurückerstattet. Ein Guthaben wird erst belastet, wenn der Telefonanbieter eine Verbindung bestätigt."], bullets: [] },
+          { heading: "Wann beginnen Verarbeitung und Aufzeichnung?", paragraphs: ["Das Audio der angerufenen Person wird erst an das Gesprächsmodell gesendet und aufgezeichnet, nachdem sie die Offenlegung gehört und mit der Taste 1 zugestimmt hat."], bullets: [] },
+          { heading: "Kann ich gespeicherte Audiodaten und meine Anrufdaten löschen?", paragraphs: ["Ja. Gespeicherte Audiodaten können in der Anrufansicht manuell gelöscht werden. Bei einem abgeschlossenen Anruf entfernt die passwortbestätigte Löschung das Audio beim Anbieter und redigiert Gesprächsplan, Transkripte, Freigabetext und Feedback-Kommentar; minimierte Guthaben-, Einwilligungs-, Sicherheits-, Technik- und Auditnachweise bleiben erhalten."], bullets: [] }
         ]
       }
     }
@@ -337,45 +335,66 @@ const landingBlocks: LandingBlock[] = [
     blockType: "hero",
     sortOrder: 0,
     enabled: true,
-    eyebrow: localized("Accessible phone assistance", "Barrierefreie Telefonassistenz"),
+    eyebrow: localized(
+      "PHONE CALLS WITHOUT THE SPEAKING BARRIER",
+      "TELEFONIEREN OHNE SPRACHBARRIERE"
+    ),
     title: localized(
-      "Your call. Your intent. An AI assistant that speaks for you.",
-      "Ihr Anruf. Ihr Anliegen. Ein KI-Assistent, der für Sie spricht."
+      "Need to make a phone call, but speaking is the hard part?",
+      "Sie müssen telefonieren, aber das Sprechen ist die eigentliche Hürde?"
+    ),
+    supportingTitle: localized(
+      "CallAssist can make it for you.",
+      "CallAssist kann den Anruf für Sie übernehmen."
     ),
     lead: localized(
-      "CallAssist helps people with speech impairments or local-language barriers prepare, review, and supervise everyday phone calls.",
-      "CallAssist hilft Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere, alltägliche Telefonanrufe vorzubereiten, zu prüfen und zu begleiten."
+      "Tell CallAssist what you need, review what it may say, and let the AI assistant place the call on your behalf.",
+      "Beschreiben Sie, was Sie erreichen möchten, prüfen Sie vorher, was der Assistent sagen darf, und lassen Sie CallAssist den Anruf in Ihrem Namen führen."
+    ),
+    secondaryText: localized(
+      "Built for people with speech difficulties and for anyone who needs help calling in a local language.",
+      "Für Menschen mit Sprach- oder Sprechschwierigkeiten und für alle, denen Telefonate in einer lokalen Sprache schwerfallen."
     ),
     badges: localizedList(
-      ["Free public beta", "3 calls included", "Switzerland only"],
-      ["Kostenlose öffentliche Beta", "3 Anrufe inklusive", "Nur Schweiz"]
+      ["Free public beta", "3 calls included", "Swiss numbers only"],
+      ["Kostenlose öffentliche Beta", "3 Anrufe inklusive", "Nur Schweizer Nummern"]
     ),
-    primaryCtaLabel: localized("Try the beta", "Beta testen"),
-    secondaryCtaLabel: localized("Sign in", "Anmelden"),
+    primaryCtaLabel: localized("Try the beta", "Beta ausprobieren"),
+    secondaryCtaLabel: localized("See how it works", "So funktioniert es"),
     seoTitle: localized(
-      "CallAssist — AI phone assistance under your control",
-      "CallAssist — KI-Telefonassistenz unter Ihrer Kontrolle"
+      "CallAssist — phone calls without the speaking barrier",
+      "CallAssist — telefonieren ohne Sprachbarriere"
     ),
     seoDescription: localized(
-      "Supervised AI phone calls for people with speech impairments or local-language barriers.",
-      "Begleitete KI-Telefonanrufe für Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere."
+      "Prepare, review and approve everyday phone calls made by an AI assistant on your behalf.",
+      "Alltägliche Telefonate vorbereiten, prüfen und freigeben, die ein KI-Assistent in Ihrem Namen führt."
     )
   },
   {
-    id: "72000000-0000-4000-8000-000000000002",
-    blockType: "how_it_works",
+    id: "72000000-0000-4000-8000-000000000008",
+    blockType: "problem",
     sortOrder: 1,
     enabled: true,
-    eyebrow: localized("How it works", "So funktioniert es"),
+    eyebrow: localized("WHY CALLASSIST", "WARUM CALLASSIST"),
     title: localized(
-      "You remain in control from brief to result.",
-      "Vom Auftrag bis zum Ergebnis behalten Sie die Kontrolle."
+      "Some calls are harder than they should be.",
+      "Manche Telefonate sind schwieriger, als sie sein sollten."
     ),
-    steps: [
-      landingStep(1, "Describe", "Beschreiben", "Set the recipient, objective, language, and facts the assistant may share.", "Empfänger, Ziel, Sprache und freigegebene Fakten festlegen."),
-      landingStep(2, "Review", "Prüfen", "CallAssist compiles a bounded plan for you to check and explicitly approve.", "CallAssist erstellt einen begrenzten Plan, den Sie prüfen und ausdrücklich genehmigen."),
-      landingStep(3, "Call", "Anrufen", "The assistant identifies itself and waits for consent before conversation processing or recording.", "Der Assistent stellt sich vor und wartet vor Verarbeitung oder Aufnahme auf die Einwilligung."),
-      landingStep(4, "Result", "Ergebnis", "Follow the live call, stop it at any time, and review the result and transcript.", "Anruf live verfolgen, jederzeit stoppen und Ergebnis sowie Transkript prüfen.")
+    items: [
+      landingContentItem(
+        11,
+        "Speaking on the phone is difficult",
+        "Sprechen am Telefon ist schwierig",
+        "You know what you want to say, but a speech impairment, fatigue or another communication difficulty can make phone calls stressful or impractical.",
+        "Sie wissen genau, was Sie sagen möchten, aber eine Sprechbeeinträchtigung, Erschöpfung oder eine andere Kommunikationshürde macht Telefonate belastend oder praktisch unmöglich."
+      ),
+      landingContentItem(
+        12,
+        "The local language is the barrier",
+        "Die lokale Sprache ist die Hürde",
+        "You may manage everyday life well, but explaining a problem, understanding questions and reacting quickly on the phone can still be difficult.",
+        "Im Alltag kommen Sie vielleicht gut zurecht. Am Telefon ein Problem zu erklären, Fragen spontan zu verstehen und sofort zu reagieren, kann trotzdem schwierig sein."
+      )
     ]
   },
   {
@@ -383,71 +402,113 @@ const landingBlocks: LandingBlock[] = [
     blockType: "use_cases",
     sortOrder: 2,
     enabled: true,
-    eyebrow: localized("Everyday assistance", "Hilfe im Alltag"),
-    title: localized("Supported everyday tasks", "Unterstützte Alltagsaufgaben"),
-    text: localized(
-      "Use CallAssist for bounded, reviewable requests where you remain responsible for the approved facts and objective.",
-      "Nutzen Sie CallAssist für begrenzte, prüfbare Anliegen, bei denen Sie für die freigegebenen Fakten und das Ziel verantwortlich bleiben."
+    eyebrow: localized("EVERYDAY CALLS", "ALLTÄGLICHE TELEFONATE"),
+    title: localized(
+      "Calls CallAssist can help with",
+      "Bei solchen Anrufen kann CallAssist helfen"
     ),
-    items: localizedList(
-      ["Request information", "Arrange an appointment", "Check a document or status", "Deliver a neutral message"],
-      ["Informationen anfragen", "Termin vereinbaren", "Dokument oder Status klären", "Neutrale Nachricht übermitteln"]
-    )
+    text: localized(
+      "Straightforward calls with a clear, practical objective.",
+      "Konkrete Telefonate mit einem klaren, praktischen Ziel."
+    ),
+    items: [
+      landingContentItem(21, "Doctor's practice", "Arztpraxis", "Ask for an appointment or find out which documents you need to bring.", "Einen Termin vereinbaren oder fragen, welche Unterlagen mitgebracht werden müssen."),
+      landingContentItem(22, "Gemeinde or public office", "Gemeinde oder Behörde", "Check whether an application arrived or ask what information is still missing.", "Nachfragen, ob ein Antrag eingegangen ist oder welche Angaben noch fehlen."),
+      landingContentItem(23, "School or course provider", "Schule oder Kursanbieter", "Clarify a schedule, registration, payment or another straightforward question.", "Zeiten, Anmeldung, Zahlung oder eine andere konkrete Frage klären."),
+      landingContentItem(24, "Landlord or repair service", "Vermieter oder Reparaturdienst", "Describe an issue and arrange the next practical step.", "Ein Problem schildern und den nächsten Schritt vereinbaren."),
+      landingContentItem(25, "Insurance or service provider", "Versicherung oder Dienstleister", "Ask about the status of a straightforward request or document.", "Den Stand einer einfachen Anfrage oder eines Dokuments abklären.")
+    ]
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000009",
+    blockType: "example",
+    sortOrder: 3,
+    enabled: true,
+    title: localized(
+      "From one sentence to a completed call",
+      "Von einem Satz zum erledigten Telefonat"
+    ),
+    items: [
+      landingContentItem(31, "Your request", "Ihre Anfrage", "Call my Gemeinde and ask whether they received my residence form. If anything is missing, ask what I need to send.", "Rufen Sie meine Gemeinde an und fragen Sie, ob mein Aufenthaltsformular angekommen ist. Falls etwas fehlt, fragen Sie bitte, was ich noch senden muss."),
+      landingContentItem(32, "CallAssist prepares", "CallAssist bereitet den Anruf vor", "CallAssist turns the request into a bounded call plan. You review the facts, objective and what the assistant may say.", "CallAssist erstellt daraus einen klar begrenzten Gesprächsplan. Sie prüfen Ziel, Fakten und was der Assistent sagen darf."),
+      landingContentItem(33, "The call", "Der Anruf", "Hello. I'm an AI assistant calling on behalf of Anna Keller. She asked me to check whether her residence form has been received.", "Guten Tag. Ich bin ein KI-Assistent und rufe im Auftrag von Anna Keller an. Sie möchte wissen, ob ihr Aufenthaltsformular eingegangen ist."),
+      landingContentItem(34, "Result", "Ergebnis", "Form received. A copy of the passport is still required and can be sent by email.", "Das Formular ist eingegangen. Eine Passkopie fehlt noch und kann per E-Mail eingereicht werden.")
+    ]
+  },
+  {
+    id: "72000000-0000-4000-8000-000000000002",
+    blockType: "how_it_works",
+    sortOrder: 4,
+    enabled: true,
+    eyebrow: localized("HOW IT WORKS", "SO FUNKTIONIERT ES"),
+    title: localized(
+      "You stay in control from start to finish.",
+      "Sie behalten von Anfang bis Ende die Kontrolle."
+    ),
+    steps: [
+      landingStep(1, "Tell us what you need", "Beschreiben Sie Ihr Anliegen", "Write naturally. You do not need to prepare a script.", "Schreiben Sie einfach in Ihren eigenen Worten. Sie brauchen kein fertiges Telefonskript."),
+      landingStep(2, "Check the plan", "Prüfen Sie den Gesprächsplan", "CallAssist turns your request into a bounded call brief that you can review and change.", "CallAssist erstellt daraus einen klar begrenzten Anruf, den Sie vorab prüfen und ändern können."),
+      landingStep(3, "Approve the call", "Geben Sie den Anruf frei", "The assistant dials only after you explicitly approve the prepared call.", "Erst nach Ihrer ausdrücklichen Freigabe wird die Nummer gewählt."),
+      landingStep(4, "See what happened", "Sehen Sie das Ergebnis", "Follow the call live and review the final transcript and result afterwards.", "Verfolgen Sie den Anruf live und prüfen Sie danach Ergebnis und Transkript.")
+    ]
   },
   {
     id: "72000000-0000-4000-8000-000000000004",
     blockType: "safety_privacy",
-    sortOrder: 3,
+    sortOrder: 5,
     enabled: true,
-    eyebrow: localized("Designed for a limited beta", "Für eine begrenzte Beta konzipiert"),
-    title: localized("Clear boundaries before every call.", "Klare Grenzen vor jedem Anruf."),
-    text: localized(
-      "Recording starts only after recipient consent. You choose 0, 7, or 30 days of audio retention and can delete retained audio manually. AI output can be wrong, so every call plan must be reviewed.",
-      "Die Aufnahme startet erst nach der Einwilligung. Sie wählen 0, 7 oder 30 Tage Audioaufbewahrung und können gespeicherte Aufnahmen manuell löschen. KI kann Fehler machen, deshalb muss jeder Anrufplan geprüft werden."
+    eyebrow: localized("CONTROL AND TRANSPARENCY", "KONTROLLE UND TRANSPARENZ"),
+    title: localized(
+      "A phone assistant, not an autonomous stranger.",
+      "Ein Telefonassistent, kein autonom handelnder Fremder."
     ),
-    limitsTitle: localized("Not supported", "Nicht unterstützt"),
+    text: localized(
+      "CallAssist is designed for ordinary, low-risk calls. It is not intended for emergencies, harassment, mass marketing or high-stakes legal, medical or financial decisions.",
+      "CallAssist ist für gewöhnliche, risikoarme Telefonate gedacht. Nicht vorgesehen sind Notfälle, Belästigung, Massenwerbung sowie rechtlich, medizinisch oder finanziell folgenreiche Verhandlungen."
+    ),
+    limitsTitle: localized("Your safeguards", "Ihre Schutzvorkehrungen"),
     limits: localizedList(
-      ["Emergencies", "Harassment or deception", "Spam, bulk marketing, or political persuasion", "High-stakes legal, medical, or financial negotiation"],
-      ["Notfälle", "Belästigung oder Täuschung", "Spam, Massenwerbung oder politische Überzeugungsarbeit", "Rechtliche, medizinische oder finanzielle Verhandlungen mit hohem Risiko"]
+      ["You approve every call first.", "The recipient is told that an AI assistant is calling.", "Conversation processing and recording begin only after consent.", "You decide how long retained call audio is kept."],
+      ["Sie geben jeden Anruf vorher frei.", "Die angerufene Person wird darüber informiert, dass ein KI-Assistent anruft.", "Gesprächsverarbeitung und Aufzeichnung beginnen erst nach Zustimmung.", "Sie bestimmen, wie lange gespeicherte Audioaufnahmen aufbewahrt werden."]
     )
   },
   {
     id: "72000000-0000-4000-8000-000000000005",
     blockType: "languages",
-    sortOrder: 4,
+    sortOrder: 6,
     enabled: true,
     title: localized(
-      "Website and call language are separate",
-      "Website- und Anrufsprache sind getrennt"
+      "Use the language that's easiest for you.",
+      "Nutzen Sie die Sprache, die für Sie am einfachsten ist."
     ),
     text: localized(
-      "Use the website in English or German, then choose the appropriate supported language for each call. A controlled fallback language is optional.",
-      "Nutzen Sie die Website auf Deutsch oder Englisch und wählen Sie für jeden Anruf eine passende unterstützte Sprache. Eine kontrollierte Ausweichsprache ist optional."
+      "The language of the website does not determine the language of the call. Choose the appropriate supported language separately for each conversation.",
+      "Die Sprache der Website bestimmt nicht die Sprache des Telefonats. Für jeden Anruf wählen Sie die passende unterstützte Gesprächssprache separat aus."
     )
   },
   {
     id: "72000000-0000-4000-8000-000000000006",
     blockType: "faq",
-    sortOrder: 5,
+    sortOrder: 7,
     enabled: true,
     eyebrow: localized("Frequently asked questions", "Häufig gestellte Fragen"),
-    title: localized("Know what to expect before you call.", "Wissen, was Sie vor dem Anruf erwartet."),
-    itemLimit: 4
+    title: localized("What happens when CallAssist makes a call?", "Was passiert, wenn CallAssist einen Anruf führt?"),
+    itemLimit: 7
   },
   {
     id: "72000000-0000-4000-8000-000000000007",
     blockType: "cta",
-    sortOrder: 6,
+    sortOrder: 8,
     enabled: true,
     title: localized(
-      "Prepare your first supervised call.",
-      "Bereiten Sie den ersten begleiteten Anruf vor."
+      "There's a call you've been putting off?",
+      "Gibt es einen Anruf, den Sie schon länger vor sich herschieben?"
     ),
     text: localized(
-      "Create an account with your real first and last name, verify your mobile number, and receive three beta call credits.",
-      "Erstellen Sie ein Konto mit Ihrem echten Vor- und Nachnamen, bestätigen Sie Ihre Mobilnummer und erhalten Sie drei Beta-Anrufguthaben."
+      "Try CallAssist with three beta calls and see whether it can make that conversation easier.",
+      "Probieren Sie CallAssist mit drei Beta-Anrufen aus und sehen Sie, ob der nächste Anruf dadurch einfacher wird."
     ),
-    primaryCtaLabel: localized("Try the beta", "Beta testen")
+    primaryCtaLabel: localized("Create an account", "Konto erstellen")
   }
 ];
 
@@ -526,6 +587,20 @@ function localized(en: string, de: string) {
 
 function localizedList(en: string[], de: string[]) {
   return { en, de };
+}
+
+function landingContentItem(
+  sequence: number,
+  enTitle: string,
+  deTitle: string,
+  enText: string,
+  deText: string
+) {
+  return {
+    id: `74000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+    title: localized(enTitle, deTitle),
+    text: localized(enText, deText)
+  };
 }
 
 function landingStep(

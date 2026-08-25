@@ -29,6 +29,10 @@ type Detail = {
 type Confirmation =
   | { kind: "publish" }
   | { kind: "rollback"; revisionNumber: number };
+type LandingContentItem = Extract<
+  LandingBlock,
+  { blockType: "problem" }
+>["items"][number];
 
 export function AdminEditorialConsole() {
   const { locale, localizeHref } = useUiLocale();
@@ -462,12 +466,19 @@ function LandingEditor({ copy, index, item, onChange, onMove }: {
       {item.blockType === "hero" ? <>
         <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
         <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        {item.supportingTitle ? <LocalizedInput label={copy.supportingTitleField} maxLength={180} onChange={(supportingTitle) => onChange({ ...item, supportingTitle })} value={item.supportingTitle} /> : null}
         <LocalizedArea label={copy.textField} maxLength={1200} onChange={(lead) => onChange({ ...item, lead })} rows={4} value={item.lead} />
+        {item.secondaryText ? <LocalizedArea label={copy.secondaryTextField} maxLength={1200} onChange={(secondaryText) => onChange({ ...item, secondaryText })} rows={3} value={item.secondaryText} /> : null}
         <LocalizedList label={copy.badgesField} onChange={(badges) => onChange({ ...item, badges })} value={item.badges} />
         <LocalizedInput label={copy.primaryCta} maxLength={180} onChange={(primaryCtaLabel) => onChange({ ...item, primaryCtaLabel })} value={item.primaryCtaLabel} />
         <LocalizedInput label={copy.secondaryCta} maxLength={180} onChange={(secondaryCtaLabel) => onChange({ ...item, secondaryCtaLabel })} value={item.secondaryCtaLabel} />
         <LocalizedInput label={copy.seoTitle} maxLength={180} onChange={(seoTitle) => onChange({ ...item, seoTitle })} value={item.seoTitle} />
         <LocalizedArea label={copy.seoDescription} maxLength={1200} onChange={(seoDescription) => onChange({ ...item, seoDescription })} rows={3} value={item.seoDescription} />
+      </> : null}
+      {item.blockType === "problem" ? <>
+        <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LandingContentItemsEditor copy={copy} items={item.items} onChange={(items) => onChange({ ...item, items })} />
       </> : null}
       {item.blockType === "how_it_works" ? <>
         <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
@@ -504,7 +515,13 @@ function LandingEditor({ copy, index, item, onChange, onMove }: {
         <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
         <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
         <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange({ ...item, text })} rows={4} value={item.text} />
-        <LocalizedList label={copy.itemsField} onChange={(items) => onChange({ ...item, items })} value={item.items} />
+        {Array.isArray(item.items)
+          ? <LandingContentItemsEditor copy={copy} items={item.items} onChange={(items) => onChange({ ...item, items })} />
+          : <LocalizedList label={copy.itemsField} onChange={(items) => onChange({ ...item, items })} value={item.items} />}
+      </> : null}
+      {item.blockType === "example" ? <>
+        <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
+        <LandingContentItemsEditor copy={copy} items={item.items} onChange={(items) => onChange({ ...item, items })} />
       </> : null}
       {item.blockType === "safety_privacy" ? <>
         <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
@@ -531,6 +548,39 @@ function LandingEditor({ copy, index, item, onChange, onMove }: {
         <LocalizedInput label={copy.primaryCta} maxLength={180} onChange={(primaryCtaLabel) => onChange({ ...item, primaryCtaLabel })} value={item.primaryCtaLabel} />
       </> : null}
     </fieldset>
+  );
+}
+
+function LandingContentItemsEditor({ copy, items, onChange }: {
+  copy: EditorialMessages;
+  items: LandingContentItem[];
+  onChange: (items: LandingContentItem[]) => void;
+}) {
+  return (
+    <div className="landing-step-list">
+      {items.map((item, itemIndex) => (
+        <fieldset className="landing-step-editor" key={item.id}>
+          <legend>{copy.contentItem} {itemIndex + 1}</legend>
+          <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange(
+            replaceAt(items, itemIndex, { ...item, title })
+          )} value={item.title} />
+          <LocalizedArea label={copy.textField} maxLength={1200} onChange={(text) => onChange(
+            replaceAt(items, itemIndex, { ...item, text })
+          )} rows={3} value={item.text} />
+          {items.length > 1 ? <button className="danger-button" onClick={() => onChange(
+            removeAt(items, itemIndex)
+          )} type="button">{copy.remove}</button> : null}
+        </fieldset>
+      ))}
+      {items.length < 12 ? <button className="secondary-button" onClick={() => onChange([
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          title: { en: "", de: "" },
+          text: { en: "", de: "" }
+        }
+      ])} type="button">{copy.addContentItem}</button> : null}
+    </div>
   );
 }
 
@@ -652,7 +702,16 @@ function normaliseLanding(items: LandingBlock[]): LandingBlock[] {
       return {
         ...item,
         sortOrder,
-        items: normaliseLocalizedList(item.items)
+        items: Array.isArray(item.items)
+          ? normaliseLandingContentItems(item.items)
+          : normaliseLocalizedList(item.items)
+      };
+    }
+    if (item.blockType === "problem" || item.blockType === "example") {
+      return {
+        ...item,
+        sortOrder,
+        items: normaliseLandingContentItems(item.items)
       };
     }
     if (item.blockType === "safety_privacy") {
@@ -671,6 +730,14 @@ function normaliseLocalizedList(value: { en: string[]; de: string[] }) {
     en: value.en.map((item) => item.trim()).filter(Boolean),
     de: value.de.map((item) => item.trim()).filter(Boolean)
   };
+}
+
+function normaliseLandingContentItems(items: LandingContentItem[]) {
+  return items.map((item) => ({
+    ...item,
+    title: { en: item.title.en.trim(), de: item.title.de.trim() },
+    text: { en: item.text.en.trim(), de: item.text.de.trim() }
+  }));
 }
 
 function replaceAt<T>(items: T[], index: number, value: T) {
@@ -759,7 +826,9 @@ const en = {
   current: "Current",
   eyebrowField: "Eyebrow",
   titleField: "Title",
+  supportingTitleField: "Supporting headline",
   textField: "Text",
+  secondaryTextField: "Secondary sentence",
   badgesField: "Badges (one per line)",
   itemsField: "Items (one per line)",
   limitsTitle: "Limitations title",
@@ -771,10 +840,14 @@ const en = {
   faqLimit: "Published FAQ items",
   step: "Step",
   addStep: "Add step",
+  contentItem: "Card",
+  addContentItem: "Add card",
   blockName: {
     hero: "Hero",
+    problem: "Problem",
     how_it_works: "How it works",
     use_cases: "Use cases",
+    example: "Concrete example",
     safety_privacy: "Safety & Privacy",
     languages: "Languages",
     faq: "Reusable FAQ",
@@ -832,7 +905,9 @@ const de: EditorialMessages = {
   current: "Aktuell",
   eyebrowField: "Übertitel",
   titleField: "Titel",
+  supportingTitleField: "Unterstützende Überschrift",
   textField: "Text",
+  secondaryTextField: "Zusätzlicher Satz",
   badgesField: "Badges (einer pro Zeile)",
   itemsField: "Einträge (einer pro Zeile)",
   limitsTitle: "Titel der Einschränkungen",
@@ -844,10 +919,14 @@ const de: EditorialMessages = {
   faqLimit: "Veröffentlichte FAQ-Einträge",
   step: "Schritt",
   addStep: "Schritt hinzufügen",
+  contentItem: "Karte",
+  addContentItem: "Karte hinzufügen",
   blockName: {
     hero: "Hero",
+    problem: "Problem",
     how_it_works: "So funktioniert es",
     use_cases: "Anwendungsfälle",
+    example: "Konkretes Beispiel",
     safety_privacy: "Sicherheit & Datenschutz",
     languages: "Sprachen",
     faq: "Wiederverwendbare FAQ",

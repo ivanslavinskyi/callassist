@@ -1380,6 +1380,8 @@ button:disabled { cursor: wait; opacity: .55; }
   line-height: 1.7;
 }
 .public-hero > p { font-size: 17px; max-width: 720px; }
+.public-hero .public-hero-support { color: var(--ink); font-family: var(--font-display), sans-serif; font-size: clamp(24px, 3vw, 36px); line-height: 1.15; margin: 20px 0 0; }
+.public-hero .public-hero-secondary { font-size: 13px; margin-bottom: 0; max-width: 760px; }
 .public-actions { display: flex; gap: 10px; margin-top: 28px; }
 .public-actions .secondary-button { min-height: 51px; }
 .public-badges { display: flex; flex-wrap: wrap; gap: 9px; list-style: none; margin: 30px 0 0; padding: 0; }
@@ -1406,8 +1408,15 @@ button:disabled { cursor: wait; opacity: .55; }
 .public-steps h3, .public-use-grid h3 { font-size: 16px; margin: 20px 0 8px; }
 .public-steps p, .public-use-grid li { color: var(--muted); font-size: 12px; line-height: 1.65; }
 .public-steps p { margin: 0; }
+.public-problem-grid { display: grid; gap: 15px; grid-template-columns: 1fr 1fr; margin-top: 34px; }
+.public-problem-grid article { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: 28px; }
+.public-problem-grid h3 { font-size: 19px; margin: 0 0 10px; }
+.public-problem-grid p { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 0; }
 .public-safety { display: grid; gap: 32px; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
-.public-safety .public-use-grid { grid-template-columns: 1fr; }
+.public-safety-points { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.public-safety-points li { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); font-size: 13px; line-height: 1.55; padding: 15px 18px 15px 46px; position: relative; }
+.public-safety-points li::before { align-items: center; background: var(--accent); border-radius: 50%; color: #102019; content: "✓"; display: flex; font-size: 10px; font-weight: 900; height: 21px; justify-content: center; left: 16px; position: absolute; top: 15px; width: 21px; }
+.public-safety-scope { border-top: 1px solid var(--line); grid-column: 1 / -1; margin: 0; padding-top: 22px; }
 .public-use-grid { display: grid; gap: 15px; grid-template-columns: 1fr 1fr; }
 .public-use-grid article { padding: 24px; }
 .public-use-grid h3 { margin-top: 0; }
@@ -1415,13 +1424,25 @@ button:disabled { cursor: wait; opacity: .55; }
 .public-use-grid li + li { margin-top: 7px; }
 .public-use-cases { display: grid; gap: 32px; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
 .public-use-cases > ul { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; list-style: none; margin: 0; padding: 0; }
-.public-use-cases > ul li { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); font-size: 13px; font-weight: 750; padding: 20px; }
+.public-use-cases > ul li { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 20px; }
+.public-use-cases > ul h3 { font-size: 14px; margin: 0 0 8px; }
+.public-use-cases > ul p { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0; }
+.public-example { background: #102019; border-radius: 26px; color: white; margin-top: 86px; padding: clamp(30px, 5vw, 52px); }
+.public-example > h2 { color: white; margin-top: 0; }
+.public-example > ol { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); list-style: none; margin: 32px 0 0; padding: 0; }
+.public-example li { background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .14); border-radius: 16px; padding: 20px; }
+.public-example li > span { align-items: center; background: var(--accent); border-radius: 50%; color: #102019; display: inline-flex; font-size: 10px; font-weight: 850; height: 26px; justify-content: center; width: 26px; }
+.public-example h3 { font-size: 14px; margin: 18px 0 8px; }
+.public-example p { color: rgba(255, 255, 255, .72); font-size: 11px; line-height: 1.65; margin: 0; }
 .public-faq .faq-list { margin-top: 28px; }
 .public-faq .faq-list section { padding: 22px 24px; }
 .public-language { border-top: 1px solid var(--line); margin-top: 86px; padding-top: 40px; }
 .public-language h2 { font-size: clamp(27px, 3vw, 38px); }
 .public-language p { max-width: 760px; }
-.public-final-cta { align-items: center; background: var(--ink); border-radius: 26px; color: white; display: flex; gap: 36px; justify-content: space-between; margin-top: 70px; padding: 36px 40px; }
+.public-language > ul { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 24px 0 0; padding: 0; }
+.public-language > ul li { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; display: flex; font-size: 11px; gap: 8px; padding: 7px 12px 7px 8px; }
+.public-language > ul span { background: var(--ink); border-radius: 99px; color: var(--accent); font-size: 9px; font-weight: 850; padding: 5px 7px; }
+.public-final-cta { align-items: center; background: #102019; border-radius: 26px; color: white; display: flex; gap: 36px; justify-content: space-between; margin-top: 70px; padding: 36px 40px; }
 .public-final-cta h2 { font-size: clamp(27px, 3vw, 38px); }
 .public-final-cta p { color: rgba(255, 255, 255, .7); margin-bottom: 0; max-width: 720px; }
 .public-final-cta .primary-button { background: var(--accent); color: #102019; flex: 0 0 auto; }
@@ -1632,7 +1653,7 @@ button:disabled { cursor: wait; opacity: .55; }
 
 @media (max-width: 980px) {
   .dashboard-grid, .live-grid { grid-template-columns: 1fr; }
-  .public-steps { grid-template-columns: 1fr 1fr; }
+  .public-steps, .public-example > ol { grid-template-columns: 1fr 1fr; }
   .public-safety, .public-use-cases { grid-template-columns: 1fr; }
   .account-grid { grid-template-columns: 1fr; }
   .account-session-list > li { align-items: stretch; grid-template-columns: 1fr; }
@@ -1684,7 +1705,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .public-hero h1 { font-size: 42px; }
   .public-actions { align-items: stretch; flex-direction: column; }
   .public-actions .primary-button, .public-actions .secondary-button { width: 100%; }
-  .public-steps, .public-use-grid, .public-use-cases > ul { grid-template-columns: 1fr; }
+  .public-steps, .public-use-grid, .public-use-cases > ul, .public-problem-grid, .public-example > ol { grid-template-columns: 1fr; }
   .public-section { padding-top: 62px; }
   .public-language { margin-top: 62px; padding-top: 34px; }
   .public-final-cta { align-items: stretch; flex-direction: column; padding: 28px 24px; }

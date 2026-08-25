@@ -747,7 +747,7 @@ describe("auth API", () => {
       faq: {
         revision: { number: 1 },
         items: expect.arrayContaining([
-          expect.objectContaining({ question: expect.stringContaining("KI-Anruf") })
+          expect.objectContaining({ question: expect.stringContaining("KI-Assistent") })
         ])
       }
     });
@@ -763,11 +763,13 @@ describe("auth API", () => {
         revision: { number: 1 },
         blocks: [
           { blockType: "hero" },
-          { blockType: "how_it_works" },
+          { blockType: "problem" },
           { blockType: "use_cases" },
+          { blockType: "example" },
+          { blockType: "how_it_works" },
           { blockType: "safety_privacy" },
           { blockType: "languages" },
-          { blockType: "faq", itemLimit: 4 },
+          { blockType: "faq", itemLimit: 7 },
           { blockType: "cta" }
         ]
       }

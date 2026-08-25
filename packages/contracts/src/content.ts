@@ -76,6 +76,14 @@ const localizedLandingListSchema = z.object({
   de: z.array(z.string().trim().min(1).max(240)).min(1).max(12)
 });
 
+const landingContentItemSchema = z.object({
+  id: z.uuid(),
+  title: localizedLandingShortTextSchema,
+  text: localizedLandingLongTextSchema
+});
+
+const landingContentItemsSchema = z.array(landingContentItemSchema).min(1).max(12);
+
 const landingBlockBaseSchema = z.object({
   id: z.uuid(),
   sortOrder: z.number().int().nonnegative().max(99),
@@ -87,12 +95,20 @@ export const landingBlockSchema = z.discriminatedUnion("blockType", [
     blockType: z.literal("hero"),
     eyebrow: localizedLandingShortTextSchema,
     title: localizedLandingShortTextSchema,
+    supportingTitle: localizedLandingShortTextSchema.optional(),
     lead: localizedLandingLongTextSchema,
+    secondaryText: localizedLandingLongTextSchema.optional(),
     badges: localizedLandingListSchema,
     primaryCtaLabel: localizedLandingShortTextSchema,
     secondaryCtaLabel: localizedLandingShortTextSchema,
     seoTitle: localizedLandingShortTextSchema,
     seoDescription: localizedLandingLongTextSchema
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("problem"),
+    eyebrow: localizedLandingShortTextSchema,
+    title: localizedLandingShortTextSchema,
+    items: landingContentItemsSchema
   }),
   landingBlockBaseSchema.extend({
     blockType: z.literal("how_it_works"),
@@ -109,7 +125,12 @@ export const landingBlockSchema = z.discriminatedUnion("blockType", [
     eyebrow: localizedLandingShortTextSchema,
     title: localizedLandingShortTextSchema,
     text: localizedLandingLongTextSchema,
-    items: localizedLandingListSchema
+    items: z.union([localizedLandingListSchema, landingContentItemsSchema])
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("example"),
+    title: localizedLandingShortTextSchema,
+    items: landingContentItemsSchema
   }),
   landingBlockBaseSchema.extend({
     blockType: z.literal("safety_privacy"),
@@ -149,15 +170,19 @@ const requiredLandingBlockTypes = [
   "cta"
 ] as const;
 
+const optionalLandingBlockTypes = ["problem", "example"] as const;
+
 export const landingBlocksSchema = z.array(landingBlockSchema)
-  .length(requiredLandingBlockTypes.length)
+  .min(requiredLandingBlockTypes.length)
+  .max(requiredLandingBlockTypes.length + optionalLandingBlockTypes.length)
   .superRefine((blocks, context) => {
     const types = new Set(blocks.map(({ blockType }) => blockType));
     const ids = new Set(blocks.map(({ id }) => id));
-    if (types.size !== requiredLandingBlockTypes.length) {
+    if (requiredLandingBlockTypes.some((blockType) => !types.has(blockType))
+      || types.size !== blocks.length) {
       context.addIssue({
         code: "custom",
-        message: "Landing requires exactly one block of every supported type"
+        message: "Landing requires one block of every core type and no duplicate types"
       });
     }
     if (ids.size !== blocks.length) {
@@ -252,12 +277,20 @@ export const publishedLandingBlockSchema = z.discriminatedUnion("blockType", [
     blockType: z.literal("hero"),
     eyebrow: z.string(),
     title: z.string(),
+    supportingTitle: z.string().optional(),
     lead: z.string(),
+    secondaryText: z.string().optional(),
     badges: z.array(z.string()),
     primaryCtaLabel: z.string(),
     secondaryCtaLabel: z.string(),
     seoTitle: z.string(),
     seoDescription: z.string()
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("problem"),
+    eyebrow: z.string(),
+    title: z.string(),
+    items: z.array(z.object({ title: z.string(), text: z.string() }))
   }),
   landingBlockBaseSchema.extend({
     blockType: z.literal("how_it_works"),
@@ -270,7 +303,12 @@ export const publishedLandingBlockSchema = z.discriminatedUnion("blockType", [
     eyebrow: z.string(),
     title: z.string(),
     text: z.string(),
-    items: z.array(z.string())
+    items: z.array(z.object({ title: z.string(), text: z.string() }))
+  }),
+  landingBlockBaseSchema.extend({
+    blockType: z.literal("example"),
+    title: z.string(),
+    items: z.array(z.object({ title: z.string(), text: z.string() }))
   }),
   landingBlockBaseSchema.extend({
     blockType: z.literal("safety_privacy"),
@@ -318,12 +356,25 @@ export function localizeLandingBlock(
         blockType: block.blockType,
         eyebrow: block.eyebrow[locale],
         title: block.title[locale],
+        supportingTitle: block.supportingTitle?.[locale],
         lead: block.lead[locale],
+        secondaryText: block.secondaryText?.[locale],
         badges: block.badges[locale],
         primaryCtaLabel: block.primaryCtaLabel[locale],
         secondaryCtaLabel: block.secondaryCtaLabel[locale],
         seoTitle: block.seoTitle[locale],
         seoDescription: block.seoDescription[locale]
+      };
+    case "problem":
+      return {
+        ...base,
+        blockType: block.blockType,
+        eyebrow: block.eyebrow[locale],
+        title: block.title[locale],
+        items: block.items.map((item) => ({
+          title: item.title[locale],
+          text: item.text[locale]
+        }))
       };
     case "how_it_works":
       return {
@@ -344,7 +395,22 @@ export function localizeLandingBlock(
         eyebrow: block.eyebrow[locale],
         title: block.title[locale],
         text: block.text[locale],
-        items: block.items[locale]
+        items: Array.isArray(block.items)
+          ? block.items.map((item) => ({
+              title: item.title[locale],
+              text: item.text[locale]
+            }))
+          : block.items[locale].map((title) => ({ title, text: "" }))
+      };
+    case "example":
+      return {
+        ...base,
+        blockType: block.blockType,
+        title: block.title[locale],
+        items: block.items.map((item) => ({
+          title: item.title[locale],
+          text: item.text[locale]
+        }))
       };
     case "safety_privacy":
       return {
@@ -389,7 +455,7 @@ export const publishedLandingSchema = z.object({
     publishedAt: true
   }).extend({ publishedAt: z.iso.datetime() }),
   locale: contentLocaleSchema,
-  blocks: z.array(publishedLandingBlockSchema).max(7),
+  blocks: z.array(publishedLandingBlockSchema).max(9),
   seo: z.object({
     title: z.string().trim().min(1).max(180),
     description: z.string().trim().min(1).max(1200)

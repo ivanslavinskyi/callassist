@@ -216,8 +216,8 @@ describe("ContentService", () => {
   it("publishes reusable FAQ and internal navigation through audited revisions", async () => {
     const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
     const initialFaq = await service.getPublishedFaq("de");
-    expect(initialFaq?.items).toHaveLength(8);
-    expect(initialFaq?.items[0]?.question).toContain("KI-Anruf");
+    expect(initialFaq?.items).toHaveLength(7);
+    expect(initialFaq?.items[0]?.question).toContain("KI-Assistent");
 
     await expect(service.getPublishedNavigation("de")).resolves.toEqual(
       expect.objectContaining({
@@ -249,7 +249,7 @@ describe("ContentService", () => {
     const beforePublish = await service.getPublishedFaq("de");
     expect(beforePublish).toMatchObject({ revision: { number: 1 } });
     expect(beforePublish?.items[0]?.question).toBe(
-      "Weiss die empfangende Person, dass es ein KI-Anruf ist?"
+      "Weiss die angerufene Person, dass ein KI-Assistent anruft?"
     );
 
     await service.publishEditorialDraft(
@@ -286,8 +286,10 @@ describe("ContentService", () => {
       locale: "de",
       blocks: [
         { blockType: "hero" },
-        { blockType: "how_it_works" },
+        { blockType: "problem" },
         { blockType: "use_cases" },
+        { blockType: "example" },
+        { blockType: "how_it_works" },
         { blockType: "safety_privacy" },
         { blockType: "languages" },
         { blockType: "faq" },
@@ -313,7 +315,7 @@ describe("ContentService", () => {
         : { ...block, sortOrder })
     });
     expect((await service.getPublishedLanding("de"))?.blocks[1]?.blockType)
-      .toBe("how_it_works");
+      .toBe("problem");
     await service.publishEditorialDraft(
       actorUserId,
       "landing",

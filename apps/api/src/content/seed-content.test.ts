@@ -45,6 +45,6 @@ describe("seeded public content", () => {
       ({ revision }) => revision.key === "landing"
     )!.revision;
     if (landing.key !== "landing") throw new Error("Expected Landing seed");
-    expect(new Set(landing.items.map(({ blockType }) => blockType)).size).toBe(7);
+    expect(new Set(landing.items.map(({ blockType }) => blockType)).size).toBe(9);
   });
 });

@@ -5,6 +5,7 @@ import type {
   PublishedLanding,
   PublishedLandingBlock
 } from "@callassist/contracts";
+import { SUPPORTED_CALL_LANGUAGES } from "@callassist/contracts";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppShell } from "./app-shell";
@@ -25,7 +26,6 @@ export function PublicHome({
       <PublicHomeContent
         faq={faq}
         landing={landing}
-        loginHref={localizeHref("/login")}
         registerHref={localizeHref("/register")}
       />
     </AppShell>
@@ -35,13 +35,11 @@ export function PublicHome({
 export function PublicHomeContent({
   landing,
   faq,
-  loginHref,
   previewBanner,
   registerHref
 }: {
   landing: PublishedLanding;
   faq: PublishedFaq | null;
-  loginHref: string;
   previewBanner?: ReactNode;
   registerHref: string;
 }) {
@@ -53,7 +51,7 @@ export function PublicHomeContent({
           block={block}
           faq={faq}
           key={block.id}
-          loginHref={loginHref}
+          locale={landing.locale}
           registerHref={registerHref}
         />
       ))}
@@ -61,10 +59,10 @@ export function PublicHomeContent({
   );
 }
 
-function LandingBlockView({ block, faq, loginHref, registerHref }: {
+function LandingBlockView({ block, faq, locale, registerHref }: {
   block: PublishedLandingBlock;
   faq: PublishedFaq | null;
-  loginHref: string;
+  locale: PublishedLanding["locale"];
   registerHref: string;
 }) {
   switch (block.blockType) {
@@ -73,19 +71,36 @@ function LandingBlockView({ block, faq, loginHref, registerHref }: {
         <section className="public-hero">
           <span className="eyebrow">{block.eyebrow}</span>
           <h1>{block.title}</h1>
+          {block.supportingTitle ? <p className="public-hero-support"><strong>{block.supportingTitle}</strong></p> : null}
           <p>{block.lead}</p>
+          {block.secondaryText ? <p className="public-hero-secondary">{block.secondaryText}</p> : null}
           <div className="public-actions">
             <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
-            <Link className="secondary-button" href={loginHref}>{block.secondaryCtaLabel}</Link>
+            <Link className="secondary-button" href="#how-it-works">{block.secondaryCtaLabel}</Link>
           </div>
           <ul className="public-badges" aria-label={block.eyebrow}>
             {block.badges.map((badge) => <li key={badge}>{badge}</li>)}
           </ul>
         </section>
       );
+    case "problem":
+      return (
+        <section className="public-section public-problem" aria-labelledby={`landing-${block.id}`}>
+          <span className="eyebrow">{block.eyebrow}</span>
+          <h2 id={`landing-${block.id}`}>{block.title}</h2>
+          <div className="public-problem-grid">
+            {block.items.map((item) => (
+              <article key={item.title}>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      );
     case "how_it_works":
       return (
-        <section className="public-section" aria-labelledby={`landing-${block.id}`}>
+        <section className="public-section" id="how-it-works" aria-labelledby={`landing-${block.id}`}>
           <span className="eyebrow">{block.eyebrow}</span>
           <h2 id={`landing-${block.id}`}>{block.title}</h2>
           <ol className="public-steps">
@@ -108,24 +123,43 @@ function LandingBlockView({ block, faq, loginHref, registerHref }: {
             <p>{block.text}</p>
           </div>
           <ul>
-            {block.items.map((item) => <li key={item}>{item}</li>)}
+            {block.items.map((item) => (
+              <li key={item.title}>
+                <h3>{item.title}</h3>
+                {item.text ? <p>{item.text}</p> : null}
+              </li>
+            ))}
           </ul>
+        </section>
+      );
+    case "example":
+      return (
+        <section className="public-section public-example" aria-labelledby={`landing-${block.id}`}>
+          <h2 id={`landing-${block.id}`}>{block.title}</h2>
+          <ol>
+            {block.items.map((item, index) => (
+              <li key={item.title}>
+                <span>{index + 1}</span>
+                <div>
+                  <h3>{item.title}</h3>
+                  <p>{item.text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
         </section>
       );
     case "safety_privacy":
       return (
         <section className="public-section public-safety" aria-labelledby={`landing-${block.id}`}>
-          <div>
+          <div className="public-safety-heading">
             <span className="eyebrow">{block.eyebrow}</span>
             <h2 id={`landing-${block.id}`}>{block.title}</h2>
-            <p>{block.text}</p>
           </div>
-          <div className="public-use-grid">
-            <article>
-              <h3>{block.limitsTitle}</h3>
-              <ul>{block.limits.map((item) => <li key={item}>{item}</li>)}</ul>
-            </article>
-          </div>
+          <ul className="public-safety-points">
+            {block.limits.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+          <p className="public-safety-scope">{block.text}</p>
         </section>
       );
     case "languages":
@@ -133,6 +167,14 @@ function LandingBlockView({ block, faq, loginHref, registerHref }: {
         <section className="public-section public-language">
           <h2>{block.title}</h2>
           <p>{block.text}</p>
+          <ul aria-label={locale === "de" ? "Unterstützte Gesprächssprachen" : "Supported call languages"}>
+            {SUPPORTED_CALL_LANGUAGES.map((language) => (
+              <li key={language.locale}>
+                <span>{language.shortLabel}</span>
+                {displayLanguageName(language.locale, language.label, locale)}
+              </li>
+            ))}
+          </ul>
         </section>
       );
     case "faq":
@@ -153,5 +195,19 @@ function LandingBlockView({ block, faq, loginHref, registerHref }: {
           <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
         </section>
       );
+  }
+}
+
+function displayLanguageName(
+  callLocale: string,
+  fallback: string,
+  locale: PublishedLanding["locale"]
+) {
+  try {
+    return new Intl.DisplayNames(locale === "de" ? ["de-CH"] : ["en"], {
+      type: "language"
+    }).of(callLocale) ?? fallback;
+  } catch {
+    return fallback;
   }
 }

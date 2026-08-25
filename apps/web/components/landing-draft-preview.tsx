@@ -21,7 +21,6 @@ export function LandingDraftPreview({
       <PublicHomeContent
         faq={faq}
         landing={landing}
-        loginHref={`/${interfaceLocale}/login`}
         previewBanner={(
           <div className="content-preview-banner" role="status">
             <div>
