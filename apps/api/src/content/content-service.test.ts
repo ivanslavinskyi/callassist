@@ -247,7 +247,7 @@ describe("ContentService", () => {
         : item)
     });
     const beforePublish = await service.getPublishedFaq("de");
-    expect(beforePublish).toMatchObject({ revision: { number: 1 } });
+    expect(beforePublish).toMatchObject({ revision: { number: 2 } });
     expect(beforePublish?.items[0]?.question).toBe(
       "Weiss die angerufene Person, dass ein KI-Assistent anruft?"
     );
@@ -258,16 +258,16 @@ describe("ContentService", () => {
       "Publish reviewed FAQ wording"
     );
     const afterPublish = await service.getPublishedFaq("de");
-    expect(afterPublish).toMatchObject({ revision: { number: 2 } });
+    expect(afterPublish).toMatchObject({ revision: { number: 3 } });
     expect(afterPublish?.items[0]?.question).toBe(
       "Ist der KI-Anruf offengelegt?"
     );
     await expect(service.createEditorialRollbackDraft(
       actorUserId,
       "faq",
-      1,
+      2,
       "Restore original FAQ wording"
-    )).resolves.toMatchObject({ number: 3, status: "draft" });
+    )).resolves.toMatchObject({ number: 4, status: "draft" });
     expect(repository.editorialAdminEventsForTest().map(({ eventType }) =>
       eventType
     )).toEqual([
@@ -282,7 +282,7 @@ describe("ContentService", () => {
     const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
     const initial = await service.getPublishedLanding("de");
     expect(initial).toMatchObject({
-      revision: { number: 1 },
+      revision: { number: 2 },
       locale: "de",
       blocks: [
         { blockType: "hero" },
@@ -323,13 +323,13 @@ describe("ContentService", () => {
     );
     const published = await service.getPublishedLanding("de");
     expect(published).toMatchObject({
-      revision: { number: 2 },
+      revision: { number: 3 },
       seo: { title: "CallAssist — geprüfte Landing-Revision" }
     });
     expect(published?.blocks[1]?.blockType).toBe("use_cases");
     const index = await service.listPublishedContentIndex();
     expect(index.landing).toMatchObject({
-      revision: { number: 2 },
+      revision: { number: 3 },
       localizations: expect.arrayContaining([
         expect.objectContaining({
           locale: "de",

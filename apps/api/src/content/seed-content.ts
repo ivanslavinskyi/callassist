@@ -29,6 +29,7 @@ type SeedDefinition = {
 };
 
 const publishedAt = "2026-08-22T00:00:00.000Z";
+const refreshedLandingPublishedAt = "2026-08-25T00:00:00.000Z";
 
 const definitions: SeedDefinition[] = [
   {
@@ -517,13 +518,13 @@ export const seededEditorialCollections: SeedEditorialCollection[] = [
     collectionId: "80000000-0000-4000-8000-000000000001",
     revision: {
       key: "faq",
-      id: "81000000-0000-4000-8000-000000000001",
-      number: 1,
+      id: "81000000-0000-4000-8000-000000000011",
+      number: 2,
       status: "published",
       createdByUserId: null,
-      createdAt: publishedAt,
-      updatedAt: publishedAt,
-      publishedAt,
+      createdAt: refreshedLandingPublishedAt,
+      updatedAt: refreshedLandingPublishedAt,
+      publishedAt: refreshedLandingPublishedAt,
       items: faqItems
     }
   },
@@ -545,13 +546,13 @@ export const seededEditorialCollections: SeedEditorialCollection[] = [
     collectionId: "80000000-0000-4000-8000-000000000003",
     revision: {
       key: "landing",
-      id: "81000000-0000-4000-8000-000000000003",
-      number: 1,
+      id: "81000000-0000-4000-8000-000000000013",
+      number: 2,
       status: "published",
       createdByUserId: null,
-      createdAt: publishedAt,
-      updatedAt: publishedAt,
-      publishedAt,
+      createdAt: refreshedLandingPublishedAt,
+      updatedAt: refreshedLandingPublishedAt,
+      publishedAt: refreshedLandingPublishedAt,
       items: landingBlocks
     }
   }
