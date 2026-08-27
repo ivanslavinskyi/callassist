@@ -5,7 +5,8 @@ import type {
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
-  CallBrief,
+   CallBrief,
+   CallPreparation,
   CallCompilation,
   CallOutcomeMetrics,
   CallOutcomeView,
@@ -169,6 +170,26 @@ export type ListCallBriefsResult = {
   nextCursor: string | null;
 };
 
+export type EnqueueCallPreparationRepositoryInput = {
+  userId: string;
+  idempotencyKey: string;
+  inputFingerprint: string;
+  input: CreateCallBriefInput;
+  now: string;
+};
+
+export type CallPreparationWork = {
+  preparation: CallPreparation;
+  userId: string;
+  idempotencyKey: string;
+  input: CreateCallBriefInput | null;
+};
+
+export type CallPreparationPublication = {
+  preparationId: string;
+  lease: DurableJobLease;
+};
+
 export type AdminCallCursor = { createdAt: string; id: string };
 export type ListAdminCallsInput = AdminCallListFilters & {
   limit: number;
@@ -274,6 +295,7 @@ export type AdminSystemFacts = {
     succeeded: number;
     deadLetter: number;
     retryQueued: number;
+    briefCompilationQueued: number;
     transcriptionQueued: number;
     retentionQueued: number;
     providerReconciliationQueued: number;
@@ -282,6 +304,7 @@ export type AdminSystemFacts = {
       DurableJob,
       | "id"
       | "callId"
+      | "callPreparationId"
       | "type"
       | "status"
       | "generation"
@@ -396,12 +419,30 @@ export interface CallRepository {
     input: CreateCallBriefInput,
     compilation: CallCompilation,
     userId?: string | null,
-    creationIdempotencyKey?: string
+    creationIdempotencyKey?: string,
+    publication?: CallPreparationPublication
   ): Promise<CallBrief>;
   findByCreationRequest(
     userId: string | null,
     creationIdempotencyKey: string
   ): Promise<CallBrief | null>;
+  enqueueCallPreparation(
+    input: EnqueueCallPreparationRepositoryInput
+  ): Promise<CallPreparation>;
+  findCallPreparationByRequest(
+    userId: string,
+    idempotencyKey: string,
+    inputFingerprint: string
+  ): Promise<CallPreparation | null>;
+  getCallPreparation(
+    id: string,
+    userId: string
+  ): Promise<CallPreparation | null>;
+  claimCallPreparation(
+    id: string,
+    lease: DurableJobLease
+  ): Promise<CallPreparationWork>;
+  cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   findCallDataDeletion(
     id: string,
@@ -592,6 +633,7 @@ export class CallRepositoryError extends Error {
       | "CALL_BRIEF_NOT_REVIEWABLE"
       | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
+      | "CALL_PREPARATION_NOT_FOUND"
       | "INSUFFICIENT_CREDITS"
       | "CONCURRENT_CALL_LIMIT"
       | "OUTBOUND_CALLS_DISABLED"
@@ -614,6 +656,7 @@ export class CallRepositoryError extends Error {
       | "CALL_FEEDBACK_NOT_AVAILABLE"
       | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
       | "CALL_CREATION_IDEMPOTENCY_CONFLICT"
+      | "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
       | "DURABLE_JOB_LEASE_LOST"
       | "DURABLE_JOB_NOT_FOUND"
       | "DURABLE_JOB_NOT_RETRYABLE"

@@ -14,8 +14,14 @@ import {
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import {
   createCallBrief,
+  getCallSnapshot,
   getCallPreparationErrorMessage
 } from "@/lib/api";
+import {
+  getCallPreparationSessionStorage,
+  prepareCallBriefCreation,
+  type CallPreparationAttempt
+} from "@/lib/call-preparation-attempt";
 import { useUiLocale } from "./ui-locale-provider";
 import { isE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone-number";
 
@@ -48,6 +54,7 @@ const legacyDemoFacts = [
 
 type CreateCallFormProps = {
   onCreated: (brief: CallBrief) => void;
+  userId?: string;
   initialValue?: CreateCallBriefInput;
   saveCallBrief?: (
     input: CreateCallBriefInput,
@@ -60,6 +67,7 @@ type CreateCallFormProps = {
 
 export function CreateCallForm({
   onCreated,
+  userId,
   initialValue,
   saveCallBrief = createCallBrief,
   heading,
@@ -81,7 +89,7 @@ export function CreateCallForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const creationIdempotencyKey = useRef<string | null>(null);
+  const preparationAttempt = useRef<CallPreparationAttempt | null>(null);
 
   const fallbackLanguages = useMemo(
     () => SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== form.locale),
@@ -121,7 +129,6 @@ export function CreateCallForm({
     field: Value,
     value: CreateCallBriefInput[Value]
   ) {
-    creationIdempotencyKey.current = null;
     setForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -130,28 +137,49 @@ export function CreateCallForm({
     setSubmitting(true);
     setError(null);
 
+    const input = {
+      ...form,
+      phoneNumber: normalizePhoneNumber(form.phoneNumber),
+      allowedFacts: factsText
+        .split("\n")
+        .map((fact) => fact.trim())
+        .filter(Boolean)
+    };
+
+    let brief: CallBrief;
     try {
-      creationIdempotencyKey.current ??= crypto.randomUUID();
-      const brief = await saveCallBrief(
-        {
-          ...form,
-          phoneNumber: normalizePhoneNumber(form.phoneNumber),
-          allowedFacts: factsText
-            .split("\n")
-            .map((fact) => fact.trim())
-            .filter(Boolean)
-        },
-        creationIdempotencyKey.current
-      );
-      creationIdempotencyKey.current = null;
-      onCreated(brief);
+      if (initialValue || !userId) {
+        brief = await saveCallBrief(input);
+      } else {
+        const storage = getCallPreparationSessionStorage();
+        brief = await prepareCallBriefCreation({
+          input,
+          userId,
+          current: preparationAttempt.current,
+          storage,
+          save: (value, idempotencyKey) =>
+            saveCallBrief(value, idempotencyKey),
+          load: async (callBriefId) =>
+            (await getCallSnapshot(callBriefId)).brief,
+          onAttempt: (attempt) => {
+            preparationAttempt.current = attempt;
+          }
+        });
+      }
     } catch (error) {
       setError(getCallPreparationErrorMessage(error, {
         rateLimited: messages.form.rateLimited
       }));
-    } finally {
       setSubmitting(false);
+      return;
     }
+
+    try {
+      onCreated(brief);
+    } catch {
+      setError(messages.form.navigationError);
+    }
+    setSubmitting(false);
   }
 
   return (
@@ -458,10 +486,7 @@ export function CreateCallForm({
             <span>{copy.approvedInformation}</span>
             <textarea
               value={factsText}
-              onChange={(event) => {
-                creationIdempotencyKey.current = null;
-                setFactsText(event.target.value);
-              }}
+              onChange={(event) => setFactsText(event.target.value)}
               rows={5}
               placeholder={copy.approvedInformationPlaceholder}
             />

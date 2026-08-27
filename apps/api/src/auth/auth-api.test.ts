@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { accountDataExportSchema } from "@callassist/contracts";
+import {
+  accountDataExportSchema,
+  type CreateCallBriefInput
+} from "@callassist/contracts";
 import { buildApp } from "../app";
 import { CallService } from "../call-service";
 import { CreditService } from "../credits/credit-service";
@@ -148,6 +151,49 @@ async function acceptCurrentOnboarding(
   expect(accepted.statusCode).toBe(200);
 }
 
+async function createPreparedCall(
+  app: ReturnType<typeof buildApp>,
+  cookie: string,
+  payload: CreateCallBriefInput = callBrief
+) {
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/call-preparations",
+    headers: { cookie, "idempotency-key": randomUUID() },
+    payload
+  });
+  expect(accepted.statusCode).toBe(202);
+  const preparationId = accepted.json<{ id: string }>().id;
+  let preparation = accepted.json<{
+    status: string;
+    callBriefId: string | null;
+  }>();
+  for (let index = 0; index < 30 && preparation.status !== "succeeded"; index++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    const status = await app.inject({
+      method: "GET",
+      url: `/api/call-preparations/${preparationId}`,
+      headers: { cookie }
+    });
+    expect(status.statusCode).toBe(200);
+    preparation = status.json();
+  }
+  expect(preparation.status).toBe("succeeded");
+  const snapshot = await app.inject({
+    method: "GET",
+    url: `/api/call-briefs/${preparation.callBriefId}`,
+    headers: { cookie }
+  });
+  expect(snapshot.statusCode).toBe(200);
+  const brief = snapshot.json().brief;
+  return {
+    statusCode: 201,
+    json<T = typeof brief>() {
+      return brief as T;
+    }
+  };
+}
+
 const callBrief = {
   recipientName: "Beta Clinic",
   phoneNumber: "+41710000002",
@@ -159,7 +205,7 @@ const callBrief = {
   locale: "de-CH",
   allowLanguageSwitch: false,
   allowedFacts: []
-};
+} satisfies CreateCallBriefInput;
 
 describe("auth API", () => {
   it("fails closed before registration when the shared limiter is unavailable", async () => {
@@ -218,12 +264,7 @@ describe("auth API", () => {
   it("step-up deletes only an owned terminal call and remains idempotent", async () => {
     const { app, callRepository } = createAuthApp();
     const ownerCookie = await registerAndVerify(app, registration);
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: ownerCookie },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, ownerCookie);
     expect(created.statusCode).toBe(201);
     const callId = created.json().id as string;
     await callRepository.updateStatus(callId, "completed");
@@ -318,16 +359,11 @@ describe("auth API", () => {
     const { app, repository } = createAuthApp(contentService);
     const ownerCookie = await registerAndVerify(app, registration);
     await acceptCurrentOnboarding(app, ownerCookie, "de");
-    const ownerCall = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: ownerCookie },
-      payload: {
-        ...callBrief,
-        recipientName: "Owner Clinic",
-        objective: "Ask the owner clinic for private appointment availability",
-        allowedFacts: ["Private member number A-149"]
-      }
+    const ownerCall = await createPreparedCall(app, ownerCookie, {
+      ...callBrief,
+      recipientName: "Owner Clinic",
+      objective: "Ask the owner clinic for private appointment availability",
+      allowedFacts: ["Private member number A-149"]
     });
     expect(ownerCall.statusCode).toBe(201);
 
@@ -341,18 +377,13 @@ describe("auth API", () => {
     };
     const foreignCookie = await registerAndVerify(app, foreignRegistration);
     await acceptCurrentOnboarding(app, foreignCookie, "en");
-    const foreignCall = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: foreignCookie },
-      payload: {
-        ...callBrief,
-        recipientName: "Foreign Council",
-        objective: "Ask the foreign council for private document availability",
-        representedPersonFirstName: "Alex",
-        representedPersonLastName: "Meier",
-        allowedFacts: ["Foreign secret B-882"]
-      }
+    const foreignCall = await createPreparedCall(app, foreignCookie, {
+      ...callBrief,
+      recipientName: "Foreign Council",
+      objective: "Ask the foreign council for private document availability",
+      representedPersonFirstName: "Alex",
+      representedPersonLastName: "Meier",
+      allowedFacts: ["Foreign secret B-882"]
     });
     expect(foreignCall.statusCode).toBe(201);
 
@@ -1145,19 +1176,18 @@ describe("auth API", () => {
 
     const invalidOrigin = await app.inject({
       method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: userACookie, origin: "https://attacker.example" },
+      url: "/api/call-preparations",
+      headers: {
+        cookie: userACookie,
+        origin: "https://attacker.example",
+        "idempotency-key": randomUUID()
+      },
       payload: callBrief
     });
     expect(invalidOrigin.statusCode).toBe(403);
     expect(invalidOrigin.json()).toEqual({ error: "INVALID_ORIGIN" });
 
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: userACookie },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, userACookie);
     expect(created.statusCode).toBe(201);
     const callId = created.json<{ id: string }>().id;
 
@@ -1290,6 +1320,144 @@ describe("auth API", () => {
     }
   });
 
+  it("accepts call preparation quickly and exposes only its durable owner state", async () => {
+    const { app } = createAuthApp();
+    const ownerCookie = await registerAndVerify(app, registration);
+    const otherCookie = await registerAndVerify(app, {
+      ...registration,
+      email: "preparation-other@example.com",
+      phoneE164: "+41710000006",
+      firstName: "Leo",
+      lastName: "Meier"
+    });
+    const idempotencyKey = randomUUID();
+    const request = {
+      method: "POST" as const,
+      url: "/api/call-preparations",
+      headers: {
+        cookie: ownerCookie,
+        "idempotency-key": idempotencyKey
+      },
+      payload: callBrief
+    };
+    const first = await app.inject(request);
+    const replay = await app.inject(request);
+    expect(first.statusCode).toBe(202);
+    expect(replay.statusCode).toBe(202);
+    const preparationId = first.json<{ id: string }>().id;
+    expect(replay.json<{ id: string }>().id).toBe(preparationId);
+    expect(first.headers.location).toBe(
+      `/api/call-preparations/${preparationId}`
+    );
+
+    const hidden = await app.inject({
+      method: "GET",
+      url: `/api/call-preparations/${preparationId}`,
+      headers: { cookie: otherCookie }
+    });
+    expect(hidden.statusCode).toBe(404);
+
+    let status = first;
+    for (let index = 0; index < 20; index++) {
+      status = await app.inject({
+        method: "GET",
+        url: `/api/call-preparations/${preparationId}`,
+        headers: { cookie: ownerCookie }
+      });
+      if (status.json().status === "succeeded") break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      id: preparationId,
+      status: "succeeded",
+      attemptCount: 1,
+      failureCode: null
+    });
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/call-briefs",
+      headers: { cookie: ownerCookie }
+    });
+    expect(list.json<{ items: unknown[] }>().items).toHaveLength(1);
+  });
+
+  it("keeps call preparation validation and idempotency conflicts explicit", async () => {
+    const { app } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+
+    const legacy = await app.inject({
+      method: "POST",
+      url: "/api/call-briefs",
+      headers: { cookie },
+      payload: callBrief
+    });
+    expect(legacy.statusCode).toBe(404);
+
+    const invalidKey = await app.inject({
+      method: "POST",
+      url: "/api/call-preparations",
+      headers: { cookie, "idempotency-key": "not-a-uuid" },
+      payload: callBrief
+    });
+    expect(invalidKey.statusCode).toBe(400);
+    expect(invalidKey.json()).toEqual({ error: "INVALID_IDEMPOTENCY_KEY" });
+
+    const foreignNumber = await app.inject({
+      method: "POST",
+      url: "/api/call-preparations",
+      headers: { cookie, "idempotency-key": randomUUID() },
+      payload: { ...callBrief, phoneNumber: "+442079460000" }
+    });
+    expect(foreignNumber.statusCode).toBe(400);
+    expect(foreignNumber.json()).toMatchObject({
+      error: "INVALID_CALL_BRIEF",
+      issues: {
+        fieldErrors: {
+          phoneNumber: [
+            "During the public beta CallAssist can only call Swiss phone numbers."
+          ]
+        }
+      }
+    });
+
+    const idempotencyKey = randomUUID();
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/api/call-preparations",
+      headers: { cookie, "idempotency-key": idempotencyKey },
+      payload: callBrief
+    });
+    expect(accepted.statusCode).toBe(202);
+    const conflict = await app.inject({
+      method: "POST",
+      url: "/api/call-preparations",
+      headers: { cookie, "idempotency-key": idempotencyKey },
+      payload: { ...callBrief, objective: `${callBrief.objective} tomorrow` }
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toEqual({
+      error: "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+    });
+  });
+
+  it("fails closed before call preparation when abuse control is unavailable", async () => {
+    const { app, callRepository } = createAuthApp(undefined, {
+      endpointRateLimiter: unavailableRateLimiter()
+    });
+    const cookie = await registerAndVerify(app, registration);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/call-preparations",
+      headers: { cookie, "idempotency-key": randomUUID() },
+      payload: callBrief
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["retry-after"]).toBe("1");
+    expect(response.json()).toEqual({ error: "RATE_LIMIT_UNAVAILABLE" });
+    expect((await callRepository.list({ limit: 1, userId: null })).items).toEqual([]);
+  });
+
   it("separates minimized Admin Calls from audited superadmin content access", async () => {
     const { app, repository, callRepository } = createAuthApp();
     const ownerCookie = await registerAndVerify(app, registration);
@@ -1309,12 +1477,7 @@ describe("auth API", () => {
     const adminId = adminMe.json().user.id as string;
     await repository.setUserRoleForTest(adminId, "admin");
 
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: ownerCookie },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, ownerCookie);
     const callId = created.json<{ id: string }>().id;
     await callRepository.updateStatus(callId, "failed");
     await callRepository.recordSystemCallOutcome(callId);
@@ -1586,12 +1749,7 @@ describe("auth API", () => {
   it("returns explicit API errors for recipient suppression and the global kill switch", async () => {
     const { app, callRepository } = createAuthApp();
     const cookie = await registerAndVerify(app, registration);
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, cookie);
     const callId = created.json<{ id: string }>().id;
     await app.inject({
       method: "POST",
@@ -1686,12 +1844,7 @@ describe("auth API", () => {
     });
 
     const cookie = await registerAndVerify(app, registration);
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, cookie);
     const callId = created.json<{ id: string }>().id;
     await app.inject({
       method: "POST",
@@ -1771,12 +1924,7 @@ describe("auth API", () => {
       status: "already_suppressed"
     });
 
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie: userCookie },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, userCookie);
     const callId = created.json<{ id: string }>().id;
     await app.inject({
       method: "POST",
@@ -2748,12 +2896,7 @@ describe("auth API", () => {
       phoneE164: "+41710000021"
     };
     const cookie = await registerAndVerify(app, input);
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie, origin: "http://localhost:3000" },
-      payload: callBrief
-    });
+    const created = await createPreparedCall(app, cookie);
     expect(created.statusCode).toBe(201);
     const started = await app.inject({
       method: "POST",
@@ -2776,8 +2919,12 @@ describe("auth API", () => {
 
     const blockedMutation = await app.inject({
       method: "POST",
-      url: "/api/call-briefs",
-      headers: { cookie, origin: "http://localhost:3000" },
+      url: "/api/call-preparations",
+      headers: {
+        cookie,
+        origin: "http://localhost:3000",
+        "idempotency-key": randomUUID()
+      },
       payload: callBrief
     });
     expect(blockedMutation.statusCode).toBe(409);

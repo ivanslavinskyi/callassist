@@ -1,4 +1,5 @@
 export const durableJobTypes = [
+  "brief_compilation",
   "final_transcription",
   "recording_retention",
   "provider_call_reconciliation",
@@ -18,7 +19,8 @@ export type DurableJob = {
   type: DurableJobType;
   recordingId: string | null;
   callAttemptId: string | null;
-  callId: string;
+  callPreparationId: string | null;
+  callId: string | null;
   status: DurableJobStatus;
   generation: number;
   attemptCount: number;
@@ -61,6 +63,7 @@ export type EnqueueDurableJobInput = {
   type: DurableJobType;
   recordingId?: string;
   callAttemptId?: string;
+  callPreparationId?: string;
   runAfter: string;
   maxAttempts: number;
   force?: boolean;
@@ -75,6 +78,7 @@ export type ClaimDurableJobInput = {
 };
 
 export const durableJobMaxAttempts: Record<DurableJobType, number> = {
+  brief_compilation: 3,
   final_transcription: 3,
   recording_retention: 5,
   provider_call_reconciliation: 5,

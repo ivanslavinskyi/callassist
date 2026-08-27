@@ -58,6 +58,195 @@ async function repositoryWithAvailableRecording() {
 }
 
 describe("durable job worker", () => {
+  it("publishes exactly one brief when a worker crashes after publication", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    const idempotencyKey = randomUUID();
+    const preparation = await repository.enqueueCallPreparation({
+      userId,
+      idempotencyKey,
+      inputFingerprint: "a".repeat(64),
+      input,
+      now: "2098-11-01T00:00:00.000Z"
+    });
+    const first = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "brief-worker-a",
+      now: "2098-11-01T00:00:00.000Z",
+      leaseExpiresAt: "2098-11-01T00:01:00.000Z"
+    });
+    const firstLease = {
+      jobId: first!.id,
+      workerId: "brief-worker-a",
+      checkedAt: "2098-11-01T00:00:01.000Z"
+    };
+    const work = await repository.claimCallPreparation(
+      preparation.id,
+      firstLease
+    );
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(work.input!)
+    );
+    const published = await repository.create(
+      work.input!,
+      compilation,
+      userId,
+      idempotencyKey,
+      { preparationId: preparation.id, lease: firstLease }
+    );
+    await repository.failDurableJob(
+      first!.id,
+      "brief-worker-a",
+      "worker_crashed_after_publication",
+      "2098-11-01T00:00:02.000Z",
+      "2098-11-01T00:00:03.000Z"
+    );
+    await expect(repository.getCallPreparation(preparation.id, userId))
+      .resolves.toMatchObject({
+        status: "succeeded",
+        callBriefId: published.id
+      });
+
+    const second = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "brief-worker-b",
+      now: "2098-11-01T00:00:03.000Z",
+      leaseExpiresAt: "2098-11-01T00:01:03.000Z"
+    });
+    const replay = await repository.claimCallPreparation(
+      preparation.id,
+      {
+        jobId: second!.id,
+        workerId: "brief-worker-b",
+        checkedAt: "2098-11-01T00:00:04.000Z"
+      }
+    );
+    expect(replay).toMatchObject({
+      preparation: { status: "succeeded", callBriefId: published.id },
+      input: null
+    });
+    await repository.completeDurableJob(
+      second!.id,
+      "brief-worker-b",
+      "2098-11-01T00:00:05.000Z"
+    );
+
+    await expect(repository.getCallPreparation(preparation.id, userId))
+      .resolves.toMatchObject({
+        status: "succeeded",
+        callBriefId: published.id,
+        attemptCount: 2
+      });
+    await expect(repository.list({ limit: 10, userId })).resolves.toMatchObject({
+      items: [{ id: published.id }]
+    });
+  });
+
+  it("exposes a controlled terminal preparation failure after bounded retries", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    const preparation = await repository.enqueueCallPreparation({
+      userId,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "b".repeat(64),
+      input,
+      now: "2098-11-02T00:00:00.000Z"
+    });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const now = `2098-11-02T00:00:0${attempt}.000Z`;
+      const job = await repository.claimDueDurableJob({
+        types: ["brief_compilation"],
+        workerId: `failing-worker-${attempt}`,
+        now,
+        leaseExpiresAt: `2098-11-02T00:01:0${attempt}.000Z`
+      });
+      await repository.claimCallPreparation(preparation.id, {
+        jobId: job!.id,
+        workerId: `failing-worker-${attempt}`,
+        checkedAt: now
+      });
+      await repository.failDurableJob(
+        job!.id,
+        `failing-worker-${attempt}`,
+        "BRIEF_COMPILER_UNAVAILABLE",
+        now,
+        `2098-11-02T00:00:0${attempt + 1}.000Z`
+      );
+    }
+
+    await expect(repository.getCallPreparation(preparation.id, userId))
+      .resolves.toMatchObject({
+        status: "failed",
+        callBriefId: null,
+        failureCode: "BRIEF_COMPILER_UNAVAILABLE",
+        attemptCount: 3
+      });
+  });
+
+  it("cancels in-flight preparation and fences publication for account deletion", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    const idempotencyKey = randomUUID();
+    const preparation = await repository.enqueueCallPreparation({
+      userId,
+      idempotencyKey,
+      inputFingerprint: "c".repeat(64),
+      input,
+      now: "2098-11-03T00:00:00.000Z"
+    });
+    const job = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "deletion-race-worker",
+      now: "2098-11-03T00:00:00.000Z",
+      leaseExpiresAt: "2098-11-03T00:01:00.000Z"
+    });
+    const work = await repository.claimCallPreparation(preparation.id, {
+      jobId: job!.id,
+      workerId: "deletion-race-worker",
+      checkedAt: "2098-11-03T00:00:01.000Z"
+    });
+    await repository.cancelCallPreparations(
+      userId,
+      "2098-11-03T00:00:02.000Z"
+    );
+
+    await expect(repository.getCallPreparation(preparation.id, userId))
+      .resolves.toMatchObject({
+        status: "cancelled",
+        callBriefId: null,
+        completedAt: "2098-11-03T00:00:02.000Z"
+      });
+    await expect(repository.create(
+      work.input!,
+      await new DeterministicBriefCompiler().compile(
+        normalizeCreateCallBriefInput(work.input!)
+      ),
+      userId,
+      idempotencyKey,
+      {
+        preparationId: preparation.id,
+        lease: {
+          jobId: job!.id,
+          workerId: "deletion-race-worker",
+          checkedAt: "2098-11-03T00:00:03.000Z"
+        }
+      }
+    )).rejects.toMatchObject({ code: "DURABLE_JOB_LEASE_LOST" });
+    await expect(repository.listDurableJobs()).resolves.toEqual([
+      expect.objectContaining({
+        id: job!.id,
+        status: "cancelled",
+        lastErrorCode: "account_deletion_requested"
+      })
+    ]);
+    await expect(repository.listDurableJobAttempts(job!.id)).resolves.toEqual([
+      expect.objectContaining({
+        outcome: "cancelled",
+        errorCode: "account_deletion_requested"
+      })
+    ]);
+  });
+
   it("fences stale provider reconciliation writes after lease recovery", async () => {
     const { repository, brief } = await repositoryWithAvailableRecording();
     const attempt = await repository.getLatestAttempt(brief.id);
@@ -165,7 +354,7 @@ describe("durable job worker", () => {
     expect((await repository.listDurableJobAttempts(second!.id)).map(
       ({ outcome }) => outcome
     )).toEqual(["lease_expired", "succeeded"]);
-    expect((await repository.get(second!.callId))?.finalTranscript?.text)
+    expect((await repository.get(second!.callId!))?.finalTranscript?.text)
       .toBe("fresh result");
   });
 

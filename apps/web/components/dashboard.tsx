@@ -14,7 +14,7 @@ const callStatuses = [
   "in_progress", "awaiting_approval", "completed", "stopped", "failed"
 ] as const satisfies readonly CallBrief["status"][];
 
-export function Dashboard() {
+export function Dashboard({ userId }: { userId: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -102,7 +102,7 @@ export function Dashboard() {
 
         <div className="dashboard-grid">
           <div id="new-call">
-            <CreateCallForm onCreated={openBrief} />
+            <CreateCallForm onCreated={openBrief} userId={userId} />
           </div>
 
           <aside className="activity-panel" id="history">

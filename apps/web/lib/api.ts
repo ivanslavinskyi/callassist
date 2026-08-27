@@ -21,6 +21,7 @@ import type {
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
+  CallPreparation,
   CallDataDeletionInput,
   CallDataDeletionResult,
   CallOutcomeView,
@@ -622,11 +623,48 @@ export async function createCallBrief(
   input: CreateCallBriefInput,
   idempotencyKey = crypto.randomUUID()
 ) {
-  return apiRequest<CallBrief>("/api/call-briefs", {
+  const request = () => apiRequest<CallPreparation>("/api/call-preparations", {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input)
   });
+
+  let preparation: CallPreparation;
+  try {
+    preparation = await request();
+  } catch (error) {
+    if (!isUncertainCallPreparationResponse(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    preparation = await request();
+  }
+
+  const deadline = Date.now() + 120_000;
+  while (preparation.status !== "succeeded") {
+    if (preparation.status === "failed") {
+      throw new ApiError(
+        preparation.failureCode ?? "BRIEF_COMPILATION_FAILED",
+        502
+      );
+    }
+    if (preparation.status === "cancelled") {
+      throw new ApiError("CALL_PREPARATION_CANCELLED", 409);
+    }
+    if (Date.now() >= deadline) {
+      throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    preparation = await apiRequest<CallPreparation>(
+      `/api/call-preparations/${preparation.id}`
+    );
+  }
+  const snapshot = await getCallSnapshot(preparation.callBriefId!);
+  return snapshot.brief;
+}
+
+function isUncertainCallPreparationResponse(error: unknown) {
+  if (!(error instanceof ApiError)) return true;
+  return (error.status === 408 || error.status === 425 || error.status >= 500) &&
+    error.code === `HTTP_${error.status}`;
 }
 
 export async function getCallSnapshot(id: string) {

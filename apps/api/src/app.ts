@@ -1813,9 +1813,12 @@ export function buildApp({
     });
   });
 
-  app.post("/api/call-briefs", async (request, reply) => {
+  app.post("/api/call-preparations", async (request, reply) => {
     const access = await authorizeCallAccess(request, reply, { mutation: true });
     if (!access) return;
+    if (!access.userId) {
+      return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+    }
     const parsed = createCallBriefInputSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -1825,17 +1828,27 @@ export function buildApp({
     }
     const idempotencyHeader = request.headers["idempotency-key"];
     if (
-      idempotencyHeader !== undefined &&
-      (typeof idempotencyHeader !== "string" || !isUuid(idempotencyHeader))
+      typeof idempotencyHeader !== "string" ||
+      !isUuid(idempotencyHeader)
     ) {
       return reply.status(400).send({ error: "INVALID_IDEMPOTENCY_KEY" });
     }
-    const creationIdempotencyKey = idempotencyHeader ?? randomUUID();
-    const existing = await service.findByCreationRequest(
-      access.userId,
-      creationIdempotencyKey
-    );
-    if (existing) return reply.status(201).send(existing);
+    try {
+      const existing = await service.findPreparationByRequest(
+        parsed.data,
+        access.userId,
+        idempotencyHeader
+      );
+      if (existing) {
+        return reply
+          .header("Location", `/api/call-preparations/${existing.id}`)
+          .header("Cache-Control", "private, no-store")
+          .status(202)
+          .send(existing);
+      }
+    } catch (error) {
+      return sendRepositoryError(reply, error);
+    }
     if (!(await enforceEndpointRateLimit(
       request,
       reply,
@@ -1843,20 +1856,39 @@ export function buildApp({
       "brief-preparation",
       endpointRateLimitPolicy.briefPreparation
     ))) return;
-
     try {
-      return reply.status(201).send(
-        await service.create(
-          parsed.data,
-          access.userId,
-          creationIdempotencyKey
-        )
+      const preparation = await service.prepare(
+        parsed.data,
+        access.userId,
+        idempotencyHeader
       );
+      return reply
+        .header("Location", `/api/call-preparations/${preparation.id}`)
+        .header("Cache-Control", "private, no-store")
+        .status(202)
+        .send(preparation);
     } catch (error) {
-      logCallPreparationError(request.log, error);
       return sendRepositoryError(reply, error);
     }
   });
+
+  app.get<{ Params: { id: string } }>(
+    "/api/call-preparations/:id",
+    async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply);
+      if (!access) return;
+      if (!access.userId) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await service.getPreparation(request.params.id, access.userId));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
 
   app.get<{ Params: { id: string } }>(
     "/api/call-briefs/:id",
@@ -2732,7 +2764,11 @@ function sendRepositoryError(
   }
 
   if (error instanceof CallRepositoryError) {
-    const status = ["CALL_NOT_FOUND", "DURABLE_JOB_NOT_FOUND"]
+    const status = [
+      "CALL_NOT_FOUND",
+      "CALL_PREPARATION_NOT_FOUND",
+      "DURABLE_JOB_NOT_FOUND"
+    ]
       .includes(error.code)
       ? 404
       : error.code === "CREDIT_USER_NOT_FOUND"

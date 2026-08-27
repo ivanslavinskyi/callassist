@@ -1454,6 +1454,157 @@ describeWithDatabase("PostgresCallRepository", () => {
     });
   });
 
+  it("atomically enqueues and completes an encrypted call preparation", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Async preparation office",
+      phoneNumber: "+41710000064",
+      objective: "Verify durable asynchronous call brief preparation",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const idempotencyKey = randomUUID();
+    const now = "2096-01-01T00:00:00.000Z";
+    const queued = await repository.enqueueCallPreparation({
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "a".repeat(64),
+      input,
+      now
+    });
+    await expect(repository.enqueueCallPreparation({
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "a".repeat(64),
+      input,
+      now
+    })).resolves.toMatchObject({ id: queued.id, status: "queued" });
+    await expect(repository.enqueueCallPreparation({
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "b".repeat(64),
+      input,
+      now
+    })).rejects.toMatchObject({
+      code: "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+    });
+
+    const job = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "postgres-preparation-worker",
+      now,
+      leaseExpiresAt: "2096-01-01T00:01:00.000Z"
+    });
+    expect(job).toMatchObject({
+      callPreparationId: queued.id,
+      callId: null,
+      attemptCount: 1
+    });
+    const lease = {
+      jobId: job!.id,
+      workerId: "postgres-preparation-worker",
+      checkedAt: "2096-01-01T00:00:01.000Z"
+    };
+    const work = await repository.claimCallPreparation(queued.id, lease);
+    expect(work.input).toEqual(normalizeCreateCallBriefInput(input));
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(
+      input,
+      compilation,
+      ownerA,
+      idempotencyKey,
+      { preparationId: queued.id, lease }
+    );
+    await expect(repository.completeDurableJob(
+      job!.id,
+      "postgres-preparation-worker",
+      "2096-01-01T00:00:02.000Z"
+    )).resolves.toBe(true);
+    await expect(repository.getCallPreparation(queued.id, ownerA))
+      .resolves.toMatchObject({
+        status: "succeeded",
+        callBriefId: brief.id,
+        attemptCount: 1
+      });
+    const [stored] = await inspection<{
+      inputCiphertext: string | null;
+    }[]>`
+      SELECT input_ciphertext AS "inputCiphertext"
+      FROM call_preparation_requests
+      WHERE id = ${queued.id}
+    `;
+    expect(stored?.inputCiphertext).toBeNull();
+  });
+
+  it("atomically cancels active preparations and erases their private input", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Cancelled preparation office",
+      phoneNumber: "+41710000063",
+      objective: "Verify account deletion fences queued compilation",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: ["Private cancellation fact"]
+    };
+    const queued = await repository.enqueueCallPreparation({
+      userId: ownerB,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "c".repeat(64),
+      input,
+      now: "2096-01-02T00:00:00.000Z"
+    });
+    const job = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "postgres-cancellation-worker",
+      now: "2096-01-02T00:00:00.000Z",
+      leaseExpiresAt: "2096-01-02T00:01:00.000Z"
+    });
+    await repository.claimCallPreparation(queued.id, {
+      jobId: job!.id,
+      workerId: "postgres-cancellation-worker",
+      checkedAt: "2096-01-02T00:00:01.000Z"
+    });
+    await repository.cancelCallPreparations(
+      ownerB,
+      "2096-01-02T00:00:02.000Z"
+    );
+
+    await expect(repository.getCallPreparation(queued.id, ownerB))
+      .resolves.toMatchObject({
+        status: "cancelled",
+        callBriefId: null,
+        completedAt: "2096-01-02T00:00:02.000Z"
+      });
+    await expect(repository.listDurableJobs()).resolves.toContainEqual(
+      expect.objectContaining({
+        id: job!.id,
+        status: "cancelled",
+        lastErrorCode: "account_deletion_requested"
+      })
+    );
+    await expect(repository.listDurableJobAttempts(job!.id)).resolves.toEqual([
+      expect.objectContaining({
+        outcome: "cancelled",
+        errorCode: "account_deletion_requested"
+      })
+    ]);
+    const [stored] = await inspection<{ inputCiphertext: string | null }[]>`
+      SELECT input_ciphertext AS "inputCiphertext"
+      FROM call_preparation_requests
+      WHERE id = ${queued.id}
+    `;
+    expect(stored?.inputCiphertext).toBeNull();
+  });
+
   it("leases durable jobs with retry fencing and immutable attempt history", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "PostgreSQL durable job",

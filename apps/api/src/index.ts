@@ -5,10 +5,7 @@ import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
 import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
-import {
-  DeterministicBriefCompiler,
-  OpenAIBriefCompiler
-} from "./brief-compiler/brief-compiler";
+import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
 import { ContentService } from "./content/content-service";
 import { createContentRepositoryFromEnv } from "./content/create-content-repository";
@@ -25,10 +22,7 @@ import {
   OpenAIRealtimeBridge,
   type RealtimeTranscriptionDelay
 } from "./realtime/openai-realtime-bridge";
-import {
-  createCallRuntimeDependenciesFromEnv,
-  requireEnvironmentVariable
-} from "./runtime/call-runtime-dependencies";
+import { createCallRuntimeDependenciesFromEnv } from "./runtime/call-runtime-dependencies";
 import {
   createGracefulShutdown,
   registerProcessShutdown
@@ -48,7 +42,7 @@ const rateLimiter = createRateLimiterFromEnv();
 const durableWorkerMode = durableWorkerModeFromEnv();
 const contentService = new ContentService(createContentRepositoryFromEnv());
 await contentService.initialize();
-const briefCompiler = createBriefCompiler();
+const briefCompiler = createBriefCompilerFromEnv();
 const service = new CallService(
   repository,
   telephonyProvider,
@@ -142,38 +136,6 @@ registerProcessShutdown(createGracefulShutdown(
 
 if (recoveredCalls > 0) {
   app.log.warn({ recoveredCalls }, "Interrupted calls were marked as failed");
-}
-
-function createBriefCompiler() {
-  const configuredKey = process.env.OPENAI_API_KEY?.trim();
-  const driver =
-    process.env.BRIEF_COMPILER_DRIVER?.trim() ||
-    (configuredKey ? "openai" : "mock");
-  if (driver === "mock") return new DeterministicBriefCompiler();
-  if (driver === "openai") {
-    return new OpenAIBriefCompiler({
-      apiKey: requireEnvironmentVariable("OPENAI_API_KEY"),
-      model: process.env.OPENAI_BRIEF_COMPILER_MODEL,
-      timeoutMs: parsePositiveInteger(
-        process.env.OPENAI_BRIEF_COMPILER_TIMEOUT_MS,
-        "OPENAI_BRIEF_COMPILER_TIMEOUT_MS"
-      ),
-      requestTimeoutMs: parsePositiveInteger(
-        process.env.OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS,
-        "OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS"
-      )
-    });
-  }
-  throw new Error(`Unsupported BRIEF_COMPILER_DRIVER: ${driver}`);
-}
-
-function parsePositiveInteger(value: string | undefined, name: string) {
-  if (!value?.trim()) return undefined;
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return parsed;
 }
 
 function parseTranscriptionDelay(

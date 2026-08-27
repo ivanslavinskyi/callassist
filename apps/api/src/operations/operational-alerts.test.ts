@@ -37,6 +37,7 @@ function alertInput(): Pick<
       succeeded: 0,
       deadLetter: 0,
       retryQueued: 0,
+      briefCompilationQueued: 0,
       transcriptionQueued: 0,
       retentionQueued: 0,
       providerReconciliationQueued: 0,

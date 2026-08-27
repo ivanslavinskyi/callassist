@@ -782,12 +782,21 @@ describe("API client headers", () => {
   });
 
   it("declares JSON when a request has a body", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ id: "call-id" }), {
-        status: 201,
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "preparation-id",
+        status: "succeeded",
+        callBriefId: "call-id"
+      }), {
+        status: 202,
         headers: { "Content-Type": "application/json" }
-      })
-    );
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        brief: { id: "call-id" }
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     const idempotencyKey = "00000000-0000-4000-8000-000000000102";
@@ -814,6 +823,110 @@ describe("API client headers", () => {
     expect(new Headers(request.headers).get("Idempotency-Key")).toBe(
       idempotencyKey
     );
+  });
+
+  it("recovers an uncertain call-preparation response with the same key", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("response stream closed"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "preparation-id",
+        status: "succeeded",
+        callBriefId: "call-id"
+      }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        brief: { id: "call-id" }
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const idempotencyKey = "00000000-0000-4000-8000-000000000103";
+    await expect(createCallBrief({
+      recipientName: "Praxis",
+      phoneNumber: "+41710000000",
+      objective: "Einen Termin fuer naechste Woche vereinbaren",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "language_barrier",
+      locale: "de-CH",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, idempotencyKey)).resolves.toMatchObject({ id: "call-id" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetchMock.mock.calls.slice(0, 2)) {
+      expect(new Headers(init?.headers).get("Idempotency-Key")).toBe(
+        idempotencyKey
+      );
+    }
+  });
+
+  it("does not retry a known call-planning failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "BRIEF_COMPILER_UNAVAILABLE"
+    }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createCallBrief({
+      recipientName: "Praxis",
+      phoneNumber: "+41710000000",
+      objective: "Einen Termin fuer naechste Woche vereinbaren",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "language_barrier",
+      locale: "de-CH",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, "00000000-0000-4000-8000-000000000104"))
+      .rejects.toMatchObject({ code: "BRIEF_COMPILER_UNAVAILABLE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers an anonymous gateway timeout with the same key", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("gateway timeout", { status: 524 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "preparation-id",
+        status: "succeeded",
+        callBriefId: "call-id"
+      }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        brief: { id: "call-id" }
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const idempotencyKey = "00000000-0000-4000-8000-000000000105";
+    await expect(createCallBrief({
+      recipientName: "Praxis",
+      phoneNumber: "+41710000000",
+      objective: "Einen Termin fuer naechste Woche vereinbaren",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "language_barrier",
+      locale: "de-CH",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, idempotencyKey)).resolves.toMatchObject({ id: "call-id" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.slice(0, 2).every(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key") === idempotencyKey
+    )).toBe(true);
   });
 
   it("updates a brief with JSON and keeps approve-and-start bodyless", async () => {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   adminOperationsWindowBounds,
   adminSystemStatusSchema,
@@ -151,6 +151,10 @@ export class CallService {
     this.#durableJobWorker = new DurableJobWorker(
       repository,
       {
+        brief_compilation: (
+          job: DurableJob,
+          lease: DurableJobLease
+        ) => this.#processCallPreparation(job, lease),
         ...(postCallTranscriber
           ? {
               final_transcription: (
@@ -428,14 +432,43 @@ export class CallService {
     }
   }
 
-  findByCreationRequest(
-    userId: string | null,
-    creationIdempotencyKey: string
+  async prepare(
+    input: CreateCallBriefInput,
+    userId: string,
+    idempotencyKey: string = randomUUID()
   ) {
-    return this.repository.findByCreationRequest(
+    const normalized = normalizeCreateCallBriefInput(input);
+    const inputFingerprint = callPreparationFingerprint(normalized);
+    const preparation = await this.repository.enqueueCallPreparation({
       userId,
-      creationIdempotencyKey
+      idempotencyKey,
+      inputFingerprint,
+      input: normalized,
+      now: new Date().toISOString()
+    });
+    this.#durableJobWorker.wake();
+    return preparation;
+  }
+
+  findPreparationByRequest(
+    input: CreateCallBriefInput,
+    userId: string,
+    idempotencyKey: string
+  ) {
+    return this.repository.findCallPreparationByRequest(
+      userId,
+      idempotencyKey,
+      callPreparationFingerprint(normalizeCreateCallBriefInput(input))
     );
+  }
+
+  async getPreparation(id: string, userId: string) {
+    if (!isUuid(id)) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    const preparation = await this.repository.getCallPreparation(id, userId);
+    if (!preparation) {
+      throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    }
+    return preparation;
   }
 
   async assertOwned(id: string, userId: string | null) {
@@ -985,8 +1018,48 @@ export class CallService {
     }
   }
 
+  async #processCallPreparation(job: DurableJob, lease: DurableJobLease) {
+    if (!job.callPreparationId) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    }
+    const work = await this.repository.claimCallPreparation(
+      job.callPreparationId,
+      currentLease(lease)
+    );
+    if (work.preparation.status === "succeeded") return;
+    if (!work.input) {
+      throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED");
+    }
+    try {
+      const compilation = await this.#briefCompiler.compile(
+        normalizeCreateCallBriefInput(work.input)
+      );
+      await this.repository.create(
+        work.input,
+        compilation,
+        work.userId,
+        work.idempotencyKey,
+        {
+          preparationId: job.callPreparationId,
+          lease: currentLease(lease)
+        }
+      );
+    } catch (error) {
+      if (error instanceof BriefCompilerError) {
+        throw new DurableJobExecutionError(
+          mapBriefCompilerError(error).code,
+          { cause: error }
+        );
+      }
+      if (error instanceof DurableJobExecutionError) throw error;
+      throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED", {
+        cause: error
+      });
+    }
+  }
+
   async #processRecordingRetention(job: DurableJob, lease: DurableJobLease) {
-    if (!job.recordingId) {
+    if (!job.recordingId || !job.callId) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
     const snapshot = await this.#require(job.callId);
@@ -1016,7 +1089,7 @@ export class CallService {
   }
 
   async #reconcileProviderCall(job: DurableJob, lease: DurableJobLease) {
-    if (!job.callAttemptId || !this.telephonyProvider.getCallStatus) {
+    if (!job.callAttemptId || !job.callId || !this.telephonyProvider.getCallStatus) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
     const snapshot = await this.#require(job.callId);
@@ -1060,7 +1133,7 @@ export class CallService {
   }
 
   async #reconcileProviderRecording(job: DurableJob, lease: DurableJobLease) {
-    if (!job.recordingId || !this.telephonyProvider.getRecordingStatus) {
+    if (!job.recordingId || !job.callId || !this.telephonyProvider.getRecordingStatus) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
     const snapshot = await this.#require(job.callId);
@@ -1323,6 +1396,10 @@ function adminWebhookDeliveryView(
         ))
       : null
   };
+}
+
+function callPreparationFingerprint(input: CreateCallBriefInput) {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }
 
 function mapBriefCompilerError(error: BriefCompilerError) {

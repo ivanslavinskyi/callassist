@@ -1,4 +1,5 @@
 import "./config/load-env";
+import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
 import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
@@ -25,7 +26,7 @@ const service = new CallService(
   telephonyProvider,
   () => writePiiSafeOperationalError("durable_worker_operation_failed"),
   postCallTranscriber,
-  undefined,
+  createBriefCompilerFromEnv(),
   undefined,
   undefined,
   {

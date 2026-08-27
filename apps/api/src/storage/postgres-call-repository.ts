@@ -24,6 +24,7 @@ import {
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
+  type CallPreparation,
   type CallCompilation,
   type CallFeedbackRevision,
   type CallGoalResult,
@@ -89,9 +90,11 @@ import {
   type CallDataDeletionRecord,
   type CallAttemptRecord,
   type CallChangeSignal,
+  type CallPreparationPublication,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
+  type EnqueueCallPreparationRepositoryInput,
   type PromoCodeCreationResult,
   type ListCallBriefsInput,
   type ListAdminCallsInput,
@@ -311,6 +314,7 @@ type AdminSystemFactsRow = {
   jobsSucceeded: number;
   jobsDeadLetter: number;
   jobsRetryQueued: number;
+  briefCompilationQueued: number;
   transcriptionQueued: number;
   retentionQueued: number;
   providerReconciliationQueued: number;
@@ -326,7 +330,8 @@ type DurableJobRow = {
   type: DurableJob["type"];
   recordingId: string | null;
   callAttemptId: string | null;
-  callId: string;
+  callPreparationId: string | null;
+  callId: string | null;
   status: DurableJob["status"];
   generation: number;
   attemptCount: number;
@@ -337,6 +342,21 @@ type DurableJobRow = {
   leasedAt: DatabaseDate | null;
   leaseExpiresAt: DatabaseDate | null;
   lastErrorCode: string | null;
+  createdAt: DatabaseDate;
+  updatedAt: DatabaseDate;
+  completedAt: DatabaseDate | null;
+};
+
+type CallPreparationRow = {
+  id: string;
+  userId: string;
+  idempotencyKey: string;
+  inputFingerprint: string;
+  inputCiphertext: string | null;
+  status: CallPreparation["status"];
+  callBriefId: string | null;
+  failureCode: CallPreparation["failureCode"];
+  attemptCount: number;
   createdAt: DatabaseDate;
   updatedAt: DatabaseDate;
   completedAt: DatabaseDate | null;
@@ -447,13 +467,16 @@ export class PostgresCallRepository implements CallRepository {
     input: CreateCallBriefInput,
     compilation: CallCompilation,
     userId: string | null = null,
-    creationIdempotencyKey: string = randomUUID()
+    creationIdempotencyKey: string = randomUUID(),
+    publication?: CallPreparationPublication
   ) {
-    const existing = await this.findByCreationRequest(
-      userId,
-      creationIdempotencyKey
-    );
-    if (existing) return existing;
+    if (!publication) {
+      const existing = await this.findByCreationRequest(
+        userId,
+        creationIdempotencyKey
+      );
+      if (existing) return existing;
+    }
 
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
@@ -471,7 +494,42 @@ export class PostgresCallRepository implements CallRepository {
       this.#encryptionKey
     );
 
-    const inserted = await this.#sql.begin(async (transaction) => {
+    const callBriefId = await this.#sql.begin(async (transaction) => {
+      if (publication) {
+        await requirePostgresDurableJobLease(transaction, publication.lease);
+        const [target] = await transaction<{
+          userId: string;
+          idempotencyKey: string;
+          status: CallPreparation["status"];
+          callBriefId: string | null;
+        }[]>`
+          SELECT
+            call_preparation_requests.user_id AS "userId",
+            call_preparation_requests.idempotency_key AS "idempotencyKey",
+            call_preparation_requests.status,
+            call_preparation_requests.call_brief_id AS "callBriefId"
+          FROM call_preparation_requests
+          INNER JOIN durable_jobs
+            ON durable_jobs.call_preparation_id = call_preparation_requests.id
+          WHERE call_preparation_requests.id = ${publication.preparationId}
+            AND durable_jobs.id = ${publication.lease.jobId}
+          FOR UPDATE OF call_preparation_requests
+        `;
+        if (
+          !target ||
+          target.userId !== userId ||
+          target.idempotencyKey !== creationIdempotencyKey ||
+          ["failed", "cancelled"].includes(target.status)
+        ) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+        }
+        if (target.status === "succeeded") {
+          if (!target.callBriefId) {
+            throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+          }
+          return target.callBriefId;
+        }
+      }
       if (userId) await this.#lockActiveUser(transaction, userId);
       const insertedRows = await transaction<{ id: string }[]>`
         INSERT INTO call_briefs (
@@ -532,44 +590,67 @@ export class PostgresCallRepository implements CallRepository {
           DO NOTHING
         RETURNING id
       `;
-      if (insertedRows.length === 0) return false;
-      await this.#audit(transaction, id, "call.created", {
-        locale: parsed.locale,
-        status: runtime.status,
-        policyDecision: compilation.policyDecision.status,
-        snapshotHash: compilation.snapshotHash
-      });
-      await this.#appendTelemetry(transaction, id, {
-        idempotencyKey: `brief:${compilation.revision}:created`,
-        occurredAt: now.toISOString(),
-        payload: {
-          name: "brief.created",
-          metadata: {
-            locale: parsed.locale,
-            compilationRevision: compilation.revision,
-            status: runtime.status
+      let resolvedId = insertedRows[0]?.id;
+      if (resolvedId) {
+        await this.#audit(transaction, resolvedId, "call.created", {
+          locale: parsed.locale,
+          status: runtime.status,
+          policyDecision: compilation.policyDecision.status,
+          snapshotHash: compilation.snapshotHash
+        });
+        await this.#appendTelemetry(transaction, resolvedId, {
+          idempotencyKey: `brief:${compilation.revision}:created`,
+          occurredAt: now.toISOString(),
+          payload: {
+            name: "brief.created",
+            metadata: {
+              locale: parsed.locale,
+              compilationRevision: compilation.revision,
+              status: runtime.status
+            }
           }
+        });
+        await this.#appendCompilationTelemetry(
+          transaction,
+          resolvedId,
+          compilation,
+          now.toISOString()
+        );
+      } else {
+        const [raced] = await transaction<{ id: string }[]>`
+          SELECT id
+          FROM call_briefs
+          WHERE creation_idempotency_key = ${creationIdempotencyKey}
+            AND user_id IS NOT DISTINCT FROM ${userId}::uuid
+            AND data_deleted_at IS NULL
+          FOR SHARE
+        `;
+        if (!raced) {
+          throw new CallRepositoryError("CALL_CREATION_IDEMPOTENCY_CONFLICT");
         }
-      });
-      await this.#appendCompilationTelemetry(
-        transaction,
-        id,
-        compilation,
-        now.toISOString()
-      );
-      return true;
+        resolvedId = raced.id;
+      }
+      if (publication) {
+        const updated = await transaction`
+          UPDATE call_preparation_requests
+          SET
+            status = 'succeeded',
+            call_brief_id = ${resolvedId},
+            failure_code = NULL,
+            input_ciphertext = NULL,
+            updated_at = ${publication.lease.checkedAt}::timestamptz,
+            completed_at = ${publication.lease.checkedAt}::timestamptz
+          WHERE id = ${publication.preparationId}
+            AND status IN ('queued', 'processing', 'retrying')
+        `;
+        if (updated.count !== 1) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+        }
+      }
+      return resolvedId;
     });
 
-    if (!inserted) {
-      const raced = await this.findByCreationRequest(
-        userId,
-        creationIdempotencyKey
-      );
-      if (raced) return raced;
-      throw new CallRepositoryError("CALL_CREATION_IDEMPOTENCY_CONFLICT");
-    }
-
-    const snapshot = await this.#require(id);
+    const snapshot = await this.#require(callBriefId);
     return snapshot.brief;
   }
 
@@ -585,6 +666,171 @@ export class PostgresCallRepository implements CallRepository {
       LIMIT 1
     `;
     return row ? this.#mapBrief(row) : null;
+  }
+
+  async enqueueCallPreparation(input: EnqueueCallPreparationRepositoryInput) {
+    const id = randomUUID();
+    const encryptedInput = encryptJson(
+      normalizeCreateCallBriefInput(input.input),
+      this.#encryptionKey
+    );
+    const preparationId = await this.#sql.begin(async (transaction) => {
+      await this.#lockActiveUser(transaction, input.userId);
+      await transaction`
+        INSERT INTO call_preparation_requests (
+          id, user_id, idempotency_key, input_fingerprint, input_ciphertext,
+          status, created_at, updated_at
+        ) VALUES (
+          ${id}, ${input.userId}, ${input.idempotencyKey},
+          ${input.inputFingerprint}, ${encryptedInput}, 'queued',
+          ${input.now}::timestamptz, ${input.now}::timestamptz
+        )
+        ON CONFLICT (user_id, idempotency_key) DO NOTHING
+      `;
+      const [stored] = await transaction<{
+        id: string;
+        inputFingerprint: string;
+      }[]>`
+        SELECT id, input_fingerprint AS "inputFingerprint"
+        FROM call_preparation_requests
+        WHERE user_id = ${input.userId}
+          AND idempotency_key = ${input.idempotencyKey}
+        FOR UPDATE
+      `;
+      if (!stored) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+      if (stored.inputFingerprint !== input.inputFingerprint) {
+        throw new CallRepositoryError(
+          "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+        );
+      }
+      await transaction`
+        INSERT INTO durable_jobs (
+          id, job_type, call_preparation_id, status, max_attempts,
+          run_after, force_requested, created_at, updated_at
+        ) VALUES (
+          ${randomUUID()}, 'brief_compilation', ${stored.id}, 'queued',
+          ${durableJobMaxAttempts.brief_compilation},
+          ${input.now}::timestamptz, false,
+          ${input.now}::timestamptz, ${input.now}::timestamptz
+        )
+        ON CONFLICT (job_type, call_preparation_id)
+          WHERE call_preparation_id IS NOT NULL
+        DO NOTHING
+      `;
+      return stored.id;
+    });
+    const preparation = await this.#getCallPreparation(preparationId);
+    if (!preparation) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    return mapCallPreparationRow(preparation);
+  }
+
+  async getCallPreparation(id: string, userId: string) {
+    const row = await this.#getCallPreparation(id, userId);
+    return row ? mapCallPreparationRow(row) : null;
+  }
+
+  async findCallPreparationByRequest(
+    userId: string,
+    idempotencyKey: string,
+    inputFingerprint: string
+  ) {
+    const [row] = await this.#sql<CallPreparationRow[]>`
+      ${this.#callPreparationSelect()}
+      WHERE call_preparation_requests.user_id = ${userId}
+        AND call_preparation_requests.idempotency_key = ${idempotencyKey}
+      LIMIT 1
+    `;
+    if (!row) return null;
+    if (row.inputFingerprint !== inputFingerprint) {
+      throw new CallRepositoryError("CALL_PREPARATION_IDEMPOTENCY_CONFLICT");
+    }
+    return mapCallPreparationRow(row);
+  }
+
+  async claimCallPreparation(id: string, lease: DurableJobLease) {
+    return this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [row] = await transaction<CallPreparationRow[]>`
+        ${this.#callPreparationSelect()}
+        WHERE call_preparation_requests.id = ${id}
+          AND durable_jobs.id = ${lease.jobId}
+        FOR UPDATE OF call_preparation_requests
+      `;
+      if (!row || ["failed", "cancelled"].includes(row.status)) {
+        throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+      }
+      if (row.status !== "succeeded") {
+        await transaction`
+          UPDATE call_preparation_requests
+          SET status = 'processing', updated_at = ${lease.checkedAt}::timestamptz
+          WHERE id = ${id}
+        `;
+        row.status = "processing";
+        row.updatedAt = lease.checkedAt;
+      }
+      return {
+        preparation: mapCallPreparationRow(row),
+        userId: row.userId,
+        idempotencyKey: row.idempotencyKey,
+        input: row.inputCiphertext
+          ? decryptJson<CreateCallBriefInput>(
+              row.inputCiphertext,
+              this.#encryptionKey
+            )
+          : null
+      };
+    });
+  }
+
+  async cancelCallPreparations(userId: string, now: string) {
+    await this.#sql.begin(async (transaction) => {
+      await transaction`
+        SELECT id FROM users WHERE id = ${userId} FOR UPDATE
+      `;
+      await transaction`
+        INSERT INTO durable_job_attempts (
+          id, job_id, generation, attempt_number, worker_id,
+          started_at, completed_at, outcome, error_code
+        )
+        SELECT
+          gen_random_uuid(), durable_jobs.id, durable_jobs.generation,
+          durable_jobs.attempt_count, durable_jobs.lease_owner,
+          durable_jobs.leased_at, ${now}::timestamptz,
+          'cancelled', 'account_deletion_requested'
+        FROM durable_jobs
+        INNER JOIN call_preparation_requests
+          ON call_preparation_requests.id = durable_jobs.call_preparation_id
+        WHERE call_preparation_requests.user_id = ${userId}
+          AND durable_jobs.status = 'running'
+        ON CONFLICT (job_id, generation, attempt_number) DO NOTHING
+      `;
+      await transaction`
+        UPDATE durable_jobs
+        SET
+          status = 'cancelled',
+          lease_owner = NULL,
+          leased_at = NULL,
+          lease_expires_at = NULL,
+          last_error_code = 'account_deletion_requested',
+          updated_at = ${now}::timestamptz,
+          completed_at = ${now}::timestamptz
+        FROM call_preparation_requests
+        WHERE call_preparation_requests.id = durable_jobs.call_preparation_id
+          AND call_preparation_requests.user_id = ${userId}
+          AND durable_jobs.status IN ('queued', 'running')
+      `;
+      await transaction`
+        UPDATE call_preparation_requests
+        SET
+          status = 'cancelled',
+          failure_code = NULL,
+          input_ciphertext = NULL,
+          updated_at = ${now}::timestamptz,
+          completed_at = ${now}::timestamptz
+        WHERE user_id = ${userId}
+          AND status IN ('queued', 'processing', 'retrying')
+      `;
+    });
   }
 
   async isOwnedBy(id: string, userId: string | null) {
@@ -1854,6 +2100,10 @@ export class PostgresCallRepository implements CallRepository {
         ) AS "jobsRetryQueued",
         (
           SELECT count(*)::int FROM durable_jobs
+          WHERE status = 'queued' AND job_type = 'brief_compilation'
+        ) AS "briefCompilationQueued",
+        (
+          SELECT count(*)::int FROM durable_jobs
           WHERE status = 'queued' AND job_type = 'final_transcription'
         ) AS "transcriptionQueued",
         (
@@ -1950,6 +2200,7 @@ export class PostgresCallRepository implements CallRepository {
         succeeded: row.jobsSucceeded,
         deadLetter: row.jobsDeadLetter,
         retryQueued: row.jobsRetryQueued,
+        briefCompilationQueued: row.briefCompilationQueued,
         transcriptionQueued: row.transcriptionQueued,
         retentionQueued: row.retentionQueued,
         providerReconciliationQueued: row.providerReconciliationQueued,
@@ -3755,9 +4006,12 @@ export class PostgresCallRepository implements CallRepository {
     const now = new Date();
     const jobId = await this.#sql.begin(async (transaction) => {
       const callTarget = input.type === "provider_call_reconciliation";
+      const preparationTarget = input.type === "brief_compilation";
+      const recordingTarget = !callTarget && !preparationTarget;
       if (
-        (callTarget && (!input.callAttemptId || input.recordingId)) ||
-        (!callTarget && (!input.recordingId || input.callAttemptId))
+        (callTarget && (!input.callAttemptId || input.recordingId || input.callPreparationId)) ||
+        (preparationTarget && (!input.callPreparationId || input.recordingId || input.callAttemptId)) ||
+        (recordingTarget && (!input.recordingId || input.callAttemptId || input.callPreparationId))
       ) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
@@ -3770,7 +4024,7 @@ export class PostgresCallRepository implements CallRepository {
         if (attempts.count === 0) {
           throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
         }
-      } else {
+      } else if (recordingTarget) {
         const recordings = await transaction`
           SELECT id FROM call_recordings
           WHERE id = ${input.recordingId!}
@@ -3778,6 +4032,15 @@ export class PostgresCallRepository implements CallRepository {
         `;
         if (recordings.count === 0) {
           throw new CallRepositoryError("RECORDING_NOT_FOUND");
+        }
+      } else {
+        const preparations = await transaction`
+          SELECT id FROM call_preparation_requests
+          WHERE id = ${input.callPreparationId!}
+          FOR UPDATE
+        `;
+        if (preparations.count === 0) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
         }
       }
       const [existing] = await transaction<{
@@ -3790,7 +4053,9 @@ export class PostgresCallRepository implements CallRepository {
           AND (
             (${callTarget} AND call_attempt_id = ${input.callAttemptId ?? null})
             OR
-            (${!callTarget} AND recording_id = ${input.recordingId ?? null})
+            (${recordingTarget} AND recording_id = ${input.recordingId ?? null})
+            OR
+            (${preparationTarget} AND call_preparation_id = ${input.callPreparationId ?? null})
           )
         FOR UPDATE
       `;
@@ -3802,6 +4067,7 @@ export class PostgresCallRepository implements CallRepository {
             job_type,
             recording_id,
             call_attempt_id,
+            call_preparation_id,
             status,
             max_attempts,
             run_after,
@@ -3813,6 +4079,7 @@ export class PostgresCallRepository implements CallRepository {
             ${input.type},
             ${input.recordingId ?? null},
             ${input.callAttemptId ?? null},
+            ${input.callPreparationId ?? null},
             'queued',
             ${input.maxAttempts},
             ${input.runAfter}::timestamptz,
@@ -3979,6 +4246,8 @@ export class PostgresCallRepository implements CallRepository {
         maxAttempts: number;
         leaseOwner: string;
         leasedAt: DatabaseDate;
+        type: DurableJob["type"];
+        callPreparationId: string | null;
       }[]>`
         SELECT
           id,
@@ -3986,7 +4255,9 @@ export class PostgresCallRepository implements CallRepository {
           attempt_count AS "attemptCount",
           max_attempts AS "maxAttempts",
           lease_owner AS "leaseOwner",
-          leased_at AS "leasedAt"
+          leased_at AS "leasedAt",
+          job_type AS "type",
+          call_preparation_id AS "callPreparationId"
         FROM durable_jobs
         WHERE status = 'running'
           AND lease_expires_at <= ${input.now}::timestamptz
@@ -4032,6 +4303,22 @@ export class PostgresCallRepository implements CallRepository {
             completed_at = ${deadLetter ? input.now : null}::timestamptz
           WHERE id = ${job.id}
         `;
+        if (job.type === "brief_compilation" && job.callPreparationId) {
+          await transaction`
+            UPDATE call_preparation_requests
+            SET
+              status = ${deadLetter ? "failed" : "retrying"},
+              failure_code = ${deadLetter ? "BRIEF_COMPILATION_FAILED" : null},
+              input_ciphertext = CASE
+                WHEN ${deadLetter} THEN NULL
+                ELSE input_ciphertext
+              END,
+              updated_at = ${input.now}::timestamptz,
+              completed_at = ${deadLetter ? input.now : null}::timestamptz
+            WHERE id = ${job.callPreparationId}
+              AND status <> 'succeeded'
+          `;
+        }
       }
 
       const [candidate] = await transaction<{
@@ -4093,11 +4380,15 @@ export class PostgresCallRepository implements CallRepository {
         generation: number;
         attemptCount: number;
         leasedAt: DatabaseDate;
+        type: DurableJob["type"];
+        callPreparationId: string | null;
       }[]>`
         SELECT
           generation,
           attempt_count AS "attemptCount",
-          leased_at AS "leasedAt"
+          leased_at AS "leasedAt",
+          job_type AS "type",
+          call_preparation_id AS "callPreparationId"
         FROM durable_jobs
         WHERE id = ${jobId}
           AND status = 'running'
@@ -4106,6 +4397,17 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!job) return false;
+      if (job.type === "brief_compilation" && job.callPreparationId) {
+        const [preparation] = await transaction<{ status: string }[]>`
+          SELECT status
+          FROM call_preparation_requests
+          WHERE id = ${job.callPreparationId}
+          FOR UPDATE
+        `;
+        if (preparation?.status !== "succeeded") {
+          throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+        }
+      }
       await transaction`
         INSERT INTO durable_job_attempts (
           id, job_id, generation, attempt_number, worker_id,
@@ -4145,12 +4447,16 @@ export class PostgresCallRepository implements CallRepository {
         attemptCount: number;
         maxAttempts: number;
         leasedAt: DatabaseDate;
+        type: DurableJob["type"];
+        callPreparationId: string | null;
       }[]>`
         SELECT
           generation,
           attempt_count AS "attemptCount",
           max_attempts AS "maxAttempts",
-          leased_at AS "leasedAt"
+          leased_at AS "leasedAt",
+          job_type AS "type",
+          call_preparation_id AS "callPreparationId"
         FROM durable_jobs
         WHERE id = ${jobId}
           AND status = 'running'
@@ -4183,6 +4489,23 @@ export class PostgresCallRepository implements CallRepository {
           completed_at = ${deadLetter ? now : null}::timestamptz
         WHERE id = ${jobId}
       `;
+      if (job.type === "brief_compilation" && job.callPreparationId) {
+        const failureCode = callPreparationFailureCode(errorCode);
+        await transaction`
+          UPDATE call_preparation_requests
+          SET
+            status = ${deadLetter ? "failed" : "retrying"},
+            failure_code = ${deadLetter ? failureCode : null},
+            input_ciphertext = CASE
+              WHEN ${deadLetter} THEN NULL
+              ELSE input_ciphertext
+            END,
+            updated_at = ${now}::timestamptz,
+            completed_at = ${deadLetter ? now : null}::timestamptz
+          WHERE id = ${job.callPreparationId}
+            AND status <> 'succeeded'
+        `;
+      }
       return true;
     });
     return found ? this.#getDurableJob(jobId) : null;
@@ -4237,7 +4560,7 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!job) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
-      if (job.status !== "dead_letter") {
+      if (job.status !== "dead_letter" || job.type === "brief_compilation") {
         throw new CallRepositoryError("DURABLE_JOB_NOT_RETRYABLE");
       }
       await transaction`
@@ -4554,9 +4877,11 @@ export class PostgresCallRepository implements CallRepository {
         durable_jobs.job_type AS "type",
         durable_jobs.recording_id AS "recordingId",
         durable_jobs.call_attempt_id AS "callAttemptId",
+        durable_jobs.call_preparation_id AS "callPreparationId",
         COALESCE(
           call_recordings.call_brief_id,
-          reconciliation_attempt.call_brief_id
+          reconciliation_attempt.call_brief_id,
+          call_preparation_requests.call_brief_id
         ) AS "callId",
         durable_jobs.status,
         durable_jobs.generation,
@@ -4576,6 +4901,30 @@ export class PostgresCallRepository implements CallRepository {
         ON call_recordings.id = durable_jobs.recording_id
       LEFT JOIN call_attempts AS reconciliation_attempt
         ON reconciliation_attempt.id = durable_jobs.call_attempt_id
+      LEFT JOIN call_preparation_requests
+        ON call_preparation_requests.id = durable_jobs.call_preparation_id
+    `;
+  }
+
+  #callPreparationSelect() {
+    return this.#sql`
+      SELECT
+        call_preparation_requests.id,
+        call_preparation_requests.user_id AS "userId",
+        call_preparation_requests.idempotency_key AS "idempotencyKey",
+        call_preparation_requests.input_fingerprint AS "inputFingerprint",
+        call_preparation_requests.input_ciphertext AS "inputCiphertext",
+        call_preparation_requests.status,
+        call_preparation_requests.call_brief_id AS "callBriefId",
+        call_preparation_requests.failure_code AS "failureCode",
+        durable_jobs.attempt_count AS "attemptCount",
+        call_preparation_requests.created_at AS "createdAt",
+        call_preparation_requests.updated_at AS "updatedAt",
+        call_preparation_requests.completed_at AS "completedAt"
+      FROM call_preparation_requests
+      JOIN durable_jobs
+        ON durable_jobs.call_preparation_id = call_preparation_requests.id
+       AND durable_jobs.job_type = 'brief_compilation'
     `;
   }
 
@@ -4869,6 +5218,16 @@ export class PostgresCallRepository implements CallRepository {
     return mapDurableJobRow(rows[0]);
   }
 
+  async #getCallPreparation(id: string, userId?: string) {
+    const rows = await this.#sql<CallPreparationRow[]>`
+      ${this.#callPreparationSelect()}
+      WHERE call_preparation_requests.id = ${id}
+        AND (${userId ?? null}::uuid IS NULL OR call_preparation_requests.user_id = ${userId ?? null})
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
   async #settleLatestAttempt(
     transaction: postgres.TransactionSql,
     callBriefId: string,
@@ -4978,6 +5337,12 @@ export class PostgresCallRepository implements CallRepository {
       WHERE id = ${userId}
         AND status = 'active'
         AND phone_verified_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM account_deletion_requests
+          WHERE account_deletion_requests.user_id = users.id
+            AND account_deletion_requests.status <> 'completed'
+        )
       FOR SHARE
     `;
     if (user.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -5252,6 +5617,27 @@ function mapDurableJobRow(row: DurableJobRow): DurableJob {
     updatedAt: toIso(row.updatedAt),
     completedAt: row.completedAt ? toIso(row.completedAt) : null
   };
+}
+
+function mapCallPreparationRow(row: CallPreparationRow): CallPreparation {
+  return {
+    id: row.id,
+    status: row.status,
+    callBriefId: row.callBriefId,
+    failureCode: row.failureCode,
+    attemptCount: row.attemptCount,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    completedAt: row.completedAt ? toIso(row.completedAt) : null
+  };
+}
+
+function callPreparationFailureCode(
+  errorCode: string
+): CallPreparation["failureCode"] {
+  if (errorCode === "BRIEF_COMPILER_UNAVAILABLE") return errorCode;
+  if (errorCode === "BRIEF_COMPILER_RESPONSE_INVALID") return errorCode;
+  return "BRIEF_COMPILATION_FAILED";
 }
 
 function mapCallDataDeletionRow(

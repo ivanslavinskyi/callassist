@@ -17,6 +17,46 @@ function createService() {
 }
 
 describe("CallService", () => {
+  it("durably compiles one brief for repeated preparation requests", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository, undefined, () => undefined);
+    services.push(service);
+    await service.initialize();
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const idempotencyKey = "5d006a34-f9e1-4c92-8395-36fd4ae4ab22";
+    const input = {
+      recipientName: "Reliable office",
+      phoneNumber: "+41710000009",
+      objective: "Confirm the office opening hours for next Monday",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "en-GB" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+
+    const first = await service.prepare(input, userId, idempotencyKey);
+    const replay = await service.prepare(input, userId, idempotencyKey);
+    expect(replay.id).toBe(first.id);
+
+    let completed = await service.getPreparation(first.id, userId);
+    for (let index = 0; index < 20 && completed.status !== "succeeded"; index++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      completed = await service.getPreparation(first.id, userId);
+    }
+    expect(completed).toMatchObject({
+      status: "succeeded",
+      failureCode: null,
+      attemptCount: 1
+    });
+    expect(completed.callBriefId).toBeTypeOf("string");
+    await expect(service.list({ limit: 10, userId })).resolves.toMatchObject({
+      items: [{ id: completed.callBriefId }]
+    });
+  });
+
   it("reports privacy-safe webhook delivery age from the snapshot boundary", async () => {
     const repository = new InMemoryCallRepository();
     const service = new CallService(repository);

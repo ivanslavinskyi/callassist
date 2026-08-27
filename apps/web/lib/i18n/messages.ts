@@ -151,6 +151,7 @@ export type Messages = {
     requiredComplete: string;
     requiredRemaining: (count: number) => string;
     rateLimited: string;
+    navigationError: string;
     callOptions: string;
     copy: FormCopy;
   };
@@ -373,6 +374,7 @@ const en: Messages = {
     requiredComplete: "All required fields complete",
     requiredRemaining: (count: number) => `${count} required ${count === 1 ? "field" : "fields"} remaining`,
     rateLimited: "Too many call-planning requests. Wait a moment and try again.",
+    navigationError: "The call was prepared, but its review page could not be opened. Select Review call again to open the existing brief.",
     callOptions: "Call options",
     copy: enFormCopy
   },
@@ -564,6 +566,7 @@ const de: Messages = {
     requiredComplete: "Alle Pflichtfelder sind ausgefüllt",
     requiredRemaining: (count: number) => `${count} ${count === 1 ? "Pflichtfeld ist" : "Pflichtfelder sind"} noch offen`,
     rateLimited: "Zu viele Anfragen zur Anrufplanung. Warten Sie kurz und versuchen Sie es erneut.",
+    navigationError: "Der Anrufentwurf wurde erstellt, aber die Pr\u00fcfseite konnte nicht ge\u00f6ffnet werden. W\u00e4hlen Sie erneut \u201eAnruf pr\u00fcfen\u201c, um den bestehenden Entwurf zu \u00f6ffnen.",
     callOptions: "Anrufoptionen",
     copy: {
       newBrief: "Neuer Anrufentwurf",

@@ -259,6 +259,7 @@ export function AdminSystemConsole() {
                 <Metric label={copy.jobsRetryQueued} value={status.jobs.retryQueued} />
                 <Metric label={copy.jobsDeadLetter} value={status.jobs.deadLetter} />
                 <Metric label={copy.jobsSucceeded} value={status.jobs.succeeded} />
+                <Metric label={copy.jobsBriefCompilation} value={status.jobs.briefCompilationQueued} />
                 <Metric label={copy.jobsTranscription} value={status.jobs.transcriptionQueued} />
                 <Metric label={copy.jobsRetention} value={status.jobs.retentionQueued} />
                 <Metric label={copy.jobsProviderReconciliation} value={status.jobs.providerReconciliationQueued} />
@@ -279,9 +280,11 @@ export function AdminSystemConsole() {
                         <strong>{copy.jobTypes[job.type]}</strong>
                         <span>{copy.jobStatuses[job.status]}</span>
                       </div>
-                      <Link href={`/admin/calls/${job.callId}`}>
-                        {copy.jobCall}
-                      </Link>
+                      {job.callId ? (
+                        <Link href={`/admin/calls/${job.callId}`}>
+                          {copy.jobCall}
+                        </Link>
+                      ) : null}
                     </header>
                     <dl className="admin-operations-list">
                       <Fact label={copy.jobAttempt} value={`${job.attemptCount} / ${job.maxAttempts}`} />
@@ -289,7 +292,7 @@ export function AdminSystemConsole() {
                       <Fact label={copy.jobLeaseUntil} value={job.leaseExpiresAt ? formatDate(job.leaseExpiresAt, locale) : copy.notAvailable} />
                       <Fact label={copy.jobError} value={job.lastErrorCode ?? copy.notAvailable} />
                     </dl>
-                    {job.status === "dead_letter" ? (
+                    {job.status === "dead_letter" && job.type !== "brief_compilation" ? (
                       <form onSubmit={(event) => void retryJob(event, job.id)}>
                         <label className="field">
                           <span>{copy.retryJobReason}</span>
@@ -311,6 +314,9 @@ export function AdminSystemConsole() {
                         </button>
                         {role !== "superadmin" ? <small>{copy.retryJobRestricted}</small> : null}
                       </form>
+                    ) : null}
+                    {job.status === "dead_letter" && job.type === "brief_compilation" ? (
+                      <small>{copy.preparationRetryUnavailable}</small>
                     ) : null}
                   </article>
                 ))}

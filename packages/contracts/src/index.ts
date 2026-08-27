@@ -5,6 +5,7 @@ export * from "./admin-operations";
 export * from "./call-brief";
 export * from "./call-event";
 export * from "./call-outcome";
+export * from "./call-preparation";
 export * from "./call-telemetry";
 export * from "./content";
 export * from "./credits";

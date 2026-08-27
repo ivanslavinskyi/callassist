@@ -163,6 +163,19 @@ Acceptance for 6A2 is met: stale call and recording state is durably detected an
 
 Acceptance for 6A3 is met: post-call worker changes reach an already-open API SSE stream without polling; missed notifications cannot lose state; `/admin/system` no longer mistakes an API-local disabled timer for external-worker health; and both graceful stop and stale-crash states are distinguishable.
 
+## Completed checkpoint — durable asynchronous brief preparation (6A4)
+
+- [x] Persist an owner-scoped encrypted `call_preparation_request` and enqueue a `brief_compilation` durable job in one transaction; reject reuse of an idempotency key with changed normalized input.
+- [x] Compile outside the request/response lifecycle with expiring leases, bounded retries, stale-worker fencing, atomic exactly-once brief publication, and terminal payload minimization.
+- [x] Move the Dashboard creation path to a fast `POST /api/call-preparations` `202` response plus owner-scoped status reads. Keep same-key client retry only as transport recovery and use a bounded polling deadline.
+- [x] Resume queued Dashboard work across remount/reload through the persisted browser operation key, poll canonical status reads, and navigate only after the resulting brief snapshot is readable.
+- [x] Cover lost responses, idempotency conflicts, durable PostgreSQL enqueue, lease fencing, post-publication crashes, bounded terminal compiler failures, owner isolation, payload encryption, and zero duplicate history rows.
+- [x] Remove synchronous creation from `POST /api/call-briefs`; migrate browser and authenticated API coverage to the preparation contract while retaining direct repository creation only as an internal publication/update primitive.
+- [x] Keep Admin System consistent with the new job family: expose the queued compilation count and recent preparation jobs without private payloads or invalid retry controls.
+- [x] Cancel and minimize queued/in-flight preparations during account deletion, fence stale publication, and record running-job cancellation evidence.
+
+Acceptance for 6A4 is met locally: enqueue never calls OpenAI, every accepted operation is durably observable, brief insertion and successful preparation publication commit atomically under the worker lease, and at-least-once execution produces exactly one visible brief or one controlled terminal failure. There is one creation route, retries reuse one normalized-input-bound key, Admin System observes the job family safely, and account deletion cannot leave private preparation input or publish a late brief.
+
 ## Completed checkpoint — operational readiness foundation (6B)
 
 - [x] Replace the ambiguous combined health route with non-cacheable `GET /health/live` (process-only) and `GET /health/ready` (PostgreSQL-backed), returning bounded contracts and no dependency exception text. Keep both absent from the isolated Twilio ingress.

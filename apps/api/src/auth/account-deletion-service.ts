@@ -155,6 +155,10 @@ export class AccountDeletionService {
     }, Math.max(1_000, Math.floor(this.#leaseDurationMs / 3)));
     heartbeat.unref();
     try {
+      await this.#callService.repository.cancelCallPreparations(
+        request.userId,
+        this.#now().toISOString()
+      );
       while (true) {
         const calls = await this.#callService.repository.list({
           userId: request.userId,

@@ -105,6 +105,7 @@ const systemComponentStateSchema = z.enum([
 ]);
 
 export const adminDurableJobTypeSchema = z.enum([
+  "brief_compilation",
   "final_transcription",
   "recording_retention",
   "provider_call_reconciliation",
@@ -120,7 +121,8 @@ export const adminDurableJobStatusSchema = z.enum([
 
 const adminDurableJobSchema = z.strictObject({
   id: z.uuid(),
-  callId: z.uuid(),
+  callId: z.uuid().nullable(),
+  callPreparationId: z.uuid().nullable(),
   type: adminDurableJobTypeSchema,
   status: adminDurableJobStatusSchema,
   generation: z.number().int().positive(),
@@ -225,6 +227,7 @@ export const adminSystemStatusSchema = z.strictObject({
     succeeded: countSchema,
     deadLetter: countSchema,
     retryQueued: countSchema,
+    briefCompilationQueued: countSchema,
     transcriptionQueued: countSchema,
     retentionQueued: countSchema,
     providerReconciliationQueued: countSchema,

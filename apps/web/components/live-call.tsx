@@ -40,6 +40,10 @@ import {
   finalTranscriptPdfFileName,
   writeTextToClipboard
 } from "@/lib/final-transcript-export";
+import {
+  consumeCallPreparationAttempt,
+  getCallPreparationSessionStorage
+} from "@/lib/call-preparation-attempt";
 
 const activeStatuses = new Set<CallBriefStatus>([
   "dialing",
@@ -87,7 +91,9 @@ export function LiveCall({ callId }: { callId: string }) {
 
   const refresh = useCallback(async (reportError = true) => {
     try {
-      setSnapshot(await getCallSnapshot(callId));
+      const nextSnapshot = await getCallSnapshot(callId);
+      setSnapshot(nextSnapshot);
+      consumeCallPreparationAttempt(getCallPreparationSessionStorage(), callId);
       setLoadError(null);
     } catch {
       if (reportError) setLoadError(messages.live.loadError);

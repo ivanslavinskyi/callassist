@@ -1,15 +1,8 @@
 import type { AddressInfo } from "node:net";
+import type { CreateCallBriefInput } from "@callassist/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app";
-import {
-  ApplicationRateLimiter,
-  RateLimiterUnavailableError,
-  type RateLimiter
-} from "./auth/rate-limiter";
-import {
-  BriefCompilerError,
-  type BriefCompiler
-} from "./brief-compiler/brief-compiler";
+import { ApplicationRateLimiter } from "./auth/rate-limiter";
 import { CallService } from "./call-service";
 import type { EndpointRateLimitPolicy } from "./config/endpoint-rate-limit-policy";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
@@ -21,17 +14,16 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-function createApp(briefCompiler?: BriefCompiler) {
-  return createAppWithService(briefCompiler).app;
+function createApp() {
+  return createAppWithService().app;
 }
 
-function createAppWithService(briefCompiler?: BriefCompiler) {
+function createAppWithService() {
   const service = new CallService(
     new InMemoryCallRepository(),
     undefined,
     () => undefined,
-    undefined,
-    briefCompiler
+    undefined
   );
   const app = buildApp({
     service,
@@ -42,60 +34,11 @@ function createAppWithService(briefCompiler?: BriefCompiler) {
   return { app, service };
 }
 
-function unavailableRateLimiter(): RateLimiter {
-  const unavailable = async () => {
-    throw new RateLimiterUnavailableError();
-  };
-  return {
-    mode: "postgres",
-    shared: true,
-    consume: unavailable,
-    consumeMany: unavailable,
-    getStatus: unavailable,
-    async close() {}
-  };
-}
-
 describe("call API", () => {
-  it("rejects a valid foreign number with the Swiss beta policy message", async () => {
-    const app = createApp();
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload: {
-        recipientName: "London office",
-        phoneNumber: "+442079460000",
-        objective: "Ask the office for its opening hours next Monday",
-        assistantProfileId: "sebastian",
-        representedPersonFirstName: "Nina",
-        representedPersonLastName: "Keller",
-        assistanceReason: "language_barrier",
-        locale: "en-GB",
-        allowLanguageSwitch: false,
-        allowedFacts: []
-      }
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      error: "INVALID_CALL_BRIEF",
-      issues: {
-        fieldErrors: {
-          phoneNumber: [
-            "During the public beta CallAssist can only call Swiss phone numbers."
-          ]
-        }
-      }
-    });
-  });
-
   it("paginates and searches call briefs with an opaque cursor", async () => {
-    const app = createApp();
+    const { app, service } = createAppWithService();
     for (const [index, recipientName] of ["Alpha Office", "Beta Clinic", "Gamma Council"].entries()) {
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/call-briefs",
-        payload: {
+      await service.create({
           recipientName,
           phoneNumber: `+4171000000${index}`,
           objective: `Ask ${recipientName} for opening hours`,
@@ -106,9 +49,7 @@ describe("call API", () => {
           locale: "en-GB",
           allowLanguageSwitch: false,
           allowedFacts: []
-        }
       });
-      expect(response.statusCode).toBe(201);
     }
 
     const first = await app.inject({ method: "GET", url: "/api/call-briefs?limit=2" });
@@ -144,11 +85,8 @@ describe("call API", () => {
   });
 
   it("creates and returns a persisted call brief", async () => {
-    const app = createApp();
-    const createResponse = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload: {
+    const { app, service } = createAppWithService();
+    const created = await service.create({
         recipientName: "Cabinet Medical Geneve",
         phoneNumber: "+41225550123",
         objective: "Prendre un rendez-vous de controle la semaine prochaine",
@@ -160,22 +98,12 @@ describe("call API", () => {
         allowLanguageSwitch: true,
         fallbackLocale: "de-CH",
         allowedFacts: []
-      }
     });
-
-    expect(createResponse.statusCode).toBe(201);
-    const created = createResponse.json<{
-      id: string;
-      locale: string;
-      assistantProfileId: string;
-      voiceGender: string;
-      assistanceReason: string;
-    }>();
     expect(created.locale).toBe("fr-CH");
     expect(created.assistantProfileId).toBe("anna");
     expect(created.voiceGender).toBe("female");
     expect(created.assistanceReason).toBe("language_barrier");
-    expect(createResponse.json().status).toBe("review_required");
+    expect(created.status).toBe("review_required");
 
     const getResponse = await app.inject({
       method: "GET",
@@ -193,61 +121,6 @@ describe("call API", () => {
     });
     expect(approveResponse.statusCode).toBe(200);
     expect(approveResponse.json().brief.status).toBe("ready");
-  });
-
-  it("returns the same call brief when a creation request is retried", async () => {
-    const app = createApp();
-    const idempotencyKey = "00000000-0000-4000-8000-000000000101";
-    const request = {
-      method: "POST" as const,
-      url: "/api/call-briefs",
-      headers: { "idempotency-key": idempotencyKey },
-      payload: {
-        recipientName: "Retry-safe office",
-        phoneNumber: "+41710000009",
-        objective: "Confirm that retrying preparation does not create a duplicate",
-        assistantProfileId: "sebastian",
-        representedPersonFirstName: "Nina",
-        representedPersonLastName: "Keller",
-        assistanceReason: "speech_impairment",
-        locale: "en-GB",
-        allowLanguageSwitch: false,
-        allowedFacts: []
-      }
-    };
-
-    const first = await app.inject(request);
-    const retry = await app.inject(request);
-
-    expect(first.statusCode).toBe(201);
-    expect(retry.statusCode).toBe(201);
-    expect(retry.json().id).toBe(first.json().id);
-    const list = await app.inject({ method: "GET", url: "/api/call-briefs" });
-    expect(list.json<{ items: unknown[] }>().items).toHaveLength(1);
-  });
-
-  it("rejects an invalid call creation idempotency key", async () => {
-    const app = createApp();
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      headers: { "idempotency-key": "not-a-uuid" },
-      payload: {
-        recipientName: "Invalid key office",
-        phoneNumber: "+41710000008",
-        objective: "Confirm invalid idempotency keys are rejected",
-        assistantProfileId: "sebastian",
-        representedPersonFirstName: "Nina",
-        representedPersonLastName: "Keller",
-        assistanceReason: "speech_impairment",
-        locale: "en-GB",
-        allowLanguageSwitch: false,
-        allowedFacts: []
-      }
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "INVALID_IDEMPOTENCY_KEY" });
   });
 
   it("keeps the event stream subscribed after the request has completed", async () => {
@@ -310,8 +183,8 @@ describe("call API", () => {
   });
 
   it("updates an existing brief and approves and starts it with one request", async () => {
-    const app = createApp();
-    const payload = {
+    const { app, service } = createAppWithService();
+    const payload: CreateCallBriefInput = {
       recipientName: "Elena",
       phoneNumber: "+41710000001",
       objective: "Ask Elena which book she likes most",
@@ -323,12 +196,8 @@ describe("call API", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     };
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload
-    });
-    const id = created.json().id as string;
+    const created = await service.create(payload);
+    const id = created.id;
 
     const updated = await app.inject({
       method: "PUT",
@@ -436,7 +305,7 @@ describe("call API", () => {
     const app = createApp();
     const response = await app.inject({
       method: "POST",
-      url: "/api/call-briefs",
+      url: "/api/call-preparations",
       payload: { objective: "x".repeat(256 * 1_024) }
     });
     expect(response.statusCode).toBe(413);
@@ -460,7 +329,7 @@ describe("call API", () => {
       const app = createApp();
       const response = await app.inject({
         method: "OPTIONS",
-        url: "/api/call-briefs",
+        url: "/api/call-preparations",
         headers: {
           origin,
           "access-control-request-method": "POST",
@@ -489,44 +358,6 @@ describe("call API", () => {
 
       expect(response.statusCode).toBe(204);
       expect(response.headers["access-control-allow-methods"]).toContain(method);
-    }
-  );
-
-  it.each([
-    ["OPENAI_REQUEST_FAILED", "BRIEF_COMPILER_UNAVAILABLE", 503],
-    ["OPENAI_RESPONSE_INVALID", "BRIEF_COMPILER_RESPONSE_INVALID", 502]
-  ] as const)(
-    "returns a typed safe error for %s",
-    async (compilerCode, apiCode, statusCode) => {
-      const compiler: BriefCompiler = {
-        model: "test-compiler",
-        async compile() {
-          throw new BriefCompilerError(compilerCode, {
-            responseId: "resp_test",
-            validationPaths: ["orderedQuestions"]
-          });
-        }
-      };
-      const app = createApp(compiler);
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/call-briefs",
-        payload: {
-          recipientName: "Elena",
-          phoneNumber: "+41710000001",
-          objective: "Ask Elena which book she likes most",
-          assistantProfileId: "sebastian",
-          representedPersonFirstName: "Nina",
-          representedPersonLastName: "Keller",
-          assistanceReason: "speech_impairment",
-          locale: "de-CH",
-          allowLanguageSwitch: false,
-          allowedFacts: []
-        }
-      });
-
-      expect(response.statusCode).toBe(statusCode);
-      expect(response.json()).toEqual({ error: apiCode });
     }
   );
 
@@ -592,41 +423,7 @@ describe("call API", () => {
     expect((await service.get(brief.id))?.brief.status).toBe("failed");
   });
 
-  it("fails closed before an expensive operation when the limiter is unavailable", async () => {
-    const repository = new InMemoryCallRepository();
-    const service = new CallService(repository, undefined, () => undefined);
-    const app = buildApp({
-      service,
-      allowAnonymousCallsForTesting: true,
-      logger: false,
-      endpointRateLimiter: unavailableRateLimiter()
-    });
-    apps.push(app);
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload: {
-        recipientName: "Unavailable limiter office",
-        phoneNumber: "+41523686688",
-        objective: "Prove no brief is stored without an abuse-control decision",
-        assistantProfileId: "sebastian",
-        representedPersonFirstName: "Nina",
-        representedPersonLastName: "Keller",
-        assistanceReason: "speech_impairment",
-        locale: "en-GB",
-        allowLanguageSwitch: false,
-        allowedFacts: []
-      }
-    });
-
-    expect(response.statusCode).toBe(503);
-    expect(response.headers["retry-after"]).toBe("1");
-    expect(response.json()).toEqual({ error: "RATE_LIMIT_UNAVAILABLE" });
-    expect((await repository.list({ limit: 1, userId: null })).items).toEqual([]);
-  });
-
-  it("rate-limits expensive endpoint families and returns Retry-After", async () => {
+  it("rate-limits call operation endpoint families and returns Retry-After", async () => {
     const service = new CallService(
       new InMemoryCallRepository(),
       undefined,
@@ -651,7 +448,7 @@ describe("call API", () => {
       endpointRateLimitPolicy: policy
     });
     apps.push(app);
-    const payload = {
+    const payload: CreateCallBriefInput = {
       recipientName: "Rate limit office",
       phoneNumber: "+41523686688",
       objective: "Verify expensive endpoint rate limits",
@@ -664,25 +461,8 @@ describe("call API", () => {
       allowedFacts: []
     };
 
-    const invalid = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload: { ...payload, phoneNumber: "invalid" }
-    });
-    expect(invalid.statusCode).toBe(400);
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload
-    });
-    expect(created.statusCode).toBe(201);
-    const callId = created.json().id as string;
-    const limitedCreate = await app.inject({
-      method: "POST",
-      url: "/api/call-briefs",
-      payload
-    });
-    expectRateLimited(limitedCreate);
+    const created = await service.create(payload);
+    const callId = created.id;
 
     expect((await app.inject({
       method: "POST",

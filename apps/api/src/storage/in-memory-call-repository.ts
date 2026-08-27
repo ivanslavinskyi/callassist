@@ -23,6 +23,7 @@ import {
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
+  type CallPreparation,
   type CallCompilation,
   type CallFeedbackRevision,
   type CallOutcomeMetrics,
@@ -62,9 +63,11 @@ import {
   type CallAttemptRecord,
   type CallChangeSignal,
   type CallRepository,
+  type CallPreparationPublication,
   type CallDataDeletionRecord,
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
+  type EnqueueCallPreparationRepositoryInput,
   type ListCallBriefsInput,
   type ListAdminCallsInput,
   type RecordingStatusInput,
@@ -130,6 +133,14 @@ type StoredWorkerHeartbeat = DurableWorkerHeartbeatInput & {
   stoppedAt: string | null;
 };
 
+type StoredCallPreparation = {
+  preparation: Omit<CallPreparation, "attemptCount">;
+  userId: string;
+  idempotencyKey: string;
+  inputFingerprint: string;
+  input: CreateCallBriefInput | null;
+};
+
 const interruptedStatuses = new Set<CallBrief["status"]>([
   "dialing",
   "in_progress",
@@ -146,6 +157,14 @@ function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
+function callPreparationFailureCode(
+  errorCode: string
+): CallPreparation["failureCode"] {
+  if (errorCode === "BRIEF_COMPILER_UNAVAILABLE") return errorCode;
+  if (errorCode === "BRIEF_COMPILER_RESPONSE_INVALID") return errorCode;
+  return "BRIEF_COMPILATION_FAILED";
+}
+
 export class InMemoryCallRepository implements CallRepository {
   readonly mode = "memory" as const;
   readonly #calls = new Map<string, CallSnapshot>();
@@ -154,6 +173,8 @@ export class InMemoryCallRepository implements CallRepository {
     string,
     { callId: string; userId: string | null }
   >();
+  readonly #callPreparations = new Map<string, StoredCallPreparation>();
+  readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
   readonly #callTelemetryEvents = new Map<
     string,
@@ -248,8 +269,36 @@ export class InMemoryCallRepository implements CallRepository {
     input: CreateCallBriefInput,
     compilation: CallCompilation,
     userId: string | null = null,
-    creationIdempotencyKey: string = randomUUID()
+    creationIdempotencyKey: string = randomUUID(),
+    publication?: CallPreparationPublication
   ) {
+    let preparation: StoredCallPreparation | null = null;
+    if (publication) {
+      this.#assertDurableJobLease(publication.lease);
+      preparation = this.#callPreparations.get(publication.preparationId) ?? null;
+      if (
+        !preparation ||
+        preparation.userId !== userId ||
+        preparation.idempotencyKey !== creationIdempotencyKey ||
+        ["failed", "cancelled"].includes(preparation.preparation.status)
+      ) {
+        throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+      }
+    }
+    const finishPublication = (callBriefId: string) => {
+      if (!preparation || !publication) return;
+      preparation.preparation = {
+        ...preparation.preparation,
+        status: "succeeded",
+        callBriefId,
+        failureCode: null,
+        updatedAt: publication.lease.checkedAt,
+        completedAt: publication.lease.checkedAt
+      };
+      preparation.input = null;
+      const job = this.#findDurableJob(publication.lease.jobId);
+      if (job) job.callId = callBriefId;
+    };
     const creationRequest = this.#creationRequests.get(creationIdempotencyKey);
     if (creationRequest) {
       if (
@@ -257,7 +306,10 @@ export class InMemoryCallRepository implements CallRepository {
         !this.#callDataDeletions.has(creationRequest.callId)
       ) {
         const existing = this.#calls.get(creationRequest.callId);
-        if (existing) return copy(existing.brief);
+        if (existing) {
+          finishPublication(existing.brief.id);
+          return copy(existing.brief);
+        }
       }
       throw new CallRepositoryError("CALL_CREATION_IDEMPOTENCY_CONFLICT");
     }
@@ -299,6 +351,7 @@ export class InMemoryCallRepository implements CallRepository {
       }
     });
     this.#appendCompilationTelemetry(brief.id, compilation, now);
+    finishPublication(brief.id);
 
     return copy(brief);
   }
@@ -315,6 +368,134 @@ export class InMemoryCallRepository implements CallRepository {
     ) return null;
     const snapshot = this.#calls.get(request.callId);
     return snapshot ? copy(snapshot.brief) : null;
+  }
+
+  async enqueueCallPreparation(input: EnqueueCallPreparationRepositoryInput) {
+    const requestKey = `${input.userId}:${input.idempotencyKey}`;
+    const existingId = this.#callPreparationRequests.get(requestKey);
+    if (existingId) {
+      const existing = this.#callPreparations.get(existingId)!;
+      if (existing.inputFingerprint !== input.inputFingerprint) {
+        throw new CallRepositoryError(
+          "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+        );
+      }
+      return this.#mapCallPreparation(existing);
+    }
+
+    const id = randomUUID();
+    const stored: StoredCallPreparation = {
+      preparation: {
+        id,
+        status: "queued",
+        callBriefId: null,
+        failureCode: null,
+        createdAt: input.now,
+        updatedAt: input.now,
+        completedAt: null
+      },
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      inputFingerprint: input.inputFingerprint,
+      input: copy(input.input)
+    };
+    this.#callPreparations.set(id, stored);
+    this.#callPreparationRequests.set(requestKey, id);
+    try {
+      await this.enqueueDurableJob({
+        type: "brief_compilation",
+        callPreparationId: id,
+        runAfter: input.now,
+        maxAttempts: durableJobMaxAttempts.brief_compilation
+      });
+    } catch (error) {
+      this.#callPreparations.delete(id);
+      this.#callPreparationRequests.delete(requestKey);
+      throw error;
+    }
+    return this.#mapCallPreparation(stored);
+  }
+
+  async getCallPreparation(id: string, userId: string) {
+    const stored = this.#callPreparations.get(id);
+    return stored?.userId === userId ? this.#mapCallPreparation(stored) : null;
+  }
+
+  async findCallPreparationByRequest(
+    userId: string,
+    idempotencyKey: string,
+    inputFingerprint: string
+  ) {
+    const id = this.#callPreparationRequests.get(`${userId}:${idempotencyKey}`);
+    if (!id) return null;
+    const stored = this.#callPreparations.get(id);
+    if (!stored) return null;
+    if (stored.inputFingerprint !== inputFingerprint) {
+      throw new CallRepositoryError("CALL_PREPARATION_IDEMPOTENCY_CONFLICT");
+    }
+    return this.#mapCallPreparation(stored);
+  }
+
+  async claimCallPreparation(id: string, lease: DurableJobLease) {
+    this.#assertDurableJobLease(lease);
+    const stored = this.#callPreparations.get(id);
+    if (!stored) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    if (["failed", "cancelled"].includes(stored.preparation.status)) {
+      throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    }
+    if (stored.preparation.status !== "succeeded") {
+      stored.preparation.status = "processing";
+      stored.preparation.updatedAt = lease.checkedAt;
+    }
+    return copy({
+      preparation: this.#mapCallPreparation(stored),
+      userId: stored.userId,
+      idempotencyKey: stored.idempotencyKey,
+      input: stored.input
+    });
+  }
+
+  async cancelCallPreparations(userId: string, now: string) {
+    for (const [id, stored] of this.#callPreparations) {
+      if (
+        stored.userId !== userId ||
+        ["succeeded", "failed", "cancelled"].includes(stored.preparation.status)
+      ) continue;
+      stored.preparation = {
+        ...stored.preparation,
+        status: "cancelled",
+        failureCode: null,
+        updatedAt: now,
+        completedAt: now
+      };
+      stored.input = null;
+      const job = [...this.#durableJobs.values()].find(
+        ({ callPreparationId }) => callPreparationId === id
+      );
+      if (!job || ["succeeded", "dead_letter", "cancelled"].includes(job.status)) {
+        continue;
+      }
+      if (job.status === "running") {
+        this.#durableJobAttempts.push({
+          id: randomUUID(),
+          jobId: job.id,
+          generation: job.generation,
+          attemptNumber: job.attemptCount,
+          workerId: job.leaseOwner!,
+          startedAt: job.leasedAt!,
+          completedAt: now,
+          outcome: "cancelled",
+          errorCode: "account_deletion_requested"
+        });
+      }
+      job.status = "cancelled";
+      job.leaseOwner = null;
+      job.leasedAt = null;
+      job.leaseExpiresAt = null;
+      job.lastErrorCode = "account_deletion_requested";
+      job.updatedAt = now;
+      job.completedAt = now;
+    }
   }
 
   async isOwnedBy(id: string, userId: string | null) {
@@ -1005,6 +1186,9 @@ export class InMemoryCallRepository implements CallRepository {
         succeeded: jobs.filter(({ status }) => status === "succeeded").length,
         deadLetter: jobs.filter(({ status }) => status === "dead_letter").length,
         retryQueued: queued.filter(({ attemptCount }) => attemptCount > 0).length,
+        briefCompilationQueued: queued.filter(
+          ({ type }) => type === "brief_compilation"
+        ).length,
         transcriptionQueued: queued.filter(
           ({ type }) => type === "final_transcription"
         ).length,
@@ -1874,8 +2058,13 @@ export class InMemoryCallRepository implements CallRepository {
     if (recording.status !== "available") return null;
     if (snapshot.finalTranscript?.status === "completed" && !force) return null;
     if (snapshot.finalTranscript?.status === "processing" && !lease) return null;
-    const now = new Date().toISOString();
     const retry = Boolean(snapshot.finalTranscript);
+    const now = new Date(Math.max(
+      Date.now(),
+      snapshot.finalTranscript
+        ? Date.parse(snapshot.finalTranscript.updatedAt) + 1
+        : 0
+    )).toISOString();
     const finalTranscript: FinalTranscript = snapshot.finalTranscript
       ? {
           ...snapshot.finalTranscript,
@@ -2028,6 +2217,7 @@ export class InMemoryCallRepository implements CallRepository {
         type: input.type,
         recordingId: input.recordingId ?? null,
         callAttemptId: input.callAttemptId ?? null,
+        callPreparationId: input.callPreparationId ?? null,
         callId: target.callId,
         status: "queued",
         generation: 1,
@@ -2156,6 +2346,12 @@ export class InMemoryCallRepository implements CallRepository {
         job.lastErrorCode = "worker_lease_expired";
         job.updatedAt = input.now;
         job.completedAt = deadLetter ? input.now : null;
+        this.#settleCallPreparationFailure(
+          job,
+          deadLetter,
+          "worker_lease_expired",
+          input.now
+        );
       }
     }
     const job = [...this.#durableJobs.values()]
@@ -2197,6 +2393,12 @@ export class InMemoryCallRepository implements CallRepository {
   async completeDurableJob(jobId: string, workerId: string, now: string) {
     const job = this.#findDurableJob(jobId);
     if (!job || !durableJobLeaseIsValid(job, workerId, now)) return false;
+    if (job.callPreparationId) {
+      const preparation = this.#callPreparations.get(job.callPreparationId);
+      if (preparation?.preparation.status !== "succeeded") {
+        throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+      }
+    }
     this.#durableJobAttempts.push({
       id: randomUUID(),
       jobId,
@@ -2247,6 +2449,7 @@ export class InMemoryCallRepository implements CallRepository {
     job.lastErrorCode = errorCode;
     job.updatedAt = now;
     job.completedAt = deadLetter ? now : null;
+    this.#settleCallPreparationFailure(job, deadLetter, errorCode, now);
     return copy(job);
   }
 
@@ -2268,7 +2471,7 @@ export class InMemoryCallRepository implements CallRepository {
   ) {
     const job = this.#findDurableJob(jobId);
     if (!job) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
-    if (job.status !== "dead_letter") {
+    if (job.status !== "dead_letter" || job.type === "brief_compilation") {
       throw new CallRepositoryError("DURABLE_JOB_NOT_RETRYABLE");
     }
     const boundedReason = requireAdminJobReason(reason);
@@ -2605,9 +2808,43 @@ export class InMemoryCallRepository implements CallRepository {
     return [...this.#durableJobs.values()].find(({ id }) => id === jobId);
   }
 
+  #mapCallPreparation(stored: StoredCallPreparation): CallPreparation {
+    const job = this.#durableJobs.get(
+      durableJobKey("brief_compilation", stored.preparation.id)
+    );
+    return copy({
+      ...stored.preparation,
+      attemptCount: job?.attemptCount ?? 0
+    });
+  }
+
+  #settleCallPreparationFailure(
+    job: DurableJob,
+    deadLetter: boolean,
+    errorCode: string,
+    now: string
+  ) {
+    if (!job.callPreparationId) return;
+    const preparation = this.#callPreparations.get(job.callPreparationId);
+    if (!preparation || preparation.preparation.status === "succeeded") return;
+    preparation.preparation.status = deadLetter ? "failed" : "retrying";
+    preparation.preparation.failureCode = deadLetter
+      ? callPreparationFailureCode(errorCode)
+      : null;
+    preparation.preparation.updatedAt = now;
+    preparation.preparation.completedAt = deadLetter ? now : null;
+    if (deadLetter) preparation.input = null;
+  }
+
   #resolveDurableJobTarget(input: EnqueueDurableJobInput) {
+    if (input.type === "brief_compilation") {
+      if (input.recordingId || input.callAttemptId || !input.callPreparationId) {
+        throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+      }
+      return { callId: null, targetId: input.callPreparationId };
+    }
     if (input.type === "provider_call_reconciliation") {
-      if (!input.callAttemptId || input.recordingId) {
+      if (!input.callAttemptId || input.recordingId || input.callPreparationId) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
       for (const [callId, attempts] of this.#attempts) {
@@ -2617,7 +2854,7 @@ export class InMemoryCallRepository implements CallRepository {
       }
       throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
     }
-    if (!input.recordingId || input.callAttemptId) {
+    if (!input.recordingId || input.callAttemptId || input.callPreparationId) {
       throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
     }
     const { callId } = this.#requireRecording(input.recordingId);
