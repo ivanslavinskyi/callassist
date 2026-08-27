@@ -63,7 +63,7 @@ describe("server route access decisions", () => {
     expect(authenticatedAppRedirect(user, current, "de")).toBeNull();
     expect(authenticatedAppRedirect(
       { ...user, role: "content_editor" }, current, "de"
-    )).toBe("/de/admin/content");
+    )).toBe("/admin/content");
   });
 
   it("allows content staff into the shared admin tree", () => {
@@ -80,7 +80,7 @@ describe("server route access decisions", () => {
     const editor = { ...user, role: "content_editor" as const };
     expect(contentAdminRedirect(editor, current, "en")).toBeNull();
     expect(contentAdminRedirect(user, current, "en")).toBe("/en/app");
-    expect(operationalAdminRedirect(editor, current, "en")).toBe("/en/admin/content");
+    expect(operationalAdminRedirect(editor, current, "en")).toBe("/admin/content");
     expect(operationalAdminRedirect({ ...user, role: "admin" }, current, "en")).toBeNull();
     expect(operationalAdminRedirect({ ...user, role: "superadmin" }, current, "en")).toBeNull();
   });
@@ -91,6 +91,6 @@ describe("server route access decisions", () => {
     expect(onboardingPageRedirect(user, current, "de")).toBe("/de/app");
     expect(onboardingPageRedirect(
       { ...user, role: "content_editor" }, current, "de"
-    )).toBe("/de/admin/content");
+    )).toBe("/admin/content");
   });
 });

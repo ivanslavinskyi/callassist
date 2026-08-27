@@ -10,9 +10,7 @@ import {
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { AppShell } from "./app-shell";
-import { useUiLocale } from "./ui-locale-provider";
-import { getCurrentUser, listAdminCalls } from "@/lib/api";
+import { listAdminCalls } from "@/lib/api";
 import { adminCallMessages } from "@/lib/i18n/admin-call-messages";
 
 const statuses: CallBriefStatus[] = [
@@ -47,11 +45,8 @@ const failureStages: CallFailureStage[] = [
 ];
 
 export function AdminCallsConsole() {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
   const copy = adminCallMessages[locale];
-  const [access, setAccess] = useState<"loading" | "allowed" | "forbidden">(
-    "loading"
-  );
   const [items, setItems] = useState<AdminCallSummary[]>([]);
   const [filters, setFilters] = useState<AdminCallListFilters>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -61,29 +56,19 @@ export function AdminCallsConsole() {
 
   useEffect(() => {
     let active = true;
-    void getCurrentUser()
-      .then(async ({ user }) => {
-        if (!active) return;
-        if (!(user.role === "admin" || user.role === "superadmin")) {
-          setAccess("forbidden");
-          return;
-        }
-        setAccess("allowed");
-        setLoading(true);
-        try {
-          const result = await listAdminCalls({ limit: 20 });
-          if (active) {
-            setItems(result.items);
-            setNextCursor(result.nextCursor);
-          }
-        } catch {
-          if (active) setError(copy.listError);
-        } finally {
-          if (active) setLoading(false);
+    setLoading(true);
+    void listAdminCalls({ limit: 20 })
+      .then((result) => {
+        if (active) {
+          setItems(result.items);
+          setNextCursor(result.nextCursor);
         }
       })
       .catch(() => {
-        if (active) setAccess("forbidden");
+        if (active) setError(copy.listError);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
     return () => {
       active = false;
@@ -159,8 +144,7 @@ export function AdminCallsConsole() {
   }
 
   return (
-    <AppShell>
-      <main className="admin-calls-page" id="main-content">
+    <main className="admin-calls-page" id="main-content">
         <header className="admin-calls-heading">
           <span className="eyebrow">{copy.eyebrow}</span>
           <h1>{copy.title}</h1>
@@ -168,18 +152,7 @@ export function AdminCallsConsole() {
           <small>{copy.privacyNote}</small>
         </header>
 
-        {access === "loading" ? <p role="status">{copy.loading}</p> : null}
-        {access === "forbidden" ? (
-          <section className="admin-access-card">
-            <p>{copy.forbidden}</p>
-            <Link className="auth-inline-link" href={localizeHref("/login")}>
-              {copy.signIn}
-            </Link>
-          </section>
-        ) : null}
-
-        {access === "allowed" ? (
-          <>
+        {loading && items.length === 0 ? <p role="status">{copy.loading}</p> : null}
             <form className="admin-call-filters" onSubmit={applyFilters}>
               <strong>{copy.filters}</strong>
               <FilterSelect label={copy.status} name="status">
@@ -272,7 +245,7 @@ export function AdminCallsConsole() {
                     </dl>
                     <Link
                       className="secondary-button"
-                      href={localizeHref(`/admin/calls/${call.id}`)}
+                      href={`/admin/calls/${call.id}`}
                     >
                       {copy.inspect}
                     </Link>
@@ -290,10 +263,7 @@ export function AdminCallsConsole() {
                 </button>
               ) : null}
             </section>
-          </>
-        ) : null}
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

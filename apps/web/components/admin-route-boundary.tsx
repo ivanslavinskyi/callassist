@@ -8,21 +8,19 @@ import {
   getServerCurrentUser,
   getServerOnboardingStatus
 } from "@/lib/server-auth";
-import type { UiLocale } from "@/lib/i18n/messages";
 
 export async function AdminRouteBoundary({
   children,
-  locale,
   scope
 }: {
   children: ReactNode;
-  locale: UiLocale;
   scope: "content" | "operations";
 }) {
-  const [user, onboarding] = await Promise.all([
-    getServerCurrentUser(),
-    getServerOnboardingStatus(locale)
-  ]);
+  const user = await getServerCurrentUser();
+  const onboarding = user
+    ? await getServerOnboardingStatus(user.uiLocale)
+    : null;
+  const locale = user?.uiLocale ?? "en";
   const destination = scope === "content"
     ? contentAdminRedirect(user, onboarding, locale)
     : operationalAdminRedirect(user, onboarding, locale);

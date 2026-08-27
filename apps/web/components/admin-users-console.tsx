@@ -9,15 +9,12 @@ import type {
   UserRole,
   UserStatus
 } from "@callassist/contracts";
-import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AppShell } from "@/components/app-shell";
+import { useAdminSession } from "@/components/admin-session-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { useUiLocale } from "@/components/ui-locale-provider";
 import {
   changeAdminUserStatus,
   getAdminUserCreditLedger,
-  getCurrentUser,
   grantCreditsAsAdmin,
   listAdminUsers,
   retryAdminAccountDeletion,
@@ -29,7 +26,6 @@ import {
 } from "@/lib/i18n/admin-user-messages";
 import { getCreditErrorMessage } from "@/lib/i18n/credit-messages";
 
-type Access = "loading" | "allowed" | "forbidden";
 type Filters = { search?: string; role?: UserRole; status?: UserStatus };
 
 const roles: UserRole[] = [
@@ -42,11 +38,11 @@ const roles: UserRole[] = [
 const statuses: UserStatus[] = ["active", "suspended", "deleted"];
 
 export function AdminUsersConsole() {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
+  const session = useAdminSession();
   const copy = adminUserMessages[locale];
-  const [access, setAccess] = useState<Access>("loading");
-  const [actorId, setActorId] = useState<string | null>(null);
-  const [canSeeStaff, setCanSeeStaff] = useState(false);
+  const actorId = session.id;
+  const canSeeStaff = session.role === "superadmin";
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({});
@@ -59,30 +55,20 @@ export function AdminUsersConsole() {
 
   useEffect(() => {
     let active = true;
-    void getCurrentUser()
-      .then(async ({ user }) => {
-        if (!active) return;
-        if (!(["admin", "superadmin"] as UserRole[]).includes(user.role)) {
-          setAccess("forbidden");
-          return;
-        }
-        setActorId(user.id);
-        setCanSeeStaff(user.role === "superadmin");
-        setAccess("allowed");
-        setLoadingUsers(true);
-        try {
-          const result = await listAdminUsers({ limit: 20 });
-          if (active) {
-            setUsers(result.items);
-            setNextCursor(result.nextCursor);
-          }
-        } catch (caught) {
-          if (active) setError(getAdminUserErrorMessage(caught, locale));
-        } finally {
-          if (active) setLoadingUsers(false);
+    setLoadingUsers(true);
+    void listAdminUsers({ limit: 20 })
+      .then((result) => {
+        if (active) {
+          setUsers(result.items);
+          setNextCursor(result.nextCursor);
         }
       })
-      .catch(() => { if (active) setAccess("forbidden"); });
+      .catch((caught) => {
+        if (active) setError(getAdminUserErrorMessage(caught, locale));
+      })
+      .finally(() => {
+        if (active) setLoadingUsers(false);
+      });
     return () => { active = false; };
   }, [locale]);
 
@@ -166,26 +152,12 @@ export function AdminUsersConsole() {
   }
 
   return (
-    <AppShell>
-      <main className="admin-users-page" id="main-content">
+    <main className="admin-users-page" id="main-content">
         <section className="admin-users-heading">
           <span className="eyebrow">{copy.eyebrow}</span>
-          {access === "loading" ? (
-            <p role="status">{copy.loadingAccess}</p>
-          ) : access === "forbidden" ? (
-            <div className="admin-access-card">
-              <h1>{copy.forbiddenTitle}</h1>
-              <p>{copy.forbidden}</p>
-              <Link className="auth-inline-link" href={localizeHref("/login")}>{copy.signIn}</Link>
-            </div>
-          ) : (
-            <>
               <h1>{copy.title}</h1>
               <p>{copy.intro}</p>
-            </>
-          )}
         </section>
-        {access === "allowed" ? (
           <div className="admin-users-grid">
             <section className="admin-user-list-panel">
               <form className="admin-user-filters" onSubmit={search}>
@@ -278,9 +250,7 @@ export function AdminUsersConsole() {
               )}
             </section>
           </div>
-        ) : null}
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

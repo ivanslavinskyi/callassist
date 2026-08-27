@@ -213,9 +213,10 @@ The web app exposes the corresponding localized flows at `/en/register`, `/en/ve
 `/en/login`, `/en/recover` and their `/de` equivalents. Recovery capabilities stay
 in page memory rather than URLs or browser storage. Browser API requests include credentials so
 the opaque HttpOnly session cookie is used without exposing its token to JavaScript.
-The localized `/app` tree is guarded through a server-side current-session lookup,
-and every existing `/admin` page additionally requires an `admin` or `superadmin`
-role before rendering. `INTERNAL_API_URL` configures the private API origin used by
+The localized `/app` tree is guarded through a server-side current-session lookup.
+The separate English-only `/admin` tree performs the same server-side session and
+onboarding checks, allows content editors only into content/SEO routes, and reserves
+operational routes for `admin` and `superadmin`. `INTERNAL_API_URL` configures the private API origin used by
 those server checks. The old localized Dashboard/call-detail routes were deliberately
 removed without compatibility redirects while the product remains local pre-beta.
 New briefs are assigned to that authenticated user, list queries are
@@ -233,8 +234,8 @@ requires a short reason. Suspension and session revocation are atomic in Postgre
 Suspension immediately revokes every session, while unsuspension never restores old
 tokens. Administrators can search the accounts visible to their role at
 `GET /api/admin/users` and load a selected append-only ledger at
-`GET /api/admin/users/:userId/credits`; the localized console is available at
-`/en/admin/users` and `/de/admin/users`. Search responses expose verification state,
+`GET /api/admin/users/:userId/credits`; the console is available at `/admin/users`.
+Search responses expose verification state,
 but not phone numbers, password hashes, or session credentials. Ordinary admins see
 only `user` accounts, while superadmins may inspect staff roles. Broader user-detail
 data remains roadmap work. The selected-user panel consolidates reasoned
@@ -243,17 +244,17 @@ require confirmation, and credit grants are available only for active, phone-ver
 targets within the acting administrator's permission scope.
 
 Operational administrators can inspect the privacy-minimized call read model at
-`/en/admin/calls` or `/de/admin/calls`. The list supports deterministic pagination
+`/admin/calls`. The list supports deterministic pagination
 and status, outcome, consent, failure-stage, language, and date filters; its detail
 Inspector reconstructs the sanitized durable timeline and outcome provenance. The
 default API omits recipient identity, phone number, brief/transcript text, and private
 feedback comments. Loading that sensitive content is a separate superadmin-only POST
 with a mandatory reason, and every read creates immutable PostgreSQL access evidence.
 
-The localized operational overview is available at `/en/admin` and `/de/admin`, with
+The operational overview is available at `/admin`, with
 24-hour, 7-day, and 30-day creation cohorts, explicit rate denominators, semantic
 outcomes, recorded-duration and first-audio aggregates, reliability counters, and
-optional versioned cost estimates. `/en/admin/system` and `/de/admin/system` report
+optional versioned cost estimates. `/admin/system` reports
 the API/database request path, configured provider modes, bounded workload, recent
 durable warnings/errors, PII-free hourly Twilio webhook delivery counts and
 last-accepted age, the transcription/retention/provider-reconciliation job backlog,
@@ -299,8 +300,8 @@ for the separately required Swiss privacy/legal review and formal request workfl
 
 Authenticated users can redeem a code at `/en/redeem` or `/de/redeem` through
 `POST /api/credits/promo-redemptions`. Active administrators can create bounded
-promo campaigns and issue reasoned grants at `/en/admin/credits` or
-`/de/admin/credits` through `POST /api/admin/promo-codes` and
+promo campaigns and issue reasoned grants at `/admin/credits` through
+`POST /api/admin/promo-codes` and
 `POST /api/admin/credit-grants`. Promo plaintext is never persisted: the server
 stores an HMAC-SHA-256 digest, locks the campaign while applying global/per-user
 limits, and writes the redemption and ledger grant in one transaction. Manual grants
@@ -343,7 +344,7 @@ provider and creates the global suppression only after the code is approved. Sen
 and checks are rate-limited by hashed phone and IP; no CallAssist account is required.
 The resulting immutable safety event records the recipient-request source without a
 staff actor. Active `admin` and `superadmin` accounts can process staff requests or
-reviewed complaints and audited lifts at `/en/admin/safety` or `/de/admin/safety`.
+reviewed complaints and audited lifts at `/admin/safety`.
 The API routes are `POST /api/admin/recipient-suppressions` and
 `POST /api/admin/recipient-suppressions/lift`; both require an explicit reason and an
 allowed browser origin. A lift should be used only after identity and renewed consent

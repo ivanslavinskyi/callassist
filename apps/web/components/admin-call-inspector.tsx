@@ -7,19 +7,18 @@ import type {
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import { AppShell } from "./app-shell";
-import { useUiLocale } from "./ui-locale-provider";
+import { useAdminSession } from "./admin-session-provider";
 import {
   accessAdminCallSensitiveContent,
-  getAdminCallInspector,
-  getCurrentUser
+  getAdminCallInspector
 } from "@/lib/api";
 import { adminCallMessages } from "@/lib/i18n/admin-call-messages";
 
 export function AdminCallInspector({ callId }: { callId: string }) {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
+  const user = useAdminSession();
   const copy = adminCallMessages[locale];
-  const [role, setRole] = useState<UserRole | null>(null);
+  const role: UserRole = user.role;
   const [inspector, setInspector] = useState<AdminCallInspectorData | null>(null);
   const [sensitive, setSensitive] = useState<AdminCallSensitiveContent | null>(
     null
@@ -31,10 +30,9 @@ export function AdminCallInspector({ callId }: { callId: string }) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([getCurrentUser(), getAdminCallInspector(callId)])
-      .then(([{ user }, data]) => {
+    void getAdminCallInspector(callId)
+      .then((data) => {
         if (!active) return;
-        setRole(user.role);
         setInspector(data);
       })
       .catch(() => {
@@ -69,9 +67,8 @@ export function AdminCallInspector({ callId }: { callId: string }) {
 
   const summary = inspector?.summary;
   return (
-    <AppShell>
-      <main className="admin-inspector-page" id="main-content">
-        <Link className="auth-inline-link" href={localizeHref("/admin/calls")}>
+    <main className="admin-inspector-page" id="main-content">
+        <Link className="auth-inline-link" href="/admin/calls">
           ← {copy.back}
         </Link>
         <header className="admin-inspector-heading">
@@ -197,8 +194,7 @@ export function AdminCallInspector({ callId }: { callId: string }) {
             </section>
           </>
         ) : null}
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

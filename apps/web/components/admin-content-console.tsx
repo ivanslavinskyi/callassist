@@ -9,32 +9,27 @@ import type {
   ContentSection
 } from "@callassist/contracts";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { AppShell } from "@/components/app-shell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   createAdminContentDraft,
   getAdminContentPage,
   listAdminContentPages,
   listAdminContentRevisions,
-  logout,
   publishAdminContentDraft,
   rollbackAdminContentRevision,
   updateAdminContentDraft
 } from "@/lib/api";
 import { contentAdminMessages } from "@/lib/i18n/content-admin-messages";
-import { useUiLocale } from "./ui-locale-provider";
 
 type PageDetail = {
   published: AdminContentLocalizedRevision | null;
   draft: AdminContentLocalizedRevision | null;
 };
-type Busy = "create" | "save" | "publish" | "rollback" | "logout" | null;
+type Busy = "create" | "save" | "publish" | "rollback" | null;
 
 export function AdminContentConsole() {
-  const router = useRouter();
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
   const copy = contentAdminMessages[locale];
   const [pages, setPages] = useState<AdminContentPageSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<ContentPageKey | null>(null);
@@ -192,25 +187,13 @@ export function AdminContentConsole() {
     setRevisions(nextRevisions);
   }
 
-  async function signOut() {
-    setBusy("logout");
-    try {
-      await logout();
-      router.replace(localizeHref("/login"));
-      router.refresh();
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const selectedPage = pages.find((page) => page.key === selectedKey) ?? null;
   const isLegal = selectedKey === "terms" || selectedKey === "acceptable_use";
   const isFaq = selectedKey === "faq";
   const currentRevision = revisions.find((revision) => revision.status === "published");
 
   return (
-    <AppShell>
-      <main className="admin-content-page" id="main-content">
+    <main className="admin-content-page" id="main-content">
         <header className="admin-content-heading">
           <div>
             <span className="eyebrow">{copy.eyebrow}</span>
@@ -218,12 +201,9 @@ export function AdminContentConsole() {
             <p>{copy.intro}</p>
           </div>
           <div className="admin-content-heading-actions">
-            <Link className="secondary-button" href={localizeHref("/admin/content/editorial")}>
+            <Link className="secondary-button" href="/admin/content/editorial">
               {copy.editorialModels}
             </Link>
-            <button className="secondary-button" disabled={busy !== null} onClick={signOut} type="button">
-              {copy.logout}
-            </button>
           </div>
         </header>
 
@@ -281,7 +261,7 @@ export function AdminContentConsole() {
                     </div>
                     <Link
                       className="secondary-button"
-                      href={`${localizeHref(`/admin/content/${editor.key}/preview`)}?contentLocale=${contentLocale}`}
+                      href={`/admin/content/${editor.key}/preview?contentLocale=${contentLocale}`}
                       target="_blank"
                     >
                       {copy.preview}
@@ -323,7 +303,7 @@ export function AdminContentConsole() {
                   {isFaq ? (
                     <div className="admin-content-empty editorial-reference-note">
                       <p>{copy.faqItemsManaged}</p>
-                      <Link className="secondary-button" href={localizeHref("/admin/content/editorial")}>
+                      <Link className="secondary-button" href="/admin/content/editorial">
                         {copy.editorialModels}
                       </Link>
                     </div>
@@ -433,8 +413,7 @@ export function AdminContentConsole() {
             ? copy.publishConfirmTitle
             : copy.rollbackConfirmTitle}
         />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

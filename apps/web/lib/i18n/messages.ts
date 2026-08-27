@@ -101,14 +101,7 @@ export type Messages = {
     faq: string;
     optOut: string;
     redeem: string;
-    safety: string;
-    creditAdmin: string;
-    operationsAdmin: string;
-    systemAdmin: string;
-    callsAdmin: string;
-    usersAdmin: string;
-    contentAdmin: string;
-    seoAdmin: string;
+    adminPortal: string;
     creditsRemaining: (count: number) => string;
   };
   dialog: {
@@ -322,14 +315,7 @@ const en: Messages = {
     faq: "FAQ",
     optOut: "Stop calls",
     redeem: "Redeem",
-    safety: "Safety",
-    creditAdmin: "Credits",
-    operationsAdmin: "Overview",
-    systemAdmin: "System",
-    callsAdmin: "Calls",
-    usersAdmin: "Users",
-    contentAdmin: "Content",
-    seoAdmin: "SEO",
+    adminPortal: "Admin",
     creditsRemaining: (count: number) =>
       `${count} call ${count === 1 ? "credit" : "credits"}`
   },
@@ -521,14 +507,7 @@ const de: Messages = {
     faq: "FAQ",
     optOut: "Anrufe sperren",
     redeem: "Code einlösen",
-    safety: "Sicherheit",
-    creditAdmin: "Guthaben",
-    operationsAdmin: "Übersicht",
-    systemAdmin: "System",
-    callsAdmin: "Anrufe",
-    usersAdmin: "Benutzer",
-    contentAdmin: "Inhalte",
-    seoAdmin: "SEO",
+    adminPortal: "Admin",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
   },
   dialog: {

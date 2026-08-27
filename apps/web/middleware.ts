@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { localeFromPathname, localizePathname, negotiateUiLocale, uiLocaleCookie } from "@/lib/i18n/routing";
+import { localeFromPathname, localizePathname, negotiateUiLocale, uiLocaleCookie } from "./lib/i18n/routing";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-callassist-ui-locale", "en");
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
   const pathLocale = localeFromPathname(pathname);
   if (!pathLocale) {
     const locale = negotiateUiLocale({

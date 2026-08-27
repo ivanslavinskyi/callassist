@@ -1,7 +1,7 @@
+import { contentLocaleSchema } from "@callassist/contracts";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LandingDraftPreview } from "@/components/landing-draft-preview";
-import { isUiLocale } from "@/lib/i18n/messages";
 import { toPublishedLandingPreview } from "@/lib/landing-preview";
 import { getPublishedFaq } from "@/lib/server-content";
 import { getServerEditorialPreview } from "@/lib/server-content-admin";
@@ -11,21 +11,23 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false }
 };
 
-export default async function LandingPreviewPage({ params }: {
-  params: Promise<{ locale: string }>;
+export default async function LandingPreviewPage({ searchParams }: {
+  searchParams: Promise<{ contentLocale?: string }>;
 }) {
-  const { locale } = await params;
-  if (!isUiLocale(locale)) notFound();
+  const query = await searchParams;
+  const parsedLocale = contentLocaleSchema.safeParse(query.contentLocale ?? "en");
+  if (!parsedLocale.success) notFound();
+  const contentLocale = parsedLocale.data;
   const [revision, faq] = await Promise.all([
     getServerEditorialPreview("landing"),
-    getPublishedFaq(locale)
+    getPublishedFaq(contentLocale)
   ]);
   if (!revision || revision.key !== "landing") notFound();
   return (
     <LandingDraftPreview
       faq={faq}
-      interfaceLocale={locale}
-      landing={toPublishedLandingPreview(revision, locale)}
+      interfaceLocale="en"
+      landing={toPublishedLandingPreview(revision, contentLocale)}
     />
   );
 }

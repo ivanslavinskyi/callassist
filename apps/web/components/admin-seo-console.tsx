@@ -2,27 +2,22 @@
 
 import type { ContentLocale } from "@callassist/contracts";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { AppShell } from "./app-shell";
-import { getPublishedContentIndex, logout } from "@/lib/api";
+import { getPublishedContentIndex } from "@/lib/api";
 import { seoAdminMessages } from "@/lib/i18n/seo-admin-messages";
 import { buildSeoAudit, type SeoAuditRoute } from "@/lib/seo-audit";
 import { absoluteSiteUrl } from "@/lib/site-config";
-import { useUiLocale } from "./ui-locale-provider";
 
 type StatusFilter = "all" | "warnings" | "stale";
 
 export function AdminSeoConsole() {
-  const router = useRouter();
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
   const copy = seoAdminMessages[locale];
   const [routes, setRoutes] = useState<SeoAuditRoute[]>([]);
   const [localeFilter, setLocaleFilter] = useState<"all" | ContentLocale>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -42,20 +37,8 @@ export function AdminSeoConsole() {
   const warningCount = routes.filter(({ issues }) => issues.length > 0).length;
   const staleCount = routes.filter(({ translationStale }) => translationStale).length;
 
-  async function signOut() {
-    setLoggingOut(true);
-    try {
-      await logout();
-      router.replace(localizeHref("/login"));
-      router.refresh();
-    } finally {
-      setLoggingOut(false);
-    }
-  }
-
   return (
-    <AppShell>
-      <main className="admin-seo-page" id="main-content">
+    <main className="admin-seo-page" id="main-content">
         <header className="admin-seo-heading">
           <div>
             <span className="eyebrow">{copy.eyebrow}</span>
@@ -65,7 +48,6 @@ export function AdminSeoConsole() {
           <div className="admin-seo-heading-actions">
             <a className="secondary-button" href={absoluteSiteUrl("/sitemap.xml")} target="_blank">{copy.sitemap}</a>
             <a className="secondary-button" href={absoluteSiteUrl("/robots.txt")} target="_blank">{copy.robots}</a>
-            <button className="secondary-button" disabled={loggingOut} onClick={signOut} type="button">{copy.logout}</button>
           </div>
         </header>
 
@@ -129,8 +111,7 @@ export function AdminSeoConsole() {
             </article>
           ))}
         </div>
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

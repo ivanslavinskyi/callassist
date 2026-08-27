@@ -8,7 +8,7 @@ export function authenticatedAppRedirect(
   if (!user) return `/${locale}/login`;
   if (onboarding?.required !== false) return `/${locale}/onboarding`;
   return user.role === "content_editor"
-    ? `/${locale}/admin/content`
+    ? "/admin/content"
     : null;
 }
 
@@ -32,7 +32,7 @@ export function operationalAdminRedirect(
   const sharedDestination = adminAreaRedirect(user, onboarding, locale);
   if (sharedDestination) return sharedDestination;
   return user?.role === "content_editor"
-    ? `/${locale}/admin/content`
+    ? "/admin/content"
     : null;
 }
 
@@ -52,6 +52,6 @@ export function onboardingPageRedirect(
   if (!user) return `/${locale}/login`;
   if (onboarding?.required !== false) return null;
   return user.role === "content_editor"
-    ? `/${locale}/admin/content`
+    ? "/admin/content"
     : `/${locale}/app`;
 }

@@ -1,11 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
-import { AppShell } from "@/components/app-shell";
-import { useUiLocale } from "@/components/ui-locale-provider";
+import { useState, type FormEvent } from "react";
 import {
-  getCurrentUser,
   liftRecipientSuppressionAsStaff,
   suppressRecipientAsStaff
 } from "@/lib/api";
@@ -14,31 +10,12 @@ import {
   safetyMessages
 } from "@/lib/i18n/safety-messages";
 
-type Access = "loading" | "allowed" | "forbidden";
-
 export function AdminSafetyForm() {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
   const copy = safetyMessages[locale];
-  const [access, setAccess] = useState<Access>("loading");
   const [busy, setBusy] = useState<"suppress" | "lift" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void getCurrentUser()
-      .then(({ user }) => {
-        if (active) {
-          setAccess(["admin", "superadmin"].includes(user.role)
-            ? "allowed"
-            : "forbidden");
-        }
-      })
-      .catch(() => {
-        if (active) setAccess("forbidden");
-      });
-    return () => { active = false; };
-  }, []);
 
   async function suppress(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,21 +65,9 @@ export function AdminSafetyForm() {
   }
 
   return (
-    <AppShell>
-      <main className="auth-page" id="main-content">
+    <main className="auth-page" id="main-content">
         <section className="auth-card">
           <span className="eyebrow">{copy.eyebrow}</span>
-          {access === "loading" ? (
-            <p className="auth-intro" role="status">{copy.loading}</p>
-          ) : access === "forbidden" ? (
-            <>
-              <h1>{copy.forbiddenTitle}</h1>
-              <p className="auth-intro">{copy.forbidden}</p>
-              <Link className="auth-inline-link" href={localizeHref("/login")}>
-                {copy.signIn}
-              </Link>
-            </>
-          ) : (
             <>
               <h1>{copy.title}</h1>
               <p className="auth-intro">{copy.intro}</p>
@@ -140,10 +105,8 @@ export function AdminSafetyForm() {
               {error ? <p className="form-error" role="alert">{error}</p> : null}
               {notice ? <p className="auth-success" role="status">{notice}</p> : null}
             </>
-          )}
         </section>
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

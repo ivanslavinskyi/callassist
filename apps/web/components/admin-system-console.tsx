@@ -9,7 +9,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   getAdminSystemStatus,
-  getCurrentUser,
   retryAdminDurableJob,
   setAdminOutboundCalls
 } from "@/lib/api";
@@ -17,13 +16,13 @@ import {
   adminOperationsMessages,
   type AdminOperationsCopy
 } from "@/lib/i18n/admin-operations-messages";
-import { AppShell } from "./app-shell";
-import { useUiLocale } from "./ui-locale-provider";
+import { useAdminSession } from "./admin-session-provider";
 
 export function AdminSystemConsole() {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
+  const user = useAdminSession();
   const copy = adminOperationsMessages[locale];
-  const [role, setRole] = useState<UserRole | null>(null);
+  const role: UserRole = user.role;
   const [status, setStatus] = useState<AdminSystemView | null>(null);
   const [loading, setLoading] = useState(true);
   const [controlLoading, setControlLoading] = useState(false);
@@ -36,12 +35,7 @@ export function AdminSystemConsole() {
     setLoading(true);
     setError(null);
     try {
-      const [{ user }, system] = await Promise.all([
-        getCurrentUser(),
-        getAdminSystemStatus()
-      ]);
-      setRole(user.role);
-      setStatus(system);
+      setStatus(await getAdminSystemStatus());
     } catch {
       setError(copy.systemError);
     } finally {
@@ -98,9 +92,8 @@ export function AdminSystemConsole() {
   }
 
   return (
-    <AppShell>
-      <main className="admin-system-page" id="main-content">
-        <Link className="auth-inline-link" href={localizeHref("/admin")}>
+    <main className="admin-system-page" id="main-content">
+        <Link className="auth-inline-link" href="/admin">
           ← {copy.systemBack}
         </Link>
         <header className="admin-system-heading">
@@ -286,7 +279,7 @@ export function AdminSystemConsole() {
                         <strong>{copy.jobTypes[job.type]}</strong>
                         <span>{copy.jobStatuses[job.status]}</span>
                       </div>
-                      <Link href={localizeHref(`/admin/calls/${job.callId}`)}>
+                      <Link href={`/admin/calls/${job.callId}`}>
                         {copy.jobCall}
                       </Link>
                     </header>
@@ -359,8 +352,7 @@ export function AdminSystemConsole() {
             </section>
           </div>
         ) : null}
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

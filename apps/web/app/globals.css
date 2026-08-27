@@ -311,6 +311,59 @@ main:focus { outline: none; }
 .admin-outbound-control form button { min-height: 44px; width: 100%; }
 .admin-outbound-control form > small { color: var(--danger); font-size: 9px; line-height: 1.5; }
 
+.admin-shell { background: var(--canvas); min-height: 100vh; }
+.admin-utility-header {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 24px;
+  height: 72px;
+  justify-content: space-between;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.admin-utility-brand, .admin-utility-actions { align-items: center; display: flex; gap: 12px; min-width: 0; }
+.admin-product-label { border-left: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 800; padding-left: 12px; text-transform: uppercase; }
+.admin-utility-actions .secondary-button { min-height: 40px; width: auto; }
+.admin-identity { display: grid; line-height: 1.25; margin-right: 4px; text-align: right; }
+.admin-identity strong { font-size: 12px; }
+.admin-identity span { color: var(--muted); font-size: 10px; }
+.admin-menu-toggle {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  cursor: pointer;
+  display: none;
+  font-size: 20px;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+.admin-shell-body { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: calc(100vh - 72px); }
+.admin-sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  height: calc(100vh - 72px);
+  overflow-y: auto;
+  padding: 26px 18px;
+  position: sticky;
+  top: 72px;
+  z-index: 40;
+}
+.admin-navigation-group + .admin-navigation-group { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 24px; }
+.admin-navigation-group h2 { color: var(--muted); font-size: 9px; letter-spacing: .14em; margin: 0 10px 9px; text-transform: uppercase; }
+.admin-navigation-group ul { display: grid; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.admin-navigation-group a { border-radius: 10px; color: var(--muted); display: block; font-size: 12px; font-weight: 750; padding: 10px 11px; }
+.admin-navigation-group a:hover { background: var(--canvas); color: var(--ink); }
+.admin-navigation-group a[aria-current="page"] { background: var(--ink); color: var(--surface); }
+.admin-workspace { min-width: 0; }
+.admin-sidebar-backdrop { display: none; }
+
 .topbar {
   align-items: center;
   border-bottom: 1px solid rgba(20, 35, 31, 0.08);
@@ -1652,6 +1705,22 @@ button:disabled { cursor: wait; opacity: .55; }
 }
 
 @media (max-width: 980px) {
+  .admin-shell-body { display: block; }
+  .admin-menu-toggle { display: inline-flex; }
+  .admin-sidebar {
+    bottom: 0;
+    box-shadow: 18px 0 48px rgba(8, 24, 19, .18);
+    height: calc(100vh - 72px);
+    left: 0;
+    position: fixed;
+    top: 72px;
+    transform: translateX(-105%);
+    transition: transform .2s ease;
+    width: min(300px, 86vw);
+    z-index: 45;
+  }
+  .admin-sidebar[data-open="true"] { transform: translateX(0); }
+  .admin-sidebar-backdrop { background: rgba(5, 16, 12, .44); border: 0; bottom: 0; display: block; left: 0; position: fixed; right: 0; top: 72px; z-index: 44; }
   .dashboard-grid, .live-grid { grid-template-columns: 1fr; }
   .public-steps, .public-example > ol { grid-template-columns: 1fr 1fr; }
   .public-safety, .public-use-cases { grid-template-columns: 1fr; }
@@ -1671,6 +1740,13 @@ button:disabled { cursor: wait; opacity: .55; }
 }
 
 @media (max-width: 680px) {
+  .admin-utility-header { gap: 10px; height: auto; min-height: 66px; padding: 10px 14px; }
+  .admin-utility-brand .brand > span:last-child, .admin-product-label, .admin-identity { display: none; }
+  .admin-utility-actions { gap: 7px; }
+  .admin-utility-actions .secondary-button { font-size: 10px; min-height: 40px; padding: 0 10px; }
+  .admin-utility-actions > a.secondary-button { display: none; }
+  .admin-sidebar { height: calc(100vh - 66px); top: 66px; }
+  .admin-sidebar-backdrop { top: 66px; }
   .topbar { align-items: center; flex-wrap: wrap; gap: 12px; height: auto; min-height: 66px; overflow: visible; padding: 12px 20px; }
   .topbar-actions { flex: 0 0 100%; flex-wrap: wrap; gap: 10px; overflow: visible; width: 100%; }
   .topbar-meta { display: none; }

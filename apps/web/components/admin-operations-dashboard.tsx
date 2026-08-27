@@ -12,13 +12,11 @@ import {
   adminOperationsMessages,
   type AdminOperationsCopy
 } from "@/lib/i18n/admin-operations-messages";
-import { AppShell } from "./app-shell";
-import { useUiLocale } from "./ui-locale-provider";
 
 const windows: AdminOperationsWindow[] = ["24h", "7d", "30d"];
 
 export function AdminOperationsDashboard() {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
   const copy = adminOperationsMessages[locale];
   const [selectedWindow, setSelectedWindow] = useState<AdminOperationsWindow>(
     "24h"
@@ -46,8 +44,7 @@ export function AdminOperationsDashboard() {
   }, [copy.loadError, reloadKey, selectedWindow]);
 
   return (
-    <AppShell>
-      <main className="admin-operations-page" id="main-content">
+    <main className="admin-operations-page" id="main-content">
         <header className="admin-operations-heading">
           <div>
             <span className="eyebrow">{copy.overviewEyebrow}</span>
@@ -55,7 +52,7 @@ export function AdminOperationsDashboard() {
             <p>{copy.overviewIntro}</p>
             <small>{copy.privacyNote}</small>
           </div>
-          <Link className="secondary-button" href={localizeHref("/admin/system")}>
+          <Link className="secondary-button" href="/admin/system">
             {copy.systemLink}
           </Link>
         </header>
@@ -192,8 +189,7 @@ export function AdminOperationsDashboard() {
             </OperationsSection>
           </div>
         ) : null}
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

@@ -8,7 +8,7 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       disallow: [
         "/en/app/", "/de/app/",
-        "/en/admin/", "/de/admin/",
+        "/admin",
         "/en/login", "/de/login",
         "/en/register", "/de/register",
         "/en/verify", "/de/verify",

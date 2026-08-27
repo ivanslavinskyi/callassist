@@ -23,7 +23,7 @@ export function ContentDraftPreview({
             <strong>{isGerman ? "Private Entwurfsvorschau" : "Private draft preview"}</strong>
             <span>{isGerman ? "Nicht öffentlich sichtbar" : "Not visible to the public"}</span>
           </div>
-          <Link href={`/${interfaceLocale}/admin/content`}>
+          <Link href="/admin/content">
             {isGerman ? "Zurück zum Editor" : "Back to editor"}
           </Link>
         </div>

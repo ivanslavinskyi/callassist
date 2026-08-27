@@ -15,7 +15,7 @@ export function LandingDraftPreview({
   landing: PublishedLanding;
 }) {
   const isGerman = interfaceLocale === "de";
-  const editorHref = `/${interfaceLocale}/admin/content/editorial`;
+  const editorHref = "/admin/content/editorial";
   return (
     <AppShell>
       <PublicHomeContent
@@ -32,7 +32,7 @@ export function LandingDraftPreview({
             </Link>
           </div>
         )}
-        registerHref={`/${interfaceLocale}/register`}
+        registerHref={`/${landing.locale}/register`}
       />
     </AppShell>
   );

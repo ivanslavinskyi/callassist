@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ContentLocale, User } from "@callassist/contracts";
 import { headers } from "next/headers";
+import { cache } from "react";
 import {
   fetchServerCurrentUser,
   fetchServerOnboardingStatus
@@ -13,19 +14,19 @@ const internalApiUrl = (
   "http://localhost:4000"
 ).replace(/\/$/, "");
 
-export async function getServerCurrentUser(): Promise<User | null> {
+export const getServerCurrentUser = cache(async (): Promise<User | null> => {
   const requestHeaders = await headers();
   return fetchServerCurrentUser({
     apiUrl: internalApiUrl,
     cookie: requestHeaders.get("cookie") ?? ""
   });
-}
+});
 
-export async function getServerOnboardingStatus(locale: ContentLocale) {
+export const getServerOnboardingStatus = cache(async (locale: ContentLocale) => {
   const requestHeaders = await headers();
   return fetchServerOnboardingStatus({
     apiUrl: internalApiUrl,
     cookie: requestHeaders.get("cookie") ?? "",
     locale
   });
-}
+});

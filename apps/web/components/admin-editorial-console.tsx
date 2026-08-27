@@ -10,7 +10,6 @@ import type {
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { AppShell } from "@/components/app-shell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   createAdminEditorialDraft,
@@ -20,7 +19,6 @@ import {
   rollbackAdminEditorialRevision,
   updateAdminEditorialDraft
 } from "@/lib/api";
-import { useUiLocale } from "./ui-locale-provider";
 
 type Detail = {
   published: AdminEditorialRevision | null;
@@ -35,7 +33,7 @@ type LandingContentItem = Extract<
 >["items"][number];
 
 export function AdminEditorialConsole() {
-  const { locale, localizeHref } = useUiLocale();
+  const locale = "en" as const;
   const copy = messages[locale];
   const [key, setKey] = useState<EditorialCollectionKey>("faq");
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -173,15 +171,14 @@ export function AdminEditorialConsole() {
   const currentPublished = revisions.find(({ status }) => status === "published");
 
   return (
-    <AppShell>
-      <main className="admin-content-page" id="main-content">
+    <main className="admin-content-page" id="main-content">
         <header className="admin-content-heading">
           <div>
             <span className="eyebrow">{copy.eyebrow}</span>
             <h1>{copy.title}</h1>
             <p>{copy.intro}</p>
           </div>
-          <Link className="secondary-button" href={localizeHref("/admin/content")}>
+          <Link className="secondary-button" href="/admin/content">
             {copy.pages}
           </Link>
         </header>
@@ -235,13 +232,22 @@ export function AdminEditorialConsole() {
                   </div>
                   <div className="admin-content-editor-actions">
                     {editor.key === "landing" && !dirty ? (
-                      <Link
-                        className="secondary-button"
-                        href={localizeHref("/admin/content/editorial/landing/preview")}
-                        target="_blank"
-                      >
-                        {copy.previewDraft}
-                      </Link>
+                      <>
+                        <Link
+                          className="secondary-button"
+                          href="/admin/content/editorial/landing/preview?contentLocale=en"
+                          target="_blank"
+                        >
+                          {copy.previewDraft} EN
+                        </Link>
+                        <Link
+                          className="secondary-button"
+                          href="/admin/content/editorial/landing/preview?contentLocale=de"
+                          target="_blank"
+                        >
+                          {copy.previewDraft} DE
+                        </Link>
+                      </>
                     ) : null}
                     {editor.key !== "landing" ? <button
                       className="secondary-button"
@@ -388,8 +394,7 @@ export function AdminEditorialConsole() {
             ? copy.publishTitle
             : copy.rollback}
         />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 
