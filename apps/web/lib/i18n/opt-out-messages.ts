@@ -3,11 +3,11 @@ import type { UiLocale } from "./messages";
 
 const en = {
   eyebrow: "Call preferences",
-  title: "Stop CallAssist calls to your number",
-  intro: "Verify your Swiss phone number by SMS and we will place it on the global do-not-call list. This affects future CallAssist calls from every account.",
+  title: "Stop SHPROHLI calls to your number",
+  intro: "Verify your Swiss phone number by SMS and we will place it on the global do-not-call list. This affects future SHPROHLI calls from every account.",
   phone: "Phone number",
   phonePlaceholder: "+41791234567",
-  phoneHelp: "Use the number that should no longer receive CallAssist calls.",
+  phoneHelp: "Use the number that should no longer receive SHPROHLI calls.",
   send: "Send verification code",
   sending: "Sending code…",
   verifyTitle: "Confirm your number",
@@ -18,8 +18,8 @@ const en = {
   confirming: "Confirming…",
   changePhone: "Use a different number",
   successTitle: "Future calls are blocked",
-  success: "This phone number is now on the CallAssist do-not-call list. The block applies across all CallAssist accounts.",
-  done: "Return to CallAssist",
+  success: "This phone number is now on the SHPROHLI do-not-call list. The block applies across all SHPROHLI accounts.",
+  done: "Return to SHPROHLI",
   errors: {
     invalidRequest: "Enter a valid Swiss phone number.",
     invalidCode: "The verification code is incorrect or expired.",
@@ -39,11 +39,11 @@ type OptOutMessages = {
 
 const de: OptOutMessages = {
   eyebrow: "Anrufeinstellungen",
-  title: "CallAssist-Anrufe an Ihre Nummer stoppen",
-  intro: "Bestätigen Sie Ihre Schweizer Telefonnummer per SMS. Wir setzen sie danach auf die globale Sperrliste für zukünftige CallAssist-Anrufe aus allen Konten.",
+  title: "SHPROHLI-Anrufe an Ihre Nummer stoppen",
+  intro: "Bestätigen Sie Ihre Schweizer Telefonnummer per SMS. Wir setzen sie danach auf die globale Sperrliste für zukünftige SHPROHLI-Anrufe aus allen Konten.",
   phone: "Telefonnummer",
   phonePlaceholder: "+41791234567",
-  phoneHelp: "Verwenden Sie die Nummer, die keine CallAssist-Anrufe mehr erhalten soll.",
+  phoneHelp: "Verwenden Sie die Nummer, die keine SHPROHLI-Anrufe mehr erhalten soll.",
   send: "Bestätigungscode senden",
   sending: "Code wird gesendet…",
   verifyTitle: "Nummer bestätigen",
@@ -54,8 +54,8 @@ const de: OptOutMessages = {
   confirming: "Wird bestätigt…",
   changePhone: "Andere Nummer verwenden",
   successTitle: "Zukünftige Anrufe sind gesperrt",
-  success: "Diese Telefonnummer steht jetzt auf der CallAssist-Sperrliste. Die Sperre gilt für alle CallAssist-Konten.",
-  done: "Zurück zu CallAssist",
+  success: "Diese Telefonnummer steht jetzt auf der SHPROHLI-Sperrliste. Die Sperre gilt für alle SHPROHLI-Konten.",
+  done: "Zurück zu SHPROHLI",
   errors: {
     invalidRequest: "Geben Sie eine gültige Schweizer Telefonnummer ein.",
     invalidCode: "Der Bestätigungscode ist falsch oder abgelaufen.",

@@ -212,7 +212,7 @@ export async function requestAccountDataExport() {
   if (!response.ok) throw await apiErrorFromResponse(response);
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const filename = disposition.match(/filename="([^"]+)"/i)?.[1]
-    ?? "callassist-data.json";
+    ?? "shprohli-data.json";
   return { blob: await response.blob(), filename };
 }
 
@@ -588,7 +588,7 @@ export function getCallPreparationErrorMessage(
     return "This call brief can no longer be edited.";
   }
   if (error.code === "SWISS_DESTINATION_REQUIRED") {
-    return "During the public beta CallAssist can only call Swiss phone numbers.";
+    return "During the public beta SHPROHLI can only call Swiss phone numbers.";
   }
   if (error.code === "RATE_LIMITED") {
     return options.rateLimited ?? "Too many requests. Wait a moment and try again.";

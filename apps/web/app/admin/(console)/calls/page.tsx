@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AdminCallsConsole } from "@/components/admin-calls-console";
 
 export const metadata: Metadata = {
-  title: "CallAssist call operations",
+  title: "SHPROHLI call operations",
   robots: { index: false, follow: false }
 };
 

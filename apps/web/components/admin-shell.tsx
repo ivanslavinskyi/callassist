@@ -64,7 +64,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           >
             <span aria-hidden="true">{menuOpen ? "×" : "☰"}</span>
           </button>
-          <Brand href="/admin" label="CallAssist admin home" />
+          <Brand href="/admin" label="SHPROHLI admin home" />
           <span className="admin-product-label">Admin</span>
         </div>
         <div className="admin-utility-actions">

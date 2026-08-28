@@ -7,9 +7,9 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteOrigin),
-  title: "CallAssist — controlled AI phone calls",
+  title: "SHPROHLI — controlled AI phone calls",
   description: "A personal voice assistant with live transcripts and approval gates",
-  applicationName: "CallAssist"
+  applicationName: "SHPROHLI"
 };
 
 export const viewport: Viewport = {

@@ -20,11 +20,11 @@ export const homeSeo: Record<UiLocale, {
   description: string;
 }> = {
   en: {
-    title: "CallAssist — AI phone assistance under your control",
+    title: "SHPROHLI — AI phone assistance under your control",
     description: "Supervised AI phone calls for people with speech impairments or local-language barriers."
   },
   de: {
-    title: "CallAssist — KI-Telefonassistenz unter Ihrer Kontrolle",
+    title: "SHPROHLI — KI-Telefonassistenz unter Ihrer Kontrolle",
     description: "Begleitete KI-Telefonanrufe für Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere."
   }
 };

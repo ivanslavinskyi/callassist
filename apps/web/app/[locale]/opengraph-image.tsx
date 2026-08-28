@@ -35,7 +35,7 @@ export default async function OpenGraphImage({ params }: {
       width: "100%"
     }}>
       <div style={{ color: "#168553", display: "flex", fontSize: 30, fontWeight: 800 }}>
-        CallAssist
+        SHPROHLI
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
         <div style={{ display: "flex", fontSize: 68, fontWeight: 800, letterSpacing: "-3px", lineHeight: 1.05, maxWidth: 980 }}>
@@ -46,7 +46,7 @@ export default async function OpenGraphImage({ params }: {
         </div>
       </div>
       <div style={{ alignItems: "center", display: "flex", fontSize: 22, justifyContent: "space-between" }}>
-        <span>callassist</span>
+        <span>SHPROHLI</span>
         <span style={{ color: "#168553" }}>{locale.toUpperCase()} · Public beta</span>
       </div>
     </div>,

@@ -187,7 +187,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link href={localizeHref("/opt-out")}>{messages.app.optOut}</Link>
             </>}
         </nav>
-        <small>CallAssist · Public beta</small>
+        <small>SHPROHLI · Public beta</small>
       </footer>
     </div>
   );

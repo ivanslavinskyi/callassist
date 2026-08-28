@@ -8,7 +8,7 @@ import { ContentDraftPreview } from "@/components/content-draft-preview";
 import { getServerContentPreview } from "@/lib/server-content-admin";
 
 export const metadata: Metadata = {
-  title: "CallAssist content preview",
+  title: "SHPROHLI content preview",
   robots: { index: false, follow: false }
 };
 

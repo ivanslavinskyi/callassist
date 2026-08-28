@@ -2,7 +2,7 @@ import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 import { z } from "zod";
 
 export const SWISS_DESTINATION_ONLY_MESSAGE =
-  "During the public beta CallAssist can only call Swiss phone numbers.";
+  "During the public beta SHPROHLI can only call Swiss phone numbers.";
 
 function preparePhoneInput(value: string) {
   const trimmed = value.trim();

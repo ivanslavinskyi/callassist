@@ -408,7 +408,7 @@ describe("auth API", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("private, no-store");
     expect(response.headers["content-disposition"]).toMatch(
-      /^attachment; filename="callassist-data-\d{4}-\d{2}-\d{2}\.json"$/
+      /^attachment; filename="shprohli-data-\d{4}-\d{2}-\d{2}\.json"$/
     );
     const exported = accountDataExportSchema.parse(response.json());
     expect(exported).toMatchObject({
@@ -1415,7 +1415,7 @@ describe("auth API", () => {
       issues: {
         fieldErrors: {
           phoneNumber: [
-            "During the public beta CallAssist can only call Swiss phone numbers."
+            "During the public beta SHPROHLI can only call Swiss phone numbers."
           ]
         }
       }

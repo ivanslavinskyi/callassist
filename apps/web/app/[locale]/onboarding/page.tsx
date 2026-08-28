@@ -9,7 +9,7 @@ import {
 } from "@/lib/server-auth";
 
 export const metadata: Metadata = {
-  title: "CallAssist onboarding",
+  title: "SHPROHLI onboarding",
   robots: { index: false, follow: false }
 };
 

@@ -14,7 +14,7 @@ type ExportInput = {
 export function buildFinalTranscriptCopyText(input: ExportInput) {
   const { brief, finalTranscript, languageLabel } = input;
   const header = [
-    "CallAssist — Final transcript",
+    "SHPROHLI — Final transcript",
     `Recipient: ${brief.recipientName}`,
     `Assistant: ${brief.agentName}`,
     `Language: ${languageLabel}`,
@@ -37,7 +37,7 @@ export function buildFinalTranscriptPdfDefinition(
     language: brief.locale,
     info: {
       title: `Final transcript — ${brief.recipientName}`,
-      author: "CallAssist",
+      author: "SHPROHLI",
       subject: "Recording-based call transcript"
     },
     defaultStyle: {
@@ -48,7 +48,7 @@ export function buildFinalTranscriptPdfDefinition(
     },
     footer: (currentPage, pageCount) => ({
       columns: [
-        { text: "CallAssist · Recording-based transcript", color: "#74837d" },
+        { text: "SHPROHLI · Recording-based transcript", color: "#74837d" },
         {
           text: `${currentPage} / ${pageCount}`,
           alignment: "right",
@@ -60,7 +60,7 @@ export function buildFinalTranscriptPdfDefinition(
     }),
     content: [
       {
-        text: "CALLASSIST",
+        text: "SHPROHLI",
         color: "#176d5d",
         bold: true,
         characterSpacing: 1.8,
@@ -131,7 +131,7 @@ export function finalTranscriptPdfFileName(input: ExportInput) {
     .replace(/^-|-$/g, "")
     .slice(0, 60);
 
-  return `callassist-final-transcript-${recipient || "call"}-${date}.pdf`;
+  return `shprohli-final-transcript-${recipient || "call"}-${date}.pdf`;
 }
 
 export async function writeTextToClipboard(text: string) {

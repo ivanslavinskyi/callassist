@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { AdminCallInspector } from "@/components/admin-call-inspector";
 
 export const metadata: Metadata = {
-  title: "CallAssist call Inspector",
+  title: "SHPROHLI call Inspector",
   robots: { index: false, follow: false }
 };
 

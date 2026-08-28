@@ -3,7 +3,7 @@ import { AdminOperationsDashboard } from "@/components/admin-operations-dashboar
 import { AdminRouteBoundary } from "@/components/admin-route-boundary";
 
 export const metadata: Metadata = {
-  title: "CallAssist operations overview",
+  title: "SHPROHLI operations overview",
   robots: { index: false, follow: false }
 };
 

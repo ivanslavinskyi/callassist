@@ -4,9 +4,9 @@ import type { UiLocale } from "./messages";
 const en = {
   redeemEyebrow: "Call credits",
   redeemTitle: "Redeem a promo code",
-  redeemIntro: "Enter a CallAssist promo code. A valid code is applied once and your balance updates immediately.",
+  redeemIntro: "Enter a SHPROHLI promo code. A valid code is applied once and your balance updates immediately.",
   code: "Promo code",
-  codePlaceholder: "CALLASSIST25",
+  codePlaceholder: "SHPROHLI25",
   redeem: "Redeem code",
   redeeming: "Redeeming…",
   redeemSuccess: (credits: number) => `${credits} credits were added to your balance.`,
@@ -69,9 +69,9 @@ type CreditMessages = {
 const de: CreditMessages = {
   redeemEyebrow: "Anrufguthaben",
   redeemTitle: "Aktionscode einlösen",
-  redeemIntro: "Geben Sie einen CallAssist-Aktionscode ein. Ein gültiger Code wird einmal angewendet und Ihr Guthaben sofort aktualisiert.",
+  redeemIntro: "Geben Sie einen SHPROHLI-Aktionscode ein. Ein gültiger Code wird einmal angewendet und Ihr Guthaben sofort aktualisiert.",
   code: "Aktionscode",
-  codePlaceholder: "CALLASSIST25",
+  codePlaceholder: "SHPROHLI25",
   redeem: "Code einlösen",
   redeeming: "Wird eingelöst…",
   redeemSuccess: (credits) => `${credits} Guthaben wurden Ihrem Konto hinzugefügt.`,

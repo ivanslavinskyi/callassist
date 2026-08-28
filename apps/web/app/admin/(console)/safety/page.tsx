@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AdminSafetyForm } from "@/components/admin-safety-form";
 
 export const metadata: Metadata = {
-  title: "CallAssist safety operations",
+  title: "SHPROHLI safety operations",
   robots: { index: false, follow: false }
 };
 

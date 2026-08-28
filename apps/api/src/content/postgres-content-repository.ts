@@ -226,7 +226,7 @@ export class PostgresContentRepository implements ContentRepository {
             'published', ${transaction.json(revision.items)}, ${null},
             ${createdAt}, ${new Date(revision.updatedAt)},
             ${new Date(revision.publishedAt!)}
-          ) ON CONFLICT (id) DO NOTHING
+          ) ON CONFLICT DO NOTHING
         `;
       }
     });

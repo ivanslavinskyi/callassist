@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AdminSeoConsole } from "@/components/admin-seo-console";
 
 export const metadata: Metadata = {
-  title: "CallAssist SEO audit",
+  title: "SHPROHLI SEO audit",
   robots: { index: false, follow: false }
 };
 

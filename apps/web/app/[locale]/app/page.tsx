@@ -4,7 +4,7 @@ import { Dashboard } from "@/components/dashboard";
 import { getServerCurrentUser } from "@/lib/server-auth";
 
 export const metadata: Metadata = {
-  title: "CallAssist call console"
+  title: "SHPROHLI call console"
 };
 
 export default async function AppPage({

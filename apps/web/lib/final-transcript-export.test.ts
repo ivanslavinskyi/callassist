@@ -75,7 +75,7 @@ describe("final transcript export", () => {
 
   it("creates a stable, readable filename", () => {
     expect(finalTranscriptPdfFileName(input)).toBe(
-      "callassist-final-transcript-иван-müller-2026-08-10.pdf"
+      "shprohli-final-transcript-иван-müller-2026-08-10.pdf"
     );
   });
 

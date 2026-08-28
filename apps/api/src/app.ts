@@ -828,7 +828,7 @@ export function buildApp({
         const date = data.generatedAt.slice(0, 10);
         return reply
           .header("Cache-Control", "private, no-store")
-          .header("Content-Disposition", `attachment; filename="callassist-data-${date}.json"`)
+          .header("Content-Disposition", `attachment; filename="shprohli-data-${date}.json"`)
           .header("X-Content-Type-Options", "nosniff")
           .type("application/json; charset=utf-8")
           .send(data);

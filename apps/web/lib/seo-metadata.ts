@@ -23,7 +23,7 @@ export function homeMetadata(
     robots: { index: true, follow: true },
     openGraph: {
       type: "website",
-      siteName: "CallAssist",
+      siteName: "SHPROHLI",
       locale: locale === "de" ? "de_CH" : "en_CH",
       alternateLocale: [locale === "de" ? "en_CH" : "de_CH"],
       url: canonical,
@@ -69,7 +69,7 @@ export function contentPageMetadata(
     robots: { index: true, follow: true },
     openGraph: {
       type: "website",
-      siteName: "CallAssist",
+      siteName: "SHPROHLI",
       locale: page.locale === "de" ? "de_CH" : "en_CH",
       alternateLocale: alternateLocales,
       url: canonical,
@@ -91,6 +91,6 @@ function socialImage(locale: UiLocale, title: string) {
     url: `/${locale}/opengraph-image`,
     width: 1200,
     height: 630,
-    alt: `${title} — CallAssist`
+    alt: `${title} — SHPROHLI`
   };
 }

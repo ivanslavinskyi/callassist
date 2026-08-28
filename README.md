@@ -1,6 +1,6 @@
-# CallAssist
+# SHPROHLI
 
-CallAssist is a privacy-conscious AI voice assistant for controlled outbound phone calls. A user prepares a structured call brief, chooses the call language and a preset assistant profile, monitors a live transcript, and retains control over sensitive disclosures.
+SHPROHLI is a privacy-conscious AI voice assistant for controlled outbound phone calls. A user prepares a structured call brief, chooses the call language and a preset assistant profile, monitors a live transcript, and retains control over sensitive disclosures.
 
 > **Project status:** working MVP for supervised testing. It is not yet intended for unattended or production-critical calling.
 
@@ -341,7 +341,7 @@ corepack pnpm --filter @callassist/api calls:enable -- "Incident resolved"
 Recipients can block future calls to their Swiss number at `/en/opt-out` or
 `/de/opt-out`. The public API sends an SMS through the configured verification
 provider and creates the global suppression only after the code is approved. Sends
-and checks are rate-limited by hashed phone and IP; no CallAssist account is required.
+and checks are rate-limited by hashed phone and IP; no SHPROHLI account is required.
 The resulting immutable safety event records the recipient-request source without a
 staff actor. Active `admin` and `superadmin` accounts can process staff requests or
 reviewed complaints and audited lifts at `/admin/safety`.

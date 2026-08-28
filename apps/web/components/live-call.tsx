@@ -489,7 +489,7 @@ export function LiveCall({ callId }: { callId: string }) {
                     <div>
                       <div className="speaker-row">
                         <strong>
-                          {segment.role === "assistant" ? "CallAssist" : brief.recipientName}
+                          {segment.role === "assistant" ? "SHPROHLI" : brief.recipientName}
                         </strong>
                         <time>
                           {new Date(segment.createdAt).toLocaleTimeString(uiLocale, {

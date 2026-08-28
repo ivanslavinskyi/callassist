@@ -7,7 +7,7 @@ import { getPublishedFaq } from "@/lib/server-content";
 import { getServerEditorialPreview } from "@/lib/server-content-admin";
 
 export const metadata: Metadata = {
-  title: "CallAssist Landing preview",
+  title: "SHPROHLI Landing preview",
   robots: { index: false, follow: false }
 };
 

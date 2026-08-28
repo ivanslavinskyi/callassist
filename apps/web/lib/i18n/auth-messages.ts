@@ -4,7 +4,7 @@ import type { UiLocale } from "./messages";
 const en = {
   eyebrow: "Secure account",
   register: {
-    title: "Create your CallAssist account",
+    title: "Create your SHPROHLI account",
     intro: "Use your real first and last name. The assistant will use them when it represents you on a call.",
     firstName: "First name",
     firstNamePlaceholder: "e.g. Nina",
@@ -41,7 +41,7 @@ const en = {
     password: "Password",
     submit: "Sign in",
     submitting: "Signing in…",
-    newAccount: "New to CallAssist?",
+    newAccount: "New to SHPROHLI?",
     register: "Create an account",
     verify: "Verify your phone",
     forgot: "Forgot your password?"
@@ -98,7 +98,7 @@ type AuthMessages = {
 const de: AuthMessages = {
   eyebrow: "Sicheres Konto",
   register: {
-    title: "CallAssist-Konto erstellen",
+    title: "SHPROHLI-Konto erstellen",
     intro: "Verwenden Sie Ihren echten Vor- und Nachnamen. Der Assistent nutzt beide, wenn er Sie bei einem Anruf vertritt.",
     firstName: "Vorname",
     firstNamePlaceholder: "z. B. Nina",
@@ -135,7 +135,7 @@ const de: AuthMessages = {
     password: "Passwort",
     submit: "Anmelden",
     submitting: "Anmeldung läuft…",
-    newAccount: "Neu bei CallAssist?",
+    newAccount: "Neu bei SHPROHLI?",
     register: "Konto erstellen",
     verify: "Telefon bestätigen",
     forgot: "Passwort vergessen?"

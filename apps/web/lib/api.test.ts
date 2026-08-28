@@ -355,7 +355,7 @@ describe("API client headers", () => {
         status: 200,
         headers: {
           "Content-Type": "application/json",
-          "Content-Disposition": "attachment; filename=\"callassist-data-2026-08-22.json\""
+          "Content-Disposition": "attachment; filename=\"shprohli-data-2026-08-22.json\""
         }
       }
     ));
@@ -363,7 +363,7 @@ describe("API client headers", () => {
 
     const result = await requestAccountDataExport();
 
-    expect(result.filename).toBe("callassist-data-2026-08-22.json");
+    expect(result.filename).toBe("shprohli-data-2026-08-22.json");
     await expect(result.blob.text()).resolves.toContain('"schemaVersion":"1"');
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/account/data-export");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
@@ -1066,7 +1066,7 @@ describe("API client headers", () => {
         new ApiError("SWISS_DESTINATION_REQUIRED", 422)
       )
     ).toBe(
-      "During the public beta CallAssist can only call Swiss phone numbers."
+      "During the public beta SHPROHLI can only call Swiss phone numbers."
     );
   });
 

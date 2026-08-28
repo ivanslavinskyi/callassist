@@ -4,7 +4,7 @@ import type { UiLocale } from "./messages";
 const en = {
   eyebrow: "Safety operations",
   title: "Recipient suppression",
-  intro: "Block a verified complaint or staff-requested number across every CallAssist account. Every action requires a reason and is audited.",
+  intro: "Block a verified complaint or staff-requested number across every SHPROHLI account. Every action requires a reason and is audited.",
   loading: "Checking staff access…",
   forbiddenTitle: "Administrator access required",
   forbidden: "Only active admin and superadmin accounts can manage the global recipient suppression list.",
@@ -45,7 +45,7 @@ type SafetyMessages = {
 const de: SafetyMessages = {
   eyebrow: "Sicherheitsbetrieb",
   title: "Empfängersperren",
-  intro: "Sperren Sie eine durch Mitarbeitende oder eine geprüfte Beschwerde gemeldete Nummer für alle CallAssist-Konten. Jede Aktion benötigt einen Grund und wird protokolliert.",
+  intro: "Sperren Sie eine durch Mitarbeitende oder eine geprüfte Beschwerde gemeldete Nummer für alle SHPROHLI-Konten. Jede Aktion benötigt einen Grund und wird protokolliert.",
   loading: "Mitarbeiterzugriff wird geprüft…",
   forbiddenTitle: "Administratorzugriff erforderlich",
   forbidden: "Nur aktive Admin- und Superadmin-Konten können die globale Empfängersperrliste verwalten.",
