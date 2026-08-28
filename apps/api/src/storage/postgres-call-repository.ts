@@ -97,6 +97,7 @@ import {
   type EnqueueCallPreparationRepositoryInput,
   type PromoCodeCreationResult,
   type ListCallBriefsInput,
+  type ListRecipientSuggestionsInput,
   type ListAdminCallsInput,
   type RecordingStatusInput,
   type RecipientSuppressionInput,
@@ -460,6 +461,50 @@ export class PostgresCallRepository implements CallRepository {
       nextCursor: hasMore && last
         ? encodeCallBriefCursor({ createdAt: last.createdAt, id: last.id })
         : null
+    };
+  }
+
+  async listRecipientSuggestions(input: ListRecipientSuggestionsInput) {
+    const searchPattern = input.query ? `%${input.query}%` : null;
+    const rows = await this.#sql<Array<{
+      recipientName: string;
+      phoneNumber: string;
+      lastUsedAt: DatabaseDate;
+    }>>`
+      WITH ranked_recipients AS (
+        SELECT
+          recipient_name AS "recipientName",
+          phone_number AS "phoneNumber",
+          created_at AS "lastUsedAt",
+          row_number() OVER (
+            PARTITION BY
+              lower(regexp_replace(btrim(recipient_name), '\\s+', ' ', 'g')),
+              phone_number
+            ORDER BY created_at DESC, id DESC
+          ) AS recipient_rank
+        FROM call_briefs
+        WHERE user_id = ${input.userId}::uuid
+          AND data_deleted_at IS NULL
+          AND phone_number ~ '^\\+41[0-9]{9}$'
+          AND (
+            ${searchPattern}::text IS NULL
+            OR recipient_name ILIKE ${searchPattern}
+            OR phone_number ILIKE ${searchPattern}
+          )
+      )
+      SELECT "recipientName", "phoneNumber", "lastUsedAt"
+      FROM ranked_recipients
+      WHERE recipient_rank = 1
+      ORDER BY "lastUsedAt" DESC, lower("recipientName"), "phoneNumber"
+      LIMIT ${input.limit}
+    `;
+
+    return {
+      items: rows.map((row) => ({
+        recipientName: row.recipientName,
+        phoneNumber: row.phoneNumber,
+        lastUsedAt: toIso(row.lastUsedAt)
+      }))
     };
   }
 

@@ -11,4 +11,5 @@ export * from "./content";
 export * from "./credits";
 export * from "./health";
 export * from "./phone";
+export * from "./recipient-suggestion";
 export * from "./safety";

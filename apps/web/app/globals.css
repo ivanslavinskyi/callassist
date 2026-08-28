@@ -773,6 +773,45 @@ main:focus { outline: none; }
 .field .field-valid { color: var(--green); }
 .field .field-invalid { color: var(--danger); }
 
+.recipient-combobox { position: relative; }
+.recipient-combobox-label {
+  color: #40504a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.recipient-suggestions-popup {
+  background: var(--surface);
+  border: 1px solid #dce4e0;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(20, 45, 37, .14);
+  left: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+}
+.recipient-suggestions { padding: 5px; }
+.recipient-suggestions:empty { display: none; }
+.recipient-suggestion {
+  border-radius: 9px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 11px;
+}
+.recipient-suggestion[aria-selected="true"] { background: #edf5f1; }
+.recipient-suggestion strong { color: var(--ink); font-size: 13px; }
+.recipient-suggestion span { color: var(--muted); font-size: 11px; }
+.recipient-suggestions-status {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 13px 14px;
+}
+
 .required-progress { background: #f5f8f6; border-radius: 12px; margin-bottom: 20px; padding: 12px 14px; }
 .required-progress > div { align-items: center; display: flex; font-size: 11px; justify-content: space-between; margin-bottom: 8px; }
 .required-progress > div span { color: var(--muted); }
@@ -1660,6 +1699,8 @@ button:disabled { cursor: wait; opacity: .55; }
   .feedback-options label, .feedback-comment textarea,
   .admin-ledger-summary div, .admin-ledger-list li,
   .account-transactions li, .onboarding-check { background: #1a2924; border-color: #34453e; color: var(--ink); }
+  .recipient-suggestions-popup { border-color: #34453e; }
+  .recipient-suggestion[aria-selected="true"] { background: #243a32; }
   .sticky-form-actions { background: rgba(21, 33, 29, .96); }
   .plan-setting-chips span, .mode-badge, .counter, .locale-tag,
   .processing-badge, .brief-avatar, .role-recipient .speaker-mark,

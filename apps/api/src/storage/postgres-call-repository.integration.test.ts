@@ -95,6 +95,67 @@ describeWithDatabase("PostgresCallRepository", () => {
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
 
+  it("returns privacy-minimized recipient suggestions for one owner", async () => {
+    const compiler = new DeterministicBriefCompiler();
+    const createRecipient = async (
+      recipientName: string,
+      phoneNumber: string,
+      userId: string
+    ) => {
+      const input: CreateCallBriefInput = {
+        recipientName,
+        phoneNumber,
+        objective: "Ask the suggestion test recipient for office hours",
+        assistantProfileId: "sebastian",
+        representedPersonFirstName: "Nina",
+        representedPersonLastName: "Keller",
+        assistanceReason: "speech_impairment",
+        locale: "en-GB",
+        allowLanguageSwitch: false,
+        allowedFacts: []
+      };
+      return repository.create(
+        input,
+        await compiler.compile(normalizeCreateCallBriefInput(input)),
+        userId
+      );
+    };
+
+    await createRecipient("Suggestion test Clinic", "+41710000011", ownerA);
+    await createRecipient("Suggestion  test Clinic", "+41710000011", ownerA);
+    await createRecipient("Suggestion test Clinic", "+41710000012", ownerA);
+    await createRecipient("Suggestion test Other Owner", "+41710000014", ownerB);
+    const deleted = await createRecipient(
+      "Suggestion test Deleted",
+      "+41710000013",
+      ownerA
+    );
+    await inspection`
+      UPDATE call_briefs
+      SET data_deleted_at = now()
+      WHERE id = ${deleted.id}
+    `;
+
+    const suggestions = await repository.listRecipientSuggestions({
+      userId: ownerA,
+      query: "Suggestion",
+      limit: 10
+    });
+    expect(suggestions.items).toHaveLength(2);
+    expect(suggestions.items.map(({ phoneNumber }) => phoneNumber).sort())
+      .toEqual(["+41710000011", "+41710000012"]);
+    expect(JSON.stringify(suggestions)).not.toContain("Other Owner");
+    expect(JSON.stringify(suggestions)).not.toContain("Deleted");
+
+    await expect(repository.listRecipientSuggestions({
+      userId: ownerA,
+      query: "+41710000012",
+      limit: 1
+    })).resolves.toMatchObject({
+      items: [expect.objectContaining({ phoneNumber: "+41710000012" })]
+    });
+  });
+
   it("deduplicates concurrent call-brief creation by idempotency key", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "Concurrent retry office",

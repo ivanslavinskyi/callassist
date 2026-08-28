@@ -22,6 +22,7 @@ import type {
   FinalTranscriptSegment,
   OwnerCallFeedbackInput,
   PromoCodeSummary,
+  RecipientSuggestionList,
   TranscriptSegment
 } from "@callassist/contracts";
 import type {
@@ -168,6 +169,12 @@ export type ListCallBriefsInput = {
 export type ListCallBriefsResult = {
   items: CallBrief[];
   nextCursor: string | null;
+};
+
+export type ListRecipientSuggestionsInput = {
+  userId: string;
+  query?: string;
+  limit: number;
 };
 
 export type EnqueueCallPreparationRepositoryInput = {
@@ -415,6 +422,9 @@ export type FinalTranscriptMutationResult = {
 export interface CallRepository {
   readonly mode: "memory" | "postgres";
   list(input: ListCallBriefsInput): Promise<ListCallBriefsResult>;
+  listRecipientSuggestions(
+    input: ListRecipientSuggestionsInput
+  ): Promise<RecipientSuggestionList>;
   create(
     input: CreateCallBriefInput,
     compilation: CallCompilation,

@@ -69,6 +69,7 @@ import {
   type DeleteCallDataInput,
   type EnqueueCallPreparationRepositoryInput,
   type ListCallBriefsInput,
+  type ListRecipientSuggestionsInput,
   type ListAdminCallsInput,
   type RecordingStatusInput,
   type RecipientSuppressionInput,
@@ -263,6 +264,41 @@ export class InMemoryCallRepository implements CallRepository {
         ? encodeCallBriefCursor({ createdAt: last.createdAt, id: last.id })
         : null
     };
+  }
+
+  async listRecipientSuggestions(input: ListRecipientSuggestionsInput) {
+    const query = input.query?.toLocaleLowerCase();
+    const seen = new Set<string>();
+    const items = [...this.#calls.values()]
+      .filter(({ brief }) =>
+        this.#owners.get(brief.id) === input.userId &&
+        !this.#callDataDeletions.has(brief.id) &&
+        brief.phoneNumber.length > 0
+      )
+      .map(({ brief }) => brief)
+      .filter((brief) =>
+        !query ||
+        brief.recipientName.toLocaleLowerCase().includes(query) ||
+        brief.phoneNumber.toLocaleLowerCase().includes(query)
+      )
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.id.localeCompare(left.id)
+      )
+      .filter((brief) => {
+        const key = `${brief.recipientName.trim().replace(/\s+/g, " ").toLocaleLowerCase()}\0${brief.phoneNumber}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, input.limit)
+      .map((brief) => ({
+        recipientName: brief.recipientName,
+        phoneNumber: brief.phoneNumber,
+        lastUsedAt: brief.createdAt
+      }));
+
+    return { items };
   }
 
   async create(

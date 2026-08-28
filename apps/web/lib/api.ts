@@ -58,6 +58,7 @@ import type {
   PublishedNavigation,
   RecipientOptOutConfirmation,
   RecipientOptOutRequest,
+  RecipientSuggestionList,
   RegistrationInput,
   StaffRecipientSuppression,
   StaffRecipientSuppressionLift,
@@ -616,6 +617,19 @@ export async function listCallBriefs(options: {
   const suffix = query.size > 0 ? `?${query}` : "";
   return apiRequest<{ items: CallBrief[]; nextCursor: string | null }>(
     `/api/call-briefs${suffix}`
+  );
+}
+
+export async function listRecipientSuggestions(options: {
+  query?: string;
+  limit?: number;
+} = {}) {
+  const query = new URLSearchParams();
+  if (options.query) query.set("query", options.query);
+  if (options.limit) query.set("limit", String(options.limit));
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return apiRequest<RecipientSuggestionList>(
+    `/api/recipient-suggestions${suffix}`
   );
 }
 

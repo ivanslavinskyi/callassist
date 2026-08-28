@@ -24,6 +24,7 @@ import {
 } from "@/lib/call-preparation-attempt";
 import { useUiLocale } from "./ui-locale-provider";
 import { isE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone-number";
+import { RecipientCombobox } from "./recipient-combobox";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -211,15 +212,16 @@ export function CreateCallForm({
       </div>
 
       <div className="form-grid">
-        <label className="field field-wide">
-          <span>{copy.recipient}</span>
-          <input
-            value={form.recipientName}
-            onChange={(event) => update("recipientName", event.target.value)}
-            placeholder={copy.recipientPlaceholder}
-            required
-          />
-        </label>
+        <RecipientCombobox
+          enabled={Boolean(userId)}
+          value={form.recipientName}
+          onChange={(value) => update("recipientName", value)}
+          onSelect={(suggestion) => setForm((current) => ({
+            ...current,
+            recipientName: suggestion.recipientName,
+            phoneNumber: suggestion.phoneNumber
+          }))}
+        />
 
         <label className="field">
           <span>{copy.phone}</span>

@@ -35,6 +35,7 @@ import {
   listAdminContentPages,
   listAdminContentRevisions,
   listAdminEditorialRevisions,
+  listRecipientSuggestions,
   liftRecipientSuppressionAsStaff,
   logout,
   registerAccount,
@@ -69,6 +70,28 @@ afterEach(() => {
 });
 
 describe("API client headers", () => {
+  it("loads a bounded recipient-history search", async () => {
+    const response = {
+      items: [{
+        recipientName: "Dr. Schmidt",
+        phoneNumber: "+41441234567",
+        lastUsedAt: "2026-08-20T10:30:00.000Z"
+      }]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(response),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listRecipientSuggestions({ query: "Dr. Schmidt", limit: 10 }))
+      .resolves.toEqual(response);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/recipient-suggestions?query=Dr.+Schmidt&limit=10"
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: "include" });
+  });
+
   it("loads the public published-content index for SEO consumers", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ pages: [], landing: null }),

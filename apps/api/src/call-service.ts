@@ -221,6 +221,12 @@ export class CallService {
     return this.repository.list(input);
   }
 
+  listRecipientSuggestions(
+    input: import("./storage/call-repository").ListRecipientSuggestionsInput
+  ) {
+    return this.repository.listRecipientSuggestions(input);
+  }
+
   async recordTelemetry(id: string, input: CallTelemetryEventInput) {
     const callAttemptId = input.callAttemptId === undefined
       ? (await this.repository.getLatestAttempt(id))?.id ?? null

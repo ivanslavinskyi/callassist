@@ -1171,6 +1171,11 @@ describe("auth API", () => {
 
     const anonymousList = await app.inject({ method: "GET", url: "/api/call-briefs" });
     expect(anonymousList.statusCode).toBe(401);
+    const anonymousRecipients = await app.inject({
+      method: "GET",
+      url: "/api/recipient-suggestions"
+    });
+    expect(anonymousRecipients.statusCode).toBe(401);
     const anonymousUsage = await app.inject({ method: "GET", url: "/api/usage" });
     expect(anonymousUsage.statusCode).toBe(401);
 
@@ -1197,6 +1202,34 @@ describe("auth API", () => {
     ]);
     expect(userAList.json<{ items: unknown[] }>().items).toHaveLength(1);
     expect(userBList.json<{ items: unknown[] }>().items).toHaveLength(0);
+
+    const [userARecipients, userBRecipients] = await Promise.all([
+      app.inject({
+        method: "GET",
+        url: "/api/recipient-suggestions?query=Clinic&limit=10",
+        headers: { cookie: userACookie }
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/recipient-suggestions?query=Clinic&limit=10",
+        headers: { cookie: userBCookie }
+      })
+    ]);
+    expect(userARecipients.statusCode).toBe(200);
+    expect(userARecipients.headers["cache-control"]).toBe("private, no-store");
+    expect(userARecipients.json<{ items: Array<{ recipientName: string }> }>().items)
+      .toEqual([expect.objectContaining({ recipientName: "Beta Clinic" })]);
+    expect(userBRecipients.json<{ items: unknown[] }>().items).toHaveLength(0);
+
+    const invalidRecipients = await app.inject({
+      method: "GET",
+      url: "/api/recipient-suggestions?limit=21",
+      headers: { cookie: userACookie }
+    });
+    expect(invalidRecipients.statusCode).toBe(400);
+    expect(invalidRecipients.json()).toEqual({
+      error: "INVALID_RECIPIENT_SUGGESTION_QUERY"
+    });
 
     const crossUserRequests = [
       { method: "GET", url: `/api/call-briefs/${callId}` },

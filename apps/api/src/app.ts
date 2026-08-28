@@ -35,6 +35,7 @@ import {
   promoRedemptionInputSchema,
   recipientOptOutConfirmationSchema,
   recipientOptOutRequestSchema,
+  recipientSuggestionListSchema,
   registrationInputSchema,
   serviceLivenessSchema,
   serviceReadinessSchema,
@@ -1811,6 +1812,32 @@ export function buildApp({
       ...(search ? { search } : {}),
       ...(status?.success ? { status: status.data } : {})
     });
+  });
+
+  app.get<{
+    Querystring: { query?: string; limit?: string };
+  }>("/api/recipient-suggestions", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply);
+    if (!access) return;
+    if (!access.userId) {
+      return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+    }
+    const limit = request.query.limit === undefined ? 10 : Number(request.query.limit);
+    const query = request.query.query?.trim();
+    if (
+      !Number.isInteger(limit) || limit < 1 || limit > 20 ||
+      (query !== undefined && query.length > 100)
+    ) {
+      return reply.status(400).send({ error: "INVALID_RECIPIENT_SUGGESTION_QUERY" });
+    }
+    const result = await service.listRecipientSuggestions({
+      userId: access.userId,
+      limit,
+      ...(query ? { query } : {})
+    });
+    return reply
+      .header("Cache-Control", "private, no-store")
+      .send(recipientSuggestionListSchema.parse(result));
   });
 
   app.post("/api/call-preparations", async (request, reply) => {
