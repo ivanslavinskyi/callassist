@@ -10,7 +10,8 @@ import type {
   CallCompilation,
   CallOutcomeMetrics,
   CallOutcomeView,
-  CallTelemetryEventInput,
+   CallTelemetryEventInput,
+   ConsentEvidence,
   CreditTransaction,
   CreditUsage,
   DurableCallEvent,
@@ -562,7 +563,7 @@ export interface CallRepository {
     decision: ApprovalDecision["decision"]
   ): Promise<ApprovalMutationResult>;
   stop(id: string): Promise<CallSnapshot>;
-  beginRecording(id: string): Promise<BeginRecordingResult>;
+  beginRecording(id: string, evidence?: ConsentEvidence): Promise<BeginRecordingResult>;
   attachProviderRecording(
     recordingId: string,
     providerRecordingId: string,

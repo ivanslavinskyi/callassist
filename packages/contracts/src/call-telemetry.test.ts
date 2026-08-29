@@ -59,4 +59,44 @@ describe("durable call telemetry contracts", () => {
       }
     }).success).toBe(false);
   });
+
+  it("accepts bounded consent evidence without raw recognized speech", () => {
+    expect(callTelemetryEventInputSchema.safeParse({
+      idempotencyKey: "call:1:consent:voice",
+      payload: {
+        name: "consent.granted",
+        metadata: {
+          method: "voice",
+          decision: "affirmative",
+          locale: "de-CH"
+        }
+      }
+    }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({
+      idempotencyKey: "call:1:consent:dtmf",
+      payload: {
+        name: "consent.granted",
+        metadata: { method: "dtmf", digit: "1", locale: "en-GB" }
+      }
+    }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({
+      idempotencyKey: "call:1:consent:legacy",
+      payload: {
+        name: "consent.granted",
+        metadata: { method: "dtmf_1" }
+      }
+    }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({
+      idempotencyKey: "call:1:consent:raw",
+      payload: {
+        name: "consent.granted",
+        metadata: {
+          method: "voice",
+          decision: "affirmative",
+          locale: "de-CH",
+          transcript: "Ja"
+        }
+      }
+    }).success).toBe(false);
+  });
 });

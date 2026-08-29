@@ -711,11 +711,14 @@ export class CallService {
     return this.#addTranscript(id, role, normalized);
   }
 
-  async startRecordingAfterConsent(id: string) {
+  async startRecordingAfterConsent(
+    id: string,
+    evidence?: import("@callassist/contracts").ConsentEvidence
+  ) {
     if (this.telephonyProvider.mode !== "twilio") {
       throw new CallServiceError("RECORDING_START_FAILED");
     }
-    const begun = await this.repository.beginRecording(id);
+    const begun = await this.repository.beginRecording(id, evidence);
     this.#publish(id, {
       type: "recording.updated",
       recording: begun.recording

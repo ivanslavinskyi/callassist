@@ -1171,10 +1171,26 @@ describeWithDatabase("PostgresCallRepository", () => {
       "queued"
     );
 
-    const begun = await repository.beginRecording(brief.id);
+    const begun = await repository.beginRecording(brief.id, {
+      method: "voice",
+      decision: "affirmative",
+      locale: "en-GB"
+    });
     expect(begun.recording).toMatchObject({
       status: "starting",
       providerRecordingId: null
+    });
+    expect(
+      (await repository.listCallTelemetryEvents(brief.id)).find(
+        ({ payload }) => payload.name === "consent.granted"
+      )?.payload
+    ).toEqual({
+      name: "consent.granted",
+      metadata: {
+        method: "voice",
+        decision: "affirmative",
+        locale: "en-GB"
+      }
     });
     await repository.attachProviderRecording(
       begun.recording.id,

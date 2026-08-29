@@ -16,6 +16,20 @@ const safeTokenSchema = z.string()
 const emptyMetadataSchema = z.strictObject({});
 const providerSchema = z.enum(["mock", "twilio"]);
 
+export const consentEvidenceSchema = z.discriminatedUnion("method", [
+  z.strictObject({
+    method: z.literal("voice"),
+    decision: z.literal("affirmative"),
+    locale: callLocaleSchema
+  }),
+  z.strictObject({
+    method: z.literal("dtmf"),
+    digit: z.literal("1"),
+    locale: callLocaleSchema
+  })
+]);
+export type ConsentEvidence = z.infer<typeof consentEvidenceSchema>;
+
 export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("brief.created"),
@@ -89,13 +103,18 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   }),
   z.strictObject({
     name: z.literal("consent.granted"),
-    metadata: z.strictObject({ method: z.literal("dtmf_1") })
+    metadata: z.union([
+      z.strictObject({ method: z.literal("dtmf_1") }),
+      consentEvidenceSchema
+    ])
   }),
   z.strictObject({
     name: z.literal("consent.failed"),
     metadata: z.strictObject({
       reason: z.enum([
+        "negative",
         "timeout",
+        "recognition_failed",
         "recording_start_failed",
         "stream_ended_before_consent"
       ])

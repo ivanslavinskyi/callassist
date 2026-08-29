@@ -884,9 +884,11 @@ export function LiveCall({ callId }: { callId: string }) {
                 <div>
                   <dt>{copy.assistanceReason}</dt>
                   <dd>
-                    {brief.assistanceReason === "language_barrier"
-                      ? copy.languageBarrier
-                      : copy.speechImpairment}
+                    {brief.assistanceReason === "none"
+                      ? copy.noAssistanceDisclosure
+                      : brief.assistanceReason === "language_barrier"
+                        ? copy.languageBarrier
+                        : copy.speechImpairment}
                   </dd>
                 </div>
                 <div>

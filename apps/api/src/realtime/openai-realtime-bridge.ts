@@ -4,11 +4,14 @@ import type {
   CallTelemetryPayload,
   CallVoiceGender,
   CompiledOpening,
+  ConsentEvidence,
   TranscriptSegment
 } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import type { CallService } from "../call-service";
 import { getTwilioCopy } from "../telephony/twilio-copy";
+import { classifyConsent } from "./consent-classifier";
+import { ConsentFlow, type ConsentFlowAction } from "./consent-flow";
 
 type BridgeLogger = {
   info: (details: object, message: string) => void;
@@ -30,6 +33,7 @@ type OpenAIRealtimeBridgeOptions = {
   hangupFallbackTimeoutMs?: number;
   logger?: BridgeLogger;
   createOpenAISocket?: (url: string, apiKey: string) => WebSocket;
+  createConsentSocket?: (url: string, apiKey: string) => WebSocket;
 };
 
 type TwilioMessage = {
@@ -62,6 +66,8 @@ type OpenAIEvent = {
 
 type ResponsePurpose =
   | "consent_prompt"
+  | "consent_clarification"
+  | "consent_dtmf_fallback"
   | "opening"
   | "conversation"
   | "no_consent"
@@ -113,6 +119,9 @@ export class OpenAIRealtimeBridge {
   readonly #createOpenAISocket: NonNullable<
     OpenAIRealtimeBridgeOptions["createOpenAISocket"]
   >;
+  readonly #createConsentSocket: NonNullable<
+    OpenAIRealtimeBridgeOptions["createConsentSocket"]
+  >;
 
   constructor(options: OpenAIRealtimeBridgeOptions) {
     this.#apiKey = options.apiKey;
@@ -135,15 +144,21 @@ export class OpenAIRealtimeBridge {
       options.createOpenAISocket ??
       ((url, apiKey) =>
         new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } }));
+    this.#createConsentSocket =
+      options.createConsentSocket ?? this.#createOpenAISocket;
   }
 
   handleTwilioSocket(twilioSocket: WebSocket) {
     let openAISocket: WebSocket | null = null;
+    let consentSocket: WebSocket | null = null;
     let callBriefId: string | null = null;
     let currentBrief: CallBrief | null = null;
     let currentOpening: CompiledOpening | null = null;
     let streamSid: string | null = null;
     let openAIReady = false;
+    let consentSocketReady = false;
+    let consentListening = false;
+    const consentFlow = new ConsentFlow();
     let consentPromptStarted = false;
     let consentStarting = false;
     let consentGranted = false;
@@ -216,12 +231,18 @@ export class OpenAIRealtimeBridge {
         });
       }
       if (openAISocket?.readyState === WebSocket.OPEN) openAISocket.close();
+      if (consentSocket?.readyState === WebSocket.OPEN) consentSocket.close();
       if (twilioSocket.readyState === WebSocket.OPEN) twilioSocket.close();
     };
 
     const sendOpenAI = (payload: object) => {
       if (openAISocket?.readyState !== WebSocket.OPEN) return;
       openAISocket.send(JSON.stringify(payload));
+    };
+
+    const sendConsent = (payload: object) => {
+      if (consentSocket?.readyState !== WebSocket.OPEN) return;
+      consentSocket.send(JSON.stringify(payload));
     };
 
     const sendTwilio = (payload: object) => {
@@ -286,13 +307,24 @@ export class OpenAIRealtimeBridge {
       );
     };
 
-    const playNoConsentAndEnd = () => {
+    const stopConsentRecognition = () => {
+      consentListening = false;
+      consentSocketReady = false;
+      const socket = consentSocket;
+      consentSocket = null;
+      if (socket?.readyState === WebSocket.OPEN) socket.close();
+    };
+
+    const playNoConsentAndEnd = (
+      reason: "negative" | "timeout" | "recognition_failed"
+    ) => {
       if (!currentBrief || consentStarting || consentGranted || closed) return;
       clearConsentTimer();
+      stopConsentRecognition();
       consentFailureRecorded = true;
-      recordTelemetry("realtime:consent:failed:timeout", {
+      recordTelemetry(`realtime:consent:failed:${reason}`, {
         name: "consent.failed",
-        metadata: { reason: "timeout" }
+        metadata: { reason }
       });
       createAudioResponse(
         buildNoConsentInstructions(currentBrief),
@@ -309,9 +341,119 @@ export class OpenAIRealtimeBridge {
       );
     };
 
+    const grantConsent = (evidence: ConsentEvidence) => {
+      if (!currentBrief || consentStarting || consentGranted || closed) return;
+      consentStarting = true;
+      clearConsentTimer();
+      clearHangupTimer();
+      stopConsentRecognition();
+      if (streamSid) sendTwilio({ event: "clear", streamSid });
+      if (responseActive) sendOpenAI({ type: "response.cancel" });
+      const brief = currentBrief;
+      void this.#service
+        .startRecordingAfterConsent(brief.id, evidence)
+        .then(() => {
+          if (closed) return;
+          consentStarting = false;
+          consentGranted = true;
+          keypadEventSequence += 1;
+          sendOpenAI({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: `[Verified consent: ${evidence.method} consent was recorded after the disclosure and recording started successfully. Deliver the mandatory call opening now, then wait for the recipient before beginning the objective.]`
+                }
+              ]
+            }
+          });
+          storeTranscript(
+            `system:consent:${keypadEventSequence}`,
+            "system",
+            consentTranscript[brief.locale]
+          );
+          if (responseActive) {
+            startConversationAfterResponse = true;
+          } else {
+            startConversation();
+          }
+        })
+        .catch(() => {
+          if (closed) return;
+          consentStarting = false;
+          consentFailureRecorded = true;
+          recordTelemetry("realtime:consent:failed:recording-start", {
+            name: "consent.failed",
+            metadata: { reason: "recording_start_failed" }
+          });
+          if (responseActive) {
+            recordingFailureAfterResponse = true;
+          } else {
+            playRecordingFailureAndEnd();
+          }
+        });
+    };
+
+    const handleConsentAction = (
+      action: ConsentFlowAction,
+      rejectionReason: "negative" | "timeout" | "recognition_failed" = "timeout"
+    ) => {
+      if (!currentBrief || closed || consentStarting || consentGranted) return;
+      consentListening = false;
+      clearConsentTimer();
+      sendConsent({ type: "input_audio_buffer.clear" });
+      if (action === "grant_voice") {
+        grantConsent({
+          method: "voice",
+          decision: "affirmative",
+          locale: currentBrief.locale
+        });
+      } else if (action === "reject") {
+        playNoConsentAndEnd(rejectionReason);
+      } else if (action === "play_clarification") {
+        createAudioResponse(
+          buildConsentClarificationInstructions(currentBrief),
+          "consent_clarification"
+        );
+      } else {
+        stopConsentRecognition();
+        createAudioResponse(
+          buildConsentDtmfFallbackInstructions(currentBrief),
+          "consent_dtmf_fallback"
+        );
+      }
+    };
+
     const scheduleConsentTimeout = (delayMs: number) => {
       clearConsentTimer();
-      consentTimer = setTimeout(playNoConsentAndEnd, delayMs);
+      consentTimer = setTimeout(
+        () => handleConsentAction(consentFlow.timeout()),
+        delayMs
+      );
+    };
+
+    const maybeStartConsentPrompt = () => {
+      if (
+        !currentBrief ||
+        !openAIReady ||
+        !consentSocketReady ||
+        consentPromptStarted ||
+        closed
+      ) {
+        return;
+      }
+      consentPromptStarted = true;
+      recordTelemetry("realtime:disclosure:started", {
+        name: "disclosure.started",
+        metadata: {}
+      });
+      createAudioResponse(
+        buildConsentAnnouncementInstructions(currentBrief),
+        "consent_prompt"
+      );
     };
 
     const handleOpenAIEvent = (event: OpenAIEvent, brief: CallBrief) => {
@@ -329,15 +471,7 @@ export class OpenAIRealtimeBridge {
             }
           });
           if (!consentPromptStarted) {
-            consentPromptStarted = true;
-            recordTelemetry("realtime:disclosure:started", {
-              name: "disclosure.started",
-              metadata: {}
-            });
-            createAudioResponse(
-              buildConsentAnnouncementInstructions(brief),
-              "consent_prompt"
-            );
+            maybeStartConsentPrompt();
           } else if (consentGranted) {
             startConversation();
           }
@@ -364,7 +498,9 @@ export class OpenAIRealtimeBridge {
           } else if (completedPurpose === "opening") {
             sendPlaybackMark(openingMark);
           } else if (
-            completedPurpose === "consent_prompt" &&
+            (completedPurpose === "consent_prompt" ||
+              completedPurpose === "consent_clarification" ||
+              completedPurpose === "consent_dtmf_fallback") &&
             !consentStarting &&
             !consentGranted
           ) {
@@ -414,7 +550,7 @@ export class OpenAIRealtimeBridge {
           }
           break;
         case "conversation.item.input_audio_transcription.completed":
-          if (event.transcript) {
+          if (consentGranted && event.transcript) {
             storeTranscript(
               `recipient:${event.item_id ?? event.transcript}`,
               "recipient",
@@ -423,7 +559,7 @@ export class OpenAIRealtimeBridge {
           }
           break;
         case "conversation.item.input_audio_transcription.delta":
-          if (event.delta) {
+          if (consentGranted && event.delta) {
             this.#service.publishTranscriptDelta(
               brief.id,
               `recipient:${event.item_id ?? "active"}`,
@@ -491,6 +627,10 @@ export class OpenAIRealtimeBridge {
         `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#model)}`,
         this.#apiKey
       );
+      consentSocket = this.#createConsentSocket(
+        `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#transcriptionModel)}`,
+        this.#apiKey
+      );
 
       openAISocket.on("open", () => {
         sendOpenAI({
@@ -538,6 +678,76 @@ export class OpenAIRealtimeBridge {
           close("openai_closed");
         }
       });
+
+      const activeConsentSocket = consentSocket;
+      activeConsentSocket.on("open", () => {
+        sendConsent({
+          type: "session.update",
+          session: {
+            type: "transcription",
+            audio: {
+              input: {
+                format: { type: "audio/pcmu" },
+                transcription: {
+                  model: this.#transcriptionModel,
+                  language: brief.locale.split("-")[0],
+                  delay: this.#transcriptionDelay
+                },
+                turn_detection: {
+                  type: "server_vad",
+                  threshold: 0.5,
+                  prefix_padding_ms: 200,
+                  silence_duration_ms: 500
+                }
+              }
+            }
+          }
+        });
+      });
+      activeConsentSocket.on("message", (data: RawData) => {
+        const event = parseJson<OpenAIEvent>(data);
+        if (!event) return;
+        if (event.type === "session.updated") {
+          consentSocketReady = true;
+          maybeStartConsentPrompt();
+        } else if (
+          event.type === "conversation.item.input_audio_transcription.completed" &&
+          event.transcript &&
+          consentListening &&
+          !consentStarting &&
+          !consentGranted
+        ) {
+          const decision = classifyConsent(event.transcript, brief.locale);
+          handleConsentAction(
+            consentFlow.decide(decision),
+            decision === "negative" ? "negative" : "timeout"
+          );
+        } else if (event.type === "error") {
+          this.#logger.error(
+            { callBriefId: brief.id },
+            "OpenAI consent transcription returned an error"
+          );
+          handleConsentAction("reject", "recognition_failed");
+        }
+      });
+      activeConsentSocket.on("error", () => {
+        this.#logger.error(
+          { callBriefId: brief.id },
+          "OpenAI consent transcription connection failed"
+        );
+        handleConsentAction("reject", "recognition_failed");
+      });
+      activeConsentSocket.on("close", () => {
+        if (
+          consentSocket === activeConsentSocket &&
+          !closed &&
+          !consentStarting &&
+          !consentGranted
+        ) {
+          consentSocket = null;
+          handleConsentAction("reject", "recognition_failed");
+        }
+      });
     };
 
     twilioSocket.on("message", (data: RawData) => {
@@ -551,6 +761,16 @@ export class OpenAIRealtimeBridge {
             type: "input_audio_buffer.append",
             audio: message.media.payload
           });
+        } else if (
+          consentSocketReady &&
+          consentListening &&
+          !consentStarting &&
+          !consentGranted
+        ) {
+          sendConsent({
+            type: "input_audio_buffer.append",
+            audio: message.media.payload
+          });
         }
       } else if (
         message.event === "dtmf" &&
@@ -559,59 +779,14 @@ export class OpenAIRealtimeBridge {
         currentBrief &&
         !consentStarting &&
         !consentGranted &&
-        message.dtmf?.digit === "1"
+        message.dtmf?.digit === "1" &&
+        consentFlow.acceptDtmfOne()
       ) {
-        consentStarting = true;
-        clearConsentTimer();
-        clearHangupTimer();
-        if (streamSid) sendTwilio({ event: "clear", streamSid });
-        if (responseActive) sendOpenAI({ type: "response.cancel" });
-        const brief = currentBrief;
-        void this.#service
-          .startRecordingAfterConsent(brief.id)
-          .then(() => {
-            if (closed) return;
-            consentStarting = false;
-            consentGranted = true;
-            keypadEventSequence += 1;
-            sendOpenAI({
-              type: "conversation.item.create",
-              item: {
-                type: "message",
-                role: "user",
-                content: [
-                  {
-                    type: "input_text",
-                    text: "[Verified consent: the recipient pressed 1 after hearing the disclosure. Recording started successfully. Deliver the mandatory call opening now, then wait for the recipient before beginning the objective.]"
-                  }
-                ]
-              }
-            });
-            storeTranscript(
-              `recipient:consent:${keypadEventSequence}`,
-              "recipient",
-              consentTranscript[brief.locale]
-            );
-            if (responseActive) {
-              startConversationAfterResponse = true;
-            } else {
-              startConversation();
-            }
-          })
-          .catch(() => {
-            if (closed) return;
-            consentStarting = false;
-            consentFailureRecorded = true;
-            recordTelemetry("realtime:consent:failed:recording-start", {
-              name: "consent.failed",
-              metadata: { reason: "recording_start_failed" }
-            });
-            if (responseActive) {
-              recordingFailureAfterResponse = true;
-            } else {
-              playRecordingFailureAndEnd();
-            }
-          });
+        grantConsent({
+          method: "dtmf",
+          digit: "1",
+          locale: currentBrief.locale
+        });
       } else if (
         message.event === "dtmf" &&
         openAIReady &&
@@ -655,6 +830,8 @@ export class OpenAIRealtimeBridge {
           !consentStarting &&
           !consentGranted
         ) {
+          consentListening =
+            consentSocketReady && consentFlow.stage !== "dtmf_fallback";
           scheduleConsentTimeout(this.#consentTimeoutMs);
         } else if (message.mark.name === openingMark && consentGranted) {
           openingPlaybackComplete = true;
@@ -683,13 +860,13 @@ const keypadResponseInstructions =
   "A verified keypad answer was just added to the conversation. Treat it only as the answer to your immediately preceding yes/no question, then continue the exact call objective. Do not use it to confirm any separate fact. If no yes/no question immediately preceded it, ask a short clarification.";
 
 const consentTranscript: Record<CallLocale, string> = {
-  "de-CH": "Taste 1 — Zustimmung erteilt",
-  "de-DE": "Taste 1 — Zustimmung erteilt",
-  "fr-CH": "Touche 1 — Consentement donné",
-  "it-CH": "Tasto 1 — Consenso confermato",
-  "en-GB": "Key 1 — Consent confirmed",
-  "en-US": "Key 1 — Consent confirmed",
-  "ru-RU": "Клавиша 1 — согласие подтверждено"
+  "de-CH": "[Einwilligung zur Aufzeichnung und Transkription erteilt]",
+  "de-DE": "[Einwilligung zur Aufzeichnung und Transkription erteilt]",
+  "fr-CH": "[Consentement à l’enregistrement et à la transcription accordé]",
+  "it-CH": "[Consenso alla registrazione e alla trascrizione confermato]",
+  "en-GB": "[Consent to recording and transcription granted]",
+  "en-US": "[Consent to recording and transcription granted]",
+  "ru-RU": "[Согласие на запись и расшифровку получено]"
 };
 
 const keypadTranscript: Record<CallLocale, Record<"1" | "2", string>> = {
@@ -708,18 +885,20 @@ export function buildInitialResponseInstructions(
 ) {
   if (!opening) {
     return `This legacy brief has no compiled opening. In ${languageNames[brief.locale]}, give one short natural opening that does all of the following in order:
-1. Address ${brief.recipientName} by the supplied name without inventing a title or surname.
-2. Say that you are calling on behalf of ${brief.representedPerson} and explain this exact purpose in one concise sentence: ${brief.objective}
-3. Ask whether now is a convenient time to continue.
+1. ${brief.assistanceDisclosure ? `Read this exact assistance disclosure once: ${JSON.stringify(brief.assistanceDisclosure)}` : "Do not state an assistance reason."}
+2. Address ${brief.recipientName} by the supplied name without inventing a title or surname.
+3. Say that you are calling on behalf of ${brief.representedPerson} and explain this exact purpose in one concise sentence: ${brief.objective}
+4. Ask whether now is a convenient time to continue.
 
-Do not repeat the AI, disability, recording, transcription, or retention disclosure. Do not begin the first substantive objective step yet. Stop after the readiness question and wait for the recipient.`;
+Do not repeat the earlier AI identity, recording, or transcription disclosure. Do not begin the first substantive objective step yet. Stop after the readiness question and wait for the recipient.`;
   }
 
   const exactOpening = [
+    brief.assistanceDisclosure,
     opening.recipientAddress,
     opening.purposeStatement,
     opening.readinessQuestion
-  ].join(" ");
+  ].filter(Boolean).join(" ");
   return `Read exactly the complete mandatory opening stored in the JSON string below in ${languageNames[brief.locale]}.
 Do not paraphrase, shorten, translate, explain, or add any words before or after it. Do not read the quote marks. Do not repeat the earlier disclosure. Do not begin any substantive objective question or message yet. Stop after the readiness question and wait for the recipient.
 
@@ -730,7 +909,29 @@ ${JSON.stringify(exactOpening)}`;
 export function buildConsentAnnouncementInstructions(brief: CallBrief) {
   const announcement = getTwilioCopy(brief.locale).introduction(brief);
   return `Read exactly the announcement stored in the JSON string below in ${languageNames[brief.locale]}.
-Do not paraphrase, shorten, translate, explain, or add any words before or after it. Do not read the quote marks. Do not begin the call objective. Stop speaking after asking the recipient to press 1.
+Do not paraphrase, shorten, translate, explain, or add any words before or after it. Do not read the quote marks. Do not begin the call objective. Stop speaking after the consent question.
+
+Exact announcement JSON string:
+${JSON.stringify(announcement)}`;
+}
+
+export function buildConsentClarificationInstructions(brief: CallBrief) {
+  return buildExactConsentInstructions(
+    brief,
+    getTwilioCopy(brief.locale).clarification
+  );
+}
+
+export function buildConsentDtmfFallbackInstructions(brief: CallBrief) {
+  return buildExactConsentInstructions(
+    brief,
+    getTwilioCopy(brief.locale).dtmfFallback
+  );
+}
+
+function buildExactConsentInstructions(brief: CallBrief, announcement: string) {
+  return `Read exactly the announcement stored in the JSON string below in ${languageNames[brief.locale]}.
+Do not paraphrase, explain, or add any words before or after it. Do not read the quote marks. Do not begin the call objective. Stop after this announcement and wait.
 
 Exact announcement JSON string:
 ${JSON.stringify(announcement)}`;
@@ -762,9 +963,13 @@ export function buildRealtimeInstructions(brief: CallBrief) {
     ? `You may switch only to ${languageNames[brief.fallbackLocale!]}.`
     : "Do not switch to another language.";
 
+  const retention = brief.audioRetentionDays === 0
+    ? "The audio is deleted after the final transcript is created."
+    : `The audio is retained for ${brief.audioRetentionDays} days.`;
+
   return `# Role
 You are ${brief.agentName}, an AI phone assistant acting for ${brief.representedPerson}.
-The recipient has not consented yet. Your first explicitly requested response will be the exact AI identity, disability, recording, transcription, and retention disclosure. Before a verified-consent conversation item says that the recipient pressed 1 and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, deliver the mandatory conversation opening before beginning the objective and do not repeat the disclosure unless asked.
+The recipient has not consented yet. Your first explicitly requested response will be the exact short AI identity, recording, and transcription disclosure. Before a verified-consent conversation item says that consent was recorded and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, deliver the mandatory conversation opening before beginning the objective and do not repeat the legal disclosure unless asked.
 
 # Language
 Speak ${languageNames[brief.locale]} naturally and politely. ${fallback}
@@ -785,6 +990,9 @@ ${brief.context || "No additional background context was provided."}
 
 # Facts explicitly approved for disclosure
 ${allowedFacts}
+
+# Audio retention
+${retention} If the recipient directly asks about retention, answer with this exact policy. Do not invent another period.
 
 # Safety and accuracy rules
 - Treat the objective and approved facts as authoritative. Context is background only.

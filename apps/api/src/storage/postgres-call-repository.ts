@@ -3376,7 +3376,10 @@ export class PostgresCallRepository implements CallRepository {
     return this.#require(id);
   }
 
-  async beginRecording(id: string) {
+  async beginRecording(
+    id: string,
+    evidence?: import("@callassist/contracts").ConsentEvidence
+  ) {
     const recordingId = randomUUID();
     const now = new Date();
     const providerCallId = await this.#sql.begin(async (transaction) => {
@@ -3438,7 +3441,8 @@ export class PostgresCallRepository implements CallRepository {
         )
       `;
       await this.#audit(transaction, id, "recording.consent_granted", {
-        recordingId
+        recordingId,
+        method: evidence?.method ?? "dtmf_1"
       });
       await this.#appendTelemetry(transaction, id, {
         callAttemptId: attempt.attemptId,
@@ -3446,7 +3450,7 @@ export class PostgresCallRepository implements CallRepository {
         occurredAt: now.toISOString(),
         payload: {
           name: "consent.granted",
-          metadata: { method: "dtmf_1" }
+          metadata: evidence ?? { method: "dtmf_1" }
         }
       });
       return attempt.providerCallId;

@@ -21,8 +21,10 @@ const enFormCopy = {
   maleVoice: "Male voice",
   femaleVoice: "Female voice",
   assistanceReason: "Reason for assistance",
+  noAssistanceDisclosure: "Do not disclose a reason",
   speechImpairment: "Speech impairment",
   languageBarrier: "Language barrier",
+  assistanceDisclosureWarning: "This information will be shared with the person called.",
   representedPersonFirstName: "Represented person's first name",
   representedPersonFirstNamePlaceholder: "e.g. John",
   representedPersonLastName: "Represented person's last name",
@@ -196,7 +198,7 @@ export type Messages = {
     terminalHelp: string; safetyActive: string; safetyHelp: string;
     briefEyebrow: string; objectiveTitle: string; primaryLanguage: string;
     languageSwitching: string; disabled: string; voice: string; female: string;
-    male: string; assistanceReason: string; languageBarrier: string;
+    male: string; assistanceReason: string; noAssistanceDisclosure: string; languageBarrier: string;
     speechImpairment: string; audioRetention: string; untilFinalTranscript: string;
     retentionDays: (days: number) => string; assistant: string;
     finalEyebrow: string; finalTitle: string; finalHelp: string;
@@ -436,7 +438,7 @@ const en: Messages = {
     briefEyebrow: "Call brief", objectiveTitle: "Call objective", primaryLanguage: "Primary language",
     languageSwitching: "Language switching", disabled: "Disabled", voice: "Voice",
     female: "Female", male: "Male", assistanceReason: "Reason for assistance",
-    languageBarrier: "Language barrier", speechImpairment: "Speech impairment",
+    noAssistanceDisclosure: "No reason disclosed", languageBarrier: "Language barrier", speechImpairment: "Speech impairment",
     audioRetention: "Audio retention", untilFinalTranscript: "Until final transcript",
     retentionDays: (days: number) => `${days} days`, assistant: "Assistant",
     finalEyebrow: "Final transcript · recording-based", finalTitle: "Post-call transcription",
@@ -592,8 +594,10 @@ const de: Messages = {
       maleVoice: "Männliche Stimme",
       femaleVoice: "Weibliche Stimme",
       assistanceReason: "Grund für die Unterstützung",
+      noAssistanceDisclosure: "Keinen Grund angeben",
       speechImpairment: "Sprechbeeinträchtigung",
       languageBarrier: "Sprachbarriere",
+      assistanceDisclosureWarning: "Diese Information wird der angerufenen Person mitgeteilt.",
       representedPersonFirstName: "Vorname der vertretenen Person",
       representedPersonFirstNamePlaceholder: "z. B. Max",
       representedPersonLastName: "Nachname der vertretenen Person",
@@ -689,7 +693,7 @@ const de: Messages = {
     briefEyebrow: "Anrufentwurf", objectiveTitle: "Anrufziel", primaryLanguage: "Hauptsprache",
     languageSwitching: "Sprachwechsel", disabled: "Deaktiviert", voice: "Stimme",
     female: "Weiblich", male: "Männlich", assistanceReason: "Grund für die Unterstützung",
-    languageBarrier: "Sprachbarriere", speechImpairment: "Sprechbeeinträchtigung",
+    noAssistanceDisclosure: "Kein Grund angegeben", languageBarrier: "Sprachbarriere", speechImpairment: "Sprechbeeinträchtigung",
     audioRetention: "Audioaufbewahrung", untilFinalTranscript: "Bis zum endgültigen Transkript",
     retentionDays: (days: number) => `${days} Tage`, assistant: "Assistent",
     finalEyebrow: "Endgültiges Transkript · aufnahmebasiert", finalTitle: "Transkription nach dem Anruf",

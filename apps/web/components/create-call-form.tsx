@@ -33,7 +33,7 @@ const emptyForm: CreateCallBriefInput = {
   assistantProfileId: "sebastian",
   representedPersonFirstName: "",
   representedPersonLastName: "",
-  assistanceReason: "speech_impairment",
+  assistanceReason: "none",
   context: "",
   locale: "de-CH",
   audioRetentionDays: 7,
@@ -100,7 +100,7 @@ export function CreateCallForm({
     () =>
       getAssistanceDisclosure(
         form.locale,
-        form.assistanceReason,
+        form.assistanceReason ?? "none",
         formatPersonName(
           form.representedPersonFirstName,
           form.representedPersonLastName
@@ -289,14 +289,18 @@ export function CreateCallForm({
         <label className="field">
           <span>{copy.assistanceReason}</span>
           <select
-            value={form.assistanceReason}
+            value={form.assistanceReason ?? "none"}
             onChange={(event) =>
               update("assistanceReason", event.target.value as AssistanceReason)
             }
           >
+            <option value="none">{copy.noAssistanceDisclosure}</option>
             <option value="speech_impairment">{copy.speechImpairment}</option>
             <option value="language_barrier">{copy.languageBarrier}</option>
           </select>
+          {(form.assistanceReason ?? "none") === "speech_impairment" ? (
+            <small>{copy.assistanceDisclosureWarning}</small>
+          ) : null}
         </label>
 
         <label className="field">
@@ -423,11 +427,13 @@ export function CreateCallForm({
             </select>
           </label>
 
-          <div className="field field-wide disclosure-preview">
-            <span>{messages.form.disclosurePreview}</span>
-            <blockquote>{disclosurePreview}</blockquote>
-            <small>{messages.form.disclosureHelp}</small>
-          </div>
+          {disclosurePreview ? (
+            <div className="field field-wide disclosure-preview">
+              <span>{messages.form.disclosurePreview}</span>
+              <blockquote>{disclosurePreview}</blockquote>
+              <small>{messages.form.disclosureHelp}</small>
+            </div>
+          ) : null}
 
           <label className="field field-wide">
             <span>{copy.additionalContext}</span>

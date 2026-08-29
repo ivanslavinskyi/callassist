@@ -191,7 +191,7 @@ function brief(id: string): CallBrief {
     agentName: "Sebastian",
     voiceGender: "male",
     representedPerson: `${input.representedPersonFirstName} ${input.representedPersonLastName}`,
-    assistanceReason: input.assistanceReason,
+    assistanceReason: input.assistanceReason ?? "none",
     assistanceDisclosure: "CallAssist is conducting this call on behalf of Max Mustermann.",
     context: input.context ?? "",
     locale: input.locale,

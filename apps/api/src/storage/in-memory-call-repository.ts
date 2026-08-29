@@ -1867,7 +1867,10 @@ export class InMemoryCallRepository implements CallRepository {
     return copy(snapshot);
   }
 
-  async beginRecording(id: string) {
+  async beginRecording(
+    id: string,
+    evidence?: import("@callassist/contracts").ConsentEvidence
+  ) {
     const snapshot = this.#require(id);
     const attempts = this.#attempts.get(id) ?? [];
     const attempt = attempts[attempts.length - 1];
@@ -1902,7 +1905,7 @@ export class InMemoryCallRepository implements CallRepository {
       occurredAt: consentGrantedAt,
       payload: {
         name: "consent.granted",
-        metadata: { method: "dtmf_1" }
+        metadata: evidence ?? { method: "dtmf_1" }
       }
     });
     return {

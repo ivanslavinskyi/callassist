@@ -28,6 +28,7 @@ describe("createCallBriefInputSchema", () => {
       expect(normalized.voiceGender).toBe("male");
       expect(normalized.representedPerson).toBe("Nina Keller");
       expect(result.data.audioRetentionDays).toBe(7);
+      expect(result.data.assistanceReason).toBe("speech_impairment");
       expect(result.data).toMatchObject({
         resultHandling: "capture_in_callassist",
         addressingMode: "formal",
@@ -119,11 +120,17 @@ describe("createCallBriefInputSchema", () => {
     ).toBe(false);
   });
 
-  it("requires one of the two deterministic assistance reasons", () => {
+  it("defaults to no assistance disclosure and accepts legacy reasons", () => {
     const { assistanceReason: _omitted, ...withoutReason } = validBrief;
-    expect(createCallBriefInputSchema.safeParse(withoutReason).success).toBe(
-      false
-    );
+    const defaulted = createCallBriefInputSchema.parse(withoutReason);
+    expect(defaulted.assistanceReason).toBe("none");
+    expect(normalizeCreateCallBriefInput(defaulted).assistanceDisclosure).toBe("");
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        assistanceReason: "none"
+      }).success
+    ).toBe(true);
     expect(
       createCallBriefInputSchema.safeParse({
         ...validBrief,
@@ -136,6 +143,18 @@ describe("createCallBriefInputSchema", () => {
         assistanceReason: "language_barrier"
       }).success
     ).toBe(true);
+    expect(
+      createCallBriefInputSchema.safeParse({
+        ...validBrief,
+        assistanceReason: "speech_impairment"
+      }).success
+    ).toBe(true);
+  });
+
+  it("returns an empty assistance disclosure for none", () => {
+    expect(
+      getAssistanceDisclosure("de-CH", "none", "Ivan Slavinskyi")
+    ).toBe("");
   });
 
   it("accepts only the supported audio retention periods", () => {

@@ -66,6 +66,7 @@ export function getAssistantProfile(id: AssistantProfileId): AssistantProfile {
 }
 
 export const ASSISTANCE_REASON_IDS = [
+  "none",
   "speech_impairment",
   "language_barrier"
 ] as const;
@@ -133,46 +134,53 @@ const ASSISTANCE_DISCLOSURE_TEMPLATES: Record<
   Record<AssistanceReason, AssistanceDisclosureTemplate>
 > = {
   "de-CH": {
-    speech_impairment: (person) =>
-      `${person} ist aufgrund einer Sprechbeeinträchtigung beim Telefonieren eingeschränkt und nutzt mich deshalb, um dieses Gespräch in seinem Auftrag zu führen.`,
-    language_barrier: (person) =>
-      `${person} kann dieses Gespräch aufgrund einer Sprachbarriere nicht selbst auf Deutsch führen und nutzt mich deshalb, um es in seinem Auftrag zu führen.`
+    none: () => "",
+    speech_impairment: () =>
+      "Für dieses Gespräch werde ich wegen einer Sprechbeeinträchtigung als Assistenz eingesetzt.",
+    language_barrier: () =>
+      "Für dieses Gespräch werde ich wegen einer Sprachbarriere als Assistenz eingesetzt."
   },
   "de-DE": {
-    speech_impairment: (person) =>
-      `${person} ist aufgrund einer Sprechbeeinträchtigung beim Telefonieren eingeschränkt und nutzt mich deshalb, um dieses Gespräch in seinem Auftrag zu führen.`,
-    language_barrier: (person) =>
-      `${person} kann dieses Gespräch aufgrund einer Sprachbarriere nicht selbst auf Deutsch führen und nutzt mich deshalb, um es in seinem Auftrag zu führen.`
+    none: () => "",
+    speech_impairment: () =>
+      "Für dieses Gespräch werde ich wegen einer Sprechbeeinträchtigung als Assistenz eingesetzt.",
+    language_barrier: () =>
+      "Für dieses Gespräch werde ich wegen einer Sprachbarriere als Assistenz eingesetzt."
   },
   "fr-CH": {
-    speech_impairment: (person) =>
-      `${person} a des difficultés à téléphoner en raison d’un trouble de la parole et m’utilise donc pour mener cet appel en son nom.`,
-    language_barrier: (person) =>
-      `${person} ne peut pas mener personnellement cet appel en français en raison d’une barrière linguistique et m’utilise donc pour le faire en son nom.`
+    none: () => "",
+    speech_impairment: () =>
+      "Pour cette conversation, j’interviens comme assistant en raison d’un trouble de la parole.",
+    language_barrier: () =>
+      "Pour cette conversation, j’interviens comme assistant en raison d’une barrière linguistique."
   },
   "it-CH": {
-    speech_impairment: (person) =>
-      `${person} ha difficoltà a parlare al telefono a causa di un disturbo del linguaggio e pertanto mi utilizza per condurre questa chiamata per suo conto.`,
-    language_barrier: (person) =>
-      `${person} non può condurre personalmente questa chiamata in italiano a causa di una barriera linguistica e pertanto mi utilizza per farlo per suo conto.`
+    none: () => "",
+    speech_impairment: () =>
+      "Per questa conversazione intervengo come assistente a causa di un disturbo del linguaggio.",
+    language_barrier: () =>
+      "Per questa conversazione intervengo come assistente a causa di una barriera linguistica."
   },
   "en-GB": {
-    speech_impairment: (person) =>
-      `${person} has difficulty speaking on the telephone because of a speech impairment, so they use me to conduct this call on their behalf.`,
-    language_barrier: (person) =>
-      `${person} cannot conduct this call in English because of a language barrier, so they use me to conduct it on their behalf.`
+    none: () => "",
+    speech_impairment: () =>
+      "I am assisting with this conversation because of a speech impairment.",
+    language_barrier: () =>
+      "I am assisting with this conversation because of a language barrier."
   },
   "en-US": {
-    speech_impairment: (person) =>
-      `${person} has difficulty speaking on the telephone because of a speech impairment, so they use me to conduct this call on their behalf.`,
-    language_barrier: (person) =>
-      `${person} cannot conduct this call in English because of a language barrier, so they use me to conduct it on their behalf.`
+    none: () => "",
+    speech_impairment: () =>
+      "I am assisting with this conversation because of a speech impairment.",
+    language_barrier: () =>
+      "I am assisting with this conversation because of a language barrier."
   },
   "ru-RU": {
-    speech_impairment: (person) =>
-      `${person} испытывает затруднения при телефонных разговорах из-за нарушения речи, поэтому использует меня для ведения этого разговора от своего имени.`,
-    language_barrier: (person) =>
-      `${person} не может самостоятельно провести этот разговор на русском языке из-за языкового барьера, поэтому использует меня для ведения разговора от своего имени.`
+    none: () => "",
+    speech_impairment: () =>
+      "В этом разговоре я помогаю из-за нарушения речи.",
+    language_barrier: () =>
+      "В этом разговоре я помогаю из-за языкового барьера."
   }
 };
 
@@ -212,7 +220,7 @@ const callBriefStoredFieldsSchema = z.object({
     .trim()
     .min(2, "Enter the person represented by the assistant")
     .max(161),
-  assistanceReason: assistanceReasonSchema,
+  assistanceReason: assistanceReasonSchema.default("none"),
   context: z.string().trim().max(12_000).default(""),
   locale: callLocaleSchema,
   audioRetentionDays: audioRetentionDaysSchema.default(7),
@@ -468,7 +476,7 @@ export const callBriefSchema = callBriefStoredFieldsSchema
     assistantProfileId: assistantProfileIdSchema.nullable(),
     agentName: z.string().trim().min(2),
     voiceGender: callVoiceGenderSchema,
-    assistanceDisclosure: z.string().trim().min(10),
+    assistanceDisclosure: z.string().trim(),
     id: z.string().uuid(),
     status: callBriefStatusSchema,
     createdAt: z.string().datetime(),

@@ -223,7 +223,11 @@ describe("durable call telemetry", () => {
       "in_progress",
       brief.id
     );
-    const begun = await repository.beginRecording(brief.id);
+    const begun = await repository.beginRecording(brief.id, {
+      method: "voice",
+      decision: "affirmative",
+      locale: "en-GB"
+    });
     await repository.attachProviderRecording(
       begun.recording.id,
       "RE-processing",
@@ -265,6 +269,16 @@ describe("durable call telemetry", () => {
       metadata: {
         model: "gpt-4o-mini-transcribe",
         failureCode: "transcription_failed"
+      }
+    });
+    expect(
+      events.find(({ payload }) => payload.name === "consent.granted")?.payload
+    ).toEqual({
+      name: "consent.granted",
+      metadata: {
+        method: "voice",
+        decision: "affirmative",
+        locale: "en-GB"
       }
     });
     expect(JSON.stringify(events)).not.toContain("private diagnostic text");
