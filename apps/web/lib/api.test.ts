@@ -5,6 +5,7 @@ import {
   accessAdminCallSensitiveContent,
   approveAndStartCall,
   changeAdminUserStatus,
+  confirmEmailChange,
   confirmPhoneChange,
   confirmRecipientOptOut,
   completePasswordRecovery,
@@ -57,11 +58,13 @@ import {
   setAdminOutboundCalls,
   suppressRecipientAsStaff,
   startCall,
+  startEmailChange,
   startPhoneChange,
   startPasswordRecovery,
   submitCallFeedback,
   updateAdminContentDraft,
   updateAdminEditorialDraft,
+  updateOwnName,
   verifyPasswordRecovery
 } from "./api";
 
@@ -846,6 +849,57 @@ describe("API client headers", () => {
     expect(new Headers(request.headers).get("Idempotency-Key")).toBe(
       idempotencyKey
     );
+  });
+
+  it("updates the current user's name with an authenticated JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: "profile_updated",
+      user: { firstName: "Nina", lastName: "Keller" }
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateOwnName({ firstName: "Nina", lastName: "Keller" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/account\/profile\/name$/),
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ firstName: "Nina", lastName: "Keller" })
+      })
+    );
+  });
+
+  it("keeps email-change capabilities in authenticated JSON bodies", async () => {
+    const emailChangeId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "verification_required",
+        emailChangeId,
+        expiresAt: "2026-09-02T10:00:00.000Z"
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "email_changed",
+        user: { email: "new@example.com" },
+        revokedSessionCount: 1
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startEmailChange({
+      newEmail: "new@example.com",
+      currentPassword: "current-password"
+    });
+    await confirmEmailChange({ emailChangeId, code: "654321" });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringMatching(/\/api\/auth\/email-change\/start$/),
+      expect.stringMatching(/\/api\/auth\/email-change\/confirm$/)
+    ]);
+    expect(String(fetchMock.mock.calls[1]?.[0])).not.toContain(emailChangeId);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      emailChangeId,
+      code: "654321"
+    });
   });
 
   it("recovers an uncertain call-preparation response with the same key", async () => {

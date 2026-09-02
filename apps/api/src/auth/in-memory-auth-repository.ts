@@ -105,6 +105,29 @@ type PhoneChangeEvent = {
   createdAt: string;
 };
 
+type EmailChangeChallenge = {
+  id: string;
+  userId: string;
+  initiatingSessionId: string;
+  newEmail: string;
+  codeHash: string;
+  attemptCount: number;
+  expiresAt: string;
+  completedAt: string | null;
+  invalidatedAt: string | null;
+  lastAttemptAt: string | null;
+  createdAt: string;
+};
+
+type EmailChangeEvent = {
+  userId: string;
+  challengeId: string;
+  revokedSessionCount: number;
+  invalidatedRecoveryChallengeCount: number;
+  invalidatedRecoveryGrantCount: number;
+  createdAt: string;
+};
+
 export class InMemoryAuthRepository implements AuthRepository {
   readonly mode = "memory" as const;
   readonly #users = new Map<string, AuthUserRecord>();
@@ -119,6 +142,8 @@ export class InMemoryAuthRepository implements AuthRepository {
   readonly #passwordRecoveryEvents: PasswordRecoveryEvent[] = [];
   readonly #phoneChangeChallenges = new Map<string, PhoneChangeChallenge>();
   readonly #phoneChangeEvents: PhoneChangeEvent[] = [];
+  readonly #emailChangeChallenges = new Map<string, EmailChangeChallenge>();
+  readonly #emailChangeEvents: EmailChangeEvent[] = [];
 
   async createUser(input: CreateAuthUserInput) {
     const email = input.email.toLowerCase();
@@ -153,6 +178,22 @@ export class InMemoryAuthRepository implements AuthRepository {
       (candidate) => candidate.email === email.toLowerCase()
     );
     return user ? structuredClone(user) : null;
+  }
+
+  async updateOwnName(input: {
+    userId: string;
+    firstName: string;
+    lastName: string;
+  }) {
+    const user = this.#users.get(input.userId);
+    if (
+      !user ||
+      user.status !== "active" ||
+      this.#hasPendingAccountDeletion(input.userId)
+    ) return null;
+    user.firstName = input.firstName;
+    user.lastName = input.lastName;
+    return structuredClone(user);
   }
 
   async listUsersForAdmin(input: ListAdminUsersInput) {
@@ -875,6 +916,196 @@ export class InMemoryAuthRepository implements AuthRepository {
     });
     return {
       user: structuredClone(user),
+      revokedSessionCount,
+      invalidatedRecoveryChallengeCount,
+      invalidatedRecoveryGrantCount
+    };
+  }
+
+  async createEmailChangeChallenge(input: {
+    id: string;
+    userId: string;
+    initiatingSessionId: string;
+    expectedPasswordHash: string;
+    newEmail: string;
+    codeHash: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    const user = this.#users.get(input.userId);
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === input.initiatingSessionId &&
+      candidate.userId === input.userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > input.now
+    );
+    if (
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      user.passwordHash !== input.expectedPasswordHash ||
+      !session ||
+      this.#hasPendingAccountDeletion(input.userId) ||
+      user.email === input.newEmail ||
+      [...this.#users.values()].some((candidate) =>
+        candidate.id !== input.userId && candidate.email === input.newEmail
+      )
+    ) return false;
+    for (const challenge of this.#emailChangeChallenges.values()) {
+      if (
+        challenge.userId === input.userId &&
+        !challenge.completedAt &&
+        !challenge.invalidatedAt
+      ) challenge.invalidatedAt = input.now;
+    }
+    this.#emailChangeChallenges.set(input.id, {
+      id: input.id,
+      userId: input.userId,
+      initiatingSessionId: input.initiatingSessionId,
+      newEmail: input.newEmail,
+      codeHash: input.codeHash,
+      attemptCount: 0,
+      expiresAt: input.expiresAt,
+      completedAt: null,
+      invalidatedAt: null,
+      lastAttemptAt: null,
+      createdAt: input.now
+    });
+    return true;
+  }
+
+  async invalidateEmailChangeChallenge(
+    emailChangeId: string,
+    userId: string,
+    now: string
+  ) {
+    const challenge = this.#emailChangeChallenges.get(emailChangeId);
+    if (
+      challenge?.userId === userId &&
+      !challenge.completedAt &&
+      !challenge.invalidatedAt
+    ) challenge.invalidatedAt = now;
+  }
+
+  async consumeEmailChangeChallengeAttempt(input: {
+    emailChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    const challenge = this.#emailChangeChallenges.get(input.emailChangeId);
+    const user = this.#users.get(input.userId);
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === input.sessionId &&
+      candidate.userId === input.userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > input.now
+    );
+    if (
+      !challenge ||
+      challenge.userId !== input.userId ||
+      challenge.initiatingSessionId !== input.sessionId ||
+      challenge.expiresAt <= input.now ||
+      challenge.completedAt ||
+      challenge.invalidatedAt ||
+      challenge.attemptCount >= 8 ||
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      !session ||
+      this.#hasPendingAccountDeletion(input.userId)
+    ) return null;
+    challenge.attemptCount += 1;
+    challenge.lastAttemptAt = input.now;
+    return structuredClone({
+      id: challenge.id,
+      userId: challenge.userId,
+      initiatingSessionId: challenge.initiatingSessionId,
+      newEmail: challenge.newEmail,
+      codeHash: challenge.codeHash,
+      attemptCount: challenge.attemptCount,
+      expiresAt: challenge.expiresAt,
+      createdAt: challenge.createdAt
+    });
+  }
+
+  async completeEmailChange(input: {
+    emailChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    const challenge = this.#emailChangeChallenges.get(input.emailChangeId);
+    const user = this.#users.get(input.userId);
+    const session = [...this.#sessions.values()].find((candidate) =>
+      candidate.id === input.sessionId &&
+      candidate.userId === input.userId &&
+      !candidate.revokedAt &&
+      candidate.expiresAt > input.now
+    );
+    if (
+      !challenge ||
+      challenge.userId !== input.userId ||
+      challenge.initiatingSessionId !== input.sessionId ||
+      challenge.expiresAt <= input.now ||
+      challenge.attemptCount === 0 ||
+      challenge.completedAt ||
+      challenge.invalidatedAt ||
+      user?.status !== "active" ||
+      !user.phoneVerifiedAt ||
+      !session ||
+      this.#hasPendingAccountDeletion(input.userId) ||
+      [...this.#users.values()].some((candidate) =>
+        candidate.id !== input.userId && candidate.email === challenge.newEmail
+      )
+    ) return null;
+
+    const previousEmail = user.email;
+    user.email = challenge.newEmail;
+    challenge.completedAt = input.now;
+    let revokedSessionCount = 0;
+    for (const candidate of this.#sessions.values()) {
+      if (
+        candidate.userId === input.userId &&
+        candidate.id !== input.sessionId &&
+        !candidate.revokedAt &&
+        candidate.expiresAt > input.now
+      ) {
+        candidate.revokedAt = input.now;
+        revokedSessionCount += 1;
+      }
+    }
+    let invalidatedRecoveryChallengeCount = 0;
+    for (const recovery of this.#passwordRecoveryChallenges.values()) {
+      if (recovery.userId === input.userId && !recovery.invalidatedAt) {
+        recovery.invalidatedAt = input.now;
+        invalidatedRecoveryChallengeCount += 1;
+      }
+    }
+    let invalidatedRecoveryGrantCount = 0;
+    for (const grant of this.#passwordRecoveryGrants.values()) {
+      if (grant.userId === input.userId && !grant.consumedAt && !grant.invalidatedAt) {
+        grant.invalidatedAt = input.now;
+        invalidatedRecoveryGrantCount += 1;
+      }
+    }
+    for (const pending of this.#emailChangeChallenges.values()) {
+      if (
+        pending.userId === input.userId &&
+        pending.id !== input.emailChangeId &&
+        !pending.completedAt &&
+        !pending.invalidatedAt
+      ) pending.invalidatedAt = input.now;
+    }
+    this.#emailChangeEvents.push({
+      userId: input.userId,
+      challengeId: input.emailChangeId,
+      revokedSessionCount,
+      invalidatedRecoveryChallengeCount,
+      invalidatedRecoveryGrantCount,
+      createdAt: input.now
+    });
+    return {
+      user: structuredClone(user),
+      previousEmail,
       revokedSessionCount,
       invalidatedRecoveryChallengeCount,
       invalidatedRecoveryGrantCount

@@ -121,6 +121,17 @@ type PhoneChangeChallengeRow = {
   createdAt: DatabaseDate;
 };
 
+type EmailChangeChallengeRow = {
+  id: string;
+  userId: string;
+  initiatingSessionId: string;
+  newEmail: string;
+  codeHash: string;
+  attemptCount: number;
+  expiresAt: DatabaseDate;
+  createdAt: DatabaseDate;
+};
+
 function toIso(value: DatabaseDate) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
@@ -128,6 +139,14 @@ function toIso(value: DatabaseDate) {
 function mapPhoneChangeChallenge(
   row: PhoneChangeChallengeRow
 ) {
+  return {
+    ...row,
+    expiresAt: toIso(row.expiresAt),
+    createdAt: toIso(row.createdAt)
+  };
+}
+
+function mapEmailChangeChallenge(row: EmailChangeChallengeRow) {
   return {
     ...row,
     expiresAt: toIso(row.expiresAt),
@@ -174,6 +193,26 @@ export class PostgresAuthRepository implements AuthRepository {
       FROM users
       WHERE lower(email) = ${email.toLowerCase()}
       LIMIT 1
+    `;
+    return row ? this.#mapUser(row) : null;
+  }
+
+  async updateOwnName(input: {
+    userId: string;
+    firstName: string;
+    lastName: string;
+  }) {
+    const [row] = await this.#sql<UserRow[]>`
+      UPDATE users
+      SET first_name = ${input.firstName}, last_name = ${input.lastName}
+      WHERE id = ${input.userId}
+        AND status = 'active'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM account_deletion_requests
+          WHERE user_id = users.id AND status <> 'completed'
+        )
+      RETURNING ${this.#userColumns()}
     `;
     return row ? this.#mapUser(row) : null;
   }
@@ -1320,6 +1359,262 @@ export class PostgresAuthRepository implements AuthRepository {
       `;
       return {
         user: this.#mapUser(updated),
+        revokedSessionCount: revokedSessions.length,
+        invalidatedRecoveryChallengeCount: invalidatedRecoveryChallenges.length,
+        invalidatedRecoveryGrantCount: invalidatedRecoveryGrants.length
+      };
+    }).catch((error) => {
+      if (isUniqueViolation(error)) return null;
+      throw error;
+    });
+  }
+
+  async createEmailChangeChallenge(input: {
+    id: string;
+    userId: string;
+    initiatingSessionId: string;
+    expectedPasswordHash: string;
+    newEmail: string;
+    codeHash: string;
+    now: string;
+    expiresAt: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const now = new Date(input.now);
+      const [user] = await transaction<UserRow[]>`
+        SELECT ${this.#userColumns()}
+        FROM users
+        WHERE id = ${input.userId}
+          AND password_hash = ${input.expectedPasswordHash}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND lower(email) <> ${input.newEmail}
+          AND NOT EXISTS (
+            SELECT 1 FROM users candidate
+            WHERE candidate.id <> users.id
+              AND lower(candidate.email) = ${input.newEmail}
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return false;
+      const [session] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM sessions
+        WHERE id = ${input.initiatingSessionId}
+          AND user_id = ${input.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        FOR UPDATE
+      `;
+      if (!session) return false;
+      await transaction`
+        DELETE FROM email_change_challenges
+        WHERE created_at < ${new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000)}
+      `;
+      await transaction`
+        UPDATE email_change_challenges
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+      `;
+      await transaction`
+        INSERT INTO email_change_challenges (
+          id, user_id, initiating_session_id, new_email, code_hash,
+          attempt_count, expires_at, created_at
+        ) VALUES (
+          ${input.id}, ${input.userId}, ${input.initiatingSessionId},
+          ${input.newEmail}, ${input.codeHash}, 0,
+          ${new Date(input.expiresAt)}, ${now}
+        )
+      `;
+      return true;
+    });
+  }
+
+  async invalidateEmailChangeChallenge(
+    emailChangeId: string,
+    userId: string,
+    now: string
+  ) {
+    await this.#sql`
+      UPDATE email_change_challenges
+      SET invalidated_at = COALESCE(invalidated_at, ${new Date(now)})
+      WHERE id = ${emailChangeId}
+        AND user_id = ${userId}
+        AND completed_at IS NULL
+    `;
+  }
+
+  async consumeEmailChangeChallengeAttempt(input: {
+    emailChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const now = new Date(input.now);
+      const [user] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM users
+        WHERE id = ${input.userId}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return null;
+      const [session] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM sessions
+        WHERE id = ${input.sessionId}
+          AND user_id = ${input.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        FOR UPDATE
+      `;
+      if (!session) return null;
+      const [challenge] = await transaction<EmailChangeChallengeRow[]>`
+        UPDATE email_change_challenges
+        SET attempt_count = attempt_count + 1, last_attempt_at = ${now}
+        WHERE id = ${input.emailChangeId}
+          AND user_id = ${input.userId}
+          AND initiating_session_id = ${input.sessionId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > ${now}
+          AND attempt_count < 8
+        RETURNING
+          id,
+          user_id AS "userId",
+          initiating_session_id AS "initiatingSessionId",
+          new_email AS "newEmail",
+          code_hash AS "codeHash",
+          attempt_count AS "attemptCount",
+          expires_at AS "expiresAt",
+          created_at AS "createdAt"
+      `;
+      return challenge ? mapEmailChangeChallenge(challenge) : null;
+    });
+  }
+
+  async completeEmailChange(input: {
+    emailChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }) {
+    return this.#sql.begin(async (transaction) => {
+      const now = new Date(input.now);
+      const [user] = await transaction<UserRow[]>`
+        SELECT ${this.#userColumns()}
+        FROM users
+        WHERE id = ${input.userId}
+          AND status = 'active'
+          AND phone_verified_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM account_deletion_requests
+            WHERE user_id = users.id AND status <> 'completed'
+          )
+        FOR UPDATE
+      `;
+      if (!user) return null;
+      const [session] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM sessions
+        WHERE id = ${input.sessionId}
+          AND user_id = ${input.userId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        FOR UPDATE
+      `;
+      if (!session) return null;
+      const [challenge] = await transaction<EmailChangeChallengeRow[]>`
+        SELECT
+          id,
+          user_id AS "userId",
+          initiating_session_id AS "initiatingSessionId",
+          new_email AS "newEmail",
+          code_hash AS "codeHash",
+          attempt_count AS "attemptCount",
+          expires_at AS "expiresAt",
+          created_at AS "createdAt"
+        FROM email_change_challenges
+        WHERE id = ${input.emailChangeId}
+          AND user_id = ${input.userId}
+          AND initiating_session_id = ${input.sessionId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+          AND expires_at > ${now}
+          AND attempt_count > 0
+        FOR UPDATE
+      `;
+      if (!challenge) return null;
+      const [updated] = await transaction<UserRow[]>`
+        UPDATE users
+        SET email = ${challenge.newEmail}
+        WHERE id = ${input.userId}
+        RETURNING ${this.#userColumns()}
+      `;
+      if (!updated) return null;
+      const revokedSessions = await transaction<{ id: string }[]>`
+        UPDATE sessions
+        SET revoked_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND id <> ${input.sessionId}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        RETURNING id
+      `;
+      const invalidatedRecoveryChallenges = await transaction<{ id: string }[]>`
+        UPDATE password_recovery_challenges
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId} AND invalidated_at IS NULL
+        RETURNING id
+      `;
+      const invalidatedRecoveryGrants = await transaction<{ id: string }[]>`
+        UPDATE password_recovery_grants
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND consumed_at IS NULL
+          AND invalidated_at IS NULL
+        RETURNING id
+      `;
+      await transaction`
+        UPDATE email_change_challenges
+        SET invalidated_at = ${now}
+        WHERE user_id = ${input.userId}
+          AND id <> ${input.emailChangeId}
+          AND completed_at IS NULL
+          AND invalidated_at IS NULL
+      `;
+      await transaction`
+        UPDATE email_change_challenges
+        SET completed_at = ${now}
+        WHERE id = ${input.emailChangeId}
+      `;
+      await transaction`
+        INSERT INTO email_change_events (
+          id, user_id, challenge_id, revoked_session_count,
+          invalidated_recovery_challenge_count,
+          invalidated_recovery_grant_count, created_at
+        ) VALUES (
+          ${randomUUID()}, ${input.userId}, ${input.emailChangeId},
+          ${revokedSessions.length}, ${invalidatedRecoveryChallenges.length},
+          ${invalidatedRecoveryGrants.length}, ${now}
+        )
+      `;
+      return {
+        user: this.#mapUser(updated),
+        previousEmail: user.email,
         revokedSessionCount: revokedSessions.length,
         invalidatedRecoveryChallengeCount: invalidatedRecoveryChallenges.length,
         invalidatedRecoveryGrantCount: invalidatedRecoveryGrants.length

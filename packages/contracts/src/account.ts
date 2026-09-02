@@ -130,6 +130,56 @@ export const userSchema = z.object({
 });
 export type User = z.infer<typeof userSchema>;
 
+export const accountNameUpdateInputSchema = z.strictObject({
+  firstName: personNamePartSchema,
+  lastName: personNamePartSchema
+});
+export type AccountNameUpdateInput = z.infer<
+  typeof accountNameUpdateInputSchema
+>;
+
+export const accountNameUpdateResponseSchema = z.strictObject({
+  status: z.literal("profile_updated"),
+  user: userSchema
+});
+export type AccountNameUpdateResponse = z.infer<
+  typeof accountNameUpdateResponseSchema
+>;
+
+export const emailChangeStartInputSchema = z.strictObject({
+  newEmail: z.string().trim().toLowerCase().email().max(320),
+  currentPassword: z.string().min(1).max(128)
+});
+export type EmailChangeStartInput = z.infer<
+  typeof emailChangeStartInputSchema
+>;
+
+export const emailChangeStartResponseSchema = z.strictObject({
+  status: z.literal("verification_required"),
+  emailChangeId: z.uuid(),
+  expiresAt: z.iso.datetime()
+});
+export type EmailChangeStartResponse = z.infer<
+  typeof emailChangeStartResponseSchema
+>;
+
+export const emailChangeConfirmInputSchema = z.strictObject({
+  emailChangeId: z.uuid(),
+  code: z.string().trim().regex(/^\d{6}$/)
+});
+export type EmailChangeConfirmInput = z.infer<
+  typeof emailChangeConfirmInputSchema
+>;
+
+export const emailChangeConfirmResponseSchema = z.strictObject({
+  status: z.literal("email_changed"),
+  user: userSchema,
+  revokedSessionCount: z.number().int().nonnegative()
+});
+export type EmailChangeConfirmResponse = z.infer<
+  typeof emailChangeConfirmResponseSchema
+>;
+
 export const phoneChangeStartInputSchema = z.strictObject({
   newPhoneE164: accountPhoneSchema,
   currentPassword: z.string().min(1).max(128)

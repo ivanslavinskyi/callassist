@@ -3,6 +3,10 @@ import { buildApp, buildWebhookApp } from "./app";
 import { AuthService } from "./auth/auth-service";
 import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
+import {
+  createEmailProviderFromEnv,
+  emailVerificationHashKeyFromEnv
+} from "./auth/create-email-provider";
 import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
 import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
@@ -58,6 +62,8 @@ const service = new CallService(
 const authService = new AuthService({
   repository: authRepository,
   verificationProvider: createVerificationProviderFromEnv(),
+  emailProvider: createEmailProviderFromEnv(),
+  emailVerificationHashKey: emailVerificationHashKeyFromEnv(),
   rateLimiter,
   signupCreditGranter: service
 });

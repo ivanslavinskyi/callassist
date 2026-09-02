@@ -38,6 +38,14 @@ describeWithDatabase("PostgresAuthRepository", () => {
     });
     expect(user).toMatchObject({ firstName: "Nina", lastName: "Keller" });
     expect(user.phoneVerifiedAt).toBeNull();
+    await expect(repository.updateOwnName({
+      userId: user.id,
+      firstName: "Nina-Maria",
+      lastName: "Keller"
+    })).resolves.toMatchObject({
+      firstName: "Nina-Maria",
+      lastName: "Keller"
+    });
 
     const verified = await repository.markPhoneVerified(
       user.id,
@@ -672,6 +680,103 @@ describeWithDatabase("PostgresAuthRepository", () => {
     expect(retention).toEqual({ challengeExists: false, eventExists: true });
     await expect(inspection`
       DELETE FROM phone_change_events WHERE challenge_id = ${phoneChangeId}
+    `).rejects.toThrow("immutable");
+  });
+
+  it("atomically changes a verified email and retains minimized evidence", async () => {
+    const suffix = randomUUID();
+    const originalEmail = `email-change.${suffix}@example.com`;
+    const newEmail = `email-changed.${suffix}@example.com`;
+    const passwordHash = "email-change-password-hash";
+    const user = await repository.createUser({
+      email: originalEmail,
+      passwordHash,
+      phoneE164: phoneFromUuid(suffix, "52"),
+      firstName: "Email",
+      lastName: "Change",
+      uiLocale: "en"
+    });
+    const now = new Date();
+    await repository.markPhoneVerified(user.id, now.toISOString());
+    const currentSessionId = randomUUID();
+    const currentTokenHash = hashSessionToken(`email-current-${suffix}`);
+    const otherTokenHash = hashSessionToken(`email-other-${suffix}`);
+    for (const [id, tokenHash] of [
+      [currentSessionId, currentTokenHash],
+      [randomUUID(), otherTokenHash]
+    ]) {
+      await repository.createSession({
+        id,
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+        revokedAt: null,
+        createdAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+        userAgent: "email-change-integration-test"
+      });
+    }
+
+    const emailChangeId = randomUUID();
+    await expect(repository.createEmailChangeChallenge({
+      id: emailChangeId,
+      userId: user.id,
+      initiatingSessionId: currentSessionId,
+      expectedPasswordHash: passwordHash,
+      newEmail,
+      codeHash: "a".repeat(64),
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString()
+    })).resolves.toBe(true);
+    await expect(repository.consumeEmailChangeChallengeAttempt({
+      emailChangeId,
+      userId: user.id,
+      sessionId: currentSessionId,
+      now: now.toISOString()
+    })).resolves.toMatchObject({
+      id: emailChangeId,
+      newEmail,
+      codeHash: "a".repeat(64),
+      attemptCount: 1
+    });
+
+    const completedAt = new Date(now.getTime() + 1_000).toISOString();
+    await expect(repository.completeEmailChange({
+      emailChangeId,
+      userId: user.id,
+      sessionId: currentSessionId,
+      now: completedAt
+    })).resolves.toMatchObject({
+      user: { email: newEmail },
+      previousEmail: originalEmail,
+      revokedSessionCount: 1
+    });
+    await expect(repository.findUserByEmail(originalEmail)).resolves.toBeNull();
+    await expect(repository.findUserBySessionTokenHash(
+      currentTokenHash,
+      completedAt
+    )).resolves.toMatchObject({ user: { email: newEmail } });
+    await expect(repository.findUserBySessionTokenHash(
+      otherTokenHash,
+      completedAt
+    )).resolves.toBeNull();
+
+    const events = await inspection<{
+      challengeId: string;
+      revokedSessionCount: number;
+    }[]>`
+      SELECT
+        challenge_id::text AS "challengeId",
+        revoked_session_count AS "revokedSessionCount"
+      FROM email_change_events
+      WHERE user_id = ${user.id}
+    `;
+    expect(events).toEqual([{
+      challengeId: emailChangeId,
+      revokedSessionCount: 1
+    }]);
+    await expect(inspection`
+      DELETE FROM email_change_events WHERE challenge_id = ${emailChangeId}
     `).rejects.toThrow("immutable");
   });
 

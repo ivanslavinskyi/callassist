@@ -9,6 +9,7 @@ const envPath = resolve(root, ".env");
 const encryptionKey = randomBytes(32).toString("base64");
 const promoCodeHashKey = randomBytes(32).toString("base64");
 const rateLimitHashKey = randomBytes(32).toString("base64");
+const emailVerificationHashKey = randomBytes(32).toString("base64");
 const example = await readFile(examplePath, "utf8");
 const contents = example
   .replace(
@@ -22,12 +23,16 @@ const contents = example
   .replace(
     /^RATE_LIMIT_HASH_KEY=.*$/m,
     `RATE_LIMIT_HASH_KEY=${rateLimitHashKey}`
+  )
+  .replace(
+    /^EMAIL_VERIFICATION_HASH_KEY=.*$/m,
+    `EMAIL_VERIFICATION_HASH_KEY=${emailVerificationHashKey}`
   );
 
 try {
   await writeFile(envPath, contents, { encoding: "utf8", flag: "wx" });
   console.info(
-    "Created .env with fresh encryption, promo-code, and rate-limit hash keys"
+    "Created .env with fresh encryption, promo-code, rate-limit, and email-verification hash keys"
   );
 } catch (error) {
   if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {

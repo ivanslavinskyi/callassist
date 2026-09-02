@@ -5,6 +5,7 @@ import websocket from "@fastify/websocket";
 import {
   ADMIN_CALL_LIST_LIMIT_MAX,
   accountDeletionInputSchema,
+  accountNameUpdateInputSchema,
   accountStatusActionSchema,
   callDataDeletionInputSchema,
   adminCallListFiltersSchema,
@@ -19,6 +20,8 @@ import {
   contentDraftUpdateInputSchema,
   editorialCollectionKeySchema,
   editorialDraftUpdateInputSchema,
+  emailChangeConfirmInputSchema,
+  emailChangeStartInputSchema,
   createCallBriefInputSchema,
   loginInputSchema,
   contentLocaleSchema,
@@ -184,7 +187,7 @@ export function buildApp({
   void app.register(cors, {
     origin: webOrigins,
     credentials: true,
-    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
   });
 
   async function authorizeCallAccess(
@@ -802,6 +805,89 @@ export function buildApp({
       return reply
         .header("Cache-Control", "private, no-store")
         .send({ user });
+    });
+
+    app.post("/api/auth/email-change/start", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      const parsed = emailChangeStartInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_EMAIL_CHANGE_START" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .status(202)
+          .send(await authService.startEmailChange(
+            authenticated.user,
+            authenticated.sessionId,
+            parsed.data,
+            authContext(request)
+          ));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.post("/api/auth/email-change/confirm", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      const parsed = emailChangeConfirmInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_EMAIL_CHANGE_CONFIRMATION" });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await authService.confirmEmailChange(
+            authenticated.user,
+            authenticated.sessionId,
+            parsed.data,
+            authContext(request)
+          ));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
+    });
+
+    app.patch("/api/account/profile/name", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
+        return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      }
+      const authenticated = await authService.authenticateSession(
+        sessionTokenFromHeaders(request.headers, secureCookies)
+      );
+      if (!authenticated) {
+        return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      }
+      const parsed = accountNameUpdateInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "INVALID_PROFILE_UPDATE",
+          issues: parsed.error.flatten()
+        });
+      }
+      try {
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .send(await authService.updateOwnName(authenticated.user, parsed.data));
+      } catch (error) {
+        return sendAuthError(reply, error);
+      }
     });
 
     if (accountDataExportService) {
@@ -2391,19 +2477,23 @@ function sendAuthError(
     reply.header("Retry-After", "1");
   }
   const status = error.code === "VERIFICATION_UNAVAILABLE" ||
+    error.code === "EMAIL_DELIVERY_UNAVAILABLE" ||
     error.code === "RATE_LIMIT_UNAVAILABLE"
     ? 503
     : error.code === "INVALID_CREDENTIALS" ||
         error.code === "INVALID_VERIFICATION" ||
         error.code === "INVALID_RECOVERY" ||
-        error.code === "INVALID_PHONE_CHANGE"
+        error.code === "INVALID_PHONE_CHANGE" ||
+        error.code === "INVALID_EMAIL_CHANGE"
       ? 401
       : error.code === "USER_NOT_FOUND" || error.code === "SESSION_NOT_FOUND"
         ? 404
         : [
             "ACCOUNT_STATUS_UNCHANGED",
             "ACCOUNT_STATUS_TRANSITION_INVALID",
-            "PHONE_CHANGE_NOT_AVAILABLE"
+            "PHONE_CHANGE_NOT_AVAILABLE",
+            "EMAIL_CHANGE_NOT_AVAILABLE",
+            "PROFILE_UPDATE_NOT_AVAILABLE"
           ].includes(error.code)
           ? 409
           : 403;

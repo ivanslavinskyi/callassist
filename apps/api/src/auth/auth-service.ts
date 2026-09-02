@@ -3,6 +3,9 @@ import type {
   AccountSessionList,
   AccountSessionPlatform,
   AdministrableUserStatus,
+  AccountNameUpdateInput,
+  EmailChangeConfirmInput,
+  EmailChangeStartInput,
   LoginInput,
   PasswordRecoveryCompleteInput,
   PasswordRecoveryStartInput,
@@ -14,7 +17,14 @@ import type {
   User,
   VerificationResendInput
 } from "@callassist/contracts";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  timingSafeEqual
+} from "node:crypto";
 import {
   AuthRepositoryError,
   toPublicUser,
@@ -30,6 +40,10 @@ import {
   type RateLimiter
 } from "./rate-limiter";
 import type { VerificationProvider } from "./verification-provider";
+import {
+  MockEmailProvider,
+  type EmailProvider
+} from "./email-provider";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 
 const minute = 60_000;
@@ -37,6 +51,7 @@ const accountSessionInventoryLimit = 50;
 const passwordRecoveryChallengeTtlMs = 10 * minute;
 const passwordRecoveryGrantTtlMs = 15 * minute;
 const phoneChangeChallengeTtlMs = 10 * minute;
+const emailChangeChallengeTtlMs = 10 * minute;
 const dummyPasswordHash = hashPassword("callassist-invalid-account-password");
 
 export type AuthRequestContext = {
@@ -57,14 +72,20 @@ export type SignupCreditGranter = {
 export class AuthService {
   readonly repository: AuthRepository;
   readonly verificationProvider: VerificationProvider;
+  readonly emailProvider: EmailProvider;
   readonly #rateLimiter: RateLimiter;
   readonly #now: () => Date;
   readonly #sessionTtlMs: number;
   readonly #signupCreditGranter: SignupCreditGranter;
+  readonly #emailVerificationHashKey: Buffer;
+  readonly #emailVerificationCode: () => string;
 
   constructor(options: {
     repository: AuthRepository;
     verificationProvider: VerificationProvider;
+    emailProvider?: EmailProvider;
+    emailVerificationHashKey?: Buffer;
+    emailVerificationCode?: () => string;
     rateLimiter?: RateLimiter;
     now?: () => Date;
     sessionTtlMs?: number;
@@ -72,10 +93,15 @@ export class AuthService {
   }) {
     this.repository = options.repository;
     this.verificationProvider = options.verificationProvider;
+    this.emailProvider = options.emailProvider ?? new MockEmailProvider();
     this.#rateLimiter = options.rateLimiter ?? new ApplicationRateLimiter();
     this.#now = options.now ?? (() => new Date());
     this.#sessionTtlMs = options.sessionTtlMs ?? 30 * 24 * 60 * minute;
     this.#signupCreditGranter = options.signupCreditGranter;
+    this.#emailVerificationHashKey = options.emailVerificationHashKey ??
+      Buffer.alloc(32, 11);
+    this.#emailVerificationCode = options.emailVerificationCode ??
+      (() => String(randomInt(0, 1_000_000)).padStart(6, "0"));
   }
 
   async register(input: RegistrationInput, context: AuthRequestContext) {
@@ -401,6 +427,130 @@ export class AuthService {
     return (await this.authenticateSession(token))?.user ?? null;
   }
 
+  async updateOwnName(user: User, input: AccountNameUpdateInput) {
+    const updated = await this.repository.updateOwnName({
+      userId: user.id,
+      firstName: input.firstName,
+      lastName: input.lastName
+    });
+    if (!updated) throw new AuthServiceError("PROFILE_UPDATE_NOT_AVAILABLE");
+    return { status: "profile_updated" as const, user: toPublicUser(updated) };
+  }
+
+  async startEmailChange(
+    user: User,
+    sessionId: string,
+    input: EmailChangeStartInput,
+    context: AuthRequestContext
+  ) {
+    await this.#limitMany([
+      limitEntry("email-change-start:ip", context.ip, 10, 60 * minute),
+      limitEntry("email-change-start:user", user.id, 3, 60 * minute),
+      limitEntry("email-change-start:email", input.newEmail, 3, 60 * minute)
+    ]);
+    if (user.email === input.newEmail) {
+      throw new AuthServiceError("EMAIL_CHANGE_NOT_AVAILABLE");
+    }
+    const record = await this.confirmOwnPassword(user, input.currentPassword);
+    const now = this.#now();
+    const emailChangeId = randomUUID();
+    const code = this.#emailVerificationCode();
+    const expiresAt = new Date(now.getTime() + emailChangeChallengeTtlMs);
+    const created = await this.repository.createEmailChangeChallenge({
+      id: emailChangeId,
+      userId: user.id,
+      initiatingSessionId: sessionId,
+      expectedPasswordHash: record.passwordHash,
+      newEmail: input.newEmail,
+      codeHash: hashEmailVerificationCode(
+        emailChangeId,
+        code,
+        this.#emailVerificationHashKey
+      ),
+      now: now.toISOString(),
+      expiresAt: expiresAt.toISOString()
+    });
+    if (!created) throw new AuthServiceError("EMAIL_CHANGE_NOT_AVAILABLE");
+    try {
+      await Promise.all([
+        this.emailProvider.sendEmailChangeVerification({
+          to: input.newEmail,
+          code,
+          expiresInMinutes: emailChangeChallengeTtlMs / minute,
+          locale: user.uiLocale
+        }),
+        this.emailProvider.sendEmailChangeNotice({
+          to: user.email,
+          proposedEmail: input.newEmail,
+          locale: user.uiLocale
+        })
+      ]);
+    } catch (error) {
+      await this.repository.invalidateEmailChangeChallenge(
+        emailChangeId,
+        user.id,
+        this.#now().toISOString()
+      ).catch(() => undefined);
+      writePiiSafeOperationalError("email_change_delivery_failed");
+      throw new AuthServiceError("EMAIL_DELIVERY_UNAVAILABLE", { cause: error });
+    }
+    return {
+      status: "verification_required" as const,
+      emailChangeId,
+      expiresAt: expiresAt.toISOString()
+    };
+  }
+
+  async confirmEmailChange(
+    user: User,
+    sessionId: string,
+    input: EmailChangeConfirmInput,
+    context: AuthRequestContext
+  ) {
+    await this.#limitMany([
+      limitEntry("email-change-confirm:ip", context.ip, 20, 15 * minute),
+      limitEntry("email-change-confirm:user", user.id, 8, 15 * minute),
+      limitEntry("email-change-confirm:id", input.emailChangeId, 8, 15 * minute)
+    ]);
+    const now = this.#now();
+    const challenge = await this.repository.consumeEmailChangeChallengeAttempt({
+      emailChangeId: input.emailChangeId,
+      userId: user.id,
+      sessionId,
+      now: now.toISOString()
+    });
+    if (!challenge) throw new AuthServiceError("INVALID_EMAIL_CHANGE");
+    const actualHash = hashEmailVerificationCode(
+      challenge.id,
+      input.code,
+      this.#emailVerificationHashKey
+    );
+    const expected = Buffer.from(challenge.codeHash, "hex");
+    const actual = Buffer.from(actualHash, "hex");
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      throw new AuthServiceError("INVALID_EMAIL_CHANGE");
+    }
+    const completed = await this.repository.completeEmailChange({
+      emailChangeId: challenge.id,
+      userId: user.id,
+      sessionId,
+      now: this.#now().toISOString()
+    });
+    if (!completed) {
+      await this.repository.invalidateEmailChangeChallenge(
+        challenge.id,
+        user.id,
+        this.#now().toISOString()
+      ).catch(() => undefined);
+      throw new AuthServiceError("INVALID_EMAIL_CHANGE");
+    }
+    return {
+      status: "email_changed" as const,
+      user: toPublicUser(completed.user),
+      revokedSessionCount: completed.revokedSessionCount
+    };
+  }
+
   async authenticateSession(token: string | undefined) {
     if (!token) return null;
     const result = await this.repository.findUserBySessionTokenHash(
@@ -650,6 +800,10 @@ export class AuthServiceError extends Error {
       | "RATE_LIMIT_UNAVAILABLE"
       | "INVALID_PHONE_CHANGE"
       | "PHONE_CHANGE_NOT_AVAILABLE"
+      | "PROFILE_UPDATE_NOT_AVAILABLE"
+      | "INVALID_EMAIL_CHANGE"
+      | "EMAIL_CHANGE_NOT_AVAILABLE"
+      | "EMAIL_DELIVERY_UNAVAILABLE"
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
       | "USER_NOT_FOUND"
@@ -698,6 +852,16 @@ export function hashSessionToken(token: string) {
 
 export function hashPasswordRecoveryToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
+}
+
+export function hashEmailVerificationCode(
+  challengeId: string,
+  code: string,
+  key: Buffer
+) {
+  return createHmac("sha256", key)
+    .update(`${challengeId}:${code}`)
+    .digest("hex");
 }
 
 function mapAdminRepositoryError(error: unknown) {

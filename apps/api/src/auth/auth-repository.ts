@@ -108,6 +108,25 @@ export type PhoneChangeCompletionRecord = {
   invalidatedRecoveryGrantCount: number;
 };
 
+export type EmailChangeChallengeRecord = {
+  id: string;
+  userId: string;
+  initiatingSessionId: string;
+  newEmail: string;
+  codeHash: string;
+  attemptCount: number;
+  expiresAt: string;
+  createdAt: string;
+};
+
+export type EmailChangeCompletionRecord = {
+  user: AuthUserRecord;
+  previousEmail: string;
+  revokedSessionCount: number;
+  invalidatedRecoveryChallengeCount: number;
+  invalidatedRecoveryGrantCount: number;
+};
+
 export type AdminUserCursor = { createdAt: string; id: string };
 
 export type ListAdminUsersInput = {
@@ -128,6 +147,11 @@ export interface AuthRepository {
   readonly mode: "memory" | "postgres";
   createUser(input: CreateAuthUserInput): Promise<AuthUserRecord>;
   findUserByEmail(email: string): Promise<AuthUserRecord | null>;
+  updateOwnName(input: {
+    userId: string;
+    firstName: string;
+    lastName: string;
+  }): Promise<AuthUserRecord | null>;
   listUsersForAdmin(
     input: ListAdminUsersInput
   ): Promise<ListAdminUsersResult>;
@@ -233,6 +257,33 @@ export interface AuthRepository {
     sessionId: string;
     now: string;
   }): Promise<PhoneChangeCompletionRecord | null>;
+  createEmailChangeChallenge(input: {
+    id: string;
+    userId: string;
+    initiatingSessionId: string;
+    expectedPasswordHash: string;
+    newEmail: string;
+    codeHash: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean>;
+  invalidateEmailChangeChallenge(
+    emailChangeId: string,
+    userId: string,
+    now: string
+  ): Promise<void>;
+  consumeEmailChangeChallengeAttempt(input: {
+    emailChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }): Promise<EmailChangeChallengeRecord | null>;
+  completeEmailChange(input: {
+    emailChangeId: string;
+    userId: string;
+    sessionId: string;
+    now: string;
+  }): Promise<EmailChangeCompletionRecord | null>;
   close(): Promise<void>;
 }
 

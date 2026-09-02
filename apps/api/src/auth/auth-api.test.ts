@@ -22,6 +22,7 @@ import {
   MockVerificationProvider,
   type VerificationProvider
 } from "./verification-provider";
+import { MockEmailProvider, type EmailProvider } from "./email-provider";
 
 const apps: ReturnType<typeof buildApp>[] = [];
 
@@ -35,6 +36,7 @@ function createAuthApp(
     production?: boolean;
     secureCookies?: boolean;
     verificationProvider?: VerificationProvider;
+    emailProvider?: EmailProvider;
     rateLimiter?: RateLimiter;
     endpointRateLimiter?: RateLimiter;
   } = {}
@@ -46,6 +48,9 @@ function createAuthApp(
     repository,
     verificationProvider: options.verificationProvider ??
       new MockVerificationProvider("123456"),
+    emailProvider: options.emailProvider ?? new MockEmailProvider(),
+    emailVerificationHashKey: Buffer.alloc(32, 12),
+    emailVerificationCode: () => "654321",
     signupCreditGranter: callService,
     rateLimiter: options.rateLimiter
   });
@@ -507,6 +512,35 @@ describe("auth API", () => {
     });
     expect(current.statusCode).toBe(200);
     expect(current.json().user.email).toBe(registration.email);
+
+    const invalidNameUpdate = await app.inject({
+      method: "PATCH",
+      url: "/api/account/profile/name",
+      headers: { cookie },
+      payload: { firstName: "", lastName: "Keller", role: "superadmin" }
+    });
+    expect(invalidNameUpdate.statusCode).toBe(400);
+
+    const nameUpdated = await app.inject({
+      method: "PATCH",
+      url: "/api/account/profile/name",
+      headers: { cookie },
+      payload: { firstName: "  Nina-Maria ", lastName: " Keller " }
+    });
+    expect(nameUpdated.statusCode).toBe(200);
+    expect(nameUpdated.json()).toMatchObject({
+      status: "profile_updated",
+      user: { firstName: "Nina-Maria", lastName: "Keller" }
+    });
+    const currentAfterNameUpdate = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    });
+    expect(currentAfterNameUpdate.json().user).toMatchObject({
+      firstName: "Nina-Maria",
+      lastName: "Keller"
+    });
 
     const usage = await app.inject({
       method: "GET",
@@ -1351,6 +1385,92 @@ describe("auth API", () => {
       });
       expect(response.statusCode).toBe(403);
     }
+  });
+
+  it("changes the login email only after password proof and new-address verification", async () => {
+    const emailProvider = new MockEmailProvider();
+    const { app, repository } = createAuthApp(undefined, { emailProvider });
+    const cookie = await registerAndVerify(app, registration);
+    const secondSession = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: registration.email, password: registration.password }
+    });
+    const secondCookie = String(secondSession.headers["set-cookie"]);
+    const newEmail = `changed-${randomUUID()}@example.com`;
+
+    const wrongPassword = await app.inject({
+      method: "POST",
+      url: "/api/auth/email-change/start",
+      headers: { cookie },
+      payload: { newEmail, currentPassword: "wrong-password" }
+    });
+    expect(wrongPassword.statusCode).toBe(401);
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/auth/email-change/start",
+      headers: { cookie },
+      payload: { newEmail: ` ${newEmail.toUpperCase()} `, currentPassword: registration.password }
+    });
+    expect(started.statusCode).toBe(202);
+    expect(started.json()).toMatchObject({
+      status: "verification_required",
+      emailChangeId: expect.any(String),
+      expiresAt: expect.any(String)
+    });
+    expect(emailProvider.verificationMessages).toEqual([
+      expect.objectContaining({ to: newEmail, code: "654321" })
+    ]);
+    expect(emailProvider.noticeMessages).toEqual([
+      expect.objectContaining({ to: registration.email, proposedEmail: newEmail })
+    ]);
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/auth/email-change/confirm",
+      headers: { cookie },
+      payload: { emailChangeId: started.json().emailChangeId, code: "111111" }
+    });
+    expect(rejected.statusCode).toBe(401);
+
+    const confirmed = await app.inject({
+      method: "POST",
+      url: "/api/auth/email-change/confirm",
+      headers: { cookie },
+      payload: { emailChangeId: started.json().emailChangeId, code: "654321" }
+    });
+    expect(confirmed.statusCode).toBe(200);
+    expect(confirmed.json()).toMatchObject({
+      status: "email_changed",
+      user: { email: newEmail },
+      revokedSessionCount: 1
+    });
+    await expect(repository.findUserByEmail(registration.email)).resolves.toBeNull();
+    await expect(repository.findUserByEmail(newEmail)).resolves.toMatchObject({
+      email: newEmail
+    });
+
+    const oldSession = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: secondCookie }
+    });
+    expect(oldSession.statusCode).toBe(401);
+    const currentSession = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie }
+    });
+    expect(currentSession.json().user.email).toBe(newEmail);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: "/api/auth/email-change/confirm",
+      headers: { cookie },
+      payload: { emailChangeId: started.json().emailChangeId, code: "654321" }
+    });
+    expect(replay.statusCode).toBe(401);
   });
 
   it("accepts call preparation quickly and exposes only its durable owner state", async () => {

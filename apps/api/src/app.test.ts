@@ -342,7 +342,7 @@ describe("call API", () => {
     }
   );
 
-  it.each(["PUT", "DELETE"])(
+  it.each(["PUT", "PATCH", "DELETE"])(
     "allows browser preflight for %s requests",
     async (method) => {
       const app = createApp();

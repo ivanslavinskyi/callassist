@@ -141,8 +141,8 @@ Unsafe browser requests with a foreign `Origin` are rejected before route dispat
 while `SameSite=Lax` session cookies provide the primary CSRF boundary. Production
 sessions use a `Secure`, `HttpOnly`, high-priority `__Host-` cookie.
 
-`pnpm env:init` creates `.env` with independent encryption, promo-code HMAC and
-rate-limit HMAC keys and never overwrites an existing file. Existing local development
+`pnpm env:init` creates `.env` with independent encryption, promo-code HMAC,
+rate-limit HMAC, and email-verification HMAC keys and never overwrites an existing file. Existing local development
 environments may temporarily derive rate-limit HMACs from `DATA_ENCRYPTION_KEY`;
 production requires an explicit independent `RATE_LIMIT_HASH_KEY`. Existing promo
 deployments may temporarily fall back to `DATA_ENCRYPTION_KEY`, but should set and
@@ -198,7 +198,7 @@ through a public application endpoint.
 
 The API includes the identity foundation endpoints under `/api/auth`: registration,
 phone verification/resend, login, verified-phone password recovery, authenticated
-verified-phone change, logout, and
+verified-phone change, verified login-email change, logout, and
 current-session lookup. Registration requires separate first and last names and a
 Twilio Verify SMS confirmation. Recovery uses a generic non-enumerating start, a
 durable eight-attempt OTP challenge, and a 15-minute single-use grant whose digest is
@@ -208,6 +208,14 @@ for the unique replacement number; completion keeps only the initiating session 
 invalidates unused recovery capabilities created for the old phone.
 Local development uses `VERIFICATION_DRIVER=mock` and `MOCK_VERIFICATION_CODE=000000`;
 never use the mock driver in a public environment.
+
+Email change requires the current password and a session-bound 10-minute code sent to
+the proposed unique address. The old address remains the login identity until that code
+is verified; completion keeps the initiating session, revokes the others, invalidates
+unused recovery capabilities, and sends a notice to the old address. Local development
+uses `EMAIL_DRIVER=mock`. Production fails closed unless `EMAIL_DRIVER=resend`,
+`RESEND_API_KEY`, `EMAIL_FROM`, and an independent base64 32-byte
+`EMAIL_VERIFICATION_HASH_KEY` are configured.
 
 The web app exposes the corresponding localized flows at `/en/register`, `/en/verify`,
 `/en/login`, `/en/recover` and their `/de` equivalents. Recovery capabilities stay
@@ -283,8 +291,9 @@ unanswered, canceled, and technical failures refund the reservation once.
 
 The localized account page at `/en/app/account` or `/de/app/account` shows the
 required first and last name, verified contact data, current usage, and ledger history.
-The same localized account UI can replace the verified mobile after password and SMS
-step-up without exposing the challenge in a URL or browser storage.
+The same localized account UI can update the account name and replace the login email
+or verified mobile after password and email/SMS step-up without exposing a challenge in
+a URL or browser storage.
 It also lists up to 50 active sessions using bounded browser/platform categories rather
 than raw User-Agent values. Users can revoke one owner-scoped session, end the current
 browser session, or revoke all sessions; revoking the current/all sessions clears the

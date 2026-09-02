@@ -1,6 +1,8 @@
 import type {
   AccountDeletionInput,
   AccountDeletionResponse,
+  AccountNameUpdateInput,
+  AccountNameUpdateResponse,
   AccountSessionList,
   AccountStatusAction,
   ApprovalDecision,
@@ -33,6 +35,10 @@ import type {
   EditorialDraftUpdateInput,
   EditorialRevisionSummary,
   CreditUsage,
+  EmailChangeConfirmInput,
+  EmailChangeConfirmResponse,
+  EmailChangeStartInput,
+  EmailChangeStartResponse,
   CreateCallBriefInput,
   LoginInput,
   OnboardingAcceptanceInput,
@@ -186,6 +192,27 @@ export async function confirmPhoneChange(input: PhoneChangeConfirmInput) {
 
 export async function getCurrentUser() {
   return apiRequest<{ user: User }>("/api/auth/me");
+}
+
+export async function startEmailChange(input: EmailChangeStartInput) {
+  return apiRequest<EmailChangeStartResponse>(
+    "/api/auth/email-change/start",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function confirmEmailChange(input: EmailChangeConfirmInput) {
+  return apiRequest<EmailChangeConfirmResponse>(
+    "/api/auth/email-change/confirm",
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function updateOwnName(input: AccountNameUpdateInput) {
+  return apiRequest<AccountNameUpdateResponse>("/api/account/profile/name", {
+    method: "PATCH",
+    body: JSON.stringify(input)
+  });
 }
 
 export async function getOnboardingStatus(locale: ContentLocale) {

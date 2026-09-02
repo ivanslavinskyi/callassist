@@ -6,11 +6,17 @@ import {
   accountDataExportSchema,
   accountDeletionInputSchema,
   accountDeletionRequestSchema,
+  accountNameUpdateInputSchema,
+  accountNameUpdateResponseSchema,
   callDataDeletionInputSchema,
   callDataDeletionResultSchema,
   accountSessionListSchema,
   accountStatusActionSchema,
   creditUsageSchema,
+  emailChangeConfirmInputSchema,
+  emailChangeConfirmResponseSchema,
+  emailChangeStartInputSchema,
+  emailChangeStartResponseSchema,
   loginInputSchema,
   passwordRecoveryCompleteInputSchema,
   passwordRecoveryCompleteResponseSchema,
@@ -145,6 +151,75 @@ describe("registrationInputSchema", () => {
       },
       revokedSessionCount: 2
     })).toMatchObject({ status: "phone_changed", revokedSessionCount: 2 });
+  });
+
+  it("validates owner name updates without accepting identity fields", () => {
+    expect(accountNameUpdateInputSchema.parse({
+      firstName: "  Nina ",
+      lastName: " Keller "
+    })).toEqual({ firstName: "Nina", lastName: "Keller" });
+    expect(accountNameUpdateInputSchema.safeParse({
+      firstName: "Nina",
+      lastName: "Keller",
+      role: "superadmin"
+    }).success).toBe(false);
+    expect(accountNameUpdateResponseSchema.parse({
+      status: "profile_updated",
+      user: {
+        id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
+        email: validRegistration.email,
+        phoneE164: validRegistration.phoneE164,
+        phoneVerifiedAt: "2026-08-23T10:00:00.000Z",
+        firstName: "Nina",
+        lastName: "Keller",
+        role: "user",
+        status: "active",
+        uiLocale: "de",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        lastLoginAt: null
+      }
+    }).status).toBe("profile_updated");
+  });
+
+  it("keeps authenticated email-change payloads strict and normalized", () => {
+    const emailChangeId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    expect(emailChangeStartInputSchema.parse({
+      newEmail: " New.Address@Example.com ",
+      currentPassword: "current-password"
+    })).toEqual({
+      newEmail: "new.address@example.com",
+      currentPassword: "current-password"
+    });
+    expect(emailChangeStartResponseSchema.parse({
+      status: "verification_required",
+      emailChangeId,
+      expiresAt: "2026-09-02T10:00:00.000Z"
+    }).emailChangeId).toBe(emailChangeId);
+    expect(emailChangeConfirmInputSchema.safeParse({
+      emailChangeId,
+      code: "123456"
+    }).success).toBe(true);
+    expect(emailChangeConfirmInputSchema.safeParse({
+      emailChangeId,
+      code: "12345"
+    }).success).toBe(false);
+    expect(emailChangeConfirmResponseSchema.parse({
+      status: "email_changed",
+      user: {
+        id: emailChangeId,
+        email: "new.address@example.com",
+        phoneE164: validRegistration.phoneE164,
+        phoneVerifiedAt: "2026-08-23T10:00:00.000Z",
+        firstName: "Nina",
+        lastName: "Keller",
+        role: "user",
+        status: "active",
+        uiLocale: "de",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        lastLoginAt: null
+      },
+      revokedSessionCount: 2
+    }).status).toBe("email_changed");
   });
 
   it("validates reconciled credit usage without exposing idempotency keys", () => {

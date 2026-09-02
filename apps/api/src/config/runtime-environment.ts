@@ -41,8 +41,16 @@ export function validateRuntimeEnvironment(
 
   if (runtime === "api") {
     requireExact(environment, "VERIFICATION_DRIVER", "twilio", issues);
+    requireExact(environment, "EMAIL_DRIVER", "resend", issues);
     requireExact(environment, "BRIEF_COMPILER_DRIVER", "openai", issues);
     requireSecret(environment, "TWILIO_VERIFY_SERVICE_SID", issues);
+    requireSecret(environment, "RESEND_API_KEY", issues);
+    requireSecret(environment, "EMAIL_FROM", issues);
+    requireBase64Key(
+      environment.EMAIL_VERIFICATION_HASH_KEY,
+      "EMAIL_VERIFICATION_HASH_KEY",
+      issues
+    );
     requireBase64Key(
       environment.PROMO_CODE_HASH_KEY,
       "PROMO_CODE_HASH_KEY",
@@ -55,6 +63,9 @@ export function validateRuntimeEnvironment(
     );
     const rateLimitHashKey = decodeBase64Key(environment.RATE_LIMIT_HASH_KEY);
     const promoCodeHashKey = decodeBase64Key(environment.PROMO_CODE_HASH_KEY);
+    const emailVerificationHashKey = decodeBase64Key(
+      environment.EMAIL_VERIFICATION_HASH_KEY
+    );
     if (environment.PROMO_CODE_HASH_KEY?.trim() && dataEncryptionMaterial) {
       try {
         const promoKey = parseDataEncryptionKey(
@@ -74,6 +85,16 @@ export function validateRuntimeEnvironment(
     if (rateLimitHashKey && promoCodeHashKey &&
       rateLimitHashKey.equals(promoCodeHashKey)) {
       issues.push("RATE_LIMIT_HASH_KEY must differ from PROMO_CODE_HASH_KEY");
+    }
+    if (emailVerificationHashKey && dataEncryptionMaterial &&
+      dataEncryptionMaterialUsesKey(dataEncryptionMaterial, emailVerificationHashKey)) {
+      issues.push("EMAIL_VERIFICATION_HASH_KEY must be independent");
+    }
+    if (emailVerificationHashKey && (
+      emailVerificationHashKey.equals(rateLimitHashKey ?? Buffer.alloc(0)) ||
+      emailVerificationHashKey.equals(promoCodeHashKey ?? Buffer.alloc(0))
+    )) {
+      issues.push("EMAIL_VERIFICATION_HASH_KEY must differ from other HMAC keys");
     }
     const origins = environment.WEB_ORIGIN
       ?.split(",")

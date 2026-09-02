@@ -18,6 +18,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "primary-1",
     PROMO_CODE_HASH_KEY: Buffer.alloc(32, 8).toString("base64"),
     RATE_LIMIT_HASH_KEY: Buffer.alloc(32, 6).toString("base64"),
+    EMAIL_VERIFICATION_HASH_KEY: Buffer.alloc(32, 5).toString("base64"),
     OPENAI_API_KEY: "openai-private",
     TWILIO_ACCOUNT_SID: "AC123",
     TWILIO_AUTH_TOKEN: "twilio-private",
@@ -26,6 +27,9 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     PUBLIC_BASE_URL: "https://calls.example.test",
     WEB_ORIGIN: "https://www.example.test,https://admin.example.test",
     VERIFICATION_DRIVER: "twilio",
+    EMAIL_DRIVER: "resend",
+    RESEND_API_KEY: "resend-private",
+    EMAIL_FROM: "SHPROHLI <security@example.test>",
     BRIEF_COMPILER_DRIVER: "openai",
     PORT: "4000",
     TWILIO_WEBHOOK_PORT: "4001"
@@ -53,6 +57,7 @@ describe("production runtime configuration", () => {
     environment.STORAGE_DRIVER = "memory";
     environment.TELEPHONY_DRIVER = "mock";
     environment.VERIFICATION_DRIVER = "mock";
+    environment.EMAIL_DRIVER = "mock";
     environment.BRIEF_COMPILER_DRIVER = "mock";
     environment.DATABASE_URL = "postgresql://user:password@localhost/db";
     environment.PUBLIC_BASE_URL = "http://localhost:4001";
@@ -71,6 +76,7 @@ describe("production runtime configuration", () => {
           "STORAGE_DRIVER must be postgres",
           "TELEPHONY_DRIVER must be twilio",
           "VERIFICATION_DRIVER must be twilio",
+          "EMAIL_DRIVER must be resend",
           "BRIEF_COMPILER_DRIVER must be openai",
           "DATABASE_URL must not use a loopback host",
           "PUBLIC_BASE_URL must contain only non-local HTTPS origins",
@@ -113,6 +119,10 @@ describe("production runtime configuration", () => {
     delete environment.TWILIO_VERIFY_SERVICE_SID;
     delete environment.WEB_ORIGIN;
     delete environment.VERIFICATION_DRIVER;
+    delete environment.EMAIL_DRIVER;
+    delete environment.RESEND_API_KEY;
+    delete environment.EMAIL_FROM;
+    delete environment.EMAIL_VERIFICATION_HASH_KEY;
     delete environment.BRIEF_COMPILER_DRIVER;
 
     expect(() => validateRuntimeEnvironment(environment, "worker"))
