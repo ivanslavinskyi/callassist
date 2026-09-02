@@ -527,7 +527,10 @@ export class CallService {
   }
 
   async approveAndStart(id: string, userId: string | null = null) {
-    await this.approveCompilation(id);
+    const current = await this.#require(id);
+    if (!current.compilation?.approvedAt) {
+      await this.approveCompilation(id);
+    }
     return this.start(id, userId);
   }
 

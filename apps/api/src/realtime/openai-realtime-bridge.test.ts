@@ -157,6 +157,7 @@ describe("OpenAIRealtimeBridge", () => {
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
+    let consentSocketUrl = "";
     const events: string[] = [];
     const unsubscribe = service.subscribe(created.id, (event) =>
       events.push(event.type)
@@ -169,7 +170,10 @@ describe("OpenAIRealtimeBridge", () => {
       service,
       validateStreamToken: (_id, token) => token === "valid",
       createOpenAISocket: () => openAISocket as unknown as WebSocket,
-      createConsentSocket: () => consentSocket as unknown as WebSocket
+      createConsentSocket: (url) => {
+        consentSocketUrl = url;
+        return consentSocket as unknown as WebSocket;
+      }
     });
 
     bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
@@ -191,6 +195,32 @@ describe("OpenAIRealtimeBridge", () => {
     await new Promise((resolve) => setImmediate(resolve));
     openAISocket.emit("open");
     consentSocket.emit("open");
+    expect(consentSocketUrl).toBe(
+      "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1"
+    );
+    expect(consentSocket.sent[0]).toMatchObject({
+      type: "session.update",
+      session: {
+        type: "realtime",
+        model: "gpt-realtime-2.1",
+        output_modalities: ["text"],
+        audio: {
+          input: {
+            format: { type: "audio/pcmu" },
+            transcription: {
+              model: "gpt-realtime-whisper",
+              delay: "high",
+              language: "de"
+            },
+            turn_detection: {
+              type: "server_vad",
+              create_response: false,
+              interrupt_response: false
+            }
+          }
+        }
+      }
+    });
     expect(openAISocket.sent[0]).toMatchObject({
       type: "session.update",
       session: {

@@ -628,7 +628,7 @@ export class OpenAIRealtimeBridge {
         this.#apiKey
       );
       consentSocket = this.#createConsentSocket(
-        `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#transcriptionModel)}`,
+        `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#model)}`,
         this.#apiKey
       );
 
@@ -684,7 +684,9 @@ export class OpenAIRealtimeBridge {
         sendConsent({
           type: "session.update",
           session: {
-            type: "transcription",
+            type: "realtime",
+            model: this.#model,
+            output_modalities: ["text"],
             audio: {
               input: {
                 format: { type: "audio/pcmu" },
@@ -697,7 +699,9 @@ export class OpenAIRealtimeBridge {
                   type: "server_vad",
                   threshold: 0.5,
                   prefix_padding_ms: 200,
-                  silence_duration_ms: 500
+                  silence_duration_ms: 500,
+                  create_response: false,
+                  interrupt_response: false
                 }
               }
             }

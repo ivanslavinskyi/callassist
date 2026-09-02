@@ -378,6 +378,12 @@ describe("CallService", () => {
     const started = await service.approveAndStart(brief.id);
     expect(started.brief.status).toBe("dialing");
     expect(started.compilation?.approvedAt).not.toBeNull();
+
+    const repeated = await service.approveAndStart(brief.id);
+    expect(repeated.brief.status).toBe("dialing");
+    expect(repeated.compilation?.approvedAt).toBe(
+      started.compilation?.approvedAt
+    );
   });
 
   it("stops a call without losing its brief", async () => {
