@@ -50,7 +50,19 @@ export function CompilationReview({
       {compiled ? (
         <>
           <p className="call-plan-lead">{compiled.localizedObjective}</p>
-          <div className="plan-setting-chips" aria-label={copy.conversationSettings}>
+          <div className="review-questions">
+            <span>{copy.whatWillDo}</span>
+            <ul>
+              {compiled.successCriteria.map((criterion) => (
+                <li key={criterion}>{criterion}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="review-questions">
+            <span>{copy.callSettings}</span>
+          </div>
+          <div className="plan-setting-chips" aria-label={copy.callSettings}>
             <span>{copy.tone[compiled.tone]}</span>
             <span>{copy.addressing[compiled.addressingStyle ?? "formal"]}</span>
             <span>
@@ -78,6 +90,25 @@ export function CompilationReview({
                 <li key={`${index}-${question.text}`}>{question.text}</li>
               ))}
             </ol>
+          </div>
+
+          <div className="compiled-plan-grid">
+            <div>
+              <span>{copy.approvedInformation}</span>
+              {compiled.approvedFacts.length > 0 ? (
+                <ul>
+                  {compiled.approvedFacts.map((fact) => (
+                    <li key={fact.sourceText}>{fact.callLanguageText}</li>
+                  ))}
+                </ul>
+              ) : <p>{copy.none}</p>}
+            </div>
+            <div>
+              <span>{copy.guardrails}</span>
+              <ul>
+                {compiled.prohibitedActions.map((action) => <li key={action}>{action}</li>)}
+              </ul>
+            </div>
           </div>
         </>
       ) : null}
@@ -147,62 +178,6 @@ export function CompilationReview({
         title={messages.call.approveTitle}
       />
 
-      <details className="technical-details">
-        <summary>{copy.technicalDetails}</summary>
-        <div className="objective-comparison">
-          <div>
-            <span>{copy.originalObjective}</span>
-            <p>{compilation.rawBrief.objective}</p>
-          </div>
-          <div>
-            <span>{copy.successMeans}</span>
-            <ul>
-              {compiled?.successCriteria.map((criterion) => (
-                <li key={criterion}>{criterion}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        {compiled ? (
-          <div className="compiled-plan-grid">
-            <div>
-              <span>{copy.defaultsUsed}</span>
-              <ul>
-                {(compiled.assumptions ?? []).map((assumption) => (
-                  <li key={assumption}>{copy.assumption[assumption]}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <span>{copy.approvedInformation}</span>
-              {compiled.approvedFacts.length > 0 ? (
-                <ul>
-                  {compiled.approvedFacts.map((fact) => (
-                    <li key={fact.sourceText}>{fact.callLanguageText}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p>{copy.none}</p>
-              )}
-            </div>
-            <div>
-              <span>{copy.guardrails}</span>
-              <ul>
-                {compiled.prohibitedActions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        ) : null}
-
-        <small className="compilation-meta">
-          {copy.revision} {compilation.revision ?? 1} · {copy.schema} {compiled?.schemaVersion ?? "1"} ·
-          {copy.policy} {decision.policyVersion} · {copy.compiler} {compilation.compilerModel} ·
-          {copy.snapshot} {compilation.snapshotHash.slice(0, 12)}
-        </small>
-      </details>
     </section>
   );
 }

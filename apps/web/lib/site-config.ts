@@ -20,12 +20,12 @@ export const homeSeo: Record<UiLocale, {
   description: string;
 }> = {
   en: {
-    title: "SHPROHLI — AI phone assistance under your control",
-    description: "Supervised AI phone calls for people with speech impairments or local-language barriers."
+    title: "SHPROHLI — AI-assisted phone calls",
+    description: "SHPROHLI helps people make everyday phone calls when speaking or the local language is a barrier."
   },
   de: {
-    title: "SHPROHLI — KI-Telefonassistenz unter Ihrer Kontrolle",
-    description: "Begleitete KI-Telefonanrufe für Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere."
+    title: "SHPROHLI — KI-unterstützte Telefonanrufe",
+    description: "SHPROHLI hilft bei alltäglichen Telefonanrufen, wenn das Sprechen oder die lokale Sprache eine Hürde ist."
   }
 };
 

@@ -463,7 +463,7 @@ const de: AdminOperationsCopy = {
   retryJobPlaceholder: "z. B. Anbieterincident gelöst und Job geprüft",
   retryJobConfirm: "Diesen Dead-Letter-Job wiederholen? Dabei kann ein externer Anbieter erneut aufgerufen werden.",
   retryJobRestricted: "Nur ein Superadmin darf Dead-Letter-Jobs wiederholen.",
-  preparationRetryUnavailable: "Diese Vorbereitung kann nicht wiederholt werden, da ihre privaten Quelldaten bereits gelÃ¶scht wurden. Starten Sie eine neue Vorbereitung Ã¼ber das Benutzerformular.",
+  preparationRetryUnavailable: "Diese Vorbereitung kann nicht wiederholt werden, da ihre privaten Quelldaten bereits gelöscht wurden. Starten Sie eine neue Vorbereitung über das Benutzerformular.",
   retryJobError: "Der dauerhafte Job wurde nicht wiederholt.",
   outboundTitle: "Steuerung ausgehender Anrufe",
   outboundEnabled: "Ausgehende Anrufe aktiviert",

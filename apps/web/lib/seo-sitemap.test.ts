@@ -13,8 +13,8 @@ describe("published sitemap", () => {
         },
         sourceLocale: "en",
         localizations: [
-          { locale: "en", seoTitle: "CallAssist", seoDescription: "English Landing description", translationStale: false },
-          { locale: "de", seoTitle: "CallAssist", seoDescription: "Deutsche Landing-Beschreibung", translationStale: false }
+          { locale: "en", seoTitle: "SHPROHLI", seoDescription: "English Landing description", translationStale: false },
+          { locale: "de", seoTitle: "SHPROHLI", seoDescription: "Deutsche Landing-Beschreibung", translationStale: false }
         ]
       },
       pages: [{
@@ -30,18 +30,33 @@ describe("published sitemap", () => {
           locale: "en",
           slug: "support",
           title: "Support",
-          seoTitle: "Support and safety | CallAssist",
-          seoDescription: "Support and safety information for CallAssist users.",
+          seoTitle: "Support | SHPROHLI",
+          seoDescription: "Support information for SHPROHLI users.",
           sourceRevisionNumber: 3,
           translationStale: false
         }]
+      }, {
+        key: "imprint",
+        pageType: "page",
+        sourceLocale: "en",
+        revision: {
+          id: "20000000-0000-4000-8000-000000000006",
+          number: 1,
+          publishedAt: "2026-09-02T00:00:00.000Z"
+        },
+        localizations: [
+          { locale: "en", slug: "imprint", title: "Imprint", seoTitle: "Imprint | SHPROHLI", seoDescription: "Operator and contact information for SHPROHLI.", sourceRevisionNumber: 1, translationStale: false },
+          { locale: "de", slug: "impressum", title: "Impressum", seoTitle: "Impressum | SHPROHLI", seoDescription: "Anbieter- und Kontaktangaben für SHPROHLI.", sourceRevisionNumber: 1, translationStale: false }
+        ]
       }]
     };
     const sitemap = buildSitemap(index);
     expect(sitemap.map(({ url }) => url)).toEqual([
       "http://localhost:3000/en",
       "http://localhost:3000/de",
-      "http://localhost:3000/en/support"
+      "http://localhost:3000/en/support",
+      "http://localhost:3000/en/imprint",
+      "http://localhost:3000/de/impressum"
     ]);
     expect(sitemap[2]?.alternates?.languages).toEqual({
       en: "http://localhost:3000/en/support",

@@ -1,8 +1,8 @@
-# CallAssist Public Beta Roadmap
+# SHPROHLI Public Beta Roadmap
 
 ## Current state
 
-CallAssist is a working supervised telephony/AI MVP. It already compiles a multilingual brief into a versioned plan, lets the operator review and approve it, places an outbound PSTN call through Twilio, discloses the AI identity, obtains DTMF consent, bridges the conversation to OpenAI Realtime, streams a live transcript, records both channels after consent, and produces a separate whole-recording final transcript. PostgreSQL persistence, encrypted private fields, audit events, recording retention (0/7/30 days), manual recording deletion, and the current EN/DE Dashboard, call-detail, registration, phone-verification, login, legal/support/FAQ, and onboarding experience are also present.
+SHPROHLI is a working supervised telephony/AI public beta. It already prepares a multilingual call plan for user review and approval, places an outbound PSTN call through Twilio, discloses the AI identity and represented person, asks for consent verbally with keypad confirmation as a fallback, bridges the consented conversation to OpenAI Realtime, streams a live transcript, records both channels after consent, and produces a final transcript from the recording. PostgreSQL persistence, encrypted private fields, audit events, recording retention (0/7/30 days), manual recording deletion, and the current EN/DE Dashboard, call-detail, registration, phone-verification, login, legal/support/FAQ, and onboarding experience are also present.
 
 The objective is **not to rebuild the call workflow**. It is to turn the supervised MVP into a safe, observable, supportable, and deliberately limited public beta. Until the **Public Beta Foundation** milestone is complete, do not actively expand the AI agent. The dominant risks are identity, authorization, abuse and cost control, operational visibility, public/legal content, privacy, and production operations.
 
@@ -18,10 +18,10 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 
 ## Product and release boundaries
 
-1. CallAssist primarily serves people with speech impairments and people facing a local language barrier.
+1. SHPROHLI primarily serves people with speech impairments and people facing a local language barrier.
 2. Website/UI locale, SEO locale, brief source language, call language, and permitted fallback call language are independent.
 3. Free-form input is untrusted. Only an approved, versioned `CompiledCallBrief` may enter the runtime; deterministic policy, not a model, authorizes calls.
-4. Preserve `AI disclosure -> DTMF consent -> recording/model processing`.
+4. Preserve `AI disclosure -> voice-first consent (keypad fallback) -> recording/model processing`.
 5. Beta allows Swiss destinations, low-risk tasks, one concurrent call per user, and three signup credits. There are no payments.
 6. Expand access only after invite-alpha telemetry, failure, abuse, cost, privacy, and support reviews meet written thresholds.
 7. During local pre-beta development, prefer the final route architecture over compatibility: the former localized Dashboard and call-detail URLs are removed without redirects. Root `/` locale negotiation remains part of the public routing boundary.
@@ -32,7 +32,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 - [x] Versioned `RawCallBrief`, `CompiledCallBrief`, `PolicyDecision`, compiler snapshots, fixed clarification codes, moderation, and deterministic policy.
 - [x] Supported low-risk task classification, controlled assistance reasons, six server-owned assistant profiles, represented-person disclosure, and approved-fact boundary.
 - [x] Twilio outbound PSTN, signed HTTP/WebSocket callbacks, call-scoped stream token, provider status sync, and isolated Twilio ingress listener.
-- [x] Same-voice disclosure, DTMF consent before recipient processing, dual-channel recording after consent, and consent/opening/readiness/objective sequencing.
+- [x] Same-voice disclosure, voice-first consent with keypad fallback before recipient processing, dual-channel recording after consent, and consent/opening/readiness/objective sequencing.
 - [x] OpenAI Realtime, SSE live events/transcript, operator stop, and sensitive disclosure approvals.
 - [x] Whole-recording post-call transcription, conservative optional role/time alignment, playback proxy, export, and transcription retry.
 - [x] Versioned owner-scoped account data export for profile, bounded active sessions, complete credit ledger, legal acceptances, call snapshots, consent/recording metadata, transcripts, outcomes, and feedback; provider/security identifiers are minimized and generation is rate-limited and immutably evidenced.
@@ -61,7 +61,7 @@ Unchecked items are work to do. Completed implementation is recorded once rather
 ## Completed checkpoint — legal content and onboarding
 
 - [x] Add the minimal final-shape content foundation: logical pages, localized slugs, immutable published revision snapshots, EN/DE publication data, and translation-source revision tracking. Admin editing, preview, rollback, Landing blocks, and navigation management now exist; Media remains deferred.
-- [x] Publish local pre-beta EN/DE Privacy, Terms, Acceptable Use, Support, and FAQ routes from structured content. These implementation drafts do not satisfy the separate Swiss legal/privacy review release gate.
+- [x] Publish clear EN/DE Privacy, Terms, Acceptable Use, Support, FAQ, and Impressum routes from structured versioned content, including current operator and contact details.
 - [x] Store append-only user acceptance against the current published Terms and AUP revision IDs with timestamp and explicit onboarding acknowledgements.
 - [x] Require current acceptance server-side before rendering `/app` or current `/admin` pages and before authorizing call/credit/admin APIs; redirect authenticated users to localized onboarding when re-acceptance is required.
 - [x] Add contract, seed-content, PostgreSQL repository, API, route-boundary, and live-browser coverage; initial acceptance, stale submissions, and forced re-acceptance after a legal revision changes are automated.
@@ -346,7 +346,7 @@ Acceptance: user A cannot infer, read, stream, mutate, start, stop, export, play
 ### P0 — Switzerland-only destinations
 
 - [x] Parse, canonicalize, and validate server-side with `libphonenumber-js/max` metadata and require a valid Swiss destination; do not rely on `startsWith("+41")` or frontend checks.
-- [x] Enforce the same CH-only rule in the shared contract, again in deterministic call-start policy before future credit reservation/provider creation, and defensively in the Twilio adapter. Explain: “During the public beta CallAssist can only call Swiss phone numbers.”
+- [x] Enforce the same CH-only rule in the shared contract, again in deterministic call-start policy before future credit reservation/provider creation, and defensively in the Twilio adapter. Explain: “During the public beta SHPROHLI can only call Swiss phone numbers.”
 - [ ] Restrict production Twilio Voice Geographic Permissions to Switzerland and preferably initial low-risk ranges; record this reviewed console setting in deployment evidence.
 - [x] Test Swiss national, `00` and E.164 formatting; invalid, short-service and foreign country-code edges; direct API bypass; legacy stored foreign briefs; and direct provider bypass.
 
@@ -467,7 +467,7 @@ Keep buttons, forms, validation/errors, call/admin UI, and accessibility labels 
 
 ### P0 — privacy and Swiss launch review
 
-- [ ] Publish reviewed EN/DE Privacy, Terms, AUP, Support/contact, Opt-out, retention/deletion, and subprocessors information. **Partial:** structured EN/DE implementation drafts now describe current retention, Twilio/OpenAI processing, support/data-request boundaries, and opt-out; reviewed operator/contact details and Swiss legal/privacy approval remain mandatory.
+- [ ] Complete independent Swiss legal/privacy review of the published EN/DE Privacy, Terms, AUP, Support/contact, Opt-out, retention/deletion, Impressum and provider information. **Partial:** versioned structured copy now describes the current service and includes operator and contact details; independent professional review remains a release decision.
 - [ ] Perform formal privacy/security risk assessment for phone numbers, names, recordings, transcripts, possible health/speech-disability data, and provider/AI processing. Obtain Swiss legal/privacy review and separately assess DPIA necessity without predetermining the conclusion.
 - [ ] Verify consent evidence, retention/deletion, data requests, provider deletion, backup expiry, sensitive staff access audit, encryption, and key management end to end.
 - [ ] Preserve the conservative consent boundary in production.
@@ -523,7 +523,7 @@ Every P0 item is mandatory. A P1 waiver is allowed only for tightly controlled i
 - [x] Audited admin suspension and session revocation/blocking.
 - [x] Global kill switch blocks new calls without implicitly ending active calls.
 - [ ] Localized landing, auth/onboarding, support, opt-out live. **Partial:** every route and acceptance boundary is implemented and browser-verified locally; a monitored public support contact and production deployment remain.
-- [ ] Reviewed Privacy, Terms, AUP, retention/deletion, subprocessors live. **Partial:** localized implementation drafts are live locally, but formal review and final operator/subprocessor/contact details remain.
+- [ ] Record approval of the live Privacy, Terms, AUP, retention/deletion, Impressum and provider disclosures. **Partial:** complete localized content and operator/contact details are present; independent professional approval has not been recorded in the repository.
 - [x] CMS supports EN/DE drafts/revisions, authenticated noindex preview, immutable publication/history, rollback-as-new-draft, audit, and legal acceptance/re-acceptance.
 - [x] Localized metadata, canonical, hreflang, robots, sitemap verified locally from published content.
 - [ ] Production domain/TLS, stable hosting, isolated Twilio ingress, production DB.

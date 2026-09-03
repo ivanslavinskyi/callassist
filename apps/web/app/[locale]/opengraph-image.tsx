@@ -15,13 +15,13 @@ export default async function OpenGraphImage({ params }: {
   const headline = hero?.blockType === "hero"
     ? hero.title
     : locale === "de"
-      ? "KI-Telefonassistenz unter Ihrer Kontrolle"
-      : "AI phone assistance under your control";
+      ? "KI-unterstützte Telefonanrufe"
+      : "AI-assisted phone calls";
   const strapline = hero?.blockType === "hero"
     ? hero.badges.join(" · ")
     : locale === "de"
-      ? "Barrierefrei · begleitet · nur Schweiz"
-      : "Accessible · supervised · Switzerland only";
+      ? "Alltagstelefonate · öffentliche Beta · Schweiz"
+      : "Everyday calls · public beta · Switzerland";
   return new ImageResponse(
     <div style={{
       alignItems: "stretch",
@@ -47,7 +47,9 @@ export default async function OpenGraphImage({ params }: {
       </div>
       <div style={{ alignItems: "center", display: "flex", fontSize: 22, justifyContent: "space-between" }}>
         <span>SHPROHLI</span>
-        <span style={{ color: "#168553" }}>{locale.toUpperCase()} · Public beta</span>
+        <span style={{ color: "#168553" }}>
+          {locale.toUpperCase()} · {locale === "de" ? "Öffentliche Beta" : "Public beta"}
+        </span>
       </div>
     </div>,
     size

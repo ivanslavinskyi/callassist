@@ -1131,9 +1131,8 @@ describe("API client headers", () => {
       code: "BRIEF_COMPILER_RESPONSE_INVALID",
       status: 502
     });
-    expect(getCallPreparationErrorMessage(caught)).toContain("after retrying");
-    expect(getCallPreparationErrorMessage(caught)).toContain(
-      "entries are preserved"
+    expect(getCallPreparationErrorMessage(caught)).toBe(
+      "SHPROHLI could not prepare this request safely. Edit the request and try again."
     );
   });
 

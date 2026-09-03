@@ -787,7 +787,7 @@ describe("auth API", () => {
     expect(contentIndex.headers["cache-control"]).toContain("max-age=60");
     expect(contentIndex.json()).toMatchObject({
       landing: {
-        revision: { number: 2 },
+        revision: { number: 1 },
         localizations: expect.arrayContaining([
           expect.objectContaining({ locale: "de", translationStale: false })
         ])
@@ -810,7 +810,7 @@ describe("auth API", () => {
     expect(faq.statusCode).toBe(200);
     expect(faq.json()).toMatchObject({
       faq: {
-        revision: { number: 2 },
+        revision: { number: 1 },
         items: expect.arrayContaining([
           expect.objectContaining({ question: expect.stringContaining("KI-Assistent") })
         ])
@@ -825,7 +825,7 @@ describe("auth API", () => {
     expect(landing.json()).toMatchObject({
       landing: {
         locale: "de",
-        revision: { number: 2 },
+        revision: { number: 1 },
         blocks: [
           { blockType: "hero" },
           { blockType: "problem" },
@@ -834,7 +834,7 @@ describe("auth API", () => {
           { blockType: "how_it_works" },
           { blockType: "safety_privacy" },
           { blockType: "languages" },
-          { blockType: "faq", itemLimit: 7 },
+          { blockType: "faq", itemLimit: 8 },
           { blockType: "cta" }
         ]
       }
@@ -1022,7 +1022,7 @@ describe("auth API", () => {
       headers: { cookie }
     });
     expect(pages.statusCode).toBe(200);
-    expect(pages.json<{ pages: unknown[] }>().pages).toHaveLength(5);
+    expect(pages.json<{ pages: unknown[] }>().pages).toHaveLength(6);
 
     const blockedCalls = await app.inject({
       method: "GET",
@@ -1149,7 +1149,7 @@ describe("auth API", () => {
     });
     expect(faqAfter.json()).toMatchObject({
       faq: {
-        revision: { number: 3 },
+        revision: { number: 2 },
         items: expect.arrayContaining([
           expect.objectContaining({ question: "Ist der KI-Anruf offengelegt?" })
         ])
@@ -1172,7 +1172,7 @@ describe("auth API", () => {
     expect(landingPreview.json()).toMatchObject({
       draft: {
         key: "landing",
-        number: 3,
+        number: 2,
         items: expect.arrayContaining([
           expect.objectContaining({ blockType: "hero" })
         ])
@@ -1188,7 +1188,7 @@ describe("auth API", () => {
       url: "/api/content/landing?locale=de"
     });
     expect(publicLanding.json()).toMatchObject({
-      landing: { revision: { number: 2 } }
+      landing: { revision: { number: 1 } }
     });
   });
 

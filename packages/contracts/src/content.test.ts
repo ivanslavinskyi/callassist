@@ -18,14 +18,15 @@ describe("content and onboarding contracts", () => {
       locale: "de",
       slug: "datenschutz",
       title: "Datenschutz",
-      summary: "Wie CallAssist Daten verarbeitet.",
+      summary: "Wie SHPROHLI Daten verarbeitet.",
       sections: [{
         heading: "Verarbeitete Daten",
-        paragraphs: ["CallAssist verarbeitet Kontodaten."],
-        bullets: ["Telefonnummer", "Transkript"]
+        paragraphs: ["SHPROHLI verarbeitet Kontodaten."],
+        bullets: ["Telefonnummer", "Transkript"],
+        links: [{ kind: "email", label: "Datenschutz", address: "privacy@shprohli.ch" }]
       }],
-      seoTitle: "Datenschutz | CallAssist",
-      seoDescription: "Datenschutzhinweise für CallAssist.",
+      seoTitle: "Datenschutz | SHPROHLI",
+      seoDescription: "Datenschutzhinweise für SHPROHLI.",
       revision: {
         id: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
         number: 1,
@@ -35,10 +36,11 @@ describe("content and onboarding contracts", () => {
       }
     });
     expect(page.sections[0]?.bullets).toContain("Telefonnummer");
+    expect(page.sections[0]?.links?.[0]).toMatchObject({ kind: "email" });
     expect(page).not.toHaveProperty("html");
   });
 
-  it("requires every explicit onboarding acknowledgement", () => {
+  it("retains required legacy compatibility flags in the acceptance payload", () => {
     const valid = {
       locale: "en",
       termsRevisionId: "72d810e8-106e-4a9d-a49a-9892d860ccbe",
@@ -61,14 +63,14 @@ describe("content and onboarding contracts", () => {
     const draft = contentDraftUpdateInputSchema.parse({
       locale: "de",
       title: "Datenschutzhinweise",
-      summary: "Wie CallAssist Daten verarbeitet.",
+      summary: "Wie SHPROHLI Daten verarbeitet.",
       sections: [{
         heading: "Verarbeitete Daten",
-        paragraphs: ["CallAssist verarbeitet Kontodaten."],
+        paragraphs: ["SHPROHLI verarbeitet Kontodaten."],
         bullets: ["Telefonnummer", "Transkript"]
       }],
-      seoTitle: "Datenschutzhinweise | CallAssist",
-      seoDescription: "Datenschutzinformationen für CallAssist.",
+      seoTitle: "Datenschutzhinweise | SHPROHLI",
+      seoDescription: "Datenschutzinformationen für SHPROHLI.",
       sourceRevisionNumber: 1,
       requiresReacceptance: false
     });
@@ -94,8 +96,8 @@ describe("content and onboarding contracts", () => {
           locale: "de",
           slug: "datenschutz",
           title: "Datenschutz",
-          seoTitle: "Datenschutz | CallAssist",
-          seoDescription: "Datenschutzinformationen für CallAssist.",
+          seoTitle: "Datenschutz | SHPROHLI",
+          seoDescription: "Datenschutzinformationen für SHPROHLI.",
           sourceRevisionNumber: 1,
           translationStale: true
         }]
@@ -123,6 +125,14 @@ describe("content and onboarding contracts", () => {
       location: "footer",
       destination: "privacy",
       label: { en: "Privacy", de: "Datenschutz" }
+    }).success).toBe(true);
+    expect(navigationItemSchema.safeParse({
+      id,
+      sortOrder: 1,
+      enabled: true,
+      location: "footer",
+      destination: "imprint",
+      label: { en: "Imprint", de: "Impressum" }
     }).success).toBe(true);
     expect(navigationItemSchema.safeParse({
       id,

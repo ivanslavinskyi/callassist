@@ -587,47 +587,52 @@ export async function liftRecipientSuppressionAsStaff(
 
 export function getCallPreparationErrorMessage(
   error: unknown,
-  options: { rateLimited?: string } = {}
+  options: Partial<{
+    generic: string;
+    unavailable: string;
+    invalid: string;
+    notFound: string;
+    notEditable: string;
+    swissDestinationRequired: string;
+    rateLimited: string;
+  }> = {}
 ) {
+  const copy = {
+    generic: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
+    unavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
+    invalid: "Some call details need attention. Check your entries and try again.",
+    notFound: "This call plan no longer exists. Return to your calls and create a new one.",
+    notEditable: "This call plan can no longer be edited.",
+    swissDestinationRequired: "During the public beta SHPROHLI can only call Swiss phone numbers.",
+    rateLimited: "Too many requests. Wait a moment and try again.",
+    ...options
+  };
   if (!(error instanceof ApiError)) {
-    return "Could not prepare the call. Your entries are preserved. Try again.";
+    return copy.generic;
   }
 
   if (error.code === "BRIEF_COMPILER_UNAVAILABLE") {
-    return "The AI call planner is temporarily unavailable. Your entries are preserved. Try again.";
+    return copy.unavailable;
   }
   if (error.code === "BRIEF_COMPILER_RESPONSE_INVALID") {
-    return "The AI call planner could not produce a valid plan after retrying. Your entries are preserved. Try again.";
+    return copy.generic;
   }
   if (error.code === "INVALID_CALL_BRIEF") {
-    const firstFieldError = Object.entries(error.issues?.fieldErrors ?? {}).find(
-      ([, messages]) => messages?.length
-    );
-    if (firstFieldError) {
-      const [field, messages] = firstFieldError;
-      return `Check ${humanizeFieldName(field)}: ${messages?.[0]}`;
-    }
-    return "Some call details are invalid. Check the highlighted fields and try again.";
+    return copy.invalid;
   }
   if (error.code === "CALL_NOT_FOUND") {
-    return "This call brief no longer exists. Return to the list and create a new one.";
+    return copy.notFound;
   }
   if (error.code === "CALL_NOT_EDITABLE") {
-    return "This call brief can no longer be edited.";
+    return copy.notEditable;
   }
   if (error.code === "SWISS_DESTINATION_REQUIRED") {
-    return "During the public beta SHPROHLI can only call Swiss phone numbers.";
+    return copy.swissDestinationRequired;
   }
   if (error.code === "RATE_LIMITED") {
-    return options.rateLimited ?? "Too many requests. Wait a moment and try again.";
+    return copy.rateLimited;
   }
-  return "Could not prepare the call. Your entries are preserved. Try again.";
-}
-
-function humanizeFieldName(value: string) {
-  return value
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/^./, (character) => character.toUpperCase());
+  return copy.generic;
 }
 
 export async function listCallBriefs(options: {

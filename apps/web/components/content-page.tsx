@@ -2,6 +2,8 @@ import type {
   PublishedContentPage,
   PublishedFaq
 } from "@callassist/contracts";
+import Link from "next/link";
+import { navigationPath } from "@/lib/i18n/content-routing";
 import { AppShell } from "./app-shell";
 import { FaqList } from "./faq-list";
 
@@ -27,8 +29,8 @@ export function ContentPage({
           <h1>{page.title}</h1>
           <p>{page.summary}</p>
           <small>
-            {page.locale === "de" ? "Version" : "Revision"} {page.revision.number}
-            {" · "}{published}
+            Version {page.revision.number}
+            {" · "}{page.locale === "de" ? "Gültig ab" : "Effective"} {published}
           </small>
         </header>
         {page.key === "faq" && faq ? <FaqList items={faq.items} /> : (
@@ -43,6 +45,22 @@ export function ContentPage({
                 <ul>
                   {section.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
                 </ul>
+              ) : null}
+              {section.links?.length ? (
+                <div className="content-links">
+                  {section.links.map((link) => link.kind === "email" ? (
+                    <a href={`mailto:${link.address}`} key={`${link.kind}:${link.address}`}>
+                      {link.label}
+                    </a>
+                  ) : (
+                    <Link
+                      href={navigationPath(page.locale, link.destination)}
+                      key={`${link.kind}:${link.destination}`}
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
+                </div>
               ) : null}
             </section>
           ))}

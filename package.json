@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "turbo build",
+    "copy:check": "node scripts/check-public-copy.mjs",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
     "db:migrate": "corepack pnpm --filter @callassist/api db:migrate",

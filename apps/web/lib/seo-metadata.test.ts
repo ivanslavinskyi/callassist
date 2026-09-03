@@ -15,8 +15,8 @@ const page: PublishedContentPage = {
   title: "Datenschutz",
   summary: "Zusammenfassung",
   sections: [{ heading: "Daten", paragraphs: ["Details"], bullets: [] }],
-  seoTitle: "Datenschutz | CallAssist",
-  seoDescription: "Datenschutzinformationen für CallAssist.",
+  seoTitle: "Datenschutz | SHPROHLI",
+  seoDescription: "Datenschutzinformationen für SHPROHLI.",
   revision: {
     id: "20000000-0000-4000-8000-000000000001",
     number: 2,
@@ -36,7 +36,7 @@ const indexPage: PublishedContentIndexPage = {
   },
   localizations: [
     { locale: "de", slug: "datenschutz", title: "Datenschutz", seoTitle: page.seoTitle, seoDescription: page.seoDescription, sourceRevisionNumber: 2, translationStale: false },
-    { locale: "en", slug: "privacy", title: "Privacy", seoTitle: "Privacy | CallAssist", seoDescription: "Privacy information.", sourceRevisionNumber: 2, translationStale: false }
+    { locale: "en", slug: "privacy", title: "Privacy", seoTitle: "Privacy | SHPROHLI", seoDescription: "Privacy information.", sourceRevisionNumber: 2, translationStale: false }
   ]
 };
 const landing: PublishedLanding = {
@@ -48,7 +48,7 @@ const landing: PublishedLanding = {
   locale: "de",
   blocks: [],
   seo: {
-    title: "Veröffentlichte Landing | CallAssist",
+    title: "Veröffentlichte Landing | SHPROHLI",
     description: "Die veröffentlichte CMS-Beschreibung der deutschen Landingpage."
   }
 };

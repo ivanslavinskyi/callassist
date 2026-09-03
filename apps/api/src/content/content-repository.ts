@@ -23,6 +23,8 @@ export type SeedContentPage = PublishedContentPage & {
   pageId: string;
   localizationId: string;
   revisionLocalizationId: string;
+  /** Keep a current-copy seed upgrade from invalidating existing acceptances. */
+  requiresReacceptanceOnUpgrade?: boolean;
 };
 
 export type SeedEditorialCollection = {

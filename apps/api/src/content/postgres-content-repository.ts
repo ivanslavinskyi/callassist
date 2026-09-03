@@ -159,6 +159,7 @@ export class PostgresContentRepository implements ContentRepository {
 
   async initializeSeedContent(pages: SeedContentPage[]) {
     await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtext('shprohli:seed-content'))`;
       for (const page of pages) {
         const now = new Date(page.revision.publishedAt);
         await transaction`
@@ -177,16 +178,37 @@ export class PostgresContentRepository implements ContentRepository {
             ${now}, ${now}
           ) ON CONFLICT (id) DO NOTHING
         `;
+        const [{ count: priorRevisionCount }] = await transaction<
+          { count: number }[]
+        >`
+          SELECT count(*)::integer AS count
+          FROM content_page_revisions
+          WHERE page_id = ${page.pageId}
+        `;
         await transaction`
           INSERT INTO content_page_revisions (
             id, page_id, revision_number, status, requires_reacceptance,
             created_by_user_id, created_at, updated_at, published_at
-          ) VALUES (
-            ${page.revision.id}, ${page.pageId}, ${page.revision.number},
-            'published', ${page.revision.requiresReacceptance}, ${null},
-            ${now}, ${now}, ${now}
-          ) ON CONFLICT (id) DO NOTHING
+          ) SELECT
+            ${page.revision.id}, ${page.pageId},
+            COALESCE(max(revision_number), 0) + 1,
+            'published',
+            ${priorRevisionCount === 0
+              ? page.revision.requiresReacceptance
+              : (page.requiresReacceptanceOnUpgrade ?? page.revision.requiresReacceptance)},
+            ${null}, ${now}, ${now}, ${now}
+          FROM content_page_revisions
+          WHERE page_id = ${page.pageId}
+          ON CONFLICT DO NOTHING
         `;
+        const [targetRevision] = await transaction<{ number: number }[]>`
+          SELECT revision_number AS number
+          FROM content_page_revisions
+          WHERE id = ${page.revision.id}
+        `;
+        if (!targetRevision) {
+          throw new ContentRepositoryError("CONTENT_REVISION_NOT_FOUND");
+        }
         await transaction`
           INSERT INTO content_page_revision_localizations (
             id, revision_id, locale, title, summary, sections,
@@ -196,7 +218,7 @@ export class PostgresContentRepository implements ContentRepository {
             ${page.revisionLocalizationId}, ${page.revision.id}, ${page.locale},
             ${page.title}, ${page.summary}, ${transaction.json(page.sections)},
             ${page.seoTitle}, ${page.seoDescription},
-            ${page.revision.sourceRevisionNumber}, ${now}, ${now}
+            ${targetRevision.number}, ${now}, ${now}
           ) ON CONFLICT (id) DO NOTHING
         `;
       }
@@ -207,6 +229,7 @@ export class PostgresContentRepository implements ContentRepository {
     collections: SeedEditorialCollection[]
   ) {
     await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtext('shprohli:seed-editorial'))`;
       for (const collection of collections) {
         const revision = collection.revision;
         const createdAt = new Date(revision.createdAt);
@@ -221,12 +244,15 @@ export class PostgresContentRepository implements ContentRepository {
           INSERT INTO content_editorial_revisions (
             id, collection_id, revision_number, status, snapshot,
             created_by_user_id, created_at, updated_at, published_at
-          ) VALUES (
-            ${revision.id}, ${collection.collectionId}, ${revision.number},
+          ) SELECT
+            ${revision.id}, ${collection.collectionId},
+            COALESCE(max(revision_number), 0) + 1,
             'published', ${transaction.json(revision.items)}, ${null},
             ${createdAt}, ${new Date(revision.updatedAt)},
             ${new Date(revision.publishedAt!)}
-          ) ON CONFLICT DO NOTHING
+          FROM content_editorial_revisions
+          WHERE collection_id = ${collection.collectionId}
+          ON CONFLICT DO NOTHING
         `;
       }
     });
@@ -1222,6 +1248,7 @@ export class PostgresContentRepository implements ContentRepository {
     const broken = revision.items.some((item) =>
       item.enabled &&
       item.destination !== "home" &&
+      item.destination !== "how_it_works" &&
       item.destination !== "opt_out" &&
       (["en", "de"] as const).some((locale) =>
         !available.has(`${item.destination}:${locale}`)
@@ -1524,6 +1551,7 @@ function navigationHref(
   index: PublishedContentIndex
 ) {
   if (destination === "home") return `/${locale}`;
+  if (destination === "how_it_works") return `/${locale}#how-it-works`;
   if (destination === "opt_out") return `/${locale}/opt-out`;
   const localization = index.pages
     .find(({ key }) => key === destination)

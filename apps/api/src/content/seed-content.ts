@@ -1,4 +1,5 @@
 import type {
+  ContentLink,
   ContentLocale,
   ContentPageKey,
   ContentSection,
@@ -6,10 +7,7 @@ import type {
   LandingBlock,
   NavigationItem
 } from "@callassist/contracts";
-import type {
-  SeedContentPage,
-  SeedEditorialCollection
-} from "./content-repository";
+import type { SeedContentPage, SeedEditorialCollection } from "./content-repository";
 
 type SeedTranslation = {
   slug: string;
@@ -28,92 +26,69 @@ type SeedDefinition = {
   translations: Record<ContentLocale, SeedTranslation>;
 };
 
-const publishedAt = "2026-08-22T00:00:00.000Z";
-const refreshedLandingPublishedAt = "2026-08-25T00:00:00.000Z";
+const publishedAt = "2026-09-02T00:00:00.000Z";
+
+function section(
+  heading: string,
+  paragraphs: string | string[],
+  bullets: string[] = [],
+  links?: ContentLink[]
+): ContentSection {
+  return {
+    heading,
+    paragraphs: Array.isArray(paragraphs) ? paragraphs : [paragraphs],
+    bullets,
+    ...(links ? { links } : {})
+  };
+}
 
 const definitions: SeedDefinition[] = [
   {
     key: "privacy",
     pageId: "10000000-0000-4000-8000-000000000001",
-    revisionId: "20000000-0000-4000-8000-000000000001",
+    revisionId: "22000000-0000-4000-8000-000000000001",
     requiresReacceptance: false,
     translations: {
       en: {
         slug: "privacy",
-        title: "Privacy notice",
-        summary: "How the local SHPROHLI beta processes account, call, recording, and transcript data.",
-        seoTitle: "Privacy notice | SHPROHLI",
-        seoDescription: "Privacy information for the SHPROHLI public beta.",
+        title: "Privacy Notice",
+        summary: "How SHPROHLI handles personal data when you create an account, prepare a call and use the service.",
+        seoTitle: "Privacy Notice | SHPROHLI",
+        seoDescription: "How SHPROHLI handles account, recipient, call, recording and transcript data.",
         sections: [
-          {
-            heading: "Local pre-beta notice",
-            paragraphs: ["This implementation draft describes the current product behavior. It must receive Swiss legal and privacy review before a public launch."],
-            bullets: []
-          },
-          {
-            heading: "Data we process",
-            paragraphs: ["SHPROHLI processes the information needed to create an account and carry out a supervised call."],
-            bullets: ["First and last name, email address, verified mobile number, account and session data", "Recipient name and phone number, call objective, approved facts, language and retention settings", "Consent evidence, provider status, recordings when enabled, live and final transcripts, and technical events", "Credit ledger, suppression, safety, and administrative audit records"]
-          },
-          {
-            heading: "Why we process it",
-            paragraphs: ["We use this data to authenticate users, compile and execute approved call plans, enforce consent and safety controls, provide transcripts, prevent abuse, reconcile credits, and operate the beta."],
-            bullets: []
-          },
-          {
-            heading: "Providers and international processing",
-            paragraphs: ["Telephony and SMS verification use Twilio. AI conversation and transcription use OpenAI. Provider processing locations, contractual safeguards, and the final subprocessor list remain a launch-review item."],
-            bullets: []
-          },
-          {
-            heading: "Retention and deletion",
-            paragraphs: ["Audio retention is selected per call: delete after the final transcript, retain 7 days, or retain 30 days. For a completed call, the account owner can use password-confirmed call-data deletion: provider audio is removed first, then the brief, transcripts, approval text, and feedback comment are redacted from the live service. Minimized credit, consent, safety, technical, and audit evidence remains. Account-wide anonymization and production backup-expiry procedures remain under development."],
-            bullets: []
-          },
-          {
-            heading: "Your choices and requests",
-            paragraphs: ["You control the facts shared in a call, approve the compiled plan, choose recording retention, and may stop an active call. Use the Support page for access, correction, deletion, privacy, or abuse requests while the formal request workflow is being completed."],
-            bullets: []
-          }
+          section("1. Who is responsible", "SHPROHLI is operated by Ivan Slavinskyi, Weiernstrasse 12, 8355 Aadorf, Switzerland. Questions about privacy or personal data can be sent to privacy@shprohli.ch.", [], [{ kind: "email", label: "Contact SHPROHLI about privacy", address: "privacy@shprohli.ch" }]),
+          section("2. Account data", "We process the information needed to create and protect your account, including your name, email address, verified mobile number, account settings, active sessions and credit history."),
+          section("3. Preparing and making a call", "To prepare and place a call, we process the recipient's name and phone number, your call objective, the information you approve, the selected language, assistance reason and call settings. SHPROHLI uses this information to prepare a call plan for your review and to carry out the call after you approve it."),
+          section("4. Recipient data and consent", "SHPROHLI also processes information about the person receiving the call. The recipient is told that an AI assistant is calling, who it represents, and is asked for consent before the conversation is processed or recorded. Consent is requested verbally first. If the answer cannot be understood reliably, the assistant may offer confirmation by keypad. If the recipient does not consent, the conversation ends."),
+          section("5. Recording and transcription", "After consent, SHPROHLI can show a live transcript during the call and create a final transcript from the recording after the call. Live and final transcripts are generated by AI and may contain mistakes. Important names, dates, numbers and commitments should be checked against the recording while it is available."),
+          section("6. Service providers and international processing", "Twilio provides telephone calling and SMS verification. OpenAI provides AI conversation and transcription services. These providers process the data needed to deliver their part of the service and may process it outside Switzerland. We use provider arrangements and safeguards intended to protect personal data when it is processed internationally."),
+          section("7. Retention", "Audio retention is selected for each call: delete the recording after the final transcript is created, keep it for 7 days, or keep it for 30 days. Other account and call data is retained while it is needed to provide the service, meet the selected settings, protect the service and comply with applicable obligations."),
+          section("8. Data export and deletion", "You can download a JSON copy of the personal data currently associated with your account. You can delete stored recordings and completed call data from the relevant call view, and you can request deletion of your SHPROHLI account from the account page. Certain limited records may be retained where necessary for security, abuse prevention, accounting or legal obligations."),
+          section("9. Security", "We use access controls, account verification and operational safeguards designed to protect the service and the personal data it processes. No online service can guarantee absolute security, so keep your password and verification codes private and report suspicious activity promptly."),
+          section("10. Your rights", "Depending on the circumstances and applicable law, you may ask for access to your personal data, correction of inaccurate data, deletion or restriction of processing. We may need to verify your identity before completing a request."),
+          section("11. Contact", "Send privacy and personal-data requests to privacy@shprohli.ch. For account, call or abuse-related help, use support@shprohli.ch.", [], [{ kind: "email", label: "privacy@shprohli.ch", address: "privacy@shprohli.ch" }, { kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("12. Effective date", "This Privacy Notice is effective from 2 September 2026. The version and effective date shown above identify the notice that is currently published.")
         ]
       },
       de: {
         slug: "datenschutz",
         title: "Datenschutzhinweise",
-        summary: "Wie die lokale SHPROHLI-Beta Konto-, Anruf-, Aufnahme- und Transkriptdaten verarbeitet.",
+        summary: "Wie SHPROHLI Personendaten verarbeitet, wenn Sie ein Konto erstellen, einen Anruf vorbereiten und den Dienst nutzen.",
         seoTitle: "Datenschutzhinweise | SHPROHLI",
-        seoDescription: "Datenschutzinformationen für die öffentliche SHPROHLI-Beta.",
+        seoDescription: "Wie SHPROHLI Konto-, Empfänger-, Anruf-, Aufnahme- und Transkriptdaten verarbeitet.",
         sections: [
-          {
-            heading: "Hinweis zur lokalen Vorab-Beta",
-            paragraphs: ["Dieser Implementierungsentwurf beschreibt das aktuelle Produktverhalten. Vor einem öffentlichen Start ist eine schweizerische Rechts- und Datenschutzprüfung erforderlich."],
-            bullets: []
-          },
-          {
-            heading: "Verarbeitete Daten",
-            paragraphs: ["SHPROHLI verarbeitet die Daten, die für ein Konto und einen begleiteten Anruf erforderlich sind."],
-            bullets: ["Vor- und Nachname, E-Mail-Adresse, bestätigte Mobilnummer, Konto- und Sitzungsdaten", "Name und Telefonnummer des Empfängers, Anrufziel, freigegebene Fakten, Sprache und Aufbewahrungseinstellung", "Einwilligungsnachweis, Anbieterstatus, gegebenenfalls Aufnahmen, Live- und Endtranskripte sowie technische Ereignisse", "Guthaben-, Sperr-, Sicherheits- und administrative Auditdaten"]
-          },
-          {
-            heading: "Zwecke",
-            paragraphs: ["Wir nutzen diese Daten zur Authentifizierung, zur Ausführung genehmigter Anrufpläne, für Einwilligungs- und Sicherheitskontrollen, Transkripte, Missbrauchsschutz, Guthabenabgleich und den Betrieb der Beta."],
-            bullets: []
-          },
-          {
-            heading: "Anbieter und internationale Verarbeitung",
-            paragraphs: ["Telefonie und SMS-Bestätigung verwenden Twilio. KI-Gespräch und Transkription verwenden OpenAI. Verarbeitungsorte, vertragliche Garantien und die endgültige Unterauftragsliste bleiben Teil der Startprüfung."],
-            bullets: []
-          },
-          {
-            heading: "Aufbewahrung und Löschung",
-            paragraphs: ["Die Audioaufbewahrung wird pro Anruf gewählt: nach dem Endtranskript löschen, 7 Tage oder 30 Tage behalten. Bei einem abgeschlossenen Anruf kann die Kontoinhaberin oder der Kontoinhaber die passwortbestätigte Löschung der Anrufdaten nutzen: Zuerst wird die Anbieter-Aufnahme entfernt, danach werden Anrufentwurf, Transkripte, Freigabetexte und Feedback-Kommentar im aktiven Dienst unkenntlich gemacht. Minimierte Guthaben-, Einwilligungs-, Sicherheits-, technische und Audit-Nachweise bleiben erhalten. Die kontoübergreifende Anonymisierung und die produktiven Backup-Abläufe sind noch in Arbeit."],
-            bullets: []
-          },
-          {
-            heading: "Ihre Wahlmöglichkeiten und Anfragen",
-            paragraphs: ["Sie bestimmen die freigegebenen Fakten, genehmigen den Anrufplan, wählen die Aufbewahrung und können einen aktiven Anruf stoppen. Nutzen Sie die Support-Seite für Auskunfts-, Korrektur-, Lösch-, Datenschutz- oder Missbrauchsanfragen."],
-            bullets: []
-          }
+          section("1. Verantwortliche Person", "SHPROHLI wird von Ivan Slavinskyi, Weiernstrasse 12, 8355 Aadorf, Schweiz, betrieben. Fragen zum Datenschutz oder zu Personendaten können Sie an privacy@shprohli.ch senden.", [], [{ kind: "email", label: "SHPROHLI zum Datenschutz kontaktieren", address: "privacy@shprohli.ch" }]),
+          section("2. Kontodaten", "Wir verarbeiten die Angaben, die zur Erstellung und zum Schutz Ihres Kontos erforderlich sind. Dazu gehören Name, E-Mail-Adresse, bestätigte Mobilnummer, Kontoeinstellungen, aktive Sitzungen und Guthabenverlauf."),
+          section("3. Vorbereitung und Durchführung eines Anrufs", "Für einen Anruf verarbeiten wir Name und Telefonnummer der angerufenen Person, Ihr Anrufziel, die von Ihnen freigegebenen Angaben, die gewählte Sprache, den Unterstützungsgrund und die Anrufeinstellungen. Daraus erstellt SHPROHLI einen Anrufplan, den Sie vor dem Anruf prüfen und freigeben."),
+          section("4. Daten der angerufenen Person und Zustimmung", "SHPROHLI verarbeitet auch Angaben über die angerufene Person. Sie wird darüber informiert, dass ein KI-Assistent anruft und in wessen Auftrag er handelt. Vor der Verarbeitung oder Aufzeichnung des Gesprächs wird sie um Zustimmung gebeten. SHPROHLI fragt zuerst mündlich. Kann die Antwort nicht zuverlässig verstanden werden, kann der Assistent eine Bestätigung über die Telefontastatur anbieten. Ohne Zustimmung wird das Gespräch beendet."),
+          section("5. Aufnahme und Transkription", "Nach der Zustimmung kann SHPROHLI während des Anrufs ein Live-Transkript anzeigen und danach aus der Aufnahme ein Endtranskript erstellen. Beide Transkripte werden mit KI erstellt und können Fehler enthalten. Wichtige Namen, Daten, Zahlen und Zusagen sollten Sie mit der Aufnahme vergleichen, solange diese verfügbar ist."),
+          section("6. Dienstleister und internationale Bearbeitung", "Twilio stellt Telefonie und SMS-Bestätigung bereit. OpenAI stellt Dienste für KI-Gespräche und Transkription bereit. Diese Anbieter bearbeiten die für ihren Dienst erforderlichen Daten und können dies ausserhalb der Schweiz tun. Für die internationale Bearbeitung verwenden wir Vereinbarungen und Schutzmassnahmen zum Schutz von Personendaten."),
+          section("7. Aufbewahrung", "Für jeden Anruf wählen Sie eine Audioaufbewahrung: Aufnahme nach Erstellung des Endtranskripts löschen, 7 Tage aufbewahren oder 30 Tage aufbewahren. Andere Konto- und Anrufdaten werden so lange gespeichert, wie dies für den Dienst, Ihre Einstellungen, den Schutz des Dienstes oder anwendbare Pflichten erforderlich ist."),
+          section("8. Datenexport und Löschung", "Sie können eine JSON-Kopie der Personendaten herunterladen, die aktuell mit Ihrem Konto verknüpft sind. Gespeicherte Aufnahmen und Daten abgeschlossener Anrufe können Sie in der jeweiligen Anrufansicht löschen. Die Löschung Ihres SHPROHLI-Kontos können Sie auf der Kontoseite anfordern. Bestimmte begrenzte Angaben dürfen aufbewahrt werden, soweit dies für Sicherheit, Missbrauchsschutz, Abrechnung oder rechtliche Pflichten erforderlich ist."),
+          section("9. Sicherheit", "Wir verwenden Zugriffskontrollen, Kontobestätigung und betriebliche Schutzmassnahmen für den Dienst und die bearbeiteten Personendaten. Kein Onlinedienst kann vollständige Sicherheit garantieren. Halten Sie deshalb Passwort und Bestätigungscodes geheim und melden Sie verdächtige Aktivitäten umgehend."),
+          section("10. Ihre Rechte", "Je nach Situation und anwendbarem Recht können Sie Auskunft über Ihre Personendaten, die Berichtigung unrichtiger Angaben sowie Löschung oder Einschränkung der Bearbeitung verlangen. Vor der Bearbeitung einer Anfrage müssen wir gegebenenfalls Ihre Identität prüfen."),
+          section("11. Kontakt", "Datenschutz- und Personendatenanfragen senden Sie an privacy@shprohli.ch. Für Hilfe zu Konto, Anrufen oder Missbrauch verwenden Sie support@shprohli.ch.", [], [{ kind: "email", label: "privacy@shprohli.ch", address: "privacy@shprohli.ch" }, { kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("12. Gültig ab", "Diese Datenschutzhinweise gelten ab dem 2. September 2026. Version und Datum oberhalb des Dokuments bezeichnen die aktuell veröffentlichte Fassung.")
         ]
       }
     }
@@ -121,37 +96,41 @@ const definitions: SeedDefinition[] = [
   {
     key: "terms",
     pageId: "10000000-0000-4000-8000-000000000002",
-    revisionId: "20000000-0000-4000-8000-000000000002",
+    revisionId: "22000000-0000-4000-8000-000000000002",
     requiresReacceptance: true,
     translations: {
       en: {
         slug: "terms",
-        title: "Beta terms of use",
-        summary: "The conditions for using the supervised SHPROHLI local public-beta implementation.",
-        seoTitle: "Beta terms of use | SHPROHLI",
-        seoDescription: "Terms for using the supervised SHPROHLI beta.",
+        title: "Terms of Use",
+        summary: "The terms that apply when you create a SHPROHLI account and use the public beta.",
+        seoTitle: "Terms of Use | SHPROHLI",
+        seoDescription: "Plain-language terms for using the SHPROHLI public beta.",
         sections: [
-          { heading: "Local pre-beta notice", paragraphs: ["Version 1 is an implementation draft and is not a substitute for the legal terms that must be reviewed before launch."], bullets: [] },
-          { heading: "Your account", paragraphs: ["Use accurate first and last names and keep account access secure. You are responsible for activity performed through your active sessions."], bullets: ["One person may not create accounts to bypass limits", "A verified mobile number is required", "SHPROHLI may suspend access for safety, abuse, or security reasons"] },
-          { heading: "Supervised beta service", paragraphs: ["SHPROHLI is an experimental assistant for limited everyday outbound calls. You must review each compiled plan and approve the real call. AI and transcripts may be incomplete or wrong."], bullets: [] },
-          { heading: "Credits and availability", paragraphs: ["The current beta includes three promotional call credits and no payments. A credit is charged only after a provider-confirmed connection. Availability, limits, supported languages, and destinations may change during the beta."], bullets: [] },
-          { heading: "Your responsibilities", paragraphs: ["You must have a legitimate reason to contact the recipient, provide only information you are entitled to use, respect refusals and opt-outs, and follow the Acceptable Use Policy."], bullets: [] },
-          { heading: "Changes and termination", paragraphs: ["A materially changed published Terms or Acceptable Use revision requires acceptance again before calls can continue. You may stop using the service at any time. Account deletion and complete data-export workflows are still under development."], bullets: [] }
+          section("1. About SHPROHLI", "SHPROHLI is a public-beta service for legitimate, low-risk everyday phone calls. It helps people make calls when speaking or the local language is a barrier. It is not an emergency service or a substitute for professional legal, medical or financial advice."),
+          section("2. Your account", "Provide accurate account information, use your real first and last name, keep your sign-in details secure and do not share verification codes. You are responsible for activity through your account and active sessions. You may download your data or request account deletion from the account page."),
+          section("3. What the service does", "You describe the call, review the prepared call plan and approve it before SHPROHLI dials. The assistant identifies itself as AI, says who it represents and asks the recipient for consent before the conversation is processed or recorded. SHPROHLI can show a live transcript and create a final transcript after the call."),
+          section("4. Your responsibilities", "You must have a legitimate reason to contact the recipient and be entitled to use and share the information you provide. Review the call plan carefully, respect refusals and blocked-number requests, and follow the Acceptable Use Policy and applicable law."),
+          section("5. Beta credits and availability", "The public beta currently includes three promotional call credits and does not accept payments. A credit is charged after the telephone provider confirms a connection. Supported destinations, languages, limits, features and availability may change during the beta."),
+          section("6. AI limitations", "AI conversations, live transcripts and final transcripts can be incomplete, inaccurate or unexpected. Check important names, dates, numbers, instructions and commitments. Do not rely on SHPROHLI for urgent or high-risk decisions."),
+          section("7. Suspension and termination", "SHPROHLI may block or stop calls, suspend an account or restrict access when safety, abuse prevention, security or service limits require it. You may stop using the service at any time and can request deletion of your account through the available account controls."),
+          section("8. Changes to these terms", "We may update these terms as the beta develops. The version and effective date shown above identify the current terms. If a future change requires renewed acceptance, SHPROHLI will ask you before you can place another call.")
         ]
       },
       de: {
         slug: "nutzungsbedingungen",
-        title: "Beta-Nutzungsbedingungen",
-        summary: "Bedingungen für die Nutzung der begleiteten lokalen SHPROHLI-Beta-Implementierung.",
-        seoTitle: "Beta-Nutzungsbedingungen | SHPROHLI",
-        seoDescription: "Bedingungen für die Nutzung der begleiteten SHPROHLI-Beta.",
+        title: "Nutzungsbedingungen",
+        summary: "Diese Bedingungen gelten, wenn Sie ein SHPROHLI-Konto erstellen und die öffentliche Beta nutzen.",
+        seoTitle: "Nutzungsbedingungen | SHPROHLI",
+        seoDescription: "Verständliche Bedingungen für die Nutzung der öffentlichen SHPROHLI-Beta.",
         sections: [
-          { heading: "Hinweis zur lokalen Vorab-Beta", paragraphs: ["Version 1 ist ein Implementierungsentwurf und ersetzt nicht die vor dem Start erforderliche rechtliche Prüfung."], bullets: [] },
-          { heading: "Ihr Konto", paragraphs: ["Verwenden Sie korrekte Vor- und Nachnamen und schützen Sie den Kontozugriff. Sie sind für Aktivitäten Ihrer aktiven Sitzungen verantwortlich."], bullets: ["Konten dürfen nicht zur Umgehung von Limiten vervielfacht werden", "Eine bestätigte Mobilnummer ist erforderlich", "SHPROHLI kann den Zugriff aus Sicherheits- oder Missbrauchsgründen sperren"] },
-          { heading: "Begleiteter Beta-Dienst", paragraphs: ["SHPROHLI ist ein experimenteller Assistent für begrenzte alltägliche ausgehende Anrufe. Sie müssen jeden erstellten Plan prüfen und den echten Anruf genehmigen. KI und Transkripte können unvollständig oder falsch sein."], bullets: [] },
-          { heading: "Guthaben und Verfügbarkeit", paragraphs: ["Die aktuelle Beta enthält drei Aktionsguthaben und keine Zahlungen. Ein Guthaben wird erst nach einer vom Anbieter bestätigten Verbindung belastet. Verfügbarkeit, Limiten, Sprachen und Ziele können sich ändern."], bullets: [] },
-          { heading: "Ihre Verantwortung", paragraphs: ["Sie benötigen einen legitimen Kontaktgrund, dürfen nur berechtigte Informationen verwenden, müssen Ablehnungen und Sperren respektieren und die Regeln zur akzeptablen Nutzung einhalten."], bullets: [] },
-          { heading: "Änderungen und Beendigung", paragraphs: ["Eine wesentlich geänderte veröffentlichte Version der Bedingungen oder Nutzungsregeln muss vor weiteren Anrufen erneut akzeptiert werden. Kontolöschung und vollständiger Datenexport sind noch in Entwicklung."], bullets: [] }
+          section("1. Über SHPROHLI", "SHPROHLI ist ein öffentlicher Beta-Dienst für legitime, risikoarme Alltagstelefonate. Der Dienst hilft Menschen beim Telefonieren, wenn das Sprechen oder die lokale Sprache eine Hürde ist. SHPROHLI ist weder ein Notfalldienst noch ein Ersatz für rechtliche, medizinische oder finanzielle Fachberatung."),
+          section("2. Ihr Konto", "Machen Sie korrekte Kontoangaben, verwenden Sie Ihren echten Vor- und Nachnamen, schützen Sie Ihre Anmeldedaten und geben Sie keine Bestätigungscodes weiter. Sie sind für Aktivitäten über Ihr Konto und aktive Sitzungen verantwortlich. Auf der Kontoseite können Sie Ihre Daten herunterladen oder die Kontolöschung anfordern."),
+          section("3. Funktionsweise des Dienstes", "Sie beschreiben den Anruf, prüfen den vorbereiteten Anrufplan und geben ihn frei, bevor SHPROHLI wählt. Der Assistent gibt sich als KI zu erkennen, nennt die Person, in deren Auftrag er anruft, und fragt vor der Verarbeitung oder Aufzeichnung des Gesprächs nach Zustimmung. SHPROHLI kann ein Live-Transkript anzeigen und nach dem Anruf ein Endtranskript erstellen."),
+          section("4. Ihre Verantwortung", "Sie benötigen einen legitimen Grund für den Kontakt und müssen berechtigt sein, die angegebenen Informationen zu verwenden und weiterzugeben. Prüfen Sie den Anrufplan sorgfältig, respektieren Sie Ablehnungen und Nummernsperren und halten Sie die Regeln zur akzeptablen Nutzung sowie das anwendbare Recht ein."),
+          section("5. Beta-Guthaben und Verfügbarkeit", "Die öffentliche Beta umfasst derzeit drei Aktionsguthaben und nimmt keine Zahlungen an. Ein Guthaben wird belastet, nachdem der Telefonanbieter eine Verbindung bestätigt hat. Unterstützte Ziele, Sprachen, Limiten, Funktionen und Verfügbarkeit können sich während der Beta ändern."),
+          section("6. Grenzen der KI", "KI-Gespräche, Live-Transkripte und Endtranskripte können unvollständig, ungenau oder unerwartet sein. Prüfen Sie wichtige Namen, Daten, Zahlen, Anweisungen und Zusagen. Verlassen Sie sich bei dringenden oder risikoreichen Entscheidungen nicht auf SHPROHLI."),
+          section("7. Sperrung und Beendigung", "SHPROHLI kann Anrufe blockieren oder beenden, ein Konto sperren oder den Zugriff einschränken, wenn dies für Sicherheit, Missbrauchsschutz oder Dienstlimiten erforderlich ist. Sie können die Nutzung jederzeit beenden und die Löschung Ihres Kontos über die vorhandenen Kontofunktionen anfordern."),
+          section("8. Änderungen dieser Bedingungen", "Wir können diese Bedingungen im Verlauf der Beta anpassen. Version und Datum oberhalb des Dokuments bezeichnen die aktuelle Fassung. Falls eine spätere Änderung eine erneute Zustimmung erfordert, fragt SHPROHLI danach, bevor Sie einen weiteren Anruf tätigen können.")
         ]
       }
     }
@@ -159,35 +138,35 @@ const definitions: SeedDefinition[] = [
   {
     key: "acceptable_use",
     pageId: "10000000-0000-4000-8000-000000000003",
-    revisionId: "20000000-0000-4000-8000-000000000003",
+    revisionId: "22000000-0000-4000-8000-000000000003",
     requiresReacceptance: true,
     translations: {
       en: {
         slug: "acceptable-use",
         title: "Acceptable Use Policy",
-        summary: "The tasks and conduct allowed in the deliberately limited SHPROHLI beta.",
+        summary: "The rules for safe, legitimate and low-risk use of SHPROHLI.",
         seoTitle: "Acceptable Use Policy | SHPROHLI",
-        seoDescription: "Safety and acceptable-use rules for SHPROHLI calls.",
+        seoDescription: "Acceptable-use and safety rules for SHPROHLI calls.",
         sections: [
-          { heading: "Supported use", paragraphs: ["Use SHPROHLI for low-risk, legitimate everyday communication where the recipient may reasonably be contacted."], bullets: ["Request routine information", "Coordinate an appointment", "Ask about a document, application, or status", "Deliver a neutral message"] },
-          { heading: "Never use SHPROHLI for", paragraphs: ["The following uses are outside the beta and may lead to immediate suspension."], bullets: ["Emergencies or urgent safety situations", "Harassment, threats, coercion, deception, or impersonation", "Spam, bulk marketing, sales campaigns, or political persuasion", "High-stakes legal, medical, financial, contractual, or employment negotiation", "Obtaining unrelated private data or bypassing a recipient's refusal or opt-out"] },
-          { heading: "Identity and facts", paragraphs: ["The assistant identifies itself as an AI assistant acting for the named user. Use your actual first and last names and approve only verified facts that may be shared."], bullets: [] },
-          { heading: "Consent and recording", paragraphs: ["The recipient must receive the disclosure and press 1 before conversation processing and recording begin. Do not attempt to bypass or misrepresent this boundary."], bullets: [] },
-          { heading: "Beta limits", paragraphs: ["Calls are restricted to supported Swiss destinations, quotas, one active call per user, suppression checks, and the global safety switch."], bullets: [] }
+          section("Supported use", "Use SHPROHLI for legitimate, low-risk everyday calls where the recipient may reasonably be contacted.", ["Request routine information", "Coordinate an appointment", "Ask whether a document arrived, request a form or check an application status", "Deliver a neutral everyday message"]),
+          section("Prohibited use", "Do not use SHPROHLI for emergencies, harassment, threats, coercion, deception, impersonation, spam, bulk marketing, political persuasion, unlawful surveillance or attempts to bypass a refusal. High-risk legal, medical, financial, contractual and employment decisions or negotiations are not supported."),
+          section("Identity and facts", "Use your real identity and provide only information you are entitled to use. Check the prepared call plan and do not ask the assistant to invent facts, conceal who it represents or make unauthorised commitments."),
+          section("Consent and recording", "The recipient is told that an AI assistant is calling and is asked for consent before the conversation is processed or recorded. Do not attempt to bypass, pressure or mislead the recipient about this choice."),
+          section("Service limits", "SHPROHLI supports only the destinations, languages and call types shown in the product. SHPROHLI may block or stop calls when safety, abuse-prevention or service limits require it.")
         ]
       },
       de: {
         slug: "nutzungsregeln",
         title: "Regeln zur akzeptablen Nutzung",
-        summary: "Erlaubte Aufgaben und Verhaltensregeln für die bewusst begrenzte SHPROHLI-Beta.",
+        summary: "Regeln für eine sichere, legitime und risikoarme Nutzung von SHPROHLI.",
         seoTitle: "Regeln zur akzeptablen Nutzung | SHPROHLI",
-        seoDescription: "Sicherheits- und Nutzungsregeln für SHPROHLI-Anrufe.",
+        seoDescription: "Nutzungs- und Sicherheitsregeln für SHPROHLI-Anrufe.",
         sections: [
-          { heading: "Unterstützte Nutzung", paragraphs: ["Nutzen Sie SHPROHLI für legitime alltägliche Kommunikation mit geringem Risiko, bei der die empfangende Person vernünftigerweise kontaktiert werden darf."], bullets: ["Routinemässige Informationen anfragen", "Einen Termin koordinieren", "Nach Dokument, Antrag oder Status fragen", "Eine neutrale Nachricht übermitteln"] },
-          { heading: "SHPROHLI darf nie verwendet werden für", paragraphs: ["Die folgenden Nutzungen liegen ausserhalb der Beta und können zur sofortigen Sperrung führen."], bullets: ["Notfälle oder dringende Gefahrensituationen", "Belästigung, Drohung, Zwang, Täuschung oder Identitätsvortäuschung", "Spam, Massenwerbung, Verkaufskampagnen oder politische Überzeugungsarbeit", "Rechtliche, medizinische, finanzielle, vertragliche oder arbeitsbezogene Verhandlungen mit hohem Risiko", "Beschaffung sachfremder privater Daten oder Umgehung einer Ablehnung oder Sperre"] },
-          { heading: "Identität und Fakten", paragraphs: ["Der Assistent nennt sich als KI-Assistent des namentlich genannten Benutzers. Verwenden Sie Ihren tatsächlichen Vor- und Nachnamen und nur überprüfte, ausdrücklich freigegebene Fakten."], bullets: [] },
-          { heading: "Einwilligung und Aufnahme", paragraphs: ["Die empfangende Person erhält zuerst die Offenlegung und muss die 1 drücken, bevor Gesprächsverarbeitung und Aufnahme beginnen. Diese Grenze darf nicht umgangen oder falsch dargestellt werden."], bullets: [] },
-          { heading: "Beta-Limiten", paragraphs: ["Anrufe sind auf unterstützte Schweizer Ziele, Quoten, einen aktiven Anruf pro Benutzer, Sperrprüfungen und den globalen Sicherheitsschalter begrenzt."], bullets: [] }
+          section("Unterstützte Nutzung", "Nutzen Sie SHPROHLI für legitime, risikoarme Alltagstelefonate, bei denen die angerufene Person vernünftigerweise kontaktiert werden darf.", ["Routinemässige Informationen anfragen", "Einen Termin vereinbaren", "Nachfragen, ob ein Dokument angekommen ist, ein Formular anfordern oder den Stand eines Antrags prüfen", "Eine neutrale Alltagsnachricht übermitteln"]),
+          section("Verbotene Nutzung", "Verwenden Sie SHPROHLI nicht für Notfälle, Belästigung, Drohungen, Zwang, Täuschung, Identitätsvortäuschung, Spam, Massenwerbung, politische Beeinflussung, rechtswidrige Überwachung oder die Umgehung einer Ablehnung. Rechtliche, medizinische, finanzielle, vertragliche oder arbeitsbezogene Entscheidungen und Verhandlungen mit hohem Risiko werden nicht unterstützt."),
+          section("Identität und Angaben", "Verwenden Sie Ihre echte Identität und nur Angaben, zu deren Nutzung Sie berechtigt sind. Prüfen Sie den vorbereiteten Anrufplan. Fordern Sie den Assistenten nicht auf, Fakten zu erfinden, seinen Auftraggeber zu verbergen oder unbefugte Zusagen zu machen."),
+          section("Zustimmung und Aufnahme", "Die angerufene Person wird darüber informiert, dass ein KI-Assistent anruft, und vor der Verarbeitung oder Aufzeichnung des Gesprächs um Zustimmung gebeten. Versuchen Sie nicht, diese Entscheidung zu umgehen, zu erzwingen oder irreführend darzustellen."),
+          section("Dienstlimiten", "SHPROHLI unterstützt nur die im Produkt angegebenen Ziele, Sprachen und Anrufarten. SHPROHLI kann Anrufe blockieren oder beenden, wenn dies wegen Sicherheit, Missbrauchsschutz oder Dienstlimiten erforderlich ist.")
         ]
       }
     }
@@ -195,35 +174,33 @@ const definitions: SeedDefinition[] = [
   {
     key: "support",
     pageId: "10000000-0000-4000-8000-000000000004",
-    revisionId: "20000000-0000-4000-8000-000000000004",
+    revisionId: "22000000-0000-4000-8000-000000000004",
     requiresReacceptance: false,
     translations: {
       en: {
         slug: "support",
-        title: "Support and safety",
-        summary: "How to get help with account access, privacy, call safety, or abuse during local beta development.",
-        seoTitle: "Support and safety | SHPROHLI",
-        seoDescription: "Support, privacy, and abuse-reporting guidance for SHPROHLI.",
+        title: "Support",
+        summary: "Help with your account, a call, privacy, accessibility or unwanted SHPROHLI calls.",
+        seoTitle: "Support | SHPROHLI",
+        seoDescription: "Get help with SHPROHLI accounts, calls, privacy, accessibility or unwanted calls.",
         sections: [
-          { heading: "Not an emergency service", paragraphs: ["Do not use SHPROHLI in an emergency. Contact the appropriate local emergency service directly."], bullets: [] },
-          { heading: "Account and technical help", paragraphs: ["When reporting a problem, include the approximate time, call status, browser, and a short description. Never send passwords, verification codes, session cookies, or unnecessary transcript text."], bullets: [] },
-          { heading: "Privacy or data request", paragraphs: ["Identify the account email and the request type: access, correction, deletion, or another privacy question. The formal verified request workflow and response targets are not yet launched."], bullets: [] },
-          { heading: "Unwanted calls or abuse", paragraphs: ["Recipients can use Stop calls to verify control of a Swiss number and add it to the global suppression list. Complaint intake ownership and published response targets remain a release task."], bullets: [] },
-          { heading: "Contact channel", paragraphs: ["A monitored public support address has not yet been configured for this local pre-beta build. This page must be updated with reviewed operator identity and contact details before launch."], bullets: [] }
+          section("Account or call help", ["Email support@shprohli.ch for help with your account or a call. You can also use this address to report an accessibility problem.", "Do not send passwords, SMS or email verification codes, session cookies or tokens, or transcript and private content that is not needed to investigate the problem."], ["Approximate time", "Call status", "Browser or device", "Short description"], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("Privacy requests", "For access, correction, deletion or other personal-data questions, contact privacy@shprohli.ch. Include the email address connected to your account and briefly describe the request. We may ask you to verify your identity.", [], [{ kind: "email", label: "privacy@shprohli.ch", address: "privacy@shprohli.ch" }]),
+          section("Unwanted or abusive calls", "If you received an unwanted or abusive call, you can block future SHPROHLI calls to your number. You can also report abuse to support@shprohli.ch without sharing unnecessary private content.", [], [{ kind: "internal", label: "Block future SHPROHLI calls", destination: "opt_out" }]),
+          section("Emergency", "SHPROHLI is not an emergency service. Contact the appropriate local emergency service directly.")
         ]
       },
       de: {
         slug: "hilfe",
-        title: "Support und Sicherheit",
-        summary: "Hilfe bei Kontozugriff, Datenschutz, Anrufsicherheit oder Missbrauch während der lokalen Beta-Entwicklung.",
-        seoTitle: "Support und Sicherheit | SHPROHLI",
-        seoDescription: "Hinweise zu Support, Datenschutz und Missbrauchsmeldungen bei SHPROHLI.",
+        title: "Support",
+        summary: "Hilfe bei Fragen zu Konto, Anrufen, Datenschutz, Barrierefreiheit oder unerwünschten SHPROHLI-Anrufen.",
+        seoTitle: "Support | SHPROHLI",
+        seoDescription: "Hilfe zu SHPROHLI-Konten, Anrufen, Datenschutz, Barrierefreiheit und unerwünschten Anrufen.",
         sections: [
-          { heading: "Kein Notfalldienst", paragraphs: ["Verwenden Sie SHPROHLI nicht in einem Notfall. Kontaktieren Sie direkt den zuständigen lokalen Notfalldienst."], bullets: [] },
-          { heading: "Konto- und technische Hilfe", paragraphs: ["Nennen Sie bei Problemen den ungefähren Zeitpunkt, Anrufstatus, Browser und eine kurze Beschreibung. Senden Sie niemals Passwörter, Bestätigungscodes, Sitzungscookies oder unnötige Transkripttexte."], bullets: [] },
-          { heading: "Datenschutz- oder Datenanfrage", paragraphs: ["Nennen Sie die Konto-E-Mail und die Art der Anfrage: Auskunft, Korrektur, Löschung oder eine andere Datenschutzfrage. Der formelle verifizierte Anfrageprozess ist noch nicht gestartet."], bullets: [] },
-          { heading: "Unerwünschte Anrufe oder Missbrauch", paragraphs: ["Empfänger können über Anrufe sperren die Kontrolle über eine Schweizer Nummer bestätigen und sie global sperren. Verantwortlichkeit und Reaktionsziele für Beschwerden bleiben eine Startaufgabe."], bullets: [] },
-          { heading: "Kontaktkanal", paragraphs: ["Für diesen lokalen Vorab-Beta-Build ist noch keine überwachte öffentliche Supportadresse konfiguriert. Vor dem Start müssen geprüfte Betreiber- und Kontaktdaten ergänzt werden."], bullets: [] }
+          section("Hilfe zu Konto oder Anruf", ["Schreiben Sie für Hilfe zu Ihrem Konto oder einem Anruf an support@shprohli.ch. An diese Adresse können Sie auch Probleme mit der Barrierefreiheit melden.", "Senden Sie keine Passwörter, SMS- oder E-Mail-Bestätigungscodes, Sitzungscookies oder Tokens und keine unnötigen Transkript- oder privaten Inhalte."], ["Ungefährer Zeitpunkt", "Anrufstatus", "Browser oder Gerät", "Kurze Beschreibung"], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("Datenschutzanfragen", "Für Auskunft, Berichtigung, Löschung oder andere Fragen zu Personendaten schreiben Sie an privacy@shprohli.ch. Nennen Sie die mit Ihrem Konto verknüpfte E-Mail-Adresse und beschreiben Sie die Anfrage kurz. Gegebenenfalls müssen wir Ihre Identität prüfen.", [], [{ kind: "email", label: "privacy@shprohli.ch", address: "privacy@shprohli.ch" }]),
+          section("Unerwünschte oder missbräuchliche Anrufe", "Wenn Sie einen unerwünschten oder missbräuchlichen Anruf erhalten haben, können Sie künftige SHPROHLI-Anrufe an Ihre Nummer sperren. Missbrauch können Sie auch an support@shprohli.ch melden, ohne unnötige private Inhalte weiterzugeben.", [], [{ kind: "internal", label: "Künftige SHPROHLI-Anrufe sperren", destination: "opt_out" }]),
+          section("Notfall", "SHPROHLI ist kein Notfalldienst. Kontaktieren Sie direkt den zuständigen lokalen Notfalldienst.")
         ]
       }
     }
@@ -231,39 +208,73 @@ const definitions: SeedDefinition[] = [
   {
     key: "faq",
     pageId: "10000000-0000-4000-8000-000000000005",
-    revisionId: "20000000-0000-4000-8000-000000000005",
+    revisionId: "22000000-0000-4000-8000-000000000005",
     requiresReacceptance: false,
     translations: {
       en: {
         slug: "faq",
         title: "Frequently asked questions",
-        summary: "Answers about how SHPROHLI behaves before, during, and after a beta call.",
+        summary: "Short answers about what happens before, during and after a SHPROHLI call.",
         seoTitle: "Frequently asked questions | SHPROHLI",
-        seoDescription: "Common questions about using the SHPROHLI beta.",
+        seoDescription: "Answers about consent, call plans, transcripts, supported calls and deletion in SHPROHLI.",
         sections: [
-          { heading: "Does the recipient know it is an AI call?", paragraphs: ["Yes. The assistant states that it is an AI assistant acting for the named user before asking for consent."], bullets: [] },
-          { heading: "Can SHPROHLI say something I did not approve?", paragraphs: ["You approve the objective, facts and prepared call plan, not every sentence word for word. SHPROHLI may phrase ordinary questions naturally, but it is instructed not to invent concrete facts or make commitments outside the reviewed plan."], bullets: [] },
-          { heading: "What happens if the recipient asks an unexpected question?", paragraphs: ["SHPROHLI must not guess. It can ask a short clarifying question. If the answer is not in the objective or approved facts, it says that the information is unavailable and can offer to pass the question back to you."], bullets: [] },
-          { heading: "Which phone numbers can I call during the beta?", paragraphs: ["The beta accepts valid Swiss destination numbers only."], bullets: [] },
-          { heading: "What happens if nobody answers?", paragraphs: ["The attempt ends as unanswered and the reserved beta credit is refunded. A credit is charged only after the phone provider confirms a connection."], bullets: [] },
-          { heading: "When does processing and recording begin?", paragraphs: ["Recipient audio is not sent to the conversation model and recording does not begin until the recipient hears the disclosure and presses 1 to consent."], bullets: [] },
-          { heading: "Can I delete retained audio and my call data?", paragraphs: ["Yes. Retained audio can be deleted manually from the call detail. For a completed call, password-confirmed call-data deletion removes provider audio and redacts the call brief, transcripts, approval text and feedback comment; minimized credit, consent, safety, technical and audit evidence remains."], bullets: [] }
+          section("Does the person know an AI assistant is calling?", "Yes. SHPROHLI identifies itself as an AI assistant and says who it is calling for before asking for consent."),
+          section("How does the recipient give consent?", "SHPROHLI first asks for consent verbally. If the answer cannot be understood reliably, the assistant may offer confirmation by keypad."),
+          section("What happens if the recipient says no?", "The call ends. SHPROHLI does not continue the conversation or start recording it."),
+          section("Can SHPROHLI say something I did not approve?", "You approve the objective, information and prepared call plan rather than every sentence. The assistant may speak naturally, but it must not invent facts or make commitments outside the approved plan."),
+          section("What happens if the recipient asks an unexpected question?", "SHPROHLI does not guess. It can ask for clarification, say that the information is unavailable or offer to pass the question back to you."),
+          section("Are transcripts always accurate?", "No. Live and final transcripts are generated by AI and can contain errors. Check important names, dates, numbers and commitments against the recording while it is available."),
+          section("Which calls and phone numbers are supported?", "The public beta supports legitimate, low-risk everyday calls to valid Swiss destination numbers in the languages shown when you create a call."),
+          section("Can I delete my recording and call data?", "Yes. You can delete a stored recording or delete the personal content of a completed call from its call page. Some limited records may remain where needed for security, abuse prevention, accounting or legal obligations.")
         ]
       },
       de: {
         slug: "faq",
         title: "Häufig gestellte Fragen",
-        summary: "Antworten dazu, wie sich SHPROHLI vor, während und nach einem Beta-Anruf verhält.",
+        summary: "Kurze Antworten dazu, was vor, während und nach einem SHPROHLI-Anruf geschieht.",
         seoTitle: "Häufig gestellte Fragen | SHPROHLI",
-        seoDescription: "Häufige Fragen zur Nutzung der SHPROHLI-Beta.",
+        seoDescription: "Antworten zu Zustimmung, Anrufplänen, Transkripten, unterstützten Anrufen und Löschung bei SHPROHLI.",
         sections: [
-          { heading: "Weiss die angerufene Person, dass ein KI-Assistent anruft?", paragraphs: ["Ja. Der Assistent erklärt vor der Einwilligung, dass er als KI-Assistent für die namentlich genannte Person anruft."], bullets: [] },
-          { heading: "Kann SHPROHLI etwas sagen, das ich nicht freigegeben habe?", paragraphs: ["Sie geben Ziel, Fakten und den vorbereiteten Gesprächsplan frei, nicht jeden Satz Wort für Wort. SHPROHLI kann gewöhnliche Fragen natürlich formulieren, darf aber keine konkreten Fakten erfinden oder Zusagen ausserhalb des geprüften Plans machen."], bullets: [] },
-          { heading: "Was passiert bei einer unerwarteten Rückfrage?", paragraphs: ["SHPROHLI darf nicht raten. Der Assistent kann kurz nachfragen. Fehlt die Antwort in Ziel oder freigegebenen Fakten, sagt er, dass diese Information nicht vorliegt, und kann anbieten, die Frage an Sie weiterzugeben."], bullets: [] },
-          { heading: "Welche Telefonnummern kann ich während der Beta anrufen?", paragraphs: ["Die Beta akzeptiert nur gültige Schweizer Zielnummern."], bullets: [] },
-          { heading: "Was passiert, wenn niemand abnimmt?", paragraphs: ["Der Versuch endet als unbeantwortet und das reservierte Beta-Guthaben wird zurückerstattet. Ein Guthaben wird erst belastet, wenn der Telefonanbieter eine Verbindung bestätigt."], bullets: [] },
-          { heading: "Wann beginnen Verarbeitung und Aufzeichnung?", paragraphs: ["Das Audio der angerufenen Person wird erst an das Gesprächsmodell gesendet und aufgezeichnet, nachdem sie die Offenlegung gehört und mit der Taste 1 zugestimmt hat."], bullets: [] },
-          { heading: "Kann ich gespeicherte Audiodaten und meine Anrufdaten löschen?", paragraphs: ["Ja. Gespeicherte Audiodaten können in der Anrufansicht manuell gelöscht werden. Bei einem abgeschlossenen Anruf entfernt die passwortbestätigte Löschung das Audio beim Anbieter und redigiert Gesprächsplan, Transkripte, Freigabetext und Feedback-Kommentar; minimierte Guthaben-, Einwilligungs-, Sicherheits-, Technik- und Auditnachweise bleiben erhalten."], bullets: [] }
+          section("Weiss die angerufene Person, dass ein KI-Assistent anruft?", "Ja. SHPROHLI stellt sich als KI-Assistent vor und nennt die Person, in deren Auftrag der Anruf erfolgt, bevor nach Zustimmung gefragt wird."),
+          section("Wie stimmt die angerufene Person zu?", "SHPROHLI fragt zuerst mündlich nach Zustimmung. Kann die Antwort nicht zuverlässig verstanden werden, kann der Assistent eine Bestätigung über die Telefontastatur anbieten."),
+          section("Was geschieht, wenn die angerufene Person Nein sagt?", "Der Anruf wird beendet. SHPROHLI führt das Gespräch nicht weiter und beginnt keine Aufzeichnung."),
+          section("Kann SHPROHLI etwas sagen, das ich nicht freigegeben habe?", "Sie geben Ziel, Angaben und den vorbereiteten Anrufplan frei, nicht jeden einzelnen Satz. Der Assistent darf natürlich formulieren, aber keine Fakten erfinden oder Zusagen ausserhalb des freigegebenen Plans machen."),
+          section("Was geschieht bei einer unerwarteten Rückfrage?", "SHPROHLI rät nicht. Der Assistent kann nachfragen, erklären, dass die Information nicht vorliegt, oder anbieten, die Frage an Sie weiterzugeben."),
+          section("Sind Transkripte immer korrekt?", "Nein. Live- und Endtranskripte werden mit KI erstellt und können Fehler enthalten. Prüfen Sie wichtige Namen, Daten, Zahlen und Zusagen mit der Aufnahme, solange diese verfügbar ist."),
+          section("Welche Anrufe und Telefonnummern werden unterstützt?", "Die öffentliche Beta unterstützt legitime, risikoarme Alltagstelefonate an gültige Schweizer Zielnummern in den Sprachen, die beim Erstellen eines Anrufs angeboten werden."),
+          section("Kann ich meine Aufnahme und Anrufdaten löschen?", "Ja. Auf der Anrufseite können Sie eine gespeicherte Aufnahme oder die persönlichen Inhalte eines abgeschlossenen Anrufs löschen. Bestimmte begrenzte Angaben dürfen verbleiben, soweit sie für Sicherheit, Missbrauchsschutz, Abrechnung oder rechtliche Pflichten erforderlich sind.")
+        ]
+      }
+    }
+  },
+  {
+    key: "imprint",
+    pageId: "10000000-0000-4000-8000-000000000006",
+    revisionId: "22000000-0000-4000-8000-000000000006",
+    requiresReacceptance: false,
+    translations: {
+      en: {
+        slug: "imprint",
+        title: "Imprint",
+        summary: "Operator and contact information for SHPROHLI.",
+        seoTitle: "Imprint | SHPROHLI",
+        seoDescription: "Operator, address and contact information for SHPROHLI in Switzerland.",
+        sections: [
+          section("Operator and service provider", "SHPROHLI\nIvan Slavinskyi\nWeiernstrasse 12\n8355 Aadorf\nSwitzerland", [], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("Person responsible for the service", "Ivan Slavinskyi"),
+          section("About the project", "SHPROHLI is an independent Swiss project created by Ivan Slavinskyi. It grew from the idea that a routine phone call should not become an obstacle because speaking is difficult or the local language is unfamiliar. SHPROHLI helps people prepare and make low-risk everyday calls while keeping them in control of the information shared. The project is currently available as a public beta.")
+        ]
+      },
+      de: {
+        slug: "impressum",
+        title: "Impressum",
+        summary: "Betreiber- und Kontaktangaben für SHPROHLI.",
+        seoTitle: "Impressum | SHPROHLI",
+        seoDescription: "Betreiber, Adresse und Kontaktangaben von SHPROHLI in der Schweiz.",
+        sections: [
+          section("Betreiber und Dienstanbieter", "SHPROHLI\nIvan Slavinskyi\nWeiernstrasse 12\n8355 Aadorf\nSchweiz", [], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("Für den Dienst verantwortliche Person", "Ivan Slavinskyi"),
+          section("Über das Projekt", "SHPROHLI ist ein unabhängiges Schweizer Projekt von Ivan Slavinskyi. Ausgangspunkt war die Idee, dass ein alltäglicher Telefonanruf nicht zur Hürde werden sollte, nur weil das Sprechen schwerfällt oder die lokale Sprache noch ungewohnt ist. SHPROHLI hilft Menschen, risikoarme Alltagstelefonate vorzubereiten und zu führen, während sie die Kontrolle über die weitergegebenen Angaben behalten. Das Projekt ist derzeit als öffentliche Beta verfügbar.")
         ]
       }
     }
@@ -271,349 +282,119 @@ const definitions: SeedDefinition[] = [
 ];
 
 export const seededContentPages: SeedContentPage[] = definitions.flatMap(
-  (definition, pageIndex) =>
-    (["en", "de"] as const).map((locale, localeIndex) => {
-      const translation = definition.translations[locale];
-      const sequence = pageIndex * 2 + localeIndex + 1;
-      const suffix = String(sequence).padStart(12, "0");
-      return {
-        key: definition.key,
-        pageType: "page",
-        sourceLocale: "en",
-        locale,
-        slug: translation.slug,
-        title: translation.title,
-        summary: translation.summary,
-        sections: translation.sections,
-        seoTitle: translation.seoTitle,
-        seoDescription: translation.seoDescription,
-        revision: {
-          id: definition.revisionId,
-          number: 1,
-          requiresReacceptance: definition.requiresReacceptance,
-          sourceRevisionNumber: 1,
-          publishedAt
-        },
-        pageId: definition.pageId,
-        localizationId: `30000000-0000-4000-8000-${suffix}`,
-        revisionLocalizationId: `40000000-0000-4000-8000-${suffix}`
-      };
-    })
-);
-
-const faqDefinition = definitions.find(({ key }) => key === "faq")!;
-const faqItems: FaqItem[] = faqDefinition.translations.en.sections.map(
-  (section, index) => ({
-    id: `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-    sortOrder: index,
-    enabled: true,
-    question: {
-      en: section.heading,
-      de: faqDefinition.translations.de.sections[index]!.heading
-    },
-    answer: {
-      en: sectionAnswer(section),
-      de: sectionAnswer(faqDefinition.translations.de.sections[index]!)
-    }
+  (definition, pageIndex) => (["en", "de"] as const).map((locale, localeIndex) => {
+    const translation = definition.translations[locale];
+    const suffix = String(pageIndex * 2 + localeIndex + 1).padStart(12, "0");
+    return {
+      key: definition.key,
+      pageType: "page",
+      sourceLocale: "en",
+      locale,
+      slug: translation.slug,
+      title: translation.title,
+      summary: translation.summary,
+      sections: translation.sections,
+      seoTitle: translation.seoTitle,
+      seoDescription: translation.seoDescription,
+      revision: { id: definition.revisionId, number: 1, requiresReacceptance: definition.requiresReacceptance, sourceRevisionNumber: 1, publishedAt },
+      requiresReacceptanceOnUpgrade: false,
+      pageId: definition.pageId,
+      localizationId: `30000000-0000-4000-8000-${suffix}`,
+      revisionLocalizationId: `42000000-0000-4000-8000-${suffix}`
+    };
   })
 );
 
+const faqDefinition = definitions.find(({ key }) => key === "faq")!;
+const faqItems: FaqItem[] = faqDefinition.translations.en.sections.map((item, index) => ({
+  id: `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  sortOrder: index,
+  enabled: true,
+  question: { en: item.heading, de: faqDefinition.translations.de.sections[index]!.heading },
+  answer: { en: sectionAnswer(item), de: sectionAnswer(faqDefinition.translations.de.sections[index]!) }
+}));
+
 const navigationItems: NavigationItem[] = [
-  navigationItem(1, "home", "header", "Home", "Start"),
+  navigationItem(1, "how_it_works", "header", "How it works", "So funktioniert es"),
   navigationItem(2, "faq", "header", "FAQ", "FAQ"),
-  navigationItem(3, "support", "header", "Support", "Support"),
-  navigationItem(4, "privacy", "footer", "Privacy", "Datenschutz"),
-  navigationItem(5, "terms", "footer", "Terms", "Bedingungen"),
-  navigationItem(6, "acceptable_use", "footer", "Acceptable Use", "Nutzungsregeln"),
-  navigationItem(7, "faq", "footer", "FAQ", "FAQ"),
-  navigationItem(8, "support", "footer", "Support", "Support"),
-  navigationItem(9, "opt_out", "footer", "Block calls", "Anrufe sperren")
+  navigationItem(3, "faq", "footer", "FAQ", "FAQ"),
+  navigationItem(4, "support", "footer", "Support", "Support"),
+  navigationItem(5, "opt_out", "footer", "Block calls", "Anrufe sperren"),
+  navigationItem(6, "privacy", "footer", "Privacy", "Datenschutz"),
+  navigationItem(7, "terms", "footer", "Terms", "Bedingungen"),
+  navigationItem(8, "acceptable_use", "footer", "Acceptable Use", "Nutzungsregeln"),
+  navigationItem(9, "imprint", "footer", "Imprint", "Impressum")
 ];
 
 const landingBlocks: LandingBlock[] = [
-  {
-    id: "72000000-0000-4000-8000-000000000001",
-    blockType: "hero",
-    sortOrder: 0,
-    enabled: true,
-    eyebrow: localized(
-      "PHONE CALLS WITHOUT THE SPEAKING BARRIER",
-      "TELEFONIEREN OHNE SPRACHBARRIERE"
-    ),
-    title: localized(
-      "Need to make a phone call, but speaking is the hard part?",
-      "Sie müssen telefonieren, aber das Sprechen ist die eigentliche Hürde?"
-    ),
-    supportingTitle: localized(
-      "SHPROHLI can make it for you.",
-      "SHPROHLI kann den Anruf für Sie übernehmen."
-    ),
-    lead: localized(
-      "Tell SHPROHLI what you need, review what it may say, and let the AI assistant place the call on your behalf.",
-      "Beschreiben Sie, was Sie erreichen möchten, prüfen Sie vorher, was der Assistent sagen darf, und lassen Sie SHPROHLI den Anruf in Ihrem Namen führen."
-    ),
-    secondaryText: localized(
-      "Built for people with speech difficulties and for anyone who needs help calling in a local language.",
-      "Für Menschen mit Sprach- oder Sprechschwierigkeiten und für alle, denen Telefonate in einer lokalen Sprache schwerfallen."
-    ),
-    badges: localizedList(
-      ["Free public beta", "3 calls included", "Swiss numbers only"],
-      ["Kostenlose öffentliche Beta", "3 Anrufe inklusive", "Nur Schweizer Nummern"]
-    ),
-    primaryCtaLabel: localized("Try the beta", "Beta ausprobieren"),
-    secondaryCtaLabel: localized("See how it works", "So funktioniert es"),
-    seoTitle: localized(
-      "SHPROHLI — phone calls without the speaking barrier",
-      "SHPROHLI — telefonieren ohne Sprachbarriere"
-    ),
-    seoDescription: localized(
-      "Prepare, review and approve everyday phone calls made by an AI assistant on your behalf.",
-      "Alltägliche Telefonate vorbereiten, prüfen und freigeben, die ein KI-Assistent in Ihrem Namen führt."
-    )
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000008",
-    blockType: "problem",
-    sortOrder: 1,
-    enabled: true,
-    eyebrow: localized("WHY SHPROHLI", "WARUM SHPROHLI"),
-    title: localized(
-      "Some calls are harder than they should be.",
-      "Manche Telefonate sind schwieriger, als sie sein sollten."
-    ),
+  { id: "72000000-0000-4000-8000-000000000001", blockType: "hero", sortOrder: 0, enabled: true,
+    eyebrow: localized("PHONE CALLS, MADE MORE ACCESSIBLE", "TELEFONIEREN MIT WENIGER HÜRDEN"),
+    title: localized("Need to make a phone call, but speaking is the hard part?", "Sie müssen telefonieren, aber das Sprechen ist die eigentliche Hürde?"),
+    supportingTitle: localized("SHPROHLI can make the call for you.", "SHPROHLI kann den Anruf für Sie übernehmen."),
+    lead: localized("Tell SHPROHLI what you need, review the call plan and let the AI assistant make the call on your behalf.", "Beschreiben Sie Ihr Anliegen, prüfen Sie den Anrufplan und lassen Sie den KI-Assistenten in Ihrem Auftrag telefonieren."),
+    secondaryText: localized("For people who find speaking on the phone difficult and anyone who needs help calling in a local language.", "Für Menschen, denen das Sprechen am Telefon schwerfällt, und für alle, die Unterstützung bei einem Anruf in einer lokalen Sprache benötigen."),
+    badges: localizedList(["Free public beta", "3 calls included", "Swiss numbers only"], ["Kostenlose öffentliche Beta", "3 Anrufe inklusive", "Nur Schweizer Nummern"]),
+    primaryCtaLabel: localized("Try SHPROHLI", "SHPROHLI ausprobieren"), secondaryCtaLabel: localized("See how it works", "So funktioniert es"),
+    seoTitle: localized("SHPROHLI — AI-assisted phone calls", "SHPROHLI — KI-unterstützte Telefonanrufe"),
+    seoDescription: localized("SHPROHLI helps people make everyday phone calls when speaking or the local language is a barrier.", "SHPROHLI hilft bei alltäglichen Telefonanrufen, wenn das Sprechen oder die lokale Sprache eine Hürde ist.") },
+  { id: "72000000-0000-4000-8000-000000000008", blockType: "problem", sortOrder: 1, enabled: true,
+    eyebrow: localized("WHY SHPROHLI", "WARUM SHPROHLI"), title: localized("Some calls are harder than they should be.", "Manche Telefonate sind schwieriger, als sie sein sollten."),
     items: [
-      landingContentItem(
-        11,
-        "Speaking on the phone is difficult",
-        "Sprechen am Telefon ist schwierig",
-        "You know what you want to say, but a speech impairment, fatigue or another communication difficulty can make phone calls stressful or impractical.",
-        "Sie wissen genau, was Sie sagen möchten, aber eine Sprechbeeinträchtigung, Erschöpfung oder eine andere Kommunikationshürde macht Telefonate belastend oder praktisch unmöglich."
-      ),
-      landingContentItem(
-        12,
-        "The local language is the barrier",
-        "Die lokale Sprache ist die Hürde",
-        "You may manage everyday life well, but explaining a problem, understanding questions and reacting quickly on the phone can still be difficult.",
-        "Im Alltag kommen Sie vielleicht gut zurecht. Am Telefon ein Problem zu erklären, Fragen spontan zu verstehen und sofort zu reagieren, kann trotzdem schwierig sein."
-      )
-    ]
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000003",
-    blockType: "use_cases",
-    sortOrder: 2,
-    enabled: true,
-    eyebrow: localized("EVERYDAY CALLS", "ALLTÄGLICHE TELEFONATE"),
-    title: localized(
-      "Calls SHPROHLI can help with",
-      "Bei solchen Anrufen kann SHPROHLI helfen"
-    ),
-    text: localized(
-      "Straightforward calls with a clear, practical objective.",
-      "Konkrete Telefonate mit einem klaren, praktischen Ziel."
-    ),
+      landingContentItem(11, "Speaking on the phone is difficult", "Sprechen am Telefon ist schwierig", "You know what you want to say, but a speech impairment, fatigue or another communication difficulty can make a call stressful or impractical.", "Sie wissen, was Sie sagen möchten. Eine Sprechbeeinträchtigung, Erschöpfung oder eine andere Kommunikationshürde kann einen Anruf trotzdem belastend oder kaum möglich machen."),
+      landingContentItem(12, "The local language is the barrier", "Die lokale Sprache ist die Hürde", "Everyday conversations may be manageable, while explaining a problem and responding to questions on the phone is still difficult.", "Im Alltag klappt die Verständigung vielleicht gut. Am Telefon ein Anliegen zu erklären und spontan auf Fragen zu antworten, kann trotzdem schwierig sein.") ] },
+  { id: "72000000-0000-4000-8000-000000000003", blockType: "use_cases", sortOrder: 2, enabled: true,
+    eyebrow: localized("EVERYDAY CALLS", "ALLTÄGLICHE TELEFONATE"), title: localized("Calls SHPROHLI can help with", "Bei diesen Anrufen kann SHPROHLI helfen"), text: localized("Straightforward calls with a clear, practical objective.", "Konkrete Telefonate mit einem klaren, praktischen Ziel."),
     items: [
-      landingContentItem(21, "Doctor's practice", "Arztpraxis", "Ask for an appointment or find out which documents you need to bring.", "Einen Termin vereinbaren oder fragen, welche Unterlagen mitgebracht werden müssen."),
-      landingContentItem(22, "Gemeinde or public office", "Gemeinde oder Behörde", "Check whether an application arrived or ask what information is still missing.", "Nachfragen, ob ein Antrag eingegangen ist oder welche Angaben noch fehlen."),
-      landingContentItem(23, "School or course provider", "Schule oder Kursanbieter", "Clarify a schedule, registration, payment or another straightforward question.", "Zeiten, Anmeldung, Zahlung oder eine andere konkrete Frage klären."),
-      landingContentItem(24, "Landlord or repair service", "Vermieter oder Reparaturdienst", "Describe an issue and arrange the next practical step.", "Ein Problem schildern und den nächsten Schritt vereinbaren."),
-      landingContentItem(25, "Insurance or service provider", "Versicherung oder Dienstleister", "Ask about the status of a straightforward request or document.", "Den Stand einer einfachen Anfrage oder eines Dokuments abklären.")
-    ]
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000009",
-    blockType: "example",
-    sortOrder: 3,
-    enabled: true,
-    title: localized(
-      "From one sentence to a completed call",
-      "Von einem Satz zum erledigten Telefonat"
-    ),
+      landingContentItem(21, "Doctor's practice", "Arztpraxis", "Ask for an appointment or which documents you need to bring.", "Einen Termin vereinbaren oder fragen, welche Unterlagen Sie mitbringen müssen."),
+      landingContentItem(22, "Municipal office (Gemeinde)", "Gemeinde oder Behörde", "Check whether an application arrived or ask what information is still missing.", "Nachfragen, ob ein Antrag eingegangen ist oder welche Angaben noch fehlen."),
+      landingContentItem(23, "School or course provider", "Schule oder Kursanbieter", "Clarify a schedule, registration, payment or another routine question.", "Zeiten, Anmeldung, Zahlung oder eine andere alltägliche Frage klären."),
+      landingContentItem(24, "Landlord or repair service", "Vermieter oder Reparaturdienst", "Describe an issue and arrange the next practical step.", "Ein Problem schildern und den nächsten praktischen Schritt vereinbaren."),
+      landingContentItem(25, "Insurance administration", "Versicherungsadministration", "Ask whether a document arrived, request a form or check an application status.", "Nachfragen, ob ein Dokument eingegangen ist, ein Formular anfordern oder den Stand eines Antrags prüfen.") ] },
+  { id: "72000000-0000-4000-8000-000000000009", blockType: "example", sortOrder: 3, enabled: true, title: localized("From one sentence to a completed call", "Von einem Satz zum erledigten Telefonat"),
     items: [
       landingContentItem(31, "Your request", "Ihre Anfrage", "Call my Gemeinde and ask whether they received my residence form. If anything is missing, ask what I need to send.", "Rufen Sie meine Gemeinde an und fragen Sie, ob mein Aufenthaltsformular angekommen ist. Falls etwas fehlt, fragen Sie bitte, was ich noch senden muss."),
-      landingContentItem(32, "SHPROHLI prepares", "SHPROHLI bereitet den Anruf vor", "SHPROHLI turns the request into a bounded call plan. You review the facts, objective and what the assistant may say.", "SHPROHLI erstellt daraus einen klar begrenzten Gesprächsplan. Sie prüfen Ziel, Fakten und was der Assistent sagen darf."),
+      landingContentItem(32, "SHPROHLI prepares", "SHPROHLI bereitet vor", "SHPROHLI turns the request into a clear call plan. You review the objective, information and what the assistant may say.", "SHPROHLI erstellt daraus einen klaren Anrufplan. Sie prüfen Ziel, Angaben und was der Assistent sagen darf."),
       landingContentItem(33, "The call", "Der Anruf", "Hello. I'm an AI assistant calling on behalf of Anna Keller. She asked me to check whether her residence form has been received.", "Guten Tag. Ich bin ein KI-Assistent und rufe im Auftrag von Anna Keller an. Sie möchte wissen, ob ihr Aufenthaltsformular eingegangen ist."),
-      landingContentItem(34, "Result", "Ergebnis", "Form received. A copy of the passport is still required and can be sent by email.", "Das Formular ist eingegangen. Eine Passkopie fehlt noch und kann per E-Mail eingereicht werden.")
-    ]
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000002",
-    blockType: "how_it_works",
-    sortOrder: 4,
-    enabled: true,
-    eyebrow: localized("HOW IT WORKS", "SO FUNKTIONIERT ES"),
-    title: localized(
-      "You stay in control from start to finish.",
-      "Sie behalten von Anfang bis Ende die Kontrolle."
-    ),
+      landingContentItem(34, "Result", "Ergebnis", "Form received. A copy of the passport is still required and can be sent by email.", "Das Formular ist eingegangen. Eine Passkopie fehlt noch und kann per E-Mail eingereicht werden.") ] },
+  { id: "72000000-0000-4000-8000-000000000002", blockType: "how_it_works", sortOrder: 4, enabled: true,
+    eyebrow: localized("HOW IT WORKS", "SO FUNKTIONIERT ES"), title: localized("You stay in control from start to finish.", "Sie behalten von Anfang bis Ende die Kontrolle."),
     steps: [
       landingStep(1, "Tell us what you need", "Beschreiben Sie Ihr Anliegen", "Write naturally. You do not need to prepare a script.", "Schreiben Sie einfach in Ihren eigenen Worten. Sie brauchen kein fertiges Telefonskript."),
-      landingStep(2, "Check the plan", "Prüfen Sie den Gesprächsplan", "SHPROHLI turns your request into a bounded call brief that you can review and change.", "SHPROHLI erstellt daraus einen klar begrenzten Anruf, den Sie vorab prüfen und ändern können."),
-      landingStep(3, "Approve the call", "Geben Sie den Anruf frei", "The assistant dials only after you explicitly approve the prepared call.", "Erst nach Ihrer ausdrücklichen Freigabe wird die Nummer gewählt."),
-      landingStep(4, "See what happened", "Sehen Sie das Ergebnis", "Follow the call live and review the final transcript and result afterwards.", "Verfolgen Sie den Anruf live und prüfen Sie danach Ergebnis und Transkript.")
-    ]
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000004",
-    blockType: "safety_privacy",
-    sortOrder: 5,
-    enabled: true,
-    eyebrow: localized("CONTROL AND TRANSPARENCY", "KONTROLLE UND TRANSPARENZ"),
-    title: localized(
-      "A phone assistant, not an autonomous stranger.",
-      "Ein Telefonassistent, kein autonom handelnder Fremder."
-    ),
-    text: localized(
-      "SHPROHLI is designed for ordinary, low-risk calls. It is not intended for emergencies, harassment, mass marketing or high-stakes legal, medical or financial decisions.",
-      "SHPROHLI ist für gewöhnliche, risikoarme Telefonate gedacht. Nicht vorgesehen sind Notfälle, Belästigung, Massenwerbung sowie rechtlich, medizinisch oder finanziell folgenreiche Verhandlungen."
-    ),
-    limitsTitle: localized("Your safeguards", "Ihre Schutzvorkehrungen"),
-    limits: localizedList(
-      ["You approve every call first.", "The recipient is told that an AI assistant is calling.", "Conversation processing and recording begin only after consent.", "You decide how long retained call audio is kept."],
-      ["Sie geben jeden Anruf vorher frei.", "Die angerufene Person wird darüber informiert, dass ein KI-Assistent anruft.", "Gesprächsverarbeitung und Aufzeichnung beginnen erst nach Zustimmung.", "Sie bestimmen, wie lange gespeicherte Audioaufnahmen aufbewahrt werden."]
-    )
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000005",
-    blockType: "languages",
-    sortOrder: 6,
-    enabled: true,
-    title: localized(
-      "Use the language that's easiest for you.",
-      "Nutzen Sie die Sprache, die für Sie am einfachsten ist."
-    ),
-    text: localized(
-      "The language of the website does not determine the language of the call. Choose the appropriate supported language separately for each conversation.",
-      "Die Sprache der Website bestimmt nicht die Sprache des Telefonats. Für jeden Anruf wählen Sie die passende unterstützte Gesprächssprache separat aus."
-    )
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000006",
-    blockType: "faq",
-    sortOrder: 7,
-    enabled: true,
-    eyebrow: localized("Frequently asked questions", "Häufig gestellte Fragen"),
-    title: localized("What happens when SHPROHLI makes a call?", "Was passiert, wenn SHPROHLI einen Anruf führt?"),
-    itemLimit: 7
-  },
-  {
-    id: "72000000-0000-4000-8000-000000000007",
-    blockType: "cta",
-    sortOrder: 8,
-    enabled: true,
-    title: localized(
-      "There's a call you've been putting off?",
-      "Gibt es einen Anruf, den Sie schon länger vor sich herschieben?"
-    ),
-    text: localized(
-      "Try SHPROHLI with three beta calls and see whether it can make that conversation easier.",
-      "Probieren Sie SHPROHLI mit drei Beta-Anrufen aus und sehen Sie, ob der nächste Anruf dadurch einfacher wird."
-    ),
-    primaryCtaLabel: localized("Create an account", "Konto erstellen")
-  }
+      landingStep(2, "Check the call plan", "Prüfen Sie den Anrufplan", "SHPROHLI prepares a call plan that you can review and change.", "SHPROHLI erstellt einen Anrufplan, den Sie prüfen und ändern können."),
+      landingStep(3, "Approve the call", "Geben Sie den Anruf frei", "The assistant dials only after you approve the prepared call.", "Erst nach Ihrer Freigabe wird die Nummer gewählt."),
+      landingStep(4, "See what happened", "Sehen Sie das Ergebnis", "Follow the live transcript and review the final transcript and result afterwards.", "Verfolgen Sie das Live-Transkript und prüfen Sie danach Endtranskript und Ergebnis.") ] },
+  { id: "72000000-0000-4000-8000-000000000004", blockType: "safety_privacy", sortOrder: 5, enabled: true,
+    eyebrow: localized("CONTROL AND TRANSPARENCY", "KONTROLLE UND TRANSPARENZ"), title: localized("Clear limits for everyday calls", "Klare Grenzen für alltägliche Anrufe"),
+    text: localized("SHPROHLI is designed for legitimate, low-risk everyday calls. It is not for emergencies, harassment, mass marketing or high-risk legal, medical or financial decisions.", "SHPROHLI ist für legitime, risikoarme Alltagstelefonate gedacht. Der Dienst ist nicht für Notfälle, Belästigung, Massenwerbung oder rechtlich, medizinisch oder finanziell folgenreiche Entscheidungen bestimmt."),
+    limitsTitle: localized("What to expect", "Was Sie erwarten können"),
+    limits: localizedList(["You approve every call first.", "The recipient is told that an AI assistant is calling and is asked for consent before the conversation is processed or recorded.", "AI conversations and transcripts can contain errors.", "You choose how long a retained recording is kept."], ["Sie geben jeden Anruf vorher frei.", "Die angerufene Person wird darüber informiert, dass ein KI-Assistent anruft, und vor der Verarbeitung oder Aufzeichnung des Gesprächs um Zustimmung gebeten.", "KI-Gespräche und Transkripte können Fehler enthalten.", "Sie bestimmen, wie lange eine gespeicherte Aufnahme aufbewahrt wird."]) },
+  { id: "72000000-0000-4000-8000-000000000005", blockType: "languages", sortOrder: 6, enabled: true,
+    title: localized("Use the language that's easiest for you.", "Nutzen Sie die Sprache, die für Sie am einfachsten ist."), text: localized("The website language does not determine the call language. Choose a supported language separately for each call.", "Die Sprache der Website bestimmt nicht die Sprache des Telefonats. Für jeden Anruf wählen Sie die passende unterstützte Sprache separat aus.") },
+  { id: "72000000-0000-4000-8000-000000000006", blockType: "faq", sortOrder: 7, enabled: true, eyebrow: localized("Frequently asked questions", "Häufig gestellte Fragen"), title: localized("What happens when SHPROHLI makes a call?", "Was geschieht bei einem SHPROHLI-Anruf?"), itemLimit: 8 },
+  { id: "72000000-0000-4000-8000-000000000007", blockType: "cta", sortOrder: 8, enabled: true, title: localized("A call you've been putting off?", "Schieben Sie einen Anruf schon länger vor sich her?"), text: localized("Try SHPROHLI with three beta calls and see whether it makes the conversation easier.", "Probieren Sie SHPROHLI mit drei Beta-Anrufen aus und sehen Sie, ob das Gespräch dadurch einfacher wird."), primaryCtaLabel: localized("Create an account", "Konto erstellen") }
 ];
 
 export const seededEditorialCollections: SeedEditorialCollection[] = [
-  {
-    collectionId: "80000000-0000-4000-8000-000000000001",
-    revision: {
-      key: "faq",
-      id: "81000000-0000-4000-8000-000000000011",
-      number: 2,
-      status: "published",
-      createdByUserId: null,
-      createdAt: refreshedLandingPublishedAt,
-      updatedAt: refreshedLandingPublishedAt,
-      publishedAt: refreshedLandingPublishedAt,
-      items: faqItems
-    }
-  },
-  {
-    collectionId: "80000000-0000-4000-8000-000000000002",
-    revision: {
-      key: "navigation",
-      id: "81000000-0000-4000-8000-000000000002",
-      number: 1,
-      status: "published",
-      createdByUserId: null,
-      createdAt: publishedAt,
-      updatedAt: publishedAt,
-      publishedAt,
-      items: navigationItems
-    }
-  },
-  {
-    collectionId: "80000000-0000-4000-8000-000000000003",
-    revision: {
-      key: "landing",
-      id: "81000000-0000-4000-8000-000000000013",
-      number: 2,
-      status: "published",
-      createdByUserId: null,
-      createdAt: refreshedLandingPublishedAt,
-      updatedAt: refreshedLandingPublishedAt,
-      publishedAt: refreshedLandingPublishedAt,
-      items: landingBlocks
-    }
-  }
+  { collectionId: "80000000-0000-4000-8000-000000000001", revision: { key: "faq", id: "82000000-0000-4000-8000-000000000001", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, items: faqItems } },
+  { collectionId: "80000000-0000-4000-8000-000000000002", revision: { key: "navigation", id: "82000000-0000-4000-8000-000000000002", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, items: navigationItems } },
+  { collectionId: "80000000-0000-4000-8000-000000000003", revision: { key: "landing", id: "82000000-0000-4000-8000-000000000003", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, items: landingBlocks } }
 ];
 
-function sectionAnswer(section: ContentSection) {
-  return [
-    ...section.paragraphs,
-    ...section.bullets.map((bullet) => `• ${bullet}`)
-  ].join("\n\n");
+function sectionAnswer(value: ContentSection) {
+  return [...value.paragraphs, ...value.bullets.map((bullet) => `• ${bullet}`)].join("\n\n");
 }
 
-function navigationItem(
-  sequence: number,
-  destination: NavigationItem["destination"],
-  location: NavigationItem["location"],
-  en: string,
-  de: string
-): NavigationItem {
-  return {
-    id: `71000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    sortOrder: sequence - 1,
-    enabled: true,
-    location,
-    destination,
-    label: { en, de }
-  };
+function navigationItem(sequence: number, destination: NavigationItem["destination"], location: NavigationItem["location"], en: string, de: string): NavigationItem {
+  return { id: `71000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`, sortOrder: sequence - 1, enabled: true, location, destination, label: { en, de } };
 }
 
-function localized(en: string, de: string) {
-  return { en, de };
+function localized(en: string, de: string) { return { en, de }; }
+function localizedList(en: string[], de: string[]) { return { en, de }; }
+
+function landingContentItem(sequence: number, enTitle: string, deTitle: string, enText: string, deText: string) {
+  return { id: `74000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`, title: localized(enTitle, deTitle), text: localized(enText, deText) };
 }
 
-function localizedList(en: string[], de: string[]) {
-  return { en, de };
-}
-
-function landingContentItem(
-  sequence: number,
-  enTitle: string,
-  deTitle: string,
-  enText: string,
-  deText: string
-) {
-  return {
-    id: `74000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    title: localized(enTitle, deTitle),
-    text: localized(enText, deText)
-  };
-}
-
-function landingStep(
-  sequence: number,
-  enTitle: string,
-  deTitle: string,
-  enText: string,
-  deText: string
-) {
-  return {
-    id: `73000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
-    title: localized(enTitle, deTitle),
-    text: localized(enText, deText)
-  };
+function landingStep(sequence: number, enTitle: string, deTitle: string, enText: string, deText: string) {
+  return { id: `73000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`, title: localized(enTitle, deTitle), text: localized(enText, deText) };
 }

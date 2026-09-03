@@ -2,7 +2,7 @@ import { ApiError } from "../api";
 import type { UiLocale } from "./messages";
 
 const en = {
-  eyebrow: "Call preferences",
+  eyebrow: "Recipient control",
   title: "Stop SHPROHLI calls to your number",
   intro: "Verify your Swiss phone number by SMS and we will place it on the global do-not-call list. This affects future SHPROHLI calls from every account.",
   phone: "Phone number",
@@ -38,7 +38,7 @@ type OptOutMessages = {
 };
 
 const de: OptOutMessages = {
-  eyebrow: "Anrufeinstellungen",
+  eyebrow: "Anrufschutz",
   title: "SHPROHLI-Anrufe an Ihre Nummer stoppen",
   intro: "Bestätigen Sie Ihre Schweizer Telefonnummer per SMS. Wir setzen sie danach auf die globale Sperrliste für zukünftige SHPROHLI-Anrufe aus allen Konten.",
   phone: "Telefonnummer",

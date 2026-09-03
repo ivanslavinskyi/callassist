@@ -263,7 +263,8 @@ export function LiveCall({ callId }: { callId: string }) {
         buildFinalTranscriptCopyText({
           brief: snapshot.brief,
           finalTranscript: snapshot.finalTranscript,
-          languageLabel: language.label
+          languageLabel: language.label,
+          uiLocale
         })
       );
       setCopyStatus("copied");
@@ -279,7 +280,8 @@ export function LiveCall({ callId }: { callId: string }) {
       const input = {
         brief: snapshot.brief,
         finalTranscript: snapshot.finalTranscript,
-        languageLabel: language.label
+        languageLabel: language.label,
+        uiLocale
       };
       const { downloadTranscriptPdf } = await import(
         "@/lib/download-transcript-pdf"
@@ -640,12 +642,15 @@ export function LiveCall({ callId }: { callId: string }) {
                       <p>{finalTranscript.text}</p>
                     </div>
                   )}
-                  <small>
-                    {finalSegments.length > 0
-                      ? copy.structuredTranscriptNote
-                      : copy.plainTranscriptNote}{" "}
-                    {copy.aiWarning}
-                  </small>
+                  <p className="transcript-warning">{copy.aiWarning}</p>
+                  <details className="transcript-method">
+                    <summary>{copy.transcriptMethod}</summary>
+                    <p>
+                      {finalSegments.length > 0
+                        ? copy.structuredTranscriptNote
+                        : copy.plainTranscriptNote}
+                    </p>
+                  </details>
                   {recording?.status === "available" ? (
                     <button
                       className="secondary-button regenerate-button"

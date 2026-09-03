@@ -646,10 +646,12 @@ export function AccountConsole() {
                   <strong data-status={data.deletion.status}>
                     {copy.deletionStatuses[data.deletion.status]}
                   </strong>
-                  <small>{copy.deletionAttempt(
-                    data.deletion.attemptCount,
-                    data.deletion.maxAttempts
-                  )}</small>
+                  {["retrying", "needs_support"].includes(data.deletion.status) ? (
+                    <small>{copy.deletionAttempt(
+                      data.deletion.attemptCount,
+                      data.deletion.maxAttempts
+                    )}</small>
+                  ) : null}
                   {data.deletion.status === "retrying" ? (
                     <p>{copy.deletionNextAttempt}</p>
                   ) : null}

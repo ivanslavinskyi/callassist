@@ -11,8 +11,8 @@ const index: PublishedContentIndex = {
     },
     sourceLocale: "en",
     localizations: [
-      { locale: "en", seoTitle: "CallAssist — AI phone assistance under your control", seoDescription: "Supervised AI phone calls for people with speech impairments or local-language barriers.", translationStale: false },
-      { locale: "de", seoTitle: "CallAssist — KI-Telefonassistenz unter Ihrer Kontrolle", seoDescription: "Begleitete KI-Telefonanrufe für Menschen mit Sprachbeeinträchtigung oder lokaler Sprachbarriere.", translationStale: false }
+      { locale: "en", seoTitle: "SHPROHLI — AI-assisted phone calls", seoDescription: "Everyday calls when speaking or the local language is a barrier.", translationStale: false },
+      { locale: "de", seoTitle: "SHPROHLI — KI-unterstützte Telefonanrufe", seoDescription: "Alltägliche Anrufe, wenn Sprechen oder die lokale Sprache eine Barriere ist.", translationStale: false }
     ]
   },
   pages: [{
@@ -25,8 +25,8 @@ const index: PublishedContentIndex = {
       publishedAt: "2026-08-25T12:00:00.000Z"
     },
     localizations: [
-      { locale: "de", slug: "datenschutz", title: "Datenschutz", seoTitle: "Datenschutz | CallAssist", seoDescription: "Kurze Beschreibung.", sourceRevisionNumber: 1, translationStale: true },
-      { locale: "en", slug: "privacy", title: "Privacy notice", seoTitle: "Privacy notice for the CallAssist public beta", seoDescription: "Learn how CallAssist processes account, call, consent, recording, and transcript data during the supervised public beta.", sourceRevisionNumber: 2, translationStale: false }
+      { locale: "de", slug: "datenschutz", title: "Datenschutz", seoTitle: "Datenschutz | SHPROHLI", seoDescription: "Kurze Beschreibung.", sourceRevisionNumber: 1, translationStale: true },
+      { locale: "en", slug: "privacy", title: "Privacy notice", seoTitle: "Privacy Notice | SHPROHLI", seoDescription: "Learn how SHPROHLI processes account, call, consent, recording and transcript data.", sourceRevisionNumber: 2, translationStale: false }
     ]
   }]
 };

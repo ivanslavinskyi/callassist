@@ -1617,7 +1617,9 @@ button:disabled { cursor: wait; opacity: .55; }
   max-width: 1344px;
   padding: 28px 48px 34px;
 }
-.site-footer nav { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.footer-navigation { display: flex; flex-wrap: wrap; gap: 34px; }
+.site-footer nav { align-items: flex-start; display: flex; flex-direction: column; gap: 8px; }
+.site-footer nav strong { color: var(--ink); font-size: 11px; }
 .site-footer a { color: var(--green); font-size: 11px; font-weight: 700; }
 .site-footer small { flex: 0 0 auto; font-size: 10px; }
 
@@ -1652,9 +1654,12 @@ button:disabled { cursor: wait; opacity: .55; }
 .content-sections h2 { font-size: 20px; letter-spacing: -.02em; margin: 0 0 14px; }
 .content-sections p, .content-sections li { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .content-sections p { margin: 0; }
+.content-sections p { white-space: pre-line; }
 .content-sections p + p { margin-top: 12px; }
 .content-sections ul { margin: 16px 0 0; padding-left: 20px; }
 .content-sections li + li { margin-top: 7px; }
+.content-links { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 16px; }
+.content-links a { color: var(--green); font-size: 12px; font-weight: 750; }
 
 .onboarding-page { max-width: 980px; }
 .onboarding-documents { display: grid; gap: 10px; grid-template-columns: repeat(3, 1fr); margin-top: 26px; }
@@ -1672,6 +1677,24 @@ button:disabled { cursor: wait; opacity: .55; }
 .onboarding-documents span { color: var(--green); font-size: 10px; font-weight: 750; }
 .onboarding-form { display: grid; gap: 18px; }
 .onboarding-form fieldset { display: grid; gap: 12px; margin: 0; }
+.onboarding-information {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+.onboarding-information h2 { font-size: 17px; margin: 0 0 12px; }
+.onboarding-information ul { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 0; padding-left: 20px; }
+.onboarding-information li + li { margin-top: 7px; }
+.admin-content-links { border-top: 1px solid var(--line); display: grid; gap: 12px; margin-top: 8px; padding-top: 16px; }
+.admin-content-links h4 { margin: 0; }
+.admin-content-link-editor { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto; }
+.admin-inline-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.transcript-warning { color: var(--muted); font-size: 12px; font-weight: 700; line-height: 1.6; }
+.transcript-method { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.transcript-method summary { color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 700; }
+.transcript-method p { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .onboarding-form legend { font-size: 15px; font-weight: 780; padding: 0 8px; }
 .onboarding-check {
   align-items: flex-start;
@@ -1742,6 +1765,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .status-blocked, .status-stopped, .status-failed, .final-failed { background: #3b2424; }
   .danger-button { background: #3b2424; }
   .decline-button, .secondary-button, .transcript-export-button,
+  .onboarding-information, .admin-content-link-editor,
   .terminal-summary .guard-visual { background: #26342f; color: #d8e7e1; }
   .transcript-export-button { border-color: #3b5148; }
   .transcript-export-button:hover:not(:disabled) { background: #30443c; border-color: #4c665b; }
@@ -1843,9 +1867,11 @@ button:disabled { cursor: wait; opacity: .55; }
   .account-transactions { max-height: none; overflow: visible; }
   .account-email-change form > .primary-button, .account-phone-change form > .primary-button, .account-deletion form > .danger-button { width: 100%; }
   .site-footer { align-items: flex-start; flex-direction: column; padding: 24px 20px 30px; }
+  .footer-navigation { flex-direction: column; gap: 22px; }
   .content-page, .onboarding-page { padding: 42px 16px 64px; }
   .content-sections section, .onboarding-form fieldset { padding: 22px; }
   .onboarding-documents { grid-template-columns: 1fr; }
+  .admin-content-link-editor { grid-template-columns: 1fr; }
   .dashboard-page, .live-page { padding: 38px 18px 60px; }
   .hero-block { margin-bottom: 30px; }
   .hero-block h1 { font-size: 36px; }

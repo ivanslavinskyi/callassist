@@ -1,8 +1,8 @@
 # SHPROHLI
 
-SHPROHLI is a privacy-conscious AI voice assistant for controlled outbound phone calls. A user prepares a structured call brief, chooses the call language and a preset assistant profile, monitors a live transcript, and retains control over sensitive disclosures.
+SHPROHLI helps people make everyday phone calls when speaking or the local language is a barrier. A user prepares a call plan, chooses the call language and assistant voice, reviews the plan, follows a live transcript and receives a final transcript after the call.
 
-> **Project status:** working MVP for supervised testing. It is not yet intended for unattended or production-critical calling.
+> **Project status:** public beta for legitimate, low-risk everyday calls. SHPROHLI is not an emergency service and is not intended for high-risk decisions.
 
 ## What it does
 
@@ -21,7 +21,8 @@ SHPROHLI is a privacy-conscious AI voice assistant for controlled outbound phone
   brief without re-entering its fields.
 - Makes initial brief preparation retry-safe with a browser-stable UUID and a
   PostgreSQL uniqueness boundary, so a lost response cannot create duplicate briefs.
-- Requires DTMF consent before recipient audio is sent to the model or recorded.
+- Asks for consent verbally before recipient audio is processed or recorded, with
+  keypad confirmation only when the spoken answer cannot be understood reliably.
 - Starts a dual-channel Twilio recording only after consent is confirmed.
 - Streams a fast draft transcript to the web console over a heartbeat-backed SSE
   connection whose subscription follows the response lifecycle through proxies.
@@ -58,11 +59,12 @@ The public Twilio surface is isolated on a dedicated listener. The main API, SSE
 ## Security model
 
 - Twilio call recording is disabled when the call is created.
-- Recipient audio is discarded until consent is confirmed by pressing `1`.
+- Recipient audio is isolated from the main conversation and is not recorded until
+  consent is confirmed by voice or, when needed, by keypad fallback.
 - After consent, the conversation starts only when Twilio confirms recording
   startup; otherwise the assistant announces the failure and ends the call.
 - Recording URLs and Twilio credentials are never exposed to the browser.
-- Provider audio is deleted on demand or at the configured retention deadline.
+- Recordings are deleted on demand or at the configured retention deadline.
 - Twilio HTTP and WebSocket requests are signature-validated.
 - Every media stream carries an additional call-scoped HMAC token.
 - Private fields are encrypted before PostgreSQL persistence.
@@ -226,7 +228,7 @@ The separate English-only `/admin` tree performs the same server-side session an
 onboarding checks, allows content editors only into content/SEO routes, and reserves
 operational routes for `admin` and `superadmin`. `INTERNAL_API_URL` configures the private API origin used by
 those server checks. The old localized Dashboard/call-detail routes were deliberately
-removed without compatibility redirects while the product remains local pre-beta.
+removed without compatibility redirects during the pre-release routing migration.
 New briefs are assigned to that authenticated user, list queries are
 owner-scoped, and foreign IDs receive the same `CALL_NOT_FOUND` response across normal
 reads, mutations, SSE, recordings, approvals, and transcript retry. Signed provider

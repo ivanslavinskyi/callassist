@@ -8,7 +8,8 @@ export const contentPageKeySchema = z.enum([
   "terms",
   "acceptable_use",
   "support",
-  "faq"
+  "faq",
+  "imprint"
 ]);
 export type ContentPageKey = z.infer<typeof contentPageKeySchema>;
 
@@ -28,7 +29,9 @@ export const navigationDestinationSchema = z.enum([
   "acceptable_use",
   "support",
   "faq",
-  "opt_out"
+  "opt_out",
+  "imprint",
+  "how_it_works"
 ]);
 export type NavigationDestination = z.infer<
   typeof navigationDestinationSchema
@@ -483,10 +486,25 @@ export type PublishedLandingIndex = z.infer<
 
 export const contentPageTypeSchema = z.enum(["page", "landing"]);
 
+export const contentLinkSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("internal"),
+    label: z.string().trim().min(1).max(120),
+    destination: navigationDestinationSchema
+  }),
+  z.object({
+    kind: z.literal("email"),
+    label: z.string().trim().min(1).max(120),
+    address: z.string().trim().toLowerCase().email().max(320)
+  })
+]);
+export type ContentLink = z.infer<typeof contentLinkSchema>;
+
 export const contentSectionSchema = z.object({
   heading: z.string().trim().min(1).max(180),
   paragraphs: z.array(z.string().trim().min(1).max(4000)).max(12),
-  bullets: z.array(z.string().trim().min(1).max(1000)).max(24)
+  bullets: z.array(z.string().trim().min(1).max(1000)).max(24),
+  links: z.array(contentLinkSchema).max(8).optional()
 });
 export type ContentSection = z.infer<typeof contentSectionSchema>;
 
@@ -655,6 +673,8 @@ export const onboardingAcceptanceInputSchema = z.object({
   acceptableUseRevisionId: z.uuid(),
   acceptTerms: z.literal(true),
   acceptAcceptableUse: z.literal(true),
+  // Legacy/internal compatibility fields retained for immutable historical
+  // acceptance records. The onboarding UI does not present separate consents.
   acknowledgeConsent: z.literal(true),
   acknowledgeRetention: z.literal(true),
   acknowledgeUseLimits: z.literal(true),

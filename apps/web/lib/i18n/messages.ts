@@ -2,8 +2,8 @@ export const uiLocales = ["en", "de"] as const;
 export type UiLocale = (typeof uiLocales)[number];
 
 const enFormCopy = {
-  newBrief: "New call brief",
-  editBrief: "Edit call brief",
+  newBrief: "New call plan",
+  editBrief: "Edit call plan",
   defaultHeading: "Who are we calling, and why?",
   aiCall: "AI call",
   recipient: "Organisation or recipient",
@@ -24,7 +24,7 @@ const enFormCopy = {
   noAssistanceDisclosure: "Do not disclose a reason",
   speechImpairment: "Speech impairment",
   languageBarrier: "Language barrier",
-  assistanceDisclosureWarning: "This information will be shared with the person called.",
+  assistanceDisclosureWarning: "If selected, this reason may be shared with the person called.",
   representedPersonFirstName: "Represented person's first name",
   representedPersonFirstNamePlaceholder: "e.g. John",
   representedPersonLastName: "Represented person's last name",
@@ -70,12 +70,10 @@ type FormCopy = { [Key in keyof typeof enFormCopy]: string };
 
 type ReviewCopy = {
   preview: string; ready: string; clarificationNeeded: string; changesNeeded: string;
-  conversationSettings: string; opening: string; questions: string;
+  whatWillDo: string; callSettings: string; opening: string; questions: string;
   addMissingDetail: string; clarificationHelp: string; blockedReason: string;
-  edit: string; starting: string; approveAndCall: string; technicalDetails: string;
-  originalObjective: string; successMeans: string; defaultsUsed: string;
+  edit: string; starting: string; approveAndCall: string; successMeans: string;
   approvedInformation: string; none: string; guardrails: string;
-  revision: string; schema: string; policy: string; compiler: string; snapshot: string;
   updating: string; continue: string;
   tone: Record<"formal" | "neutral" | "friendly", string>;
   addressing: Record<"formal" | "informal", string>;
@@ -89,7 +87,6 @@ type ReviewCopy = {
 export type Messages = {
   app: {
     homeLabel: string;
-    consoleLabel: string;
     interfaceLanguage: string;
     switchToLightTheme: string;
     switchToDarkTheme: string;
@@ -105,7 +102,12 @@ export type Messages = {
     acceptableUse: string;
     support: string;
     faq: string;
+    howItWorks: string;
+    imprint: string;
     optOut: string;
+    footerProduct: string;
+    footerLegal: string;
+    publicBeta: string;
     redeem: string;
     adminPortal: string;
     creditsRemaining: (count: number) => string;
@@ -157,6 +159,11 @@ export type Messages = {
     requiredComplete: string;
     requiredRemaining: (count: number) => string;
     rateLimited: string;
+    preparationError: string;
+    preparationUnavailable: string;
+    preparationInvalid: string;
+    preparationNotFound: string;
+    preparationNotEditable: string;
     navigationError: string;
     callOptions: string;
     copy: FormCopy;
@@ -203,7 +210,8 @@ export type Messages = {
     retentionDays: (days: number) => string; assistant: string;
     finalEyebrow: string; finalTitle: string; finalHelp: string;
     preparingPdf: string; pdfFailed: string; downloadPdf: string; pdfFailedAnnouncement: string;
-    unassignedSpeaker: string; fullRecordingTranscript: string; structuredTranscriptNote: string;
+    unassignedSpeaker: string; fullRecordingTranscript: string; transcriptMethod: string;
+    structuredTranscriptNote: string;
     plainTranscriptNote: string; aiWarning: string; regenerateTranscript: string;
     finalFailed: string; finalFailedHelp: string; retryTranscription: string;
     creatingFinal: string; creatingFinalHelp: string; recordingNotStarted: string;
@@ -231,16 +239,13 @@ export type Messages = {
 
 const enReview: ReviewCopy = {
   preview: "Call preview", ready: "Ready to call", clarificationNeeded: "One detail is needed",
-  changesNeeded: "This call needs changes", conversationSettings: "Conversation settings",
-  opening: "How the assistant will open the call", questions: "What the assistant will ask or say",
+  changesNeeded: "This call needs changes", whatWillDo: "What SHPROHLI will do", callSettings: "Call settings",
+  opening: "How the call starts", questions: "Questions it may ask",
   addMissingDetail: "Add the missing detail here",
-  clarificationHelp: "Your existing brief will be updated. You will not need to fill it in again.",
-  blockedReason: "Why this cannot be called yet", edit: "Edit brief", starting: "Starting…",
-  approveAndCall: "Approve & call", technicalDetails: "Technical details",
-  originalObjective: "Original objective", successMeans: "Success means",
-  defaultsUsed: "Product defaults used", approvedInformation: "Approved information",
-  none: "None", guardrails: "Guardrails", revision: "Revision", schema: "Schema",
-  policy: "Policy", compiler: "Compiler", snapshot: "Snapshot", updating: "Updating…",
+  clarificationHelp: "Your existing call plan will be updated. You will not need to fill it in again.",
+  blockedReason: "What needs to change", edit: "Edit", starting: "Starting…",
+  approveAndCall: "Approve & call", successMeans: "A successful result",
+  approvedInformation: "Approved information", none: "None", guardrails: "Safety rules", updating: "Updating…",
   continue: "Continue",
   tone: { formal: "Formal tone", neutral: "Neutral tone", friendly: "Friendly tone" },
   addressing: { formal: "Formal addressing", informal: "Informal addressing" },
@@ -254,30 +259,27 @@ const enReview: ReviewCopy = {
     respect_refusal_and_end: "A refusal is respected and the call ends politely."
   },
   reason: {
-    input_moderation_flagged: "The source brief was flagged by input moderation.",
-    model_refusal: "The compiler refused to create an executable plan.",
-    prohibited_content: "The brief contains a category outside the current low-risk scope.",
-    material_ambiguity: "A legacy brief contains an unresolved material ambiguity.",
+    input_moderation_flagged: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
+    model_refusal: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
+    prohibited_content: "This request is outside the supported low-risk uses. Edit it before trying again.",
+    material_ambiguity: "The request is unclear in a way that could change the call. Add the missing detail.",
     required_information_missing: "Required information is missing.",
-    fact_integrity_failure: "Approved information was not preserved exactly.",
-    plan_constraint_failure: "The generated plan did not preserve a selected call option.",
-    unsupported_task: "This task type is outside the current MVP scope."
+    fact_integrity_failure: "SHPROHLI could not preserve the approved information reliably. Edit the request and try again.",
+    plan_constraint_failure: "SHPROHLI could not apply one of the selected call settings. Review the request and try again.",
+    unsupported_task: "This type of call is not currently supported."
   }
 };
 
 const deReview: ReviewCopy = {
   preview: "Anrufvorschau", ready: "Bereit zum Anrufen", clarificationNeeded: "Eine Angabe fehlt",
-  changesNeeded: "Dieser Anruf muss geändert werden", conversationSettings: "Gesprächseinstellungen",
-  opening: "So beginnt der Assistent den Anruf", questions: "Was der Assistent fragt oder sagt",
+  changesNeeded: "Dieser Anruf muss geändert werden", whatWillDo: "Was SHPROHLI tun wird", callSettings: "Anrufeinstellungen",
+  opening: "So beginnt der Anruf", questions: "Mögliche Fragen",
   addMissingDetail: "Fehlende Angabe ergänzen",
-  clarificationHelp: "Ihr bestehender Entwurf wird aktualisiert. Sie müssen ihn nicht erneut ausfüllen.",
-  blockedReason: "Warum dieser Anruf noch nicht möglich ist", edit: "Entwurf bearbeiten",
+  clarificationHelp: "Ihr bestehender Anrufplan wird aktualisiert. Sie müssen ihn nicht erneut ausfüllen.",
+  blockedReason: "Was geändert werden muss", edit: "Bearbeiten",
   starting: "Wird gestartet…", approveAndCall: "Genehmigen und anrufen",
-  technicalDetails: "Technische Details", originalObjective: "Ursprüngliches Ziel",
-  successMeans: "Erfolg bedeutet", defaultsUsed: "Verwendete Produktstandardwerte",
-  approvedInformation: "Freigegebene Informationen", none: "Keine", guardrails: "Schutzregeln",
-  revision: "Revision", schema: "Schema", policy: "Richtlinie", compiler: "Compiler",
-  snapshot: "Snapshot", updating: "Wird aktualisiert…", continue: "Weiter",
+  successMeans: "Ein erfolgreiches Ergebnis", approvedInformation: "Freigegebene Informationen",
+  none: "Keine", guardrails: "Sicherheitsregeln", updating: "Wird aktualisiert…", continue: "Weiter",
   tone: { formal: "Formeller Ton", neutral: "Neutraler Ton", friendly: "Freundlicher Ton" },
   addressing: { formal: "Formelle Anrede", informal: "Informelle Anrede" },
   result: { capture_in_callassist: "Antworten werden in SHPROHLI gespeichert", request_external_delivery: "Externe Zustellung angefragt", message_only: "Nur Nachricht" },
@@ -290,26 +292,25 @@ const deReview: ReviewCopy = {
     respect_refusal_and_end: "Eine Ablehnung wird respektiert und der Anruf höflich beendet."
   },
   reason: {
-    input_moderation_flagged: "Der Ausgangsentwurf wurde von der Inhaltsprüfung markiert.",
-    model_refusal: "Der Compiler hat keinen ausführbaren Plan erstellt.",
-    prohibited_content: "Der Entwurf liegt ausserhalb des derzeit erlaubten risikoarmen Bereichs.",
-    material_ambiguity: "Ein älterer Entwurf enthält eine ungeklärte wesentliche Mehrdeutigkeit.",
+    input_moderation_flagged: "SHPROHLI konnte diese Anfrage nicht sicher vorbereiten. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
+    model_refusal: "SHPROHLI konnte diese Anfrage nicht sicher vorbereiten. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
+    prohibited_content: "Diese Anfrage liegt ausserhalb der unterstützten risikoarmen Nutzung. Bearbeiten Sie sie und versuchen Sie es erneut.",
+    material_ambiguity: "Die Anfrage ist an einer entscheidenden Stelle unklar. Ergänzen Sie die fehlende Angabe.",
     required_information_missing: "Erforderliche Informationen fehlen.",
-    fact_integrity_failure: "Freigegebene Informationen wurden nicht exakt bewahrt.",
-    plan_constraint_failure: "Der erstellte Plan hat eine gewählte Anrufoption nicht bewahrt.",
-    unsupported_task: "Dieser Aufgabentyp liegt ausserhalb des aktuellen MVP-Umfangs."
+    fact_integrity_failure: "SHPROHLI konnte die freigegebenen Angaben nicht zuverlässig übernehmen. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
+    plan_constraint_failure: "SHPROHLI konnte eine gewählte Anrufeinstellung nicht übernehmen. Prüfen Sie die Anfrage und versuchen Sie es erneut.",
+    unsupported_task: "Diese Art von Anruf wird derzeit nicht unterstützt."
   }
 };
 
 const en: Messages = {
   app: {
     homeLabel: "SHPROHLI — home",
-    consoleLabel: "Private call console",
     interfaceLanguage: "Interface language",
     switchToLightTheme: "Switch to light theme",
     switchToDarkTheme: "Switch to dark theme",
     skipToContent: "Skip to main content",
-    defaultTitle: "SHPROHLI — controlled AI phone calls",
+    defaultTitle: "SHPROHLI — AI-assisted phone calls",
     newCall: "New call",
     history: "History",
     account: "Account",
@@ -320,7 +321,12 @@ const en: Messages = {
     acceptableUse: "Acceptable use",
     support: "Support",
     faq: "FAQ",
+    howItWorks: "How it works",
+    imprint: "Imprint",
     optOut: "Stop calls",
+    footerProduct: "Product",
+    footerLegal: "Legal",
+    publicBeta: "Public beta",
     redeem: "Redeem",
     adminPortal: "Admin",
     creditsRemaining: (count: number) =>
@@ -334,24 +340,24 @@ const en: Messages = {
     approveBody: (recipient: string) =>
       `You are approving the reviewed plan and immediately starting a real phone call to ${recipient}.`,
     approveConfirm: "Approve & start call",
-    deleteAudioTitle: "Permanently delete this audio?",
+    deleteAudioTitle: "Permanently delete this recording?",
     deleteAudioBody:
-      "The consent-gated recording will be permanently deleted and cannot be recovered. The transcript is not deleted.",
-    deleteAudioConfirm: "Delete audio permanently"
+      "The recording will be permanently deleted and cannot be recovered. The transcript is not deleted.",
+    deleteAudioConfirm: "Delete recording permanently"
   },
   dashboard: {
-    eyebrow: "Personal voice agent",
+    eyebrow: "AI-assisted phone calls",
     titleStart: "Every call under",
     titleAccent: " your control.",
-    lead: "Set the objective and language. SHPROHLI handles the conversation, streams a live draft, and creates a more accurate transcript after the call.",
+    lead: "SHPROHLI handles the conversation, shows a live transcript and creates a final transcript after the call.",
     historyEyebrow: "History",
-    historyTitle: "Recent call briefs",
+    historyTitle: "Recent calls",
     emptyTitle: "Your calls will appear here",
-    emptyText: "Create your first brief to get started.",
-    privacyTitle: "Consent first.",
-    privacyText: "Audio recording starts only after the recipient presses 1 and is deleted according to the selected retention period.",
-    openBrief: (recipient: string) => `Open call brief for ${recipient}`,
-    loading: "Loading recent call briefs…",
+    emptyText: "Create your first call plan to get started.",
+    privacyTitle: "The recipient chooses.",
+    privacyText: "The recipient is told that an AI assistant is calling and is asked for consent before the conversation is processed or recorded.",
+    openBrief: (recipient: string) => `Open call plan for ${recipient}`,
+    loading: "Loading recent calls…",
     loadErrorTitle: "Could not load call history",
     loadErrorText: "Check the API connection and try again.",
     retry: "Try again",
@@ -371,8 +377,8 @@ const en: Messages = {
     }
   },
   form: {
-    disclosurePreview: "Disclosure preview",
-    disclosureHelp: "Generated automatically from the selected call language and assistance reason.",
+    disclosurePreview: "If shared, the assistant may say:",
+    disclosureHelp: "The assistant always identifies itself as AI and asks the recipient for consent separately.",
     preparingTitle: "AI is reviewing your call plan…",
     preparingText: "This can take around a minute. Keep this page open; your entries are preserved if it fails.",
     phoneValid: "Valid Swiss phone number",
@@ -380,7 +386,12 @@ const en: Messages = {
     requiredComplete: "All required fields complete",
     requiredRemaining: (count: number) => `${count} required ${count === 1 ? "field" : "fields"} remaining`,
     rateLimited: "Too many call-planning requests. Wait a moment and try again.",
-    navigationError: "The call was prepared, but its review page could not be opened. Select Review call again to open the existing brief.",
+    preparationError: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
+    preparationUnavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
+    preparationInvalid: "Some call details need attention. Check your entries and try again.",
+    preparationNotFound: "This call plan no longer exists. Return to your calls and create a new one.",
+    preparationNotEditable: "This call plan can no longer be edited.",
+    navigationError: "The call plan was prepared, but its review page could not be opened. Select Review call again to open it.",
     callOptions: "Call options",
     copy: enFormCopy
   },
@@ -393,11 +404,11 @@ const en: Messages = {
     actionError: "The action could not be completed. Try again.",
     insufficientCredits: "You have no call credits remaining.",
     concurrentCall: "Finish your active call before starting another one.",
-    recipientSuppressed: "This recipient has opted out and cannot be called.",
+    recipientSuppressed: "Calls to this number are blocked.",
     outboundCallsDisabled: "New calls are temporarily paused. Try again later.",
     callLimitReached: "Your public-beta call limit has been reached. Try again later.",
     rateLimited: "Too many requests. Wait a moment and try again.",
-    loadError: "The call brief was not found or the API is unavailable.",
+    loadError: "This call could not be loaded. Check your connection and try again.",
     copied: "Copied",
     copyFailed: "Copy failed — retry",
     copyTranscript: "Copy transcript",
@@ -406,11 +417,11 @@ const en: Messages = {
     showObjective: "Show full objective",
     hideObjective: "Collapse objective",
     breadcrumbLabel: "Breadcrumb",
-    allCallBriefs: "All call briefs",
+    allCallBriefs: "All calls",
     callPageTitle: (recipient: string) => `${recipient} — SHPROHLI`,
     status: {
       review_required: "Ready to call", needs_clarification: "Needs one detail",
-      blocked: "Blocked by policy", ready: "Ready to start", dialing: "Dialing",
+      blocked: "Needs changes", ready: "Ready to start", dialing: "Dialing",
       in_progress: "Call in progress", awaiting_approval: "Awaiting decision",
       completed: "Call completed", stopped: "Call stopped", failed: "Call failed"
     },
@@ -421,43 +432,44 @@ const en: Messages = {
     finalTranscriptStatus: {
       processing: "Processing", completed: "Completed", failed: "Failed"
     },
-    loadingBrief: "Loading call brief…", unavailableTitle: "Call brief unavailable",
-    returnDashboard: "Return to dashboard", activeBrief: "Active call brief",
+    loadingBrief: "Loading call plan…", unavailableTitle: "Call plan unavailable",
+    returnDashboard: "Return to dashboard", activeBrief: "Active call plan",
     startCall: "Start call", stopCall: "Stop call", updateHeading: "Update this call",
-    updatePlan: "Update call plan", legacyBrief: "Legacy call brief",
-    legacyTitle: "This brief cannot be started",
-    legacyHelp: "It was created before the compiler and policy boundary. Recreate it from the dashboard to generate a reviewable call plan.",
-    liveTranscriptEyebrow: "Live transcript · realtime draft", liveCaptions: "Live captions",
+    updatePlan: "Update call plan", legacyBrief: "Earlier call plan",
+    legacyTitle: "This call plan cannot be started",
+    legacyHelp: "This call plan uses an older format. Recreate it from the dashboard before starting the call.",
+    liveTranscriptEyebrow: "During the call", liveCaptions: "Live transcript",
     liveTranscriptHelp: "Appears during the call. Fast, provisional, and may contain recognition errors.",
     transcriptEmptyTitle: "The transcript will appear here",
     transcriptEmptyHelp: "After the recipient consents, each turn will appear here in real time. This fast transcript may contain recognition errors.",
     liveTime: "live", decisionRequired: "Decision required", assistantWillSay: "The assistant will say",
     approve: "Approve", doNotDisclose: "Do not disclose",
     terminalHelp: "This call has ended. Review the call results below.",
-    safetyActive: "Safety gate active", safetyHelp: "Private data cannot enter the conversation without your approval.",
-    briefEyebrow: "Call brief", objectiveTitle: "Call objective", primaryLanguage: "Primary language",
+    safetyActive: "Protected information", safetyHelp: "The assistant can share only the information you approved.",
+    briefEyebrow: "Call plan", objectiveTitle: "Call objective", primaryLanguage: "Primary language",
     languageSwitching: "Language switching", disabled: "Disabled", voice: "Voice",
     female: "Female", male: "Male", assistanceReason: "Reason for assistance",
     noAssistanceDisclosure: "No reason disclosed", languageBarrier: "Language barrier", speechImpairment: "Speech impairment",
     audioRetention: "Audio retention", untilFinalTranscript: "Until final transcript",
     retentionDays: (days: number) => `${days} days`, assistant: "Assistant",
-    finalEyebrow: "Final transcript · recording-based", finalTitle: "Post-call transcription",
-    finalHelp: "Created after the call from the complete consented recording.",
+    finalEyebrow: "After the call", finalTitle: "Final transcript",
+    finalHelp: "Created from the call recording after the conversation ended.",
     preparingPdf: "Preparing PDF…", pdfFailed: "PDF failed — retry", downloadPdf: "Download PDF",
     pdfFailedAnnouncement: "The PDF could not be created.", unassignedSpeaker: "Unassigned speaker",
-    fullRecordingTranscript: "Full-recording transcript",
-    structuredTranscriptNote: "The wording comes only from the consented recording. Roles are determined by the separate call channels and timestamps are approximate; live draft words are never copied.",
-    plainTranscriptNote: "The wording comes from one complete-recording pass and is not merged with the live draft. A reliable role/time alignment was not available for this call.",
-    aiWarning: "The result remains AI-generated; check critical details against the audio.",
+    fullRecordingTranscript: "Transcript",
+    transcriptMethod: "How this transcript was created",
+    structuredTranscriptNote: "The final transcript was created from the recording. Speaker labels and times may be approximate.",
+    plainTranscriptNote: "The final transcript was created from the recording. Speaker labels and times were not available for this call.",
+    aiWarning: "AI-generated. Check important names, dates, numbers and commitments against the recording.",
     regenerateTranscript: "Regenerate final transcript", finalFailed: "Final transcription failed",
     finalFailedHelp: "The recording is still available. You can retry safely.", retryTranscription: "Retry transcription",
-    creatingFinal: "Creating the final transcript", creatingFinalHelp: "The complete recording is being processed after the call.",
+    creatingFinal: "Creating the final transcript", creatingFinalHelp: "The call recording is being processed.",
     recordingNotStarted: "Recording was not started", recordingNotStartedHelp: "The conversation did not continue after consent.",
     noRecording: "No recording available", noRecordingHelp: "The call ended before a consent-gated recording was started.",
-    availableAfterCall: "Available after the call", availableAfterCallHelp: "Recording begins only after consent. The final transcript is generated when the provider finishes the recording.",
-    consentAudio: "Consent-gated audio", deleted: "Deleted", available: "Available",
+    availableAfterCall: "Available after the call", availableAfterCallHelp: "Recording begins only after consent. The final transcript is created when the recording is available.",
+    consentAudio: "Recording", deleted: "Deleted", available: "Available",
     audioUnsupported: "Your browser does not support audio playback.", deleteAudioNow: "Delete audio now",
-    audioDeleted: "The provider audio has been permanently deleted.",
+    audioDeleted: "The recording has been permanently deleted.",
     retentionImmediate: "Deleted automatically after the final transcript is created.",
     retentionScheduled: (date: string) => `Scheduled for deletion on ${date}.`,
     retentionAutomatic: (days: number) => `Deleted automatically ${days} days after the final transcript is created.`,
@@ -482,27 +494,26 @@ const en: Messages = {
     feedbackSaved: "Feedback saved.",
     feedbackError: "Feedback could not be saved. Try again.",
     dataDeletionTitle: "Delete this call's data",
-    dataDeletionText: "Permanently removes the call brief, transcripts, approval text, feedback comment, and provider audio. This call disappears from your history and exports.",
-    dataDeletionRetained: "Minimized credit, consent, safety, technical, and audit evidence is retained without the call content. This cannot be undone.",
+    dataDeletionText: "Permanently deletes this call plan, recording, transcripts, approval text and feedback comment. The call disappears from your history and data export.",
+    dataDeletionRetained: "This cannot be undone. Some limited records may be retained where necessary for security, abuse prevention, accounting or legal obligations.",
     dataDeletionPassword: "Current password",
     dataDeletionConfirmation: "Type DELETE to confirm",
     dataDeletionConfirmationHint: "Enter the exact uppercase word DELETE.",
     dataDeletionAction: "Delete call data permanently",
     dataDeletionBusy: "Deleting call data…",
     dataDeletionInvalidPassword: "The current password is incorrect.",
-    dataDeletionError: "The call data could not be deleted. No success was recorded; wait and retry."
+    dataDeletionError: "The call data could not be deleted. Wait a moment and try again."
   }
 };
 
 const de: Messages = {
   app: {
     homeLabel: "SHPROHLI — Startseite",
-    consoleLabel: "Private Anrufkonsole",
     interfaceLanguage: "Sprache der Benutzeroberfläche",
     switchToLightTheme: "Zum hellen Design wechseln",
     switchToDarkTheme: "Zum dunklen Design wechseln",
     skipToContent: "Zum Hauptinhalt springen",
-    defaultTitle: "SHPROHLI — kontrollierte KI-Telefonanrufe",
+    defaultTitle: "SHPROHLI — KI-unterstützte Telefonanrufe",
     newCall: "Neuer Anruf",
     history: "Verlauf",
     account: "Konto",
@@ -513,7 +524,12 @@ const de: Messages = {
     acceptableUse: "Nutzungsregeln",
     support: "Support",
     faq: "FAQ",
+    howItWorks: "So funktioniert es",
+    imprint: "Impressum",
     optOut: "Anrufe sperren",
+    footerProduct: "Produkt",
+    footerLegal: "Rechtliches",
+    publicBeta: "Öffentliche Beta",
     redeem: "Code einlösen",
     adminPortal: "Admin",
     creditsRemaining: (count: number) => `${count} Anrufguthaben`
@@ -532,18 +548,18 @@ const de: Messages = {
     deleteAudioConfirm: "Aufnahme endgültig löschen"
   },
   dashboard: {
-    eyebrow: "Persönlicher Sprachassistent",
+    eyebrow: "KI-unterstützte Telefonanrufe",
     titleStart: "Jeder Anruf unter",
     titleAccent: " Ihrer Kontrolle.",
-    lead: "Legen Sie Ziel und Sprache fest. SHPROHLI führt das Gespräch, zeigt einen Live-Entwurf und erstellt danach ein genaueres Transkript.",
+    lead: "SHPROHLI führt das Gespräch, zeigt ein Live-Transkript und erstellt nach dem Anruf ein Endtranskript.",
     historyEyebrow: "Verlauf",
-    historyTitle: "Letzte Anrufentwürfe",
+    historyTitle: "Letzte Anrufe",
     emptyTitle: "Ihre Anrufe erscheinen hier",
-    emptyText: "Erstellen Sie den ersten Anrufentwurf.",
-    privacyTitle: "Einwilligung zuerst.",
-    privacyText: "Die Audioaufnahme beginnt erst, nachdem die empfangende Person die 1 gedrückt hat, und wird gemäss der gewählten Aufbewahrungsfrist gelöscht.",
-    openBrief: (recipient: string) => `Anrufentwurf für ${recipient} öffnen`,
-    loading: "Letzte Anrufentwürfe werden geladen…",
+    emptyText: "Erstellen Sie Ihren ersten Anrufplan.",
+    privacyTitle: "Die angerufene Person entscheidet.",
+    privacyText: "Die angerufene Person wird darüber informiert, dass ein KI-Assistent anruft, und vor der Verarbeitung oder Aufzeichnung des Gesprächs um Zustimmung gebeten.",
+    openBrief: (recipient: string) => `Anrufplan für ${recipient} öffnen`,
+    loading: "Letzte Anrufe werden geladen…",
     loadErrorTitle: "Anrufverlauf konnte nicht geladen werden",
     loadErrorText: "Prüfen Sie die API-Verbindung und versuchen Sie es erneut.",
     retry: "Erneut versuchen",
@@ -563,8 +579,8 @@ const de: Messages = {
     }
   },
   form: {
-    disclosurePreview: "Vorschau der Offenlegung",
-    disclosureHelp: "Wird automatisch aus Anrufsprache und Unterstützungsgrund erstellt.",
+    disclosurePreview: "Falls dieser Grund genannt wird, kann der Assistent sagen:",
+    disclosureHelp: "Der Assistent gibt sich immer als KI zu erkennen und fragt die angerufene Person separat nach ihrer Zustimmung.",
     preparingTitle: "Die KI prüft Ihren Anrufplan…",
     preparingText: "Dies kann etwa eine Minute dauern. Lassen Sie diese Seite geöffnet; bei einem Fehler bleiben Ihre Eingaben erhalten.",
     phoneValid: "Gültige Schweizer Telefonnummer",
@@ -572,11 +588,16 @@ const de: Messages = {
     requiredComplete: "Alle Pflichtfelder sind ausgefüllt",
     requiredRemaining: (count: number) => `${count} ${count === 1 ? "Pflichtfeld ist" : "Pflichtfelder sind"} noch offen`,
     rateLimited: "Zu viele Anfragen zur Anrufplanung. Warten Sie kurz und versuchen Sie es erneut.",
-    navigationError: "Der Anrufentwurf wurde erstellt, aber die Pr\u00fcfseite konnte nicht ge\u00f6ffnet werden. W\u00e4hlen Sie erneut \u201eAnruf pr\u00fcfen\u201c, um den bestehenden Entwurf zu \u00f6ffnen.",
+    preparationError: "SHPROHLI konnte diese Anfrage nicht sicher vorbereiten. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
+    preparationUnavailable: "Die Anrufvorbereitung ist vorübergehend nicht verfügbar. Ihre Eingaben bleiben erhalten. Versuchen Sie es später erneut.",
+    preparationInvalid: "Einige Anrufangaben müssen geprüft werden. Korrigieren Sie Ihre Eingaben und versuchen Sie es erneut.",
+    preparationNotFound: "Dieser Anrufplan ist nicht mehr vorhanden. Kehren Sie zu Ihren Anrufen zurück und erstellen Sie einen neuen.",
+    preparationNotEditable: "Dieser Anrufplan kann nicht mehr bearbeitet werden.",
+    navigationError: "Der Anrufplan wurde erstellt, aber die Pr\u00fcfseite konnte nicht ge\u00f6ffnet werden. W\u00e4hlen Sie erneut \u201eAnruf pr\u00fcfen\u201c, um ihn zu \u00f6ffnen.",
     callOptions: "Anrufoptionen",
     copy: {
-      newBrief: "Neuer Anrufentwurf",
-      editBrief: "Anrufentwurf bearbeiten",
+      newBrief: "Neuer Anrufplan",
+      editBrief: "Anrufplan bearbeiten",
       defaultHeading: "Wen rufen wir an und warum?",
       aiCall: "KI-Anruf",
       recipient: "Organisation oder empfangende Person",
@@ -648,11 +669,11 @@ const de: Messages = {
     actionError: "Die Aktion konnte nicht abgeschlossen werden. Versuchen Sie es erneut.",
     insufficientCredits: "Sie haben kein Anrufguthaben mehr.",
     concurrentCall: "Beenden Sie den aktiven Anruf, bevor Sie einen weiteren starten.",
-    recipientSuppressed: "Dieser Empfänger hat widersprochen und kann nicht angerufen werden.",
+    recipientSuppressed: "Anrufe an diese Nummer sind gesperrt.",
     outboundCallsDisabled: "Neue Anrufe sind vorübergehend pausiert. Versuchen Sie es später erneut.",
     callLimitReached: "Ihr Anruflimit für die öffentliche Beta ist erreicht. Versuchen Sie es später erneut.",
     rateLimited: "Zu viele Anfragen. Warten Sie kurz und versuchen Sie es erneut.",
-    loadError: "Der Anrufentwurf wurde nicht gefunden oder die API ist nicht erreichbar.",
+    loadError: "Dieser Anruf konnte nicht geladen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
     copied: "Kopiert",
     copyFailed: "Kopieren fehlgeschlagen — erneut versuchen",
     copyTranscript: "Transkript kopieren",
@@ -661,58 +682,59 @@ const de: Messages = {
     showObjective: "Vollständiges Ziel anzeigen",
     hideObjective: "Ziel einklappen",
     breadcrumbLabel: "Brotkrümelnavigation",
-    allCallBriefs: "Alle Anrufentwürfe",
+    allCallBriefs: "Alle Anrufe",
     callPageTitle: (recipient: string) => `${recipient} — SHPROHLI`,
     status: {
       review_required: "Bereit zum Anrufen", needs_clarification: "Eine Angabe fehlt",
-      blocked: "Durch Richtlinie blockiert", ready: "Startbereit", dialing: "Wird gewählt",
+      blocked: "Muss geändert werden", ready: "Startbereit", dialing: "Wird gewählt",
       in_progress: "Anruf läuft", awaiting_approval: "Entscheidung ausstehend",
       completed: "Anruf abgeschlossen", stopped: "Anruf gestoppt", failed: "Anruf fehlgeschlagen"
     },
     recordingStatus: {
-      starting: "Wird gestartet", recording: "Aufnahme lÃ¤uft", processing: "Wird verarbeitet",
-      available: "VerfÃ¼gbar", failed: "Fehlgeschlagen", deleted: "GelÃ¶scht"
+      starting: "Wird gestartet", recording: "Aufnahme läuft", processing: "Wird verarbeitet",
+      available: "Verfügbar", failed: "Fehlgeschlagen", deleted: "Gelöscht"
     },
     finalTranscriptStatus: {
       processing: "Wird verarbeitet", completed: "Abgeschlossen", failed: "Fehlgeschlagen"
     },
-    loadingBrief: "Anrufentwurf wird geladen…", unavailableTitle: "Anrufentwurf nicht verfügbar",
-    returnDashboard: "Zur Übersicht", activeBrief: "Aktiver Anrufentwurf",
+    loadingBrief: "Anrufplan wird geladen…", unavailableTitle: "Anrufplan nicht verfügbar",
+    returnDashboard: "Zur Übersicht", activeBrief: "Aktiver Anrufplan",
     startCall: "Anruf starten", stopCall: "Anruf stoppen", updateHeading: "Diesen Anruf aktualisieren",
-    updatePlan: "Anrufplan aktualisieren", legacyBrief: "Älterer Anrufentwurf",
-    legacyTitle: "Dieser Entwurf kann nicht gestartet werden",
-    legacyHelp: "Er wurde vor der Compiler- und Richtliniengrenze erstellt. Erstellen Sie ihn in der Übersicht neu, um einen prüfbaren Anrufplan zu erzeugen.",
-    liveTranscriptEyebrow: "Live-Transkript · Echtzeitentwurf", liveCaptions: "Live-Untertitel",
+    updatePlan: "Anrufplan aktualisieren", legacyBrief: "Früherer Anrufplan",
+    legacyTitle: "Dieser Anrufplan kann nicht gestartet werden",
+    legacyHelp: "Dieser Anrufplan verwendet ein älteres Format. Erstellen Sie ihn in der Übersicht neu, bevor Sie den Anruf starten.",
+    liveTranscriptEyebrow: "Während des Anrufs", liveCaptions: "Live-Transkript",
     liveTranscriptHelp: "Erscheint während des Anrufs. Schnell, vorläufig und möglicherweise fehlerhaft.",
     transcriptEmptyTitle: "Das Transkript erscheint hier",
     transcriptEmptyHelp: "Nach der Einwilligung erscheint jeder Gesprächsbeitrag in Echtzeit. Dieses schnelle Transkript kann Erkennungsfehler enthalten.",
     liveTime: "live", decisionRequired: "Entscheidung erforderlich", assistantWillSay: "Der Assistent sagt",
     approve: "Genehmigen", doNotDisclose: "Nicht offenlegen",
     terminalHelp: "Dieser Anruf ist beendet. Prüfen Sie unten die Ergebnisse des Anrufs.",
-    safetyActive: "Sicherheitsfreigabe aktiv", safetyHelp: "Private Daten können ohne Ihre Freigabe nicht in das Gespräch gelangen.",
-    briefEyebrow: "Anrufentwurf", objectiveTitle: "Anrufziel", primaryLanguage: "Hauptsprache",
+    safetyActive: "Geschützte Informationen", safetyHelp: "Der Assistent darf nur die von Ihnen freigegebenen Informationen weitergeben.",
+    briefEyebrow: "Anrufplan", objectiveTitle: "Anrufziel", primaryLanguage: "Hauptsprache",
     languageSwitching: "Sprachwechsel", disabled: "Deaktiviert", voice: "Stimme",
     female: "Weiblich", male: "Männlich", assistanceReason: "Grund für die Unterstützung",
     noAssistanceDisclosure: "Kein Grund angegeben", languageBarrier: "Sprachbarriere", speechImpairment: "Sprechbeeinträchtigung",
     audioRetention: "Audioaufbewahrung", untilFinalTranscript: "Bis zum endgültigen Transkript",
     retentionDays: (days: number) => `${days} Tage`, assistant: "Assistent",
-    finalEyebrow: "Endgültiges Transkript · aufnahmebasiert", finalTitle: "Transkription nach dem Anruf",
-    finalHelp: "Wird nach dem Anruf aus der vollständigen Aufnahme mit Einwilligung erstellt.",
+    finalEyebrow: "Nach dem Anruf", finalTitle: "Endtranskript",
+    finalHelp: "Wird nach dem Gespräch aus der Anrufaufnahme erstellt.",
     preparingPdf: "PDF wird vorbereitet…", pdfFailed: "PDF fehlgeschlagen — erneut versuchen", downloadPdf: "PDF herunterladen",
     pdfFailedAnnouncement: "Das PDF konnte nicht erstellt werden.", unassignedSpeaker: "Nicht zugeordnete Stimme",
-    fullRecordingTranscript: "Transkript der vollständigen Aufnahme",
-    structuredTranscriptNote: "Der Wortlaut stammt nur aus der Aufnahme mit Einwilligung. Die Rollen werden durch die getrennten Anrufkanäle bestimmt, die Zeitangaben sind ungefähr; Wörter aus dem Live-Entwurf werden nie kopiert.",
-    plainTranscriptNote: "Der Wortlaut stammt aus einem Durchlauf der vollständigen Aufnahme und wird nicht mit dem Live-Entwurf vermischt. Für diesen Anruf war keine zuverlässige Rollen- und Zeitausrichtung verfügbar.",
-    aiWarning: "Das Ergebnis wurde von KI erstellt; prüfen Sie kritische Details anhand der Aufnahme.",
+    fullRecordingTranscript: "Transkript",
+    transcriptMethod: "So wurde dieses Transkript erstellt",
+    structuredTranscriptNote: "Das Endtranskript wurde aus der Aufnahme erstellt. Sprecherzuordnung und Zeitangaben können ungefähr sein.",
+    plainTranscriptNote: "Das Endtranskript wurde aus der Aufnahme erstellt. Sprecherzuordnung und Zeitangaben waren für diesen Anruf nicht verfügbar.",
+    aiWarning: "Mit KI erstellt. Prüfen Sie wichtige Namen, Daten, Zahlen und Zusagen anhand der Aufnahme.",
     regenerateTranscript: "Endgültiges Transkript neu erstellen", finalFailed: "Endgültige Transkription fehlgeschlagen",
     finalFailedHelp: "Die Aufnahme ist weiterhin verfügbar. Sie können den Vorgang sicher wiederholen.", retryTranscription: "Transkription wiederholen",
-    creatingFinal: "Endgültiges Transkript wird erstellt", creatingFinalHelp: "Die vollständige Aufnahme wird nach dem Anruf verarbeitet.",
+    creatingFinal: "Endtranskript wird erstellt", creatingFinalHelp: "Die Anrufaufnahme wird verarbeitet.",
     recordingNotStarted: "Aufnahme wurde nicht gestartet", recordingNotStartedHelp: "Das Gespräch wurde nach der Einwilligung nicht fortgesetzt.",
     noRecording: "Keine Aufnahme verfügbar", noRecordingHelp: "Der Anruf endete, bevor eine Aufnahme mit Einwilligung gestartet wurde.",
-    availableAfterCall: "Nach dem Anruf verfügbar", availableAfterCallHelp: "Die Aufnahme beginnt erst nach der Einwilligung. Das endgültige Transkript wird erstellt, sobald der Anbieter die Aufnahme abgeschlossen hat.",
-    consentAudio: "Audioaufnahme mit Einwilligung", deleted: "Gelöscht", available: "Verfügbar",
+    availableAfterCall: "Nach dem Anruf verfügbar", availableAfterCallHelp: "Die Aufnahme beginnt erst nach der Zustimmung. Das Endtranskript wird erstellt, sobald die Aufnahme verfügbar ist.",
+    consentAudio: "Aufnahme", deleted: "Gelöscht", available: "Verfügbar",
     audioUnsupported: "Ihr Browser unterstützt die Audiowiedergabe nicht.", deleteAudioNow: "Audio jetzt löschen",
-    audioDeleted: "Die Audioaufnahme des Anbieters wurde endgültig gelöscht.",
+    audioDeleted: "Die Aufnahme wurde endgültig gelöscht.",
     retentionImmediate: "Wird nach Erstellung des endgültigen Transkripts automatisch gelöscht.",
     retentionScheduled: (date: string) => `Löschung geplant für ${date}.`,
     retentionAutomatic: (days: number) => `Wird ${days} Tage nach Erstellung des endgültigen Transkripts automatisch gelöscht.`,
@@ -737,15 +759,15 @@ const de: Messages = {
     feedbackSaved: "Feedback gespeichert.",
     feedbackError: "Das Feedback konnte nicht gespeichert werden. Versuchen Sie es erneut.",
     dataDeletionTitle: "Daten dieses Anrufs löschen",
-    dataDeletionText: "Entfernt den Anrufentwurf, Transkripte, Freigabetexte, den Feedback-Kommentar und die Anbieter-Aufnahme dauerhaft. Der Anruf verschwindet aus Verlauf und Exporten.",
-    dataDeletionRetained: "Minimierte Guthaben-, Einwilligungs-, Sicherheits-, technische und Audit-Nachweise bleiben ohne Anrufinhalt erhalten. Dies kann nicht rückgängig gemacht werden.",
+    dataDeletionText: "Löscht Anrufplan, Aufnahme, Transkripte, Freigabetexte und Feedback-Kommentar dauerhaft. Der Anruf verschwindet aus Verlauf und Datenexport.",
+    dataDeletionRetained: "Dies kann nicht rückgängig gemacht werden. Bestimmte begrenzte Angaben dürfen aufbewahrt werden, soweit dies für Sicherheit, Missbrauchsschutz, Abrechnung oder rechtliche Pflichten erforderlich ist.",
     dataDeletionPassword: "Aktuelles Passwort",
     dataDeletionConfirmation: "Zur Bestätigung DELETE eingeben",
     dataDeletionConfirmationHint: "Geben Sie das exakte grossgeschriebene Wort DELETE ein.",
     dataDeletionAction: "Anrufdaten dauerhaft löschen",
     dataDeletionBusy: "Anrufdaten werden gelöscht…",
     dataDeletionInvalidPassword: "Das aktuelle Passwort ist falsch.",
-    dataDeletionError: "Die Anrufdaten konnten nicht gelöscht werden. Es wurde kein Erfolg protokolliert; warten Sie und versuchen Sie es erneut."
+    dataDeletionError: "Die Anrufdaten konnten nicht gelöscht werden. Warten Sie einen Moment und versuchen Sie es erneut."
   }
 };
 

@@ -705,6 +705,7 @@ export class InMemoryContentRepository implements ContentRepository {
     locale: ContentLocale
   ) {
     if (destination === "home") return `/${locale}`;
+    if (destination === "how_it_works") return `/${locale}#how-it-works`;
     if (destination === "opt_out") return `/${locale}/opt-out`;
     const page = this.#latestPublishedPages().find((candidate) =>
       candidate.key === destination && candidate.locale === locale

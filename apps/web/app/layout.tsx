@@ -7,8 +7,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteOrigin),
-  title: "SHPROHLI — controlled AI phone calls",
-  description: "A personal voice assistant with live transcripts and approval gates",
+  title: "SHPROHLI — AI-assisted phone calls",
+  description: "SHPROHLI helps people make everyday phone calls when speaking or the local language is a barrier.",
   applicationName: "SHPROHLI"
 };
 

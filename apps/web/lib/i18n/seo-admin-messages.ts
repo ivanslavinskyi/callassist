@@ -64,7 +64,7 @@ const en: SeoMessages = {
   open: "Open public page",
   logout: "Sign out",
   noMatches: "No published routes match these filters.",
-  pageName: { home: "Landing", privacy: "Privacy", terms: "Terms", acceptable_use: "Acceptable Use", support: "Support", faq: "FAQ" },
+  pageName: { home: "Landing", privacy: "Privacy", terms: "Terms", acceptable_use: "Acceptable Use", support: "Support", faq: "FAQ", imprint: "Imprint" },
   issue: {
     translation_stale: "Translation trails the source revision",
     title_short: "Title is shorter than 20 characters",
@@ -103,7 +103,7 @@ const de: SeoMessages = {
   open: "Öffentliche Seite öffnen",
   logout: "Abmelden",
   noMatches: "Keine veröffentlichte Route entspricht diesen Filtern.",
-  pageName: { home: "Landingpage", privacy: "Datenschutz", terms: "Bedingungen", acceptable_use: "Nutzungsregeln", support: "Support", faq: "FAQ" },
+  pageName: { home: "Landingpage", privacy: "Datenschutz", terms: "Bedingungen", acceptable_use: "Nutzungsregeln", support: "Support", faq: "FAQ", imprint: "Impressum" },
   issue: {
     translation_stale: "Übersetzung liegt hinter der Quellrevision",
     title_short: "Titel ist kürzer als 20 Zeichen",

@@ -30,6 +30,8 @@ export function OnboardingForm({ initialStatus }: {
         acceptableUseRevisionId: initialStatus.current.acceptableUse.id,
         acceptTerms: true,
         acceptAcceptableUse: true,
+        // Legacy compatibility fields remain required by the immutable
+        // acceptance schema, but are no longer separate user agreements.
         acknowledgeConsent: true,
         acknowledgeRetention: true,
         acknowledgeUseLimits: true,
@@ -71,11 +73,11 @@ export function OnboardingForm({ initialStatus }: {
           <div className="onboarding-documents">
             <Link href={`/${locale}/${initialStatus.current.terms.slug}`} rel="noreferrer" target="_blank">
               <strong>{copy.terms}</strong>
-              <span>{copy.revision(initialStatus.current.terms.revisionNumber)}</span>
+              <span aria-hidden="true">↗</span>
             </Link>
             <Link href={`/${locale}/${initialStatus.current.acceptableUse.slug}`} rel="noreferrer" target="_blank">
               <strong>{copy.acceptableUse}</strong>
-              <span>{copy.revision(initialStatus.current.acceptableUse.revisionNumber)}</span>
+              <span aria-hidden="true">↗</span>
             </Link>
             <Link href={contentPath(locale, "privacy")} rel="noreferrer" target="_blank">
               <strong>{copy.privacy}</strong>
@@ -86,17 +88,15 @@ export function OnboardingForm({ initialStatus }: {
 
         <form className="onboarding-form" onSubmit={submit}>
           <fieldset>
-            <legend>{copy.legalHeading}</legend>
-            <OnboardingCheck name="acceptTerms" text={copy.acceptTerms} />
-            <OnboardingCheck name="acceptAcceptableUse" text={copy.acceptAcceptableUse} />
+            <legend className="sr-only">{copy.title}</legend>
+            <OnboardingCheck name="legalAgreement" text={copy.agreement} />
           </fieldset>
-          <fieldset>
-            <legend>{copy.safeguardsHeading}</legend>
-            <OnboardingCheck name="acknowledgeConsent" text={copy.consent} />
-            <OnboardingCheck name="acknowledgeRetention" text={copy.retention} />
-            <OnboardingCheck name="acknowledgeUseLimits" text={copy.useLimits} />
-            <OnboardingCheck name="acknowledgeCredits" text={copy.credits} />
-          </fieldset>
+          <section className="onboarding-information">
+            <h2>{copy.informationHeading}</h2>
+            <ul>
+              {copy.information.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </section>
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <div className="onboarding-actions">
             <button className="primary-button" disabled={busy} type="submit">

@@ -2,7 +2,6 @@ import { ApiError } from "@/lib/api";
 import type { UiLocale } from "./messages";
 
 const en = {
-  eyebrow: "Secure account",
   register: {
     title: "Create your SHPROHLI account",
     intro: "Use your real first and last name. The assistant will use them when it represents you on a call.",
@@ -87,7 +86,6 @@ const en = {
 } as const;
 
 type AuthMessages = {
-  eyebrow: string;
   register: { [Key in keyof typeof en.register]: string };
   verify: { [Key in keyof typeof en.verify]: string };
   login: { [Key in keyof typeof en.login]: string };
@@ -96,7 +94,6 @@ type AuthMessages = {
 };
 
 const de: AuthMessages = {
-  eyebrow: "Sicheres Konto",
   register: {
     title: "SHPROHLI-Konto erstellen",
     intro: "Verwenden Sie Ihren echten Vor- und Nachnamen. Der Assistent nutzt beide, wenn er Sie bei einem Anruf vertritt.",

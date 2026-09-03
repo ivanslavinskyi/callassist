@@ -100,6 +100,7 @@ describeWithDatabase("PostgresContentRepository", () => {
       .filter(({ key }) => key === "terms")
       .map((page) => ({
         ...page,
+        requiresReacceptanceOnUpgrade: true,
         revisionLocalizationId: randomUUID(),
         revision: {
           ...page.revision,
@@ -111,12 +112,13 @@ describeWithDatabase("PostgresContentRepository", () => {
     await contentRepository.initializeSeedContent(nextRevision);
 
     await expect(contentRepository.hasCurrentAcceptance(user.id)).resolves.toBe(false);
-    await expect(contentRepository.getOnboardingStatus(user.id, "de")).resolves
-      .toMatchObject({
-        required: true,
-        current: { terms: { revisionNumber: nextRevisionNumber } },
-        accepted: { termsRevisionId: initial.current.terms.id }
-      });
+    const upgraded = await contentRepository.getOnboardingStatus(user.id, "de");
+    expect(upgraded).toMatchObject({
+      required: true,
+      accepted: { termsRevisionId: initial.current.terms.id }
+    });
+    expect(upgraded.current.terms.revisionNumber)
+      .toBeGreaterThan(initial.current.terms.revisionNumber);
   });
 
   it("publishes and rolls back through new immutable revisions with append-only audit", async () => {

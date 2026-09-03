@@ -4,9 +4,11 @@ import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
   AdminContentRevisionSummary,
+  ContentLink,
   ContentLocale,
   ContentPageKey,
-  ContentSection
+  ContentSection,
+  NavigationDestination
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -462,8 +464,108 @@ function SectionEditor({ copy, index, onChange, onRemove, removable, section }: 
       <TextInput label={copy.heading} maxLength={180} value={section.heading} onChange={(heading) => onChange({ ...section, heading })} />
       <TextArea label={copy.paragraphs} maxLength={4000} rows={6} value={section.paragraphs.join("\n")} onChange={(value) => onChange({ ...section, paragraphs: value.split("\n") })} />
       <TextArea label={copy.bullets} maxLength={1000} rows={5} value={section.bullets.join("\n")} onChange={(value) => onChange({ ...section, bullets: value.split("\n") })} />
+      <div className="admin-content-links">
+        <h4>{copy.links}</h4>
+        {(section.links ?? []).map((link, linkIndex) => (
+          <ContentLinkEditor
+            copy={copy}
+            key={linkIndex}
+            link={link}
+            onChange={(next) => onChange({
+              ...section,
+              links: (section.links ?? []).map((value, valueIndex) =>
+                valueIndex === linkIndex ? next : value
+              )
+            })}
+            onRemove={() => onChange({
+              ...section,
+              links: (section.links ?? []).filter((_, valueIndex) => valueIndex !== linkIndex)
+            })}
+          />
+        ))}
+        <div className="admin-inline-actions">
+          <button
+            className="secondary-button"
+            disabled={(section.links?.length ?? 0) >= 8}
+            onClick={() => onChange({
+              ...section,
+              links: [...(section.links ?? []), { kind: "internal", label: "", destination: "home" }]
+            })}
+            type="button"
+          >
+            {copy.addInternalLink}
+          </button>
+          <button
+            className="secondary-button"
+            disabled={(section.links?.length ?? 0) >= 8}
+            onClick={() => onChange({
+              ...section,
+              links: [...(section.links ?? []), { kind: "email", label: "", address: "" }]
+            })}
+            type="button"
+          >
+            {copy.addEmailLink}
+          </button>
+        </div>
+      </div>
       {removable ? <button className="danger-button" onClick={onRemove} type="button">{copy.removeSection}</button> : null}
     </fieldset>
+  );
+}
+
+const navigationDestinations: NavigationDestination[] = [
+  "home",
+  "how_it_works",
+  "faq",
+  "support",
+  "opt_out",
+  "privacy",
+  "terms",
+  "acceptable_use",
+  "imprint"
+];
+
+function ContentLinkEditor({ copy, link, onChange, onRemove }: {
+  copy: (typeof contentAdminMessages)["en"];
+  link: ContentLink;
+  onChange: (link: ContentLink) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="admin-content-link-editor">
+      <TextInput
+        label={copy.linkLabel}
+        maxLength={120}
+        onChange={(label) => onChange({ ...link, label })}
+        value={link.label}
+      />
+      {link.kind === "internal" ? (
+        <label className="field">
+          <span>{copy.linkDestination}</span>
+          <select
+            onChange={(event) => onChange({
+              ...link,
+              destination: event.target.value as NavigationDestination
+            })}
+            value={link.destination}
+          >
+            {navigationDestinations.map((destination) => (
+              <option key={destination} value={destination}>{destination}</option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <TextInput
+          label={copy.emailAddress}
+          maxLength={320}
+          onChange={(address) => onChange({ ...link, address })}
+          value={link.address}
+        />
+      )}
+      <button className="danger-button" onClick={onRemove} type="button">
+        {copy.removeLink}
+      </button>
+    </div>
   );
 }
 
@@ -475,7 +577,12 @@ function normaliseSections(sections: ContentSection[]) {
   return sections.map((section) => ({
     heading: section.heading.trim(),
     paragraphs: section.paragraphs.map((value) => value.trim()).filter(Boolean),
-    bullets: section.bullets.map((value) => value.trim()).filter(Boolean)
+    bullets: section.bullets.map((value) => value.trim()).filter(Boolean),
+    ...(section.links?.length ? {
+      links: section.links.map((link) => link.kind === "email"
+        ? { ...link, label: link.label.trim(), address: link.address.trim().toLowerCase() }
+        : { ...link, label: link.label.trim() })
+    } : {})
   }));
 }
 

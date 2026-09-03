@@ -18,8 +18,27 @@ describe("ContentService", () => {
   });
 
   it("serves localized structured pages", async () => {
-    await expect(service.getPublishedPage("de", "datenschutz")).resolves
-      .toMatchObject({ key: "privacy", locale: "de", revision: { number: 1 } });
+    const routes = [
+      ["en", "privacy", "privacy"],
+      ["de", "datenschutz", "privacy"],
+      ["en", "terms", "terms"],
+      ["de", "nutzungsbedingungen", "terms"],
+      ["en", "acceptable-use", "acceptable_use"],
+      ["de", "nutzungsregeln", "acceptable_use"],
+      ["en", "support", "support"],
+      ["de", "hilfe", "support"],
+      ["en", "faq", "faq"],
+      ["de", "faq", "faq"],
+      ["en", "imprint", "imprint"],
+      ["de", "impressum", "imprint"]
+    ] as const;
+    for (const [locale, slug, key] of routes) {
+      await expect(service.getPublishedPage(locale, slug)).resolves.toMatchObject({
+        key,
+        locale,
+        revision: { number: 1 }
+      });
+    }
     await expect(service.getPublishedPage("en", "datenschutz")).resolves.toBeNull();
     const index = await service.listPublishedContentIndex();
     const privacy = index.pages.find(({ key }) => key === "privacy")!;
@@ -28,6 +47,8 @@ describe("ContentService", () => {
       expect.objectContaining({ locale: "en", translationStale: false }),
       expect.objectContaining({ locale: "de", translationStale: false })
     ]));
+    await expect(service.getPublishedPage("de", "impressum")).resolves
+      .toMatchObject({ key: "imprint", title: "Impressum" });
   });
 
   it("automatically advances source revisions and flags stale translations", async () => {
@@ -216,7 +237,7 @@ describe("ContentService", () => {
   it("publishes reusable FAQ and internal navigation through audited revisions", async () => {
     const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
     const initialFaq = await service.getPublishedFaq("de");
-    expect(initialFaq?.items).toHaveLength(7);
+    expect(initialFaq?.items).toHaveLength(8);
     expect(initialFaq?.items[0]?.question).toContain("KI-Assistent");
 
     await expect(service.getPublishedNavigation("de")).resolves.toEqual(
@@ -229,6 +250,14 @@ describe("ContentService", () => {
           expect.objectContaining({
             destination: "opt_out",
             href: "/de/opt-out"
+          }),
+          expect.objectContaining({
+            destination: "how_it_works",
+            href: "/de#how-it-works"
+          }),
+          expect.objectContaining({
+            destination: "imprint",
+            href: "/de/impressum"
           })
         ])
       })
@@ -247,7 +276,7 @@ describe("ContentService", () => {
         : item)
     });
     const beforePublish = await service.getPublishedFaq("de");
-    expect(beforePublish).toMatchObject({ revision: { number: 2 } });
+    expect(beforePublish).toMatchObject({ revision: { number: 1 } });
     expect(beforePublish?.items[0]?.question).toBe(
       "Weiss die angerufene Person, dass ein KI-Assistent anruft?"
     );
@@ -258,16 +287,16 @@ describe("ContentService", () => {
       "Publish reviewed FAQ wording"
     );
     const afterPublish = await service.getPublishedFaq("de");
-    expect(afterPublish).toMatchObject({ revision: { number: 3 } });
+    expect(afterPublish).toMatchObject({ revision: { number: 2 } });
     expect(afterPublish?.items[0]?.question).toBe(
       "Ist der KI-Anruf offengelegt?"
     );
     await expect(service.createEditorialRollbackDraft(
       actorUserId,
       "faq",
-      2,
+      1,
       "Restore original FAQ wording"
-    )).resolves.toMatchObject({ number: 4, status: "draft" });
+    )).resolves.toMatchObject({ number: 3, status: "draft" });
     expect(repository.editorialAdminEventsForTest().map(({ eventType }) =>
       eventType
     )).toEqual([
@@ -282,7 +311,7 @@ describe("ContentService", () => {
     const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
     const initial = await service.getPublishedLanding("de");
     expect(initial).toMatchObject({
-      revision: { number: 2 },
+      revision: { number: 1 },
       locale: "de",
       blocks: [
         { blockType: "hero" },
@@ -309,7 +338,7 @@ describe("ContentService", () => {
             sortOrder,
             seoTitle: {
               ...block.seoTitle,
-              de: "CallAssist — geprüfte Landing-Revision"
+              de: "SHPROHLI — geprüfte Landing-Revision"
             }
           }
         : { ...block, sortOrder })
@@ -323,17 +352,17 @@ describe("ContentService", () => {
     );
     const published = await service.getPublishedLanding("de");
     expect(published).toMatchObject({
-      revision: { number: 3 },
-      seo: { title: "CallAssist — geprüfte Landing-Revision" }
+      revision: { number: 2 },
+      seo: { title: "SHPROHLI — geprüfte Landing-Revision" }
     });
     expect(published?.blocks[1]?.blockType).toBe("use_cases");
     const index = await service.listPublishedContentIndex();
     expect(index.landing).toMatchObject({
-      revision: { number: 3 },
+      revision: { number: 2 },
       localizations: expect.arrayContaining([
         expect.objectContaining({
           locale: "de",
-          seoTitle: "CallAssist — geprüfte Landing-Revision",
+          seoTitle: "SHPROHLI — geprüfte Landing-Revision",
           translationStale: false
         })
       ])

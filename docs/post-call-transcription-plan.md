@@ -126,7 +126,8 @@ guessing. Retained audio remains the verification source for critical details.
 
 ## Verification
 
-- Prove that recording and recipient forwarding do not begin before DTMF consent.
+- Prove that recording and forwarding to the main conversation do not begin before
+  voice or fallback keypad consent is confirmed.
 - Verify signed, idempotent Twilio recording callbacks and dual-channel capture.
 - Verify deterministic channel roles and bounded-concurrency utterance requests.
 - Verify that live draft wording and roles cannot enter the final transcript and that

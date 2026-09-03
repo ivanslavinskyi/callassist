@@ -38,7 +38,8 @@ const finalTranscript = {
 const input = {
   brief,
   finalTranscript,
-  languageLabel: "Russian"
+  languageLabel: "Russian",
+  uiLocale: "en" as const
 };
 
 describe("final transcript export", () => {
@@ -48,6 +49,7 @@ describe("final transcript export", () => {
     expect(text).toContain("Recipient: Иван Müller");
     expect(text).toContain("[~00:01] Sebastian: Здравствуйте.");
     expect(text).toContain("[~01:05] Иван Müller: Добрый день.");
+    expect(text).toContain("AI-generated. Check important names");
   });
 
   it("preserves a full-recording transcript without invented speaker data", () => {
@@ -71,6 +73,17 @@ describe("final transcript export", () => {
     expect(JSON.stringify(definition.content)).toContain("Здравствуйте.");
     expect(definition.info?.title).toBe("Final transcript — Иван Müller");
     expect(definition.language).toBe("ru-RU");
+  });
+
+  it("localizes user-facing export copy to German", () => {
+    const text = buildFinalTranscriptCopyText({
+      ...input,
+      languageLabel: "Russisch",
+      uiLocale: "de"
+    });
+
+    expect(text).toContain("SHPROHLI — Endtranskript");
+    expect(text).toContain("Angerufene Person: Иван Müller");
   });
 
   it("creates a stable, readable filename", () => {

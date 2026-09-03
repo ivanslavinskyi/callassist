@@ -16,7 +16,7 @@ invite alpha:
 | Web/API/worker binaries | Git commit; no data loss | 30 minutes after database availability | Immutable artifacts must be rebuilt or redeployed from the evidenced commit. |
 | Provider recordings | Existing 0/7/30-day product retention; no independent archive | Reconcile within 4 hours | Audio remains provider-held and must not be copied into a longer-lived backup tier. |
 
-CallAssist is not an emergency service. During recovery, new outbound calls remain
+SHPROHLI is not an emergency service. During recovery, new outbound calls remain
 disabled until authoritative database state, worker fencing, provider reconciliation,
 credit settlement, suppression, and retention state are verified.
 

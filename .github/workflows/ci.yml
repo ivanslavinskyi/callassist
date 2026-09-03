@@ -65,6 +65,8 @@ jobs:
           pnpm db:migrate
       - name: Audit production dependencies
         run: pnpm security:audit
+      - name: Check public copy consistency
+        run: pnpm copy:check
       - name: Lint
         run: pnpm lint
       - name: Typecheck

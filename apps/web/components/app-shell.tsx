@@ -111,8 +111,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <Brand href={localizeHref("/")} label={messages.app.homeLabel} />
         <div className="topbar-actions">
-          {isAuthenticated === false ? publicNavigation?.items
-            .filter(({ location }) => location === "header")
+          {isAuthenticated === false ? (publicNavigation?.items
+            .filter(({ location }) => location === "header") ?? [
+              { id: "how-it-works", href: `/${locale}#how-it-works`, label: messages.app.howItWorks },
+              { id: "faq", href: contentPath(locale, "faq"), label: messages.app.faq }
+            ])
             .map((item) => (
               <Link className="topbar-link" href={item.href} key={item.id}>
                 {item.label}
@@ -127,9 +130,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link className="topbar-link" href={localizeHref("/login")}>{messages.app.signIn}</Link>
             <Link className="topbar-link" href={localizeHref("/register")}>{messages.app.createAccount}</Link>
           </> : null}
-          <Link className="topbar-link" href={localizeHref("/opt-out")}>
-            {messages.app.optOut}
-          </Link>
+          {isAuthenticated === true ? (
+            <Link className="topbar-link" href={localizeHref("/opt-out")}>
+              {messages.app.optOut}
+            </Link>
+          ) : null}
           {isAuthenticated && role !== "content_editor" ? <Link className="topbar-link" href={localizeHref("/redeem")}>{messages.app.redeem}</Link> : null}
           {role && ["content_editor", "admin", "superadmin"].includes(role) ? (
             <Link className="topbar-link" href="/admin">{messages.app.adminPortal}</Link>
@@ -145,10 +150,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               {messages.app.creditsRemaining(creditBalance)}
             </Link>
           ) : null}
-          <div className="topbar-meta">
-            <span className="secure-dot" aria-hidden="true" />
-            {messages.app.consoleLabel}
-          </div>
           <button
             aria-label={theme === "dark" ? messages.app.switchToLightTheme : messages.app.switchToDarkTheme}
             className="theme-toggle"
@@ -173,22 +174,43 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       {children}
       <footer className="site-footer">
-        <nav aria-label={messages.app.support}>
-          {publicNavigation ? publicNavigation.items
-            .filter(({ location }) => location === "footer")
-            .map((item) => (
-              <Link href={item.href} key={item.id}>{item.label}</Link>
-            )) : <>
-              <Link href={contentPath(locale, "privacy")}>{messages.app.privacy}</Link>
-              <Link href={contentPath(locale, "terms")}>{messages.app.terms}</Link>
-              <Link href={contentPath(locale, "acceptable_use")}>{messages.app.acceptableUse}</Link>
-              <Link href={contentPath(locale, "faq")}>{messages.app.faq}</Link>
-              <Link href={contentPath(locale, "support")}>{messages.app.support}</Link>
-              <Link href={localizeHref("/opt-out")}>{messages.app.optOut}</Link>
-            </>}
-        </nav>
-        <small>SHPROHLI · Public beta</small>
+        <div className="footer-navigation">
+          <FooterGroup
+            label={messages.app.footerProduct}
+            items={publicNavigation?.items.filter(({ location, destination }) =>
+              location === "footer" && ["faq", "support", "opt_out"].includes(destination)
+            ) ?? [
+              { id: "faq", href: contentPath(locale, "faq"), label: messages.app.faq },
+              { id: "support", href: contentPath(locale, "support"), label: messages.app.support },
+              { id: "opt-out", href: localizeHref("/opt-out"), label: messages.app.optOut }
+            ]}
+          />
+          <FooterGroup
+            label={messages.app.footerLegal}
+            items={publicNavigation?.items.filter(({ location, destination }) =>
+              location === "footer" && ["privacy", "terms", "acceptable_use", "imprint"].includes(destination)
+            ) ?? [
+              { id: "privacy", href: contentPath(locale, "privacy"), label: messages.app.privacy },
+              { id: "terms", href: contentPath(locale, "terms"), label: messages.app.terms },
+              { id: "acceptable-use", href: contentPath(locale, "acceptable_use"), label: messages.app.acceptableUse },
+              { id: "imprint", href: contentPath(locale, "imprint"), label: messages.app.imprint }
+            ]}
+          />
+        </div>
+        <small>SHPROHLI · {messages.app.publicBeta}</small>
       </footer>
     </div>
+  );
+}
+
+function FooterGroup({ label, items }: {
+  label: string;
+  items: Array<{ id: string; href: string; label: string }>;
+}) {
+  return (
+    <nav aria-label={label}>
+      <strong>{label}</strong>
+      {items.map((item) => <Link href={item.href} key={item.id}>{item.label}</Link>)}
+    </nav>
   );
 }

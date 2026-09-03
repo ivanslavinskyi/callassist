@@ -169,6 +169,12 @@ export function CreateCallForm({
       }
     } catch (error) {
       setError(getCallPreparationErrorMessage(error, {
+        generic: messages.form.preparationError,
+        unavailable: messages.form.preparationUnavailable,
+        invalid: messages.form.preparationInvalid,
+        notFound: messages.form.preparationNotFound,
+        notEditable: messages.form.preparationNotEditable,
+        swissDestinationRequired: messages.form.phoneInvalid,
         rateLimited: messages.form.rateLimited
       }));
       setSubmitting(false);
@@ -427,13 +433,15 @@ export function CreateCallForm({
             </select>
           </label>
 
-          {disclosurePreview ? (
-            <div className="field field-wide disclosure-preview">
-              <span>{messages.form.disclosurePreview}</span>
-              <blockquote>{disclosurePreview}</blockquote>
-              <small>{messages.form.disclosureHelp}</small>
-            </div>
-          ) : null}
+          <div className="field field-wide disclosure-preview">
+            {disclosurePreview ? (
+              <>
+                <span>{messages.form.disclosurePreview}</span>
+                <blockquote>{disclosurePreview}</blockquote>
+              </>
+            ) : null}
+            <small>{messages.form.disclosureHelp}</small>
+          </div>
 
           <label className="field field-wide">
             <span>{copy.additionalContext}</span>

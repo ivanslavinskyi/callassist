@@ -25,6 +25,13 @@ const en = {
   heading: "Heading",
   paragraphs: "Paragraphs (one per line)",
   bullets: "Bullets (one per line)",
+  links: "Links",
+  linkLabel: "Link label",
+  linkDestination: "Internal destination",
+  emailAddress: "Email address",
+  addInternalLink: "Add internal link",
+  addEmailLink: "Add email link",
+  removeLink: "Remove link",
   addSection: "Add section",
   removeSection: "Remove section",
   reacceptance: "Require users to accept this legal revision again",
@@ -62,7 +69,8 @@ const en = {
     terms: "Terms",
     acceptable_use: "Acceptable Use",
     support: "Support",
-    faq: "FAQ"
+    faq: "FAQ",
+    imprint: "Imprint"
   } satisfies Record<ContentPageKey, string>
 };
 
@@ -93,6 +101,13 @@ const de: ContentAdminMessages = {
   heading: "Überschrift",
   paragraphs: "Absätze (einer pro Zeile)",
   bullets: "Aufzählungspunkte (einer pro Zeile)",
+  links: "Links",
+  linkLabel: "Linktext",
+  linkDestination: "Internes Ziel",
+  emailAddress: "E-Mail-Adresse",
+  addInternalLink: "Internen Link hinzufügen",
+  addEmailLink: "E-Mail-Link hinzufügen",
+  removeLink: "Link entfernen",
   addSection: "Abschnitt hinzufügen",
   removeSection: "Abschnitt entfernen",
   reacceptance: "Benutzer müssen diese rechtliche Revision erneut akzeptieren",
@@ -130,7 +145,8 @@ const de: ContentAdminMessages = {
     terms: "Bedingungen",
     acceptable_use: "Nutzungsregeln",
     support: "Support",
-    faq: "FAQ"
+    faq: "FAQ",
+    imprint: "Impressum"
   }
 };
 

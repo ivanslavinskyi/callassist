@@ -70,7 +70,6 @@ export function RegistrationForm() {
 
   return (
     <AuthFrame>
-      <span className="eyebrow">{copy.eyebrow}</span>
       <h1>{copy.register.title}</h1>
       <p className="auth-intro">{copy.register.intro}</p>
       <form className="auth-form" onSubmit={submit}>
@@ -148,7 +147,6 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
 
   return (
     <AuthFrame>
-      <span className="eyebrow">{copy.eyebrow}</span>
       <h1>{copy.verify.title}</h1>
       <p className="auth-intro">{copy.verify.intro}</p>
       <form className="auth-form" onSubmit={submit}>
@@ -202,7 +200,6 @@ export function LoginForm() {
 
   return (
     <AuthFrame>
-      <span className="eyebrow">{copy.eyebrow}</span>
       <h1>{copy.login.title}</h1>
       <p className="auth-intro">{copy.login.intro}</p>
       <form className="auth-form" onSubmit={submit}>
@@ -307,7 +304,6 @@ export function PasswordRecoveryForm() {
   if (stage === "success") {
     return (
       <AuthFrame>
-        <span className="eyebrow">{copy.eyebrow}</span>
         <h1>{copy.recovery.successTitle}</h1>
         <p className="auth-intro" role="status">{copy.recovery.successIntro}</p>
         <Link className="primary-button auth-submit" href={localizeHref("/login")}>{copy.recovery.signIn}</Link>
@@ -318,7 +314,6 @@ export function PasswordRecoveryForm() {
   if (stage === "verify") {
     return (
       <AuthFrame>
-        <span className="eyebrow">{copy.eyebrow}</span>
         <h1>{copy.recovery.codeTitle}</h1>
         <p className="auth-intro">{copy.recovery.codeIntro}</p>
         <form className="auth-form" onSubmit={verify}>
@@ -337,7 +332,6 @@ export function PasswordRecoveryForm() {
   if (stage === "reset") {
     return (
       <AuthFrame>
-        <span className="eyebrow">{copy.eyebrow}</span>
         <h1>{copy.recovery.resetTitle}</h1>
         <p className="auth-intro">{copy.recovery.resetIntro}</p>
         <form className="auth-form" onSubmit={complete}>
@@ -360,7 +354,6 @@ export function PasswordRecoveryForm() {
 
   return (
     <AuthFrame>
-      <span className="eyebrow">{copy.eyebrow}</span>
       <h1>{copy.recovery.title}</h1>
       <p className="auth-intro">{copy.recovery.intro}</p>
       <form className="auth-form" onSubmit={start}>
