@@ -6,11 +6,13 @@ import {
   adminCallListSchema,
   adminCallSensitiveContentSchema,
   adminCallSummarySchema,
+  approvedExecutionSnapshotSchema,
   callFeedbackRevisionSchema,
   callOutcomeMetricsSchema,
   callOutcomeRevisionSchema,
   callOutcomeViewSchema,
   callTelemetryEventInputSchema,
+  createApprovedExecutionSnapshot,
   deriveTechnicalCallOutcome,
   describeCallTelemetryEvent,
   durableCallEventSchema,
@@ -21,11 +23,13 @@ import {
   semanticOutcomeForGoalResult,
   sensitiveCallAccessInputSchema,
   type AdminCallSummary,
+  type ApprovedExecutionSnapshot,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
   type CallPreparation,
   type CallCompilation,
+  type CompilationApprovalInput,
   type CallFeedbackRevision,
   type CallGoalResult,
   type CallOutcomeMetrics,
@@ -167,6 +171,9 @@ type CallAttemptRow = {
   startedAt: DatabaseDate;
   endedAt: DatabaseDate | null;
   failureReason: string | null;
+  compilationRevision: number | null;
+  compilationSnapshotHash: string | null;
+  executionSnapshotCiphertext: string | null;
 };
 
 type CallRecordingRow = {
@@ -1031,7 +1038,12 @@ export class PostgresCallRepository implements CallRepository {
       `;
       await transaction`
         UPDATE call_attempts
-        SET provider_call_id = NULL, failure_reason = NULL
+        SET
+          provider_call_id = NULL,
+          failure_reason = NULL,
+          compilation_revision = NULL,
+          compilation_snapshot_hash = NULL,
+          execution_snapshot_ciphertext = NULL
         WHERE call_brief_id = ${input.callId}
       `;
       await transaction`
@@ -2631,7 +2643,7 @@ export class PostgresCallRepository implements CallRepository {
     return callOutcomeMetricsSchema.parse(metrics);
   }
 
-  async approveCompilation(id: string) {
+  async approveCompilation(id: string, expected?: CompilationApprovalInput) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
       const [row] = await transaction<
@@ -2657,6 +2669,13 @@ export class PostgresCallRepository implements CallRepository {
         !compilation.compiledBrief
       ) {
         throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
+      }
+      if (
+        expected &&
+        (compilation.revision !== expected.revision ||
+          compilation.snapshotHash !== expected.snapshotHash)
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_STALE");
       }
       compilation.approvedAt = now.toISOString();
       await transaction`
@@ -2699,7 +2718,10 @@ export class PostgresCallRepository implements CallRepository {
         provider_status AS "providerStatus",
         started_at AS "startedAt",
         ended_at AS "endedAt",
-        failure_reason AS "failureReason"
+        failure_reason AS "failureReason",
+        compilation_revision AS "compilationRevision",
+        compilation_snapshot_hash AS "compilationSnapshotHash",
+        execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
       FROM call_attempts
       WHERE call_brief_id = ${id}
       ORDER BY created_at DESC
@@ -2717,12 +2739,9 @@ export class PostgresCallRepository implements CallRepository {
         await this.#lockCreditAccount(transaction, userId);
         await this.#lockActiveUser(transaction, userId);
       }
-      const [call] = await transaction<
-        { status: CallBrief["status"]; phoneE164: string }[]
-      >`
-        SELECT status, phone_number AS "phoneE164"
-        FROM call_briefs
-        WHERE id = ${id}
+      const [call] = await transaction<CallBriefRow[]>`
+        ${this.#briefSelect()}
+        WHERE call_briefs.id = ${id}
           AND (${userId}::uuid IS NULL OR user_id = ${userId})
         FOR UPDATE
       `;
@@ -2730,6 +2749,24 @@ export class PostgresCallRepository implements CallRepository {
       if (call.status !== "ready") {
         throw new CallRepositoryError("CALL_NOT_READY");
       }
+      const compilation = call.compilationCiphertext
+        ? decryptJson<CallCompilation>(
+            call.compilationCiphertext,
+            this.#encryptionKey
+          )
+        : null;
+      const executionSnapshot = createApprovedExecutionSnapshot({
+        brief: this.#mapBrief(call),
+        compilation,
+        transcript: [],
+        pendingApproval: null,
+        recording: null,
+        finalTranscript: null
+      });
+      const encryptedExecutionSnapshot = encryptJson(
+        executionSnapshot,
+        this.#encryptionKey
+      );
       const [control] = await transaction<{ enabled: boolean }[]>`
         SELECT enabled
         FROM system_controls
@@ -2739,11 +2776,11 @@ export class PostgresCallRepository implements CallRepository {
       if (!control?.enabled) {
         throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
       }
-      await this.#lockRecipient(transaction, call.phoneE164);
+      await this.#lockRecipient(transaction, call.phoneNumber);
       const suppression = await transaction`
         SELECT id
         FROM recipient_suppressions
-        WHERE phone_e164 = ${call.phoneE164} AND lifted_at IS NULL
+        WHERE phone_e164 = ${call.phoneNumber} AND lifted_at IS NULL
         LIMIT 1
       `;
       if (suppression.count > 0) {
@@ -2778,7 +2815,7 @@ export class PostgresCallRepository implements CallRepository {
             )::int AS "dailyStarts",
             count(*) FILTER (
               WHERE call_attempts.started_at >= ${dayStart}
-                AND call_briefs.phone_number = ${call.phoneE164}
+                AND call_briefs.phone_number = ${call.phoneNumber}
             )::int AS "recipientDailyStarts"
           FROM call_attempts
           JOIN call_briefs ON call_briefs.id = call_attempts.call_brief_id
@@ -2833,6 +2870,9 @@ export class PostgresCallRepository implements CallRepository {
           provider_call_id,
           status,
           provider_status,
+          compilation_revision,
+          compilation_snapshot_hash,
+          execution_snapshot_ciphertext,
           started_at,
           created_at
         ) VALUES (
@@ -2843,6 +2883,9 @@ export class PostgresCallRepository implements CallRepository {
           ${null},
           'dialing',
           ${null},
+          ${executionSnapshot.compilationRevision},
+          ${executionSnapshot.compilationSnapshotHash},
+          ${encryptedExecutionSnapshot},
           ${now},
           ${now}
         )
@@ -4856,10 +4899,19 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapAttempt(row: CallAttemptRow): CallAttemptRecord {
+    const { executionSnapshotCiphertext, ...attempt } = row;
     return {
-      ...row,
+      ...attempt,
       startedAt: toIso(row.startedAt),
-      endedAt: row.endedAt ? toIso(row.endedAt) : null
+      endedAt: row.endedAt ? toIso(row.endedAt) : null,
+      executionSnapshot: executionSnapshotCiphertext
+        ? approvedExecutionSnapshotSchema.parse(
+            decryptJson<unknown>(
+              executionSnapshotCiphertext,
+              this.#encryptionKey
+            )
+          )
+        : null
     };
   }
 

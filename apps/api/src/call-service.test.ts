@@ -256,6 +256,38 @@ describe("CallService", () => {
     expect(reviewed.transcript).toEqual([]);
   });
 
+  it("rejects approval when the reviewed revision was replaced", async () => {
+    const service = createService();
+    const input = {
+      recipientName: "Gemeinde Aadorf",
+      phoneNumber: "+41523686688",
+      objective: "Ask whether the submitted residence form was received",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "de-CH" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const brief = await service.create(input);
+    const reviewed = (await service.get(brief.id))!.compilation!;
+    const replaced = await service.recompile(brief.id, {
+      ...input,
+      objective: "Ask whether the updated residence form was received"
+    });
+
+    await expect(service.approveCompilation(brief.id, {
+      revision: reviewed.revision,
+      snapshotHash: reviewed.snapshotHash
+    })).rejects.toMatchObject({ code: "CALL_COMPILATION_STALE" });
+
+    await expect(service.approveCompilation(brief.id, {
+      revision: replaced.compilation!.revision,
+      snapshotHash: replaced.compilation!.snapshotHash
+    })).resolves.toMatchObject({ brief: { status: "ready" } });
+  });
+
   it("blocks a legacy foreign destination before reserving or starting a provider call", async () => {
     const startCall = vi.fn();
     const provider: TelephonyProvider = {
@@ -378,6 +410,25 @@ describe("CallService", () => {
     const started = await service.approveAndStart(brief.id);
     expect(started.brief.status).toBe("dialing");
     expect(started.compilation?.approvedAt).not.toBeNull();
+    const attempt = await service.getLatestAttempt(brief.id);
+    expect(attempt).toMatchObject({
+      compilationRevision: 2,
+      compilationSnapshotHash: started.compilation!.snapshotHash,
+      executionSnapshot: {
+        compilationRevision: 2,
+        compilationSnapshotHash: started.compilation!.snapshotHash,
+        plan: {
+          localizedObjective:
+            "Ask Elena which book and country she likes most"
+        }
+      }
+    });
+    expect(JSON.stringify(attempt?.executionSnapshot)).not.toContain(
+      "sourceText"
+    );
+    expect(JSON.stringify(attempt?.executionSnapshot)).not.toContain(
+      "rawBrief"
+    );
 
     const repeated = await service.approveAndStart(brief.id);
     expect(repeated.brief.status).toBe("dialing");
@@ -977,6 +1028,11 @@ describe("CallService", () => {
     expect(deleted.requestId).toBe(request.requestId);
     expect(deleteRecording).toHaveBeenCalledTimes(2);
     expect(await repository.get(brief.id)).toBeNull();
+    expect(await repository.getLatestAttempt(brief.id)).toMatchObject({
+      compilationRevision: null,
+      compilationSnapshotHash: null,
+      executionSnapshot: null
+    });
     expect(await repository.findCallDataDeletion(
       brief.id,
       userId,

@@ -43,6 +43,12 @@ export type StartTelephonyCallResult = {
   providerStatus: string;
 };
 
+export type MediaStreamBinding = {
+  callBriefId: string;
+  callAttemptId: string;
+  compilationSnapshotHash: string;
+};
+
 export type StartCallRecordingInput = {
   callBriefId: string;
   recordingId: string;

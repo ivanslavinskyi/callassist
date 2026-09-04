@@ -14,6 +14,7 @@ import {
   type CallOutcomeView,
   type CallSnapshot,
   type CallTelemetryEventInput,
+  type CompilationApprovalInput,
   type CreateCallBriefInput,
   type OwnerCallFeedbackInput,
   type TranscriptSegment
@@ -520,16 +521,31 @@ export class CallService {
     return this.repository.get(id);
   }
 
-  async approveCompilation(id: string) {
-    const snapshot = await this.repository.approveCompilation(id);
+  getLatestAttempt(id: string) {
+    return this.repository.getLatestAttempt(id);
+  }
+
+  async approveCompilation(id: string, expected?: CompilationApprovalInput) {
+    const snapshot = await this.repository.approveCompilation(id, expected);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
   }
 
-  async approveAndStart(id: string, userId: string | null = null) {
+  async approveAndStart(
+    id: string,
+    userId: string | null = null,
+    expected?: CompilationApprovalInput
+  ) {
     const current = await this.#require(id);
+    if (
+      expected &&
+      (current.compilation?.revision !== expected.revision ||
+        current.compilation.snapshotHash !== expected.snapshotHash)
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_STALE");
+    }
     if (!current.compilation?.approvedAt) {
-      await this.approveCompilation(id);
+      await this.approveCompilation(id, expected);
     }
     return this.start(id, userId);
   }

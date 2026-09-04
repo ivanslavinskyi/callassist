@@ -421,7 +421,13 @@ export function LiveCall({ callId }: { callId: string }) {
             compilation={compilation}
             onAnswerClarifications={answerClarifications}
             onApproveAndCall={() =>
-              runAction(() => approveAndStartCall(callId), revealLiveTranscript)
+              runAction(
+                () => approveAndStartCall(callId, {
+                  revision: compilation.revision,
+                  snapshotHash: compilation.snapshotHash
+                }),
+                revealLiveTranscript
+              )
             }
             onEdit={() => setEditingBrief(true)}
             recipientName={brief.recipientName}

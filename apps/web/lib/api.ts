@@ -28,6 +28,7 @@ import type {
   CallDataDeletionResult,
   CallOutcomeView,
   CallSnapshot,
+  CompilationApprovalInput,
   ContentLocale,
   ContentDraftUpdateInput,
   ContentPageKey,
@@ -749,16 +750,23 @@ export async function startCall(id: string) {
   return snapshot;
 }
 
-export async function approveCallBrief(id: string) {
+export async function approveCallBrief(
+  id: string,
+  approval: CompilationApprovalInput
+) {
   return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/approve`, {
-    method: "POST"
+    method: "POST",
+    body: JSON.stringify(approval)
   });
 }
 
-export async function approveAndStartCall(id: string) {
+export async function approveAndStartCall(
+  id: string,
+  approval: CompilationApprovalInput
+) {
   const snapshot = await apiRequest<CallSnapshot>(
     `/api/call-briefs/${id}/approve-and-start`,
-    { method: "POST" }
+    { method: "POST", body: JSON.stringify(approval) }
   );
   notifyUsageChanged();
   return snapshot;

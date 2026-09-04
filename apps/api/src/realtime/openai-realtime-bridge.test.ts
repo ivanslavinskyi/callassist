@@ -286,6 +286,57 @@ describe("OpenAIRealtimeBridge", () => {
     await service.close();
   });
 
+  it("rejects a stream whose signed binding does not match the active attempt", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
+    });
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => true,
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-MISMATCHED",
+        customParameters: {
+          callBriefId: created.id,
+          callAttemptId: reserved.attempt.id,
+          compilationSnapshotHash: "b".repeat(64),
+          streamToken: "valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(0);
+    expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    await service.close();
+  });
+
   it("plays the mandatory opening before accepting audio and persists finalized transcripts", async () => {
     const service = new CallService(new InMemoryCallRepository());
     const created = await service.create({
@@ -302,6 +353,9 @@ describe("OpenAIRealtimeBridge", () => {
       allowedFacts: brief.allowedFacts
     });
     await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
+    });
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -334,6 +388,9 @@ describe("OpenAIRealtimeBridge", () => {
             streamSid: "MZ123",
             customParameters: {
               callBriefId: created.id,
+              callAttemptId: reserved.attempt.id,
+              compilationSnapshotHash:
+                reserved.attempt.compilationSnapshotHash!,
               streamToken: "valid"
             }
           }
@@ -669,6 +726,9 @@ describe("OpenAIRealtimeBridge", () => {
       allowedFacts: brief.allowedFacts
     });
     await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
+    });
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -691,6 +751,9 @@ describe("OpenAIRealtimeBridge", () => {
             streamSid: "MZ456",
             customParameters: {
               callBriefId: created.id,
+              callAttemptId: reserved.attempt.id,
+              compilationSnapshotHash:
+                reserved.attempt.compilationSnapshotHash!,
               streamToken: "valid"
             }
           }
@@ -910,6 +973,9 @@ async function createConsentHarness(failRecording = false) {
     allowedFacts: brief.allowedFacts
   });
   await service.approveCompilation(created.id);
+  const reserved = await service.repository.startAttempt(created.id, {
+    provider: "twilio"
+  });
   const twilioSocket = new FakeSocket();
   const openAISocket = new FakeSocket();
   const consentSocket = new FakeSocket();
@@ -931,7 +997,12 @@ async function createConsentHarness(failRecording = false) {
     event: "start",
     start: {
       streamSid: "MZ-HARNESS",
-      customParameters: { callBriefId: created.id, streamToken: "valid" }
+      customParameters: {
+        callBriefId: created.id,
+        callAttemptId: reserved.attempt.id,
+        compilationSnapshotHash: reserved.attempt.compilationSnapshotHash!,
+        streamToken: "valid"
+      }
     }
   });
   await new Promise((resolve) => setImmediate(resolve));

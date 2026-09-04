@@ -254,19 +254,34 @@ describe("TwilioTelephonyProvider", () => {
 
   it("opens the signed bidirectional media stream immediately", () => {
     const { provider } = createProvider();
-    const xml = provider.createVoiceTwiml(brief);
+    const binding = {
+      callBriefId: brief.id,
+      callAttemptId: "629774e8-726b-44d9-96b4-d6c44be03490",
+      compilationSnapshotHash: "a".repeat(64)
+    };
+    const xml = provider.createVoiceTwiml(brief, binding);
     expect(xml).toContain("<Connect>");
     expect(xml).toContain(
       '<Stream url="wss://calls.example.test/webhooks/twilio/media">'
     );
     expect(xml).toContain(`name="callBriefId" value="${brief.id}"`);
+    expect(xml).toContain(
+      `name="callAttemptId" value="${binding.callAttemptId}"`
+    );
+    expect(xml).toContain(
+      `name="compilationSnapshotHash" value="${binding.compilationSnapshotHash}"`
+    );
     expect(xml).not.toContain("<Say");
     expect(xml).not.toContain("<Gather");
     expect(xml).toContain("<Hangup/>");
 
-    const token = provider.createMediaStreamToken(brief.id);
-    expect(provider.validateMediaStreamToken(brief.id, token)).toBe(true);
-    expect(provider.validateMediaStreamToken(brief.id, `${token}x`)).toBe(false);
+    const token = provider.createMediaStreamToken(binding);
+    expect(provider.validateMediaStreamToken(binding, token)).toBe(true);
+    expect(provider.validateMediaStreamToken(binding, `${token}x`)).toBe(false);
+    expect(provider.validateMediaStreamToken({
+      ...binding,
+      compilationSnapshotHash: "b".repeat(64)
+    }, token)).toBe(false);
   });
 
   it("validates the exact signed webhook URL", () => {

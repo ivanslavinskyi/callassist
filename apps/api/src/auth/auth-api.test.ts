@@ -199,6 +199,24 @@ async function createPreparedCall(
   };
 }
 
+async function compilationApprovalPayload(
+  app: ReturnType<typeof buildApp>,
+  cookie: string,
+  callId: string
+) {
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/call-briefs/${callId}`,
+    headers: { cookie }
+  });
+  expect(response.statusCode).toBe(200);
+  const compilation = response.json().compilation;
+  return {
+    revision: compilation.revision as number,
+    snapshotHash: compilation.snapshotHash as string
+  };
+}
+
 const callBrief = {
   recipientName: "Beta Clinic",
   phoneNumber: "+41710000002",
@@ -1308,7 +1326,8 @@ describe("auth API", () => {
     const approved = await app.inject({
       method: "POST",
       url: `/api/call-briefs/${callId}/approve`,
-      headers: { cookie: userACookie }
+      headers: { cookie: userACookie },
+      payload: await compilationApprovalPayload(app, userACookie, callId)
     });
     expect(approved.statusCode).toBe(200);
     const started = await app.inject({
@@ -1907,7 +1926,8 @@ describe("auth API", () => {
     await app.inject({
       method: "POST",
       url: `/api/call-briefs/${callId}/approve`,
-      headers: { cookie }
+      headers: { cookie },
+      payload: await compilationApprovalPayload(app, cookie, callId)
     });
 
     await callRepository.suppressRecipient({
@@ -2002,7 +2022,8 @@ describe("auth API", () => {
     await app.inject({
       method: "POST",
       url: `/api/call-briefs/${callId}/approve`,
-      headers: { cookie }
+      headers: { cookie },
+      payload: await compilationApprovalPayload(app, cookie, callId)
     });
     const blocked = await app.inject({
       method: "POST",
@@ -2082,7 +2103,8 @@ describe("auth API", () => {
     await app.inject({
       method: "POST",
       url: `/api/call-briefs/${callId}/approve`,
-      headers: { cookie: userCookie }
+      headers: { cookie: userCookie },
+      payload: await compilationApprovalPayload(app, userCookie, callId)
     });
     expect((await app.inject({
       method: "POST",
@@ -3054,7 +3076,12 @@ describe("auth API", () => {
     const started = await app.inject({
       method: "POST",
       url: `/api/call-briefs/${created.json().id}/approve-and-start`,
-      headers: { cookie, origin: "http://localhost:3000" }
+      headers: { cookie, origin: "http://localhost:3000" },
+      payload: await compilationApprovalPayload(
+        app,
+        cookie,
+        created.json().id
+      )
     });
     expect(started.statusCode).toBe(200);
 

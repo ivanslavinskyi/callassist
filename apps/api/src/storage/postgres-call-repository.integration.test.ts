@@ -866,12 +866,31 @@ describeWithDatabase("PostgresCallRepository", () => {
       revision: 2,
       approvedAt: null
     });
-    const approved = await repository.approveCompilation(brief.id);
+    await expect(repository.approveCompilation(brief.id, {
+      revision: 1,
+      snapshotHash: compilation.snapshotHash
+    })).rejects.toMatchObject({ code: "CALL_COMPILATION_STALE" });
+    const approved = await repository.approveCompilation(brief.id, {
+      revision: revisedCompilation.revision,
+      snapshotHash: revisedCompilation.snapshotHash
+    });
     expect(approved.brief.status).toBe("ready");
 
     const started = await repository.startAttempt(brief.id, {
       provider: "mock"
     });
+    expect(started.attempt).toMatchObject({
+      compilationRevision: revisedCompilation.revision,
+      compilationSnapshotHash: revisedCompilation.snapshotHash,
+      executionSnapshot: {
+        compilationRevision: revisedCompilation.revision,
+        compilationSnapshotHash: revisedCompilation.snapshotHash,
+        plan: { localizedObjective: revisedInput.objective }
+      }
+    });
+    expect(await repository.getLatestAttempt(brief.id)).toEqual(
+      started.attempt
+    );
     const providerCallId = `mock-${brief.id}`;
     await repository.attachProviderCall(
       started.attempt.id,

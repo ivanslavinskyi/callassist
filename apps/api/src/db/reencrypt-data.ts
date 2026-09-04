@@ -21,6 +21,7 @@ const genericCiphertextColumns = [
   ["call_briefs", "compilation_ciphertext"],
   ["call_briefs", "assistance_reason_ciphertext"],
   ["call_briefs", "assistance_disclosure_ciphertext"],
+  ["call_attempts", "execution_snapshot_ciphertext"],
   ["final_transcripts", "text_ciphertext"],
   ["final_transcripts", "segments_ciphertext"]
 ] as const;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compilationApprovalInputSchema,
   createCallBriefInputSchema,
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput
@@ -19,6 +20,22 @@ const validBrief = {
 };
 
 describe("createCallBriefInputSchema", () => {
+  it("requires an exact revision and SHA-256 hash for compilation approval", () => {
+    expect(compilationApprovalInputSchema.safeParse({
+      revision: 2,
+      snapshotHash: "a".repeat(64)
+    }).success).toBe(true);
+    expect(compilationApprovalInputSchema.safeParse({
+      revision: 2,
+      snapshotHash: "not-a-hash"
+    }).success).toBe(false);
+    expect(compilationApprovalInputSchema.safeParse({
+      revision: 2,
+      snapshotHash: "a".repeat(64),
+      objective: "unexpected raw field"
+    }).success).toBe(false);
+  });
+
   it("accepts a supported Swiss German call brief", () => {
     const result = createCallBriefInputSchema.safeParse(validBrief);
     expect(result.success).toBe(true);

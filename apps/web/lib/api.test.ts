@@ -1006,7 +1006,7 @@ describe("API client headers", () => {
     )).toBe(true);
   });
 
-  it("updates a brief with JSON and keeps approve-and-start bodyless", async () => {
+  it("updates a brief and binds approval to the reviewed compilation", async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({ brief: { id: "call-id" } }), {
         status: 200,
@@ -1028,7 +1028,10 @@ describe("API client headers", () => {
     };
 
     await recompileCallBrief("call-id", input);
-    await approveAndStartCall("call-id");
+    await approveAndStartCall("call-id", {
+      revision: 3,
+      snapshotHash: "a".repeat(64)
+    });
 
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/call-briefs/call-id");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "PUT" });
@@ -1039,10 +1042,14 @@ describe("API client headers", () => {
     ).toBe("application/json");
     expect(fetchMock.mock.calls[1]?.[0]).toContain("/approve-and-start");
     expect(
-      new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).has(
+      new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get(
         "Content-Type"
       )
-    ).toBe(false);
+    ).toBe("application/json");
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
+      revision: 3,
+      snapshotHash: "a".repeat(64)
+    }));
   });
 
   it("loads the private outcome and submits bounded owner feedback", async () => {

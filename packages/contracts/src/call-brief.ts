@@ -549,6 +549,23 @@ export const callCompilationSchema = z.object({
 });
 export type CallCompilation = z.infer<typeof callCompilationSchema>;
 
+export const compilationApprovalInputSchema = z.strictObject({
+  revision: z.number().int().positive(),
+  snapshotHash: z.string().regex(/^[a-f0-9]{64}$/)
+});
+export type CompilationApprovalInput = z.infer<
+  typeof compilationApprovalInputSchema
+>;
+
+export function compilationApprovalInput(
+  compilation: Pick<CallCompilation, "revision" | "snapshotHash">
+): CompilationApprovalInput {
+  return {
+    revision: compilation.revision,
+    snapshotHash: compilation.snapshotHash
+  };
+}
+
 export const callBriefSchema = callBriefStoredFieldsSchema
   .extend({
     assistantProfileId: assistantProfileIdSchema.nullable(),

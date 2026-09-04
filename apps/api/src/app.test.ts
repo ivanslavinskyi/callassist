@@ -115,9 +115,22 @@ describe("call API", () => {
       "ready_for_review"
     );
 
-    const approveResponse = await app.inject({
+    const invalidApproval = await app.inject({
       method: "POST",
       url: `/api/call-briefs/${created.id}/approve`
+    });
+    expect(invalidApproval.statusCode).toBe(400);
+    expect(invalidApproval.json()).toEqual({
+      error: "INVALID_COMPILATION_APPROVAL"
+    });
+
+    const approveResponse = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${created.id}/approve`,
+      payload: {
+        revision: getResponse.json().compilation.revision,
+        snapshotHash: getResponse.json().compilation.snapshotHash
+      }
     });
     expect(approveResponse.statusCode).toBe(200);
     expect(approveResponse.json().brief.status).toBe("ready");
@@ -198,6 +211,7 @@ describe("call API", () => {
     };
     const created = await service.create(payload);
     const id = created.id;
+    const originalCompilation = (await service.get(id))!.compilation!;
 
     const updated = await app.inject({
       method: "PUT",
@@ -211,9 +225,24 @@ describe("call API", () => {
     expect(updated.json().brief.id).toBe(id);
     expect(updated.json().compilation.revision).toBe(2);
 
+    const staleApproval = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${id}/approve-and-start`,
+      payload: {
+        revision: originalCompilation.revision,
+        snapshotHash: originalCompilation.snapshotHash
+      }
+    });
+    expect(staleApproval.statusCode).toBe(409);
+    expect(staleApproval.json()).toEqual({ error: "CALL_COMPILATION_STALE" });
+
     const started = await app.inject({
       method: "POST",
-      url: `/api/call-briefs/${id}/approve-and-start`
+      url: `/api/call-briefs/${id}/approve-and-start`,
+      payload: {
+        revision: updated.json().compilation.revision,
+        snapshotHash: updated.json().compilation.snapshotHash
+      }
     });
     expect(started.statusCode).toBe(200);
     expect(started.json().brief.status).toBe("dialing");
@@ -466,7 +495,11 @@ describe("call API", () => {
 
     expect((await app.inject({
       method: "POST",
-      url: `/api/call-briefs/${callId}/approve`
+      url: `/api/call-briefs/${callId}/approve`,
+      payload: {
+        revision: 1,
+        snapshotHash: (await service.get(callId))!.compilation!.snapshotHash
+      }
     })).statusCode).toBe(200);
     expect((await app.inject({
       method: "POST",

@@ -126,6 +126,7 @@ describe("Twilio webhooks", () => {
   it("does not change a valid webhook response when evidence storage fails", async () => {
     const { app, service } = createHarness();
     const brief = await createBrief(service);
+    await service.repository.startAttempt(brief.id, { provider: "twilio" });
     vi.spyOn(service, "recordProviderWebhookDelivery").mockRejectedValueOnce(
       new Error("evidence store unavailable")
     );
@@ -233,6 +234,12 @@ describe("Twilio webhooks", () => {
     expect(voiceResponse.headers["content-type"]).toContain("text/xml");
     expect(voiceResponse.body).toContain("<Connect>");
     expect(voiceResponse.body).toContain("wss://calls.example.test");
+    expect(voiceResponse.body).toContain(
+      `name="callAttemptId" value="${reserved.attempt.id}"`
+    );
+    expect(voiceResponse.body).toContain(
+      `name="compilationSnapshotHash" value="${reserved.attempt.compilationSnapshotHash}"`
+    );
     expect(voiceResponse.body).not.toContain("<Say");
     expect(voiceResponse.body).not.toContain("<Gather");
     expect((await webhookFacts(service)).voice.accepted).toBe(1);

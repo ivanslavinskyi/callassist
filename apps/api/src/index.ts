@@ -96,8 +96,8 @@ const realtimeBridge =
     ? new OpenAIRealtimeBridge({
         apiKey: realtimeApiKey!,
         service,
-        validateStreamToken: (callBriefId, token) =>
-          telephonyProvider.validateMediaStreamToken(callBriefId, token),
+        validateStreamToken: (binding, token) =>
+          telephonyProvider.validateMediaStreamToken(binding, token),
         model: process.env.OPENAI_REALTIME_MODEL,
         transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL,
         transcriptionDelay: parseTranscriptionDelay(

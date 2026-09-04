@@ -16,6 +16,7 @@ import {
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
+  compilationApprovalInputSchema,
   contentAdminActionInputSchema,
   contentDraftUpdateInputSchema,
   editorialCollectionKeySchema,
@@ -2211,7 +2212,7 @@ export function buildApp({
     }
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: unknown }>(
     "/api/call-briefs/:id/approve",
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
@@ -2219,15 +2220,19 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
+      const parsed = compilationApprovalInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_COMPILATION_APPROVAL" });
+      }
       try {
-        return await service.approveCompilation(request.params.id);
+        return await service.approveCompilation(request.params.id, parsed.data);
       } catch (error) {
         return sendRepositoryError(reply, error);
       }
     }
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: unknown }>(
     "/api/call-briefs/:id/approve-and-start",
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
@@ -2242,8 +2247,16 @@ export function buildApp({
         "call-start",
         endpointRateLimitPolicy.callStart
       ))) return;
+      const parsed = compilationApprovalInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_COMPILATION_APPROVAL" });
+      }
       try {
-        return await service.approveAndStart(request.params.id, access.userId);
+        return await service.approveAndStart(
+          request.params.id,
+          access.userId,
+          parsed.data
+        );
       } catch (error) {
         return sendRepositoryError(reply, error);
       }
@@ -2611,7 +2624,21 @@ export function buildWebhookApp({
             });
             return reply.status(404).send({ error: "CALL_NOT_FOUND" });
           }
-          const twiml = twilioProvider.createVoiceTwiml(snapshot.brief);
+          const attempt = await service.getLatestAttempt(callBriefId);
+          if (!attempt?.compilationSnapshotHash || !attempt.executionSnapshot) {
+            await recordWebhookDelivery(request, {
+              kind: "voice",
+              outcome: "unmatched",
+              receivedAt,
+              errorCode: "CALL_ATTEMPT_NOT_FOUND"
+            });
+            return reply.status(409).send({ error: "CALL_ATTEMPT_NOT_FOUND" });
+          }
+          const twiml = twilioProvider.createVoiceTwiml(snapshot.brief, {
+            callBriefId,
+            callAttemptId: attempt.id,
+            compilationSnapshotHash: attempt.compilationSnapshotHash
+          });
           await recordWebhookDelivery(request, {
             kind: "voice",
             outcome: "accepted",

@@ -24,11 +24,20 @@ Completed in the first branch increment:
   are opened;
 - added regression coverage for raw objective, context, facts, clarification, and
   delivery markers, plus the unapproved-stream failure path.
+- changed public approval and approve-and-start requests to compare-and-set the
+  exact reviewed compilation revision and snapshot hash;
+- captured an encrypted execution snapshot atomically when reserving a call
+  attempt and made Realtime load that attempt snapshot instead of current brief
+  state;
+- bound Twilio media parameters and their HMAC to call ID, attempt ID, and
+  compilation snapshot hash, with fail-closed mismatch and terminal-state checks;
+- added owner-erasure and encryption-key-rotation handling for attempt snapshots.
 
-This is not yet a deployable completion of items 1 through 3. The V1 snapshot is
-currently projected when the media stream starts. It is not yet stored as an
-immutable revision, cryptographically revalidated, or bound to a call attempt.
-Those guarantees require the schema and transaction work in items 2 and 3.
+This is not yet a deployable completion of items 1 through 3. A V1 execution
+snapshot is now stored on and bound to each new attempt, but compilation history
+still lives in the mutable current `call_briefs` blob. Append-only compilation and
+approval records, canonical hash recomputation, legacy-row rollout policy, and
+database-backed concurrency verification remain required by item 2.
 
 ## Why this roadmap exists
 

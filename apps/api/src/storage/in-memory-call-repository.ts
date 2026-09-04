@@ -11,6 +11,7 @@ import {
   callOutcomeRevisionSchema,
   callOutcomeViewSchema,
   callTelemetryEventInputSchema,
+  createApprovedExecutionSnapshot,
   deriveTechnicalCallOutcome,
   describeCallTelemetryEvent,
   durableCallEventSchema,
@@ -25,6 +26,7 @@ import {
   type CallBrief,
   type CallPreparation,
   type CallCompilation,
+  type CompilationApprovalInput,
   type CallFeedbackRevision,
   type CallOutcomeMetrics,
   type CallOutcomeRevision,
@@ -608,6 +610,9 @@ export class InMemoryCallRepository implements CallRepository {
     for (const attempt of attempts) {
       attempt.providerCallId = null;
       attempt.failureReason = null;
+      attempt.compilationRevision = null;
+      attempt.compilationSnapshotHash = null;
+      attempt.executionSnapshot = null;
     }
     const feedback = this.#callFeedbackRevisions.get(input.callId) ?? [];
     for (const item of feedback) item.revision.comment = null;
@@ -1479,7 +1484,10 @@ export class InMemoryCallRepository implements CallRepository {
     return callOutcomeMetricsSchema.parse(metrics);
   }
 
-  async approveCompilation(id: string) {
+  async approveCompilation(
+    id: string,
+    expected?: CompilationApprovalInput
+  ) {
     const snapshot = this.#require(id);
     if (
       snapshot.brief.status !== "review_required" ||
@@ -1487,6 +1495,13 @@ export class InMemoryCallRepository implements CallRepository {
       !snapshot.compilation.compiledBrief
     ) {
       throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
+    }
+    if (
+      expected &&
+      (snapshot.compilation.revision !== expected.revision ||
+        snapshot.compilation.snapshotHash !== expected.snapshotHash)
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_STALE");
     }
     const now = new Date().toISOString();
     snapshot.compilation.approvedAt = now;
@@ -1548,7 +1563,10 @@ export class InMemoryCallRepository implements CallRepository {
       providerStatus: null,
       startedAt: now,
       endedAt: null,
-      failureReason: null
+      failureReason: null,
+      compilationRevision: snapshot.compilation!.revision,
+      compilationSnapshotHash: snapshot.compilation!.snapshotHash,
+      executionSnapshot: createApprovedExecutionSnapshot(snapshot)
     };
     const attempts = this.#attempts.get(id) ?? [];
     attempts.push(attempt);

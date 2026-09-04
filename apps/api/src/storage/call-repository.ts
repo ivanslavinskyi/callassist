@@ -1,13 +1,15 @@
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ApprovedExecutionSnapshot,
   AdminCallInspector,
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
    CallBrief,
-   CallPreparation,
+  CallPreparation,
   CallCompilation,
+  CompilationApprovalInput,
   CallOutcomeMetrics,
   CallOutcomeView,
    CallTelemetryEventInput,
@@ -75,6 +77,9 @@ export type CallAttemptRecord = {
   startedAt: string;
   endedAt: string | null;
   failureReason: string | null;
+  compilationRevision: number | null;
+  compilationSnapshotHash: string | null;
+  executionSnapshot: ApprovedExecutionSnapshot | null;
 };
 
 export type StartAttemptInput = Pick<
@@ -527,7 +532,10 @@ export interface CallRepository {
     input: OwnerCallFeedbackInput
   ): Promise<CallOutcomeView>;
   getCallOutcomeMetrics(): Promise<CallOutcomeMetrics>;
-  approveCompilation(id: string): Promise<CallSnapshot>;
+  approveCompilation(
+    id: string,
+    expected?: CompilationApprovalInput
+  ): Promise<CallSnapshot>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
   startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
   attachProviderCall(
@@ -642,6 +650,7 @@ export class CallRepositoryError extends Error {
       | "APPROVAL_NOT_FOUND"
       | "CALL_NOT_READY"
       | "CALL_BRIEF_NOT_REVIEWABLE"
+      | "CALL_COMPILATION_STALE"
       | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
       | "CALL_PREPARATION_NOT_FOUND"

@@ -1,5 +1,4 @@
 import {
-  createApprovedExecutionSnapshot,
   type ApprovedExecutionSnapshot,
   type CallBrief,
   type CallLocale,
@@ -10,6 +9,7 @@ import {
 } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import type { CallService } from "../call-service";
+import type { MediaStreamBinding } from "../telephony/telephony-provider";
 import { getTwilioCopy } from "../telephony/twilio-copy";
 import { classifyConsent } from "./consent-classifier";
 import { ConsentFlow, type ConsentFlowAction } from "./consent-flow";
@@ -23,7 +23,7 @@ type BridgeLogger = {
 type OpenAIRealtimeBridgeOptions = {
   apiKey: string;
   service: CallService;
-  validateStreamToken: (callBriefId: string, token: string) => boolean;
+  validateStreamToken: (binding: MediaStreamBinding, token: string) => boolean;
   model?: string;
   transcriptionModel?: string;
   transcriptionDelay?: RealtimeTranscriptionDelay;
@@ -600,13 +600,22 @@ export class OpenAIRealtimeBridge {
     const connectOpenAI = async (message: TwilioMessage) => {
       const parameters = message.start?.customParameters ?? {};
       const candidateCallBriefId = parameters.callBriefId;
+      const candidateCallAttemptId = parameters.callAttemptId;
+      const candidateCompilationSnapshotHash =
+        parameters.compilationSnapshotHash;
       const streamToken = parameters.streamToken;
       const candidateStreamSid = message.start?.streamSid ?? message.streamSid;
       if (
         !candidateCallBriefId ||
+        !candidateCallAttemptId ||
+        !candidateCompilationSnapshotHash ||
         !streamToken ||
         !candidateStreamSid ||
-        !this.#validateStreamToken(candidateCallBriefId, streamToken)
+        !this.#validateStreamToken({
+          callBriefId: candidateCallBriefId,
+          callAttemptId: candidateCallAttemptId,
+          compilationSnapshotHash: candidateCompilationSnapshotHash
+        }, streamToken)
       ) {
         this.#logger.warn({}, "Rejected unauthorized Twilio media stream");
         close();
@@ -620,13 +629,24 @@ export class OpenAIRealtimeBridge {
         return;
       }
 
-      let executionSnapshot: ApprovedExecutionSnapshot;
-      try {
-        executionSnapshot = createApprovedExecutionSnapshot(snapshot);
-      } catch {
+      const attempt = await this.#service.getLatestAttempt(candidateCallBriefId);
+      const executionSnapshot = attempt?.executionSnapshot;
+      if (
+        !executionSnapshot ||
+        attempt.provider !== "twilio" ||
+        !["dialing", "in_progress", "awaiting_approval"].includes(
+          attempt.status
+        ) ||
+        attempt.id !== candidateCallAttemptId ||
+        attempt.compilationSnapshotHash !== candidateCompilationSnapshotHash ||
+        executionSnapshot.callBriefId !== candidateCallBriefId ||
+        attempt.compilationRevision !== executionSnapshot.compilationRevision ||
+        attempt.compilationSnapshotHash !==
+          executionSnapshot.compilationSnapshotHash
+      ) {
         this.#logger.warn(
           { callBriefId: candidateCallBriefId },
-          "Rejected media stream without an approved execution snapshot"
+          "Rejected media stream without an attempt-bound execution snapshot"
         );
         close();
         return;

@@ -5,6 +5,7 @@ import {
 } from "@callassist/contracts";
 import twilio from "twilio";
 import type {
+  MediaStreamBinding,
   StartCallRecordingInput,
   TelephonyProvider
 } from "./telephony-provider";
@@ -214,27 +215,40 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     );
   }
 
-  createVoiceTwiml(brief: CallBrief) {
+  createVoiceTwiml(brief: CallBrief, binding: MediaStreamBinding) {
+    if (binding.callBriefId !== brief.id) {
+      throw new Error("MEDIA_STREAM_BINDING_CALL_MISMATCH");
+    }
     const response = new twilio.twiml.VoiceResponse();
     const connect = response.connect();
     const stream = connect.stream({ url: this.mediaStreamUrl() });
     stream.parameter({ name: "callBriefId", value: brief.id });
+    stream.parameter({ name: "callAttemptId", value: binding.callAttemptId });
+    stream.parameter({
+      name: "compilationSnapshotHash",
+      value: binding.compilationSnapshotHash
+    });
     stream.parameter({
       name: "streamToken",
-      value: this.createMediaStreamToken(brief.id)
+      value: this.createMediaStreamToken(binding)
     });
     response.hangup();
     return response.toString();
   }
 
-  createMediaStreamToken(callBriefId: string) {
+  createMediaStreamToken(binding: MediaStreamBinding) {
     return createHmac("sha256", this.#authToken)
-      .update(`callassist-media:${callBriefId}`)
+      .update([
+        "callassist-media-v2",
+        binding.callBriefId,
+        binding.callAttemptId,
+        binding.compilationSnapshotHash
+      ].join(":"))
       .digest("base64url");
   }
 
-  validateMediaStreamToken(callBriefId: string, token: string) {
-    const expected = Buffer.from(this.createMediaStreamToken(callBriefId));
+  validateMediaStreamToken(binding: MediaStreamBinding, token: string) {
+    const expected = Buffer.from(this.createMediaStreamToken(binding));
     const received = Buffer.from(token);
     return (
       expected.length === received.length && timingSafeEqual(expected, received)
