@@ -285,11 +285,14 @@ describeWithDatabase("PostgresCallRepository", () => {
       phoneNumber: string;
       objective: string;
       compilationCiphertext: string | null;
+      immutableCompilationCiphertexts: number;
+      approvalExecutionSnapshotCiphertexts: number;
       dataDeletedAt: Date;
       transcriptCount: number;
       feedbackCommentCiphertext: string | null;
       deletionEvents: number;
       providerCallId: string | null;
+      attemptCompilationId: string | null;
       jobStatus: string;
       jobAttemptOutcome: string;
     }[]>`
@@ -298,6 +301,14 @@ describeWithDatabase("PostgresCallRepository", () => {
         phone_number AS "phoneNumber",
         objective,
         compilation_ciphertext AS "compilationCiphertext",
+        (SELECT count(*)::int FROM call_compilations
+          WHERE call_brief_id = call_briefs.id
+            AND compilation_ciphertext IS NOT NULL)
+          AS "immutableCompilationCiphertexts",
+        (SELECT count(*)::int FROM call_compilation_approvals
+          WHERE call_brief_id = call_briefs.id
+            AND execution_snapshot_ciphertext IS NOT NULL)
+          AS "approvalExecutionSnapshotCiphertexts",
         data_deleted_at AS "dataDeletedAt",
         (SELECT count(*)::int FROM transcript_segments
           WHERE call_brief_id = call_briefs.id) AS "transcriptCount",
@@ -308,6 +319,8 @@ describeWithDatabase("PostgresCallRepository", () => {
           WHERE call_brief_id = call_briefs.id) AS "deletionEvents"
         ,(SELECT provider_call_id FROM call_attempts
           WHERE id = ${attemptId}) AS "providerCallId"
+        ,(SELECT compilation_id FROM call_attempts
+          WHERE id = ${attemptId}) AS "attemptCompilationId"
         ,(SELECT status FROM durable_jobs
           WHERE id = ${jobId}) AS "jobStatus"
         ,(SELECT outcome FROM durable_job_attempts
@@ -321,10 +334,13 @@ describeWithDatabase("PostgresCallRepository", () => {
       phoneNumber: "",
       objective: "Deleted by owner",
       compilationCiphertext: null,
+      immutableCompilationCiphertexts: 0,
+      approvalExecutionSnapshotCiphertexts: 0,
       transcriptCount: 0,
       feedbackCommentCiphertext: null,
       deletionEvents: 1,
       providerCallId: null,
+      attemptCompilationId: null,
       jobStatus: "cancelled",
       jobAttemptOutcome: "cancelled"
     });
@@ -879,7 +895,51 @@ describeWithDatabase("PostgresCallRepository", () => {
     const started = await repository.startAttempt(brief.id, {
       provider: "mock"
     });
+    const compilationRows = await inspection<{
+      id: string;
+      revision: number;
+      snapshotHash: string;
+      origin: string;
+      approved: boolean;
+      executionSnapshotStored: boolean;
+      current: boolean;
+    }[]>`
+      SELECT
+        call_compilations.id,
+        call_compilations.revision,
+        call_compilations.snapshot_hash AS "snapshotHash",
+        call_compilations.origin,
+        call_compilation_approvals.id IS NOT NULL AS approved,
+        call_compilation_approvals.execution_snapshot_ciphertext IS NOT NULL
+          AS "executionSnapshotStored",
+        call_briefs.current_compilation_id = call_compilations.id AS current
+      FROM call_compilations
+      JOIN call_briefs ON call_briefs.id = call_compilations.call_brief_id
+      LEFT JOIN call_compilation_approvals
+        ON call_compilation_approvals.compilation_id = call_compilations.id
+      WHERE call_compilations.call_brief_id = ${brief.id}
+      ORDER BY call_compilations.revision
+    `;
+    expect(compilationRows).toEqual([
+      expect.objectContaining({
+        revision: 1,
+        snapshotHash: compilation.snapshotHash,
+        origin: "native",
+        approved: false,
+        executionSnapshotStored: false,
+        current: false
+      }),
+      expect.objectContaining({
+        revision: 2,
+        snapshotHash: revisedCompilation.snapshotHash,
+        origin: "native",
+        approved: true,
+        executionSnapshotStored: true,
+        current: true
+      })
+    ]);
     expect(started.attempt).toMatchObject({
+      compilationId: compilationRows[1]!.id,
       compilationRevision: revisedCompilation.revision,
       compilationSnapshotHash: revisedCompilation.snapshotHash,
       executionSnapshot: {
@@ -891,6 +951,15 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(await repository.getLatestAttempt(brief.id)).toEqual(
       started.attempt
     );
+    await expect(inspection`
+      UPDATE call_compilations
+      SET snapshot_hash = ${"0".repeat(64)}
+      WHERE id = ${compilationRows[1]!.id}
+    `).rejects.toThrow("immutable");
+    await expect(inspection`
+      DELETE FROM call_compilation_approvals
+      WHERE compilation_id = ${compilationRows[1]!.id}
+    `).rejects.toThrow("immutable");
     const providerCallId = `mock-${brief.id}`;
     await repository.attachProviderCall(
       started.attempt.id,

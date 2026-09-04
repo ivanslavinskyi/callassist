@@ -21,6 +21,7 @@ import {
   semanticOutcomeForGoalResult,
   sensitiveCallAccessInputSchema,
   type AdminCallSummary,
+  type ApprovedExecutionSnapshot,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
@@ -180,6 +181,17 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #callPreparations = new Map<string, StoredCallPreparation>();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
+  readonly #compilations = new Map<
+    string,
+    Array<{
+      id: string;
+      revision: number;
+      snapshotHash: string;
+      compilation: CallCompilation | null;
+      approvedAt: string | null;
+      executionSnapshot: ApprovedExecutionSnapshot | null;
+    }>
+  >();
   readonly #callTelemetryEvents = new Map<
     string,
     StoredCallTelemetryEvent[]
@@ -373,6 +385,14 @@ export class InMemoryCallRepository implements CallRepository {
       recording: null,
       finalTranscript: null
     });
+    this.#compilations.set(brief.id, [{
+      id: randomUUID(),
+      revision: compilation.revision,
+      snapshotHash: compilation.snapshotHash,
+      compilation: copy(compilation),
+      approvedAt: null,
+      executionSnapshot: null
+    }]);
     this.#owners.set(brief.id, userId);
     this.#creationRequests.set(
       creationIdempotencyKey,
@@ -587,6 +607,10 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: input.deletedAt
     };
     snapshot.compilation = null;
+    for (const stored of this.#compilations.get(input.callId) ?? []) {
+      stored.compilation = null;
+      stored.executionSnapshot = null;
+    }
     snapshot.transcript = [];
     snapshot.pendingApproval = null;
     if (snapshot.recording) {
@@ -917,6 +941,16 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: now
     };
     snapshot.compilation = copy(compilation);
+    const history = this.#compilations.get(id) ?? [];
+    history.push({
+      id: randomUUID(),
+      revision: compilation.revision,
+      snapshotHash: compilation.snapshotHash,
+      compilation: copy(compilation),
+      approvedAt: null,
+      executionSnapshot: null
+    });
+    this.#compilations.set(id, history);
     snapshot.pendingApproval = null;
     this.#appendCompilationTelemetry(id, compilation, now);
     return copy(snapshot);
@@ -1509,6 +1543,11 @@ export class InMemoryCallRepository implements CallRepository {
     }
     const now = new Date().toISOString();
     snapshot.compilation.approvedAt = now;
+    const storedCompilation = this.#currentCompilation(id);
+    storedCompilation.approvedAt = now;
+    storedCompilation.executionSnapshot = createApprovedExecutionSnapshot(
+      snapshot
+    );
     snapshot.brief.status = "ready";
     snapshot.brief.updatedAt = now;
     this.#appendTelemetry(id, {
@@ -1562,9 +1601,14 @@ export class InMemoryCallRepository implements CallRepository {
       );
     }
     const now = new Date().toISOString();
+    const currentCompilation = this.#currentCompilation(id);
+    if (!currentCompilation.executionSnapshot) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
     const attempt: CallAttemptRecord = {
       id: randomUUID(),
       callBriefId: id,
+      compilationId: currentCompilation.id,
       provider: input.provider,
       providerCallId: null,
       status: "dialing",
@@ -1574,7 +1618,7 @@ export class InMemoryCallRepository implements CallRepository {
       failureReason: null,
       compilationRevision: snapshot.compilation!.revision,
       compilationSnapshotHash: snapshot.compilation!.snapshotHash,
-      executionSnapshot: createApprovedExecutionSnapshot(snapshot)
+      executionSnapshot: copy(currentCompilation.executionSnapshot)
     };
     const attempts = this.#attempts.get(id) ?? [];
     attempts.push(attempt);
@@ -2852,6 +2896,14 @@ export class InMemoryCallRepository implements CallRepository {
       createdAt: new Date().toISOString()
     });
     return type;
+  }
+
+  #currentCompilation(id: string) {
+    const current = this.#compilations.get(id)?.at(-1);
+    if (!current?.compilation) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    return current;
   }
 
   #require(id: string) {

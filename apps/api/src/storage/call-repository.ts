@@ -71,6 +71,7 @@ export type ApprovalMutationResult = {
 export type CallAttemptRecord = {
   id: string;
   callBriefId: string;
+  compilationId: string | null;
   provider: "mock" | "twilio";
   providerCallId: string | null;
   status: CallBrief["status"];

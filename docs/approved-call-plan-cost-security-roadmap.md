@@ -39,12 +39,17 @@ Completed in the first branch increment:
 - centralized the existing compilation hash format, recompute it from
   schema-normalized content, and reject integrity failures at create, recompile,
   approval, and attempt-reservation storage boundaries.
+- added append-only compilation revision and approval tables, dual-write for new
+  and recompiled briefs, lazy materialization of the latest recoverable legacy
+  revision, and a database `compilation_id` binding on new call attempts;
+- added immutable logical-identity triggers while preserving the narrowly scoped
+  ciphertext-only updates required for owner erasure and key rotation.
 
-This is not yet a deployable completion of items 1 through 3. A V1 execution
-snapshot is now stored on and bound to each new attempt, but compilation history
-still lives in the mutable current `call_briefs` blob. Append-only compilation and
-approval records, legacy-row rollout policy, and database-backed concurrency
-verification remain required by item 2.
+Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
+path. They are not a deployable completion until migration 0051 and the
+database-backed concurrency, immutability, owner-erasure, and legacy-backfill
+tests pass against PostgreSQL. The mutable current `call_briefs` blob remains only
+as a compatibility projection; immutable revision rows are the new audit anchor.
 
 ## Why this roadmap exists
 
@@ -153,7 +158,9 @@ content shown to the operator.
 - Store encrypted raw brief, compiled plan, execution projection, policy decision,
   compiler/model versions, provider response ID, and canonical snapshot hash.
 - Add immutable `call_compilation_approvals` keyed by compilation ID.
-- Approval input is `{ compilationId, revision, snapshotHash }`.
+- Approval input is `{ revision, snapshotHash }`; while holding the call row lock,
+  the server resolves that unique pair to `compilationId` and stores the ID in the
+  immutable approval and attempt records.
 - Never mutate an approved compilation; editing creates a new revision.
 
 ### Compatibility
@@ -165,7 +172,8 @@ content shown to the operator.
 ### Definition of done
 
 - Concurrent recompile/approve tests cannot approve an unseen revision.
-- Database triggers prevent compilation and approval mutation/deletion.
+- Database triggers prevent logical compilation and approval mutation/deletion,
+  with a ciphertext-only exception for key rotation and owner erasure.
 - Audit/export can reconstruct the exact approved plan.
 
 ## 3. Attempt-bound Realtime

@@ -412,6 +412,7 @@ describe("CallService", () => {
     expect(started.compilation?.approvedAt).not.toBeNull();
     const attempt = await service.getLatestAttempt(brief.id);
     expect(attempt).toMatchObject({
+      compilationId: expect.any(String),
       compilationRevision: 2,
       compilationSnapshotHash: started.compilation!.snapshotHash,
       executionSnapshot: {

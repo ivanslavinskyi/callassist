@@ -119,6 +119,7 @@ type DatabaseDate = Date | string;
 
 type CallBriefRow = {
   id: string;
+  currentCompilationId: string | null;
   recipientName: string;
   phoneNumber: string;
   objective: string;
@@ -165,6 +166,7 @@ type ApprovalRow = {
 type CallAttemptRow = {
   id: string;
   callBriefId: string;
+  compilationId: string | null;
   provider: CallAttemptRecord["provider"];
   providerCallId: string | null;
   status: CallBrief["status"];
@@ -646,6 +648,17 @@ export class PostgresCallRepository implements CallRepository {
       `;
       let resolvedId = insertedRows[0]?.id;
       if (resolvedId) {
+        const compilationId = await this.#insertCompilationRecord(
+          transaction,
+          resolvedId,
+          compilation,
+          "native"
+        );
+        await transaction`
+          UPDATE call_briefs
+          SET current_compilation_id = ${compilationId}
+          WHERE id = ${resolvedId}
+        `;
         await this.#audit(transaction, resolvedId, "call.created", {
           locale: parsed.locale,
           status: runtime.status,
@@ -1043,10 +1056,23 @@ export class PostgresCallRepository implements CallRepository {
         SET
           provider_call_id = NULL,
           failure_reason = NULL,
+          compilation_id = NULL,
           compilation_revision = NULL,
           compilation_snapshot_hash = NULL,
           execution_snapshot_ciphertext = NULL
         WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        UPDATE call_compilations
+        SET compilation_ciphertext = NULL
+        WHERE call_brief_id = ${input.callId}
+          AND compilation_ciphertext IS NOT NULL
+      `;
+      await transaction`
+        UPDATE call_compilation_approvals
+        SET execution_snapshot_ciphertext = NULL
+        WHERE call_brief_id = ${input.callId}
+          AND execution_snapshot_ciphertext IS NOT NULL
       `;
       await transaction`
         UPDATE call_recordings
@@ -1573,6 +1599,12 @@ export class PostgresCallRepository implements CallRepository {
             this.#encryptionKey
           )
         : null;
+      const compilationId = await this.#insertCompilationRecord(
+        transaction,
+        id,
+        compilation,
+        "native"
+      );
 
       await transaction`
         UPDATE call_briefs
@@ -1589,6 +1621,7 @@ export class PostgresCallRepository implements CallRepository {
           assistance_disclosure = ${null},
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
           compilation_ciphertext = ${encryptedCompilation},
+          current_compilation_id = ${compilationId},
           context_ciphertext = ${encryptedContext},
           locale = ${parsed.locale},
           voice_gender = ${parsed.voiceGender},
@@ -2649,14 +2682,9 @@ export class PostgresCallRepository implements CallRepository {
   async approveCompilation(id: string, expected?: CompilationApprovalInput) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
-      const [row] = await transaction<
-        { status: CallBrief["status"]; compilationCiphertext: string | null }[]
-      >`
-        SELECT
-          status,
-          compilation_ciphertext AS "compilationCiphertext"
-        FROM call_briefs
-        WHERE id = ${id}
+      const [row] = await transaction<CallBriefRow[]>`
+        ${this.#briefSelect()}
+        WHERE call_briefs.id = ${id}
         FOR UPDATE
       `;
       if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -2681,7 +2709,40 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_COMPILATION_STALE");
       }
+      const compilationId = await this.#resolveCompilationRecord(
+        transaction,
+        id,
+        row.currentCompilationId,
+        compilation
+      );
       compilation.approvedAt = now.toISOString();
+      const executionSnapshot = createApprovedExecutionSnapshot({
+        brief: this.#mapBrief(row),
+        compilation,
+        transcript: [],
+        pendingApproval: null,
+        recording: null,
+        finalTranscript: null
+      });
+      await transaction`
+        INSERT INTO call_compilation_approvals (
+          id,
+          compilation_id,
+          call_brief_id,
+          revision,
+          snapshot_hash,
+          approved_at,
+          execution_snapshot_ciphertext
+        ) VALUES (
+          ${randomUUID()},
+          ${compilationId},
+          ${id},
+          ${compilation.revision},
+          ${compilation.snapshotHash},
+          ${now},
+          ${encryptJson(executionSnapshot, this.#encryptionKey)}
+        )
+      `;
       await transaction`
         UPDATE call_briefs
         SET
@@ -2716,6 +2777,7 @@ export class PostgresCallRepository implements CallRepository {
       SELECT
         id,
         call_brief_id AS "callBriefId",
+        compilation_id AS "compilationId",
         provider,
         provider_call_id AS "providerCallId",
         status,
@@ -2763,14 +2825,78 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
       }
       assertCompilationIntegrity(compilation);
-      const executionSnapshot = createApprovedExecutionSnapshot({
-        brief: this.#mapBrief(call),
-        compilation,
-        transcript: [],
-        pendingApproval: null,
-        recording: null,
-        finalTranscript: null
-      });
+      const compilationId = await this.#resolveCompilationRecord(
+        transaction,
+        id,
+        call.currentCompilationId,
+        compilation
+      );
+      const [approval] = await transaction<{
+        approvedAt: DatabaseDate;
+        executionSnapshotCiphertext: string | null;
+      }[]>`
+        SELECT
+          approved_at AS "approvedAt",
+          execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
+        FROM call_compilation_approvals
+        WHERE compilation_id = ${compilationId}
+        FOR SHARE
+      `;
+      let executionSnapshot: ApprovedExecutionSnapshot;
+      if (!approval) {
+        if (call.currentCompilationId || !compilation.approvedAt) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+        executionSnapshot = createApprovedExecutionSnapshot({
+          brief: this.#mapBrief(call),
+          compilation,
+          transcript: [],
+          pendingApproval: null,
+          recording: null,
+          finalTranscript: null
+        });
+        await transaction`
+          INSERT INTO call_compilation_approvals (
+            id,
+            compilation_id,
+            call_brief_id,
+            revision,
+            snapshot_hash,
+            approved_at,
+            execution_snapshot_ciphertext
+          ) VALUES (
+            ${randomUUID()},
+            ${compilationId},
+            ${id},
+            ${compilation.revision},
+            ${compilation.snapshotHash},
+            ${new Date(compilation.approvedAt)},
+            ${encryptJson(executionSnapshot, this.#encryptionKey)}
+          )
+        `;
+      } else {
+        if (!approval.executionSnapshotCiphertext) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+        try {
+          executionSnapshot = approvedExecutionSnapshotSchema.parse(
+            decryptJson<unknown>(
+              approval.executionSnapshotCiphertext,
+              this.#encryptionKey
+            )
+          );
+        } catch {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+        if (
+          executionSnapshot.callBriefId !== id ||
+          executionSnapshot.compilationRevision !== compilation.revision ||
+          executionSnapshot.compilationSnapshotHash !== compilation.snapshotHash ||
+          executionSnapshot.approvedAt !== toIso(approval.approvedAt)
+        ) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+      }
       const encryptedExecutionSnapshot = encryptJson(
         executionSnapshot,
         this.#encryptionKey
@@ -2873,6 +2999,7 @@ export class PostgresCallRepository implements CallRepository {
         INSERT INTO call_attempts (
           id,
           call_brief_id,
+          compilation_id,
           user_id,
           provider,
           provider_call_id,
@@ -2886,6 +3013,7 @@ export class PostgresCallRepository implements CallRepository {
         ) VALUES (
           ${attemptId},
           ${id},
+          ${compilationId},
           ${userId},
           ${input.provider},
           ${null},
@@ -4820,6 +4948,7 @@ export class PostgresCallRepository implements CallRepository {
     return this.#sql`
       SELECT
         id,
+        current_compilation_id AS "currentCompilationId",
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
         objective,
@@ -5538,6 +5667,95 @@ export class PostgresCallRepository implements CallRepository {
         }
       }
     });
+  }
+
+  async #insertCompilationRecord(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    compilation: CallCompilation,
+    origin: "native" | "legacy_backfill"
+  ) {
+    assertCompilationIntegrity(compilation);
+    const id = randomUUID();
+    const inserted = await transaction<{ id: string }[]>`
+      INSERT INTO call_compilations (
+        id,
+        call_brief_id,
+        revision,
+        snapshot_hash,
+        compilation_ciphertext,
+        origin,
+        created_at
+      ) VALUES (
+        ${id},
+        ${callBriefId},
+        ${compilation.revision},
+        ${compilation.snapshotHash},
+        ${encryptJson(compilation, this.#encryptionKey)},
+        ${origin},
+        ${new Date(compilation.compiledAt)}
+      )
+      ON CONFLICT (call_brief_id, revision) DO NOTHING
+      RETURNING id
+    `;
+    if (inserted[0]) return inserted[0].id;
+
+    const [existing] = await transaction<{
+      id: string;
+      snapshotHash: string;
+    }[]>`
+      SELECT id, snapshot_hash AS "snapshotHash"
+      FROM call_compilations
+      WHERE call_brief_id = ${callBriefId}
+        AND revision = ${compilation.revision}
+      FOR SHARE
+    `;
+    if (!existing || existing.snapshotHash !== compilation.snapshotHash) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    return existing.id;
+  }
+
+  async #resolveCompilationRecord(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    currentCompilationId: string | null,
+    compilation: CallCompilation
+  ) {
+    if (currentCompilationId) {
+      const [current] = await transaction<{
+        revision: number;
+        snapshotHash: string;
+      }[]>`
+        SELECT revision, snapshot_hash AS "snapshotHash"
+        FROM call_compilations
+        WHERE id = ${currentCompilationId}
+          AND call_brief_id = ${callBriefId}
+        FOR SHARE
+      `;
+      if (
+        !current ||
+        current.revision !== compilation.revision ||
+        current.snapshotHash !== compilation.snapshotHash
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+      }
+      return currentCompilationId;
+    }
+
+    const compilationId = await this.#insertCompilationRecord(
+      transaction,
+      callBriefId,
+      compilation,
+      "legacy_backfill"
+    );
+    await transaction`
+      UPDATE call_briefs
+      SET current_compilation_id = ${compilationId}
+      WHERE id = ${callBriefId}
+        AND current_compilation_id IS NULL
+    `;
+    return compilationId;
   }
 
   async #appendCompilationTelemetry(
