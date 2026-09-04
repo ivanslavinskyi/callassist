@@ -4,6 +4,11 @@
 
 SHPROHLI is an AI assistant that places outbound calls under a narrowly scoped call plan. During a call, the user can monitor the transcript, stop the call, and approve or reject sensitive disclosures.
 
+The staged implementation plan for making the approved compilation the explicit
+Realtime trust boundary, binding call attempts to immutable revisions, and adding
+provider usage/cost accounting is maintained in
+[`approved-call-plan-cost-security-roadmap.md`](approved-call-plan-cost-security-roadmap.md).
+
 ## System overview
 
 ```text
