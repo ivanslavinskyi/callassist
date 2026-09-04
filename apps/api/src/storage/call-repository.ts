@@ -35,6 +35,7 @@ import type {
   DurableJobLease,
   EnqueueDurableJobInput
 } from "../jobs/durable-job";
+import { hasValidCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 
 export type ProviderRecordingDeletionDisposition =
   | "not_present"
@@ -651,6 +652,7 @@ export class CallRepositoryError extends Error {
       | "CALL_NOT_READY"
       | "CALL_BRIEF_NOT_REVIEWABLE"
       | "CALL_COMPILATION_STALE"
+      | "CALL_COMPILATION_INTEGRITY_FAILED"
       | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
       | "CALL_PREPARATION_NOT_FOUND"
@@ -685,6 +687,12 @@ export class CallRepositoryError extends Error {
   ) {
     super(message);
     this.name = "CallRepositoryError";
+  }
+}
+
+export function assertCompilationIntegrity(compilation: CallCompilation) {
+  if (!hasValidCompilationSnapshotHash(compilation)) {
+    throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
   }
 }
 

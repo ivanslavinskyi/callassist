@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   BRIEF_COMPILER_VERSION,
   CALL_BRIEF_SCHEMA_VERSION,
@@ -11,6 +11,7 @@ import {
   type PolicyDecision,
   type RawCallBrief
 } from "@callassist/contracts";
+import { createCompilationSnapshotHash } from "./compilation-integrity";
 
 const defaultCompilerModel = "gpt-5.6";
 const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
@@ -492,20 +493,16 @@ function createCompilation(input: {
   compilerResponseId: string | null;
   revision: number;
 }): CallCompilation {
-  const hashPayload = JSON.stringify({
-    rawBrief: input.rawBrief,
-    compiledBrief: input.compiledBrief,
-    policyDecision: input.policyDecision,
-    compilerModel: input.compilerModel,
-    compilerVersion: BRIEF_COMPILER_VERSION,
-    revision: input.revision
-  });
+  const compilerVersion = BRIEF_COMPILER_VERSION;
   return {
     ...input,
-    compilerVersion: BRIEF_COMPILER_VERSION,
+    compilerVersion,
     compiledAt: new Date().toISOString(),
     approvedAt: null,
-    snapshotHash: createHash("sha256").update(hashPayload).digest("hex")
+    snapshotHash: createCompilationSnapshotHash({
+      ...input,
+      compilerVersion
+    })
   };
 }
 

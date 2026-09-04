@@ -76,6 +76,7 @@ import {
 } from "../jobs/durable-job";
 import {
   CallRepositoryError,
+  assertCompilationIntegrity,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
   creditSettlementForStatus,
@@ -522,6 +523,7 @@ export class PostgresCallRepository implements CallRepository {
     creationIdempotencyKey: string = randomUUID(),
     publication?: CallPreparationPublication
   ) {
+    assertCompilationIntegrity(compilation);
     if (!publication) {
       const existing = await this.findByCreationRequest(
         userId,
@@ -1524,6 +1526,7 @@ export class PostgresCallRepository implements CallRepository {
     input: CreateCallBriefInput,
     compilation: CallCompilation
   ) {
+    assertCompilationIntegrity(compilation);
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
     const now = new Date();
@@ -2670,6 +2673,7 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
       }
+      assertCompilationIntegrity(compilation);
       if (
         expected &&
         (compilation.revision !== expected.revision ||
@@ -2755,6 +2759,10 @@ export class PostgresCallRepository implements CallRepository {
             this.#encryptionKey
           )
         : null;
+      if (!compilation) {
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+      }
+      assertCompilationIntegrity(compilation);
       const executionSnapshot = createApprovedExecutionSnapshot({
         brief: this.#mapBrief(call),
         compilation,

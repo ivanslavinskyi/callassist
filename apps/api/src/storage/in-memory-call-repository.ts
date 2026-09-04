@@ -48,6 +48,7 @@ import {
 } from "@callassist/contracts";
 import {
   CallRepositoryError,
+  assertCompilationIntegrity,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
   creditSettlementForStatus,
@@ -310,6 +311,7 @@ export class InMemoryCallRepository implements CallRepository {
     creationIdempotencyKey: string = randomUUID(),
     publication?: CallPreparationPublication
   ) {
+    assertCompilationIntegrity(compilation);
     let preparation: StoredCallPreparation | null = null;
     if (publication) {
       this.#assertDurableJobLease(publication.lease);
@@ -894,6 +896,7 @@ export class InMemoryCallRepository implements CallRepository {
     input: CreateCallBriefInput,
     compilation: CallCompilation
   ) {
+    assertCompilationIntegrity(compilation);
     const snapshot = this.#require(id);
     if (
       !["review_required", "needs_clarification", "blocked", "ready"].includes(
@@ -1496,6 +1499,7 @@ export class InMemoryCallRepository implements CallRepository {
     ) {
       throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
     }
+    assertCompilationIntegrity(snapshot.compilation);
     if (
       expected &&
       (snapshot.compilation.revision !== expected.revision ||
@@ -1533,6 +1537,10 @@ export class InMemoryCallRepository implements CallRepository {
     if (snapshot.brief.status !== "ready") {
       throw new CallRepositoryError("CALL_NOT_READY");
     }
+    if (!snapshot.compilation) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    assertCompilationIntegrity(snapshot.compilation);
     if (!this.#outboundCallsEnabled) {
       throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
     }

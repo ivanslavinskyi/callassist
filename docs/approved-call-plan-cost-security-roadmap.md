@@ -36,12 +36,15 @@ Completed in the first branch increment:
   active attempt has all new snapshot columns `NULL`; new attempts cannot enter
   this path, and the adapter should be removed after the maximum active-call drain
   window.
+- centralized the existing compilation hash format, recompute it from
+  schema-normalized content, and reject integrity failures at create, recompile,
+  approval, and attempt-reservation storage boundaries.
 
 This is not yet a deployable completion of items 1 through 3. A V1 execution
 snapshot is now stored on and bound to each new attempt, but compilation history
 still lives in the mutable current `call_briefs` blob. Append-only compilation and
-approval records, canonical hash recomputation, legacy-row rollout policy, and
-database-backed concurrency verification remain required by item 2.
+approval records, legacy-row rollout policy, and database-backed concurrency
+verification remain required by item 2.
 
 ## Why this roadmap exists
 
