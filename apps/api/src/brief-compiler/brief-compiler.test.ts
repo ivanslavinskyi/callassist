@@ -8,7 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DeterministicBriefCompiler,
   OpenAIBriefCompiler,
-  evaluateCompiledBrief
+  evaluateCompiledBrief,
+  protectedIdentifiers
 } from "./brief-compiler";
 
 const rawInput: CreateCallBriefInput = {
@@ -51,7 +52,12 @@ const modelOutput = {
       required: true
     }
   ],
-  conditionalFollowUps: [],
+  conditionalFollowUps: [
+    {
+      condition: "Der Antrag ist nicht auffindbar",
+      question: "Welche Stelle kann den Eingang sonst prüfen?"
+    }
+  ],
   successCriteria: ["Der Eingang wird eindeutig bestätigt oder verneint"],
   unresolvedCriteria: ["Der Eingang kann nicht geprüft werden"],
   stopConditions: ["Die Frage ist beantwortet", "Die angerufene Person lehnt ab"],
@@ -117,6 +123,57 @@ describe("deterministic brief policy", () => {
       status: "blocked",
       reasonCodes: ["fact_integrity_failure"]
     });
+  });
+
+  it("preserves opaque identifiers in facts and the execution plan", () => {
+    expect(protectedIdentifiers(
+      "Case AB-123-XY, email nina@example.com, date 12.07.2026, phone +41 52 368 66 88"
+    )).toEqual(expect.arrayContaining([
+      "AB-123-XY",
+      "nina@example.com",
+      "12.07.2026",
+      "+41 52 368 66 88"
+    ]));
+
+    const raw = normalizeCreateCallBriefInput({
+      ...rawInput,
+      objective: "Ask whether case AB-123-XY was received",
+      allowedFacts: ["Case reference: AB-123-XY"]
+    });
+    const changed = compiled({
+      localizedObjective: "Klären, ob der Fall AB-123-XZ eingegangen ist.",
+      approvedFacts: [{
+        sourceText: "Case reference: AB-123-XY",
+        callLanguageText: "Fallreferenz: AB-123-XZ"
+      }]
+    });
+    expect(evaluateCompiledBrief(raw, changed)).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      localizedObjective: "Klären, ob der Fall AB-123-XY eingegangen ist.",
+      backgroundSummary: "Interne Referenz ZX-999-QQ verwenden.",
+      approvedFacts: [{
+        sourceText: "Case reference: AB-123-XY",
+        callLanguageText: "Fallreferenz: AB-123-XY"
+      }]
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    const preserved = compiled({
+      localizedObjective: "Klären, ob der Fall AB-123-XY eingegangen ist.",
+      approvedFacts: [{
+        sourceText: "Case reference: AB-123-XY",
+        callLanguageText: "Fallreferenz: AB-123-XY"
+      }]
+    });
+    expect(evaluateCompiledBrief(raw, preserved).status).toBe(
+      "ready_for_review"
+    );
   });
 
   it("blocks risk categories and requests clarification only for fixed issues", () => {
@@ -242,8 +299,24 @@ describe("OpenAIBriefCompiler", () => {
       minItems: 1,
       maxItems: 12
     });
-    expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain(
-      modelOutput.opening.purposeStatement
+    const outputModerationRequest = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body)
+    );
+    const moderatedPlan = JSON.parse(outputModerationRequest.input);
+    expect(moderatedPlan).toMatchObject({
+      localizedObjective: modelOutput.localizedObjective,
+      opening: modelOutput.opening,
+      orderedQuestions: modelOutput.orderedQuestions,
+      conditionalFollowUps: modelOutput.conditionalFollowUps,
+      successCriteria: modelOutput.successCriteria,
+      unresolvedCriteria: modelOutput.unresolvedCriteria,
+      stopConditions: modelOutput.stopConditions,
+      approvedFacts: ["Antrag gesendet: 12. Juli"],
+      prohibitedActions: modelOutput.prohibitedActions
+    });
+    expect(outputModerationRequest.input).not.toContain("sourceText");
+    expect(outputModerationRequest.input).not.toContain(
+      "Application sent: 12 July"
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [, init] of fetchMock.mock.calls) {

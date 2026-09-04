@@ -4,6 +4,7 @@ import {
   CALL_BRIEF_SCHEMA_VERSION,
   CALL_POLICY_VERSION,
   compiledCallBriefSchema,
+  createApprovedExecutionPlan,
   createCallBriefInputSchema,
   type CallCompilation,
   type CompiledCallBrief,
@@ -430,9 +431,35 @@ export function evaluateCompiledBrief(
   );
   const factIntegrity =
     sourceFacts.length === rawBrief.allowedFacts.length &&
-    sourceFacts.every((fact, index) => fact === rawBrief.allowedFacts[index]);
+    sourceFacts.every((fact, index) => fact === rawBrief.allowedFacts[index]) &&
+    compiledBrief.approvedFacts.every(({ sourceText, callLanguageText }) =>
+      protectedIdentifiers(sourceText).every((identifier) =>
+        callLanguageText.includes(identifier)
+      )
+    );
 
   if (!factIntegrity) return blockedDecision("fact_integrity_failure");
+  const executionText = buildRuntimeModerationText(compiledBrief);
+  const objectiveIdentifiers = protectedIdentifiers(rawBrief.objective);
+  if (!objectiveIdentifiers.every((identifier) => executionText.includes(identifier))) {
+    return blockedDecision("fact_integrity_failure");
+  }
+  const sourceText = [
+    rawBrief.recipientName,
+    rawBrief.representedPerson,
+    rawBrief.objective,
+    rawBrief.context,
+    rawBrief.deliveryInstruction,
+    ...rawBrief.allowedFacts,
+    ...rawBrief.clarificationAnswers.map(({ answer }) => answer)
+  ].join("\n");
+  if (
+    !protectedIdentifiers(executionText).every((identifier) =>
+      sourceText.includes(identifier)
+    )
+  ) {
+    return blockedDecision("fact_integrity_failure");
+  }
   const expectedVoicemailAction =
     rawBrief.voicemailPolicy === "leave_neutral_message"
       ? "leave_neutral_message"
@@ -504,6 +531,22 @@ function createCompilation(input: {
       compilerVersion
     })
   };
+}
+
+export function protectedIdentifiers(sourceText: string) {
+  const matches = new Set<string>();
+  const patterns = [
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    /\+\d[\d ()/.-]{6,}\d/g,
+    /\b\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b/g,
+    /\b(?=[A-Z0-9][A-Z0-9._/-]{3,}\b)(?=[A-Z0-9._/-]*[A-Z])(?=[A-Z0-9._/-]*\d)[A-Z0-9]+(?:[._/-][A-Z0-9]+)+\b/gi,
+    /\b(?=[A-Z0-9]{6,}\b)(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{6,}\b/gi,
+    /\b\d{6,}\b/g
+  ];
+  for (const pattern of patterns) {
+    for (const match of sourceText.matchAll(pattern)) matches.add(match[0]);
+  }
+  return [...matches];
 }
 
 function extractRefusal(payload: OpenAIResponsePayload) {
@@ -918,14 +961,5 @@ function filterApplicableBlockingIssues(
 }
 
 function buildRuntimeModerationText(compiled: CompiledCallBrief) {
-  return [
-    compiled.localizedObjective,
-    compiled.opening.recipientAddress,
-    compiled.opening.purposeStatement,
-    compiled.opening.readinessQuestion,
-    compiled.backgroundSummary,
-    ...compiled.orderedQuestions.map(({ text }) => text),
-    ...compiled.conditionalFollowUps.map(({ question }) => question),
-    ...compiled.approvedFacts.map(({ callLanguageText }) => callLanguageText)
-  ].join("\n");
+  return JSON.stringify(createApprovedExecutionPlan(compiled));
 }

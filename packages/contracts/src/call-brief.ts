@@ -505,6 +505,32 @@ export type ApprovedExecutionSnapshot = z.infer<
   typeof approvedExecutionSnapshotSchema
 >;
 
+export function createApprovedExecutionPlan(
+  compiled: CompiledCallBrief
+): ApprovedExecutionPlan {
+  return approvedExecutionPlanSchema.parse({
+    callLocale: compiled.callLocale,
+    taskType: compiled.taskType,
+    tone: compiled.tone,
+    addressingStyle: compiled.addressingStyle,
+    resultHandling: compiled.resultHandling,
+    voicemailAction: compiled.voicemailAction,
+    refusalBehavior: compiled.refusalBehavior,
+    localizedObjective: compiled.localizedObjective,
+    opening: compiled.opening,
+    backgroundSummary: compiled.backgroundSummary,
+    orderedQuestions: compiled.orderedQuestions,
+    conditionalFollowUps: compiled.conditionalFollowUps,
+    successCriteria: compiled.successCriteria,
+    unresolvedCriteria: compiled.unresolvedCriteria,
+    stopConditions: compiled.stopConditions,
+    approvedFacts: compiled.approvedFacts.map(
+      ({ callLanguageText }) => callLanguageText
+    ),
+    prohibitedActions: compiled.prohibitedActions
+  });
+}
+
 export const policyDecisionStatusSchema = z.enum([
   "ready_for_review",
   "needs_clarification",
@@ -690,27 +716,7 @@ export function createApprovedExecutionSnapshot(
     compilationRevision: compilation.revision,
     compilationSnapshotHash: compilation.snapshotHash,
     approvedAt: compilation.approvedAt,
-    plan: {
-      callLocale: compiled.callLocale,
-      taskType: compiled.taskType,
-      tone: compiled.tone,
-      addressingStyle: compiled.addressingStyle,
-      resultHandling: compiled.resultHandling,
-      voicemailAction: compiled.voicemailAction,
-      refusalBehavior: compiled.refusalBehavior,
-      localizedObjective: compiled.localizedObjective,
-      opening: compiled.opening,
-      backgroundSummary: compiled.backgroundSummary,
-      orderedQuestions: compiled.orderedQuestions,
-      conditionalFollowUps: compiled.conditionalFollowUps,
-      successCriteria: compiled.successCriteria,
-      unresolvedCriteria: compiled.unresolvedCriteria,
-      stopConditions: compiled.stopConditions,
-      approvedFacts: compiled.approvedFacts.map(
-        ({ callLanguageText }) => callLanguageText
-      ),
-      prohibitedActions: compiled.prohibitedActions
-    },
+    plan: createApprovedExecutionPlan(compiled),
     runtime: {
       agentName: snapshot.brief.agentName,
       voiceGender: snapshot.brief.voiceGender,

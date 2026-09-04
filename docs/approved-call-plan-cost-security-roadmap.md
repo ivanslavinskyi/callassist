@@ -44,12 +44,21 @@ Completed in the first branch increment:
   revision, and a database `compilation_id` binding on new call attempts;
 - added immutable logical-identity triggers while preserving the narrowly scoped
   ciphertext-only updates required for owner erasure and key rotation.
+- made output moderation consume the same canonical execution-plan projection as
+  Realtime, including question purposes, follow-up conditions, all outcome/stop
+  criteria, and prohibited actions;
+- added local preservation checks for email, phone, numeric date, long numeric,
+  and opaque reference identifiers in approved facts and objectives, and reject
+  identifiers invented by the compiled runtime plan.
 
 Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
 path. They are not a deployable completion until migration 0051 and the
 database-backed concurrency, immutability, owner-erasure, and legacy-backfill
 tests pass against PostgreSQL. The mutable current `call_briefs` blob remains only
 as a compatibility projection; immutable revision rows are the new audit anchor.
+Item 4 is partially implemented: full-plan output moderation and the beta opaque
+identifier guard are present; broader address/name extraction and review UI still
+remain.
 
 ## Why this roadmap exists
 
