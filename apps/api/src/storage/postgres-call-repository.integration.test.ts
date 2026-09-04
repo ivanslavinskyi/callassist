@@ -1676,6 +1676,12 @@ describeWithDatabase("PostgresCallRepository", () => {
     };
     const work = await repository.claimCallPreparation(queued.id, lease);
     expect(work.input).toEqual(normalizeCreateCallBriefInput(input));
+    const reservations = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        repository.reserveCallPreparationProviderRequest(queued.id, 8, lease)
+      )
+    );
+    expect(reservations.filter(Boolean)).toHaveLength(8);
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
@@ -1699,12 +1705,16 @@ describeWithDatabase("PostgresCallRepository", () => {
       });
     const [stored] = await inspection<{
       inputCiphertext: string | null;
+      providerRequestCount: number;
     }[]>`
-      SELECT input_ciphertext AS "inputCiphertext"
+      SELECT
+        input_ciphertext AS "inputCiphertext",
+        provider_request_count AS "providerRequestCount"
       FROM call_preparation_requests
       WHERE id = ${queued.id}
     `;
     expect(stored?.inputCiphertext).toBeNull();
+    expect(stored?.providerRequestCount).toBe(8);
   });
 
   it("atomically cancels active preparations and erases their private input", async () => {

@@ -62,7 +62,11 @@ remain.
 Item 5 now has explicit durable retry disposition for compiler failures: network,
 timeout, 408/409/429, and 5xx remain retryable; exhausted structured-output
 validation, malformed responses, and permanent 4xx failures dead-letter after
-one durable attempt. A persisted cumulative provider-request budget still remains.
+one durable attempt. A preparation-scoped provider-request counter is reserved
+atomically before every physical compiler or moderation request and caps all
+transport and durable retries at eight requests. A crash after reservation is
+deliberately fail-closed and may consume budget without sending the request; the
+provider-operation ledger in item 6 will make that distinction observable.
 
 ## Why this roadmap exists
 
@@ -273,6 +277,17 @@ configuration failures and without multiplicative cost amplification.
 
 Start with at most four Responses submissions and four moderation submissions per
 compilation revision. Revisit only after production measurements and evaluation.
+
+### Implemented increment
+
+- `call_preparation_requests.provider_request_count` persists the cumulative
+  budget across worker restarts and durable attempts.
+- The compiler reserves budget before each HTTP request, including transport
+  retries, and refuses to call the provider when reservation is denied.
+- `OPENAI_REQUEST_BUDGET_EXHAUSTED` is terminal and maps to the existing
+  privacy-safe unavailable result at the public preparation boundary.
+- Initial preparation is covered now. Durable recompilation remains part of the
+  later recompilation/idempotency work.
 
 ### Definition of done
 

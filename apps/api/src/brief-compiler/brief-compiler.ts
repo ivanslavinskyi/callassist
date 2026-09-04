@@ -20,16 +20,27 @@ const defaultModerationEndpoint = "https://api.openai.com/v1/moderations";
 const defaultCompilationTimeoutMs = 90_000;
 const defaultRequestTimeoutMs = 25_000;
 
-type BriefCompilerStage =
+export const briefCompilationProviderRequestBudget = 8;
+
+export type BriefCompilerStage =
   | "input_moderation"
   | "compilation"
   | "output_moderation";
+
+export type BriefCompilerRunOptions = {
+  maxProviderRequests?: number;
+  beforeProviderRequest?: (request: {
+    clientRequestId: string;
+    stage: BriefCompilerStage;
+  }) => Promise<boolean>;
+};
 
 export interface BriefCompiler {
   readonly model: string;
   compile(
     input: NormalizedCallBriefInput,
-    revision?: number
+    revision?: number,
+    options?: BriefCompilerRunOptions
   ): Promise<CallCompilation>;
 }
 
@@ -43,6 +54,7 @@ export class BriefCompilerError extends Error {
   constructor(
     readonly code:
       | "OPENAI_REQUEST_FAILED"
+      | "OPENAI_REQUEST_BUDGET_EXHAUSTED"
       | "OPENAI_RESPONSE_INVALID",
     options?: {
       cause?: unknown;
@@ -108,10 +120,15 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     this.#fetch = options.fetchImplementation ?? fetch;
   }
 
-  async compile(input: NormalizedCallBriefInput, revision = 1) {
+  async compile(
+    input: NormalizedCallBriefInput,
+    revision = 1,
+    options: BriefCompilerRunOptions = {}
+  ) {
     const deadline = Date.now() + this.#timeoutMs;
+    const requestBudget = createRequestBudget(options);
     const rawBrief = createCallBriefInputSchema.parse(input);
-    if (await this.#isFlaggedByModeration(rawBrief, deadline)) {
+    if (await this.#isFlaggedByModeration(rawBrief, deadline, requestBudget)) {
       return createCompilation({
         rawBrief,
         compiledBrief: null,
@@ -130,7 +147,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       response = await this.#requestCompilation(
         rawBrief,
         validationFeedback,
-        deadline
+        deadline,
+        requestBudget
       );
       const refusal = extractRefusal(response);
       if (refusal) {
@@ -175,7 +193,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     const policyDecision = await this.#isFlaggedByModerationText(
       buildRuntimeModerationText(sanitizedBrief),
       deadline,
-      "output_moderation"
+      "output_moderation",
+      requestBudget
     )
       ? blockedDecision("prohibited_content")
       : evaluateCompiledBrief(rawBrief, sanitizedBrief);
@@ -190,7 +209,11 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     });
   }
 
-  async #isFlaggedByModeration(rawBrief: RawCallBrief, deadline: number) {
+  async #isFlaggedByModeration(
+    rawBrief: RawCallBrief,
+    deadline: number,
+    requestBudget: ProviderRequestBudget
+  ) {
     return this.#isFlaggedByModerationText(
       [
         rawBrief.recipientName,
@@ -202,14 +225,16 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         ...rawBrief.allowedFacts
       ].join("\n"),
       deadline,
-      "input_moderation"
+      "input_moderation",
+      requestBudget
     );
   }
 
   async #isFlaggedByModerationText(
     input: string,
     deadline: number,
-    stage: Extract<BriefCompilerStage, "input_moderation" | "output_moderation">
+    stage: Extract<BriefCompilerStage, "input_moderation" | "output_moderation">,
+    requestBudget: ProviderRequestBudget
   ) {
     const response = await this.#request(
       this.#moderationEndpoint,
@@ -218,7 +243,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         input
       },
       deadline,
-      stage
+      stage,
+      requestBudget
     );
     const payload = response as {
       results?: Array<{ flagged?: unknown }>;
@@ -233,7 +259,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
   async #requestCompilation(
     rawBrief: RawCallBrief,
     validationFeedback: string[],
-    deadline: number
+    deadline: number,
+    requestBudget: ProviderRequestBudget
   ) {
     return (await this.#request(
       this.#responsesEndpoint,
@@ -280,7 +307,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         }
       },
       deadline,
-      "compilation"
+      "compilation",
+      requestBudget
     )) as OpenAIResponsePayload;
   }
 
@@ -288,7 +316,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     endpoint: string,
     body: unknown,
     deadline: number,
-    stage: BriefCompilerStage
+    stage: BriefCompilerStage,
+    requestBudget: ProviderRequestBudget
   ) {
     let lastError: unknown;
     let lastClientRequestId: string | null = null;
@@ -304,6 +333,22 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 
       const clientRequestId = randomUUID();
       lastClientRequestId = clientRequestId;
+      if (requestBudget.used >= requestBudget.max) {
+        throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
+          clientRequestId,
+          stage
+        });
+      }
+      if (
+        requestBudget.beforeProviderRequest &&
+        !(await requestBudget.beforeProviderRequest({ clientRequestId, stage }))
+      ) {
+        throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
+          clientRequestId,
+          stage
+        });
+      }
+      requestBudget.used += 1;
       let response: Response;
       try {
         response = await this.#fetch(endpoint, {
@@ -625,8 +670,34 @@ export function isRetryableOpenAIStatus(status: number) {
 }
 
 export function isBriefCompilerErrorRetryable(error: BriefCompilerError) {
-  if (error.code === "OPENAI_RESPONSE_INVALID") return false;
+  if (
+    error.code === "OPENAI_RESPONSE_INVALID" ||
+    error.code === "OPENAI_REQUEST_BUDGET_EXHAUSTED"
+  ) return false;
   return error.statusCode === null || isRetryableOpenAIStatus(error.statusCode);
+}
+
+type ProviderRequestBudget = {
+  used: number;
+  max: number;
+  beforeProviderRequest?: BriefCompilerRunOptions["beforeProviderRequest"];
+};
+
+function createRequestBudget(
+  options: BriefCompilerRunOptions
+): ProviderRequestBudget {
+  const max = options.maxProviderRequests ??
+    briefCompilationProviderRequestBudget;
+  if (!Number.isSafeInteger(max) || max < 0) {
+    throw new TypeError("maxProviderRequests must be a non-negative integer");
+  }
+  return {
+    used: 0,
+    max,
+    ...(options.beforeProviderRequest
+      ? { beforeProviderRequest: options.beforeProviderRequest }
+      : {})
+  };
 }
 
 function isTimeoutError(error: unknown) {

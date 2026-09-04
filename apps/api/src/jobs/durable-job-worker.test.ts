@@ -183,6 +183,69 @@ describe("durable job worker", () => {
       });
   });
 
+  it("persists one provider request budget across durable attempts", async () => {
+    const repository = new InMemoryCallRepository();
+    const userId = randomUUID();
+    const preparation = await repository.enqueueCallPreparation({
+      userId,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "d".repeat(64),
+      input,
+      now: "2098-11-02T01:00:00.000Z"
+    });
+    const firstJob = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "budget-worker-a",
+      now: "2098-11-02T01:00:00.000Z",
+      leaseExpiresAt: "2098-11-02T01:01:00.000Z"
+    });
+    const firstLease = {
+      jobId: firstJob!.id,
+      workerId: "budget-worker-a",
+      checkedAt: "2098-11-02T01:00:01.000Z"
+    };
+    await repository.claimCallPreparation(preparation.id, firstLease);
+    for (let request = 0; request < 5; request += 1) {
+      await expect(repository.reserveCallPreparationProviderRequest(
+        preparation.id,
+        8,
+        firstLease
+      )).resolves.toBe(true);
+    }
+    await repository.failDurableJob(
+      firstJob!.id,
+      "budget-worker-a",
+      "BRIEF_COMPILER_UNAVAILABLE",
+      "2098-11-02T01:00:02.000Z",
+      "2098-11-02T01:00:03.000Z"
+    );
+
+    const secondJob = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "budget-worker-b",
+      now: "2098-11-02T01:00:03.000Z",
+      leaseExpiresAt: "2098-11-02T01:01:03.000Z"
+    });
+    const secondLease = {
+      jobId: secondJob!.id,
+      workerId: "budget-worker-b",
+      checkedAt: "2098-11-02T01:00:04.000Z"
+    };
+    await repository.claimCallPreparation(preparation.id, secondLease);
+    for (let request = 0; request < 3; request += 1) {
+      await expect(repository.reserveCallPreparationProviderRequest(
+        preparation.id,
+        8,
+        secondLease
+      )).resolves.toBe(true);
+    }
+    await expect(repository.reserveCallPreparationProviderRequest(
+      preparation.id,
+      8,
+      secondLease
+    )).resolves.toBe(false);
+  });
+
   it("cancels in-flight preparation and fences publication for account deletion", async () => {
     const repository = new InMemoryCallRepository();
     const userId = randomUUID();

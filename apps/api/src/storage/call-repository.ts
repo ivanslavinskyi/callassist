@@ -460,6 +460,11 @@ export interface CallRepository {
     id: string,
     lease: DurableJobLease
   ): Promise<CallPreparationWork>;
+  reserveCallPreparationProviderRequest(
+    id: string,
+    maxRequests: number,
+    lease: DurableJobLease
+  ): Promise<boolean>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   findCallDataDeletion(

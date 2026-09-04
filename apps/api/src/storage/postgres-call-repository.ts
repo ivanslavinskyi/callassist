@@ -364,6 +364,7 @@ type CallPreparationRow = {
   idempotencyKey: string;
   inputFingerprint: string;
   inputCiphertext: string | null;
+  providerRequestCount: number;
   status: CallPreparation["status"];
   callBriefId: string | null;
   failureCode: CallPreparation["failureCode"];
@@ -846,6 +847,33 @@ export class PostgresCallRepository implements CallRepository {
             )
           : null
       };
+    });
+  }
+
+  async reserveCallPreparationProviderRequest(
+    id: string,
+    maxRequests: number,
+    lease: DurableJobLease
+  ) {
+    return this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const rows = await transaction`
+        UPDATE call_preparation_requests
+        SET
+          provider_request_count = provider_request_count + 1,
+          updated_at = ${lease.checkedAt}::timestamptz
+        WHERE id = ${id}
+          AND status = 'processing'
+          AND provider_request_count < ${maxRequests}
+          AND EXISTS (
+            SELECT 1
+            FROM durable_jobs
+            WHERE durable_jobs.id = ${lease.jobId}
+              AND durable_jobs.call_preparation_id = call_preparation_requests.id
+          )
+        RETURNING provider_request_count
+      `;
+      return rows.count === 1;
     });
   }
 
@@ -5153,6 +5181,7 @@ export class PostgresCallRepository implements CallRepository {
         call_preparation_requests.idempotency_key AS "idempotencyKey",
         call_preparation_requests.input_fingerprint AS "inputFingerprint",
         call_preparation_requests.input_ciphertext AS "inputCiphertext",
+        call_preparation_requests.provider_request_count AS "providerRequestCount",
         call_preparation_requests.status,
         call_preparation_requests.call_brief_id AS "callBriefId",
         call_preparation_requests.failure_code AS "failureCode",

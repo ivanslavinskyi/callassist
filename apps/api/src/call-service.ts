@@ -22,6 +22,7 @@ import {
 import { buildAdminOperationsOverview } from "./admin-operations";
 import {
   BriefCompilerError,
+  briefCompilationProviderRequestBudget,
   isBriefCompilerErrorRetryable,
   DeterministicBriefCompiler,
   type BriefCompiler
@@ -1063,7 +1064,17 @@ export class CallService {
     }
     try {
       const compilation = await this.#briefCompiler.compile(
-        normalizeCreateCallBriefInput(work.input)
+        normalizeCreateCallBriefInput(work.input),
+        1,
+        {
+          maxProviderRequests: briefCompilationProviderRequestBudget,
+          beforeProviderRequest: () =>
+            this.repository.reserveCallPreparationProviderRequest(
+              job.callPreparationId!,
+              briefCompilationProviderRequestBudget,
+              currentLease(lease)
+            )
+        }
       );
       await this.repository.create(
         work.input,
@@ -1452,7 +1463,8 @@ function callPreparationFingerprint(input: CreateCallBriefInput) {
 
 function mapBriefCompilerError(error: BriefCompilerError) {
   return new CallServiceError(
-    error.code === "OPENAI_REQUEST_FAILED"
+    error.code === "OPENAI_REQUEST_FAILED" ||
+      error.code === "OPENAI_REQUEST_BUDGET_EXHAUSTED"
       ? "BRIEF_COMPILER_UNAVAILABLE"
       : "BRIEF_COMPILER_RESPONSE_INVALID",
     {

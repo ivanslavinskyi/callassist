@@ -144,6 +144,7 @@ type StoredCallPreparation = {
   idempotencyKey: string;
   inputFingerprint: string;
   input: CreateCallBriefInput | null;
+  providerRequestCount: number;
 };
 
 const interruptedStatuses = new Set<CallBrief["status"]>([
@@ -457,7 +458,8 @@ export class InMemoryCallRepository implements CallRepository {
       userId: input.userId,
       idempotencyKey: input.idempotencyKey,
       inputFingerprint: input.inputFingerprint,
-      input: copy(input.input)
+      input: copy(input.input),
+      providerRequestCount: 0
     };
     this.#callPreparations.set(id, stored);
     this.#callPreparationRequests.set(requestKey, id);
@@ -513,6 +515,27 @@ export class InMemoryCallRepository implements CallRepository {
       idempotencyKey: stored.idempotencyKey,
       input: stored.input
     });
+  }
+
+  async reserveCallPreparationProviderRequest(
+    id: string,
+    maxRequests: number,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const job = this.#findDurableJob(lease.jobId);
+    const stored = this.#callPreparations.get(id);
+    if (
+      !stored ||
+      job?.callPreparationId !== id ||
+      stored.preparation.status !== "processing"
+    ) {
+      throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    }
+    if (stored.providerRequestCount >= maxRequests) return false;
+    stored.providerRequestCount += 1;
+    stored.preparation.updatedAt = lease.checkedAt;
+    return true;
   }
 
   async cancelCallPreparations(userId: string, now: string) {

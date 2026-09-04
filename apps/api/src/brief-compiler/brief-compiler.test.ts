@@ -589,4 +589,88 @@ describe("OpenAIBriefCompiler", () => {
       reasonCodes: ["prohibited_content"]
     });
   });
+
+  it("reserves budget before every physical provider request", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ output_text: JSON.stringify(modelOutput) }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      );
+    const reservations: Array<{
+      clientRequestId: string;
+      stage: "input_moderation" | "compilation" | "output_moderation";
+    }> = [];
+    const beforeProviderRequest = vi.fn(async (
+      request: (typeof reservations)[number]
+    ) => {
+      reservations.push(request);
+      return true;
+    });
+
+    await new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    }).compile(normalizeCreateCallBriefInput(rawInput), 1, {
+      beforeProviderRequest
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(beforeProviderRequest).toHaveBeenCalledTimes(4);
+    expect(reservations.map(({ stage }) => stage)).toEqual([
+        "input_moderation",
+        "input_moderation",
+        "compilation",
+        "output_moderation"
+      ]);
+    expect(new Set(reservations.map(({ clientRequestId }) => clientRequestId)).size)
+      .toBe(4);
+  });
+
+  it("fails terminally before fetch when provider request budget is exhausted", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const compiler = new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    });
+
+    await expect(compiler.compile(
+      normalizeCreateCallBriefInput(rawInput),
+      1,
+      { maxProviderRequests: 0 }
+    )).rejects.toMatchObject({
+      code: "OPENAI_REQUEST_BUDGET_EXHAUSTED",
+      stage: "input_moderation"
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch when the persisted budget reservation is denied", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const beforeProviderRequest = vi.fn(async () => false);
+
+    await expect(new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    }).compile(normalizeCreateCallBriefInput(rawInput), 1, {
+      beforeProviderRequest
+    })).rejects.toMatchObject({
+      code: "OPENAI_REQUEST_BUDGET_EXHAUSTED",
+      stage: "input_moderation"
+    });
+    expect(beforeProviderRequest).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
