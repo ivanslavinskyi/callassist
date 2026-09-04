@@ -620,8 +620,13 @@ function parseCompiledBriefResponse(
   };
 }
 
-function isRetryableOpenAIStatus(status: number) {
+export function isRetryableOpenAIStatus(status: number) {
   return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+export function isBriefCompilerErrorRetryable(error: BriefCompilerError) {
+  if (error.code === "OPENAI_RESPONSE_INVALID") return false;
+  return error.statusCode === null || isRetryableOpenAIStatus(error.statusCode);
 }
 
 function isTimeoutError(error: unknown) {

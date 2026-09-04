@@ -59,6 +59,10 @@ as a compatibility projection; immutable revision rows are the new audit anchor.
 Item 4 is partially implemented: full-plan output moderation and the beta opaque
 identifier guard are present; broader address/name extraction and review UI still
 remain.
+Item 5 now has explicit durable retry disposition for compiler failures: network,
+timeout, 408/409/429, and 5xx remain retryable; exhausted structured-output
+validation, malformed responses, and permanent 4xx failures dead-letter after
+one durable attempt. A persisted cumulative provider-request budget still remains.
 
 ## Why this roadmap exists
 

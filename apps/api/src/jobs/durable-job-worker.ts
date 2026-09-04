@@ -3,6 +3,7 @@ import type { CallRepository } from "../storage/call-repository";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import {
   durableJobErrorCode,
+  durableJobErrorIsRetryable,
   durableJobRetryDelayMs,
   type DurableJob,
   type DurableJobLease,
@@ -212,7 +213,8 @@ export class DurableJobWorker {
         now.toISOString(),
         new Date(
           now.getTime() + durableJobRetryDelayMs(job.attemptCount)
-        ).toISOString()
+        ).toISOString(),
+        durableJobErrorIsRetryable(error)
       );
       if (failed) this.onError(error);
     } finally {

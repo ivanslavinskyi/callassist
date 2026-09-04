@@ -444,6 +444,46 @@ describe("durable job worker", () => {
     ]);
   });
 
+  it("dead-letters terminal failures after one attempt", async () => {
+    const { repository, recordingId } = await repositoryWithAvailableRecording();
+    const job = await repository.enqueueDurableJob({
+      type: "final_transcription",
+      recordingId,
+      runAfter: "2099-03-15T00:00:00.000Z",
+      maxAttempts: 3
+    });
+    const worker = new DurableJobWorker(
+      repository,
+      {
+        final_transcription: async () => {
+          throw new DurableJobExecutionError(
+            "BRIEF_COMPILER_RESPONSE_INVALID",
+            { retryable: false }
+          );
+        }
+      },
+      () => undefined,
+      { now: () => new Date("2099-03-15T00:00:00.000Z") }
+    );
+
+    await worker.runOnce();
+
+    expect((await repository.listDurableJobs()).find(
+      ({ id }) => id === job.id
+    )).toMatchObject({
+      status: "dead_letter",
+      attemptCount: 1,
+      lastErrorCode: "BRIEF_COMPILER_RESPONSE_INVALID"
+    });
+    expect(await repository.listDurableJobAttempts(job.id)).toEqual([
+      expect.objectContaining({
+        attemptNumber: 1,
+        outcome: "dead_letter",
+        errorCode: "BRIEF_COMPILER_RESPONSE_INVALID"
+      })
+    ]);
+  });
+
   it("does not expire jobs for types the worker cannot execute", async () => {
     const { repository, recordingId } = await repositoryWithAvailableRecording();
     const retention = await repository.enqueueDurableJob({

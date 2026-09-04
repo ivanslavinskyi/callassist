@@ -630,7 +630,8 @@ export interface CallRepository {
     workerId: string,
     errorCode: string,
     now: string,
-    retryAt: string
+    retryAt: string,
+    retryable?: boolean
   ): Promise<DurableJob | null>;
   listDurableJobs(): Promise<DurableJob[]>;
   listDurableJobAttempts(jobId: string): Promise<DurableJobAttempt[]>;

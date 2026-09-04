@@ -6,9 +6,11 @@ import {
 } from "@callassist/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BriefCompilerError,
   DeterministicBriefCompiler,
   OpenAIBriefCompiler,
   evaluateCompiledBrief,
+  isBriefCompilerErrorRetryable,
   protectedIdentifiers
 } from "./brief-compiler";
 
@@ -228,6 +230,21 @@ describe("deterministic brief policy", () => {
 });
 
 describe("OpenAIBriefCompiler", () => {
+  it("classifies only transient compiler failures as durable-retryable", () => {
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_RESPONSE_INVALID")
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED", { statusCode: 400 })
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED", { statusCode: 429 })
+    )).toBe(true);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED")
+    )).toBe(true);
+  });
+
   it("moderates input and requests a strict Structured Output", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

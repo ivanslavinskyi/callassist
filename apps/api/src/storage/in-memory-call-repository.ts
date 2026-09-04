@@ -2534,11 +2534,12 @@ export class InMemoryCallRepository implements CallRepository {
     workerId: string,
     errorCode: string,
     now: string,
-    retryAt: string
+    retryAt: string,
+    retryable = true
   ) {
     const job = this.#findDurableJob(jobId);
     if (!job || !durableJobLeaseIsValid(job, workerId, now)) return null;
-    const deadLetter = job.attemptCount >= job.maxAttempts;
+    const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
     this.#durableJobAttempts.push({
       id: randomUUID(),
       jobId,

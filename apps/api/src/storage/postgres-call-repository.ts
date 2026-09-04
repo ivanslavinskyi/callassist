@@ -4667,7 +4667,8 @@ export class PostgresCallRepository implements CallRepository {
     workerId: string,
     errorCode: string,
     now: string,
-    retryAt: string
+    retryAt: string,
+    retryable = true
   ) {
     const found = await this.#sql.begin(async (transaction) => {
       const [job] = await transaction<{
@@ -4693,7 +4694,7 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!job) return false;
-      const deadLetter = job.attemptCount >= job.maxAttempts;
+      const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
       await transaction`
         INSERT INTO durable_job_attempts (
           id, job_id, generation, attempt_number, worker_id,

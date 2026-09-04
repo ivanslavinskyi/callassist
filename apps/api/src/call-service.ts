@@ -22,6 +22,7 @@ import {
 import { buildAdminOperationsOverview } from "./admin-operations";
 import {
   BriefCompilerError,
+  isBriefCompilerErrorRetryable,
   DeterministicBriefCompiler,
   type BriefCompiler
 } from "./brief-compiler/brief-compiler";
@@ -1056,7 +1057,9 @@ export class CallService {
     );
     if (work.preparation.status === "succeeded") return;
     if (!work.input) {
-      throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED");
+      throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED", {
+        retryable: false
+      });
     }
     try {
       const compilation = await this.#briefCompiler.compile(
@@ -1076,10 +1079,27 @@ export class CallService {
       if (error instanceof BriefCompilerError) {
         throw new DurableJobExecutionError(
           mapBriefCompilerError(error).code,
-          { cause: error }
+          {
+            cause: error,
+            retryable: isBriefCompilerErrorRetryable(error)
+          }
         );
       }
       if (error instanceof DurableJobExecutionError) throw error;
+      if (
+        error instanceof CallRepositoryError &&
+        [
+          "CALL_COMPILATION_INTEGRITY_FAILED",
+          "CALL_CREATION_IDEMPOTENCY_CONFLICT",
+          "CALL_PREPARATION_IDEMPOTENCY_CONFLICT",
+          "DURABLE_JOB_TARGET_INVALID"
+        ].includes(error.code)
+      ) {
+        throw new DurableJobExecutionError(error.code, {
+          cause: error,
+          retryable: false
+        });
+      }
       throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED", {
         cause: error
       });
