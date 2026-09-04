@@ -427,6 +427,84 @@ export const compiledCallBriefSchema = z.object({
 });
 export type CompiledCallBrief = z.infer<typeof compiledCallBriefSchema>;
 
+export const APPROVED_EXECUTION_SNAPSHOT_VERSION = 1 as const;
+
+/**
+ * The task-specific contract accepted by Realtime after preparation approval.
+ * Audit-only compiler fields (including fact sourceText) and raw form fields are
+ * deliberately excluded so they cannot be interpolated into runtime prompts.
+ */
+export const approvedExecutionPlanSchema = z.object({
+  callLocale: callLocaleSchema,
+  taskType: callTaskTypeSchema,
+  tone: z.enum(["formal", "neutral", "friendly"]),
+  addressingStyle: z.enum(["formal", "informal"]),
+  resultHandling: callResultHandlingSchema,
+  voicemailAction: z.enum(["hang_up", "leave_neutral_message"]),
+  refusalBehavior: z.literal("respect_and_end"),
+  localizedObjective: z.string().trim().min(10).max(2_000),
+  opening: compiledOpeningSchema,
+  backgroundSummary: z.string().trim().max(4_000),
+  orderedQuestions: z.array(compiledQuestionSchema).min(1).max(12),
+  conditionalFollowUps: z.array(compiledFollowUpSchema).max(12),
+  successCriteria: z.array(z.string().trim().min(2).max(400)).min(1).max(10),
+  unresolvedCriteria: z.array(z.string().trim().min(2).max(400)).min(1).max(10),
+  stopConditions: z.array(z.string().trim().min(2).max(400)).min(1).max(10),
+  approvedFacts: z.array(z.string().trim().min(1).max(400)).max(40),
+  prohibitedActions: z.array(z.string().trim().min(2).max(400)).min(1).max(12)
+}).strict();
+export type ApprovedExecutionPlan = z.infer<
+  typeof approvedExecutionPlanSchema
+>;
+
+export const approvedExecutionRuntimeSchema = z.object({
+  agentName: z.string().trim().min(2),
+  voiceGender: callVoiceGenderSchema,
+  assistanceDisclosure: z.string().trim(),
+  audioRetentionDays: audioRetentionDaysSchema,
+  allowLanguageSwitch: z.boolean(),
+  fallbackLocale: callLocaleSchema.optional()
+}).strict();
+export type ApprovedExecutionRuntime = z.infer<
+  typeof approvedExecutionRuntimeSchema
+>;
+
+export const approvedExecutionSnapshotSchema = z.object({
+  version: z.literal(APPROVED_EXECUTION_SNAPSHOT_VERSION),
+  callBriefId: z.string().uuid(),
+  compilationRevision: z.number().int().positive(),
+  compilationSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  approvedAt: z.string().datetime(),
+  plan: approvedExecutionPlanSchema,
+  runtime: approvedExecutionRuntimeSchema
+}).strict().superRefine((snapshot, context) => {
+  const { allowLanguageSwitch, fallbackLocale } = snapshot.runtime;
+  if (allowLanguageSwitch && !fallbackLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "Select a fallback language",
+      path: ["runtime", "fallbackLocale"]
+    });
+  }
+  if (!allowLanguageSwitch && fallbackLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "A fallback language is available only when language switching is enabled",
+      path: ["runtime", "fallbackLocale"]
+    });
+  }
+  if (fallbackLocale === snapshot.plan.callLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "The fallback language must differ from the primary language",
+      path: ["runtime", "fallbackLocale"]
+    });
+  }
+});
+export type ApprovedExecutionSnapshot = z.infer<
+  typeof approvedExecutionSnapshotSchema
+>;
+
 export const policyDecisionStatusSchema = z.enum([
   "ready_for_review",
   "needs_clarification",
@@ -573,6 +651,59 @@ export const callSnapshotSchema = z.object({
   finalTranscript: finalTranscriptSchema.nullable()
 });
 export type CallSnapshot = z.infer<typeof callSnapshotSchema>;
+
+export function createApprovedExecutionSnapshot(
+  snapshot: CallSnapshot
+): ApprovedExecutionSnapshot {
+  const compilation = snapshot.compilation;
+  const compiled = compilation?.compiledBrief;
+  if (
+    !compilation ||
+    !compiled ||
+    !compilation.approvedAt ||
+    compilation.policyDecision.status !== "ready_for_review" ||
+    compiled.blockingIssues.length > 0
+  ) {
+    throw new Error("CALL_EXECUTION_SNAPSHOT_NOT_APPROVED");
+  }
+
+  return approvedExecutionSnapshotSchema.parse({
+    version: APPROVED_EXECUTION_SNAPSHOT_VERSION,
+    callBriefId: snapshot.brief.id,
+    compilationRevision: compilation.revision,
+    compilationSnapshotHash: compilation.snapshotHash,
+    approvedAt: compilation.approvedAt,
+    plan: {
+      callLocale: compiled.callLocale,
+      taskType: compiled.taskType,
+      tone: compiled.tone,
+      addressingStyle: compiled.addressingStyle,
+      resultHandling: compiled.resultHandling,
+      voicemailAction: compiled.voicemailAction,
+      refusalBehavior: compiled.refusalBehavior,
+      localizedObjective: compiled.localizedObjective,
+      opening: compiled.opening,
+      backgroundSummary: compiled.backgroundSummary,
+      orderedQuestions: compiled.orderedQuestions,
+      conditionalFollowUps: compiled.conditionalFollowUps,
+      successCriteria: compiled.successCriteria,
+      unresolvedCriteria: compiled.unresolvedCriteria,
+      stopConditions: compiled.stopConditions,
+      approvedFacts: compiled.approvedFacts.map(
+        ({ callLanguageText }) => callLanguageText
+      ),
+      prohibitedActions: compiled.prohibitedActions
+    },
+    runtime: {
+      agentName: snapshot.brief.agentName,
+      voiceGender: snapshot.brief.voiceGender,
+      assistanceDisclosure: snapshot.brief.assistanceDisclosure,
+      audioRetentionDays: snapshot.brief.audioRetentionDays,
+      allowLanguageSwitch: snapshot.brief.allowLanguageSwitch,
+      fallbackLocale: snapshot.brief.fallbackLocale
+    }
+  });
+}
 
 export const approvalDecisionSchema = z.object({
   decision: z.enum(["approved", "declined"])

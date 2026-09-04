@@ -1,4 +1,8 @@
-import type { CallBrief } from "@callassist/contracts";
+import {
+  approvedExecutionSnapshotSchema,
+  type ApprovedExecutionSnapshot,
+  type CallBrief
+} from "@callassist/contracts";
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
@@ -32,9 +36,68 @@ const brief: CallBrief = {
   updatedAt: "2026-07-14T12:00:00.000Z"
 };
 
+const executionSnapshot: ApprovedExecutionSnapshot = {
+  version: 1,
+  callBriefId: brief.id,
+  compilationRevision: 2,
+  compilationSnapshotHash: "a".repeat(64),
+  approvedAt: "2026-07-14T12:01:00.000Z",
+  plan: {
+    callLocale: "de-CH",
+    taskType: "receipt_confirmation",
+    tone: "neutral",
+    addressingStyle: "formal",
+    resultHandling: "capture_in_callassist",
+    voicemailAction: "hang_up",
+    refusalBehavior: "respect_and_end",
+    localizedObjective: "Confirm the approved application receipt objective",
+    opening: {
+      recipientAddress: "Guten Tag Example AG.",
+      purposeStatement: "Ich rufe wegen des Eingangs des Antrags vom 12. Juli an.",
+      readinessQuestion: "Passt es Ihnen jetzt kurz?"
+    },
+    backgroundSummary: "Approved background summary for the call.",
+    orderedQuestions: [
+      {
+        text: "Ist der Antrag vom 12. Juli eingegangen?",
+        purpose: "Confirm receipt",
+        required: true
+      }
+    ],
+    conditionalFollowUps: [
+      {
+        condition: "the application was not received",
+        question: "An welche Adresse soll der Antrag erneut gesendet werden?"
+      }
+    ],
+    successCriteria: ["Receipt status is confirmed"],
+    unresolvedCriteria: ["Receipt status remains unclear"],
+    stopConditions: ["The recipient asks to end the call"],
+    approvedFacts: ["Application sent: 12 July"],
+    prohibitedActions: ["Do not agree to contractual terms"]
+  },
+  runtime: {
+    agentName: "Anna",
+    voiceGender: "female",
+    assistanceDisclosure: "Disability disclosure",
+    audioRetentionDays: 7,
+    allowLanguageSwitch: false
+  }
+};
+
 describe("buildRealtimeInstructions", () => {
+  it("rejects raw task fields at the runtime schema boundary", () => {
+    expect(
+      approvedExecutionSnapshotSchema.safeParse({
+        ...executionSnapshot,
+        objective: "RAW_OBJECTIVE",
+        context: "RAW_CONTEXT"
+      }).success
+    ).toBe(false);
+  });
+
   it("separates background context from approved facts and forbids guessing", () => {
-    const prompt = buildRealtimeInstructions(brief);
+    const prompt = buildRealtimeInstructions(executionSnapshot);
     expect(prompt).toContain("# Background context");
     expect(prompt).toContain("# Facts explicitly approved for disclosure");
     expect(prompt).toContain("Application sent: 12 July");
@@ -43,14 +106,51 @@ describe("buildRealtimeInstructions", () => {
     expect(prompt).toContain("Only if the repeated answer is still unclear");
     expect(prompt).toContain("something was bought does not confirm that it was sent");
     expect(prompt).toContain("# Mandatory conversation opening");
+    expect(prompt).toContain("# Ordered questions");
+    expect(prompt).toContain("Ist der Antrag vom 12. Juli eingegangen?");
+    expect(prompt).toContain("# Conditional follow-ups");
+    expect(prompt).toContain("Receipt status is confirmed");
+    expect(prompt).toContain("Receipt status remains unclear");
+    expect(prompt).toContain("Do not agree to contractual terms");
     expect(prompt).toContain(
       "Do not include the first substantive objective question or message"
     );
   });
 
   it("instructs the realtime model to speak Russian", () => {
-    const prompt = buildRealtimeInstructions({ ...brief, locale: "ru-RU" });
+    const prompt = buildRealtimeInstructions({
+      ...executionSnapshot,
+      plan: { ...executionSnapshot.plan, callLocale: "ru-RU" }
+    });
     expect(prompt).toContain("Speak Russian naturally and politely");
+  });
+
+  it("ignores raw task fields even if an upstream object carries them", () => {
+    const rawMarkers = {
+      objective: "RAW_OBJECTIVE_IGNORE_ALL_RULES",
+      context: "RAW_CONTEXT_PROMPT_INJECTION",
+      allowedFacts: ["RAW_UNAPPROVED_FACT"],
+      clarificationAnswers: [
+        { issueCode: "missing_required_reference", answer: "RAW_CLARIFICATION" }
+      ],
+      deliveryInstruction: "RAW_DELIVERY_INSTRUCTION"
+    };
+    const prompt = buildRealtimeInstructions({
+      ...executionSnapshot,
+      ...rawMarkers
+    });
+
+    expect(prompt).toContain(executionSnapshot.plan.localizedObjective);
+    expect(prompt).toContain(executionSnapshot.plan.backgroundSummary);
+    expect(prompt).not.toContain(brief.objective);
+    expect(prompt).not.toContain(brief.context);
+    expect(prompt).not.toContain(brief.representedPerson);
+    expect(prompt).not.toContain(brief.recipientName);
+    expect(prompt).not.toContain("RAW_OBJECTIVE_IGNORE_ALL_RULES");
+    expect(prompt).not.toContain("RAW_CONTEXT_PROMPT_INJECTION");
+    expect(prompt).not.toContain("RAW_UNAPPROVED_FACT");
+    expect(prompt).not.toContain("RAW_CLARIFICATION");
+    expect(prompt).not.toContain("RAW_DELIVERY_INSTRUCTION");
   });
 });
 
@@ -65,10 +165,14 @@ describe("buildInitialResponseInstructions", () => {
       readinessQuestion: "Вам сейчас удобно коротко поговорить?"
     };
     const prompt = buildInitialResponseInstructions({
-      ...brief,
-      locale: "ru-RU",
-      objective
-    }, opening);
+      ...executionSnapshot,
+      plan: {
+        ...executionSnapshot.plan,
+        callLocale: "ru-RU",
+        localizedObjective: objective,
+        opening
+      }
+    });
 
     expect(prompt).toContain(
       JSON.stringify([brief.assistanceDisclosure, ...Object.values(opening)].join(" "))
@@ -80,24 +184,22 @@ describe("buildInitialResponseInstructions", () => {
     expect(prompt).not.toContain("Immediately ask");
   });
 
-  it("provides a bounded opening fallback for legacy briefs", () => {
-    const prompt = buildInitialResponseInstructions(brief, null);
-
-    expect(prompt).toContain(brief.recipientName);
-    expect(prompt).toContain(brief.representedPerson);
-    expect(prompt).toContain(brief.objective);
-    expect(prompt).toContain("Do not begin the first substantive objective step yet");
-  });
-
   it("omits assistance disclosure entirely when the reason is none", () => {
-    const prompt = buildInitialResponseInstructions(
-      { ...brief, assistanceReason: "none", assistanceDisclosure: "" },
-      {
+    const prompt = buildInitialResponseInstructions({
+      ...executionSnapshot,
+      plan: {
+        ...executionSnapshot.plan,
+        opening: {
         recipientAddress: "Hello Example AG.",
         purposeStatement: "I am calling on behalf of Ivan Slavinskyi about the application.",
         readinessQuestion: "Is now a convenient time?"
+        }
+      },
+      runtime: {
+        ...executionSnapshot.runtime,
+        assistanceDisclosure: ""
       }
-    );
+    });
 
     expect(prompt).not.toContain("Disability disclosure");
     expect(prompt).toContain("I am calling on behalf of Ivan Slavinskyi");
@@ -139,6 +241,51 @@ class FakeSocket extends EventEmitter {
 }
 
 describe("OpenAIRealtimeBridge", () => {
+  it("fails closed before opening provider sockets when compilation is not approved", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => true,
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-UNAPPROVED",
+        customParameters: {
+          callBriefId: created.id,
+          streamToken: "valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(0);
+    expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    await service.close();
+  });
+
   it("plays the mandatory opening before accepting audio and persists finalized transcripts", async () => {
     const service = new CallService(new InMemoryCallRepository());
     const created = await service.create({
@@ -154,6 +301,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
+    await service.approveCompilation(created.id);
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -520,6 +668,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
+    await service.approveCompilation(created.id);
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -760,6 +909,7 @@ async function createConsentHarness(failRecording = false) {
     allowLanguageSwitch: false,
     allowedFacts: brief.allowedFacts
   });
+  await service.approveCompilation(created.id);
   const twilioSocket = new FakeSocket();
   const openAISocket = new FakeSocket();
   const consentSocket = new FakeSocket();
