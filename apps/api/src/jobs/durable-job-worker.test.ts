@@ -22,6 +22,22 @@ const input: CreateCallBriefInput = {
   allowedFacts: []
 };
 
+function providerReservation(preparationId: string, generation: number) {
+  const id = randomUUID();
+  return {
+    id,
+    preparationId,
+    provider: "openai" as const,
+    operationType: "brief_compilation" as const,
+    stage: "compilation" as const,
+    requestedModel: "gpt-5.6",
+    clientRequestId: id,
+    startedAt: "2098-11-02T01:00:01.000Z",
+    maxRequests: 8,
+    durableJobGeneration: generation
+  };
+}
+
 async function repositoryWithAvailableRecording() {
   const repository = new InMemoryCallRepository();
   const compilation = await new DeterministicBriefCompiler().compile(
@@ -207,8 +223,7 @@ describe("durable job worker", () => {
     await repository.claimCallPreparation(preparation.id, firstLease);
     for (let request = 0; request < 5; request += 1) {
       await expect(repository.reserveCallPreparationProviderRequest(
-        preparation.id,
-        8,
+        providerReservation(preparation.id, firstJob!.generation),
         firstLease
       )).resolves.toBe(true);
     }
@@ -234,14 +249,12 @@ describe("durable job worker", () => {
     await repository.claimCallPreparation(preparation.id, secondLease);
     for (let request = 0; request < 3; request += 1) {
       await expect(repository.reserveCallPreparationProviderRequest(
-        preparation.id,
-        8,
+        providerReservation(preparation.id, secondJob!.generation),
         secondLease
       )).resolves.toBe(true);
     }
     await expect(repository.reserveCallPreparationProviderRequest(
-      preparation.id,
-      8,
+      providerReservation(preparation.id, secondJob!.generation),
       secondLease
     )).resolves.toBe(false);
   });

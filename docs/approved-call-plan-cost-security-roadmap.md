@@ -67,6 +67,15 @@ atomically before every physical compiler or moderation request and caps all
 transport and durable retries at eight requests. A crash after reservation is
 deliberately fail-closed and may consume budget without sending the request; the
 provider-operation ledger in item 6 will make that distinction observable.
+Item 6 has its first vertical slice: every compiler/moderation HTTP attempt is
+reserved as an immutable provider operation before network I/O, its bounded
+outcome is stored even on failure, and Responses token usage is written to a
+separate append-only usage record before schema/policy publication. Pricing and
+calculated cost are intentionally not part of these records. Realtime, Twilio,
+and transcription instrumentation still remain.
+Like the immutable compilation work, this slice is code-complete but remains a
+deployment blocker until migration 0053 and its append-only/deduplication checks
+pass against PostgreSQL in CI or a repaired local Docker environment.
 
 ## Why this roadmap exists
 
@@ -318,6 +327,25 @@ success.
 
 - Write usage immediately after a provider response/event is parsed and before
   downstream schema validation or business-state publication.
+
+### Implemented compiler slice
+
+- `provider_operations` records physical request identity, requested model,
+  stage, preparation, durable job generation, and start time. A reserved row
+  without a result explicitly represents an ambiguous crash/interruption.
+- `provider_operation_results` records one deduplicated outcome, provider
+  request/response IDs, actual returned model, HTTP status, duration, and a
+  bounded error code.
+- `provider_usage_records` stores request count plus independent text, cached,
+  reasoning, audio, and duration dimensions. Compiler Responses currently fill
+  only counters actually returned by the API; moderation tokens remain unknown.
+- The bounded raw `usage` object is retained for forward-compatible parsing,
+  while prompts, brief content, and provider error bodies are never stored.
+- The normalized Responses mapping follows the official API fields
+  [`input_tokens`, cached/cache-write input details, `output_tokens`, reasoning
+  details, and `total_tokens`](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+- All three tables reject update/delete at the database boundary and are included
+  in the recovery drill's critical-table set.
 - Usage insertion must not roll back with call creation, compilation validation, or
   final transcript assembly.
 - Duplicate provider events converge on one record.

@@ -66,6 +66,7 @@ import {
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallChangeSignal,
+  type CompleteProviderOperationInput,
   type CallRepository,
   type CallPreparationPublication,
   type CallDataDeletionRecord,
@@ -82,6 +83,8 @@ import {
   type StartAttemptInput,
   type ProviderWebhookDeliveryInput,
   type ProviderWebhookKind,
+  type ProviderOperationRecord,
+  type ProviderOperationReservationInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 import {
@@ -180,6 +183,7 @@ export class InMemoryCallRepository implements CallRepository {
     { callId: string; userId: string | null }
   >();
   readonly #callPreparations = new Map<string, StoredCallPreparation>();
+  readonly #providerOperations = new Map<string, ProviderOperationRecord>();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
   readonly #compilations = new Map<
@@ -518,24 +522,54 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async reserveCallPreparationProviderRequest(
-    id: string,
-    maxRequests: number,
+    input: ProviderOperationReservationInput,
     lease: DurableJobLease
   ) {
     this.#assertDurableJobLease(lease);
     const job = this.#findDurableJob(lease.jobId);
-    const stored = this.#callPreparations.get(id);
+    const stored = this.#callPreparations.get(input.preparationId);
     if (
       !stored ||
-      job?.callPreparationId !== id ||
+      job?.callPreparationId !== input.preparationId ||
       stored.preparation.status !== "processing"
     ) {
       throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
     }
-    if (stored.providerRequestCount >= maxRequests) return false;
+    if (this.#providerOperations.has(input.id)) return true;
+    if (stored.providerRequestCount >= input.maxRequests) return false;
+    const { preparationId, maxRequests: _maxRequests, ...operation } = input;
     stored.providerRequestCount += 1;
     stored.preparation.updatedAt = lease.checkedAt;
+    this.#providerOperations.set(input.id, {
+      ...copy(operation),
+      callPreparationId: preparationId,
+      durableJobId: lease.jobId,
+      result: null
+    });
     return true;
+  }
+
+  async completeProviderOperation(input: CompleteProviderOperationInput) {
+    const stored = this.#providerOperations.get(input.operationId);
+    if (!stored) throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+    if (stored.result) return;
+    stored.result = copy({
+      outcome: input.outcome,
+      providerRequestId: input.providerRequestId,
+      providerResponseId: input.providerResponseId,
+      providerModel: input.providerModel,
+      statusCode: input.statusCode,
+      completedAt: input.completedAt,
+      durationMs: input.durationMs,
+      errorCode: input.errorCode,
+      usage: input.usage
+    });
+  }
+
+  providerOperationsForTest(preparationId?: string) {
+    return copy([...this.#providerOperations.values()].filter((operation) =>
+      !preparationId || operation.callPreparationId === preparationId
+    ));
   }
 
   async cancelCallPreparations(userId: string, now: string) {

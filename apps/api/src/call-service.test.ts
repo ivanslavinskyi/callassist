@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallService } from "./call-service";
+import {
+  DeterministicBriefCompiler,
+  OpenAIBriefCompiler
+} from "./brief-compiler/brief-compiler";
+import { normalizeCreateCallBriefInput } from "@callassist/contracts";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import type { TelephonyProvider } from "./telephony/telephony-provider";
 import type { PostCallTranscriber } from "./transcription/openai-post-call-transcriber";
@@ -254,6 +259,178 @@ describe("CallService", () => {
     expect(reviewed.brief.status).toBe("ready");
     expect(reviewed.compilation?.approvedAt).not.toBeNull();
     expect(reviewed.transcript).toEqual([]);
+  });
+
+  it("persists compiler operations and returned token usage before publication", async () => {
+    const repository = new InMemoryCallRepository();
+    const input = {
+      recipientName: "Usage office",
+      phoneNumber: "+41710000019",
+      objective: "Confirm the office opening hours",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "en-GB" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const modelOutput = (await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    )).compiledBrief!;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ results: [{ flagged: false }] }),
+        { status: 200, headers: { "x-request-id": "req_moderation_in" } }
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "resp_compiler_usage",
+        model: "gpt-5.6-2026-08-01",
+        output_text: JSON.stringify(modelOutput),
+        usage: {
+          input_tokens: 250,
+          input_tokens_details: { cached_tokens: 50 },
+          output_tokens: 80,
+          output_tokens_details: { reasoning_tokens: 10 },
+          total_tokens: 330
+        }
+      }), {
+        status: 200,
+        headers: { "x-request-id": "req_compiler_usage" }
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ results: [{ flagged: false }] }),
+        { status: 200, headers: { "x-request-id": "req_moderation_out" } }
+      ));
+    const compiler = new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    });
+    const service = new CallService(
+      repository,
+      undefined,
+      () => undefined,
+      undefined,
+      compiler
+    );
+    services.push(service);
+    await service.initialize();
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const preparation = await service.prepare(
+      input,
+      userId,
+      "6d006a34-f9e1-4c92-8395-36fd4ae4ab22"
+    );
+
+    let completed = await service.getPreparation(preparation.id, userId);
+    for (let index = 0; index < 20 && completed.status !== "succeeded"; index++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      completed = await service.getPreparation(preparation.id, userId);
+    }
+
+    expect(completed.status).toBe("succeeded");
+    expect(repository.providerOperationsForTest(preparation.id)).toEqual([
+      expect.objectContaining({
+        operationType: "brief_moderation",
+        result: expect.objectContaining({ outcome: "succeeded", usage: null })
+      }),
+      expect.objectContaining({
+        operationType: "brief_compilation",
+        result: expect.objectContaining({
+          outcome: "succeeded",
+          providerRequestId: "req_compiler_usage",
+          providerResponseId: "resp_compiler_usage",
+          usage: expect.objectContaining({
+            inputTextTokens: 250,
+            cachedInputTextTokens: 50,
+            outputTextTokens: 80,
+            reasoningOutputTokens: 10,
+            totalTokens: 330
+          })
+        })
+      }),
+      expect.objectContaining({
+        operationType: "brief_moderation",
+        result: expect.objectContaining({ outcome: "succeeded", usage: null })
+      })
+    ]);
+  });
+
+  it("retains billable compiler usage when structured output fails terminally", async () => {
+    const repository = new InMemoryCallRepository();
+    const input = {
+      recipientName: "Failed usage office",
+      phoneNumber: "+41710000029",
+      objective: "Confirm the office opening hours",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "en-GB" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const validOutput = (await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    )).compiledBrief!;
+    const invalidOutput = { ...validOutput, orderedQuestions: [] };
+    const response = (id: string) => new Response(JSON.stringify({
+      id,
+      model: "gpt-5.6-2026-08-01",
+      output_text: JSON.stringify(invalidOutput),
+      usage: {
+        input_tokens: 200,
+        input_tokens_details: { cached_tokens: 0 },
+        output_tokens: 60,
+        output_tokens_details: { reasoning_tokens: 5 },
+        total_tokens: 260
+      }
+    }), { status: 200, headers: { "x-request-id": `req_${id}` } });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ results: [{ flagged: false }] }),
+        { status: 200 }
+      ))
+      .mockResolvedValueOnce(response("invalid_one"))
+      .mockResolvedValueOnce(response("invalid_two"));
+    const service = new CallService(
+      repository,
+      undefined,
+      () => undefined,
+      undefined,
+      new OpenAIBriefCompiler({
+        apiKey: "test-key",
+        fetchImplementation: fetchMock
+      })
+    );
+    services.push(service);
+    await service.initialize();
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const preparation = await service.prepare(
+      input,
+      userId,
+      "7d006a34-f9e1-4c92-8395-36fd4ae4ab22"
+    );
+
+    let completed = await service.getPreparation(preparation.id, userId);
+    for (let index = 0; index < 20 && completed.status !== "failed"; index++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      completed = await service.getPreparation(preparation.id, userId);
+    }
+
+    expect(completed).toMatchObject({
+      status: "failed",
+      failureCode: "BRIEF_COMPILER_RESPONSE_INVALID",
+      attemptCount: 1
+    });
+    const operations = repository.providerOperationsForTest(preparation.id);
+    expect(operations).toHaveLength(3);
+    expect(operations.filter(({ result }) => result?.usage != null))
+      .toHaveLength(2);
+    expect(operations.every(({ result }) => result?.outcome === "succeeded"))
+      .toBe(true);
   });
 
   it("rejects approval when the reviewed revision was replaced", async () => {

@@ -205,6 +205,51 @@ export type CallPreparationPublication = {
   lease: DurableJobLease;
 };
 
+export type ProviderOperationReservationInput = {
+  id: string;
+  preparationId: string;
+  provider: "openai";
+  operationType: "brief_moderation" | "brief_compilation";
+  stage: "input_moderation" | "compilation" | "output_moderation";
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+  maxRequests: number;
+  durableJobGeneration: number;
+};
+
+export type ProviderTextTokenUsage = {
+  inputTextTokens: number | null;
+  cachedInputTextTokens: number | null;
+  cacheWriteInputTextTokens: number | null;
+  outputTextTokens: number | null;
+  reasoningOutputTokens: number | null;
+  totalTokens: number | null;
+  rawUsage: Record<string, unknown>;
+};
+
+export type CompleteProviderOperationInput = {
+  operationId: string;
+  outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
+  providerRequestId: string | null;
+  providerResponseId: string | null;
+  providerModel: string | null;
+  statusCode: number | null;
+  completedAt: string;
+  durationMs: number;
+  errorCode: string | null;
+  usage: ProviderTextTokenUsage | null;
+};
+
+export type ProviderOperationRecord = Omit<
+  ProviderOperationReservationInput,
+  "preparationId" | "maxRequests"
+> & {
+  callPreparationId: string;
+  durableJobId: string;
+  result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+};
+
 export type AdminCallCursor = { createdAt: string; id: string };
 export type ListAdminCallsInput = AdminCallListFilters & {
   limit: number;
@@ -461,10 +506,10 @@ export interface CallRepository {
     lease: DurableJobLease
   ): Promise<CallPreparationWork>;
   reserveCallPreparationProviderRequest(
-    id: string,
-    maxRequests: number,
+    input: ProviderOperationReservationInput,
     lease: DurableJobLease
   ): Promise<boolean>;
+  completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   findCallDataDeletion(
@@ -663,6 +708,7 @@ export class CallRepositoryError extends Error {
       | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
       | "CALL_PREPARATION_NOT_FOUND"
+      | "PROVIDER_OPERATION_NOT_FOUND"
       | "INSUFFICIENT_CREDITS"
       | "CONCURRENT_CALL_LIMIT"
       | "OUTBOUND_CALLS_DISABLED"

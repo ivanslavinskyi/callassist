@@ -11,7 +11,8 @@ import {
   OpenAIBriefCompiler,
   evaluateCompiledBrief,
   isBriefCompilerErrorRetryable,
-  protectedIdentifiers
+  protectedIdentifiers,
+  type BriefCompilerProviderRequestResult
 } from "./brief-compiler";
 
 const rawInput: CreateCallBriefInput = {
@@ -600,8 +601,23 @@ describe("OpenAIBriefCompiler", () => {
         })
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ output_text: JSON.stringify(modelOutput) }), {
-          status: 200
+        new Response(JSON.stringify({
+          id: "resp_usage",
+          model: "gpt-5.6-2026-08-01",
+          output_text: JSON.stringify(modelOutput),
+          usage: {
+            input_tokens: 321,
+            input_tokens_details: {
+              cached_tokens: 120,
+              cache_write_tokens: 11
+            },
+            output_tokens: 87,
+            output_tokens_details: { reasoning_tokens: 19 },
+            total_tokens: 408
+          }
+        }), {
+          status: 200,
+          headers: { "x-request-id": "req_usage" }
         })
       )
       .mockResolvedValueOnce(
@@ -619,12 +635,19 @@ describe("OpenAIBriefCompiler", () => {
       reservations.push(request);
       return true;
     });
+    const completions: BriefCompilerProviderRequestResult[] = [];
+    const afterProviderRequest = vi.fn(async (
+      result: BriefCompilerProviderRequestResult
+    ) => {
+      completions.push(result);
+    });
 
     await new OpenAIBriefCompiler({
       apiKey: "test-key",
       fetchImplementation: fetchMock
     }).compile(normalizeCreateCallBriefInput(rawInput), 1, {
-      beforeProviderRequest
+      beforeProviderRequest,
+      afterProviderRequest
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -637,6 +660,27 @@ describe("OpenAIBriefCompiler", () => {
       ]);
     expect(new Set(reservations.map(({ clientRequestId }) => clientRequestId)).size)
       .toBe(4);
+    expect(completions).toHaveLength(4);
+    expect(completions.map(({ outcome }) => outcome)).toEqual([
+      "provider_error",
+      "succeeded",
+      "succeeded",
+      "succeeded"
+    ]);
+    expect(completions[2]).toMatchObject({
+      providerRequestId: "req_usage",
+      providerResponseId: "resp_usage",
+      providerModel: "gpt-5.6-2026-08-01",
+      statusCode: 200,
+      usage: {
+        inputTextTokens: 321,
+        cachedInputTextTokens: 120,
+        cacheWriteInputTextTokens: 11,
+        outputTextTokens: 87,
+        reasoningOutputTokens: 19,
+        totalTokens: 408
+      }
+    });
   });
 
   it("fails terminally before fetch when provider request budget is exhausted", async () => {

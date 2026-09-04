@@ -95,6 +95,7 @@ import {
   type CallDataDeletionRecord,
   type CallAttemptRecord,
   type CallChangeSignal,
+  type CompleteProviderOperationInput,
   type CallPreparationPublication,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
@@ -112,6 +113,7 @@ import {
   type ProviderWebhookDeliveryInput,
   type ProviderWebhookKind,
   type ProviderWebhookOutcome,
+  type ProviderOperationReservationInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 
@@ -851,20 +853,27 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async reserveCallPreparationProviderRequest(
-    id: string,
-    maxRequests: number,
+    input: ProviderOperationReservationInput,
     lease: DurableJobLease
   ) {
     return this.#sql.begin(async (transaction) => {
       await requirePostgresDurableJobLease(transaction, lease);
+      const existing = await transaction`
+        SELECT id
+        FROM provider_operations
+        WHERE id = ${input.id}
+          AND call_preparation_id = ${input.preparationId}
+          AND durable_job_id = ${lease.jobId}
+      `;
+      if (existing.count === 1) return true;
       const rows = await transaction`
         UPDATE call_preparation_requests
         SET
           provider_request_count = provider_request_count + 1,
           updated_at = ${lease.checkedAt}::timestamptz
-        WHERE id = ${id}
+        WHERE id = ${input.preparationId}
           AND status = 'processing'
-          AND provider_request_count < ${maxRequests}
+          AND provider_request_count < ${input.maxRequests}
           AND EXISTS (
             SELECT 1
             FROM durable_jobs
@@ -873,7 +882,67 @@ export class PostgresCallRepository implements CallRepository {
           )
         RETURNING provider_request_count
       `;
-      return rows.count === 1;
+      if (rows.count !== 1) return false;
+      await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_preparation_id, durable_job_id,
+          durable_job_generation, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.preparationId}, ${lease.jobId},
+          ${input.durableJobGeneration}, ${input.startedAt}::timestamptz
+        )
+      `;
+      return true;
+    });
+  }
+
+  async completeProviderOperation(input: CompleteProviderOperationInput) {
+    await this.#sql.begin(async (transaction) => {
+      const operation = await transaction`
+        SELECT id FROM provider_operations WHERE id = ${input.operationId}
+        FOR SHARE
+      `;
+      if (operation.count !== 1) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO provider_operation_results (
+          operation_id, outcome, provider_request_id, provider_response_id,
+          provider_model, http_status, error_code, completed_at, duration_ms
+        ) VALUES (
+          ${input.operationId}, ${input.outcome}, ${input.providerRequestId},
+          ${input.providerResponseId}, ${input.providerModel},
+          ${input.statusCode}, ${input.errorCode},
+          ${input.completedAt}::timestamptz, ${input.durationMs}
+        )
+        ON CONFLICT (operation_id) DO NOTHING
+      `;
+      if (input.outcome !== "network_error") {
+        await transaction`
+          INSERT INTO provider_usage_records (
+            id, operation_id, schema_version, request_count,
+            input_text_tokens, cached_input_text_tokens,
+            cache_write_input_text_tokens, output_text_tokens,
+            reasoning_output_tokens, total_tokens, raw_usage, observed_at
+          ) VALUES (
+            ${randomUUID()}, ${input.operationId}, 1, 1,
+            ${input.usage?.inputTextTokens ?? null},
+            ${input.usage?.cachedInputTextTokens ?? null},
+            ${input.usage?.cacheWriteInputTextTokens ?? null},
+            ${input.usage?.outputTextTokens ?? null},
+            ${input.usage?.reasoningOutputTokens ?? null},
+            ${input.usage?.totalTokens ?? null},
+            ${transaction.json(
+              (input.usage?.rawUsage ?? {}) as postgres.JSONValue
+            )},
+            ${input.completedAt}::timestamptz
+          )
+          ON CONFLICT (operation_id) DO NOTHING
+        `;
+      }
     });
   }
 

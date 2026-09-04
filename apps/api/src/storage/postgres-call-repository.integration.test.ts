@@ -1676,12 +1676,56 @@ describeWithDatabase("PostgresCallRepository", () => {
     };
     const work = await repository.claimCallPreparation(queued.id, lease);
     expect(work.input).toEqual(normalizeCreateCallBriefInput(input));
+    const reservationInputs = Array.from({ length: 12 }, () => {
+      const id = randomUUID();
+      return {
+          id,
+          preparationId: queued.id,
+          provider: "openai" as const,
+          operationType: "brief_compilation" as const,
+          stage: "compilation" as const,
+          requestedModel: "gpt-5.6",
+          clientRequestId: id,
+          startedAt: lease.checkedAt,
+          maxRequests: 8,
+          durableJobGeneration: job!.generation
+      };
+    });
     const reservations = await Promise.all(
-      Array.from({ length: 12 }, () =>
-        repository.reserveCallPreparationProviderRequest(queued.id, 8, lease)
+      reservationInputs.map((reservation) =>
+        repository.reserveCallPreparationProviderRequest(reservation, lease)
       )
     );
     expect(reservations.filter(Boolean)).toHaveLength(8);
+    const acceptedOperationId = reservationInputs[
+      reservations.findIndex(Boolean)
+    ]!.id;
+    const operationResult = {
+      operationId: acceptedOperationId,
+      outcome: "succeeded" as const,
+      providerRequestId: "req_postgres_usage",
+      providerResponseId: "resp_postgres_usage",
+      providerModel: "gpt-5.6-2026-08-01",
+      statusCode: 200,
+      completedAt: "2096-01-01T00:00:02.000Z",
+      durationMs: 123,
+      errorCode: null,
+      usage: {
+        inputTextTokens: 100,
+        cachedInputTextTokens: 25,
+        cacheWriteInputTextTokens: null,
+        outputTextTokens: 40,
+        reasoningOutputTokens: 5,
+        totalTokens: 140,
+        rawUsage: {
+          input_tokens: 100,
+          output_tokens: 40,
+          total_tokens: 140
+        }
+      }
+    };
+    await repository.completeProviderOperation(operationResult);
+    await repository.completeProviderOperation(operationResult);
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
@@ -1715,6 +1759,43 @@ describeWithDatabase("PostgresCallRepository", () => {
     `;
     expect(stored?.inputCiphertext).toBeNull();
     expect(stored?.providerRequestCount).toBe(8);
+    const [ledger] = await inspection<{
+      operations: number;
+      results: number;
+      usageRecords: number;
+      inputTextTokens: number;
+    }[]>`
+      SELECT
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_preparation_id = ${queued.id}) AS operations,
+        (SELECT count(*)::int FROM provider_operation_results
+          WHERE operation_id = ${acceptedOperationId}) AS results,
+        (SELECT count(*)::int FROM provider_usage_records
+          WHERE operation_id = ${acceptedOperationId}) AS "usageRecords",
+        (SELECT input_text_tokens FROM provider_usage_records
+          WHERE operation_id = ${acceptedOperationId}) AS "inputTextTokens"
+    `;
+    expect(ledger).toEqual({
+      operations: 8,
+      results: 1,
+      usageRecords: 1,
+      inputTextTokens: 100
+    });
+    await expect(inspection`
+      UPDATE provider_operations
+      SET stage = 'output_moderation'
+      WHERE id = ${acceptedOperationId}
+    `).rejects.toThrow(/append-only/);
+    await expect(inspection`
+      UPDATE provider_operation_results
+      SET duration_ms = 124
+      WHERE operation_id = ${acceptedOperationId}
+    `).rejects.toThrow(/append-only/);
+    await expect(inspection`
+      UPDATE provider_usage_records
+      SET input_text_tokens = 101
+      WHERE operation_id = ${acceptedOperationId}
+    `).rejects.toThrow(/append-only/);
   });
 
   it("atomically cancels active preparations and erases their private input", async () => {

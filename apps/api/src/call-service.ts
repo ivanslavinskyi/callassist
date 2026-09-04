@@ -1068,12 +1068,39 @@ export class CallService {
         1,
         {
           maxProviderRequests: briefCompilationProviderRequestBudget,
-          beforeProviderRequest: () =>
+          beforeProviderRequest: (request) =>
             this.repository.reserveCallPreparationProviderRequest(
-              job.callPreparationId!,
-              briefCompilationProviderRequestBudget,
+              {
+                id: request.clientRequestId,
+                preparationId: job.callPreparationId!,
+                provider: request.provider,
+                operationType: request.operationType,
+                stage: request.stage,
+                requestedModel: request.model,
+                clientRequestId: request.clientRequestId,
+                startedAt: request.startedAt,
+                maxRequests: briefCompilationProviderRequestBudget,
+                durableJobGeneration: job.generation
+              },
               currentLease(lease)
-            )
+            ),
+          afterProviderRequest: (result) =>
+            this.repository.completeProviderOperation({
+              operationId: result.clientRequestId,
+              outcome: result.outcome,
+              providerRequestId: result.providerRequestId,
+              providerResponseId: result.providerResponseId,
+              providerModel: result.providerModel,
+              statusCode: result.statusCode,
+              completedAt: result.completedAt,
+              durationMs: result.durationMs,
+              errorCode: result.outcome === "succeeded"
+                ? null
+                : result.outcome === "invalid_response"
+                  ? "OPENAI_RESPONSE_INVALID"
+                  : "OPENAI_REQUEST_FAILED",
+              usage: result.usage
+            })
         }
       );
       await this.repository.create(

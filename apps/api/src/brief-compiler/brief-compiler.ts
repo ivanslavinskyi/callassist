@@ -32,7 +32,36 @@ export type BriefCompilerRunOptions = {
   beforeProviderRequest?: (request: {
     clientRequestId: string;
     stage: BriefCompilerStage;
+    operationType: "brief_moderation" | "brief_compilation";
+    provider: "openai";
+    model: string;
+    startedAt: string;
   }) => Promise<boolean>;
+  afterProviderRequest?: (result: BriefCompilerProviderRequestResult) =>
+    Promise<void>;
+};
+
+export type BriefCompilerProviderRequestResult = {
+  clientRequestId: string;
+  stage: BriefCompilerStage;
+  outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
+  providerRequestId: string | null;
+  providerResponseId: string | null;
+  providerModel: string | null;
+  statusCode: number | null;
+  completedAt: string;
+  durationMs: number;
+  usage: OpenAITextTokenUsage | null;
+};
+
+export type OpenAITextTokenUsage = {
+  inputTextTokens: number | null;
+  cachedInputTextTokens: number | null;
+  cacheWriteInputTextTokens: number | null;
+  outputTextTokens: number | null;
+  reasoningOutputTokens: number | null;
+  totalTokens: number | null;
+  rawUsage: Record<string, unknown>;
 };
 
 export interface BriefCompiler {
@@ -244,6 +273,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       },
       deadline,
       stage,
+      "omni-moderation-latest",
       requestBudget
     );
     const payload = response as {
@@ -308,6 +338,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       },
       deadline,
       "compilation",
+      this.model,
       requestBudget
     )) as OpenAIResponsePayload;
   }
@@ -317,6 +348,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     body: unknown,
     deadline: number,
     stage: BriefCompilerStage,
+    model: string,
     requestBudget: ProviderRequestBudget
   ) {
     let lastError: unknown;
@@ -333,6 +365,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 
       const clientRequestId = randomUUID();
       lastClientRequestId = clientRequestId;
+      const reservedAtMs = Date.now();
+      const startedAt = new Date(reservedAtMs).toISOString();
       if (requestBudget.used >= requestBudget.max) {
         throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
           clientRequestId,
@@ -341,7 +375,16 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       }
       if (
         requestBudget.beforeProviderRequest &&
-        !(await requestBudget.beforeProviderRequest({ clientRequestId, stage }))
+        !(await requestBudget.beforeProviderRequest({
+          clientRequestId,
+          stage,
+          operationType: stage === "compilation"
+            ? "brief_compilation"
+            : "brief_moderation",
+          provider: "openai",
+          model,
+          startedAt
+        }))
       ) {
         throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
           clientRequestId,
@@ -349,6 +392,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         });
       }
       requestBudget.used += 1;
+      const providerRequestStartedAtMs = Date.now();
       let response: Response;
       try {
         response = await this.#fetch(endpoint, {
@@ -364,6 +408,18 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           )
         });
       } catch (error) {
+        await completeProviderRequest(requestBudget, {
+          clientRequestId,
+          stage,
+          outcome: "network_error",
+          providerRequestId: null,
+          providerResponseId: null,
+          providerModel: null,
+          statusCode: null,
+          completedAt: new Date().toISOString(),
+          durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
+          usage: null
+        });
         lastError = error;
         if (attempt === 0 && Date.now() < deadline) continue;
         if (isTimeoutError(error) || Date.now() >= deadline) {
@@ -382,6 +438,18 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 
       const responseId = response.headers.get("x-request-id");
       if (!response.ok) {
+        await completeProviderRequest(requestBudget, {
+          clientRequestId,
+          stage,
+          outcome: "provider_error",
+          providerRequestId: responseId,
+          providerResponseId: null,
+          providerModel: null,
+          statusCode: response.status,
+          completedAt: new Date().toISOString(),
+          durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
+          usage: null
+        });
         if (attempt === 0 && isRetryableOpenAIStatus(response.status)) continue;
         throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
           responseId,
@@ -392,7 +460,34 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       }
 
       const payload = await response.json().catch(() => null);
-      if (payload && typeof payload === "object") return payload;
+      if (payload && typeof payload === "object") {
+        const responsePayload = payload as Record<string, unknown>;
+        await completeProviderRequest(requestBudget, {
+          clientRequestId,
+          stage,
+          outcome: "succeeded",
+          providerRequestId: responseId,
+          providerResponseId: stringOrNull(responsePayload.id),
+          providerModel: stringOrNull(responsePayload.model),
+          statusCode: response.status,
+          completedAt: new Date().toISOString(),
+          durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
+          usage: parseOpenAITextTokenUsage(responsePayload.usage)
+        });
+        return payload;
+      }
+      await completeProviderRequest(requestBudget, {
+        clientRequestId,
+        stage,
+        outcome: "invalid_response",
+        providerRequestId: responseId,
+        providerResponseId: null,
+        providerModel: null,
+        statusCode: response.status,
+        completedAt: new Date().toISOString(),
+        durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
+        usage: null
+      });
       if (attempt === 0) continue;
       throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", {
         responseId,
@@ -681,6 +776,7 @@ type ProviderRequestBudget = {
   used: number;
   max: number;
   beforeProviderRequest?: BriefCompilerRunOptions["beforeProviderRequest"];
+  afterProviderRequest?: BriefCompilerRunOptions["afterProviderRequest"];
 };
 
 function createRequestBudget(
@@ -696,8 +792,64 @@ function createRequestBudget(
     max,
     ...(options.beforeProviderRequest
       ? { beforeProviderRequest: options.beforeProviderRequest }
+      : {}),
+    ...(options.afterProviderRequest
+      ? { afterProviderRequest: options.afterProviderRequest }
       : {})
   };
+}
+
+async function completeProviderRequest(
+  requestBudget: ProviderRequestBudget,
+  result: BriefCompilerProviderRequestResult
+) {
+  await requestBudget.afterProviderRequest?.(result);
+}
+
+export function parseOpenAITextTokenUsage(
+  value: unknown
+): OpenAITextTokenUsage | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const usage = value as Record<string, unknown>;
+  const inputDetails = objectOrNull(usage.input_tokens_details);
+  const outputDetails = objectOrNull(usage.output_tokens_details);
+  const parsed = {
+    inputTextTokens: nonNegativeIntegerOrNull(usage.input_tokens),
+    cachedInputTextTokens: nonNegativeIntegerOrNull(
+      inputDetails?.cached_tokens
+    ),
+    cacheWriteInputTextTokens: nonNegativeIntegerOrNull(
+      inputDetails?.cache_write_tokens
+    ),
+    outputTextTokens: nonNegativeIntegerOrNull(usage.output_tokens),
+    reasoningOutputTokens: nonNegativeIntegerOrNull(
+      outputDetails?.reasoning_tokens
+    ),
+    totalTokens: nonNegativeIntegerOrNull(usage.total_tokens),
+    rawUsage: usage
+  };
+  return [
+    parsed.inputTextTokens,
+    parsed.cachedInputTextTokens,
+    parsed.cacheWriteInputTextTokens,
+    parsed.outputTextTokens,
+    parsed.reasoningOutputTokens,
+    parsed.totalTokens
+  ].every((entry) => entry === null)
+    ? null
+    : parsed;
+}
+
+function objectOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonNegativeIntegerOrNull(value: unknown) {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+    ? value as number
+    : null;
 }
 
 function isTimeoutError(error: unknown) {
