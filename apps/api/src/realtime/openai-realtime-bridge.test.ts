@@ -337,6 +337,66 @@ describe("OpenAIRealtimeBridge", () => {
     await service.close();
   });
 
+  it("allows only a pre-migration attempt through the legacy token adapter", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository);
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    await service.approveCompilation(created.id);
+    await repository.startAttempt(created.id, { provider: "twilio" });
+    const getLatestAttempt = repository.getLatestAttempt.bind(repository);
+    vi.spyOn(repository, "getLatestAttempt").mockImplementation(async (id) => {
+      const attempt = await getLatestAttempt(id);
+      return attempt
+        ? {
+            ...attempt,
+            compilationRevision: null,
+            compilationSnapshotHash: null,
+            executionSnapshot: null
+          }
+        : null;
+    });
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => false,
+      validateLegacyStreamToken: (_id, token) => token === "legacy-valid",
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-LEGACY",
+        customParameters: {
+          callBriefId: created.id,
+          streamToken: "legacy-valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(2);
+    await service.close();
+  });
+
   it("plays the mandatory opening before accepting audio and persists finalized transcripts", async () => {
     const service = new CallService(new InMemoryCallRepository());
     const created = await service.create({

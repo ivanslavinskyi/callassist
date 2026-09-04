@@ -32,6 +32,10 @@ Completed in the first branch increment:
 - bound Twilio media parameters and their HMAC to call ID, attempt ID, and
   compilation snapshot hash, with fail-closed mismatch and terminal-state checks;
 - added owner-erasure and encryption-key-rotation handling for attempt snapshots.
+- retained a bounded rollout adapter for pre-migration Twilio tokens only when the
+  active attempt has all new snapshot columns `NULL`; new attempts cannot enter
+  this path, and the adapter should be removed after the maximum active-call drain
+  window.
 
 This is not yet a deployable completion of items 1 through 3. A V1 execution
 snapshot is now stored on and bound to each new attempt, but compilation history
