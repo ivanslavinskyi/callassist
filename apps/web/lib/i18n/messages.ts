@@ -158,6 +158,11 @@ export type Messages = {
     phoneInvalid: string;
     requiredComplete: string;
     requiredRemaining: (count: number) => string;
+    characterCount: (count: number, maximum: number) => string;
+    factCount: (count: number, maximum: number) => string;
+    taskTextBudget: (count: number, maximum: number) => string;
+    taskTextTooLong: string;
+    factsTooLong: string;
     rateLimited: string;
     preparationError: string;
     preparationUnavailable: string;
@@ -385,6 +390,11 @@ const en: Messages = {
     phoneInvalid: "During the public beta SHPROHLI can only call Swiss phone numbers, for example +41710000000",
     requiredComplete: "All required fields complete",
     requiredRemaining: (count: number) => `${count} required ${count === 1 ? "field" : "fields"} remaining`,
+    characterCount: (count, maximum) => `${count} / ${maximum} characters`,
+    factCount: (count, maximum) => `${count} / ${maximum} facts`,
+    taskTextBudget: (count, maximum) => `${count} / ${maximum} total task characters`,
+    taskTextTooLong: "Shorten the objective, context, approved information, delivery instruction, or clarification answers before preparing this call.",
+    factsTooLong: "Use no more than 40 approved facts and keep each fact within 300 characters.",
     rateLimited: "Too many call-planning requests. Wait a moment and try again.",
     preparationError: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
     preparationUnavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
@@ -587,6 +597,11 @@ const de: Messages = {
     phoneInvalid: "Während der öffentlichen Beta kann SHPROHLI nur Schweizer Telefonnummern anrufen, zum Beispiel +41710000000",
     requiredComplete: "Alle Pflichtfelder sind ausgefüllt",
     requiredRemaining: (count: number) => `${count} ${count === 1 ? "Pflichtfeld ist" : "Pflichtfelder sind"} noch offen`,
+    characterCount: (count, maximum) => `${count} / ${maximum} Zeichen`,
+    factCount: (count, maximum) => `${count} / ${maximum} Fakten`,
+    taskTextBudget: (count, maximum) => `${count} / ${maximum} Zeichen für die gesamte Aufgabe`,
+    taskTextTooLong: "Kürzen Sie Ziel, Kontext, freigegebene Informationen, Zustellungsanweisung oder Klärungsantworten, bevor Sie diesen Anruf vorbereiten.",
+    factsTooLong: "Verwenden Sie höchstens 40 freigegebene Fakten mit jeweils maximal 300 Zeichen.",
     rateLimited: "Zu viele Anfragen zur Anrufplanung. Warten Sie kurz und versuchen Sie es erneut.",
     preparationError: "SHPROHLI konnte diese Anfrage nicht sicher vorbereiten. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
     preparationUnavailable: "Die Anrufvorbereitung ist vorübergehend nicht verfügbar. Ihre Eingaben bleiben erhalten. Versuchen Sie es später erneut.",

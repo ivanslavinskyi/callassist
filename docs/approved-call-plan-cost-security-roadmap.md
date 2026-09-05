@@ -116,6 +116,13 @@ count, and unpriced-bucket coverage. It deliberately keeps the call-created
 cohort for outcomes and uses usage observation time for incurred cost. Per-call
 detail, trends, averages, Twilio invoice reconciliation, and persisted cost
 records remain.
+Item 10's beta input guard is implemented: one exported contract owns every
+per-field/array limit plus the 16,000 soft and 20,000 hard task-text budgets.
+The aggregate counts Unicode code points after trim, NFC, and line-ending
+normalization across objective, context, facts, delivery instructions, and all
+clarification answers. The API returns a field issue for direct requests, while
+the create/edit and clarification forms use the same constants for `maxLength`,
+counters, warnings, and submit blocking. Long-document upload remains separate.
 
 ## Why this roadmap exists
 
@@ -506,6 +513,11 @@ system.
 - Enforce the same function on the API; arrays cannot bypass the aggregate limit.
 - Add `maxLength`, per-field counters, a total counter, fact-count limits, and
   field-specific API errors.
+
+Implemented for the current textarea workflow. The hard aggregate budget is a
+server-side invariant and therefore cannot be bypassed by direct API calls or by
+splitting text across facts/clarification answers. Browser counters are an early
+UX guard, not the security boundary.
 
 Twenty thousand is intentionally above the initial 12–16k guideline: the currently
 supported 12k context plus 4k objective already consumes 16k and leaves no room for

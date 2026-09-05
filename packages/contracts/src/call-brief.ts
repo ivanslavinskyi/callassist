@@ -1,11 +1,50 @@
 import { z } from "zod";
 import { swissDestinationPhoneSchema } from "./phone";
 
+export const CALL_BRIEF_INPUT_LIMITS = {
+  recipientName: 160,
+  objective: 4_000,
+  representedPersonNamePart: 80,
+  representedPerson: 161,
+  context: 12_000,
+  allowedFact: 300,
+  allowedFacts: 40,
+  deliveryInstruction: 1_000,
+  clarificationAnswer: 1_000,
+  clarificationAnswers: 10,
+  aggregateTaskTextSoft: 16_000,
+  aggregateTaskTextHard: 20_000
+} as const;
+
+export function normalizeCallBriefBudgetText(value: string) {
+  return value.replace(/\r\n?/g, "\n").normalize("NFC").trim();
+}
+
+export function callBriefTaskTextLength(input: {
+  objective?: string;
+  context?: string;
+  allowedFacts?: string[];
+  deliveryInstruction?: string;
+  clarificationAnswers?: Array<{ answer: string }>;
+}) {
+  return [
+    input.objective ?? "",
+    input.context ?? "",
+    ...(input.allowedFacts ?? []),
+    input.deliveryInstruction ?? "",
+    ...(input.clarificationAnswers ?? []).map(({ answer }) => answer)
+  ].reduce(
+    (total, value) =>
+      total + [...normalizeCallBriefBudgetText(value)].length,
+    0
+  );
+}
+
 export const personNamePartSchema = z
   .string()
   .trim()
   .min(1, "Enter a name")
-  .max(80);
+  .max(CALL_BRIEF_INPUT_LIMITS.representedPersonNamePart);
 
 export function formatPersonName(firstName: string, lastName: string) {
   return `${firstName.trim()} ${lastName.trim()}`;
@@ -123,7 +162,8 @@ export type CallBlockingIssueCode = z.infer<
 
 export const clarificationAnswerSchema = z.object({
   issueCode: callBlockingIssueCodeSchema,
-  answer: z.string().trim().min(1).max(1_000)
+  answer: z.string().trim().min(1)
+    .max(CALL_BRIEF_INPUT_LIMITS.clarificationAnswer)
 });
 export type ClarificationAnswer = z.infer<typeof clarificationAnswerSchema>;
 
@@ -207,28 +247,29 @@ export const callBriefStatusSchema = z.enum([
 export type CallBriefStatus = z.infer<typeof callBriefStatusSchema>;
 
 const callBriefStoredFieldsSchema = z.object({
-  recipientName: z.string().trim().min(2, "Enter a recipient").max(160),
+  recipientName: z.string().trim().min(2, "Enter a recipient")
+    .max(CALL_BRIEF_INPUT_LIMITS.recipientName),
   phoneNumber: swissDestinationPhoneSchema,
   objective: z
     .string()
     .trim()
     .min(10, "Describe the call objective in more detail")
-    .max(4_000),
+    .max(CALL_BRIEF_INPUT_LIMITS.objective),
   assistantProfileId: assistantProfileIdSchema,
   representedPerson: z
     .string()
     .trim()
     .min(2, "Enter the person represented by the assistant")
-    .max(161),
+    .max(CALL_BRIEF_INPUT_LIMITS.representedPerson),
   assistanceReason: assistanceReasonSchema.default("none"),
-  context: z.string().trim().max(12_000).default(""),
+  context: z.string().trim().max(CALL_BRIEF_INPUT_LIMITS.context).default(""),
   locale: callLocaleSchema,
   audioRetentionDays: audioRetentionDaysSchema.default(7),
   allowLanguageSwitch: z.boolean().default(false),
   fallbackLocale: callLocaleSchema.optional(),
   allowedFacts: z
-    .array(z.string().trim().min(1).max(300))
-    .max(40)
+    .array(z.string().trim().min(1).max(CALL_BRIEF_INPUT_LIMITS.allowedFact))
+    .max(CALL_BRIEF_INPUT_LIMITS.allowedFacts)
     .default([])
 });
 
@@ -241,8 +282,10 @@ const callBriefInputBaseSchema = callBriefStoredFieldsSchema
     addressingMode: callAddressingModeSchema.default("formal"),
     tonePreference: callTonePreferenceSchema.default("auto"),
     voicemailPolicy: voicemailPolicySchema.default("do_not_leave_details"),
-    deliveryInstruction: z.string().trim().max(1_000).default(""),
-    clarificationAnswers: z.array(clarificationAnswerSchema).max(10).default([])
+    deliveryInstruction: z.string().trim()
+      .max(CALL_BRIEF_INPUT_LIMITS.deliveryInstruction).default(""),
+    clarificationAnswers: z.array(clarificationAnswerSchema)
+      .max(CALL_BRIEF_INPUT_LIMITS.clarificationAnswers).default([])
   })
   .transform((input) => ({
     ...input,
@@ -286,7 +329,17 @@ function validateLanguagePolicy(
 }
 
 export const createCallBriefInputSchema = callBriefInputBaseSchema.superRefine(
-  validateLanguagePolicy
+  (input, context) => {
+    validateLanguagePolicy(input, context);
+    const taskTextLength = callBriefTaskTextLength(input);
+    if (taskTextLength > CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard) {
+      context.addIssue({
+        code: "custom",
+        message: `Call task text must be at most ${CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard} characters in total`,
+        path: ["objective"]
+      });
+    }
+  }
 );
 
 export type CreateCallBriefInput = z.input<typeof createCallBriefInputSchema>;

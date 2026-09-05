@@ -340,6 +340,43 @@ describe("call API", () => {
     expect(response.statusCode).toBe(413);
   });
 
+  it("rejects aggregate task text that stays within individual field limits", async () => {
+    const { app, service } = createAppWithService();
+    const base: CreateCallBriefInput = {
+      recipientName: "Aggregate budget office",
+      phoneNumber: "+41523686688",
+      objective: "Ask whether the submitted documents were received",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      context: "",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const brief = await service.create(base);
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/call-briefs/${brief.id}`,
+      payload: {
+        ...base,
+        objective: "o".repeat(4_000),
+        context: "c".repeat(12_000),
+        allowedFacts: Array.from({ length: 14 }, () => "f".repeat(300))
+      }
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "INVALID_CALL_BRIEF",
+      issues: {
+        fieldErrors: {
+          objective: [expect.stringContaining("20000")]
+        }
+      }
+    });
+  });
+
   it("applies the origin boundary before an unsafe route is dispatched", async () => {
     const app = createApp();
     const response = await app.inject({
