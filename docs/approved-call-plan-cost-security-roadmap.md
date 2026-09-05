@@ -32,16 +32,15 @@ Completed in the first branch increment:
 - bound Twilio media parameters and their HMAC to call ID, attempt ID, and
   compilation snapshot hash, with fail-closed mismatch and terminal-state checks;
 - added owner-erasure and encryption-key-rotation handling for attempt snapshots.
-- retained a bounded rollout adapter for pre-migration Twilio tokens only when the
-  active attempt has all new snapshot columns `NULL`; new attempts cannot enter
-  this path, and the adapter should be removed after the maximum active-call drain
-  window.
+- retired the bounded pre-migration Twilio token adapter after the active legacy
+  attempt count reached zero; every accepted stream now requires an attempt-bound
+  immutable compilation hash.
 - centralized the existing compilation hash format, recompute it from
   schema-normalized content, and reject integrity failures at create, recompile,
   approval, and attempt-reservation storage boundaries.
-- added append-only compilation revision and approval tables, dual-write for new
-  and recompiled briefs, lazy materialization of the latest recoverable legacy
-  revision, and a database `compilation_id` binding on new call attempts;
+- added append-only compilation revision and approval tables, backfilled the
+  latest recoverable legacy revision, bound new call attempts to `compilation_id`,
+  and then stopped the transitional mutable compilation dual-write;
 - added immutable logical-identity triggers while preserving the narrowly scoped
   ciphertext-only updates required for owner erasure and key rotation.
 - made output moderation consume the same canonical execution-plan projection as
@@ -51,12 +50,13 @@ Completed in the first branch increment:
   and opaque reference identifiers in approved facts and objectives, and reject
   identifiers invented by the compiled runtime plan.
 
-Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
-path. Migrations 0051 through 0059 and the database-backed concurrency,
+Items 1 through 10 and the immutable-plan cutover are implemented in code.
+Migrations 0051 through 0061 and the database-backed concurrency,
 immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
-Realtime audio-token tests pass locally against PostgreSQL. The mutable current
-`call_briefs` blob remains only as a compatibility projection; immutable revision
-rows are the new audit anchor.
+Realtime audio-token tests pass locally against PostgreSQL. Immutable revision
+rows are the only normal compiled-plan read/write source. Historical mutable
+ciphertext remains encrypted solely for retention/audit and explicit offline
+maintenance.
 Item 4 has full-plan output moderation plus beta verbatim guards for opaque
 identifiers, email, phone, numeric dates, long numbers, the explicit recipient and
 represented-person fields, and common Swiss/German/French/Italian postal-address
@@ -138,15 +138,14 @@ normalization across objective, context, facts, delivery instructions, and all
 clarification answers. The API returns a field issue for direct requests, while
 the create/edit and clarification forms use the same constants for `maxLength`,
 counters, warnings, and submit blocking. Long-document upload remains separate.
-The existing administrator system view now exposes cutover readiness without
+The existing administrator system view exposes cutover evidence without
 reading private call content: recoverable and unavailable legacy calls,
-historical attempts missing immutable bindings, active legacy attempts, and
-active recompilations. Owner-erased calls are excluded because their snapshots
-are intentionally removed. The mutable-compilation reader is not considered
-removable until the recoverable count is zero; the bounded media adapter is not
-considered removable while any active legacy attempt remains. Deploy the API
-before the web console so the newly rendered status is present when the new UI
-loads.
+explicitly archived and recompile-required plans, historical attempts missing
+immutable bindings, active legacy attempts, and active recompilations.
+Owner-erased calls are excluded because their snapshots are intentionally removed.
+The local cutover gates reached zero before the mutable reader and media adapter
+were removed. Deploy the API before the web console so the newly rendered status
+is present when the new UI loads.
 
 A read-only local pre-beta inspection on 2026-09-05 found 21 recoverable legacy
 calls, 15 visible calls with no recoverable compilation, 28 historical attempts
@@ -300,14 +299,14 @@ fallback undercount: Realtime-per-minute estimates now include the pre-consent
 
 ## Why this roadmap exists
 
-The current production path already replaces the stored runtime `objective`,
-`context`, and `allowedFacts` with a projection of `CompiledCallBrief`. Raw task
-content remains in the encrypted compilation snapshot for editing, recompilation,
-history, and export. The main risk is therefore not a direct raw-context bypass in
-the normal path. The risk is that this boundary is implicit: Realtime still accepts
-a `CallBrief`, approval is not bound to the exact reviewed revision, some
-user-controlled identity text is added outside the compiled plan, and provider
-usage is not durably recorded.
+The original audited path replaced stored runtime `objective`, `context`, and
+`allowedFacts` with a compiled projection, but the boundary was implicit:
+Realtime still accepted a `CallBrief`, approval was not bound to the exact reviewed
+revision, some user-controlled identity text was added outside the compiled plan,
+and provider usage was not durable. The implementation above closes those normal
+execution paths. Raw task content remains available only in the owner-facing brief
+and encrypted immutable compilation history for editing, recompilation, history,
+export, and controlled audit.
 
 The target invariant is:
 
@@ -761,11 +760,26 @@ Evolution of current configured per-minute rates:
 11. Backfill recoverable legacy records and cut over readers.
 12. Remove mutable/legacy execution paths after active legacy work drains.
 
-Migration 0058 must be deployed before the new binaries. In external-worker mode,
-drain and replace old workers before enabling the new API/web path: an old worker
-does not understand recompilation targets. The database trigger prevents call
-attempt insertion while a new recompilation is active, but it is not a substitute
-for that worker cutover order.
+Production rollout must preserve the two cutover boundaries represented by the
+commits; do not deploy branch HEAD directly to an unprepared database:
+
+1. Deploy through `73da326` (migrations through 0060) while retaining the bounded
+   readers/adapters. In external-worker mode, drain and replace old workers first.
+2. Run the compilation backfill dry-run/execute/dry-run sequence. Then run the
+   incompatible-plan classification dry-run/execute/dry-run sequence.
+3. Require `recoverableLegacyCalls=0`, `activeLegacyAttempts=0`,
+   `activeRecompilations=0`, and no ambiguous classification candidates. Preserve
+   recovery-drill and aggregate command evidence.
+4. Only then deploy `922de05` and migration 0061. It validates the historical
+   `ready`-brief constraint and removes the mutable reader, dual-write, legacy
+   media-token adapter, and snapshot reconstruction fallback.
+5. Deploy the web build after the API and verify the two `recompile_required`
+   drafts can submit a new immutable plan. Monitor rejected media streams,
+   compilation-integrity failures, usage-ledger persistence failures, and provider
+   reconciliation lag.
+
+The database trigger prevents new call-attempt insertion without an immutable
+plan, but it is not a substitute for this worker/data cutover order.
 
 ## Test matrix
 
