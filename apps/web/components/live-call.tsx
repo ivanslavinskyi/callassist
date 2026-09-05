@@ -461,23 +461,6 @@ export function LiveCall({ callId }: { callId: string }) {
               submitLabel={copy.updatePlan}
             />
           </>
-        ) : compilation && !hasImmutableExecutionPlan ? (
-          <>
-            <section className="compilation-review decision-blocked">
-              <span className="eyebrow">{copy.legacyBrief}</span>
-              <h2>{copy.legacyTitle}</h2>
-              <p>{copy.legacyHelp}</p>
-            </section>
-            <CompilationReview
-              busy={busy}
-              compilation={compilation}
-              onAnswerClarifications={answerClarifications}
-              onApproveAndCall={() => undefined}
-              onEdit={() => undefined}
-              recipientName={brief.recipientName}
-              showActions={false}
-            />
-          </>
         ) : compilation && editingBrief ? (
           <CreateCallForm
             heading={copy.updateHeading}

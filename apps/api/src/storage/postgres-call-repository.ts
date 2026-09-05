@@ -622,7 +622,6 @@ export class PostgresCallRepository implements CallRepository {
     const now = new Date();
     const encryptedFacts = encryptJson(runtime.allowedFacts, this.#encryptionKey);
     const encryptedContext = encryptJson(runtime.context, this.#encryptionKey);
-    const encryptedCompilation = encryptJson(compilation, this.#encryptionKey);
     const encryptedReason = encryptJson(
       parsed.assistanceReason,
       this.#encryptionKey
@@ -711,7 +710,7 @@ export class PostgresCallRepository implements CallRepository {
           ${encryptedReason},
           ${null},
           ${encryptedDisclosure},
-          ${encryptedCompilation},
+          ${null},
           ${encryptedContext},
           ${parsed.locale},
           ${parsed.voiceGender},
@@ -2330,7 +2329,6 @@ export class PostgresCallRepository implements CallRepository {
     const now = new Date();
     const encryptedFacts = encryptJson(runtime.allowedFacts, this.#encryptionKey);
     const encryptedContext = encryptJson(runtime.context, this.#encryptionKey);
-    const encryptedCompilation = encryptJson(compilation, this.#encryptionKey);
     const encryptedReason = encryptJson(
       parsed.assistanceReason,
       this.#encryptionKey
@@ -2349,7 +2347,7 @@ export class PostgresCallRepository implements CallRepository {
       >`
         SELECT
           status,
-          compilation_ciphertext AS "compilationCiphertext",
+          NULL::text AS "compilationCiphertext",
           current_compilation_id AS "currentCompilationId",
           legacy_compilation_disposition AS "legacyCompilationDisposition",
           (
@@ -2454,7 +2452,6 @@ export class PostgresCallRepository implements CallRepository {
           assistance_reason_ciphertext = ${encryptedReason},
           assistance_disclosure = ${null},
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
-          compilation_ciphertext = ${encryptedCompilation},
           current_compilation_id = ${compilationId},
           legacy_compilation_disposition = NULL,
           context_ciphertext = ${encryptedContext},
@@ -2568,9 +2565,7 @@ export class PostgresCallRepository implements CallRepository {
           ? "archived"
           : briefRow.legacyCompilationDisposition === "recompile_required"
             ? "recompile_required"
-            : briefRow.compilationCiphertext
-              ? "legacy"
-              : "unavailable",
+            : "unavailable",
       brief: this.#mapBrief(briefRow),
       compilation: this.#mapCurrentCompilation(briefRow),
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
@@ -3827,12 +3822,7 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_COMPILATION_STALE");
       }
-      const compilationId = await this.#resolveCompilationRecord(
-        transaction,
-        id,
-        row.currentCompilationId,
-        compilation
-      );
+      const compilationId = row.currentCompilationId;
       compilation.approvedAt = now.toISOString();
       const executionSnapshot = createApprovedExecutionSnapshot({
         brief: this.#mapBrief(row),
@@ -3861,10 +3851,6 @@ export class PostgresCallRepository implements CallRepository {
         UPDATE call_briefs
         SET
           status = 'ready',
-          compilation_ciphertext = ${encryptJson(
-            compilation,
-            this.#encryptionKey
-          )},
           updated_at = ${now}
         WHERE id = ${id}
       `;
@@ -3932,7 +3918,7 @@ export class PostgresCallRepository implements CallRepository {
       }
       const rows = execute
         ? await transaction<CallBriefRow[]>`
-            ${this.#briefSelect()}
+            ${this.#briefSelect(false, true)}
             WHERE data_deleted_at IS NULL
               AND current_compilation_id IS NULL
               AND compilation_ciphertext IS NOT NULL
@@ -3943,7 +3929,7 @@ export class PostgresCallRepository implements CallRepository {
             FOR UPDATE SKIP LOCKED
           `
         : await transaction<CallBriefRow[]>`
-            ${this.#briefSelect()}
+            ${this.#briefSelect(false, true)}
             WHERE data_deleted_at IS NULL
               AND current_compilation_id IS NULL
               AND compilation_ciphertext IS NOT NULL
@@ -4059,10 +4045,9 @@ export class PostgresCallRepository implements CallRepository {
         };
       }
       for (const { row, compilation, executionSnapshot } of valid) {
-        const compilationId = await this.#resolveCompilationRecord(
+        const compilationId = await this.#materializeLegacyCompilation(
           transaction,
           row.id,
-          null,
           compilation
         );
         if (!executionSnapshot || !compilation.approvedAt) continue;
@@ -4319,12 +4304,7 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
       }
       assertCompilationIntegrity(compilation);
-      const compilationId = await this.#resolveCompilationRecord(
-        transaction,
-        id,
-        call.currentCompilationId,
-        compilation
-      );
+      const compilationId = call.currentCompilationId;
       const [approval] = await transaction<{
         approvedAt: DatabaseDate;
         executionSnapshotCiphertext: string | null;
@@ -4338,32 +4318,7 @@ export class PostgresCallRepository implements CallRepository {
       `;
       let executionSnapshot: ApprovedExecutionSnapshot;
       if (!approval) {
-        if (call.currentCompilationId || !compilation.approvedAt) {
-          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
-        }
-        executionSnapshot = createApprovedExecutionSnapshot({
-          brief: this.#mapBrief(call),
-          compilation
-        });
-        await transaction`
-          INSERT INTO call_compilation_approvals (
-            id,
-            compilation_id,
-            call_brief_id,
-            revision,
-            snapshot_hash,
-            approved_at,
-            execution_snapshot_ciphertext
-          ) VALUES (
-            ${randomUUID()},
-            ${compilationId},
-            ${id},
-            ${compilation.revision},
-            ${compilation.snapshotHash},
-            ${new Date(compilation.approvedAt)},
-            ${encryptJson(executionSnapshot, this.#encryptionKey)}
-          )
-        `;
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
       } else {
         if (!approval.executionSnapshotCiphertext) {
           throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
@@ -6466,7 +6421,10 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.end({ timeout: 5 });
   }
 
-  #briefSelect(includeImmutableCompilation = false) {
+  #briefSelect(
+    includeImmutableCompilation = false,
+    includeLegacyCompilation = false
+  ) {
     return this.#sql`
       SELECT
         id,
@@ -6511,7 +6469,9 @@ export class PostgresCallRepository implements CallRepository {
         assistance_reason_ciphertext AS "assistanceReasonCiphertext",
         assistance_disclosure AS "assistanceDisclosure",
         assistance_disclosure_ciphertext AS "assistanceDisclosureCiphertext",
-        compilation_ciphertext AS "compilationCiphertext",
+        ${includeLegacyCompilation
+          ? this.#sql`compilation_ciphertext`
+          : this.#sql`NULL::text`} AS "compilationCiphertext",
         context_ciphertext AS "contextCiphertext",
         locale,
         voice_gender AS "voiceGender",
@@ -6527,15 +6487,7 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapCurrentCompilation(row: CallCompilationSourceRow): CallCompilation | null {
-    if (!row.currentCompilationId) {
-      if (row.legacyCompilationDisposition) return null;
-      if (!row.compilationCiphertext) return null;
-      const legacy = callCompilationSchema.safeParse(decryptJson<unknown>(
-        row.compilationCiphertext,
-        this.#encryptionKey
-      ));
-      return legacy.success ? legacy.data : null;
-    }
+    if (!row.currentCompilationId) return null;
     if (
       !row.immutableCompilationCiphertext ||
       row.immutableCompilationRevision === null ||
@@ -7339,33 +7291,11 @@ export class PostgresCallRepository implements CallRepository {
     return existing.id;
   }
 
-  async #resolveCompilationRecord(
+  async #materializeLegacyCompilation(
     transaction: postgres.TransactionSql,
     callBriefId: string,
-    currentCompilationId: string | null,
     compilation: CallCompilation
   ) {
-    if (currentCompilationId) {
-      const [current] = await transaction<{
-        revision: number;
-        snapshotHash: string;
-      }[]>`
-        SELECT revision, snapshot_hash AS "snapshotHash"
-        FROM call_compilations
-        WHERE id = ${currentCompilationId}
-          AND call_brief_id = ${callBriefId}
-        FOR SHARE
-      `;
-      if (
-        !current ||
-        current.revision !== compilation.revision ||
-        current.snapshotHash !== compilation.snapshotHash
-      ) {
-        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
-      }
-      return currentCompilationId;
-    }
-
     const compilationId = await this.#insertCompilationRecord(
       transaction,
       callBriefId,

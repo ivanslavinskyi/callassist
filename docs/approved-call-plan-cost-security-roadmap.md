@@ -252,6 +252,35 @@ The post-run dry run found zero remaining candidates; the admin facts are now
 without any recoverable compilation remain an explicit historical-data limitation
 and are not execution candidates.
 
+With the recoverable count at zero, the normal repository reader no longer
+decrypts or parses `call_briefs.compilation_ciphertext`. `CallCompilation` is
+returned only from the immutable `call_compilations` row selected by
+`current_compilation_id`. The maintenance backfill command retains its explicit,
+offline encrypted-legacy reader so a restored older database can still be
+upgraded; it is not reachable from call approval, attempt reservation, Realtime,
+or the public snapshot API. Approval and attempt reservation now use the already
+validated immutable ID directly, and attempt reservation no longer synthesizes a
+missing approval snapshot.
+
+The active legacy-attempt count was also zero, so the Realtime media adapter now
+accepts only a token bound to all three values: call brief ID, call attempt ID,
+and immutable compilation hash. The call-ID-only HMAC generator/validator and
+the fallback that rebuilt an execution snapshot from a current call snapshot
+have been removed. A late pre-migration media stream therefore fails closed
+instead of reconstructing task instructions from mutable state.
+
+New call creation, recompilation, and approval no longer dual-write the compiled
+plan into `call_briefs.compilation_ciphertext`; the immutable revision and approval
+tables are the sole write target. Normal brief queries project the legacy column
+as SQL `NULL` and do not fetch its encrypted value. Migration 0061 validates the
+previously deferred `ready`-brief constraint and documents the column as a
+deprecated historical/offline-maintenance projection. Dropping the column remains
+a later retention decision because doing so would destroy historical encrypted
+evidence rather than merely remove an execution path.
+The local post-cutover verification reports 61 migrations, zero backfill or
+classification candidates, and a successful recovery drill across 58 public
+tables with all 10 sampled encrypted records readable.
+
 Deployment rehearsal on 2026-09-05 applied migrations 0050–0057 first to an
 isolated restored clone and then to the local source database, verified a no-op
 second pass, and passed the full post-migration recovery drill. A real-provider

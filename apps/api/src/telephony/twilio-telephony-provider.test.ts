@@ -335,13 +335,6 @@ describe("TwilioTelephonyProvider", () => {
       ...binding,
       compilationSnapshotHash: "b".repeat(64)
     }, token)).toBe(false);
-    const legacyToken = provider.createLegacyMediaStreamToken(brief.id);
-    expect(provider.validateLegacyMediaStreamToken(brief.id, legacyToken))
-      .toBe(true);
-    expect(provider.validateLegacyMediaStreamToken(
-      `${brief.id}-other`,
-      legacyToken
-    )).toBe(false);
   });
 
   it("validates the exact signed webhook URL", () => {

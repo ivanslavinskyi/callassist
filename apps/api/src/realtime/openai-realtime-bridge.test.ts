@@ -522,7 +522,7 @@ describe("OpenAIRealtimeBridge", () => {
     await service.close();
   });
 
-  it("allows only a pre-migration attempt through the legacy token adapter", async () => {
+  it("rejects a pre-migration attempt without immutable stream binding", async () => {
     const repository = new InMemoryCallRepository();
     const service = new CallService(repository);
     const created = await service.create({
@@ -558,7 +558,6 @@ describe("OpenAIRealtimeBridge", () => {
       apiKey: "test-key",
       service,
       validateStreamToken: () => false,
-      validateLegacyStreamToken: (_id, token) => token === "legacy-valid",
       createOpenAISocket: () => {
         providerSocketCount += 1;
         return new FakeSocket() as unknown as WebSocket;
@@ -578,7 +577,7 @@ describe("OpenAIRealtimeBridge", () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(providerSocketCount).toBe(2);
+    expect(providerSocketCount).toBe(0);
     await service.close();
   });
 

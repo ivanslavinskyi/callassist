@@ -1048,7 +1048,8 @@ describeWithDatabase("PostgresCallRepository", () => {
       {
         allowedFactsCiphertext: string;
         assistanceReasonCiphertext: string;
-        compilationCiphertext: string;
+        compilationCiphertext: string | null;
+        immutableCompilationCiphertext: string;
         representedPersonFirstName: string;
         representedPersonLastName: string;
         userId: string;
@@ -1058,6 +1059,11 @@ describeWithDatabase("PostgresCallRepository", () => {
         allowed_facts_ciphertext AS "allowedFactsCiphertext",
         assistance_reason_ciphertext AS "assistanceReasonCiphertext",
         compilation_ciphertext AS "compilationCiphertext",
+        (
+          SELECT compilation_ciphertext
+          FROM call_compilations
+          WHERE id = call_briefs.current_compilation_id
+        ) AS "immutableCompilationCiphertext",
         represented_person_first_name AS "representedPersonFirstName",
         represented_person_last_name AS "representedPersonLastName",
         user_id AS "userId"
@@ -1068,7 +1074,8 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(stored?.assistanceReasonCiphertext).not.toContain(
       "language_barrier"
     );
-    expect(stored?.compilationCiphertext).not.toContain(
+    expect(stored?.compilationCiphertext).toBeNull();
+    expect(stored?.immutableCompilationCiphertext).not.toContain(
       "Verify the PostgreSQL persistence"
     );
     expect(stored?.representedPersonFirstName).toBe("Nina");
@@ -1764,7 +1771,8 @@ describeWithDatabase("PostgresCallRepository", () => {
         before.callPlanCutover.recoverableLegacyCalls + 1
       );
       await expect(repository.get(brief.id)).resolves.toMatchObject({
-        executionPlanSource: "legacy"
+        executionPlanSource: "unavailable",
+        compilation: null
       });
       await expect(repository.approveCompilation(brief.id)).rejects
         .toMatchObject({ code: "CALL_COMPILATION_RECOMPILE_REQUIRED" });

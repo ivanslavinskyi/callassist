@@ -1,5 +1,4 @@
 import {
-  createApprovedExecutionSnapshot,
   type ApprovedExecutionSnapshot,
   type CallBrief,
   type CallLocale,
@@ -33,7 +32,6 @@ type OpenAIRealtimeBridgeOptions = {
   apiKey: string;
   service: CallService;
   validateStreamToken: (binding: MediaStreamBinding, token: string) => boolean;
-  validateLegacyStreamToken?: (callBriefId: string, token: string) => boolean;
   model?: string;
   transcriptionModel?: string;
   transcriptionDelay?: RealtimeTranscriptionDelay;
@@ -139,8 +137,6 @@ export class OpenAIRealtimeBridge {
   readonly #apiKey: string;
   readonly #service: CallService;
   readonly #validateStreamToken: OpenAIRealtimeBridgeOptions["validateStreamToken"];
-  readonly #validateLegacyStreamToken:
-    OpenAIRealtimeBridgeOptions["validateLegacyStreamToken"];
   readonly #model: string;
   readonly #transcriptionModel: string;
   readonly #transcriptionDelay: RealtimeTranscriptionDelay;
@@ -160,7 +156,6 @@ export class OpenAIRealtimeBridge {
     this.#apiKey = options.apiKey;
     this.#service = options.service;
     this.#validateStreamToken = options.validateStreamToken;
-    this.#validateLegacyStreamToken = options.validateLegacyStreamToken;
     this.#model = options.model ?? "gpt-realtime-2.1";
     this.#transcriptionModel =
       options.transcriptionModel ?? "gpt-realtime-whisper";
@@ -858,12 +853,6 @@ export class OpenAIRealtimeBridge {
         parameters.compilationSnapshotHash;
       const streamToken = parameters.streamToken;
       const candidateStreamSid = message.start?.streamSid ?? message.streamSid;
-      const hasCompleteBinding = Boolean(
-        candidateCallAttemptId && candidateCompilationSnapshotHash
-      );
-      const hasPartialBinding = Boolean(
-        candidateCallAttemptId || candidateCompilationSnapshotHash
-      ) && !hasCompleteBinding;
       const validBoundToken =
         candidateCallBriefId &&
         candidateCallAttemptId &&
@@ -875,20 +864,13 @@ export class OpenAIRealtimeBridge {
               compilationSnapshotHash: candidateCompilationSnapshotHash
             }, streamToken)
           : false;
-      const validLegacyToken =
-        candidateCallBriefId &&
-        streamToken &&
-        !hasPartialBinding &&
-        !hasCompleteBinding &&
-        this.#validateLegacyStreamToken
-          ? this.#validateLegacyStreamToken(candidateCallBriefId, streamToken)
-          : false;
       if (
         !candidateCallBriefId ||
+        !candidateCallAttemptId ||
+        !candidateCompilationSnapshotHash ||
         !streamToken ||
         !candidateStreamSid ||
-        hasPartialBinding ||
-        (!validBoundToken && !validLegacyToken)
+        !validBoundToken
       ) {
         this.#logger.warn({}, "Rejected unauthorized Twilio media stream");
         close();
@@ -903,21 +885,7 @@ export class OpenAIRealtimeBridge {
       }
 
       const attempt = await this.#service.getLatestAttempt(candidateCallBriefId);
-      let executionSnapshot = attempt?.executionSnapshot;
-      const legacyAttempt = Boolean(
-        validLegacyToken &&
-        attempt &&
-        attempt.compilationRevision === null &&
-        attempt.compilationSnapshotHash === null &&
-        attempt.executionSnapshot === null
-      );
-      if (legacyAttempt) {
-        try {
-          executionSnapshot = createApprovedExecutionSnapshot(snapshot);
-        } catch {
-          executionSnapshot = null;
-        }
-      }
+      const executionSnapshot = attempt?.executionSnapshot;
       if (
         !attempt ||
         !executionSnapshot ||
@@ -925,15 +893,12 @@ export class OpenAIRealtimeBridge {
         !["dialing", "in_progress", "awaiting_approval"].includes(
           attempt.status
         ) ||
-        (!legacyAttempt && attempt.id !== candidateCallAttemptId) ||
-        (!legacyAttempt &&
-          attempt.compilationSnapshotHash !== candidateCompilationSnapshotHash) ||
+        attempt.id !== candidateCallAttemptId ||
+        attempt.compilationSnapshotHash !== candidateCompilationSnapshotHash ||
         executionSnapshot.callBriefId !== candidateCallBriefId ||
-        (!legacyAttempt &&
-          attempt.compilationRevision !== executionSnapshot.compilationRevision) ||
-        (!legacyAttempt &&
-          attempt.compilationSnapshotHash !==
-            executionSnapshot.compilationSnapshotHash)
+        attempt.compilationRevision !== executionSnapshot.compilationRevision ||
+        attempt.compilationSnapshotHash !==
+          executionSnapshot.compilationSnapshotHash
       ) {
         this.#logger.warn(
           { callBriefId: candidateCallBriefId },

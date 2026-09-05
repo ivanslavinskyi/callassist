@@ -265,20 +265,6 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     );
   }
 
-  createLegacyMediaStreamToken(callBriefId: string) {
-    return createHmac("sha256", this.#authToken)
-      .update(`callassist-media:${callBriefId}`)
-      .digest("base64url");
-  }
-
-  validateLegacyMediaStreamToken(callBriefId: string, token: string) {
-    const expected = Buffer.from(this.createLegacyMediaStreamToken(callBriefId));
-    const received = Buffer.from(token);
-    return (
-      expected.length === received.length && timingSafeEqual(expected, received)
-    );
-  }
-
   mediaStreamUrl() {
     const url = new URL("/webhooks/twilio/media", this.#publicBaseUrl);
     url.protocol = "wss:";

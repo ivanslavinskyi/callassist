@@ -98,8 +98,6 @@ const realtimeBridge =
         service,
         validateStreamToken: (binding, token) =>
           telephonyProvider.validateMediaStreamToken(binding, token),
-        validateLegacyStreamToken: (callBriefId, token) =>
-          telephonyProvider.validateLegacyMediaStreamToken(callBriefId, token),
         model: process.env.OPENAI_REALTIME_MODEL,
         transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL,
         transcriptionDelay: parseTranscriptionDelay(
