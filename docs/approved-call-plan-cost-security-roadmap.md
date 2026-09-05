@@ -57,9 +57,12 @@ immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
 Realtime audio-token tests pass locally against PostgreSQL. The mutable current
 `call_briefs` blob remains only as a compatibility projection; immutable revision
 rows are the new audit anchor.
-Item 4 is partially implemented: full-plan output moderation and the beta opaque
-identifier guard are present; broader address/name extraction and review UI still
-remain.
+Item 4 has full-plan output moderation plus beta verbatim guards for opaque
+identifiers, email, phone, numeric dates, long numbers, the explicit recipient and
+represented-person fields, and common Swiss/German/French/Italian postal-address
+forms. Compiler-declared person, organisation, and location entities must have
+exact source provenance. General multilingual named-entity extraction from
+unstructured prose and dedicated review UI still remain.
 Item 5 now has explicit durable retry disposition for compiler failures: network,
 timeout, 408/409/429, and 5xx remain retryable; exhausted structured-output
 validation, malformed responses, and permanent 4xx failures dead-letter after

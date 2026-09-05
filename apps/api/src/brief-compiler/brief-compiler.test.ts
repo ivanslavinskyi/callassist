@@ -12,6 +12,7 @@ import {
   evaluateCompiledBrief,
   isBriefCompilerErrorRetryable,
   protectedIdentifiers,
+  protectedPostalAddresses,
   type BriefCompilerProviderRequestResult
 } from "./brief-compiler";
 
@@ -43,7 +44,7 @@ const modelOutput = {
   opening: {
     recipientAddress: "Vielen Dank, Gemeinde Aadorf.",
     purposeStatement:
-      "Ich rufe im Auftrag von Ivan Slavinskyi an, um den Eingang eines am 12. Juli gesendeten Antrags zu klären.",
+      "Ich rufe im Auftrag von Nina Keller an, um den Eingang eines am 12. Juli gesendeten Antrags zu klären.",
     readinessQuestion: "Passt es Ihnen, wenn wir das jetzt kurz besprechen?"
   },
   backgroundSummary:
@@ -179,6 +180,60 @@ describe("deterministic brief policy", () => {
     );
   });
 
+  it("requires primary names and postal addresses verbatim", () => {
+    const zurich = "Z\u00fcrich";
+    const geneva = "Gen\u00e8ve";
+    const raw = normalizeCreateCallBriefInput({
+      ...rawInput,
+      context: `Reply address: Bahnhofstrasse 10, 8001 ${zurich}.`
+    });
+    expect(protectedPostalAddresses(raw.context)).toEqual([
+      `Bahnhofstrasse 10, 8001 ${zurich}`
+    ]);
+    expect(protectedPostalAddresses(`Rue de Lausanne 12, 1201 ${geneva}`))
+      .toEqual([`Rue de Lausanne 12, 1201 ${geneva}`]);
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 11, 8001 ${zurich}.`
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Bahnhofstrasse 10, 8001 ${zurich}; Bahnhofstrasse 11, 8001 ${zurich}.`
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 10, 8001 ${zurich}.`
+    })).status).toBe("ready_for_review");
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      opening: {
+        ...modelOutput.opening,
+        purposeStatement: "Ich rufe im Auftrag von Nena Keller an."
+      },
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 10, 8001 ${zurich}.`
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 10, 8001 ${zurich}.`,
+      namedEntities: [
+        ...modelOutput.namedEntities,
+        { type: "person", value: "Hans Meier" }
+      ] as CompiledCallBrief["namedEntities"]
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+  });
+
   it("blocks risk categories and requests clarification only for fixed issues", () => {
     const raw = normalizeCreateCallBriefInput(rawInput);
     expect(
@@ -216,6 +271,11 @@ describe("deterministic brief policy", () => {
       compiled({
         addressingStyle: "formal",
         tone: "friendly",
+        opening: {
+          ...modelOutput.opening,
+          recipientAddress: "Danke, Elena."
+        },
+        namedEntities: [{ type: "date", value: "12. Juli" }],
         blockingIssues: [],
         assumptions: [
           "spoken_answers_saved_in_callassist",
