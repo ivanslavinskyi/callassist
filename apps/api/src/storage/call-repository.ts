@@ -193,11 +193,20 @@ export type EnqueueCallPreparationRepositoryInput = {
   now: string;
 };
 
+export type EnqueueCallRecompilationRepositoryInput =
+  Omit<EnqueueCallPreparationRepositoryInput, "userId"> & {
+    callBriefId: string;
+    userId: string | null;
+  };
+
 export type CallPreparationWork = {
   preparation: CallPreparation;
-  userId: string;
+  userId: string | null;
   idempotencyKey: string;
   input: CreateCallBriefInput | null;
+  targetCallBriefId: string | null;
+  expectedCompilationId: string | null;
+  targetRevision: number;
 };
 
 export type CallPreparationPublication = {
@@ -716,10 +725,14 @@ export interface CallRepository {
   enqueueCallPreparation(
     input: EnqueueCallPreparationRepositoryInput
   ): Promise<CallPreparation>;
+  enqueueCallRecompilation(
+    input: EnqueueCallRecompilationRepositoryInput
+  ): Promise<CallPreparation>;
   findCallPreparationByRequest(
-    userId: string,
+    userId: string | null,
     idempotencyKey: string,
-    inputFingerprint: string
+    inputFingerprint: string,
+    targetCallBriefId?: string | null
   ): Promise<CallPreparation | null>;
   getCallPreparation(
     id: string,
@@ -791,7 +804,8 @@ export interface CallRepository {
   recompile(
     id: string,
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    publication?: CallPreparationPublication
   ): Promise<CallSnapshot>;
   get(id: string): Promise<CallSnapshot | null>;
   appendCallTelemetryEvent(
@@ -986,6 +1000,7 @@ export class CallRepositoryError extends Error {
       | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
       | "CALL_CREATION_IDEMPOTENCY_CONFLICT"
       | "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+      | "CALL_RECOMPILATION_IN_PROGRESS"
       | "DURABLE_JOB_LEASE_LOST"
       | "DURABLE_JOB_NOT_FOUND"
       | "DURABLE_JOB_NOT_RETRYABLE"

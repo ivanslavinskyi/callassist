@@ -519,6 +519,20 @@ export class CallService {
     );
   }
 
+  findRecompilationByRequest(
+    id: string,
+    input: CreateCallBriefInput,
+    userId: string | null,
+    idempotencyKey: string
+  ) {
+    return this.repository.findCallPreparationByRequest(
+      userId,
+      idempotencyKey,
+      callPreparationFingerprint(normalizeCreateCallBriefInput(input)),
+      id
+    );
+  }
+
   async getPreparation(id: string, userId: string) {
     if (!isUuid(id)) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
     const preparation = await this.repository.getCallPreparation(id, userId);
@@ -542,29 +556,23 @@ export class CallService {
     return this.repository.getCreditUsage(userId);
   }
 
-  async recompile(id: string, input: CreateCallBriefInput) {
-    const current = await this.#require(id);
-    const revision = current.compilation
-      ? (current.compilation.revision ?? 1) + 1
-      : 1;
-    try {
-      const compilation = await this.#briefCompiler.compile(
-        normalizeCreateCallBriefInput(input),
-        revision
-      );
-      const snapshot = await this.repository.recompile(
-        id,
-        input,
-        compilation
-      );
-      this.#publish(id, { type: "call.updated", brief: snapshot.brief });
-      return snapshot;
-    } catch (error) {
-      if (error instanceof BriefCompilerError) {
-        throw mapBriefCompilerError(error);
-      }
-      throw error;
-    }
+  async recompile(
+    id: string,
+    input: CreateCallBriefInput,
+    userId: string | null,
+    idempotencyKey: string = randomUUID()
+  ) {
+    const normalized = normalizeCreateCallBriefInput(input);
+    const preparation = await this.repository.enqueueCallRecompilation({
+      callBriefId: id,
+      userId,
+      idempotencyKey,
+      inputFingerprint: callPreparationFingerprint(normalized),
+      input: normalized,
+      now: new Date().toISOString()
+    });
+    this.#durableJobWorker.wake();
+    return preparation;
   }
 
   get(id: string) {
@@ -1218,7 +1226,7 @@ export class CallService {
     try {
       const compilation = await this.#briefCompiler.compile(
         normalizeCreateCallBriefInput(work.input),
-        1,
+        work.targetRevision,
         {
           maxProviderRequests: briefCompilationProviderRequestBudget,
           beforeProviderRequest: (request) =>
@@ -1256,16 +1264,30 @@ export class CallService {
             })
         }
       );
-      await this.repository.create(
-        work.input,
-        compilation,
-        work.userId,
-        work.idempotencyKey,
-        {
-          preparationId: job.callPreparationId,
-          lease: currentLease(lease)
-        }
-      );
+      const publication = {
+        preparationId: job.callPreparationId,
+        lease: currentLease(lease)
+      };
+      if (work.targetCallBriefId) {
+        const snapshot = await this.repository.recompile(
+          work.targetCallBriefId,
+          work.input,
+          compilation,
+          publication
+        );
+        this.#publish(work.targetCallBriefId, {
+          type: "call.updated",
+          brief: snapshot.brief
+        });
+      } else {
+        await this.repository.create(
+          work.input,
+          compilation,
+          work.userId,
+          work.idempotencyKey,
+          publication
+        );
+      }
     } catch (error) {
       if (error instanceof BriefCompilerError) {
         throw new DurableJobExecutionError(
@@ -1281,6 +1303,8 @@ export class CallService {
         error instanceof CallRepositoryError &&
         [
           "CALL_COMPILATION_INTEGRITY_FAILED",
+          "CALL_COMPILATION_STALE",
+          "CALL_BRIEF_NOT_EDITABLE",
           "CALL_CREATION_IDEMPOTENCY_CONFLICT",
           "CALL_PREPARATION_IDEMPOTENCY_CONFLICT",
           "DURABLE_JOB_TARGET_INVALID"

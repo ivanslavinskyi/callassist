@@ -98,9 +98,15 @@ allow-list of fixed issue codes whose answers can materially change the task.
 
 For a reviewable plan, the server stores an encrypted source/compiled snapshot,
 compiler model and version, policy version, response ID, and SHA-256 snapshot hash.
-Editing or answering a clarification recompiles the same call ID, increments the
-compilation revision, resets approval, and records an audit event containing only
-hashes and version metadata. The operator sees a compact call-language plan, including
+Editing or answering a clarification creates an idempotent encrypted preparation
+request for the same call ID. A durable worker compiles the captured target revision
+under the same cumulative provider-request budget as initial preparation. The
+previous approved revision remains authoritative while that job is queued or
+retrying, and call start is blocked during the transition. Publication atomically
+verifies that the current immutable compilation ID still matches the revision the
+job started from, increments the revision, resets approval, erases the queued raw
+input, and records an audit event containing only hashes and version metadata. A
+failed or stale job leaves the previous revision unchanged. The operator sees a compact call-language plan, including
 the exact opening spoken after consent; source, guardrail, policy, and snapshot metadata
 remain available under technical details.
 The combined approve-and-call action records `approvedAt` before starting Twilio;

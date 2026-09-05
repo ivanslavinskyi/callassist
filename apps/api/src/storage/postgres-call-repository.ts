@@ -104,6 +104,7 @@ import {
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
   type EnqueueCallPreparationRepositoryInput,
+  type EnqueueCallRecompilationRepositoryInput,
   type PromoCodeCreationResult,
   type ListCallBriefsInput,
   type ListRecipientSuggestionsInput,
@@ -412,6 +413,10 @@ type CallPreparationRow = {
   inputFingerprint: string;
   inputCiphertext: string | null;
   providerRequestCount: number;
+  operationKind: "creation" | "recompilation";
+  targetCallBriefId: string | null;
+  expectedCompilationId: string | null;
+  targetRevision: number;
   status: CallPreparation["status"];
   callBriefId: string | null;
   failureCode: CallPreparation["failureCode"];
@@ -813,7 +818,15 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!stored) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
-      if (stored.inputFingerprint !== input.inputFingerprint) {
+      const [target] = await transaction<{ targetCallBriefId: string | null }[]>`
+        SELECT target_call_brief_id AS "targetCallBriefId"
+        FROM call_preparation_requests
+        WHERE id = ${stored.id}
+      `;
+      if (
+        stored.inputFingerprint !== input.inputFingerprint ||
+        target?.targetCallBriefId !== null
+      ) {
         throw new CallRepositoryError(
           "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
         );
@@ -839,6 +852,149 @@ export class PostgresCallRepository implements CallRepository {
     return mapCallPreparationRow(preparation);
   }
 
+  async enqueueCallRecompilation(
+    input: EnqueueCallRecompilationRepositoryInput
+  ) {
+    const id = randomUUID();
+    const encryptedInput = encryptJson(
+      normalizeCreateCallBriefInput(input.input),
+      this.#encryptionKey
+    );
+    const preparationId = await this.#sql.begin(async (transaction) => {
+      const [brief] = await transaction<{
+        userId: string | null;
+        status: CallBrief["status"];
+        currentCompilationId: string | null;
+        currentRevision: number | null;
+        attemptCount: number;
+      }[]>`
+        SELECT
+          call_briefs.user_id AS "userId",
+          call_briefs.status,
+          call_briefs.current_compilation_id AS "currentCompilationId",
+          call_compilations.revision AS "currentRevision",
+          (
+            SELECT COUNT(*)::int
+            FROM call_attempts
+            WHERE call_attempts.call_brief_id = call_briefs.id
+          ) AS "attemptCount"
+        FROM call_briefs
+        LEFT JOIN call_compilations
+          ON call_compilations.id = call_briefs.current_compilation_id
+        WHERE call_briefs.id = ${input.callBriefId}
+          AND call_briefs.data_deleted_at IS NULL
+        FOR UPDATE OF call_briefs
+      `;
+      if (!brief || brief.userId !== input.userId) {
+        throw new CallRepositoryError("CALL_NOT_FOUND");
+      }
+
+      const [existing] = await transaction<{
+        id: string;
+        inputFingerprint: string;
+        targetCallBriefId: string | null;
+      }[]>`
+        SELECT
+          id,
+          input_fingerprint AS "inputFingerprint",
+          target_call_brief_id AS "targetCallBriefId"
+        FROM call_preparation_requests
+        WHERE user_id = ${input.userId}
+          AND idempotency_key = ${input.idempotencyKey}
+        FOR UPDATE
+      `;
+      if (existing) {
+        if (
+          existing.inputFingerprint !== input.inputFingerprint ||
+          existing.targetCallBriefId !== input.callBriefId
+        ) {
+          throw new CallRepositoryError(
+            "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+          );
+        }
+        return existing.id;
+      }
+      if (
+        !["review_required", "needs_clarification", "blocked", "ready"].includes(
+          brief.status
+        ) ||
+        brief.attemptCount > 0
+      ) {
+        throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
+      }
+      if (!brief.currentCompilationId || !brief.currentRevision) {
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+      }
+      const active = await transaction`
+        SELECT id
+        FROM call_preparation_requests
+        WHERE target_call_brief_id = ${input.callBriefId}
+          AND status IN ('queued', 'processing', 'retrying')
+        LIMIT 1
+      `;
+      if (active.count > 0) {
+        throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+      }
+
+      const inserted = await transaction`
+        INSERT INTO call_preparation_requests (
+          id, user_id, idempotency_key, input_fingerprint, input_ciphertext,
+          operation_kind, target_call_brief_id, expected_compilation_id,
+          target_revision, status, created_at, updated_at
+        ) VALUES (
+          ${id}, ${input.userId}, ${input.idempotencyKey},
+          ${input.inputFingerprint}, ${encryptedInput}, 'recompilation',
+          ${input.callBriefId}, ${brief.currentCompilationId},
+          ${brief.currentRevision + 1}, 'queued',
+          ${input.now}::timestamptz, ${input.now}::timestamptz
+        )
+        ON CONFLICT (user_id, idempotency_key) DO NOTHING
+        RETURNING id
+      `;
+      if (inserted.count !== 1) {
+        const [raced] = await transaction<{
+          id: string;
+          inputFingerprint: string;
+          targetCallBriefId: string | null;
+        }[]>`
+          SELECT
+            id,
+            input_fingerprint AS "inputFingerprint",
+            target_call_brief_id AS "targetCallBriefId"
+          FROM call_preparation_requests
+          WHERE user_id = ${input.userId}
+            AND idempotency_key = ${input.idempotencyKey}
+          FOR UPDATE
+        `;
+        if (
+          !raced ||
+          raced.inputFingerprint !== input.inputFingerprint ||
+          raced.targetCallBriefId !== input.callBriefId
+        ) {
+          throw new CallRepositoryError(
+            "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+          );
+        }
+        return raced.id;
+      }
+      await transaction`
+        INSERT INTO durable_jobs (
+          id, job_type, call_preparation_id, status, max_attempts,
+          run_after, force_requested, created_at, updated_at
+        ) VALUES (
+          ${randomUUID()}, 'brief_compilation', ${id}, 'queued',
+          ${durableJobMaxAttempts.brief_compilation},
+          ${input.now}::timestamptz, false,
+          ${input.now}::timestamptz, ${input.now}::timestamptz
+        )
+      `;
+      return id;
+    });
+    const preparation = await this.#getCallPreparation(preparationId);
+    if (!preparation) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    return mapCallPreparationRow(preparation);
+  }
+
   async getCallPreparation(id: string, userId: string) {
     const row = await this.#getCallPreparation(id, userId);
     return row ? mapCallPreparationRow(row) : null;
@@ -850,18 +1006,22 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async findCallPreparationByRequest(
-    userId: string,
+    userId: string | null,
     idempotencyKey: string,
-    inputFingerprint: string
+    inputFingerprint: string,
+    targetCallBriefId: string | null = null
   ) {
     const [row] = await this.#sql<CallPreparationRow[]>`
       ${this.#callPreparationSelect()}
-      WHERE call_preparation_requests.user_id = ${userId}
+      WHERE call_preparation_requests.user_id IS NOT DISTINCT FROM ${userId}::uuid
         AND call_preparation_requests.idempotency_key = ${idempotencyKey}
       LIMIT 1
     `;
     if (!row) return null;
-    if (row.inputFingerprint !== inputFingerprint) {
+    if (
+      row.inputFingerprint !== inputFingerprint ||
+      row.targetCallBriefId !== targetCallBriefId
+    ) {
       throw new CallRepositoryError("CALL_PREPARATION_IDEMPOTENCY_CONFLICT");
     }
     return mapCallPreparationRow(row);
@@ -897,7 +1057,10 @@ export class PostgresCallRepository implements CallRepository {
               row.inputCiphertext,
               this.#encryptionKey
             )
-          : null
+          : null,
+        targetCallBriefId: row.targetCallBriefId,
+        expectedCompilationId: row.expectedCompilationId,
+        targetRevision: row.targetRevision
       };
     });
   }
@@ -1552,6 +1715,10 @@ export class PostgresCallRepository implements CallRepository {
               SELECT id FROM call_attempts
               WHERE call_brief_id = ${input.callId}
             )
+            OR durable_jobs.call_preparation_id IN (
+              SELECT id FROM call_preparation_requests
+              WHERE target_call_brief_id = ${input.callId}
+            )
           )
         ON CONFLICT (job_id, generation, attempt_number) DO NOTHING
       `;
@@ -1575,7 +1742,22 @@ export class PostgresCallRepository implements CallRepository {
               SELECT id FROM call_attempts
               WHERE call_brief_id = ${input.callId}
             )
+            OR call_preparation_id IN (
+              SELECT id FROM call_preparation_requests
+              WHERE target_call_brief_id = ${input.callId}
+            )
           )
+      `;
+      await transaction`
+        UPDATE call_preparation_requests
+        SET
+          status = 'cancelled',
+          failure_code = NULL,
+          input_ciphertext = NULL,
+          updated_at = ${new Date(input.deletedAt)},
+          completed_at = ${new Date(input.deletedAt)}
+        WHERE target_call_brief_id = ${input.callId}
+          AND status IN ('queued', 'processing', 'retrying')
       `;
       await transaction`
         DELETE FROM transcript_segments WHERE call_brief_id = ${input.callId}
@@ -2107,7 +2289,8 @@ export class PostgresCallRepository implements CallRepository {
   async recompile(
     id: string,
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    publication?: CallPreparationPublication
   ) {
     assertCompilationIntegrity(compilation);
     const parsed = normalizeCreateCallBriefInput(input);
@@ -2130,18 +2313,65 @@ export class PostgresCallRepository implements CallRepository {
         {
           status: CallBrief["status"];
           compilationCiphertext: string | null;
+          currentCompilationId: string | null;
           attemptCount: number;
         }[]
       >`
         SELECT
           status,
           compilation_ciphertext AS "compilationCiphertext",
+          current_compilation_id AS "currentCompilationId",
           (SELECT COUNT(*)::int FROM call_attempts WHERE call_brief_id = ${id}) AS "attemptCount"
         FROM call_briefs
         WHERE id = ${id}
         FOR UPDATE
       `;
       if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
+      let expectedCompilationId: string | null = null;
+      if (publication) {
+        await requirePostgresDurableJobLease(transaction, publication.lease);
+        const [target] = await transaction<{
+          status: CallPreparation["status"];
+          callBriefId: string | null;
+          targetCallBriefId: string | null;
+          expectedCompilationId: string | null;
+          targetRevision: number;
+        }[]>`
+          SELECT
+            call_preparation_requests.status,
+            call_preparation_requests.call_brief_id AS "callBriefId",
+            call_preparation_requests.target_call_brief_id AS "targetCallBriefId",
+            call_preparation_requests.expected_compilation_id AS "expectedCompilationId",
+            call_preparation_requests.target_revision AS "targetRevision"
+          FROM call_preparation_requests
+          INNER JOIN durable_jobs
+            ON durable_jobs.call_preparation_id = call_preparation_requests.id
+          WHERE call_preparation_requests.id = ${publication.preparationId}
+            AND durable_jobs.id = ${publication.lease.jobId}
+          FOR UPDATE OF call_preparation_requests
+        `;
+        if (
+          !target ||
+          target.targetCallBriefId !== id ||
+          target.targetRevision !== compilation.revision ||
+          ["failed", "cancelled"].includes(target.status)
+        ) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+        }
+        if (target.status === "succeeded") {
+          if (target.callBriefId !== id) {
+            throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+          }
+          return;
+        }
+        expectedCompilationId = target.expectedCompilationId;
+      }
+      if (
+        publication &&
+        (!expectedCompilationId || row.currentCompilationId !== expectedCompilationId)
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_STALE");
+      }
       if (
         !["review_required", "needs_clarification", "blocked", "ready"].includes(
           row.status
@@ -2202,6 +2432,23 @@ export class PostgresCallRepository implements CallRepository {
         compilation,
         now.toISOString()
       );
+      if (publication) {
+        const updated = await transaction`
+          UPDATE call_preparation_requests
+          SET
+            status = 'succeeded',
+            call_brief_id = ${id},
+            failure_code = NULL,
+            input_ciphertext = NULL,
+            updated_at = ${publication.lease.checkedAt}::timestamptz,
+            completed_at = ${publication.lease.checkedAt}::timestamptz
+          WHERE id = ${publication.preparationId}
+            AND status IN ('queued', 'processing', 'retrying')
+        `;
+        if (updated.count !== 1) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+        }
+      }
     });
 
     return this.#require(id);
@@ -2671,7 +2918,10 @@ export class PostgresCallRepository implements CallRepository {
               FROM call_preparation_requests
               WHERE call_preparation_requests.id =
                 provider_operations.call_preparation_id
-                AND call_preparation_requests.call_brief_id = ${callId ?? null}
+                AND COALESCE(
+                  call_preparation_requests.call_brief_id,
+                  call_preparation_requests.target_call_brief_id
+                ) = ${callId ?? null}
             )
           )
       `,
@@ -2742,7 +2992,10 @@ export class PostgresCallRepository implements CallRepository {
               SELECT 1
               FROM call_preparation_requests
               WHERE call_preparation_requests.id = operations.call_preparation_id
-                AND call_preparation_requests.call_brief_id = ${callId ?? null}
+                AND COALESCE(
+                  call_preparation_requests.call_brief_id,
+                  call_preparation_requests.target_call_brief_id
+                ) = ${callId ?? null}
             )
           )
         GROUP BY
@@ -2782,7 +3035,10 @@ export class PostgresCallRepository implements CallRepository {
               SELECT 1
               FROM call_preparation_requests
               WHERE call_preparation_requests.id = operations.call_preparation_id
-                AND call_preparation_requests.call_brief_id = ${callId ?? null}
+                AND COALESCE(
+                  call_preparation_requests.call_brief_id,
+                  call_preparation_requests.target_call_brief_id
+                ) = ${callId ?? null}
             )
           )
         GROUP BY costs.provider, costs.cost_basis, costs.component, costs.currency
@@ -3577,6 +3833,17 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const activeRecompilation = await transaction`
+        SELECT id
+        FROM call_preparation_requests
+        WHERE target_call_brief_id = ${id}
+          AND status IN ('queued', 'processing', 'retrying')
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (activeRecompilation.count > 0) {
+        throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+      }
       if (call.status !== "ready") {
         throw new CallRepositoryError("CALL_NOT_READY");
       }
@@ -5916,7 +6183,8 @@ export class PostgresCallRepository implements CallRepository {
         COALESCE(
           call_recordings.call_brief_id,
           reconciliation_attempt.call_brief_id,
-          call_preparation_requests.call_brief_id
+          call_preparation_requests.call_brief_id,
+          call_preparation_requests.target_call_brief_id
         ) AS "callId",
         durable_jobs.status,
         durable_jobs.generation,
@@ -5950,6 +6218,10 @@ export class PostgresCallRepository implements CallRepository {
         call_preparation_requests.input_fingerprint AS "inputFingerprint",
         call_preparation_requests.input_ciphertext AS "inputCiphertext",
         call_preparation_requests.provider_request_count AS "providerRequestCount",
+        call_preparation_requests.operation_kind AS "operationKind",
+        call_preparation_requests.target_call_brief_id AS "targetCallBriefId",
+        call_preparation_requests.expected_compilation_id AS "expectedCompilationId",
+        call_preparation_requests.target_revision AS "targetRevision",
         call_preparation_requests.status,
         call_preparation_requests.call_brief_id AS "callBriefId",
         call_preparation_requests.failure_code AS "failureCode",

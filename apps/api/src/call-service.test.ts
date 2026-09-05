@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallService } from "./call-service";
 import {
+  BriefCompilerError,
   DeterministicBriefCompiler,
-  OpenAIBriefCompiler
+  OpenAIBriefCompiler,
+  type BriefCompiler
 } from "./brief-compiler/brief-compiler";
 import { normalizeCreateCallBriefInput } from "@callassist/contracts";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
@@ -19,6 +21,20 @@ function createService() {
   const service = new CallService(new InMemoryCallRepository());
   services.push(service);
   return service;
+}
+
+async function waitForPreparation(
+  service: CallService,
+  preparationId: string,
+  userId: string
+) {
+  let preparation = await service.getPreparation(preparationId, userId);
+  for (let index = 0; index < 30 && preparation.status !== "succeeded"; index++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    preparation = await service.getPreparation(preparationId, userId);
+  }
+  expect(preparation.status).toBe("succeeded");
+  return preparation;
 }
 
 describe("CallService", () => {
@@ -453,6 +469,8 @@ describe("CallService", () => {
 
   it("rejects approval when the reviewed revision was replaced", async () => {
     const service = createService();
+    await service.initialize();
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
     const input = {
       recipientName: "Gemeinde Aadorf",
       phoneNumber: "+41523686688",
@@ -465,12 +483,14 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     };
-    const brief = await service.create(input);
+    const brief = await service.create(input, userId);
     const reviewed = (await service.get(brief.id))!.compilation!;
-    const replaced = await service.recompile(brief.id, {
+    const preparation = await service.recompile(brief.id, {
       ...input,
       objective: "Ask whether the updated residence form was received"
-    });
+    }, userId, "5d006a34-f9e1-4c92-8395-36fd4ae4ab23");
+    await waitForPreparation(service, preparation.id, userId);
+    const replaced = (await service.get(brief.id))!;
 
     await expect(service.approveCompilation(brief.id, {
       revision: reviewed.revision,
@@ -481,6 +501,179 @@ describe("CallService", () => {
       revision: replaced.compilation!.revision,
       snapshotHash: replaced.compilation!.snapshotHash
     })).resolves.toMatchObject({ brief: { status: "ready" } });
+  });
+
+  it("durably deduplicates recompilation and preserves the approved revision until publication", async () => {
+    const repository = new InMemoryCallRepository();
+    const deterministic = new DeterministicBriefCompiler();
+    let releaseCompilation!: () => void;
+    let markCompilationStarted!: () => void;
+    const compilationStarted = new Promise<void>((resolve) => {
+      markCompilationStarted = resolve;
+    });
+    const compilationReleased = new Promise<void>((resolve) => {
+      releaseCompilation = resolve;
+    });
+    const compiler: BriefCompiler = {
+      model: deterministic.model,
+      async compile(input, revision) {
+        if (revision === 2) {
+          markCompilationStarted();
+          await compilationReleased;
+        }
+        return deterministic.compile(input, revision);
+      }
+    };
+    const service = new CallService(
+      repository,
+      undefined,
+      () => undefined,
+      undefined,
+      compiler
+    );
+    services.push(service);
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    const input = {
+      recipientName: "Durable office",
+      phoneNumber: "+41523686688",
+      objective: "Ask whether the original application was received",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "de-CH" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const brief = await service.create(input, userId);
+    const approved = await service.approveCompilation(brief.id);
+    const approvedHash = approved.compilation!.snapshotHash;
+    await service.initialize();
+
+    const idempotencyKey = "5d006a34-f9e1-4c92-8395-36fd4ae4ab28";
+    const changed = {
+      ...input,
+      objective: "Ask whether the updated application was received"
+    };
+    const preparation = await service.recompile(
+      brief.id,
+      changed,
+      userId,
+      idempotencyKey
+    );
+    const replay = await service.recompile(
+      brief.id,
+      changed,
+      userId,
+      idempotencyKey
+    );
+    expect(replay.id).toBe(preparation.id);
+    await compilationStarted;
+
+    await expect(service.get(brief.id)).resolves.toMatchObject({
+      brief: { status: "ready" },
+      compilation: {
+        revision: 1,
+        snapshotHash: approvedHash,
+        approvedAt: expect.any(String)
+      }
+    });
+    await expect(service.recompile(
+      brief.id,
+      changed,
+      userId,
+      "5d006a34-f9e1-4c92-8395-36fd4ae4ab29"
+    )).rejects.toMatchObject({ code: "CALL_RECOMPILATION_IN_PROGRESS" });
+    await expect(service.approveAndStart(brief.id, userId, {
+      revision: 1,
+      snapshotHash: approvedHash
+    })).rejects.toMatchObject({ code: "CALL_RECOMPILATION_IN_PROGRESS" });
+
+    releaseCompilation();
+    await waitForPreparation(service, preparation.id, userId);
+    await expect(service.get(brief.id)).resolves.toMatchObject({
+      brief: {
+        status: "review_required",
+        objective: changed.objective
+      },
+      compilation: {
+        revision: 2,
+        approvedAt: null,
+        rawBrief: { objective: changed.objective }
+      }
+    });
+    expect(await service.getLatestAttempt(brief.id)).toBeNull();
+  });
+
+  it("keeps the approved revision executable after a terminal recompilation failure", async () => {
+    const repository = new InMemoryCallRepository();
+    const deterministic = new DeterministicBriefCompiler();
+    const compiler: BriefCompiler = {
+      model: deterministic.model,
+      async compile(input, revision) {
+        if (revision === 2) {
+          throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", {
+            stage: "compilation",
+            validationPaths: ["orderedQuestions"]
+          });
+        }
+        return deterministic.compile(input, revision);
+      }
+    };
+    const service = new CallService(
+      repository,
+      undefined,
+      () => undefined,
+      undefined,
+      compiler
+    );
+    services.push(service);
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
+    await repository.grantSignupCredits(userId);
+    const input = {
+      recipientName: "Stable approved office",
+      phoneNumber: "+41523686688",
+      objective: "Ask whether the original request was received",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "de-CH" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const brief = await service.create(input, userId);
+    const approved = await service.approveCompilation(brief.id);
+    await service.initialize();
+    const preparation = await service.recompile(
+      brief.id,
+      { ...input, objective: "Ask about a replacement request" },
+      userId,
+      "5d006a34-f9e1-4c92-8395-36fd4ae4ab32"
+    );
+
+    let failed = await service.getPreparation(preparation.id, userId);
+    for (let index = 0; index < 30 && failed.status !== "failed"; index++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      failed = await service.getPreparation(preparation.id, userId);
+    }
+    expect(failed).toMatchObject({
+      status: "failed",
+      failureCode: "BRIEF_COMPILER_RESPONSE_INVALID",
+      attemptCount: 1
+    });
+    await expect(service.get(brief.id)).resolves.toMatchObject({
+      brief: { status: "ready", objective: input.objective },
+      compilation: {
+        revision: 1,
+        snapshotHash: approved.compilation!.snapshotHash,
+        approvedAt: expect.any(String)
+      }
+    });
+    await expect(service.approveAndStart(brief.id, userId, {
+      revision: 1,
+      snapshotHash: approved.compilation!.snapshotHash
+    })).resolves.toMatchObject({ brief: { status: "dialing" } });
   });
 
   it("blocks a legacy foreign destination before reserving or starting a provider call", async () => {
@@ -571,6 +764,8 @@ describe("CallService", () => {
 
   it("recompiles the same brief revision and can approve and call in one action", async () => {
     const service = createService();
+    await service.initialize();
+    const userId = "72d810e8-106e-4a9d-a49a-9892d860ccbe";
     const input = {
       recipientName: "Elena",
       phoneNumber: "+41710000001",
@@ -583,12 +778,14 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     };
-    const brief = await service.create(input);
+    const brief = await service.create(input, userId);
 
-    const updated = await service.recompile(brief.id, {
+    const preparation = await service.recompile(brief.id, {
       ...input,
       objective: "Ask Elena which book and country she likes most"
-    });
+    }, userId, "5d006a34-f9e1-4c92-8395-36fd4ae4ab24");
+    await waitForPreparation(service, preparation.id, userId);
+    const updated = (await service.get(brief.id))!;
 
     expect(updated.brief.id).toBe(brief.id);
     expect(updated.brief.status).toBe("review_required");

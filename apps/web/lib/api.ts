@@ -748,12 +748,44 @@ export async function submitCallFeedback(
 
 export async function recompileCallBrief(
   id: string,
-  input: CreateCallBriefInput
+  input: CreateCallBriefInput,
+  idempotencyKey = crypto.randomUUID()
 ) {
-  return apiRequest<CallSnapshot>(`/api/call-briefs/${id}`, {
+  const request = () => apiRequest<CallPreparation>(`/api/call-briefs/${id}`, {
     method: "PUT",
+    headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input)
   });
+
+  let preparation: CallPreparation;
+  try {
+    preparation = await request();
+  } catch (error) {
+    if (!isUncertainCallPreparationResponse(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    preparation = await request();
+  }
+
+  const deadline = Date.now() + 120_000;
+  while (preparation.status !== "succeeded") {
+    if (preparation.status === "failed") {
+      throw new ApiError(
+        preparation.failureCode ?? "BRIEF_COMPILATION_FAILED",
+        502
+      );
+    }
+    if (preparation.status === "cancelled") {
+      throw new ApiError("CALL_PREPARATION_CANCELLED", 409);
+    }
+    if (Date.now() >= deadline) {
+      throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    preparation = await apiRequest<CallPreparation>(
+      `/api/call-preparations/${preparation.id}`
+    );
+  }
+  return getCallSnapshot(preparation.callBriefId!);
 }
 
 export async function startCall(id: string) {

@@ -2116,6 +2116,30 @@ export function buildApp({
           issues: parsed.error.flatten()
         });
       }
+      const idempotencyHeader = request.headers["idempotency-key"];
+      if (
+        typeof idempotencyHeader !== "string" ||
+        !isUuid(idempotencyHeader)
+      ) {
+        return reply.status(400).send({ error: "INVALID_IDEMPOTENCY_KEY" });
+      }
+      try {
+        const existing = await service.findRecompilationByRequest(
+          request.params.id,
+          parsed.data,
+          access.userId,
+          idempotencyHeader
+        );
+        if (existing) {
+          return reply
+            .header("Location", `/api/call-preparations/${existing.id}`)
+            .header("Cache-Control", "private, no-store")
+            .status(202)
+            .send(existing);
+        }
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
       if (!(await enforceEndpointRateLimit(
         request,
         reply,
@@ -2124,7 +2148,17 @@ export function buildApp({
         endpointRateLimitPolicy.briefPreparation
       ))) return;
       try {
-        return await service.recompile(request.params.id, parsed.data);
+        const preparation = await service.recompile(
+          request.params.id,
+          parsed.data,
+          access.userId,
+          idempotencyHeader
+        );
+        return reply
+          .header("Location", `/api/call-preparations/${preparation.id}`)
+          .header("Cache-Control", "private, no-store")
+          .status(202)
+          .send(preparation);
       } catch (error) {
         logCallPreparationError(request.log, error);
         return sendRepositoryError(reply, error);

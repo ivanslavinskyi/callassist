@@ -197,6 +197,7 @@ describe("call API", () => {
 
   it("updates an existing brief and approves and starts it with one request", async () => {
     const { app, service } = createAppWithService();
+    await service.initialize();
     const payload: CreateCallBriefInput = {
       recipientName: "Elena",
       phoneNumber: "+41710000001",
@@ -216,14 +217,47 @@ describe("call API", () => {
     const updated = await app.inject({
       method: "PUT",
       url: `/api/call-briefs/${id}`,
+      headers: {
+        "idempotency-key": "5d006a34-f9e1-4c92-8395-36fd4ae4ab27"
+      },
       payload: {
         ...payload,
         objective: "Ask Elena which book and country she likes most"
       }
     });
-    expect(updated.statusCode).toBe(200);
-    expect(updated.json().brief.id).toBe(id);
-    expect(updated.json().compilation.revision).toBe(2);
+    expect(updated.statusCode).toBe(202);
+    let preparation = updated.json<{
+      id: string;
+      status: string;
+      callBriefId: string | null;
+    }>();
+    for (let index = 0; index < 30 && preparation.status !== "succeeded"; index++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      preparation = (await service.getAdminCallPreparationInspector(
+        preparation.id
+      )).preparation;
+    }
+    expect(preparation).toMatchObject({ status: "succeeded", callBriefId: id });
+    const replay = await app.inject({
+      method: "PUT",
+      url: `/api/call-briefs/${id}`,
+      headers: {
+        "idempotency-key": "5d006a34-f9e1-4c92-8395-36fd4ae4ab27"
+      },
+      payload: {
+        ...payload,
+        objective: "Ask Elena which book and country she likes most"
+      }
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toMatchObject({
+      id: preparation.id,
+      status: "succeeded",
+      callBriefId: id
+    });
+    const recompiled = (await service.get(id))!;
+    expect(recompiled.brief.id).toBe(id);
+    expect(recompiled.compilation?.revision).toBe(2);
 
     const staleApproval = await app.inject({
       method: "POST",
@@ -240,8 +274,8 @@ describe("call API", () => {
       method: "POST",
       url: `/api/call-briefs/${id}/approve-and-start`,
       payload: {
-        revision: updated.json().compilation.revision,
-        snapshotHash: updated.json().compilation.snapshotHash
+        revision: recompiled.compilation!.revision,
+        snapshotHash: recompiled.compilation!.snapshotHash
       }
     });
     expect(started.statusCode).toBe(200);

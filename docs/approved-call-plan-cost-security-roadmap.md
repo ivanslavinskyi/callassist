@@ -52,7 +52,7 @@ Completed in the first branch increment:
   identifiers invented by the compiled runtime plan.
 
 Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
-path. Migrations 0051 through 0056 and the database-backed concurrency,
+path. Migrations 0051 through 0058 and the database-backed concurrency,
 immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
 Realtime audio-token tests pass locally against PostgreSQL. The mutable current
 `call_briefs` blob remains only as a compatibility projection; immutable revision
@@ -70,7 +70,14 @@ one durable attempt. A preparation-scoped provider-request counter is reserved
 atomically before every physical compiler or moderation request and caps all
 transport and durable retries at eight requests. A crash after reservation is
 deliberately fail-closed and may consume budget without sending the request; the
-provider-operation ledger in item 6 will make that distinction observable.
+provider-operation ledger in item 6 makes that ambiguity observable as a reserved
+operation without a result.
+Initial creation and editing/clarification recompilation now share this durable
+boundary. A recompilation request captures the expected immutable compilation ID
+and next revision, deduplicates by owner/idempotency key/input fingerprint, permits
+only one active edit per call, and publishes only if the captured base revision is
+still current. The previous approved snapshot remains unchanged on failure, and a
+call attempt cannot start while a recompilation is active.
 Post-call transcription uses the same transient HTTP classification; empty or
 oversized audio, malformed successful responses, and permanent OpenAI 4xx errors
 are terminal instead of multiplying cost across all three durable attempts.
@@ -367,8 +374,9 @@ compilation revision. Revisit only after production measurements and evaluation.
   retries, and refuses to call the provider when reservation is denied.
 - `OPENAI_REQUEST_BUDGET_EXHAUSTED` is terminal and maps to the existing
   privacy-safe unavailable result at the public preparation boundary.
-- Initial preparation is covered now. Durable recompilation remains part of the
-  later recompilation/idempotency work.
+- Initial preparation and recompilation are covered. Both reserve provider requests
+  against their preparation-scoped cumulative budget, retain billable failed usage,
+  and use the same durable retry classification.
 
 ### Definition of done
 
@@ -610,6 +618,12 @@ Evolution of current configured per-minute rates:
 10. Add shared input limits/counters and advanced analytics.
 11. Backfill recoverable legacy records and cut over readers.
 12. Remove mutable/legacy execution paths after active legacy work drains.
+
+Migration 0058 must be deployed before the new binaries. In external-worker mode,
+drain and replace old workers before enabling the new API/web path: an old worker
+does not understand recompilation targets. The database trigger prevents call
+attempt insertion while a new recompilation is active, but it is not a substitute
+for that worker cutover order.
 
 ## Test matrix
 

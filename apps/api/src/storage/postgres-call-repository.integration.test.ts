@@ -1991,6 +1991,237 @@ describeWithDatabase("PostgresCallRepository", () => {
     `).rejects.toThrow(/append-only/);
   });
 
+  it("publishes a durable recompilation only against its expected immutable revision", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Durable recompilation office",
+      phoneNumber: "+41710000065",
+      objective: "Ask whether the original documents were received",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compiler = new DeterministicBriefCompiler();
+    const brief = await repository.create(
+      input,
+      await compiler.compile(normalizeCreateCallBriefInput(input)),
+      ownerA
+    );
+    const approved = await repository.approveCompilation(brief.id);
+    const approvedHash = approved.compilation!.snapshotHash;
+    const changed = {
+      ...input,
+      objective: "Ask whether the updated documents were received"
+    };
+    const idempotencyKey = randomUUID();
+    const now = "2096-02-01T00:00:00.000Z";
+    const queued = await repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "c".repeat(64),
+      input: changed,
+      now
+    });
+    await expect(repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "c".repeat(64),
+      input: changed,
+      now
+    })).resolves.toMatchObject({ id: queued.id, status: "queued" });
+    await expect(repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "c".repeat(64),
+      input: changed,
+      now
+    })).rejects.toMatchObject({ code: "CALL_RECOMPILATION_IN_PROGRESS" });
+    await expect(repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerA
+    })).rejects.toMatchObject({ code: "CALL_RECOMPILATION_IN_PROGRESS" });
+    await expect(repository.get(brief.id)).resolves.toMatchObject({
+      brief: { status: "ready", objective: input.objective },
+      compilation: {
+        revision: 1,
+        snapshotHash: approvedHash,
+        approvedAt: expect.any(String)
+      }
+    });
+
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE job_type = 'brief_compilation'
+        AND call_preparation_id <> ${queued.id}
+        AND status = 'queued'
+    `;
+    const job = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "postgres-recompilation-worker",
+      now,
+      leaseExpiresAt: "2096-02-01T00:01:00.000Z"
+    });
+    expect(job).toMatchObject({
+      callPreparationId: queued.id,
+      callId: brief.id,
+      attemptCount: 1
+    });
+    const lease = {
+      jobId: job!.id,
+      workerId: "postgres-recompilation-worker",
+      checkedAt: "2096-02-01T00:00:01.000Z"
+    };
+    const work = await repository.claimCallPreparation(queued.id, lease);
+    expect(work).toMatchObject({
+      targetCallBriefId: brief.id,
+      expectedCompilationId: expect.any(String),
+      targetRevision: 2,
+      input: normalizeCreateCallBriefInput(changed)
+    });
+    const compilation = await compiler.compile(
+      normalizeCreateCallBriefInput(changed),
+      work.targetRevision
+    );
+    await repository.recompile(
+      brief.id,
+      changed,
+      compilation,
+      { preparationId: queued.id, lease }
+    );
+    await expect(repository.completeDurableJob(
+      job!.id,
+      "postgres-recompilation-worker",
+      "2096-02-01T00:00:02.000Z"
+    )).resolves.toBe(true);
+    await expect(repository.getCallPreparation(queued.id, ownerA))
+      .resolves.toMatchObject({
+        status: "succeeded",
+        callBriefId: brief.id,
+        attemptCount: 1
+      });
+    await expect(repository.get(brief.id)).resolves.toMatchObject({
+      brief: {
+        status: "review_required",
+        objective: changed.objective
+      },
+      compilation: {
+        revision: 2,
+        approvedAt: null,
+        rawBrief: { objective: changed.objective }
+      }
+    });
+    const [stored] = await inspection<{
+      operationKind: string;
+      targetCallBriefId: string | null;
+      expectedCompilationId: string | null;
+      targetRevision: number;
+      inputCiphertext: string | null;
+    }[]>`
+      SELECT
+        operation_kind AS "operationKind",
+        target_call_brief_id AS "targetCallBriefId",
+        expected_compilation_id AS "expectedCompilationId",
+        target_revision AS "targetRevision",
+        input_ciphertext AS "inputCiphertext"
+      FROM call_preparation_requests
+      WHERE id = ${queued.id}
+    `;
+    expect(stored).toMatchObject({
+      operationKind: "recompilation",
+      targetCallBriefId: brief.id,
+      expectedCompilationId: work.expectedCompilationId,
+      targetRevision: 2,
+      inputCiphertext: null
+    });
+
+    const staleInput = {
+      ...changed,
+      objective: "Ask whether a third document set was received"
+    };
+    const stalePreparation = await repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "d".repeat(64),
+      input: staleInput,
+      now: "2096-03-01T00:00:00.000Z"
+    });
+    const interveningInput = {
+      ...changed,
+      objective: "Ask whether an intervening document set was received"
+    };
+    await repository.recompile(
+      brief.id,
+      interveningInput,
+      await compiler.compile(
+        normalizeCreateCallBriefInput(interveningInput),
+        3
+      )
+    );
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE job_type = 'brief_compilation'
+        AND call_preparation_id <> ${stalePreparation.id}
+        AND status = 'queued'
+    `;
+    const staleJob = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "postgres-stale-recompilation-worker",
+      now: "2096-03-01T00:00:00.000Z",
+      leaseExpiresAt: "2096-03-01T00:01:00.000Z"
+    });
+    expect(staleJob).toMatchObject({
+      callPreparationId: stalePreparation.id,
+      callId: brief.id
+    });
+    const staleLease = {
+      jobId: staleJob!.id,
+      workerId: "postgres-stale-recompilation-worker",
+      checkedAt: "2096-03-01T00:00:01.000Z"
+    };
+    const staleWork = await repository.claimCallPreparation(
+      stalePreparation.id,
+      staleLease
+    );
+    await expect(repository.recompile(
+      brief.id,
+      staleInput,
+      await compiler.compile(
+        normalizeCreateCallBriefInput(staleInput),
+        staleWork.targetRevision
+      ),
+      { preparationId: stalePreparation.id, lease: staleLease }
+    )).rejects.toMatchObject({ code: "CALL_COMPILATION_STALE" });
+    await repository.failDurableJob(
+      staleJob!.id,
+      staleLease.workerId,
+      "CALL_COMPILATION_STALE",
+      "2096-03-01T00:00:02.000Z",
+      "2096-03-01T00:00:03.000Z",
+      false
+    );
+    await expect(repository.getCallPreparation(stalePreparation.id, ownerA))
+      .resolves.toMatchObject({
+        status: "failed",
+        callBriefId: null,
+        attemptCount: 1
+      });
+    await expect(repository.get(brief.id)).resolves.toMatchObject({
+      compilation: {
+        revision: 3,
+        rawBrief: { objective: interveningInput.objective }
+      }
+    });
+  });
+
   it("persists and deduplicates Realtime text/audio usage by provider event", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "Realtime usage office",

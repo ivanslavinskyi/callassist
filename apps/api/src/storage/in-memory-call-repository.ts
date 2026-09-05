@@ -77,6 +77,7 @@ import {
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
   type EnqueueCallPreparationRepositoryInput,
+  type EnqueueCallRecompilationRepositoryInput,
   type ListCallBriefsInput,
   type ListRecipientSuggestionsInput,
   type ListAdminCallsInput,
@@ -158,11 +159,14 @@ type StoredWorkerHeartbeat = DurableWorkerHeartbeatInput & {
 
 type StoredCallPreparation = {
   preparation: Omit<CallPreparation, "attemptCount">;
-  userId: string;
+  userId: string | null;
   idempotencyKey: string;
   inputFingerprint: string;
   input: CreateCallBriefInput | null;
   providerRequestCount: number;
+  targetCallBriefId: string | null;
+  expectedCompilationId: string | null;
+  targetRevision: number;
 };
 
 const interruptedStatuses = new Set<CallBrief["status"]>([
@@ -469,7 +473,10 @@ export class InMemoryCallRepository implements CallRepository {
     const existingId = this.#callPreparationRequests.get(requestKey);
     if (existingId) {
       const existing = this.#callPreparations.get(existingId)!;
-      if (existing.inputFingerprint !== input.inputFingerprint) {
+      if (
+        existing.inputFingerprint !== input.inputFingerprint ||
+        existing.targetCallBriefId !== null
+      ) {
         throw new CallRepositoryError(
           "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
         );
@@ -492,7 +499,100 @@ export class InMemoryCallRepository implements CallRepository {
       idempotencyKey: input.idempotencyKey,
       inputFingerprint: input.inputFingerprint,
       input: copy(input.input),
-      providerRequestCount: 0
+      providerRequestCount: 0,
+      targetCallBriefId: null,
+      expectedCompilationId: null,
+      targetRevision: 1
+    };
+    this.#callPreparations.set(id, stored);
+    this.#callPreparationRequests.set(requestKey, id);
+    try {
+      await this.enqueueDurableJob({
+        type: "brief_compilation",
+        callPreparationId: id,
+        runAfter: input.now,
+        maxAttempts: durableJobMaxAttempts.brief_compilation
+      });
+    } catch (error) {
+      this.#callPreparations.delete(id);
+      this.#callPreparationRequests.delete(requestKey);
+      throw error;
+    }
+    return this.#mapCallPreparation(stored);
+  }
+
+  async enqueueCallRecompilation(
+    input: EnqueueCallRecompilationRepositoryInput
+  ) {
+    const requestKey = `${input.userId}:${input.idempotencyKey}`;
+    const existingId = this.#callPreparationRequests.get(requestKey);
+    if (existingId) {
+      const existing = this.#callPreparations.get(existingId)!;
+      if (
+        existing.inputFingerprint !== input.inputFingerprint ||
+        existing.targetCallBriefId !== input.callBriefId
+      ) {
+        throw new CallRepositoryError(
+          "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+        );
+      }
+      return this.#mapCallPreparation(existing);
+    }
+
+    const snapshot = this.#calls.get(input.callBriefId);
+    if (
+      !snapshot ||
+      this.#owners.get(input.callBriefId) !== input.userId ||
+      this.#callDataDeletions.has(input.callBriefId)
+    ) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
+    if (
+      !["review_required", "needs_clarification", "blocked", "ready"].includes(
+        snapshot.brief.status
+      ) ||
+      (this.#attempts.get(input.callBriefId)?.length ?? 0) > 0
+    ) {
+      throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
+    }
+    const active = [...this.#callPreparations.values()].find(
+      (stored) =>
+        stored.targetCallBriefId === input.callBriefId &&
+        ["queued", "processing", "retrying"].includes(
+          stored.preparation.status
+        )
+    );
+    if (active) {
+      throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+    }
+    const currentCompilation = (this.#compilations.get(input.callBriefId) ?? [])
+      .find((stored) =>
+        stored.revision === snapshot.compilation?.revision &&
+        stored.snapshotHash === snapshot.compilation?.snapshotHash
+      );
+    if (!currentCompilation || !snapshot.compilation) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+
+    const id = randomUUID();
+    const stored: StoredCallPreparation = {
+      preparation: {
+        id,
+        status: "queued",
+        callBriefId: null,
+        failureCode: null,
+        createdAt: input.now,
+        updatedAt: input.now,
+        completedAt: null
+      },
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      inputFingerprint: input.inputFingerprint,
+      input: copy(input.input),
+      providerRequestCount: 0,
+      targetCallBriefId: input.callBriefId,
+      expectedCompilationId: currentCompilation.id,
+      targetRevision: snapshot.compilation.revision + 1
     };
     this.#callPreparations.set(id, stored);
     this.#callPreparationRequests.set(requestKey, id);
@@ -522,15 +622,19 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async findCallPreparationByRequest(
-    userId: string,
+    userId: string | null,
     idempotencyKey: string,
-    inputFingerprint: string
+    inputFingerprint: string,
+    targetCallBriefId: string | null = null
   ) {
     const id = this.#callPreparationRequests.get(`${userId}:${idempotencyKey}`);
     if (!id) return null;
     const stored = this.#callPreparations.get(id);
     if (!stored) return null;
-    if (stored.inputFingerprint !== inputFingerprint) {
+    if (
+      stored.inputFingerprint !== inputFingerprint ||
+      stored.targetCallBriefId !== targetCallBriefId
+    ) {
       throw new CallRepositoryError("CALL_PREPARATION_IDEMPOTENCY_CONFLICT");
     }
     return this.#mapCallPreparation(stored);
@@ -551,7 +655,10 @@ export class InMemoryCallRepository implements CallRepository {
       preparation: this.#mapCallPreparation(stored),
       userId: stored.userId,
       idempotencyKey: stored.idempotencyKey,
-      input: stored.input
+      input: stored.input,
+      targetCallBriefId: stored.targetCallBriefId,
+      expectedCompilationId: stored.expectedCompilationId,
+      targetRevision: stored.targetRevision
     });
   }
 
@@ -992,8 +1099,14 @@ export class InMemoryCallRepository implements CallRepository {
     const feedback = this.#callFeedbackRevisions.get(input.callId) ?? [];
     for (const item of feedback) item.revision.comment = null;
     for (const job of this.#durableJobs.values()) {
+      const preparation = job.callPreparationId
+        ? this.#callPreparations.get(job.callPreparationId)
+        : null;
       if (
-        job.callId !== input.callId ||
+        (
+          job.callId !== input.callId &&
+          preparation?.targetCallBriefId !== input.callId
+        ) ||
         ["succeeded", "dead_letter", "cancelled"].includes(job.status)
       ) continue;
       if (job.status === "running") {
@@ -1016,6 +1129,13 @@ export class InMemoryCallRepository implements CallRepository {
       job.lastErrorCode = "call_data_deleted";
       job.updatedAt = input.deletedAt;
       job.completedAt = input.deletedAt;
+      if (preparation) {
+        preparation.preparation.status = "cancelled";
+        preparation.preparation.failureCode = null;
+        preparation.preparation.updatedAt = input.deletedAt;
+        preparation.preparation.completedAt = input.deletedAt;
+        preparation.input = null;
+      }
     }
     const deletion: CallDataDeletionRecord = {
       requestId: input.requestId,
@@ -1267,10 +1387,38 @@ export class InMemoryCallRepository implements CallRepository {
   async recompile(
     id: string,
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    publication?: CallPreparationPublication
   ) {
     assertCompilationIntegrity(compilation);
     const snapshot = this.#require(id);
+    let preparation: StoredCallPreparation | null = null;
+    if (publication) {
+      this.#assertDurableJobLease(publication.lease);
+      preparation = this.#callPreparations.get(publication.preparationId) ?? null;
+      if (
+        !preparation ||
+        preparation.targetCallBriefId !== id ||
+        preparation.targetRevision !== compilation.revision ||
+        ["failed", "cancelled"].includes(preparation.preparation.status)
+      ) {
+        throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+      }
+      if (preparation.preparation.status === "succeeded") {
+        return copy(snapshot);
+      }
+      const currentCompilation = (this.#compilations.get(id) ?? []).find(
+        (stored) =>
+          stored.revision === snapshot.compilation?.revision &&
+          stored.snapshotHash === snapshot.compilation?.snapshotHash
+      );
+      if (
+        !currentCompilation ||
+        currentCompilation.id !== preparation.expectedCompilationId
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_STALE");
+      }
+    }
     if (
       !["review_required", "needs_clarification", "blocked", "ready"].includes(
         snapshot.brief.status
@@ -1302,6 +1450,19 @@ export class InMemoryCallRepository implements CallRepository {
     this.#compilations.set(id, history);
     snapshot.pendingApproval = null;
     this.#appendCompilationTelemetry(id, compilation, now);
+    if (preparation && publication) {
+      preparation.preparation = {
+        ...preparation.preparation,
+        status: "succeeded",
+        callBriefId: id,
+        failureCode: null,
+        updatedAt: publication.lease.checkedAt,
+        completedAt: publication.lease.checkedAt
+      };
+      preparation.input = null;
+      const job = this.#findDurableJob(publication.lease.jobId);
+      if (job) job.callId = id;
+    }
     return copy(snapshot);
   }
 
@@ -2105,6 +2266,15 @@ export class InMemoryCallRepository implements CallRepository {
     const userId = input.userId ?? null;
     if (userId !== null && this.#owners.get(id) !== userId) {
       throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
+    if ([...this.#callPreparations.values()].some(
+      (stored) =>
+        stored.targetCallBriefId === id &&
+        ["queued", "processing", "retrying"].includes(
+          stored.preparation.status
+        )
+    )) {
+      throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
     }
     if (snapshot.brief.status !== "ready") {
       throw new CallRepositoryError("CALL_NOT_READY");
@@ -3482,8 +3652,11 @@ export class InMemoryCallRepository implements CallRepository {
       return true;
     }
     if ("callPreparationId" in operation) {
-      return this.#callPreparations.get(operation.callPreparationId)
-        ?.preparation.callBriefId === callId;
+      const preparation = this.#callPreparations.get(operation.callPreparationId);
+      return (
+        preparation?.preparation.callBriefId === callId ||
+        preparation?.targetCallBriefId === callId
+      );
     }
     return false;
   }
@@ -3559,7 +3732,11 @@ export class InMemoryCallRepository implements CallRepository {
       if (input.recordingId || input.callAttemptId || !input.callPreparationId) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
-      return { callId: null, targetId: input.callPreparationId };
+      return {
+        callId: this.#callPreparations.get(input.callPreparationId)
+          ?.targetCallBriefId ?? null,
+        targetId: input.callPreparationId
+      };
     }
     if (
       input.type === "provider_call_reconciliation" ||
