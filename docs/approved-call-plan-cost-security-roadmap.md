@@ -132,6 +132,17 @@ clarification answers. The API returns a field issue for direct requests, while
 the create/edit and clarification forms use the same constants for `maxLength`,
 counters, warnings, and submit blocking. Long-document upload remains separate.
 
+Deployment rehearsal on 2026-09-05 applied migrations 0050–0057 first to an
+isolated restored clone and then to the local source database, verified a no-op
+second pass, and passed the full post-migration recovery drill. A real-provider
+call proved immutable attempt binding, compiler/Realtime/Twilio raw usage capture,
+provider-reported Twilio connectivity cost, calculated OpenAI cost, and provider-ID
+deduplication. It did **not** pass the end-to-end release gate: the Russian consent
+flow produced one unclear transcription and the media stream ended during the
+clarification before consent, task execution, recording, or post-call processing.
+The strict settlement inspection failed accordingly. Detailed privacy-safe evidence
+and the required repeat criteria are in `docs/real-provider-drills.md`.
+
 ## Why this roadmap exists
 
 The current production path already replaces the stored runtime `objective`,
