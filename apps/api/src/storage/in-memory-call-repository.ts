@@ -62,6 +62,7 @@ import {
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
+  type AdminProviderUsageBucket,
   type AdminSystemFacts,
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
@@ -1334,6 +1335,8 @@ export class InMemoryCallRepository implements CallRepository {
       brief.createdAt >= from && brief.createdAt <= to
     );
     const facts = emptyAdminOperationsFacts();
+    facts.providerUsage.incurredFrom = from;
+    facts.providerUsage.incurredTo = to;
     const durationValues: number[] = [];
     const firstAudioValues: number[] = [];
     for (const snapshot of scoped) {
@@ -1415,6 +1418,120 @@ export class InMemoryCallRepository implements CallRepository {
     }
     facts.recordedDurationSeconds = aggregateFacts(durationValues);
     facts.firstAudioLatencyMs = aggregateFacts(firstAudioValues);
+    const providerBuckets = new Map<string, AdminProviderUsageBucket>();
+    for (const operation of this.#providerOperations.values()) {
+      if (operation.startedAt >= from && operation.startedAt <= to) {
+        facts.providerUsage.operationCount += 1;
+      }
+      const result = operation.result;
+      if (
+        !result?.usage ||
+        result.completedAt < from ||
+        result.completedAt > to
+      ) continue;
+      const model = result.providerModel ?? operation.requestedModel;
+      const key = [
+        operation.provider,
+        operation.operationType,
+        operation.stage,
+        model
+      ].join("\0");
+      let bucket = providerBuckets.get(key);
+      if (!bucket) {
+        bucket = emptyAdminProviderUsageBucket({
+          provider: operation.provider,
+          operationType: operation.operationType,
+          stage: operation.stage,
+          model
+        });
+        providerBuckets.set(key, bucket);
+      }
+      bucket.usageRecords += 1;
+      bucket.requestCount += result.usage.requestCount ?? 0;
+      addAdminProviderMetric(
+        bucket,
+        "inputTextTokens",
+        "inputTextTokenSamples",
+        result.usage.inputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "cachedInputTextTokens",
+        "cachedInputTextTokenSamples",
+        result.usage.cachedInputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "cacheWriteInputTextTokens",
+        "cacheWriteInputTextTokenSamples",
+        result.usage.cacheWriteInputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "outputTextTokens",
+        "outputTextTokenSamples",
+        result.usage.outputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "reasoningOutputTokens",
+        "reasoningOutputTokenSamples",
+        result.usage.reasoningOutputTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "inputAudioTokens",
+        "inputAudioTokenSamples",
+        result.usage.inputAudioTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "cachedInputAudioTokens",
+        "cachedInputAudioTokenSamples",
+        result.usage.cachedInputAudioTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "outputAudioTokens",
+        "outputAudioTokenSamples",
+        result.usage.outputAudioTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "totalTokens",
+        "totalTokenSamples",
+        result.usage.totalTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "durationSeconds",
+        "durationSamples",
+        result.usage.durationSeconds
+      );
+      addAdminProviderMetric(
+        bucket,
+        "billableSeconds",
+        "billableSamples",
+        result.usage.billableSeconds
+      );
+    }
+    facts.providerUsage.buckets = [...providerBuckets.values()].sort(
+      (left, right) => [
+        left.provider,
+        left.operationType,
+        left.stage,
+        left.model
+      ].join("\0").localeCompare([
+        right.provider,
+        right.operationType,
+        right.stage,
+        right.model
+      ].join("\0"))
+    );
+    facts.providerUsage.usageRecordCount = facts.providerUsage.buckets.reduce(
+      (total, bucket) => total + bucket.usageRecords,
+      0
+    );
     return facts;
   }
 
@@ -3423,8 +3540,62 @@ function emptyAdminOperationsFacts(): AdminOperationsFacts {
     transcriptionRetries: 0,
     realtimeDisconnects: 0,
     recoveries: 0,
-    usageSeconds: { telephony: 0, realtime: 0, transcription: 0 }
+    usageSeconds: { telephony: 0, realtime: 0, transcription: 0 },
+    providerUsage: {
+      incurredFrom: "",
+      incurredTo: "",
+      operationCount: 0,
+      usageRecordCount: 0,
+      buckets: []
+    }
   };
+}
+
+function emptyAdminProviderUsageBucket(identity: Pick<
+  AdminProviderUsageBucket,
+  "provider" | "operationType" | "stage" | "model"
+>): AdminProviderUsageBucket {
+  return {
+    ...identity,
+    usageRecords: 0,
+    requestCount: 0,
+    inputTextTokens: 0,
+    inputTextTokenSamples: 0,
+    cachedInputTextTokens: 0,
+    cachedInputTextTokenSamples: 0,
+    cacheWriteInputTextTokens: 0,
+    cacheWriteInputTextTokenSamples: 0,
+    outputTextTokens: 0,
+    outputTextTokenSamples: 0,
+    reasoningOutputTokens: 0,
+    reasoningOutputTokenSamples: 0,
+    inputAudioTokens: 0,
+    inputAudioTokenSamples: 0,
+    cachedInputAudioTokens: 0,
+    cachedInputAudioTokenSamples: 0,
+    outputAudioTokens: 0,
+    outputAudioTokenSamples: 0,
+    totalTokens: 0,
+    totalTokenSamples: 0,
+    durationSeconds: 0,
+    durationSamples: 0,
+    billableSeconds: 0,
+    billableSamples: 0
+  };
+}
+
+function addAdminProviderMetric<
+  ValueKey extends keyof AdminProviderUsageBucket,
+  SampleKey extends keyof AdminProviderUsageBucket
+>(
+  bucket: AdminProviderUsageBucket,
+  valueKey: ValueKey,
+  sampleKey: SampleKey,
+  value: number | null | undefined
+) {
+  if (value === null || value === undefined) return;
+  (bucket[valueKey] as number) += value;
+  (bucket[sampleKey] as number) += 1;
 }
 
 function incrementAdminSemanticOutcome(

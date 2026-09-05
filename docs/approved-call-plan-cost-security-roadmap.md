@@ -52,7 +52,7 @@ Completed in the first branch increment:
   identifiers invented by the compiled runtime plan.
 
 Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
-path. Migrations 0051 through 0054 and the database-backed concurrency,
+path. Migrations 0051 through 0056 and the database-backed concurrency,
 immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
 Realtime audio-token tests pass locally against PostgreSQL. The mutable current
 `call_briefs` blob remains only as a compatibility projection; immutable revision
@@ -90,6 +90,17 @@ outbound legs are now reserved before the create-call request and terminal statu
 callbacks persist connected `CallDuration` separately from the callback's billed
 `Duration`; callback replay and reconciliation converge on one leg operation.
 Provider-reported Twilio price and recording cost still remain.
+The existing administrator overview now has a first calculated-cost read model:
+it aggregates immutable usage records by provider, operation, stage, and observed
+model over an independent `usage_observed_at` window. A centralized
+`openai-public-2026-09-05` public-list-price snapshot calculates compiler,
+Realtime text/audio, Realtime input transcription, and post-call transcription
+without modifying raw usage. Exact model-family matching is fail-open only for
+reporting: unknown SKUs and returned metrics without a configured rate remain
+explicitly unpriced and make the result partial, never zero. The previous
+configured per-minute estimate remains visible as a separate fallback view.
+Persisted price-rate and calculated-cost records, provider-reported invoice cost,
+and per-preparation/call drill-down are still pending.
 Item 8 is implemented for the current dual-channel utterance path: successful
 chunks are stored encrypted with recording ID, durable-job generation, role/stage,
 chronological key, exact-request fingerprint, model, and provider operation. A
@@ -98,6 +109,13 @@ work. A deliberate administrative retry increments the generation and therefore
 does not silently reuse an earlier result. Partial chunks remain internal, are
 never published as a final transcript, participate in key rotation/recovery
 verification, and are erased with recording or owner-data deletion.
+Item 9 has its first aggregate beta slice: the existing admin API/UI shows raw
+request, text/audio token, cached-token, duration, and model facts alongside the
+calculated OpenAI amount, pricing version, reserved-operation count, usage-record
+count, and unpriced-bucket coverage. It deliberately keeps the call-created
+cohort for outcomes and uses usage observation time for incurred cost. Per-call
+detail, trends, averages, Twilio invoice reconciliation, and persisted cost
+records remain.
 
 ## Why this roadmap exists
 

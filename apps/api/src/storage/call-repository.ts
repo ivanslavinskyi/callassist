@@ -408,6 +408,37 @@ export type AdminOperationsAggregateFacts = {
   p95: number | null;
 };
 
+export type AdminProviderUsageBucket = {
+  provider: string;
+  operationType: string;
+  stage: string;
+  model: string;
+  usageRecords: number;
+  requestCount: number;
+  inputTextTokens: number;
+  inputTextTokenSamples: number;
+  cachedInputTextTokens: number;
+  cachedInputTextTokenSamples: number;
+  cacheWriteInputTextTokens: number;
+  cacheWriteInputTextTokenSamples: number;
+  outputTextTokens: number;
+  outputTextTokenSamples: number;
+  reasoningOutputTokens: number;
+  reasoningOutputTokenSamples: number;
+  inputAudioTokens: number;
+  inputAudioTokenSamples: number;
+  cachedInputAudioTokens: number;
+  cachedInputAudioTokenSamples: number;
+  outputAudioTokens: number;
+  outputAudioTokenSamples: number;
+  totalTokens: number;
+  totalTokenSamples: number;
+  durationSeconds: number;
+  durationSamples: number;
+  billableSeconds: number;
+  billableSamples: number;
+};
+
 export type AdminOperationsFacts = {
   createdCalls: number;
   attemptedCalls: number;
@@ -437,6 +468,13 @@ export type AdminOperationsFacts = {
     telephony: number;
     realtime: number;
     transcription: number;
+  };
+  providerUsage: {
+    incurredFrom: string;
+    incurredTo: string;
+    operationCount: number;
+    usageRecordCount: number;
+    buckets: AdminProviderUsageBucket[];
   };
 };
 

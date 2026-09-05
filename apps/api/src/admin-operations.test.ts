@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildAdminOperationsOverview } from "./admin-operations";
 import { unavailableOperationalCostPolicy } from "./config/operational-cost-policy";
-import type { AdminOperationsFacts } from "./storage/call-repository";
+import type {
+  AdminOperationsFacts,
+  AdminProviderUsageBucket
+} from "./storage/call-repository";
 
 const facts: AdminOperationsFacts = {
   createdCalls: 4,
@@ -42,6 +45,13 @@ const facts: AdminOperationsFacts = {
     telephony: 240,
     realtime: 180,
     transcription: 120
+  },
+  providerUsage: {
+    incurredFrom: "2026-08-21T12:00:00.000Z",
+    incurredTo: "2026-08-22T12:00:00.000Z",
+    operationCount: 0,
+    usageRecordCount: 0,
+    buckets: []
   }
 };
 
@@ -94,4 +104,108 @@ describe("admin operations overview", () => {
       }
     });
   });
+
+  it("calculates model-priced cost from immutable provider usage", () => {
+    const overview = buildAdminOperationsOverview({
+      facts: {
+        ...facts,
+        providerUsage: {
+          incurredFrom: "2026-08-15T12:00:00.000Z",
+          incurredTo: "2026-08-22T12:00:00.000Z",
+          operationCount: 4,
+          usageRecordCount: 3,
+          buckets: [
+            providerBucket({
+              model: "gpt-5.6",
+              inputTextTokens: 1_000,
+              inputTextTokenSamples: 1,
+              cachedInputTextTokens: 200,
+              cachedInputTextTokenSamples: 1,
+              outputTextTokens: 100,
+              outputTextTokenSamples: 1
+            }),
+            providerBucket({
+              operationType: "realtime_response",
+              stage: "conversation",
+              model: "gpt-realtime-2.1",
+              inputAudioTokens: 500,
+              inputAudioTokenSamples: 1,
+              outputAudioTokens: 100,
+              outputAudioTokenSamples: 1
+            }),
+            providerBucket({
+              operationType: "transcription",
+              stage: "full_recording",
+              model: "gpt-transcribe",
+              durationSeconds: 120,
+              durationSamples: 1
+            })
+          ]
+        }
+      },
+      kind: "7d",
+      from: "2026-08-15T12:00:00.000Z",
+      to: "2026-08-22T12:00:00.000Z",
+      costPolicy: unavailableOperationalCostPolicy
+    });
+    expect(overview.cost.providerUsage).toMatchObject({
+      status: "calculated",
+      operationCount: 4,
+      usageRecordCount: 3,
+      unpricedBuckets: 0,
+      calculatedUsdMicros: 36_680,
+      components: {
+        briefCompilation: {
+          calculatedUsdMicros: 5_280,
+          inputTextTokens: 1_000,
+          cachedInputTextTokens: 200
+        },
+        realtimeAudio: {
+          calculatedUsdMicros: 22_400,
+          inputAudioTokens: 500,
+          outputAudioTokens: 100
+        },
+        postCallTranscription: {
+          calculatedUsdMicros: 9_000,
+          durationSeconds: 120
+        }
+      }
+    });
+  });
 });
+
+function providerBucket(
+  overrides: Partial<AdminProviderUsageBucket>
+): AdminProviderUsageBucket {
+  return {
+    provider: "openai",
+    operationType: "brief_compilation",
+    stage: "compilation",
+    model: "gpt-5.6",
+    usageRecords: 1,
+    requestCount: 1,
+    inputTextTokens: 0,
+    inputTextTokenSamples: 0,
+    cachedInputTextTokens: 0,
+    cachedInputTextTokenSamples: 0,
+    cacheWriteInputTextTokens: 0,
+    cacheWriteInputTextTokenSamples: 0,
+    outputTextTokens: 0,
+    outputTextTokenSamples: 0,
+    reasoningOutputTokens: 0,
+    reasoningOutputTokenSamples: 0,
+    inputAudioTokens: 0,
+    inputAudioTokenSamples: 0,
+    cachedInputAudioTokens: 0,
+    cachedInputAudioTokenSamples: 0,
+    outputAudioTokens: 0,
+    outputAudioTokenSamples: 0,
+    totalTokens: 0,
+    totalTokenSamples: 0,
+    durationSeconds: 0,
+    durationSamples: 0,
+    billableSeconds: 0,
+    billableSamples: 0,
+    ...overrides
+  };
+}

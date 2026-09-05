@@ -44,6 +44,18 @@ describe("admin operational read models", () => {
       providerCallId,
       "queued"
     );
+    const telephonyOperationId = randomUUID();
+    await repository.startTelephonyProviderOperation({
+      id: telephonyOperationId,
+      callBriefId: brief.id,
+      callAttemptId: started.attempt.id,
+      provider: "twilio",
+      operationType: "telephony_leg",
+      stage: "outbound_call",
+      requestedModel: "programmable_voice",
+      clientRequestId: telephonyOperationId,
+      startedAt: new Date().toISOString()
+    });
     await repository.applyProviderStatus(
       providerCallId,
       "in-progress",
@@ -97,6 +109,17 @@ describe("admin operational read models", () => {
       "gpt-transcribe-test",
       true
     );
+    await repository.recordTelephonyLegUsage({
+      fallbackOperationId: telephonyOperationId,
+      callBriefId: brief.id,
+      callAttemptId: started.attempt.id,
+      providerCallId,
+      providerStatus: "completed",
+      durationSeconds: 125,
+      billableSeconds: 180,
+      occurredAt: new Date().toISOString(),
+      sequenceNumber: 1
+    });
     await repository.updateStatus(brief.id, "completed");
     await repository.submitOwnerCallFeedback(brief.id, ownerUserId, {
       idempotencyKey: randomUUID(),
@@ -131,7 +154,22 @@ describe("admin operational read models", () => {
         p95: 420
       },
       transcriptionRetries: 1,
-      usageSeconds: { realtime: 120, transcription: 120 }
+      usageSeconds: { realtime: 120, transcription: 120 },
+      providerUsage: {
+        operationCount: 1,
+        usageRecordCount: 1,
+        buckets: [expect.objectContaining({
+          provider: "twilio",
+          operationType: "telephony_leg",
+          model: "programmable_voice",
+          usageRecords: 1,
+          requestCount: 1,
+          durationSeconds: 125,
+          durationSamples: 1,
+          billableSeconds: 180,
+          billableSamples: 1
+        })]
+      }
     });
 
     await repository.setOutboundCallsEnabled(false, {

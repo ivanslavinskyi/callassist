@@ -34,6 +34,35 @@ const costComponentSchema = z.strictObject({
   estimatedUsdMicros: countSchema.nullable()
 });
 
+const providerUsageCostComponentSchema = z.strictObject({
+  usageRecords: countSchema,
+  requests: countSchema,
+  models: z.array(z.string().trim().min(1).max(160)).max(50),
+  inputTextTokens: countSchema,
+  inputTextTokenSamples: countSchema,
+  cachedInputTextTokens: countSchema,
+  cachedInputTextTokenSamples: countSchema,
+  cacheWriteInputTextTokens: countSchema,
+  cacheWriteInputTextTokenSamples: countSchema,
+  outputTextTokens: countSchema,
+  outputTextTokenSamples: countSchema,
+  reasoningOutputTokens: countSchema,
+  reasoningOutputTokenSamples: countSchema,
+  inputAudioTokens: countSchema,
+  inputAudioTokenSamples: countSchema,
+  cachedInputAudioTokens: countSchema,
+  cachedInputAudioTokenSamples: countSchema,
+  outputAudioTokens: countSchema,
+  outputAudioTokenSamples: countSchema,
+  totalTokens: countSchema,
+  totalTokenSamples: countSchema,
+  durationSeconds: z.number().nonnegative(),
+  durationSamples: countSchema,
+  billableSeconds: z.number().nonnegative(),
+  billableSamples: countSchema,
+  calculatedUsdMicros: countSchema.nullable()
+});
+
 export const adminOperationsOverviewSchema = z.strictObject({
   generatedAt: z.iso.datetime(),
   window: z.strictObject({
@@ -90,6 +119,25 @@ export const adminOperationsOverviewSchema = z.strictObject({
       telephony: costComponentSchema,
       realtime: costComponentSchema,
       transcription: costComponentSchema
+    }),
+    providerUsage: z.strictObject({
+      status: z.enum(["unavailable", "partial", "calculated"]),
+      cohort: z.literal("usage_observed_at"),
+      from: z.iso.datetime(),
+      to: z.iso.datetime(),
+      pricingVersion: z.string().trim().min(1).max(80),
+      operationCount: countSchema,
+      usageRecordCount: countSchema,
+      unpricedBuckets: countSchema,
+      calculatedUsdMicros: countSchema.nullable(),
+      components: z.strictObject({
+        briefCompilation: providerUsageCostComponentSchema,
+        realtimeText: providerUsageCostComponentSchema,
+        realtimeAudio: providerUsageCostComponentSchema,
+        realtimeTranscription: providerUsageCostComponentSchema,
+        postCallTranscription: providerUsageCostComponentSchema,
+        telephony: providerUsageCostComponentSchema
+      })
     })
   })
 });

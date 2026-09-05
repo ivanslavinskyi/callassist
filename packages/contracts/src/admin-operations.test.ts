@@ -97,6 +97,52 @@ describe("admin operations contracts", () => {
             rateUsdMicrosPerMinute: null,
             estimatedUsdMicros: null
           }
+        },
+        providerUsage: {
+          status: "unavailable",
+          cohort: "usage_observed_at",
+          from: "2026-08-21T12:00:00.000Z",
+          to: "2026-08-22T12:00:00.000Z",
+          pricingVersion: "openai-public-2026-09-05",
+          operationCount: 0,
+          usageRecordCount: 0,
+          unpricedBuckets: 0,
+          calculatedUsdMicros: null,
+          components: Object.fromEntries([
+            "briefCompilation",
+            "realtimeText",
+            "realtimeAudio",
+            "realtimeTranscription",
+            "postCallTranscription",
+            "telephony"
+          ].map((key) => [key, {
+            usageRecords: 0,
+            requests: 0,
+            models: [],
+            inputTextTokens: 0,
+            inputTextTokenSamples: 0,
+            cachedInputTextTokens: 0,
+            cachedInputTextTokenSamples: 0,
+            cacheWriteInputTextTokens: 0,
+            cacheWriteInputTextTokenSamples: 0,
+            outputTextTokens: 0,
+            outputTextTokenSamples: 0,
+            reasoningOutputTokens: 0,
+            reasoningOutputTokenSamples: 0,
+            inputAudioTokens: 0,
+            inputAudioTokenSamples: 0,
+            cachedInputAudioTokens: 0,
+            cachedInputAudioTokenSamples: 0,
+            outputAudioTokens: 0,
+            outputAudioTokenSamples: 0,
+            totalTokens: 0,
+            totalTokenSamples: 0,
+            durationSeconds: 0,
+            durationSamples: 0,
+            billableSeconds: 0,
+            billableSamples: 0,
+            calculatedUsdMicros: null
+          }]))
         }
       }
     });

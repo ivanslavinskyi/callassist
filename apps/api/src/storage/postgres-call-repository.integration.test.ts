@@ -2084,6 +2084,32 @@ describeWithDatabase("PostgresCallRepository", () => {
       connectedSeconds: 37,
       billableSeconds: 60
     });
+    const facts = await repository.getAdminOperationsFacts(
+      "2096-01-03T00:00:00.000Z",
+      "2096-01-03T00:01:00.000Z"
+    );
+    expect(facts.providerUsage.operationCount).toBeGreaterThanOrEqual(4);
+    expect(facts.providerUsage.usageRecordCount).toBeGreaterThanOrEqual(2);
+    const realtimeBucket = facts.providerUsage.buckets.find((bucket) =>
+      bucket.provider === "openai" &&
+      bucket.operationType === "realtime_response" &&
+      bucket.model === "gpt-realtime-2.1-2026-08-01"
+    );
+    expect(realtimeBucket).toMatchObject({
+      stage: "conversation",
+      usageRecords: expect.any(Number)
+    });
+    expect(realtimeBucket!.inputTextTokens).toBeGreaterThanOrEqual(70);
+    expect(realtimeBucket!.cachedInputTextTokens).toBeGreaterThanOrEqual(20);
+    expect(realtimeBucket!.inputAudioTokens).toBeGreaterThanOrEqual(50);
+    expect(realtimeBucket!.cachedInputAudioTokens).toBeGreaterThanOrEqual(5);
+    expect(realtimeBucket!.outputAudioTokens).toBeGreaterThanOrEqual(20);
+    const telephonyBucket = facts.providerUsage.buckets.find((bucket) =>
+      bucket.provider === "twilio" &&
+      bucket.operationType === "telephony_leg"
+    );
+    expect(telephonyBucket!.durationSeconds).toBeGreaterThanOrEqual(37);
+    expect(telephonyBucket!.billableSeconds).toBeGreaterThanOrEqual(60);
   });
 
   it("atomically cancels active preparations and erases their private input", async () => {

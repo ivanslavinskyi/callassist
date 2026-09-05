@@ -317,6 +317,39 @@ type AdminOperationsFactsRow = {
   transcriptionUsageSeconds: number;
 };
 
+type AdminProviderOperationCountRow = { operationCount: number };
+
+type AdminProviderUsageRow = {
+  provider: string;
+  operationType: string;
+  stage: string;
+  model: string;
+  usageRecords: number;
+  requestCount: number;
+  inputTextTokens: number;
+  inputTextTokenSamples: number;
+  cachedInputTextTokens: number;
+  cachedInputTextTokenSamples: number;
+  cacheWriteInputTextTokens: number;
+  cacheWriteInputTextTokenSamples: number;
+  outputTextTokens: number;
+  outputTextTokenSamples: number;
+  reasoningOutputTokens: number;
+  reasoningOutputTokenSamples: number;
+  inputAudioTokens: number;
+  inputAudioTokenSamples: number;
+  cachedInputAudioTokens: number;
+  cachedInputAudioTokenSamples: number;
+  outputAudioTokens: number;
+  outputAudioTokenSamples: number;
+  totalTokens: number;
+  totalTokenSamples: number;
+  durationSeconds: number;
+  durationSamples: number;
+  billableSeconds: number;
+  billableSamples: number;
+};
+
 type AdminSystemFactsRow = {
   outboundCallsEnabled: boolean;
   outboundCallsReason: string;
@@ -2484,6 +2517,78 @@ export class PostgresCallRepository implements CallRepository {
       FROM signals
     `;
     if (!row) throw new Error("Admin operations query returned no row");
+    const [[operationCount], usageRows] = await Promise.all([
+      this.#sql<AdminProviderOperationCountRow[]>`
+        SELECT count(*)::int AS "operationCount"
+        FROM provider_operations
+        WHERE started_at >= ${from}::timestamptz
+          AND started_at <= ${to}::timestamptz
+      `,
+      this.#sql<AdminProviderUsageRow[]>`
+        SELECT
+          operations.provider,
+          operations.operation_type AS "operationType",
+          operations.stage,
+          COALESCE(results.provider_model, operations.requested_model)
+            AS model,
+          count(*)::int AS "usageRecords",
+          COALESCE(sum(usage.request_count), 0)::int AS "requestCount",
+          COALESCE(sum(usage.input_text_tokens), 0)::double precision
+            AS "inputTextTokens",
+          count(usage.input_text_tokens)::int AS "inputTextTokenSamples",
+          COALESCE(sum(usage.cached_input_text_tokens), 0)::double precision
+            AS "cachedInputTextTokens",
+          count(usage.cached_input_text_tokens)::int
+            AS "cachedInputTextTokenSamples",
+          COALESCE(sum(usage.cache_write_input_text_tokens), 0)::double precision
+            AS "cacheWriteInputTextTokens",
+          count(usage.cache_write_input_text_tokens)::int
+            AS "cacheWriteInputTextTokenSamples",
+          COALESCE(sum(usage.output_text_tokens), 0)::double precision
+            AS "outputTextTokens",
+          count(usage.output_text_tokens)::int AS "outputTextTokenSamples",
+          COALESCE(sum(usage.reasoning_output_tokens), 0)::double precision
+            AS "reasoningOutputTokens",
+          count(usage.reasoning_output_tokens)::int
+            AS "reasoningOutputTokenSamples",
+          COALESCE(sum(usage.input_audio_tokens), 0)::double precision
+            AS "inputAudioTokens",
+          count(usage.input_audio_tokens)::int AS "inputAudioTokenSamples",
+          COALESCE(sum(usage.cached_input_audio_tokens), 0)::double precision
+            AS "cachedInputAudioTokens",
+          count(usage.cached_input_audio_tokens)::int
+            AS "cachedInputAudioTokenSamples",
+          COALESCE(sum(usage.output_audio_tokens), 0)::double precision
+            AS "outputAudioTokens",
+          count(usage.output_audio_tokens)::int AS "outputAudioTokenSamples",
+          COALESCE(sum(usage.total_tokens), 0)::double precision
+            AS "totalTokens",
+          count(usage.total_tokens)::int AS "totalTokenSamples",
+          COALESCE(sum(usage.duration_seconds), 0)::double precision
+            AS "durationSeconds",
+          count(usage.duration_seconds)::int AS "durationSamples",
+          COALESCE(sum(usage.billable_seconds), 0)::double precision
+            AS "billableSeconds",
+          count(usage.billable_seconds)::int AS "billableSamples"
+        FROM provider_usage_records usage
+        JOIN provider_operations operations
+          ON operations.id = usage.operation_id
+        LEFT JOIN provider_operation_results results
+          ON results.operation_id = operations.id
+        WHERE usage.observed_at >= ${from}::timestamptz
+          AND usage.observed_at <= ${to}::timestamptz
+        GROUP BY
+          operations.provider,
+          operations.operation_type,
+          operations.stage,
+          COALESCE(results.provider_model, operations.requested_model)
+        ORDER BY
+          operations.provider,
+          operations.operation_type,
+          operations.stage,
+          COALESCE(results.provider_model, operations.requested_model)
+      `
+    ]);
     return {
       createdCalls: row.createdCalls,
       attemptedCalls: row.attemptedCalls,
@@ -2523,6 +2628,16 @@ export class PostgresCallRepository implements CallRepository {
         telephony: row.telephonyUsageSeconds,
         realtime: row.realtimeUsageSeconds,
         transcription: row.transcriptionUsageSeconds
+      },
+      providerUsage: {
+        incurredFrom: from,
+        incurredTo: to,
+        operationCount: operationCount?.operationCount ?? 0,
+        usageRecordCount: usageRows.reduce(
+          (total, bucket) => total + bucket.usageRecords,
+          0
+        ),
+        buckets: usageRows
       }
     };
   }
