@@ -1920,6 +1920,23 @@ describeWithDatabase("PostgresCallRepository", () => {
         outputTextTokens: 40
       })]
     });
+    const preparationFacts = await repository.getAdminOperationsFacts(
+      "2096-01-01T00:00:00.000Z",
+      "2096-01-01T00:01:00.000Z",
+      undefined,
+      queued.id
+    );
+    expect(preparationFacts).toMatchObject({
+      createdCalls: 0,
+      providerUsage: {
+        operationCount: 8,
+        usageRecordCount: 1,
+        buckets: [expect.objectContaining({
+          operationType: "brief_compilation",
+          inputTextTokens: 100
+        })]
+      }
+    });
     await expect(inspection`
       UPDATE provider_operations
       SET stage = 'output_moderation'

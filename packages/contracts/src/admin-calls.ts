@@ -22,6 +22,7 @@ import {
   callTelemetryStageSchema
 } from "./call-telemetry";
 import { adminOperationsOverviewSchema } from "./admin-operations";
+import { callPreparationSchema } from "./call-preparation";
 
 export const ADMIN_CALL_LIST_LIMIT_MAX = 100;
 
@@ -111,6 +112,15 @@ export const adminCallCostBreakdownSchema = z.strictObject({
 });
 export type AdminCallCostBreakdown = z.infer<
   typeof adminCallCostBreakdownSchema
+>;
+
+export const adminCallPreparationInspectorSchema = z.strictObject({
+  preparation: callPreparationSchema,
+  generatedAt: z.iso.datetime(),
+  cost: adminOperationsOverviewSchema.shape.cost
+});
+export type AdminCallPreparationInspector = z.infer<
+  typeof adminCallPreparationInspectorSchema
 >;
 
 export const sensitiveCallAccessInputSchema = z.strictObject({

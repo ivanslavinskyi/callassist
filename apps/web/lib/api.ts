@@ -12,6 +12,7 @@ import type {
   AdminContentRevisionSummary,
   AdminCallInspector,
   AdminCallCostBreakdown,
+  AdminCallPreparationInspector,
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
@@ -640,6 +641,12 @@ export function getCallPreparationErrorMessage(
 export async function getAdminCallCostBreakdown(id: string) {
   return apiRequest<AdminCallCostBreakdown>(
     `/api/admin/calls/${encodeURIComponent(id)}/cost`
+  );
+}
+
+export async function getAdminCallPreparationInspector(id: string) {
+  return apiRequest<AdminCallPreparationInspector>(
+    `/api/admin/call-preparations/${encodeURIComponent(id)}`
   );
 }
 

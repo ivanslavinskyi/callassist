@@ -285,6 +285,11 @@ export function AdminSystemConsole() {
                           {copy.jobCall}
                         </Link>
                       ) : null}
+                      {!job.callId && job.callPreparationId ? (
+                        <Link href={`/admin/calls/preparations/${job.callPreparationId}`}>
+                          {copy.jobPreparation}
+                        </Link>
+                      ) : null}
                     </header>
                     <dl className="admin-operations-list">
                       <Fact label={copy.jobAttempt} value={`${job.attemptCount} / ${job.maxAttempts}`} />

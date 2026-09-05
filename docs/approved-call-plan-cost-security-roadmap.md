@@ -89,7 +89,8 @@ failure, and keeps pricing out of raw usage. Twilio
 outbound legs are now reserved before the create-call request and terminal status
 callbacks persist connected `CallDuration` separately from the callback's billed
 `Duration`; callback replay and reconciliation converge on one leg operation.
-Provider-reported Twilio price and recording cost still remain.
+Provider-reported Twilio connectivity price is now reconciled after terminal
+calls; recording and other feature-specific Twilio charges still remain.
 The existing administrator overview now has a first calculated-cost read model:
 it aggregates immutable usage records by provider, operation, stage, and observed
 model over an independent `usage_observed_at` window. A centralized
@@ -99,8 +100,9 @@ without modifying raw usage. Exact model-family matching is fail-open only for
 reporting: unknown SKUs and returned metrics without a configured rate remain
 explicitly unpriced and make the result partial, never zero. The previous
 configured per-minute estimate remains visible as a separate fallback view.
-Persisted price-rate and calculated-cost records, provider-reported invoice cost,
-and per-preparation/call drill-down are still pending.
+Persisted price-rate and calculated-cost records remain pending. Twilio call
+connectivity price is now reconciled as a separate provider-reported actual cost;
+recording and other Twilio feature charges remain outside that record.
 Item 8 is implemented for the current dual-channel utterance path: successful
 chunks are stored encrypted with recording ID, durable-job generation, role/stage,
 chronological key, exact-request fingerprint, model, and provider operation. A
@@ -109,12 +111,15 @@ work. A deliberate administrative retry increments the generation and therefore
 does not silently reuse an earlier result. Partial chunks remain internal, are
 never published as a final transcript, participate in key rotation/recovery
 verification, and are erased with recording or owner-data deletion.
-Item 9 has its first aggregate beta slice: the existing admin API/UI shows raw
+Item 9 now has aggregate and drill-down beta slices: the existing admin API/UI shows raw
 request, text/audio token, cached-token, duration, and model facts alongside the
 calculated OpenAI amount, pricing version, reserved-operation count, usage-record
 count, and unpriced-bucket coverage. It deliberately keeps the call-created
-cohort for outcomes and uses usage observation time for incurred cost. Per-call
-detail, trends, averages, Twilio invoice reconciliation, and persisted cost
+cohort for outcomes and uses usage observation time for incurred cost. Call
+Inspector shows attempt-bound call usage and linked compiler usage. A separate
+privacy-safe Preparation Inspector is reachable from recent durable preparation
+jobs, including failures without a call ID. A complete historical preparation
+list, trends, averages, invoice reconciliation, and persisted calculated-cost
 records remain.
 Item 10's beta input guard is implemented: one exported contract owns every
 per-field/array limit plus the 16,000 soft and 20,000 hard task-text budgets.
@@ -502,8 +507,9 @@ provider-reported actual charges as three visibly separate views. Reported
 currencies are grouped independently; the USD total never absorbs CHF/EUR through
 an implicit exchange rate. The existing Call Inspector now exposes the same
 breakdown for one call and includes compiler operations linked through that call's
-preparation. Failed preparations that never produced a call still need a dedicated
-preparation inspector; coverage ratios also remain pending.
+preparation. Recent durable jobs link to a dedicated privacy-safe Preparation
+Inspector, so failed compilation usage remains inspectable even without a call ID.
+A complete paginated preparation history and coverage ratios remain pending.
 
 ### Later scope
 

@@ -431,6 +431,24 @@ describe("CallService", () => {
       .toHaveLength(2);
     expect(operations.every(({ result }) => result?.outcome === "succeeded"))
       .toBe(true);
+    await expect(service.getAdminCallPreparationInspector(preparation.id))
+      .resolves.toMatchObject({
+        preparation: {
+          id: preparation.id,
+          status: "failed",
+          callBriefId: null,
+          failureCode: "BRIEF_COMPILER_RESPONSE_INVALID"
+        },
+        cost: {
+          providerUsage: {
+            operationCount: 3,
+            usageRecordCount: 2,
+            components: {
+              briefCompilation: { usageRecords: 2 }
+            }
+          }
+        }
+      });
   });
 
   it("rejects approval when the reviewed revision was replaced", async () => {

@@ -1394,6 +1394,10 @@ describe("auth API", () => {
       { method: "GET", url: `/api/admin/calls/${callId}` },
       { method: "GET", url: `/api/admin/calls/${callId}/cost` },
       {
+        method: "GET",
+        url: `/api/admin/call-preparations/${randomUUID()}`
+      },
+      {
         method: "POST",
         url: `/api/admin/calls/${callId}/sensitive-access`,
         payload: { reason: "Unauthorized access test" }
@@ -1652,6 +1656,11 @@ describe("auth API", () => {
 
     const created = await createPreparedCall(app, ownerCookie);
     const callId = created.json<{ id: string }>().id;
+    const preparationId = (await callRepository.listDurableJobs()).find(
+      ({ type, callId: linkedCallId }) =>
+        type === "brief_compilation" && linkedCallId === callId
+    )?.callPreparationId;
+    expect(preparationId).toBeTruthy();
     await callRepository.updateStatus(callId, "failed");
     await callRepository.recordSystemCallOutcome(callId);
 
@@ -1704,6 +1713,25 @@ describe("auth API", () => {
       }
     });
     expect(JSON.stringify(cost.json())).not.toContain(callBrief.phoneNumber);
+
+    const preparation = await app.inject({
+      method: "GET",
+      url: `/api/admin/call-preparations/${preparationId}`,
+      headers: { cookie: adminCookie }
+    });
+    expect(preparation.statusCode).toBe(200);
+    expect(preparation.headers["cache-control"]).toBe("private, no-store");
+    expect(preparation.json()).toMatchObject({
+      preparation: {
+        id: preparationId,
+        status: "succeeded",
+        callBriefId: callId
+      },
+      cost: {
+        providerUsage: { cohort: "usage_observed_at" }
+      }
+    });
+    expect(JSON.stringify(preparation.json())).not.toContain(callBrief.phoneNumber);
 
     const adminSensitive = await app.inject({
       method: "POST",

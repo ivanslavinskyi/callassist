@@ -3,6 +3,7 @@ import type {
   CallFailureStage,
   CallGoalResult,
   CallLocale,
+  CallPreparationStatus,
   CallOutcomeProvenance,
   SemanticCallOutcome,
   TranscriptQualityRating
@@ -54,6 +55,23 @@ const en = {
   outcomeHistory: "Outcome provenance",
   noOutcomeHistory: "No outcome revisions are recorded.",
   revision: "Revision",
+  preparationEyebrow: "Preparation operations",
+  preparationTitle: "Preparation Inspector",
+  preparationHelp: "Privacy-safe durable state and provider usage for one brief preparation. The original user input is not exposed.",
+  preparationId: "Preparation ID",
+  preparationAttempts: "Durable attempts",
+  preparationFailure: "Failure code",
+  preparationCompleted: "Completed",
+  preparationLinkedCall: "Open linked Call Inspector",
+  preparationBack: "Back to System Status",
+  preparationStatuses: {
+    queued: "Queued",
+    processing: "Processing",
+    retrying: "Retrying",
+    succeeded: "Succeeded",
+    failed: "Failed",
+    cancelled: "Cancelled"
+  } satisfies Record<CallPreparationStatus, string>,
   costTitle: "Usage and cost breakdown",
   costHelp: "Configured duration estimates, calculated model-list-price cost, and provider-reported actual charges are separate. Unknown usage remains unavailable, not zero.",
   configuredEstimate: "Configured fallback estimate",
@@ -165,7 +183,7 @@ const en = {
 type StructuredMessageKey =
   "loaded" | "statuses" | "outcomes" | "consents" | "failures" |
   "provenance" | "goalResults" | "transcriptRatings" | "connections" |
-  "processStates" | "languages" | "costComponents";
+  "processStates" | "languages" | "costComponents" | "preparationStatuses";
 
 type AdminCallMessages = {
   [Key in Exclude<keyof typeof en, StructuredMessageKey>]: string;
@@ -190,6 +208,7 @@ type AdminCallMessages = {
     | "telephony",
     string
   >;
+  preparationStatuses: Record<CallPreparationStatus, string>;
 };
 
 const de: AdminCallMessages = {
@@ -238,6 +257,23 @@ const de: AdminCallMessages = {
   outcomeHistory: "Ergebnisprovenienz",
   noOutcomeHistory: "Es sind keine Ergebnisrevisionen gespeichert.",
   revision: "Revision",
+  preparationEyebrow: "Vorbereitungsvorgänge",
+  preparationTitle: "Vorbereitungs-Inspector",
+  preparationHelp: "Datenschutzgerechter dauerhafter Status und Anbieternutzung für eine Brief-Vorbereitung. Die ursprüngliche Benutzereingabe wird nicht angezeigt.",
+  preparationId: "Vorbereitungs-ID",
+  preparationAttempts: "Dauerhafte Versuche",
+  preparationFailure: "Fehlercode",
+  preparationCompleted: "Abgeschlossen",
+  preparationLinkedCall: "Verknüpften Call Inspector öffnen",
+  preparationBack: "Zurück zum Systemstatus",
+  preparationStatuses: {
+    queued: "Eingereiht",
+    processing: "In Bearbeitung",
+    retrying: "Wiederholung",
+    succeeded: "Erfolgreich",
+    failed: "Fehlgeschlagen",
+    cancelled: "Abgebrochen"
+  },
   costTitle: "Nutzungs- und Kostenaufschlüsselung",
   costHelp: "Konfigurierte Dauerschätzungen, aus Modell-Listenpreisen berechnete Kosten und vom Anbieter gemeldete Ist-Kosten bleiben getrennt. Unbekannte Nutzung wird nicht als null ausgegeben.",
   configuredEstimate: "Konfigurierte Ersatzschätzung",

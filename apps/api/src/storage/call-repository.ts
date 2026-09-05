@@ -725,6 +725,7 @@ export interface CallRepository {
     id: string,
     userId: string
   ): Promise<CallPreparation | null>;
+  getAdminCallPreparation(id: string): Promise<CallPreparation | null>;
   claimCallPreparation(
     id: string,
     lease: DurableJobLease
@@ -808,7 +809,8 @@ export interface CallRepository {
   getAdminOperationsFacts(
     from: string,
     to: string,
-    callId?: string
+    callId?: string,
+    preparationId?: string
   ): Promise<AdminOperationsFacts>;
   getAdminSystemFacts(
     now: string,

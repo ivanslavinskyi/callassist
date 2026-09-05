@@ -844,6 +844,11 @@ export class PostgresCallRepository implements CallRepository {
     return row ? mapCallPreparationRow(row) : null;
   }
 
+  async getAdminCallPreparation(id: string) {
+    const row = await this.#getCallPreparation(id);
+    return row ? mapCallPreparationRow(row) : null;
+  }
+
   async findCallPreparationByRequest(
     userId: string,
     idempotencyKey: string,
@@ -2441,7 +2446,8 @@ export class PostgresCallRepository implements CallRepository {
   async getAdminOperationsFacts(
     from: string,
     to: string,
-    callId?: string
+    callId?: string,
+    preparationId?: string
   ): Promise<AdminOperationsFacts> {
     const [row] = await this.#sql<AdminOperationsFactsRow[]>`
       WITH scoped_calls AS (
@@ -2449,6 +2455,7 @@ export class PostgresCallRepository implements CallRepository {
         FROM call_briefs
         WHERE created_at >= ${from}::timestamptz
           AND created_at <= ${to}::timestamptz
+          AND ${preparationId ?? null}::uuid IS NULL
           AND (${callId ?? null}::uuid IS NULL OR id = ${callId ?? null})
       ),
       signals AS (
@@ -2630,7 +2637,15 @@ export class PostgresCallRepository implements CallRepository {
         WHERE started_at >= ${from}::timestamptz
           AND started_at <= ${to}::timestamptz
           AND (
-            ${callId ?? null}::uuid IS NULL
+            (
+              ${preparationId ?? null}::uuid IS NOT NULL
+              AND provider_operations.call_preparation_id =
+                ${preparationId ?? null}
+            )
+            OR (
+              ${preparationId ?? null}::uuid IS NULL
+              AND ${callId ?? null}::uuid IS NULL
+            )
             OR provider_operations.call_brief_id = ${callId ?? null}
             OR EXISTS (
               SELECT 1
@@ -2695,7 +2710,14 @@ export class PostgresCallRepository implements CallRepository {
         WHERE usage.observed_at >= ${from}::timestamptz
           AND usage.observed_at <= ${to}::timestamptz
           AND (
-            ${callId ?? null}::uuid IS NULL
+            (
+              ${preparationId ?? null}::uuid IS NOT NULL
+              AND operations.call_preparation_id = ${preparationId ?? null}
+            )
+            OR (
+              ${preparationId ?? null}::uuid IS NULL
+              AND ${callId ?? null}::uuid IS NULL
+            )
             OR operations.call_brief_id = ${callId ?? null}
             OR EXISTS (
               SELECT 1
@@ -2728,7 +2750,14 @@ export class PostgresCallRepository implements CallRepository {
         WHERE costs.observed_at >= ${from}::timestamptz
           AND costs.observed_at <= ${to}::timestamptz
           AND (
-            ${callId ?? null}::uuid IS NULL
+            (
+              ${preparationId ?? null}::uuid IS NOT NULL
+              AND operations.call_preparation_id = ${preparationId ?? null}
+            )
+            OR (
+              ${preparationId ?? null}::uuid IS NULL
+              AND ${callId ?? null}::uuid IS NULL
+            )
             OR operations.call_brief_id = ${callId ?? null}
             OR EXISTS (
               SELECT 1

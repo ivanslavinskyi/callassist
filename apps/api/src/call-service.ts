@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   adminOperationsWindowBounds,
   adminCallCostBreakdownSchema,
+  adminCallPreparationInspectorSchema,
   adminSystemStatusSchema,
   normalizeCreateCallBriefInput,
   isSwissDestinationPhone,
@@ -308,6 +309,25 @@ export class CallService {
     );
     return adminCallCostBreakdownSchema.parse({
       callId: id,
+      generatedAt,
+      cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
+    });
+  }
+
+  async getAdminCallPreparationInspector(id: string) {
+    const preparation = await this.repository.getAdminCallPreparation(id);
+    if (!preparation) {
+      throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    }
+    const generatedAt = new Date().toISOString();
+    const facts = await this.repository.getAdminOperationsFacts(
+      "1970-01-01T00:00:00.000Z",
+      generatedAt,
+      undefined,
+      id
+    );
+    return adminCallPreparationInspectorSchema.parse({
+      preparation,
       generatedAt,
       cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
     });
