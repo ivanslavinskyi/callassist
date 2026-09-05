@@ -210,6 +210,7 @@ describeWithDatabase("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
     await repository.addTranscript(
       brief.id,
       "recipient",
@@ -225,13 +226,36 @@ describeWithDatabase("PostgresCallRepository", () => {
     });
     const attemptId = randomUUID();
     const jobId = randomUUID();
+    const [attemptPlan] = await inspection<{
+      compilationId: string;
+      revision: number;
+      snapshotHash: string;
+      executionSnapshotCiphertext: string;
+    }[]>`
+      SELECT
+        call_compilations.id AS "compilationId",
+        call_compilations.revision,
+        call_compilations.snapshot_hash AS "snapshotHash",
+        call_compilation_approvals.execution_snapshot_ciphertext
+          AS "executionSnapshotCiphertext"
+      FROM call_briefs
+      JOIN call_compilations
+        ON call_compilations.id = call_briefs.current_compilation_id
+      JOIN call_compilation_approvals
+        ON call_compilation_approvals.compilation_id = call_compilations.id
+      WHERE call_briefs.id = ${brief.id}
+    `;
     await inspection`
       INSERT INTO call_attempts (
         id, call_brief_id, user_id, provider, provider_call_id,
-        status, provider_status, started_at, ended_at, created_at
+        status, provider_status, compilation_id, compilation_revision,
+        compilation_snapshot_hash, execution_snapshot_ciphertext,
+        started_at, ended_at, created_at
       ) VALUES (
         ${attemptId}, ${brief.id}, ${ownerA}, 'twilio', 'CA-private-delete',
-        'completed', 'completed', now(), now(), now()
+        'completed', 'completed', ${attemptPlan!.compilationId},
+        ${attemptPlan!.revision}, ${attemptPlan!.snapshotHash},
+        ${attemptPlan!.executionSnapshotCiphertext}, now(), now(), now()
       )
     `;
     await inspection`
@@ -1727,7 +1751,7 @@ describeWithDatabase("PostgresCallRepository", () => {
             approvedCompilation,
             encryptionKey
           )},
-          status = 'ready'
+          status = 'completed'
         WHERE id = ${brief.id}
       `;
       const during = await repository.getAdminSystemFacts(
@@ -1745,8 +1769,15 @@ describeWithDatabase("PostgresCallRepository", () => {
       await expect(repository.startAttempt(brief.id, {
         provider: "mock"
       })).rejects.toMatchObject({
-        code: "CALL_COMPILATION_RECOMPILE_REQUIRED"
+        code: "CALL_NOT_READY"
       });
+      await expect(inspection`
+        INSERT INTO call_attempts (
+          id, call_brief_id, provider, status, started_at, created_at
+        ) VALUES (
+          ${randomUUID()}, ${brief.id}, 'mock', 'dialing', now(), now()
+        )
+      `).rejects.toThrow("require an immutable execution plan");
       const preview = await repository.backfillLegacyCompilationBatch(
         500,
         null,

@@ -52,7 +52,7 @@ Completed in the first branch increment:
   identifiers invented by the compiled runtime plan.
 
 Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
-path. Migrations 0051 through 0058 and the database-backed concurrency,
+path. Migrations 0051 through 0059 and the database-backed concurrency,
 immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
 Realtime audio-token tests pass locally against PostgreSQL. The mutable current
 `call_briefs` blob remains only as a compatibility projection; immutable revision
@@ -182,6 +182,14 @@ remains encrypted for controlled audit/backfill disposition but is not represent
 as a current `CallCompilation` API object. This removes
 the mutable compilation from the execution trust boundary while retaining the
 temporary UI/audit read fallback needed for explicit legacy disposition.
+Migration 0059 mirrors the application boundary in PostgreSQL: every newly
+inserted attempt must contain compilation ID, revision, hash, and encrypted
+execution snapshot, and every newly written `ready` brief must have an immutable
+compilation pointer. The ready-row constraint is initially `NOT VALID` so the
+schema can be deployed without rewriting historical rows; it still protects all
+new and changed rows. Validation is deferred until legacy disposition reaches
+zero. The migration was applied locally after a 59-migration catalog check and
+the post-migration recovery drill passed.
 
 The item 11 maintenance command is `pnpm db:backfill:call-plans`. Its default is
 a read-only dry run that emits aggregate JSON only. Execution additionally
