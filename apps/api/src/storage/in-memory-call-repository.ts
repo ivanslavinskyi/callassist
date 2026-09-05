@@ -1468,9 +1468,6 @@ export class InMemoryCallRepository implements CallRepository {
       const duration = snapshot.recording?.durationSeconds;
       if (duration !== null && duration !== undefined) {
         durationValues.push(duration);
-        if (events.some(({ payload }) => payload.name === "realtime.ready")) {
-          facts.usageSeconds.realtime += duration;
-        }
         if (events.some(
           ({ payload }) => payload.name === "transcription.started"
         )) {
@@ -1496,8 +1493,22 @@ export class InMemoryCallRepository implements CallRepository {
           facts.recoveries += 1;
         }
       }
+      let realtimeElapsedSeconds = 0;
       for (const attempt of attempts) {
         if (!attempt.endedAt) continue;
+        const realtimeReadyAt = events.find((event) =>
+          event.callAttemptId === attempt.id &&
+          event.payload.name === "realtime.ready"
+        )?.occurredAt;
+        if (realtimeReadyAt) {
+          realtimeElapsedSeconds += Math.max(
+            0,
+            Math.floor(
+              (Date.parse(attempt.endedAt) - Date.parse(realtimeReadyAt)) /
+                1_000
+            )
+          );
+        }
         const connectedAt = events.find((event) =>
           event.callAttemptId === attempt.id &&
           event.payload.name === "connection.confirmed"
@@ -1508,6 +1519,12 @@ export class InMemoryCallRepository implements CallRepository {
           Math.floor(
             (Date.parse(attempt.endedAt) - Date.parse(connectedAt)) / 1_000
           )
+        );
+      }
+      if (events.some(({ payload }) => payload.name === "realtime.ready")) {
+        facts.usageSeconds.realtime += Math.max(
+          duration ?? 0,
+          realtimeElapsedSeconds
         );
       }
     }

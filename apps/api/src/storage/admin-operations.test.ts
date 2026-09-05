@@ -21,6 +21,59 @@ const callInput: CreateCallBriefInput = {
 };
 
 describe("admin operational read models", () => {
+  it("includes pre-consent Realtime time when no recording was created", async () => {
+    const repository = new InMemoryCallRepository();
+    const ownerUserId = randomUUID();
+    await repository.grantSignupCredits(ownerUserId);
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput({
+        ...callInput,
+        phoneNumber: "+41710000063"
+      })
+    );
+    const brief = await repository.create(
+      { ...callInput, phoneNumber: "+41710000063" },
+      compilation,
+      ownerUserId
+    );
+    await repository.approveCompilation(brief.id);
+    const started = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerUserId
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "pre-consent-realtime-ready",
+      occurredAt: new Date(Date.now() - 12_000).toISOString(),
+      payload: {
+        name: "realtime.ready",
+        metadata: {
+          model: "gpt-realtime-test",
+          transcriptionModel: "gpt-transcribe-test"
+        }
+      }
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "pre-consent-stream-ended",
+      payload: {
+        name: "consent.failed",
+        metadata: { reason: "stream_ended_before_consent" }
+      }
+    });
+    await repository.updateStatus(brief.id, "completed");
+
+    const now = new Date();
+    const facts = await repository.getAdminOperationsFacts(
+      new Date(now.getTime() - 60_000).toISOString(),
+      new Date(now.getTime() + 60_000).toISOString(),
+      brief.id
+    );
+    expect(facts.usageSeconds.realtime).toBeGreaterThanOrEqual(11);
+    expect(facts.usageSeconds.transcription).toBe(0);
+    expect(facts.recordedDurationSeconds.samples).toBe(0);
+  });
+
   it("derives cohort metrics and system workload from bounded facts", async () => {
     const repository = new InMemoryCallRepository();
     const ownerUserId = randomUUID();

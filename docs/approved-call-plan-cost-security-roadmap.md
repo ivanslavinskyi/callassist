@@ -142,6 +142,12 @@ flow produced one unclear transcription and the media stream ended during the
 clarification before consent, task execution, recording, or post-call processing.
 The strict settlement inspection failed accordingly. Detailed privacy-safe evidence
 and the required repeat criteria are in `docs/real-provider-drills.md`.
+The recipient subsequently confirmed the first call had been missed and explicitly
+authorized one repeat. The repeat passed strict settlement: consent, task execution,
+recording, channel-aware post-call transcription, provider reconciliation, and
+zero-day deletion all completed. The run also revealed and corrected a legacy
+fallback undercount: Realtime-per-minute estimates now include the pre-consent
+`realtime.ready`-to-attempt-end interval instead of relying only on recording length.
 
 ## Why this roadmap exists
 

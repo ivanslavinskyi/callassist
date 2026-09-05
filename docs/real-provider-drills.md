@@ -115,3 +115,34 @@ documented DTMF fallback), capture whether clarification audio completes, and ob
 trace containing `consent.granted`, `conversation.started`, recording/post-call jobs,
 and a passing strict `settled` inspection. A repeat call requires fresh recipient
 authorization; the drill must never redial automatically.
+
+### Authorized repeat — passed
+
+The recipient later confirmed that the earlier call had simply been missed and
+explicitly authorized one repeat. That repeat passed the strict `settled` inspection:
+
+- voice consent was granted, recording and conversation started, first audio was
+  observed, the conversation ended cleanly, and final transcription completed;
+- call, recording, cost, transcription, and zero-day retention reconciliation all
+  succeeded on their first durable attempt; the 69-second recording was deleted;
+- Twilio reported 88 connected seconds, 120 billable seconds, and USD 0.360400 actual
+  connectivity cost;
+- the versioned OpenAI public-rate calculation was USD 0.115863: compilation USD
+  0.011722, Realtime text USD 0.028168, Realtime audio USD 0.069696, Realtime input
+  transcription USD 0.003684, and post-call transcription USD 0.002593;
+- compiler usage was 1,577 input tokens (1,574 cached), 554 output tokens, 52 reasoning
+  tokens, and 2,131 total tokens. Six Realtime responses retained 5,614 text input
+  tokens (1,280 cached), 430 text output tokens, 180 audio input tokens, and 999 audio
+  output tokens. Five Realtime transcription observations covered 13 seconds. Eight
+  post-call utterance requests retained 4,831 total tokens, including 473 audio input
+  tokens;
+- one interrupted/non-completed Realtime response still retained its provider outcome
+  and usage, and later responses completed the flow. Provider request/response keys
+  remained deduplicated and the call attempt matched the exact approved snapshot.
+
+The repeat also exposed an estimate-only accounting gap: the configured legacy
+Realtime-per-minute fallback used recording duration and therefore omitted the
+pre-consent interval. The fallback now uses the greater of recording duration and
+the bounded `realtime.ready`-to-attempt-end interval. Raw provider session/token usage
+remains the preferred source and is unchanged; this correction only makes the legacy
+fallback conservative when actual token data is unavailable.

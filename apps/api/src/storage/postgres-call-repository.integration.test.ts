@@ -1527,6 +1527,43 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(facts.firstAudioLatencyMs.samples).toBeGreaterThanOrEqual(1);
     expect(facts.firstAudioLatencyMs.total).toBeGreaterThanOrEqual(275);
 
+    await repository.grantSignupCredits(ownerA);
+    await repository.approveCompilation(brief.id);
+    const started = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerA,
+      admissionPolicy: ledgerTestPolicy
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "postgres-pre-consent-realtime-ready",
+      occurredAt: new Date(Date.now() - 12_000).toISOString(),
+      payload: {
+        name: "realtime.ready",
+        metadata: {
+          model: "gpt-realtime-test",
+          transcriptionModel: "gpt-transcribe-test"
+        }
+      }
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "postgres-pre-consent-stream-ended",
+      payload: {
+        name: "consent.failed",
+        metadata: { reason: "stream_ended_before_consent" }
+      }
+    });
+    await repository.updateStatus(brief.id, "completed");
+    const preConsentFacts = await repository.getAdminOperationsFacts(
+      new Date(now.getTime() - 60_000).toISOString(),
+      new Date(now.getTime() + 60_000).toISOString(),
+      brief.id
+    );
+    expect(preConsentFacts.usageSeconds.realtime).toBeGreaterThanOrEqual(11);
+    expect(preConsentFacts.usageSeconds.transcription).toBe(0);
+    expect(preConsentFacts.recordedDurationSeconds.samples).toBe(0);
+
     await inspection`DELETE FROM provider_webhook_delivery_buckets`;
     await repository.recordProviderWebhookDelivery({
       kind: "voice",

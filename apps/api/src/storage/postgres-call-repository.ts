@@ -2561,7 +2561,26 @@ export class PostgresCallRepository implements CallRepository {
             SELECT 1 FROM call_events
             WHERE call_events.call_brief_id = scoped_calls.id
               AND call_events.event_name = 'realtime.ready'
-          ) THEN COALESCE(call_recordings.duration_seconds, 0) ELSE 0 END
+          ) THEN GREATEST(
+            COALESCE(call_recordings.duration_seconds, 0),
+            COALESCE((
+              SELECT floor(sum(GREATEST(
+                0,
+                EXTRACT(EPOCH FROM (
+                  call_attempts.ended_at - realtime_ready.occurred_at
+                ))
+              )))::int
+              FROM call_attempts
+              JOIN LATERAL (
+                SELECT min(call_events.occurred_at) AS occurred_at
+                FROM call_events
+                WHERE call_events.call_attempt_id = call_attempts.id
+                  AND call_events.event_name = 'realtime.ready'
+              ) AS realtime_ready ON realtime_ready.occurred_at IS NOT NULL
+              WHERE call_attempts.call_brief_id = scoped_calls.id
+                AND call_attempts.ended_at IS NOT NULL
+            ), 0)
+          ) ELSE 0 END
             AS realtime_usage_seconds,
           CASE WHEN EXISTS (
             SELECT 1 FROM call_events
