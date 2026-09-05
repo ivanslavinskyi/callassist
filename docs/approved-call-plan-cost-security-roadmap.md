@@ -165,6 +165,14 @@ one review-required draft without attempts. The 15 records with no compilation
 are also all terminal (12 completed, two stopped, one failed). This leaves no
 active legacy attempt, but it does not justify silently blessing or rewriting the
 eight incompatible snapshots.
+For calls with `current_compilation_id`, repository reads, approval, recompilation,
+and attempt reservation now load the encrypted immutable revision, validate its
+canonical hash against the immutable row metadata, and hydrate approval time from
+the separate immutable approval record. A PostgreSQL regression test removes the
+mutable compatibility projection and proves that both read and attempt reservation
+still use the approved immutable plan. Only calls without an immutable pointer use
+the bounded legacy projection; therefore the eight incompatible records remain
+visible for explicit disposition without being promoted into the trusted path.
 
 The item 11 maintenance command is `pnpm db:backfill:call-plans`. Its default is
 a read-only dry run that emits aggregate JSON only. Execution additionally

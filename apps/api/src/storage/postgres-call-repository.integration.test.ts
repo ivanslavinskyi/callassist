@@ -893,9 +893,32 @@ describeWithDatabase("PostgresCallRepository", () => {
     });
     expect(approved.brief.status).toBe("ready");
 
+    const [mutableProjection] = await inspection<{
+      compilationCiphertext: string;
+    }[]>`
+      SELECT compilation_ciphertext AS "compilationCiphertext"
+      FROM call_briefs
+      WHERE id = ${brief.id}
+    `;
+    await inspection`
+      UPDATE call_briefs
+      SET compilation_ciphertext = NULL
+      WHERE id = ${brief.id}
+    `;
+    const immutableRead = await repository.get(brief.id);
+    expect(immutableRead?.compilation).toMatchObject({
+      revision: revisedCompilation.revision,
+      snapshotHash: revisedCompilation.snapshotHash,
+      approvedAt: expect.any(String)
+    });
     const started = await repository.startAttempt(brief.id, {
       provider: "mock"
     });
+    await inspection`
+      UPDATE call_briefs
+      SET compilation_ciphertext = ${mutableProjection!.compilationCiphertext}
+      WHERE id = ${brief.id}
+    `;
     const compilationRows = await inspection<{
       id: string;
       revision: number;

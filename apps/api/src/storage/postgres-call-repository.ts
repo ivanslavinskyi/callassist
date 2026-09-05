@@ -135,6 +135,10 @@ type DatabaseDate = Date | string;
 type CallBriefRow = {
   id: string;
   currentCompilationId: string | null;
+  immutableCompilationCiphertext: string | null;
+  immutableCompilationRevision: number | null;
+  immutableCompilationSnapshotHash: string | null;
+  immutableCompilationApprovedAt: DatabaseDate | null;
   recipientName: string;
   phoneNumber: string;
   objective: string;
@@ -158,6 +162,16 @@ type CallBriefRow = {
   createdAt: DatabaseDate;
   updatedAt: DatabaseDate;
 };
+
+type CallCompilationSourceRow = Pick<
+  CallBriefRow,
+  | "currentCompilationId"
+  | "immutableCompilationCiphertext"
+  | "immutableCompilationRevision"
+  | "immutableCompilationSnapshotHash"
+  | "immutableCompilationApprovedAt"
+  | "compilationCiphertext"
+>;
 
 type TranscriptRow = {
   id: string;
@@ -2318,17 +2332,36 @@ export class PostgresCallRepository implements CallRepository {
 
     await this.#sql.begin(async (transaction) => {
       const [row] = await transaction<
-        {
+        Array<CallCompilationSourceRow & {
           status: CallBrief["status"];
-          compilationCiphertext: string | null;
-          currentCompilationId: string | null;
           attemptCount: number;
-        }[]
+        }>
       >`
         SELECT
           status,
           compilation_ciphertext AS "compilationCiphertext",
           current_compilation_id AS "currentCompilationId",
+          (
+            SELECT call_compilations.compilation_ciphertext
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationCiphertext",
+          (
+            SELECT call_compilations.revision
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationRevision",
+          (
+            SELECT call_compilations.snapshot_hash
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationSnapshotHash",
+          (
+            SELECT call_compilation_approvals.approved_at
+            FROM call_compilation_approvals
+            WHERE call_compilation_approvals.compilation_id =
+              call_briefs.current_compilation_id
+          ) AS "immutableCompilationApprovedAt",
           (SELECT COUNT(*)::int FROM call_attempts WHERE call_brief_id = ${id}) AS "attemptCount"
         FROM call_briefs
         WHERE id = ${id}
@@ -2388,12 +2421,7 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
       }
-      const previousCompilation = row.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            row.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null;
+      const previousCompilation = this.#mapCurrentCompilation(row);
       const compilationId = await this.#insertCompilationRecord(
         transaction,
         id,
@@ -2464,7 +2492,7 @@ export class PostgresCallRepository implements CallRepository {
 
   async get(id: string) {
     const [briefRow] = await this.#sql<CallBriefRow[]>`
-      ${this.#briefSelect()}
+      ${this.#briefSelect(true)}
       WHERE id = ${id} AND data_deleted_at IS NULL
     `;
     if (!briefRow) return null;
@@ -2523,12 +2551,7 @@ export class PostgresCallRepository implements CallRepository {
 
     return {
       brief: this.#mapBrief(briefRow),
-      compilation: briefRow.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            briefRow.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null,
+      compilation: this.#mapCurrentCompilation(briefRow),
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
       pendingApproval: approvalRows[0]
         ? this.#mapApproval(approvalRows[0])
@@ -3744,17 +3767,12 @@ export class PostgresCallRepository implements CallRepository {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
       const [row] = await transaction<CallBriefRow[]>`
-        ${this.#briefSelect()}
+        ${this.#briefSelect(true)}
         WHERE call_briefs.id = ${id}
         FOR UPDATE
       `;
       if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
-      const compilation = row.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            row.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null;
+      const compilation = this.#mapCurrentCompilation(row);
       if (
         row.status !== "review_required" ||
         compilation?.policyDecision.status !== "ready_for_review" ||
@@ -4129,7 +4147,7 @@ export class PostgresCallRepository implements CallRepository {
         await this.#lockActiveUser(transaction, userId);
       }
       const [call] = await transaction<CallBriefRow[]>`
-        ${this.#briefSelect()}
+        ${this.#briefSelect(true)}
         WHERE call_briefs.id = ${id}
           AND (${userId}::uuid IS NULL OR user_id = ${userId})
         FOR UPDATE
@@ -4149,12 +4167,7 @@ export class PostgresCallRepository implements CallRepository {
       if (call.status !== "ready") {
         throw new CallRepositoryError("CALL_NOT_READY");
       }
-      const compilation = call.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            call.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null;
+      const compilation = this.#mapCurrentCompilation(call);
       if (!compilation) {
         throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
       }
@@ -6310,11 +6323,39 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.end({ timeout: 5 });
   }
 
-  #briefSelect() {
+  #briefSelect(includeImmutableCompilation = false) {
     return this.#sql`
       SELECT
         id,
         current_compilation_id AS "currentCompilationId",
+        ${includeImmutableCompilation ? this.#sql`
+          (
+            SELECT call_compilations.compilation_ciphertext
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationCiphertext",
+          (
+            SELECT call_compilations.revision
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationRevision",
+          (
+            SELECT call_compilations.snapshot_hash
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationSnapshotHash",
+          (
+            SELECT call_compilation_approvals.approved_at
+            FROM call_compilation_approvals
+            WHERE call_compilation_approvals.compilation_id =
+              call_briefs.current_compilation_id
+          ) AS "immutableCompilationApprovedAt",
+        ` : this.#sql`
+          NULL::text AS "immutableCompilationCiphertext",
+          NULL::integer AS "immutableCompilationRevision",
+          NULL::text AS "immutableCompilationSnapshotHash",
+          NULL::timestamptz AS "immutableCompilationApprovedAt",
+        `}
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
         objective,
@@ -6339,6 +6380,42 @@ export class PostgresCallRepository implements CallRepository {
         updated_at AS "updatedAt"
       FROM call_briefs
     `;
+  }
+
+  #mapCurrentCompilation(row: CallCompilationSourceRow): CallCompilation | null {
+    if (!row.currentCompilationId) {
+      return row.compilationCiphertext
+        ? decryptJson<CallCompilation>(
+            row.compilationCiphertext,
+            this.#encryptionKey
+          )
+        : null;
+    }
+    if (
+      !row.immutableCompilationCiphertext ||
+      row.immutableCompilationRevision === null ||
+      !row.immutableCompilationSnapshotHash
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    const compilation = decryptJson<CallCompilation>(
+      row.immutableCompilationCiphertext,
+      this.#encryptionKey
+    );
+    assertCompilationIntegrity(compilation);
+    if (
+      compilation.revision !== row.immutableCompilationRevision ||
+      compilation.snapshotHash !== row.immutableCompilationSnapshotHash
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    const approvedAt = row.immutableCompilationApprovedAt
+      ? toIso(row.immutableCompilationApprovedAt)
+      : null;
+    if (compilation.approvedAt && compilation.approvedAt !== approvedAt) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    return { ...compilation, approvedAt };
   }
 
   #mapBrief(row: CallBriefRow): CallBrief {
