@@ -416,6 +416,7 @@ export class InMemoryCallRepository implements CallRepository {
     };
 
     this.#calls.set(brief.id, {
+      executionPlanSource: "immutable",
       brief,
       compilation: copy(compilation),
       transcript: [],

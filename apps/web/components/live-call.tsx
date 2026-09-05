@@ -217,6 +217,9 @@ export function LiveCall({ callId }: { callId: string }) {
                   ? messages.live.callLimitReached
                   : error instanceof ApiError && error.code === "RATE_LIMITED"
                       ? messages.live.rateLimited
+                      : error instanceof ApiError &&
+                          error.code === "CALL_COMPILATION_RECOMPILE_REQUIRED"
+                        ? messages.live.legacyHelp
                       : messages.live.actionError
       );
     } finally {
@@ -352,6 +355,8 @@ export function LiveCall({ callId }: { callId: string }) {
   const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
   const isTerminal = isTerminalCallStatus(brief.status);
+  const hasImmutableExecutionPlan =
+    snapshot.executionPlanSource === "immutable";
 
   return (
     <AppShell>
@@ -380,7 +385,7 @@ export function LiveCall({ callId }: { callId: string }) {
           </div>
 
           <div className="call-actions">
-            {brief.status === "ready" ? (
+            {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
                 className="primary-button compact-button"
                 disabled={busy}
@@ -406,7 +411,24 @@ export function LiveCall({ callId }: { callId: string }) {
 
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
 
-        {compilation && editingBrief ? (
+        {compilation && !hasImmutableExecutionPlan ? (
+          <>
+            <section className="compilation-review decision-blocked">
+              <span className="eyebrow">{copy.legacyBrief}</span>
+              <h2>{copy.legacyTitle}</h2>
+              <p>{copy.legacyHelp}</p>
+            </section>
+            <CompilationReview
+              busy={busy}
+              compilation={compilation}
+              onAnswerClarifications={answerClarifications}
+              onApproveAndCall={() => undefined}
+              onEdit={() => undefined}
+              recipientName={brief.recipientName}
+              showActions={false}
+            />
+          </>
+        ) : compilation && editingBrief ? (
           <CreateCallForm
             heading={copy.updateHeading}
             initialValue={compilation.rawBrief}
@@ -433,7 +455,7 @@ export function LiveCall({ callId }: { callId: string }) {
             recipientName={brief.recipientName}
             showActions={!isTerminal}
           />
-        ) : brief.status === "blocked" ? (
+        ) : !hasImmutableExecutionPlan ? (
           <section className="compilation-review decision-blocked">
             <span className="eyebrow">{copy.legacyBrief}</span>
             <h2>{copy.legacyTitle}</h2>

@@ -2490,7 +2490,7 @@ export class PostgresCallRepository implements CallRepository {
     return this.#require(id);
   }
 
-  async get(id: string) {
+  async get(id: string): Promise<CallSnapshot | null> {
     const [briefRow] = await this.#sql<CallBriefRow[]>`
       ${this.#briefSelect(true)}
       WHERE id = ${id} AND data_deleted_at IS NULL
@@ -2550,6 +2550,11 @@ export class PostgresCallRepository implements CallRepository {
       ]);
 
     return {
+      executionPlanSource: briefRow.currentCompilationId
+        ? "immutable"
+        : briefRow.compilationCiphertext
+          ? "legacy"
+          : "unavailable",
       brief: this.#mapBrief(briefRow),
       compilation: this.#mapCurrentCompilation(briefRow),
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
@@ -3772,6 +3777,11 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
+      if (!row.currentCompilationId) {
+        throw new CallRepositoryError(
+          "CALL_COMPILATION_RECOMPILE_REQUIRED"
+        );
+      }
       const compilation = this.#mapCurrentCompilation(row);
       if (
         row.status !== "review_required" ||
@@ -3797,11 +3807,7 @@ export class PostgresCallRepository implements CallRepository {
       compilation.approvedAt = now.toISOString();
       const executionSnapshot = createApprovedExecutionSnapshot({
         brief: this.#mapBrief(row),
-        compilation,
-        transcript: [],
-        pendingApproval: null,
-        recording: null,
-        finalTranscript: null
+        compilation
       });
       await transaction`
         INSERT INTO call_compilation_approvals (
@@ -3991,11 +3997,7 @@ export class PostgresCallRepository implements CallRepository {
           const executionSnapshot = compilation.approvedAt
             ? createApprovedExecutionSnapshot({
                 brief: this.#mapBrief(row),
-                compilation,
-                transcript: [],
-                pendingApproval: null,
-                recording: null,
-                finalTranscript: null
+                compilation
               })
             : null;
           if (executionSnapshot) approvalSnapshotsRequired += 1;
@@ -4167,6 +4169,11 @@ export class PostgresCallRepository implements CallRepository {
       if (call.status !== "ready") {
         throw new CallRepositoryError("CALL_NOT_READY");
       }
+      if (!call.currentCompilationId) {
+        throw new CallRepositoryError(
+          "CALL_COMPILATION_RECOMPILE_REQUIRED"
+        );
+      }
       const compilation = this.#mapCurrentCompilation(call);
       if (!compilation) {
         throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
@@ -4196,11 +4203,7 @@ export class PostgresCallRepository implements CallRepository {
         }
         executionSnapshot = createApprovedExecutionSnapshot({
           brief: this.#mapBrief(call),
-          compilation,
-          transcript: [],
-          pendingApproval: null,
-          recording: null,
-          finalTranscript: null
+          compilation
         });
         await transaction`
           INSERT INTO call_compilation_approvals (
@@ -6384,12 +6387,12 @@ export class PostgresCallRepository implements CallRepository {
 
   #mapCurrentCompilation(row: CallCompilationSourceRow): CallCompilation | null {
     if (!row.currentCompilationId) {
-      return row.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            row.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null;
+      if (!row.compilationCiphertext) return null;
+      const legacy = callCompilationSchema.safeParse(decryptJson<unknown>(
+        row.compilationCiphertext,
+        this.#encryptionKey
+      ));
+      return legacy.success ? legacy.data : null;
     }
     if (
       !row.immutableCompilationCiphertext ||

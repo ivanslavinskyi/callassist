@@ -1737,6 +1737,16 @@ describeWithDatabase("PostgresCallRepository", () => {
       expect(during.callPlanCutover.recoverableLegacyCalls).toBe(
         before.callPlanCutover.recoverableLegacyCalls + 1
       );
+      await expect(repository.get(brief.id)).resolves.toMatchObject({
+        executionPlanSource: "legacy"
+      });
+      await expect(repository.approveCompilation(brief.id)).rejects
+        .toMatchObject({ code: "CALL_COMPILATION_RECOMPILE_REQUIRED" });
+      await expect(repository.startAttempt(brief.id, {
+        provider: "mock"
+      })).rejects.toMatchObject({
+        code: "CALL_COMPILATION_RECOMPILE_REQUIRED"
+      });
       const preview = await repository.backfillLegacyCompilationBatch(
         500,
         null,

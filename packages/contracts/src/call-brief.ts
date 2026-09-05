@@ -739,6 +739,7 @@ export const approvalRequestSchema = z.object({
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const callSnapshotSchema = z.object({
+  executionPlanSource: z.enum(["immutable", "legacy", "unavailable"]),
   brief: callBriefSchema,
   compilation: callCompilationSchema.nullable(),
   transcript: z.array(transcriptSegmentSchema),
@@ -749,7 +750,7 @@ export const callSnapshotSchema = z.object({
 export type CallSnapshot = z.infer<typeof callSnapshotSchema>;
 
 export function createApprovedExecutionSnapshot(
-  snapshot: CallSnapshot
+  snapshot: Pick<CallSnapshot, "brief" | "compilation">
 ): ApprovedExecutionSnapshot {
   const compilation = snapshot.compilation;
   const compiled = compilation?.compiledBrief;

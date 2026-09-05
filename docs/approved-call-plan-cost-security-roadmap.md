@@ -173,6 +173,15 @@ mutable compatibility projection and proves that both read and attempt reservati
 still use the approved immutable plan. Only calls without an immutable pointer use
 the bounded legacy projection; therefore the eight incompatible records remain
 visible for explicit disposition without being promoted into the trusted path.
+The public call snapshot now labels the plan source as `immutable`, `legacy`, or
+`unavailable`. Approval and new attempt reservation fail closed with
+`CALL_COMPILATION_RECOMPILE_REQUIRED` unless the source is immutable. The call UI
+hides start/approval actions for legacy plans, keeps schema-compatible content
+read-only, and explains that a new plan must be created. Incompatible ciphertext
+remains encrypted for controlled audit/backfill disposition but is not represented
+as a current `CallCompilation` API object. This removes
+the mutable compilation from the execution trust boundary while retaining the
+temporary UI/audit read fallback needed for explicit legacy disposition.
 
 The item 11 maintenance command is `pnpm db:backfill:call-plans`. Its default is
 a read-only dry run that emits aggregate JSON only. Execution additionally
