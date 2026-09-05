@@ -193,6 +193,18 @@ that branch protection requires the workflow and review. A passing dependency au
 means no finding at or above its configured high-severity threshold; moderate findings
 still require triage and a recorded disposition.
 
+For the immutable call-plan finalization release, run
+`pnpm db:verify:call-plan-cutover` against the target database before applying the
+finalizing migration. The command is read-only, emits aggregate counts only, and
+must return `call_plan_cutover_ready` with an empty `blockers` array. A non-zero
+recoverable legacy count, executable call without an immutable plan, active legacy
+attempt, or active recompilation is a hard stop. Archived terminal plans, drafts
+explicitly awaiting recompilation, unavailable terminal history, and historical
+attempts without reconstructable usage/snapshots remain visible evidence but do
+not become trusted execution state. See
+`docs/approved-call-plan-cost-security-roadmap.md` for the mandatory two-phase
+commit and migration order.
+
 Production API and worker processes must pass fail-closed environment validation.
 Never bypass a validation issue by changing `NODE_ENV`. Verify TLS termination before
 trusting HSTS, keep the main and Twilio listener ports separate, and do not reuse the

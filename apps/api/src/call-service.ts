@@ -422,7 +422,9 @@ export class CallService {
       callPlanCutover: {
         ...facts.callPlanCutover,
         mutableCompilationReadRemovalReady:
-          facts.callPlanCutover.recoverableLegacyCalls === 0,
+          facts.callPlanCutover.recoverableLegacyCalls === 0 &&
+          facts.callPlanCutover.executableLegacyCalls === 0 &&
+          facts.callPlanCutover.activeRecompilations === 0,
         legacyMediaAdapterRemovalReady:
           facts.callPlanCutover.activeLegacyAttempts === 0
       },

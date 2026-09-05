@@ -579,6 +579,7 @@ export type AdminSystemFacts = {
     archivedLegacyCalls: number;
     recompileRequiredCalls: number;
     unavailableLegacyCalls: number;
+    executableLegacyCalls: number;
     historicalAttemptsWithoutCompilation: number;
     historicalAttemptsWithoutExecutionSnapshot: number;
     activeLegacyAttempts: number;

@@ -291,6 +291,7 @@ export const adminSystemStatusSchema = z.strictObject({
     archivedLegacyCalls: countSchema,
     recompileRequiredCalls: countSchema,
     unavailableLegacyCalls: countSchema,
+    executableLegacyCalls: countSchema,
     historicalAttemptsWithoutCompilation: countSchema,
     historicalAttemptsWithoutExecutionSnapshot: countSchema,
     activeLegacyAttempts: countSchema,

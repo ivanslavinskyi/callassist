@@ -1958,6 +1958,7 @@ export class InMemoryCallRepository implements CallRepository {
           compilation === null &&
           (this.#compilations.get(brief.id)?.length ?? 0) === 0
         ).length,
+        executableLegacyCalls: 0,
         historicalAttemptsWithoutCompilation: attempts.filter((attempt) =>
           attempt.endedAt !== null && attempt.compilationId === null
         ).length,

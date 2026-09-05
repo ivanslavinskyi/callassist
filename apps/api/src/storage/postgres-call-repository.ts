@@ -393,6 +393,7 @@ type AdminSystemFactsRow = {
   archivedLegacyCalls: number;
   recompileRequiredCalls: number;
   unavailableLegacyCalls: number;
+  executableLegacyCalls: number;
   historicalAttemptsWithoutCompilation: number;
   historicalAttemptsWithoutExecutionSnapshot: number;
   activeLegacyAttempts: number;
@@ -3241,6 +3242,17 @@ export class PostgresCallRepository implements CallRepository {
             AND compilation_ciphertext IS NULL
         ) AS "unavailableLegacyCalls",
         (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND current_compilation_id IS NULL
+            AND status IN (
+              'ready',
+              'dialing',
+              'in_progress',
+              'awaiting_approval'
+            )
+        ) AS "executableLegacyCalls",
+        (
           SELECT count(*)::int
           FROM call_attempts
           JOIN call_briefs
@@ -3386,6 +3398,7 @@ export class PostgresCallRepository implements CallRepository {
         archivedLegacyCalls: row.archivedLegacyCalls,
         recompileRequiredCalls: row.recompileRequiredCalls,
         unavailableLegacyCalls: row.unavailableLegacyCalls,
+        executableLegacyCalls: row.executableLegacyCalls,
         historicalAttemptsWithoutCompilation:
           row.historicalAttemptsWithoutCompilation,
         historicalAttemptsWithoutExecutionSnapshot:

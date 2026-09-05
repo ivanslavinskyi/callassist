@@ -270,6 +270,7 @@ describe("admin operational read models", () => {
         archivedLegacyCalls: 0,
         recompileRequiredCalls: 0,
         unavailableLegacyCalls: 0,
+        executableLegacyCalls: 0,
         historicalAttemptsWithoutCompilation: 0,
         historicalAttemptsWithoutExecutionSnapshot: 0,
         activeLegacyAttempts: 0,

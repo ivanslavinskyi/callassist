@@ -768,11 +768,14 @@ commits; do not deploy branch HEAD directly to an unprepared database:
 2. Run the compilation backfill dry-run/execute/dry-run sequence. Then run the
    incompatible-plan classification dry-run/execute/dry-run sequence.
 3. Require `recoverableLegacyCalls=0`, `activeLegacyAttempts=0`,
-   `activeRecompilations=0`, and no ambiguous classification candidates. Preserve
-   recovery-drill and aggregate command evidence.
-4. Only then deploy `922de05` and migration 0061. It validates the historical
-   `ready`-brief constraint and removes the mutable reader, dual-write, legacy
-   media-token adapter, and snapshot reconstruction fallback.
+   `activeRecompilations=0`, `executableLegacyCalls=0`, and no ambiguous
+   classification candidates. Run `pnpm db:verify:call-plan-cutover` and preserve
+   its aggregate evidence together with the recovery-drill evidence.
+4. Only then deploy the final reviewed release containing `922de05` and migration
+   0061. It validates the historical `ready`-brief constraint and removes the
+   mutable reader, dual-write, legacy media-token adapter, and snapshot
+   reconstruction fallback. The read-only gate command can be run from the final
+   built artifact before invoking its migration entry point.
 5. Deploy the web build after the API and verify the two `recompile_required`
    drafts can submit a new immutable plan. Monitor rejected media streams,
    compilation-integrity failures, usage-ledger persistence failures, and provider
@@ -780,6 +783,13 @@ commits; do not deploy branch HEAD directly to an unprepared database:
 
 The database trigger prevents new call-attempt insertion without an immutable
 plan, but it is not a substitute for this worker/data cutover order.
+
+The release gate is implemented as `pnpm db:verify:call-plan-cutover`, is included
+in the production API artifact, and runs in CI after fresh-schema migration. The
+local populated database returns `ready=true` with an empty blocker list. During
+the same gate pass, patched transitive `fast-uri` and `qs` versions removed all
+known production dependency advisories; the frozen install and production audit
+now pass with the system certificate store enabled.
 
 ## Test matrix
 

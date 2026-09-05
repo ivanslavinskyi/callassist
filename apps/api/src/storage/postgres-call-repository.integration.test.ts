@@ -1673,6 +1673,7 @@ describeWithDatabase("PostgresCallRepository", () => {
         archivedLegacyCalls: expect.any(Number),
         recompileRequiredCalls: expect.any(Number),
         unavailableLegacyCalls: expect.any(Number),
+        executableLegacyCalls: expect.any(Number),
         historicalAttemptsWithoutCompilation: expect.any(Number),
         historicalAttemptsWithoutExecutionSnapshot: expect.any(Number),
         activeLegacyAttempts: expect.any(Number),

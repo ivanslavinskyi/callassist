@@ -15,6 +15,7 @@
     "db:migrate:check": "corepack pnpm --filter @callassist/api db:migrate:check",
     "db:backfill:call-plans": "corepack pnpm --filter @callassist/api db:backfill:call-plans",
     "db:classify:legacy-call-plans": "corepack pnpm --filter @callassist/api db:classify:legacy-call-plans",
+    "db:verify:call-plan-cutover": "corepack pnpm --filter @callassist/api db:verify:call-plan-cutover",
     "db:reencrypt": "corepack pnpm --filter @callassist/api db:reencrypt",
     "db:recovery:drill": "corepack pnpm --filter @callassist/api db:recovery:drill",
     "db:test:prepare": "corepack pnpm --filter @callassist/api db:test:prepare",
