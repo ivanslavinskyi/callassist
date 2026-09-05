@@ -202,6 +202,16 @@ describe("admin operations contracts", () => {
         retentionScheduled: 0,
         retentionOverdue: 0
       },
+      callPlanCutover: {
+        recoverableLegacyCalls: 0,
+        unavailableLegacyCalls: 0,
+        historicalAttemptsWithoutCompilation: 0,
+        historicalAttemptsWithoutExecutionSnapshot: 0,
+        activeLegacyAttempts: 0,
+        activeRecompilations: 0,
+        mutableCompilationReadRemovalReady: true,
+        legacyMediaAdapterRemovalReady: true
+      },
       jobs: {
         queued: 0,
         running: 0,

@@ -265,6 +265,14 @@ describe("admin operational read models", () => {
       transcriptionProcessing: 1,
       transcriptionFailed: 0,
       retentionScheduled: 0,
+      callPlanCutover: {
+        recoverableLegacyCalls: 0,
+        unavailableLegacyCalls: 0,
+        historicalAttemptsWithoutCompilation: 0,
+        historicalAttemptsWithoutExecutionSnapshot: 0,
+        activeLegacyAttempts: 0,
+        activeRecompilations: 0
+      },
       webhooks: {
         voice: {
           accepted: 1,

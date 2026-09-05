@@ -107,6 +107,16 @@ describe("CallService", () => {
         lastProblemCode: null
       }
     });
+    expect(status.callPlanCutover).toEqual({
+      recoverableLegacyCalls: 0,
+      unavailableLegacyCalls: 0,
+      historicalAttemptsWithoutCompilation: 0,
+      historicalAttemptsWithoutExecutionSnapshot: 0,
+      activeLegacyAttempts: 0,
+      activeRecompilations: 0,
+      mutableCompilationReadRemovalReady: true,
+      legacyMediaAdapterRemovalReady: true
+    });
   });
 
   it("keeps recovery and durable claims out of an external-worker API process", async () => {

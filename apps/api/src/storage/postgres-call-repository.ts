@@ -368,6 +368,12 @@ type AdminSystemFactsRow = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  recoverableLegacyCalls: number;
+  unavailableLegacyCalls: number;
+  historicalAttemptsWithoutCompilation: number;
+  historicalAttemptsWithoutExecutionSnapshot: number;
+  activeLegacyAttempts: number;
+  activeRecompilations: number;
   jobsQueued: number;
   jobsRunning: number;
   jobsSucceeded: number;
@@ -3171,6 +3177,53 @@ export class PostgresCallRepository implements CallRepository {
             AND severity = 'error'
         ) AS "recentErrors",
         (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND current_compilation_id IS NULL
+            AND compilation_ciphertext IS NOT NULL
+        ) AS "recoverableLegacyCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND current_compilation_id IS NULL
+            AND compilation_ciphertext IS NULL
+        ) AS "unavailableLegacyCalls",
+        (
+          SELECT count(*)::int
+          FROM call_attempts
+          JOIN call_briefs
+            ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_briefs.data_deleted_at IS NULL
+            AND call_attempts.ended_at IS NOT NULL
+            AND call_attempts.compilation_id IS NULL
+        ) AS "historicalAttemptsWithoutCompilation",
+        (
+          SELECT count(*)::int
+          FROM call_attempts
+          JOIN call_briefs
+            ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_briefs.data_deleted_at IS NULL
+            AND call_attempts.ended_at IS NOT NULL
+            AND call_attempts.execution_snapshot_ciphertext IS NULL
+        ) AS "historicalAttemptsWithoutExecutionSnapshot",
+        (
+          SELECT count(*)::int
+          FROM call_attempts
+          JOIN call_briefs
+            ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_briefs.data_deleted_at IS NULL
+            AND call_attempts.ended_at IS NULL
+            AND (
+              call_attempts.compilation_id IS NULL
+              OR call_attempts.execution_snapshot_ciphertext IS NULL
+            )
+        ) AS "activeLegacyAttempts",
+        (
+          SELECT count(*)::int FROM call_preparation_requests
+          WHERE operation_kind = 'recompilation'
+            AND status IN ('queued', 'processing', 'retrying')
+        ) AS "activeRecompilations",
+        (
           SELECT count(*)::int FROM durable_jobs WHERE status = 'queued'
         ) AS "jobsQueued",
         (
@@ -3276,6 +3329,16 @@ export class PostgresCallRepository implements CallRepository {
       retentionOverdue: row.retentionOverdue,
       recentWarnings: row.recentWarnings,
       recentErrors: row.recentErrors,
+      callPlanCutover: {
+        recoverableLegacyCalls: row.recoverableLegacyCalls,
+        unavailableLegacyCalls: row.unavailableLegacyCalls,
+        historicalAttemptsWithoutCompilation:
+          row.historicalAttemptsWithoutCompilation,
+        historicalAttemptsWithoutExecutionSnapshot:
+          row.historicalAttemptsWithoutExecutionSnapshot,
+        activeLegacyAttempts: row.activeLegacyAttempts,
+        activeRecompilations: row.activeRecompilations
+      },
       externalWorker: {
         healthyInstances: row.workerHealthyInstances,
         staleInstances: row.workerStaleInstances,

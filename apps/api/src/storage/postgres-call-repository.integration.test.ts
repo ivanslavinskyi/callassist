@@ -1613,6 +1613,14 @@ describeWithDatabase("PostgresCallRepository", () => {
       activeCalls: expect.any(Number),
       recentWarnings: expect.any(Number),
       recentErrors: expect.any(Number),
+      callPlanCutover: {
+        recoverableLegacyCalls: expect.any(Number),
+        unavailableLegacyCalls: expect.any(Number),
+        historicalAttemptsWithoutCompilation: expect.any(Number),
+        historicalAttemptsWithoutExecutionSnapshot: expect.any(Number),
+        activeLegacyAttempts: expect.any(Number),
+        activeRecompilations: expect.any(Number)
+      },
       externalWorker: {
         healthyInstances: 1,
         staleInstances: 1,
@@ -1654,6 +1662,64 @@ describeWithDatabase("PostgresCallRepository", () => {
       SET last_error_code = 'private provider error text'
       WHERE outcome = 'failed'
     `).rejects.toThrow("provider_webhook_delivery_error_code_check");
+  });
+
+  it("reports recoverable legacy compilations until the immutable pointer is restored", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Cutover readiness office",
+      phoneNumber: "+41710000058",
+      objective: "Verify the immutable compilation cutover counter",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    const [stored] = await inspection<{ currentCompilationId: string }[]>`
+      SELECT current_compilation_id AS "currentCompilationId"
+      FROM call_briefs
+      WHERE id = ${brief.id}
+    `;
+    expect(stored?.currentCompilationId).toBeTypeOf("string");
+    const before = await repository.getAdminSystemFacts(
+      new Date().toISOString(),
+      new Date(Date.now() - 86_400_000).toISOString()
+    );
+
+    try {
+      await inspection`
+        UPDATE call_briefs
+        SET current_compilation_id = NULL
+        WHERE id = ${brief.id}
+      `;
+      const during = await repository.getAdminSystemFacts(
+        new Date().toISOString(),
+        new Date(Date.now() - 86_400_000).toISOString()
+      );
+      expect(during.callPlanCutover.recoverableLegacyCalls).toBe(
+        before.callPlanCutover.recoverableLegacyCalls + 1
+      );
+    } finally {
+      await inspection`
+        UPDATE call_briefs
+        SET current_compilation_id = ${stored!.currentCompilationId}
+        WHERE id = ${brief.id}
+      `;
+    }
+
+    const restored = await repository.getAdminSystemFacts(
+      new Date().toISOString(),
+      new Date(Date.now() - 86_400_000).toISOString()
+    );
+    expect(restored.callPlanCutover.recoverableLegacyCalls).toBe(
+      before.callPlanCutover.recoverableLegacyCalls
+    );
   });
 
   it("persists provider reconciliation targets and fences stale writes", async () => {

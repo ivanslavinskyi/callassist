@@ -419,6 +419,13 @@ export class CallService {
         retentionScheduled: facts.retentionScheduled,
         retentionOverdue: facts.retentionOverdue
       },
+      callPlanCutover: {
+        ...facts.callPlanCutover,
+        mutableCompilationReadRemovalReady:
+          facts.callPlanCutover.recoverableLegacyCalls === 0,
+        legacyMediaAdapterRemovalReady:
+          facts.callPlanCutover.activeLegacyAttempts === 0
+      },
       jobs: facts.jobs,
       webhooks: {
         since: webhookSince,

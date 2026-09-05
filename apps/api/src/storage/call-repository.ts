@@ -574,6 +574,14 @@ export type AdminSystemFacts = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  callPlanCutover: {
+    recoverableLegacyCalls: number;
+    unavailableLegacyCalls: number;
+    historicalAttemptsWithoutCompilation: number;
+    historicalAttemptsWithoutExecutionSnapshot: number;
+    activeLegacyAttempts: number;
+    activeRecompilations: number;
+  };
   externalWorker: {
     healthyInstances: number;
     staleInstances: number;

@@ -1858,6 +1858,12 @@ export class InMemoryCallRepository implements CallRepository {
     webhookSince = recentSince
   ): Promise<AdminSystemFacts> {
     const snapshots = [...this.#calls.values()];
+    const visibleSnapshots = snapshots.filter(
+      ({ brief }) => !this.#callDataDeletions.has(brief.id)
+    );
+    const attempts = [...this.#attempts.entries()]
+      .filter(([callId]) => !this.#callDataDeletions.has(callId))
+      .flatMap(([, stored]) => stored);
     const events = [...this.#callTelemetryEvents.values()]
       .flatMap((stored) => stored.map(({ event }) => event))
       .filter(({ occurredAt }) => occurredAt >= recentSince);
@@ -1938,6 +1944,33 @@ export class InMemoryCallRepository implements CallRepository {
         .length,
       recentErrors: events.filter(({ severity }) => severity === "error")
         .length,
+      callPlanCutover: {
+        recoverableLegacyCalls: visibleSnapshots.filter(({ brief, compilation }) =>
+          compilation !== null &&
+          (this.#compilations.get(brief.id)?.length ?? 0) === 0
+        ).length,
+        unavailableLegacyCalls: visibleSnapshots.filter(({ brief, compilation }) =>
+          compilation === null &&
+          (this.#compilations.get(brief.id)?.length ?? 0) === 0
+        ).length,
+        historicalAttemptsWithoutCompilation: attempts.filter((attempt) =>
+          attempt.endedAt !== null && attempt.compilationId === null
+        ).length,
+        historicalAttemptsWithoutExecutionSnapshot: attempts.filter((attempt) =>
+          attempt.endedAt !== null && attempt.executionSnapshot === null
+        ).length,
+        activeLegacyAttempts: attempts.filter((attempt) =>
+          attempt.endedAt === null &&
+          (attempt.compilationId === null || attempt.executionSnapshot === null)
+        ).length,
+        activeRecompilations: [...this.#callPreparations.values()].filter(
+          (preparation) =>
+            preparation.targetCallBriefId !== null &&
+            ["queued", "processing", "retrying"].includes(
+              preparation.preparation.status
+            )
+        ).length
+      },
       externalWorker: {
         healthyInstances: healthyWorkerHeartbeats.length,
         staleInstances: staleWorkerHeartbeats.length,

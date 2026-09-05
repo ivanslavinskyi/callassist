@@ -153,6 +153,31 @@ export function AdminSystemConsole() {
                   )}
             </section>
 
+            <section className="admin-system-panel">
+              <h2>{copy.cutoverTitle}</h2>
+              <p>{copy.cutoverIntro}</p>
+              <dl className="admin-operations-list">
+                <Fact label={copy.recoverableLegacyCalls} value={String(status.callPlanCutover.recoverableLegacyCalls)} />
+                <Fact label={copy.unavailableLegacyCalls} value={String(status.callPlanCutover.unavailableLegacyCalls)} />
+                <Fact label={copy.historicalAttemptsWithoutCompilation} value={String(status.callPlanCutover.historicalAttemptsWithoutCompilation)} />
+                <Fact label={copy.historicalAttemptsWithoutExecutionSnapshot} value={String(status.callPlanCutover.historicalAttemptsWithoutExecutionSnapshot)} />
+                <Fact label={copy.activeLegacyAttempts} value={String(status.callPlanCutover.activeLegacyAttempts)} />
+                <Fact label={copy.activeRecompilations} value={String(status.callPlanCutover.activeRecompilations)} />
+                <Fact
+                  label={copy.mutableReadRemoval}
+                  value={status.callPlanCutover.mutableCompilationReadRemovalReady
+                    ? copy.cutoverReady
+                    : copy.cutoverNotReady}
+                />
+                <Fact
+                  label={copy.mediaAdapterRemoval}
+                  value={status.callPlanCutover.legacyMediaAdapterRemovalReady
+                    ? copy.cutoverReady
+                    : copy.cutoverNotReady}
+                />
+              </dl>
+            </section>
+
             <div className="admin-system-grid">
               <section className="admin-system-panel">
                 <h2>{copy.workloadTitle}</h2>

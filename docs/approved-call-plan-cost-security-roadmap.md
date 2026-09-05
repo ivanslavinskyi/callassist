@@ -138,6 +138,23 @@ normalization across objective, context, facts, delivery instructions, and all
 clarification answers. The API returns a field issue for direct requests, while
 the create/edit and clarification forms use the same constants for `maxLength`,
 counters, warnings, and submit blocking. Long-document upload remains separate.
+The existing administrator system view now exposes cutover readiness without
+reading private call content: recoverable and unavailable legacy calls,
+historical attempts missing immutable bindings, active legacy attempts, and
+active recompilations. Owner-erased calls are excluded because their snapshots
+are intentionally removed. The mutable-compilation reader is not considered
+removable until the recoverable count is zero; the bounded media adapter is not
+considered removable while any active legacy attempt remains. Deploy the API
+before the web console so the newly rendered status is present when the new UI
+loads.
+
+A read-only local pre-beta inspection on 2026-09-05 found 21 recoverable legacy
+calls, 15 visible calls with no recoverable compilation, 28 historical attempts
+without immutable compilation/execution snapshots, zero active legacy attempts,
+and zero active recompilations. Consequently item 11 still requires an explicit,
+resumable backfill before the mutable read is removed. Historical attempts cannot
+be given a trustworthy execution snapshot after the fact and remain an explicit
+audit limitation; they do not block removal of the active-call media adapter.
 
 Deployment rehearsal on 2026-09-05 applied migrations 0050–0057 first to an
 isolated restored clone and then to the local source database, verified a no-op

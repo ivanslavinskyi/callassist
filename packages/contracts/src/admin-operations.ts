@@ -286,6 +286,16 @@ export const adminSystemStatusSchema = z.strictObject({
     retentionScheduled: countSchema,
     retentionOverdue: countSchema
   }),
+  callPlanCutover: z.strictObject({
+    recoverableLegacyCalls: countSchema,
+    unavailableLegacyCalls: countSchema,
+    historicalAttemptsWithoutCompilation: countSchema,
+    historicalAttemptsWithoutExecutionSnapshot: countSchema,
+    activeLegacyAttempts: countSchema,
+    activeRecompilations: countSchema,
+    mutableCompilationReadRemovalReady: z.boolean(),
+    legacyMediaAdapterRemovalReady: z.boolean()
+  }),
   jobs: z.strictObject({
     queued: countSchema,
     running: countSchema,
