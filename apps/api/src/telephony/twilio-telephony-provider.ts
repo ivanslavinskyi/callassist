@@ -80,7 +80,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       if (!isTwilioCallResourceStatus(call.status)) {
         throw new Error("TWILIO_CALL_STATUS_UNSUPPORTED");
       }
-      return { providerCallId, status: call.status };
+      const durationSeconds = optionalNonNegativeInteger(call.duration);
+      return {
+        providerCallId,
+        status: call.status,
+        ...(durationSeconds === undefined ? {} : { durationSeconds })
+      };
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("TWILIO_")) {
         throw error;

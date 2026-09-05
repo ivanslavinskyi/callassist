@@ -138,6 +138,21 @@ describe("TwilioTelephonyProvider", () => {
     expect(fetchCall).toHaveBeenCalledOnce();
   });
 
+  it("returns completed connected duration without inferring billed duration", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({
+      sid: "CA123",
+      status: "completed",
+      duration: "37"
+    });
+
+    await expect(provider.getCallStatus("CA123")).resolves.toEqual({
+      providerCallId: "CA123",
+      status: "completed",
+      durationSeconds: 37
+    });
+  });
+
   it("returns a controlled error for an unsupported provider call status", async () => {
     const { fetchCall, provider } = createProvider();
     fetchCall.mockResolvedValueOnce({ sid: "CA123", status: "mystery" });

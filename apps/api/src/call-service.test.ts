@@ -994,8 +994,9 @@ describe("CallService", () => {
       model: "gpt-transcribe",
       transcribe
     };
+    const repository = new InMemoryCallRepository();
     const service = new CallService(
-      new InMemoryCallRepository(),
+      repository,
       provider,
       () => undefined,
       transcriber
@@ -1017,6 +1018,14 @@ describe("CallService", () => {
 
     await service.approveCompilation(brief.id);
     await service.start(brief.id);
+    expect(repository.providerOperationsForTest()).toContainEqual(
+      expect.objectContaining({
+        provider: "twilio",
+        operationType: "telephony_leg",
+        stage: "outbound_call",
+        result: null
+      })
+    );
     expect((await service.get(brief.id))?.recording).toBeNull();
 
     const recordingStarted = await service.startRecordingAfterConsent(brief.id);

@@ -47,7 +47,8 @@ import {
   mapTwilioStatusToCallStatus,
   type RecordingMedia,
   type TelephonyProvider,
-  type TwilioCallStatusCallbackValue
+  type TwilioCallStatusCallbackValue,
+  type TwilioCallStatusUsage
 } from "./telephony/telephony-provider";
 import {
   PostCallTranscriptionError,
@@ -605,6 +606,20 @@ export class CallService {
 
     let started;
     try {
+      if (this.telephonyProvider.mode === "twilio") {
+        const operationId = randomUUID();
+        await this.repository.startTelephonyProviderOperation({
+          id: operationId,
+          callBriefId: id,
+          callAttemptId: reserved.attempt.id,
+          provider: "twilio",
+          operationType: "telephony_leg",
+          stage: "outbound_call",
+          requestedModel: "programmable_voice",
+          clientRequestId: operationId,
+          startedAt: reserved.attempt.startedAt
+        });
+      }
       started = await this.telephonyProvider.startCall(current.brief);
     } catch (error) {
       await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
@@ -704,7 +719,8 @@ export class CallService {
     providerCallId: string,
     status: TwilioCallStatusCallbackValue,
     callBriefId?: string,
-    lease?: DurableJobLease
+    lease?: DurableJobLease,
+    usage?: TwilioCallStatusUsage
   ) {
     const result = await this.repository.applyProviderStatus(
       providerCallId,
@@ -714,6 +730,26 @@ export class CallService {
       lease
     );
     if (result) {
+      if (
+        ["completed", "failed", "busy", "no-answer", "canceled"].includes(status) &&
+        (usage?.durationSeconds !== undefined ||
+          usage?.billableMinutes !== undefined)
+      ) {
+        await this.repository.recordTelephonyLegUsage({
+          fallbackOperationId: randomUUID(),
+          callBriefId: result.callId,
+          callAttemptId: result.attemptId,
+          providerCallId,
+          providerStatus: status,
+          durationSeconds: usage.durationSeconds ?? null,
+          billableSeconds:
+            usage.billableMinutes === undefined
+              ? null
+              : usage.billableMinutes * 60,
+          occurredAt: usage.occurredAt ?? new Date().toISOString(),
+          sequenceNumber: usage.sequenceNumber ?? null
+        });
+      }
       if (["completed", "failed", "stopped"].includes(result.snapshot.brief.status)) {
         this.#clearTimers(result.callId);
       }
@@ -1213,7 +1249,8 @@ export class CallService {
         provider.providerCallId,
         provider.status,
         job.callId,
-        currentLease(lease)
+        currentLease(lease),
+        { durationSeconds: provider.durationSeconds }
       );
       if (!reconciled) {
         throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");

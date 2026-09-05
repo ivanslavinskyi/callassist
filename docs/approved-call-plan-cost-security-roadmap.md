@@ -79,8 +79,12 @@ and total token counters, while input-audio transcription completion persists th
 provider's token or duration usage variant. Stable provider event/response IDs
 deduplicate replay, response/transcription operations point to the exact parent
 session, and locally observed session duration is retained even on interruption.
-Ledger persistence failure closes the stream to cap untracked spend. Twilio leg,
-recording, and post-call transcription instrumentation still remain.
+Ledger persistence failure closes the stream to cap untracked spend. Twilio
+outbound legs are now reserved before the create-call request and terminal status
+callbacks persist connected `CallDuration` separately from the callback's billed
+`Duration`; callback replay and reconciliation converge on one leg operation.
+Provider-reported Twilio price, recording cost, and post-call transcription
+instrumentation still remain.
 
 ## Why this roadmap exists
 
@@ -391,6 +395,11 @@ Capture Call SID/Recording SID, connected seconds, provider billed duration, sta
 end and queue times, final call and recording price/currency, and webhook sequence
 metadata. Provider-reported Call price covers connectivity only; recording and other
 features remain separate components.
+
+Implemented: outbound leg reservation, Call SID deduplication, terminal callback
+`CallDuration`, billed callback `Duration`, callback timestamp/sequence, and REST
+reconciliation of connected seconds. Pending: eventually consistent final call
+price/currency, recording price, and explicit queue/start/end timestamps.
 
 ### Post-call transcription
 

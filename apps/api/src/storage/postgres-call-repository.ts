@@ -79,6 +79,7 @@ import {
   assertCompilationIntegrity,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
+  createTelephonyLegResult,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
   durableWorkerHeartbeatRetentionMs,
@@ -116,6 +117,8 @@ import {
   type ProviderOperationReservationInput,
   type RealtimeProviderOperationInput,
   type RealtimeProviderSessionInput,
+  type TelephonyLegUsageInput,
+  type TelephonyProviderOperationInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 
@@ -985,6 +988,96 @@ export class PostgresCallRepository implements CallRepository {
         transaction,
         input.id,
         input.result
+      );
+    });
+  }
+
+  async startTelephonyProviderOperation(
+    input: TelephonyProviderOperationInput
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+          AND provider = 'twilio'
+        FOR SHARE
+      `;
+      if (attempt.count !== 1) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_brief_id, call_attempt_id, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.callBriefId}, ${input.callAttemptId},
+          ${input.startedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+    });
+  }
+
+  async recordTelephonyLegUsage(input: TelephonyLegUsageInput) {
+    await this.#sql.begin(async (transaction) => {
+      const [attempt] = await transaction<{ startedAt: DatabaseDate }[]>`
+        SELECT created_at AS "startedAt"
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+          AND provider = 'twilio'
+          AND provider_call_id = ${input.providerCallId}
+        FOR SHARE
+      `;
+      if (!attempt) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      let [operation] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM provider_operations
+        WHERE call_attempt_id = ${input.callAttemptId}
+          AND provider = 'twilio'
+          AND operation_type = 'telephony_leg'
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (!operation) {
+        [operation] = await transaction<{ id: string }[]>`
+          INSERT INTO provider_operations (
+            id, provider, operation_type, stage, requested_model,
+            client_request_id, call_brief_id, call_attempt_id, started_at
+          ) VALUES (
+            ${input.fallbackOperationId}, 'twilio', 'telephony_leg',
+            'outbound_call', 'programmable_voice',
+            ${input.fallbackOperationId}, ${input.callBriefId},
+            ${input.callAttemptId}, ${attempt.startedAt}
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `;
+        if (!operation) {
+          [operation] = await transaction<{ id: string }[]>`
+            SELECT id
+            FROM provider_operations
+            WHERE call_attempt_id = ${input.callAttemptId}
+              AND provider = 'twilio'
+              AND operation_type = 'telephony_leg'
+            LIMIT 1
+            FOR SHARE
+          `;
+        }
+      }
+      if (!operation) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await this.#insertProviderOperationResult(
+        transaction,
+        operation.id,
+        createTelephonyLegResult(input)
       );
     });
   }
@@ -3338,7 +3431,7 @@ export class PostgresCallRepository implements CallRepository {
     lease?: DurableJobLease
   ) {
     const now = new Date();
-    const callId = await this.#sql.begin(async (transaction) => {
+    const target = await this.#sql.begin(async (transaction) => {
       if (lease) {
         await requirePostgresDurableJobLease(transaction, lease);
       }
@@ -3465,11 +3558,14 @@ export class PostgresCallRepository implements CallRepository {
           status: callStatus
         });
       }
-      return row.callId;
+      return { callId: row.callId, attemptId: row.attemptId };
     });
 
-    if (!callId) return null;
-    return { callId, snapshot: await this.#require(callId) };
+    if (!target) return null;
+    return {
+      ...target,
+      snapshot: await this.#require(target.callId)
+    };
   }
 
   async updateStatus(id: string, status: CallBrief["status"]) {

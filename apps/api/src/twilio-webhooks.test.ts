@@ -30,10 +30,8 @@ function createHarness() {
     publicBaseUrl: "https://calls.example.test",
     client: { calls } as unknown as ReturnType<typeof twilio>
   });
-  const service = new CallService(
-    new InMemoryCallRepository(),
-    provider
-  );
+  const repository = new InMemoryCallRepository();
+  const service = new CallService(repository, provider);
   const handleTwilioSocket = vi.fn(
     (socket: { close: () => void; on: (...args: unknown[]) => unknown }) =>
       socket.close()
@@ -48,7 +46,7 @@ function createHarness() {
   });
   apps.push(app);
   services.push(service);
-  return { app, handleTwilioSocket, service };
+  return { app, handleTwilioSocket, repository, service };
 }
 
 async function createBrief(service: CallService) {
@@ -324,6 +322,61 @@ describe("Twilio webhooks", () => {
       channels: 2
     });
     expect((await webhookFacts(service)).recording_status.accepted).toBe(1);
+  });
+
+  it("stores terminal connected and billable call duration exactly once", async () => {
+    const { app, repository, service } = createHarness();
+    const brief = await createBrief(service);
+    const reserved = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    await repository.attachProviderCall(
+      reserved.attempt.id,
+      "CA-USAGE",
+      "in-progress"
+    );
+    const parameters = {
+      CallSid: "CA-USAGE",
+      CallStatus: "completed",
+      CallDuration: "37",
+      Duration: "1",
+      Timestamp: "Fri, 05 Sep 2026 08:00:37 +0000",
+      SequenceNumber: "3"
+    };
+    const path = `/webhooks/twilio/status?callBriefId=${brief.id}`;
+    const signature = twilio.getExpectedTwilioSignature(
+      "test-auth-token",
+      `https://calls.example.test${path}`,
+      parameters
+    );
+    for (let replay = 0; replay < 2; replay += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: path,
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-twilio-signature": signature
+        },
+        payload: new URLSearchParams(parameters).toString()
+      });
+      expect(response.statusCode).toBe(204);
+    }
+
+    const legs = repository.providerOperationsForTest().filter(
+      ({ operationType }) => operationType === "telephony_leg"
+    );
+    expect(legs).toHaveLength(1);
+    expect(legs[0]?.result).toMatchObject({
+      providerResponseId: "CA-USAGE",
+      usage: {
+        durationSeconds: 37,
+        billableSeconds: 60,
+        rawUsage: {
+          call_status: "completed",
+          sequence_number: 3
+        }
+      }
+    });
   });
 
   it("records unmatched and failed status deliveries without provider payloads", async () => {

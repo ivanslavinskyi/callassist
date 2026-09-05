@@ -29,6 +29,13 @@ export const TWILIO_CALL_STATUS_CALLBACK_VALUES = [
 export type TwilioCallStatusCallbackValue =
   (typeof TWILIO_CALL_STATUS_CALLBACK_VALUES)[number];
 
+export type TwilioCallStatusUsage = {
+  durationSeconds?: number;
+  billableMinutes?: number;
+  occurredAt?: string;
+  sequenceNumber?: number;
+};
+
 export const TWILIO_RECORDING_STATUSES = [
   "in-progress",
   "completed",
@@ -69,6 +76,7 @@ export type RecordingMedia = {
 export type ProviderCallStatus = {
   providerCallId: string;
   status: TwilioCallResourceStatus;
+  durationSeconds?: number;
 };
 
 export type ProviderRecordingStatus = {

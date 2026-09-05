@@ -1822,6 +1822,39 @@ describeWithDatabase("PostgresCallRepository", () => {
       userId: ownerA,
       admissionPolicy: ledgerTestPolicy
     });
+    const telephonyOperationId = randomUUID();
+    await repository.startTelephonyProviderOperation({
+      id: telephonyOperationId,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "twilio",
+      operationType: "telephony_leg",
+      stage: "outbound_call",
+      requestedModel: "programmable_voice",
+      clientRequestId: telephonyOperationId,
+      startedAt: "2096-01-03T00:00:00.000Z"
+    });
+    const providerCallId = `CA-usage-${randomUUID()}`;
+    await repository.attachProviderCall(
+      attempt.id,
+      providerCallId,
+      "in-progress"
+    );
+    const telephonyUsage = {
+      fallbackOperationId: randomUUID(),
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      providerCallId,
+      providerStatus: "completed",
+      durationSeconds: 37,
+      billableSeconds: 60,
+      occurredAt: "2096-01-03T00:00:37.000Z",
+      sequenceNumber: 3
+    };
+    await Promise.all([
+      repository.recordTelephonyLegUsage(telephonyUsage),
+      repository.recordTelephonyLegUsage(telephonyUsage)
+    ]);
     const sessionIds = [randomUUID(), randomUUID()];
     await repository.startRealtimeProviderSessions(sessionIds.map((id, index) => ({
       id,
@@ -1886,6 +1919,9 @@ describeWithDatabase("PostgresCallRepository", () => {
       inputAudioTokens: number;
       cachedInputAudioTokens: number;
       outputAudioTokens: number;
+      telephonyLegs: number;
+      connectedSeconds: number;
+      billableSeconds: number;
     }[]>`
       SELECT
         (SELECT count(*)::int FROM provider_operations
@@ -1905,7 +1941,14 @@ describeWithDatabase("PostgresCallRepository", () => {
         (SELECT cached_input_audio_tokens FROM provider_usage_records
           WHERE operation_id = ${operationId}) AS "cachedInputAudioTokens",
         (SELECT output_audio_tokens FROM provider_usage_records
-          WHERE operation_id = ${operationId}) AS "outputAudioTokens"
+          WHERE operation_id = ${operationId}) AS "outputAudioTokens",
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_attempt_id = ${attempt.id}
+            AND operation_type = 'telephony_leg') AS "telephonyLegs",
+        (SELECT duration_seconds::float FROM provider_usage_records
+          WHERE operation_id = ${telephonyOperationId}) AS "connectedSeconds",
+        (SELECT billable_seconds::float FROM provider_usage_records
+          WHERE operation_id = ${telephonyOperationId}) AS "billableSeconds"
     `;
     expect(ledger).toEqual({
       sessions: 2,
@@ -1913,7 +1956,10 @@ describeWithDatabase("PostgresCallRepository", () => {
       usageRecords: 1,
       inputAudioTokens: 50,
       cachedInputAudioTokens: 5,
-      outputAudioTokens: 20
+      outputAudioTokens: 20,
+      telephonyLegs: 1,
+      connectedSeconds: 37,
+      billableSeconds: 60
     });
   });
 

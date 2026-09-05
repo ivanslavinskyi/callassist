@@ -288,6 +288,72 @@ export type RealtimeProviderOperationRecord =
     })
   | RealtimeProviderOperationInput;
 
+export type TelephonyProviderOperationInput = {
+  id: string;
+  callBriefId: string;
+  callAttemptId: string;
+  provider: "twilio";
+  operationType: "telephony_leg";
+  stage: "outbound_call";
+  requestedModel: "programmable_voice";
+  clientRequestId: string;
+  startedAt: string;
+};
+
+export type TelephonyLegUsageInput = {
+  fallbackOperationId: string;
+  callBriefId: string;
+  callAttemptId: string;
+  providerCallId: string;
+  providerStatus: string;
+  durationSeconds: number | null;
+  billableSeconds: number | null;
+  occurredAt: string;
+  sequenceNumber: number | null;
+};
+
+export type TelephonyProviderOperationRecord =
+  TelephonyProviderOperationInput & {
+    result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+  };
+
+export function createTelephonyLegResult(
+  input: TelephonyLegUsageInput
+): Omit<CompleteProviderOperationInput, "operationId"> {
+  return {
+    outcome: input.providerStatus === "failed" ? "provider_error" : "succeeded",
+    providerRequestId: null,
+    providerResponseId: input.providerCallId,
+    providerModel: "programmable_voice",
+    statusCode: null,
+    completedAt: input.occurredAt,
+    durationMs: Math.round((input.durationSeconds ?? 0) * 1_000),
+    errorCode: input.providerStatus === "failed" ? "TWILIO_CALL_FAILED" : null,
+    usage: {
+      requestCount: 1,
+      inputTextTokens: null,
+      cachedInputTextTokens: null,
+      cacheWriteInputTextTokens: null,
+      outputTextTokens: null,
+      reasoningOutputTokens: null,
+      inputAudioTokens: null,
+      cachedInputAudioTokens: null,
+      outputAudioTokens: null,
+      totalTokens: null,
+      durationSeconds: input.durationSeconds,
+      billableSeconds: input.billableSeconds,
+      rawUsage: {
+        call_status: input.providerStatus,
+        call_duration_seconds: input.durationSeconds,
+        billable_minutes:
+          input.billableSeconds === null ? null : input.billableSeconds / 60,
+        billable_seconds: input.billableSeconds,
+        sequence_number: input.sequenceNumber
+      }
+    }
+  };
+}
+
 export type AdminCallCursor = { createdAt: string; id: string };
 export type ListAdminCallsInput = AdminCallListFilters & {
   limit: number;
@@ -477,6 +543,7 @@ export function isUuid(value: string) {
 
 export type ProviderStatusResult = {
   callId: string;
+  attemptId: string;
   snapshot: CallSnapshot;
 };
 
@@ -553,6 +620,10 @@ export interface CallRepository {
   recordRealtimeProviderOperation(
     input: RealtimeProviderOperationInput
   ): Promise<void>;
+  startTelephonyProviderOperation(
+    input: TelephonyProviderOperationInput
+  ): Promise<void>;
+  recordTelephonyLegUsage(input: TelephonyLegUsageInput): Promise<void>;
   completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;

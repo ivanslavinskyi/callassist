@@ -49,6 +49,7 @@ import {
 } from "@callassist/contracts";
 import {
   CallRepositoryError,
+  createTelephonyLegResult,
   assertCompilationIntegrity,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
@@ -88,6 +89,9 @@ import {
   type RealtimeProviderOperationInput,
   type RealtimeProviderOperationRecord,
   type RealtimeProviderSessionInput,
+  type TelephonyLegUsageInput,
+  type TelephonyProviderOperationInput,
+  type TelephonyProviderOperationRecord,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 import {
@@ -188,7 +192,9 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #callPreparations = new Map<string, StoredCallPreparation>();
   readonly #providerOperations = new Map<
     string,
-    ProviderOperationRecord | RealtimeProviderOperationRecord
+    | ProviderOperationRecord
+    | RealtimeProviderOperationRecord
+    | TelephonyProviderOperationRecord
   >();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
@@ -611,6 +617,57 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
     }
     this.#providerOperations.set(input.id, copy(input));
+  }
+
+  async startTelephonyProviderOperation(
+    input: TelephonyProviderOperationInput
+  ) {
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (!attempt || attempt.provider !== "twilio") {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    const existing = [...this.#providerOperations.values()].find(
+      (operation) =>
+        "callAttemptId" in operation &&
+        operation.callAttemptId === input.callAttemptId &&
+        operation.operationType === "telephony_leg"
+    );
+    if (existing) return;
+    this.#providerOperations.set(input.id, { ...copy(input), result: null });
+  }
+
+  async recordTelephonyLegUsage(input: TelephonyLegUsageInput) {
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (!attempt || attempt.providerCallId !== input.providerCallId) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    let operation = [...this.#providerOperations.values()].find(
+      (candidate): candidate is TelephonyProviderOperationRecord =>
+        "callAttemptId" in candidate &&
+        candidate.callAttemptId === input.callAttemptId &&
+        candidate.operationType === "telephony_leg"
+    );
+    if (!operation) {
+      operation = {
+        id: input.fallbackOperationId,
+        callBriefId: input.callBriefId,
+        callAttemptId: input.callAttemptId,
+        provider: "twilio",
+        operationType: "telephony_leg",
+        stage: "outbound_call",
+        requestedModel: "programmable_voice",
+        clientRequestId: input.fallbackOperationId,
+        startedAt: attempt.startedAt,
+        result: null
+      };
+      this.#providerOperations.set(operation.id, operation);
+    }
+    if (operation.result) return;
+    operation.result = createTelephonyLegResult(input);
   }
 
   providerOperationsForTest(preparationId?: string) {
@@ -1909,7 +1966,7 @@ export class InMemoryCallRepository implements CallRepository {
           now
         );
       }
-      return { callId, snapshot: copy(snapshot) };
+      return { callId, attemptId: attempt.id, snapshot: copy(snapshot) };
     }
     return null;
   }

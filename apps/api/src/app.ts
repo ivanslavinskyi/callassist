@@ -2707,7 +2707,18 @@ export function buildWebhookApp({
           const snapshot = await service.handleTwilioStatus(
             providerCallId,
             status,
-            request.query.callBriefId
+            request.query.callBriefId,
+            undefined,
+            {
+              durationSeconds: optionalNonNegativeInteger(
+                parameters.CallDuration
+              ),
+              billableMinutes: optionalNonNegativeNumber(parameters.Duration),
+              occurredAt: optionalIsoDate(parameters.Timestamp) ?? receivedAt,
+              sequenceNumber: optionalNonNegativeInteger(
+                parameters.SequenceNumber
+              )
+            }
           );
           await recordWebhookDelivery(request, snapshot
             ? { kind: "call_status", outcome: "accepted", receivedAt }
@@ -2848,6 +2859,11 @@ function optionalNonNegativeNumber(value: string | undefined) {
 function optionalPositiveNumber(value: string | undefined) {
   const parsed = optionalNonNegativeNumber(value);
   return parsed !== undefined && parsed > 0 ? parsed : undefined;
+}
+
+function optionalNonNegativeInteger(value: string | undefined) {
+  const parsed = optionalNonNegativeNumber(value);
+  return parsed !== undefined && Number.isInteger(parsed) ? parsed : undefined;
 }
 
 function optionalIsoDate(value: string | undefined) {
