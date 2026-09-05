@@ -99,16 +99,28 @@ export interface PostCallTranscriber {
 }
 
 export class PostCallTranscriptionError extends Error {
+  readonly statusCode: number | null;
+  readonly providerRequestId: string | null;
+  readonly retryable: boolean;
+
   constructor(
     readonly code:
       | "AUDIO_EMPTY"
       | "AUDIO_TOO_LARGE"
       | "OPENAI_REQUEST_FAILED"
       | "OPENAI_RESPONSE_INVALID",
-    options?: { cause?: unknown }
+    options?: {
+      cause?: unknown;
+      statusCode?: number | null;
+      providerRequestId?: string | null;
+    }
   ) {
     super(code, options);
     this.name = "PostCallTranscriptionError";
+    this.statusCode = options?.statusCode ?? null;
+    this.providerRequestId = options?.providerRequestId ?? null;
+    this.retryable = code === "OPENAI_REQUEST_FAILED" &&
+      isRetryableTranscriptionStatus(this.statusCode);
   }
 }
 
@@ -369,7 +381,10 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         usage: null,
         transcriptText: null
       });
-      throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED");
+      throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED", {
+        statusCode: response.status,
+        providerRequestId
+      });
     }
     const payload = (await response.json().catch(() => null)) as
       | { text?: unknown; usage?: unknown }
@@ -407,6 +422,18 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     });
     return transcriptText;
   }
+}
+
+export function isPostCallTranscriptionErrorRetryable(error: unknown) {
+  return error instanceof PostCallTranscriptionError && error.retryable;
+}
+
+function isRetryableTranscriptionStatus(statusCode: number | null) {
+  return statusCode === null ||
+    statusCode === 408 ||
+    statusCode === 409 ||
+    statusCode === 429 ||
+    statusCode >= 500;
 }
 
 function createTranscriptionInputFingerprint(input: {

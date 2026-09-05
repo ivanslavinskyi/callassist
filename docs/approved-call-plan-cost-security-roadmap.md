@@ -68,6 +68,9 @@ atomically before every physical compiler or moderation request and caps all
 transport and durable retries at eight requests. A crash after reservation is
 deliberately fail-closed and may consume budget without sending the request; the
 provider-operation ledger in item 6 will make that distinction observable.
+Post-call transcription uses the same transient HTTP classification; empty or
+oversized audio, malformed successful responses, and permanent OpenAI 4xx errors
+are terminal instead of multiplying cost across all three durable attempts.
 Item 6 has compiler and Realtime vertical slices: every compiler/moderation HTTP
 attempt is reserved as an immutable provider operation before network I/O, its
 bounded outcome is stored even on failure, and Responses token usage is written

@@ -5,6 +5,7 @@ import {
   buildPostCallTranscriptionKeywords,
   buildPostCallTranscriptionLanguages,
   buildPostCallTranscriptionPrompt,
+  isPostCallTranscriptionErrorRetryable,
   parsePostCallTranscriptionUsage
 } from "./openai-post-call-transcriber";
 
@@ -304,6 +305,35 @@ describe("OpenAIPostCallTranscriber", () => {
       statusCode: 429,
       usage: null
     }));
+  });
+
+  it("retries only transient provider failures", async () => {
+    for (const status of [408, 409, 429, 500, 503]) {
+      const transcriber = new OpenAIPostCallTranscriber({
+        apiKey: "test-key",
+        fetchImplementation: vi.fn().mockResolvedValue(
+          new Response("transient", { status })
+        )
+      });
+      const error = await transcriber.transcribe(media, brief).catch(
+        (caught: unknown) => caught
+      );
+      expect(error).toMatchObject({ statusCode: status, retryable: true });
+      expect(isPostCallTranscriptionErrorRetryable(error)).toBe(true);
+    }
+    for (const status of [400, 401, 403, 404, 422]) {
+      const transcriber = new OpenAIPostCallTranscriber({
+        apiKey: "test-key",
+        fetchImplementation: vi.fn().mockResolvedValue(
+          new Response("terminal", { status })
+        )
+      });
+      const error = await transcriber.transcribe(media, brief).catch(
+        (caught: unknown) => caught
+      );
+      expect(error).toMatchObject({ statusCode: status, retryable: false });
+      expect(isPostCallTranscriptionErrorRetryable(error)).toBe(false);
+    }
   });
 
   it("does not promote wording from the live draft", async () => {

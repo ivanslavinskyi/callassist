@@ -51,6 +51,7 @@ import {
   type TwilioCallStatusUsage
 } from "./telephony/telephony-provider";
 import {
+  isPostCallTranscriptionErrorRetryable,
   PostCallTranscriptionError,
   type PostCallTranscriber
 } from "./transcription/openai-post-call-transcriber";
@@ -1146,7 +1147,12 @@ export class CallService {
           });
           await this.#syncSystemOutcome(failed.callId);
         }
-        throw new DurableJobExecutionError(failureCode, { cause: error });
+        throw new DurableJobExecutionError(failureCode, {
+          cause: error,
+          retryable: error instanceof PostCallTranscriptionError
+            ? isPostCallTranscriptionErrorRetryable(error)
+            : true
+        });
       }
       throw error;
     } finally {
