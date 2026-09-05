@@ -1905,6 +1905,21 @@ describeWithDatabase("PostgresCallRepository", () => {
       usageRecords: 1,
       inputTextTokens: 100
     });
+    const callFacts = await repository.getAdminOperationsFacts(
+      "2096-01-01T00:00:00.000Z",
+      "2096-01-01T00:01:00.000Z",
+      brief.id
+    );
+    expect(callFacts.providerUsage).toMatchObject({
+      operationCount: 8,
+      usageRecordCount: 1,
+      buckets: [expect.objectContaining({
+        provider: "openai",
+        operationType: "brief_compilation",
+        inputTextTokens: 100,
+        outputTextTokens: 40
+      })]
+    });
     await expect(inspection`
       UPDATE provider_operations
       SET stage = 'output_moderation'
@@ -2228,7 +2243,8 @@ describeWithDatabase("PostgresCallRepository", () => {
     });
     const facts = await repository.getAdminOperationsFacts(
       new Date(costObservedAt.getTime() - 1_000).toISOString(),
-      new Date(costObservedAt.getTime() + 1_000).toISOString()
+      new Date(costObservedAt.getTime() + 1_000).toISOString(),
+      brief.id
     );
     expect(facts.providerCosts).toMatchObject({
       recordCount: 1,

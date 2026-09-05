@@ -500,8 +500,10 @@ Implemented aggregate slice: the existing dashboard now keeps configured
 per-minute estimates, token/duration-based list-price calculations, and
 provider-reported actual charges as three visibly separate views. Reported
 currencies are grouped independently; the USD total never absorbs CHF/EUR through
-an implicit exchange rate. Per-call/preparation drill-down and coverage ratios
-remain pending.
+an implicit exchange rate. The existing Call Inspector now exposes the same
+breakdown for one call and includes compiler operations linked through that call's
+preparation. Failed preparations that never produced a call still need a dedicated
+preparation inspector; coverage ratios also remain pending.
 
 ### Later scope
 

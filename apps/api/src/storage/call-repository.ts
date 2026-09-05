@@ -807,7 +807,8 @@ export interface CallRepository {
   ): Promise<AdminCallSensitiveContent>;
   getAdminOperationsFacts(
     from: string,
-    to: string
+    to: string,
+    callId?: string
   ): Promise<AdminOperationsFacts>;
   getAdminSystemFacts(
     now: string,

@@ -11,6 +11,7 @@ import type {
   AdminContentPageSummary,
   AdminContentRevisionSummary,
   AdminCallInspector,
+  AdminCallCostBreakdown,
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
@@ -634,6 +635,12 @@ export function getCallPreparationErrorMessage(
     return copy.rateLimited;
   }
   return copy.generic;
+}
+
+export async function getAdminCallCostBreakdown(id: string) {
+  return apiRequest<AdminCallCostBreakdown>(
+    `/api/admin/calls/${encodeURIComponent(id)}/cost`
+  );
 }
 
 export async function listCallBriefs(options: {

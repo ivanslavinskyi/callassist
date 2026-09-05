@@ -935,6 +935,25 @@ describe("CallService", () => {
         rawCost: { price: "-0.013700", price_unit: "USD" }
       })
     ]);
+    await expect(service.getAdminCallCostBreakdown(brief.id)).resolves
+      .toMatchObject({
+        callId: brief.id,
+        cost: {
+          providerUsage: {
+            components: {
+              telephony: {
+                usageRecords: 1,
+                durationSeconds: 37
+              }
+            }
+          },
+          providerReported: {
+            status: "reported",
+            recordCount: 1,
+            usdMicros: 13_700
+          }
+        }
+      });
 
     await service.handleTwilioStatus(
       "CA-cost-reconciliation",

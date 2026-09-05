@@ -760,7 +760,10 @@ export class InMemoryCallRepository implements CallRepository {
       };
       this.#providerOperations.set(operation.id, operation);
     }
-    if (!operation.result) {
+    if (
+      !operation.result &&
+      (input.durationSeconds !== null || input.billableSeconds !== null)
+    ) {
       operation.result = createTelephonyLegResult(input);
     }
     await this.enqueueDurableJob({
@@ -1410,10 +1413,12 @@ export class InMemoryCallRepository implements CallRepository {
 
   async getAdminOperationsFacts(
     from: string,
-    to: string
+    to: string,
+    callId?: string
   ): Promise<AdminOperationsFacts> {
     const scoped = [...this.#calls.values()].filter(({ brief }) =>
-      brief.createdAt >= from && brief.createdAt <= to
+      brief.createdAt >= from && brief.createdAt <= to &&
+      (!callId || brief.id === callId)
     );
     const facts = emptyAdminOperationsFacts();
     facts.providerUsage.incurredFrom = from;
@@ -1503,6 +1508,7 @@ export class InMemoryCallRepository implements CallRepository {
     facts.firstAudioLatencyMs = aggregateFacts(firstAudioValues);
     const providerBuckets = new Map<string, AdminProviderUsageBucket>();
     for (const operation of this.#providerOperations.values()) {
+      if (!this.#providerOperationMatchesCall(operation, callId)) continue;
       if (operation.startedAt >= from && operation.startedAt <= to) {
         facts.providerUsage.operationCount += 1;
       }
@@ -1618,6 +1624,10 @@ export class InMemoryCallRepository implements CallRepository {
     const providerCostBuckets = new Map<string, AdminProviderCostBucket>();
     for (const cost of this.#providerCosts.values()) {
       if (cost.observedAt < from || cost.observedAt > to) continue;
+      const operation = this.#providerOperations.get(cost.operationId);
+      if (!operation || !this.#providerOperationMatchesCall(operation, callId)) {
+        continue;
+      }
       const key = [
         cost.provider,
         cost.costBasis,
@@ -3423,6 +3433,22 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
     }
     return current;
+  }
+
+  #providerOperationMatchesCall(
+    operation: ProviderOperationRecord | PostCallTranscriptionProviderOperationRecord |
+      RealtimeProviderOperationRecord | TelephonyProviderOperationRecord,
+    callId?: string
+  ) {
+    if (!callId) return true;
+    if ("callBriefId" in operation && operation.callBriefId === callId) {
+      return true;
+    }
+    if ("callPreparationId" in operation) {
+      return this.#callPreparations.get(operation.callPreparationId)
+        ?.preparation.callBriefId === callId;
+    }
+    return false;
   }
 
   #require(id: string) {

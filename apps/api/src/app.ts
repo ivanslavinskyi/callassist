@@ -1619,6 +1619,24 @@ export function buildApp({
       }
     );
 
+    app.get<{ Params: { id: string } }>(
+      "/api/admin/calls/:id/cost",
+      async (request, reply) => {
+        const actor = await authorizeAdminRead(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.id)) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await service.getAdminCallCostBreakdown(request.params.id));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      }
+    );
+
     app.post<{ Params: { id: string } }>(
       "/api/admin/calls/:id/sensitive-access",
       async (request, reply) => {

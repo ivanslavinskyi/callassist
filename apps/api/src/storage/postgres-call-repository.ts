@@ -1263,11 +1263,13 @@ export class PostgresCallRepository implements CallRepository {
       if (!operation) {
         throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
       }
-      await this.#insertProviderOperationResult(
-        transaction,
-        operation.id,
-        createTelephonyLegResult(input)
-      );
+      if (input.durationSeconds !== null || input.billableSeconds !== null) {
+        await this.#insertProviderOperationResult(
+          transaction,
+          operation.id,
+          createTelephonyLegResult(input)
+        );
+      }
       await this.#enqueueProviderCallCostReconciliation(
         transaction,
         input.callAttemptId,
@@ -2438,7 +2440,8 @@ export class PostgresCallRepository implements CallRepository {
 
   async getAdminOperationsFacts(
     from: string,
-    to: string
+    to: string,
+    callId?: string
   ): Promise<AdminOperationsFacts> {
     const [row] = await this.#sql<AdminOperationsFactsRow[]>`
       WITH scoped_calls AS (
@@ -2446,6 +2449,7 @@ export class PostgresCallRepository implements CallRepository {
         FROM call_briefs
         WHERE created_at >= ${from}::timestamptz
           AND created_at <= ${to}::timestamptz
+          AND (${callId ?? null}::uuid IS NULL OR id = ${callId ?? null})
       ),
       signals AS (
         SELECT
@@ -2625,6 +2629,17 @@ export class PostgresCallRepository implements CallRepository {
         FROM provider_operations
         WHERE started_at >= ${from}::timestamptz
           AND started_at <= ${to}::timestamptz
+          AND (
+            ${callId ?? null}::uuid IS NULL
+            OR provider_operations.call_brief_id = ${callId ?? null}
+            OR EXISTS (
+              SELECT 1
+              FROM call_preparation_requests
+              WHERE call_preparation_requests.id =
+                provider_operations.call_preparation_id
+                AND call_preparation_requests.call_brief_id = ${callId ?? null}
+            )
+          )
       `,
       this.#sql<AdminProviderUsageRow[]>`
         SELECT
@@ -2679,6 +2694,16 @@ export class PostgresCallRepository implements CallRepository {
           ON results.operation_id = operations.id
         WHERE usage.observed_at >= ${from}::timestamptz
           AND usage.observed_at <= ${to}::timestamptz
+          AND (
+            ${callId ?? null}::uuid IS NULL
+            OR operations.call_brief_id = ${callId ?? null}
+            OR EXISTS (
+              SELECT 1
+              FROM call_preparation_requests
+              WHERE call_preparation_requests.id = operations.call_preparation_id
+                AND call_preparation_requests.call_brief_id = ${callId ?? null}
+            )
+          )
         GROUP BY
           operations.provider,
           operations.operation_type,
@@ -2692,17 +2717,28 @@ export class PostgresCallRepository implements CallRepository {
       `,
       this.#sql<AdminProviderCostRow[]>`
         SELECT
-          provider,
-          cost_basis AS "costBasis",
-          component,
-          currency,
+          costs.provider,
+          costs.cost_basis AS "costBasis",
+          costs.component,
+          costs.currency,
           count(*)::int AS records,
-          sum(amount_micros)::double precision AS "amountMicros"
-        FROM provider_cost_records
-        WHERE observed_at >= ${from}::timestamptz
-          AND observed_at <= ${to}::timestamptz
-        GROUP BY provider, cost_basis, component, currency
-        ORDER BY provider, component, currency
+          sum(costs.amount_micros)::double precision AS "amountMicros"
+        FROM provider_cost_records costs
+        JOIN provider_operations operations ON operations.id = costs.operation_id
+        WHERE costs.observed_at >= ${from}::timestamptz
+          AND costs.observed_at <= ${to}::timestamptz
+          AND (
+            ${callId ?? null}::uuid IS NULL
+            OR operations.call_brief_id = ${callId ?? null}
+            OR EXISTS (
+              SELECT 1
+              FROM call_preparation_requests
+              WHERE call_preparation_requests.id = operations.call_preparation_id
+                AND call_preparation_requests.call_brief_id = ${callId ?? null}
+            )
+          )
+        GROUP BY costs.provider, costs.cost_basis, costs.component, costs.currency
+        ORDER BY costs.provider, costs.component, costs.currency
       `
     ]);
     return {

@@ -16,6 +16,7 @@ import {
   deleteCallData,
   getAccountDeletion,
   getCreditUsage,
+  getAdminCallCostBreakdown,
   getAdminCallInspector,
   getAdminOperationsOverview,
   getAdminSystemStatus,
@@ -541,6 +542,10 @@ describe("API client headers", () => {
         outcomeHistory: []
       }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        callId,
+        generatedAt: "2026-08-22T12:00:00.000Z"
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         callBriefId: callId,
         phoneNumber: "+41710000000"
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -557,6 +562,7 @@ describe("API client headers", () => {
       dateTo: "2026-08-31T23:59:59.999Z"
     });
     await getAdminCallInspector(callId);
+    await getAdminCallCostBreakdown(callId);
     await accessAdminCallSensitiveContent(
       callId,
       "Investigating support ticket 123"
@@ -569,9 +575,12 @@ describe("API client headers", () => {
       `/api/admin/calls/${callId}`
     );
     expect(fetchMock.mock.calls[2]?.[0]).toContain(
+      `/api/admin/calls/${callId}/cost`
+    );
+    expect(fetchMock.mock.calls[3]?.[0]).toContain(
       `/api/admin/calls/${callId}/sensitive-access`
     );
-    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
       method: "POST",
       credentials: "include",
       body: JSON.stringify({ reason: "Investigating support ticket 123" })

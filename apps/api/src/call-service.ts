@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   adminOperationsWindowBounds,
+  adminCallCostBreakdownSchema,
   adminSystemStatusSchema,
   normalizeCreateCallBriefInput,
   isSwissDestinationPhone,
@@ -19,7 +20,10 @@ import {
   type OwnerCallFeedbackInput,
   type TranscriptSegment
 } from "@callassist/contracts";
-import { buildAdminOperationsOverview } from "./admin-operations";
+import {
+  buildAdminCostOverview,
+  buildAdminOperationsOverview
+} from "./admin-operations";
 import {
   BriefCompilerError,
   briefCompilationProviderRequestBudget,
@@ -292,6 +296,21 @@ export class CallService {
 
   getAdminCallInspector(id: string) {
     return this.repository.getAdminCallInspector(id);
+  }
+
+  async getAdminCallCostBreakdown(id: string) {
+    await this.repository.getAdminCallInspector(id);
+    const generatedAt = new Date().toISOString();
+    const facts = await this.repository.getAdminOperationsFacts(
+      "1970-01-01T00:00:00.000Z",
+      generatedAt,
+      id
+    );
+    return adminCallCostBreakdownSchema.parse({
+      callId: id,
+      generatedAt,
+      cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
+    });
   }
 
   getAdminCallSensitiveContent(
@@ -1368,6 +1387,18 @@ export class CallService {
       ].includes(provider.status)) {
         throw new DurableJobExecutionError("PROVIDER_CALL_COST_NOT_FINAL");
       }
+      const observedAt = new Date().toISOString();
+      await this.repository.recordTelephonyLegUsage({
+        fallbackOperationId: randomUUID(),
+        callBriefId: job.callId,
+        callAttemptId: attempt.id,
+        providerCallId: provider.providerCallId,
+        providerStatus: provider.status,
+        durationSeconds: provider.durationSeconds ?? null,
+        billableSeconds: null,
+        occurredAt: observedAt,
+        sequenceNumber: null
+      });
       if (!provider.providerReportedCost) {
         throw new DurableJobExecutionError("PROVIDER_CALL_COST_PENDING");
       }
@@ -1380,7 +1411,7 @@ export class CallService {
         amountMicros: provider.providerReportedCost.amountMicros,
         currency: provider.providerReportedCost.currency,
         rawAmount: provider.providerReportedCost.rawAmount,
-        observedAt: new Date().toISOString()
+        observedAt
       }, currentLease(lease));
     } catch (error) {
       if (error instanceof DurableJobExecutionError) throw error;

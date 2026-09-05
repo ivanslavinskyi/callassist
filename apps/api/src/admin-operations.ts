@@ -65,7 +65,7 @@ export function buildAdminOperationsOverview(input: {
       recoveries: facts.recoveries,
       realtimeReconnects: { status: "not_supported", count: null }
     },
-    cost: buildCost(facts, input.costPolicy)
+    cost: buildAdminCostOverview(facts, input.costPolicy)
   });
 }
 
@@ -86,8 +86,11 @@ function withAvailability(
   };
 }
 
-function buildCost(
-  facts: AdminOperationsFacts,
+export function buildAdminCostOverview(
+  facts: Pick<
+    AdminOperationsFacts,
+    "usageSeconds" | "providerUsage" | "providerCosts"
+  >,
   policy: OperationalCostPolicy
 ) {
   const usage = facts.usageSeconds;

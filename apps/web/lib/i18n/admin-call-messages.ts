@@ -54,6 +54,26 @@ const en = {
   outcomeHistory: "Outcome provenance",
   noOutcomeHistory: "No outcome revisions are recorded.",
   revision: "Revision",
+  costTitle: "Usage and cost breakdown",
+  costHelp: "Configured duration estimates, calculated model-list-price cost, and provider-reported actual charges are separate. Unknown usage remains unavailable, not zero.",
+  configuredEstimate: "Configured fallback estimate",
+  calculatedUsageCost: "Calculated usage cost",
+  providerReportedCost: "Provider-reported actual (USD)",
+  providerActual: "Provider actual",
+  providerOperations: "Provider operations",
+  providerUsageRecords: "Usage / cost records",
+  requests: "Requests",
+  textTokens: "Text tokens (input / cached / cache write / output)",
+  audioTokens: "Audio tokens (input / cached / output)",
+  providerUsageDuration: "Measured duration",
+  costComponents: {
+    briefCompilation: "Brief compilation",
+    realtimeText: "Realtime text",
+    realtimeAudio: "Realtime audio",
+    realtimeTranscription: "Realtime transcription",
+    postCallTranscription: "Post-call transcription",
+    telephony: "Telephony"
+  },
   sensitiveTitle: "Sensitive call content",
   sensitiveHelp: "Only superadmins can request this data. Enter the support or incident reason before access. The read is permanently audited.",
   sensitiveForbidden: "Your administrator role can inspect technical data but cannot access call content.",
@@ -145,7 +165,7 @@ const en = {
 type StructuredMessageKey =
   "loaded" | "statuses" | "outcomes" | "consents" | "failures" |
   "provenance" | "goalResults" | "transcriptRatings" | "connections" |
-  "processStates" | "languages";
+  "processStates" | "languages" | "costComponents";
 
 type AdminCallMessages = {
   [Key in Exclude<keyof typeof en, StructuredMessageKey>]: string;
@@ -161,6 +181,15 @@ type AdminCallMessages = {
   connections: Record<"confirmed" | "not_confirmed", string>;
   processStates: Record<"not_recorded" | "started" | "completed" | "failed", string>;
   languages: Record<CallLocale, string>;
+  costComponents: Record<
+    | "briefCompilation"
+    | "realtimeText"
+    | "realtimeAudio"
+    | "realtimeTranscription"
+    | "postCallTranscription"
+    | "telephony",
+    string
+  >;
 };
 
 const de: AdminCallMessages = {
@@ -209,6 +238,26 @@ const de: AdminCallMessages = {
   outcomeHistory: "Ergebnisprovenienz",
   noOutcomeHistory: "Es sind keine Ergebnisrevisionen gespeichert.",
   revision: "Revision",
+  costTitle: "Nutzungs- und Kostenaufschlüsselung",
+  costHelp: "Konfigurierte Dauerschätzungen, aus Modell-Listenpreisen berechnete Kosten und vom Anbieter gemeldete Ist-Kosten bleiben getrennt. Unbekannte Nutzung wird nicht als null ausgegeben.",
+  configuredEstimate: "Konfigurierte Ersatzschätzung",
+  calculatedUsageCost: "Berechnete Nutzungskosten",
+  providerReportedCost: "Vom Anbieter gemeldete Ist-Kosten (USD)",
+  providerActual: "Anbieter-Ist-Kosten",
+  providerOperations: "Anbieteroperationen",
+  providerUsageRecords: "Nutzungs-/Kostendatensätze",
+  requests: "Anfragen",
+  textTokens: "Text-Token (Eingabe / Cache / Cache-Schreiben / Ausgabe)",
+  audioTokens: "Audio-Token (Eingabe / Cache / Ausgabe)",
+  providerUsageDuration: "Gemessene Dauer",
+  costComponents: {
+    briefCompilation: "Brief-Kompilierung",
+    realtimeText: "Realtime-Text",
+    realtimeAudio: "Realtime-Audio",
+    realtimeTranscription: "Realtime-Transkription",
+    postCallTranscription: "Transkription nach dem Anruf",
+    telephony: "Telefonie"
+  },
   sensitiveTitle: "Sensible Anrufinhalte",
   sensitiveHelp: "Nur Superadmins können diese Daten anfordern. Geben Sie vor dem Zugriff den Support- oder Vorfallgrund ein. Der Lesezugriff wird dauerhaft protokolliert.",
   sensitiveForbidden: "Ihre Administratorrolle kann technische Daten prüfen, aber nicht auf Anrufinhalte zugreifen.",

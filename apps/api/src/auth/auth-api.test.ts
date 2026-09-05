@@ -1392,6 +1392,7 @@ describe("auth API", () => {
     for (const request of [
       { method: "GET", url: "/api/admin/calls" },
       { method: "GET", url: `/api/admin/calls/${callId}` },
+      { method: "GET", url: `/api/admin/calls/${callId}/cost` },
       {
         method: "POST",
         url: `/api/admin/calls/${callId}/sensitive-access`,
@@ -1686,6 +1687,23 @@ describe("auth API", () => {
       outcomeHistory: expect.any(Array)
     });
     expect(JSON.stringify(inspector.json())).not.toContain(callBrief.phoneNumber);
+
+    const cost = await app.inject({
+      method: "GET",
+      url: `/api/admin/calls/${callId}/cost`,
+      headers: { cookie: adminCookie }
+    });
+    expect(cost.statusCode).toBe(200);
+    expect(cost.headers["cache-control"]).toBe("private, no-store");
+    expect(cost.json()).toMatchObject({
+      callId,
+      cost: {
+        currency: "USD",
+        providerUsage: { cohort: "usage_observed_at" },
+        providerReported: { cohort: "cost_observed_at" }
+      }
+    });
+    expect(JSON.stringify(cost.json())).not.toContain(callBrief.phoneNumber);
 
     const adminSensitive = await app.inject({
       method: "POST",
