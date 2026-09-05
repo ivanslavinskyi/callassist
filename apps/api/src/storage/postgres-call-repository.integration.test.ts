@@ -7,6 +7,7 @@ import {
 import postgres from "postgres";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { runMigrations } from "../db/migrate";
+import { encryptJson } from "../security/encryption";
 import { PostgresCallRepository } from "./postgres-call-repository";
 import {
   decodeCallBriefCursor,
@@ -1692,10 +1693,18 @@ describeWithDatabase("PostgresCallRepository", () => {
       new Date(Date.now() - 86_400_000).toISOString()
     );
 
+    const approvedAt = new Date().toISOString();
+    const approvedCompilation = { ...compilation, approvedAt };
     try {
       await inspection`
         UPDATE call_briefs
-        SET current_compilation_id = NULL
+        SET
+          current_compilation_id = NULL,
+          compilation_ciphertext = ${encryptJson(
+            approvedCompilation,
+            encryptionKey
+          )},
+          status = 'ready'
         WHERE id = ${brief.id}
       `;
       const during = await repository.getAdminSystemFacts(
@@ -1705,6 +1714,42 @@ describeWithDatabase("PostgresCallRepository", () => {
       expect(during.callPlanCutover.recoverableLegacyCalls).toBe(
         before.callPlanCutover.recoverableLegacyCalls + 1
       );
+      const preview = await repository.backfillLegacyCompilationBatch(
+        500,
+        null,
+        false
+      );
+      expect(preview.validCandidates).toBeGreaterThanOrEqual(1);
+      expect(preview.backfilledCompilations).toBe(0);
+      const [afterPreview] = await inspection<{
+        currentCompilationId: string | null;
+      }[]>`
+        SELECT current_compilation_id AS "currentCompilationId"
+        FROM call_briefs
+        WHERE id = ${brief.id}
+      `;
+      expect(afterPreview?.currentCompilationId).toBeNull();
+      const backfilled = await repository.backfillLegacyCompilationBatch(500);
+      expect(backfilled.backfilledCompilations).toBeGreaterThanOrEqual(1);
+      expect(backfilled.approvalSnapshotsCreated).toBeGreaterThanOrEqual(1);
+      const [materialized] = await inspection<{
+        currentCompilationId: string | null;
+        approvalSnapshotStored: boolean;
+      }[]>`
+        SELECT
+          call_briefs.current_compilation_id AS "currentCompilationId",
+          call_compilation_approvals.execution_snapshot_ciphertext IS NOT NULL
+            AS "approvalSnapshotStored"
+        FROM call_briefs
+        LEFT JOIN call_compilation_approvals
+          ON call_compilation_approvals.compilation_id =
+            call_briefs.current_compilation_id
+        WHERE call_briefs.id = ${brief.id}
+      `;
+      expect(materialized).toEqual({
+        currentCompilationId: stored!.currentCompilationId,
+        approvalSnapshotStored: true
+      });
     } finally {
       await inspection`
         UPDATE call_briefs

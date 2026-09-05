@@ -155,6 +155,45 @@ and zero active recompilations. Consequently item 11 still requires an explicit,
 resumable backfill before the mutable read is removed. Historical attempts cannot
 be given a trustworthy execution snapshot after the fact and remain an explicit
 audit limitation; they do not block removal of the active-call media adapter.
+The validated backfill subsequently materialized 13 of those 21 compilations and
+created eight approval snapshots, with successful recovery drills immediately
+before and after the write. The remaining eight are deliberately untouched: two
+use `brief-compiler-2`; six use `brief-compiler-3` but predate the required
+`rawBrief.representedPersonFirstName` and `representedPersonLastName` fields.
+They comprise six completed calls with historical attempts plus one blocked and
+one review-required draft without attempts. The 15 records with no compilation
+are also all terminal (12 completed, two stopped, one failed). This leaves no
+active legacy attempt, but it does not justify silently blessing or rewriting the
+eight incompatible snapshots.
+
+The item 11 maintenance command is `pnpm db:backfill:call-plans`. Its default is
+a read-only dry run that emits aggregate JSON only. Execution additionally
+requires `--execute` and
+`CALL_COMPILATION_BACKFILL_CONFIRM=BACKFILL_RECOVERABLE_CALL_COMPILATIONS`.
+It validates and decrypts the existing compilation, verifies the canonical hash,
+inserts or verifies the immutable revision, reconstructs an approval snapshot
+only when the historical compilation itself contains a valid `approvedAt`, and
+sets the current immutable pointer in the same row-locked transaction. Batches
+are limited to 1..500, committed independently, protected by an advisory
+transaction lock, and can be rerun safely. It never fabricates an approval or an
+attempt execution snapshot.
+
+Operational sequence for item 11:
+
+1. Deploy migrations 0050 through 0058 and the dual-read API/worker build; retain
+   the compatibility reader.
+2. Preserve a successful backup/recovery-drill record, then run the command
+   without arguments and retain its aggregate dry-run evidence.
+3. Set the exact confirmation value in the controlled job environment and run
+   `pnpm --filter @callassist/api db:backfill:call-plans -- --execute`.
+4. Run the default dry run again. `recoverableLegacyCalls` must be zero before
+   reader removal. The command reports aggregate decryption, compiler-version,
+   schema-path, hash, approval-state, and approval-snapshot failures without call
+   IDs or private content. Investigate any remainder rather than skipping or
+   rewriting the affected call.
+5. Run the recovery drill again and observe the admin cutover panel through at
+   least the maximum active-call window. Removal of compatibility code is a later
+   deployment, not part of the backfill deployment.
 
 Deployment rehearsal on 2026-09-05 applied migrations 0050–0057 first to an
 isolated restored clone and then to the local source database, verified a no-op

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  BRIEF_COMPILER_VERSION,
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
   adminCallInspectorSchema,
@@ -8,6 +9,7 @@ import {
   adminCallSummarySchema,
   approvedExecutionSnapshotSchema,
   callFeedbackRevisionSchema,
+  callCompilationSchema,
   callOutcomeMetricsSchema,
   callOutcomeRevisionSchema,
   callOutcomeViewSchema,
@@ -3853,6 +3855,243 @@ export class PostgresCallRepository implements CallRepository {
       LIMIT 1
     `;
     return row ? this.#mapAttempt(row) : null;
+  }
+
+  async backfillLegacyCompilationBatch(
+    limit: number,
+    afterId: string | null = null,
+    execute = true
+  ) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("Legacy compilation backfill limit must be 1..500");
+    }
+    if (afterId !== null && !isUuid(afterId)) {
+      throw new Error("Legacy compilation backfill cursor is invalid");
+    }
+    return this.#sql.begin(async (transaction) => {
+      if (execute) {
+        const [lock] = await transaction<{ acquired: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(742303986) AS acquired
+        `;
+        if (!lock?.acquired) {
+          throw new Error("Another legacy compilation backfill batch is running");
+        }
+      }
+      const rows = execute
+        ? await transaction<CallBriefRow[]>`
+            ${this.#briefSelect()}
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED
+          `
+        : await transaction<CallBriefRow[]>`
+            ${this.#briefSelect()}
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+          `;
+      const valid: Array<{
+        row: CallBriefRow;
+        compilation: CallCompilation;
+        executionSnapshot: ApprovedExecutionSnapshot | null;
+      }> = [];
+      let invalidCandidates = 0;
+      let decryptionFailures = 0;
+      let unsupportedCompilerVersions = 0;
+      const unsupportedCompilerVersionCounts: Record<string, number> = {};
+      let schemaValidationFailures = 0;
+      const schemaIssueCounts: Record<string, number> = {};
+      let snapshotHashFailures = 0;
+      let approvalStateFailures = 0;
+      let approvalSnapshotFailures = 0;
+      let approvalSnapshotsRequired = 0;
+      for (const row of rows) {
+        let decrypted: unknown;
+        try {
+          decrypted = decryptJson<unknown>(
+            row.compilationCiphertext!,
+            this.#encryptionKey
+          );
+        } catch {
+          invalidCandidates += 1;
+          decryptionFailures += 1;
+          continue;
+        }
+        const storedCompilerVersion =
+          decrypted && typeof decrypted === "object" && !Array.isArray(decrypted)
+            ? Reflect.get(decrypted, "compilerVersion")
+            : null;
+        if (
+          typeof storedCompilerVersion === "string" &&
+          storedCompilerVersion !== BRIEF_COMPILER_VERSION
+        ) {
+          invalidCandidates += 1;
+          unsupportedCompilerVersions += 1;
+          const version = /^[a-zA-Z0-9._-]{1,64}$/.test(storedCompilerVersion)
+            ? storedCompilerVersion
+            : "invalid";
+          unsupportedCompilerVersionCounts[version] =
+            (unsupportedCompilerVersionCounts[version] ?? 0) + 1;
+          continue;
+        }
+        const parsed = callCompilationSchema.safeParse(decrypted);
+        if (!parsed.success) {
+          invalidCandidates += 1;
+          schemaValidationFailures += 1;
+          for (const issue of parsed.error.issues) {
+            const path = issue.path.length === 0
+              ? "root"
+              : issue.path.map((part) =>
+                  typeof part === "number" ? "[]" : String(part)
+                ).join(".");
+            const key = `${issue.code}:${path}`;
+            schemaIssueCounts[key] = (schemaIssueCounts[key] ?? 0) + 1;
+          }
+          continue;
+        }
+        const compilation = parsed.data;
+        try {
+          assertCompilationIntegrity(compilation);
+        } catch {
+          invalidCandidates += 1;
+          snapshotHashFailures += 1;
+          continue;
+        }
+        if (row.status === "ready" && !compilation.approvedAt) {
+          invalidCandidates += 1;
+          approvalStateFailures += 1;
+          continue;
+        }
+        try {
+          const executionSnapshot = compilation.approvedAt
+            ? createApprovedExecutionSnapshot({
+                brief: this.#mapBrief(row),
+                compilation,
+                transcript: [],
+                pendingApproval: null,
+                recording: null,
+                finalTranscript: null
+              })
+            : null;
+          if (executionSnapshot) approvalSnapshotsRequired += 1;
+          valid.push({ row, compilation, executionSnapshot });
+        } catch {
+          invalidCandidates += 1;
+          approvalSnapshotFailures += 1;
+        }
+      }
+      let approvalSnapshotsCreated = 0;
+      if (!execute) {
+        return {
+          scannedCandidates: rows.length,
+          validCandidates: valid.length,
+          invalidCandidates,
+          decryptionFailures,
+          unsupportedCompilerVersions,
+          unsupportedCompilerVersionCounts,
+          schemaValidationFailures,
+          schemaIssueCounts,
+          snapshotHashFailures,
+          approvalStateFailures,
+          approvalSnapshotFailures,
+          approvalSnapshotsRequired,
+          backfilledCompilations: 0,
+          approvalSnapshotsCreated: 0,
+          lastScannedId: rows.at(-1)?.id ?? null
+        };
+      }
+      for (const { row, compilation, executionSnapshot } of valid) {
+        const compilationId = await this.#resolveCompilationRecord(
+          transaction,
+          row.id,
+          null,
+          compilation
+        );
+        if (!executionSnapshot || !compilation.approvedAt) continue;
+        const inserted = await transaction<{ id: string }[]>`
+          INSERT INTO call_compilation_approvals (
+            id,
+            compilation_id,
+            call_brief_id,
+            revision,
+            snapshot_hash,
+            approved_at,
+            execution_snapshot_ciphertext
+          ) VALUES (
+            ${randomUUID()},
+            ${compilationId},
+            ${row.id},
+            ${compilation.revision},
+            ${compilation.snapshotHash},
+            ${new Date(compilation.approvedAt)},
+            ${encryptJson(executionSnapshot, this.#encryptionKey)}
+          )
+          ON CONFLICT (compilation_id) DO NOTHING
+          RETURNING id
+        `;
+        if (inserted[0]) {
+          approvalSnapshotsCreated += 1;
+          continue;
+        }
+        const [existing] = await transaction<{
+          callBriefId: string;
+          revision: number;
+          snapshotHash: string;
+          approvedAt: DatabaseDate;
+          executionSnapshotCiphertext: string | null;
+        }[]>`
+          SELECT
+            call_brief_id AS "callBriefId",
+            revision,
+            snapshot_hash AS "snapshotHash",
+            approved_at AS "approvedAt",
+            execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
+          FROM call_compilation_approvals
+          WHERE compilation_id = ${compilationId}
+          FOR SHARE
+        `;
+        const storedSnapshot = existing?.executionSnapshotCiphertext
+          ? approvedExecutionSnapshotSchema.parse(decryptJson<unknown>(
+              existing.executionSnapshotCiphertext,
+              this.#encryptionKey
+            ))
+          : null;
+        if (
+          !existing ||
+          existing.callBriefId !== row.id ||
+          existing.revision !== compilation.revision ||
+          existing.snapshotHash !== compilation.snapshotHash ||
+          toIso(existing.approvedAt) !== compilation.approvedAt ||
+          JSON.stringify(storedSnapshot) !== JSON.stringify(executionSnapshot)
+        ) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+      }
+      return {
+        scannedCandidates: rows.length,
+        validCandidates: valid.length,
+        invalidCandidates,
+        decryptionFailures,
+        unsupportedCompilerVersions,
+        unsupportedCompilerVersionCounts,
+        schemaValidationFailures,
+        schemaIssueCounts,
+        snapshotHashFailures,
+        approvalStateFailures,
+        approvalSnapshotFailures,
+        approvalSnapshotsRequired,
+        backfilledCompilations: valid.length,
+        approvalSnapshotsCreated,
+        lastScannedId: rows.at(-1)?.id ?? null
+      };
+    });
   }
 
   async getAttempt(id: string, attemptId: string) {
