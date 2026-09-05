@@ -81,10 +81,15 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
         throw new Error("TWILIO_CALL_STATUS_UNSUPPORTED");
       }
       const durationSeconds = optionalNonNegativeInteger(call.duration);
+      const providerReportedCost = parseTwilioProviderReportedCost(
+        call.price,
+        call.priceUnit
+      );
       return {
         providerCallId,
         status: call.status,
-        ...(durationSeconds === undefined ? {} : { durationSeconds })
+        ...(durationSeconds === undefined ? {} : { durationSeconds }),
+        ...(providerReportedCost === undefined ? {} : { providerReportedCost })
       };
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("TWILIO_")) {
@@ -299,4 +304,31 @@ function optionalNonNegativeInteger(value: unknown) {
 function optionalPositiveInteger(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+export function parseTwilioProviderReportedCost(
+  rawAmount: unknown,
+  rawCurrency: unknown
+) {
+  if (rawAmount === null || rawAmount === undefined || rawAmount === "") {
+    return undefined;
+  }
+  if (typeof rawAmount !== "string" ||
+      typeof rawCurrency !== "string" ||
+      !/^[A-Z]{3}$/.test(rawCurrency)) {
+    throw new Error("TWILIO_CALL_COST_INVALID");
+  }
+  const match = /^-?(\d+)(?:\.(\d{1,6}))?$/.exec(rawAmount);
+  if (!match) throw new Error("TWILIO_CALL_COST_INVALID");
+  const whole = BigInt(match[1]!);
+  const fractional = BigInt((match[2] ?? "").padEnd(6, "0"));
+  const amountMicros = whole * 1_000_000n + fractional;
+  if (amountMicros > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("TWILIO_CALL_COST_INVALID");
+  }
+  return {
+    amountMicros: Number(amountMicros),
+    currency: rawCurrency,
+    rawAmount
+  };
 }

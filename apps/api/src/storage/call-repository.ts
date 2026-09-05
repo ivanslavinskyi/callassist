@@ -358,6 +358,31 @@ export type TelephonyProviderOperationRecord =
     result: Omit<CompleteProviderOperationInput, "operationId"> | null;
   };
 
+export type TelephonyProviderCostInput = {
+  id: string;
+  fallbackOperationId: string;
+  callBriefId: string;
+  callAttemptId: string;
+  providerCallId: string;
+  amountMicros: number;
+  currency: string;
+  rawAmount: string;
+  observedAt: string;
+};
+
+export type ProviderCostRecord = {
+  id: string;
+  operationId: string;
+  provider: "twilio";
+  providerCostId: string;
+  costBasis: "provider_reported_actual";
+  component: "connectivity";
+  amountMicros: number;
+  currency: string;
+  rawCost: { price: string; price_unit: string };
+  observedAt: string;
+};
+
 export function createTelephonyLegResult(
   input: TelephonyLegUsageInput
 ): Omit<CompleteProviderOperationInput, "operationId"> {
@@ -439,6 +464,15 @@ export type AdminProviderUsageBucket = {
   billableSamples: number;
 };
 
+export type AdminProviderCostBucket = {
+  provider: string;
+  costBasis: "provider_reported_actual";
+  component: string;
+  currency: string;
+  records: number;
+  amountMicros: number;
+};
+
 export type AdminOperationsFacts = {
   createdCalls: number;
   attemptedCalls: number;
@@ -475,6 +509,12 @@ export type AdminOperationsFacts = {
     operationCount: number;
     usageRecordCount: number;
     buckets: AdminProviderUsageBucket[];
+  };
+  providerCosts: {
+    incurredFrom: string;
+    incurredTo: string;
+    recordCount: number;
+    buckets: AdminProviderCostBucket[];
   };
 };
 
@@ -714,6 +754,10 @@ export interface CallRepository {
     input: TelephonyProviderOperationInput
   ): Promise<void>;
   recordTelephonyLegUsage(input: TelephonyLegUsageInput): Promise<void>;
+  recordTelephonyProviderCost(
+    input: TelephonyProviderCostInput,
+    lease: DurableJobLease
+  ): Promise<void>;
   completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
@@ -793,6 +837,7 @@ export interface CallRepository {
     id: string,
     expected?: CompilationApprovalInput
   ): Promise<CallSnapshot>;
+  getAttempt(id: string, attemptId: string): Promise<CallAttemptRecord | null>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
   startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
   attachProviderCall(
@@ -914,6 +959,7 @@ export class CallRepositoryError extends Error {
       | "CALL_ATTEMPT_NOT_FOUND"
       | "CALL_PREPARATION_NOT_FOUND"
       | "PROVIDER_OPERATION_NOT_FOUND"
+      | "PROVIDER_COST_CONFLICT"
       | "INSUFFICIENT_CREDITS"
       | "CONCURRENT_CALL_LIMIT"
       | "OUTBOUND_CALLS_DISABLED"

@@ -153,6 +153,42 @@ describe("TwilioTelephonyProvider", () => {
     });
   });
 
+  it("returns an exact positive micros value for Twilio's signed final price", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({
+      sid: "CA123",
+      status: "completed",
+      duration: "37",
+      price: "-0.013700",
+      priceUnit: "USD"
+    });
+
+    await expect(provider.getCallStatus("CA123")).resolves.toEqual({
+      providerCallId: "CA123",
+      status: "completed",
+      durationSeconds: 37,
+      providerReportedCost: {
+        amountMicros: 13_700,
+        currency: "USD",
+        rawAmount: "-0.013700"
+      }
+    });
+  });
+
+  it("rejects malformed provider cost instead of silently estimating it", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({
+      sid: "CA123",
+      status: "completed",
+      price: "not-a-price",
+      priceUnit: "USD"
+    });
+
+    await expect(provider.getCallStatus("CA123")).rejects.toThrow(
+      "TWILIO_CALL_COST_INVALID"
+    );
+  });
+
   it("returns a controlled error for an unsupported provider call status", async () => {
     const { fetchCall, provider } = createProvider();
     fetchCall.mockResolvedValueOnce({ sid: "CA123", status: "mystery" });

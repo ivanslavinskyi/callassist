@@ -386,6 +386,10 @@ success.
 - `provider_usage_records` stores request count plus independent text, cached,
   reasoning, audio, and duration dimensions. Compiler Responses currently fill
   only counters actually returned by the API; moderation tokens remain unknown.
+- `provider_cost_records` separately stores immutable provider-reported monetary
+  facts. Twilio Call connectivity price is keyed by Call SID and component,
+  preserves its signed raw amount for audit, stores a positive integer micros
+  value, and never converts currencies implicitly.
 - The bounded raw `usage` object is retained for forward-compatible parsing,
   while prompts, brief content, and provider error bodies are never stored.
 - The normalized Responses mapping follows the official API fields
@@ -435,9 +439,12 @@ metadata. Provider-reported Call price covers connectivity only; recording and o
 features remain separate components.
 
 Implemented: outbound leg reservation, Call SID deduplication, terminal callback
-`CallDuration`, billed callback `Duration`, callback timestamp/sequence, and REST
-reconciliation of connected seconds. Pending: eventually consistent final call
-price/currency, recording price, and explicit queue/start/end timestamps.
+`CallDuration`, billed callback `Duration`, callback timestamp/sequence, REST
+reconciliation of connected seconds, and a dedicated durable reconciliation for
+eventually consistent final Call connectivity price/currency. Missing final price
+retries with bounded backoff; malformed or permanent authentication/not-found
+responses are terminal. Pending: recording price and explicit queue/start/end
+timestamps.
 
 ### Post-call transcription
 
@@ -488,6 +495,13 @@ system.
   spend, average preparation/call/successful-call cost, component/provider/model
   breakdown, time trend, and usage coverage.
 - Add incurred-at aggregation; retain call-created cohort for operational outcomes.
+
+Implemented aggregate slice: the existing dashboard now keeps configured
+per-minute estimates, token/duration-based list-price calculations, and
+provider-reported actual charges as three visibly separate views. Reported
+currencies are grouped independently; the USD total never absorbs CHF/EUR through
+an implicit exchange rate. Per-call/preparation drill-down and coverage ratios
+remain pending.
 
 ### Later scope
 

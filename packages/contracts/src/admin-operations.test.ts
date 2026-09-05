@@ -143,6 +143,15 @@ describe("admin operations contracts", () => {
             billableSamples: 0,
             calculatedUsdMicros: null
           }]))
+        },
+        providerReported: {
+          status: "unavailable",
+          cohort: "cost_observed_at",
+          from: "2026-08-21T12:00:00.000Z",
+          to: "2026-08-22T12:00:00.000Z",
+          recordCount: 0,
+          usdMicros: null,
+          amounts: []
         }
       }
     });

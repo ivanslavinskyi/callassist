@@ -180,7 +180,11 @@ export class CallService {
               provider_call_reconciliation: (
                 job: DurableJob,
                 lease: DurableJobLease
-              ) => this.#reconcileProviderCall(job, lease)
+              ) => this.#reconcileProviderCall(job, lease),
+              provider_call_cost_reconciliation: (
+                job: DurableJob,
+                lease: DurableJobLease
+              ) => this.#reconcileProviderCallCost(job, lease)
             }
           : {}),
         ...(telephonyProvider.getRecordingStatus
@@ -732,9 +736,7 @@ export class CallService {
     );
     if (result) {
       if (
-        ["completed", "failed", "busy", "no-answer", "canceled"].includes(status) &&
-        (usage?.durationSeconds !== undefined ||
-          usage?.billableMinutes !== undefined)
+        ["completed", "failed", "busy", "no-answer", "canceled"].includes(status)
       ) {
         await this.repository.recordTelephonyLegUsage({
           fallbackOperationId: randomUUID(),
@@ -742,13 +744,13 @@ export class CallService {
           callAttemptId: result.attemptId,
           providerCallId,
           providerStatus: status,
-          durationSeconds: usage.durationSeconds ?? null,
+          durationSeconds: usage?.durationSeconds ?? null,
           billableSeconds:
-            usage.billableMinutes === undefined
+            usage?.billableMinutes === undefined
               ? null
               : usage.billableMinutes * 60,
-          occurredAt: usage.occurredAt ?? new Date().toISOString(),
-          sequenceNumber: usage.sequenceNumber ?? null
+          occurredAt: usage?.occurredAt ?? new Date().toISOString(),
+          sequenceNumber: usage?.sequenceNumber ?? null
         });
       }
       if (["completed", "failed", "stopped"].includes(result.snapshot.brief.status)) {
@@ -1290,14 +1292,13 @@ export class CallService {
     if (!job.callAttemptId || !job.callId || !this.telephonyProvider.getCallStatus) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
-    const snapshot = await this.#require(job.callId);
-    if (["completed", "failed", "stopped"].includes(snapshot.brief.status)) {
-      return;
-    }
-    const attempt = await this.repository.getLatestAttempt(job.callId);
+    await this.#require(job.callId);
+    const attempt = await this.repository.getAttempt(
+      job.callId,
+      job.callAttemptId
+    );
     if (
       !attempt ||
-      attempt.id !== job.callAttemptId ||
       !attempt.providerCallId
     ) {
       throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
@@ -1316,9 +1317,8 @@ export class CallService {
       if (!reconciled) {
         throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
       }
-      if (!["completed", "failed", "stopped"].includes(
-        reconciled.brief.status
-      )) {
+      if (!["canceled", "completed", "failed", "busy", "no-answer"]
+        .includes(provider.status)) {
         await this.telephonyProvider.stopCall(provider.providerCallId);
         throw new DurableJobExecutionError("PROVIDER_CALL_STOP_PENDING");
       }
@@ -1328,6 +1328,79 @@ export class CallService {
         providerReconciliationFailureCode(error, "PROVIDER_CALL_FETCH_FAILED"),
         { cause: error }
       );
+    }
+  }
+
+  async #reconcileProviderCallCost(job: DurableJob, lease: DurableJobLease) {
+    if (!job.callAttemptId || !job.callId || !this.telephonyProvider.getCallStatus) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID", {
+        retryable: false
+      });
+    }
+    const attempt = await this.repository.getAttempt(
+      job.callId,
+      job.callAttemptId
+    );
+    if (
+      !attempt ||
+      attempt.provider !== "twilio" ||
+      !attempt.providerCallId
+    ) {
+      throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING", {
+        retryable: false
+      });
+    }
+    try {
+      const provider = await this.telephonyProvider.getCallStatus(
+        attempt.providerCallId
+      );
+      if (provider.providerCallId !== attempt.providerCallId) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISMATCH", {
+          retryable: false
+        });
+      }
+      if (![
+        "canceled",
+        "completed",
+        "failed",
+        "busy",
+        "no-answer"
+      ].includes(provider.status)) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_COST_NOT_FINAL");
+      }
+      if (!provider.providerReportedCost) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_COST_PENDING");
+      }
+      await this.repository.recordTelephonyProviderCost({
+        id: randomUUID(),
+        fallbackOperationId: randomUUID(),
+        callBriefId: job.callId,
+        callAttemptId: attempt.id,
+        providerCallId: provider.providerCallId,
+        amountMicros: provider.providerReportedCost.amountMicros,
+        currency: provider.providerReportedCost.currency,
+        rawAmount: provider.providerReportedCost.rawAmount,
+        observedAt: new Date().toISOString()
+      }, currentLease(lease));
+    } catch (error) {
+      if (error instanceof DurableJobExecutionError) throw error;
+      if (
+        error instanceof CallRepositoryError &&
+        error.code === "PROVIDER_COST_CONFLICT"
+      ) {
+        throw new DurableJobExecutionError(error.code, {
+          cause: error,
+          retryable: false
+        });
+      }
+      const code = providerReconciliationFailureCode(
+        error,
+        "PROVIDER_CALL_COST_FETCH_FAILED"
+      );
+      throw new DurableJobExecutionError(code, {
+        cause: error,
+        retryable: providerCallCostFailureIsRetryable(code)
+      });
     }
   }
 
@@ -1577,6 +1650,17 @@ function providerReconciliationFailureCode(
     return error.code;
   }
   return fallback;
+}
+
+function providerCallCostFailureIsRetryable(code: string) {
+  return ![
+    "TWILIO_CALL_COST_INVALID",
+    "TWILIO_CALL_STATUS_UNSUPPORTED",
+    "TWILIO_CALL_FETCH_400",
+    "TWILIO_CALL_FETCH_401",
+    "TWILIO_CALL_FETCH_403",
+    "TWILIO_CALL_FETCH_404"
+  ].includes(code);
 }
 
 function currentLease(lease: DurableJobLease): DurableJobLease {

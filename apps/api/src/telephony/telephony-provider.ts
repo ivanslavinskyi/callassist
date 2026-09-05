@@ -77,6 +77,11 @@ export type ProviderCallStatus = {
   providerCallId: string;
   status: TwilioCallResourceStatus;
   durationSeconds?: number;
+  providerReportedCost?: {
+    amountMicros: number;
+    currency: string;
+    rawAmount: string;
+  };
 };
 
 export type ProviderRecordingStatus = {

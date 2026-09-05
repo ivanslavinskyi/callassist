@@ -124,7 +124,28 @@ function buildCost(
       ? null
       : estimates.reduce((total, value) => total + value, 0),
     components,
-    providerUsage: buildProviderUsageCost(facts.providerUsage)
+    providerUsage: buildProviderUsageCost(facts.providerUsage),
+    providerReported: buildProviderReportedCost(facts.providerCosts)
+  };
+}
+
+function buildProviderReportedCost(
+  costs: AdminOperationsFacts["providerCosts"]
+) {
+  const amounts = costs.buckets.slice(0, 100);
+  const usd = costs.buckets.filter(({ currency }) => currency === "USD");
+  return {
+    status: costs.recordCount === 0
+      ? "unavailable" as const
+      : "reported" as const,
+    cohort: "cost_observed_at" as const,
+    from: costs.incurredFrom,
+    to: costs.incurredTo,
+    recordCount: costs.recordCount,
+    usdMicros: usd.length === 0
+      ? null
+      : usd.reduce((total, bucket) => total + bucket.amountMicros, 0),
+    amounts
   };
 }
 

@@ -2112,6 +2112,147 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(telephonyBucket!.billableSeconds).toBeGreaterThanOrEqual(60);
   });
 
+  it("persists provider-reported Twilio cost once behind a durable lease", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Provider cost office",
+      phoneNumber: "+41710000068",
+      objective: "Verify provider-reported cost persistence",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const { attempt } = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    const operationId = randomUUID();
+    await repository.startTelephonyProviderOperation({
+      id: operationId,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "twilio",
+      operationType: "telephony_leg",
+      stage: "outbound_call",
+      requestedModel: "programmable_voice",
+      clientRequestId: operationId,
+      startedAt: "2096-02-01T00:00:00.000Z"
+    });
+    const providerCallId = `CA-cost-${randomUUID()}`;
+    await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
+    await repository.applyProviderStatus(
+      providerCallId,
+      "completed",
+      "completed",
+      brief.id
+    );
+    await repository.recordTelephonyLegUsage({
+      fallbackOperationId: randomUUID(),
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      providerCallId,
+      providerStatus: "completed",
+      durationSeconds: 37,
+      billableSeconds: null,
+      occurredAt: "2096-02-01T00:00:00.000Z",
+      sequenceNumber: null
+    });
+    const [costJob] = await inspection<{ id: string }[]>`
+      SELECT id
+      FROM durable_jobs
+      WHERE job_type = 'provider_call_cost_reconciliation'
+        AND call_attempt_id = ${attempt.id}
+    `;
+    expect(costJob).toBeDefined();
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE job_type = 'provider_call_cost_reconciliation'
+        AND id <> ${costJob!.id}
+        AND status = 'queued'
+    `;
+    const leased = await repository.claimDueDurableJob({
+      types: ["provider_call_cost_reconciliation"],
+      workerId: "postgres-provider-cost-worker",
+      now: "2096-02-01T00:00:01.000Z",
+      leaseExpiresAt: "2096-02-01T00:01:00.000Z"
+    });
+    expect(leased).toMatchObject({ id: costJob!.id, callAttemptId: attempt.id });
+    const costObservedAt = new Date();
+    const cost = {
+      id: randomUUID(),
+      fallbackOperationId: randomUUID(),
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      providerCallId,
+      amountMicros: 13_700,
+      currency: "USD",
+      rawAmount: "-0.013700",
+      observedAt: costObservedAt.toISOString()
+    };
+    const lease = {
+      jobId: leased!.id,
+      workerId: "postgres-provider-cost-worker",
+      checkedAt: "2096-02-01T00:00:02.000Z"
+    };
+    await Promise.all([
+      repository.recordTelephonyProviderCost(cost, lease),
+      repository.recordTelephonyProviderCost({ ...cost, id: randomUUID() }, lease)
+    ]);
+    const [stored] = await inspection<{
+      records: number;
+      amountMicros: number;
+      currency: string;
+      rawPrice: string;
+    }[]>`
+      SELECT
+        count(*)::int AS records,
+        max(amount_micros)::int AS "amountMicros",
+        max(currency) AS currency,
+        max(raw_cost->>'price') AS "rawPrice"
+      FROM provider_cost_records
+      WHERE operation_id = ${operationId}
+    `;
+    expect(stored).toEqual({
+      records: 1,
+      amountMicros: 13_700,
+      currency: "USD",
+      rawPrice: "-0.013700"
+    });
+    const facts = await repository.getAdminOperationsFacts(
+      new Date(costObservedAt.getTime() - 1_000).toISOString(),
+      new Date(costObservedAt.getTime() + 1_000).toISOString()
+    );
+    expect(facts.providerCosts).toMatchObject({
+      recordCount: 1,
+      buckets: [{
+        provider: "twilio",
+        costBasis: "provider_reported_actual",
+        component: "connectivity",
+        currency: "USD",
+        records: 1,
+        amountMicros: 13_700
+      }]
+    });
+    await expect(inspection`
+      UPDATE provider_cost_records
+      SET amount_micros = 1
+      WHERE operation_id = ${operationId}
+    `).rejects.toThrow(/append-only/);
+    await expect(repository.completeDurableJob(
+      leased!.id,
+      "postgres-provider-cost-worker",
+      "2096-02-01T00:00:03.000Z"
+    )).resolves.toBe(true);
+  });
+
   it("atomically cancels active preparations and erases their private input", async () => {
     const input: CreateCallBriefInput = {
       recipientName: "Cancelled preparation office",

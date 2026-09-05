@@ -109,6 +109,7 @@ function assertExpectation(result, expected) {
   const jobsByType = new Map(result.jobs.map((job) => [job.type, job]));
   const initialJobs = [
     "provider_call_reconciliation",
+    "provider_call_cost_reconciliation",
     "provider_recording_reconciliation",
     "final_transcription"
   ];

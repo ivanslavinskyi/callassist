@@ -71,6 +71,14 @@ const en = {
     calculated: "Calculated from measured usage"
   },
   providerUsageCaveat: "Calculated from immutable provider usage and a versioned public list-price snapshot. It is an estimate, not a provider invoice. The usage window is based on when usage was observed, independently of the call-created cohort above.",
+  providerReportedTitle: "Provider-reported actual cost",
+  providerReportedStatuses: {
+    unavailable: "No provider-reported cost in this window",
+    reported: "Reported by provider"
+  },
+  providerReportedCaveat: "This is an immutable provider-reported charge, not a local estimate. Currency amounts remain separate; no implicit exchange-rate conversion is applied. Twilio connectivity price excludes separately billed features such as recording storage.",
+  providerCostRecords: "Provider cost records",
+  providerCostComponent: "Connectivity",
   providerUsageComponents: {
     briefCompilation: "Brief compilation",
     realtimeText: "Realtime text",
@@ -223,6 +231,7 @@ const en = {
     final_transcription: "Final transcription",
     recording_retention: "Recording retention",
     provider_call_reconciliation: "Provider call reconciliation",
+    provider_call_cost_reconciliation: "Provider call cost reconciliation",
     provider_recording_reconciliation: "Provider recording reconciliation"
   },
   jobStatuses: {
@@ -344,6 +353,14 @@ const de: AdminOperationsCopy = {
     calculated: "Aus gemessener Nutzung berechnet"
   },
   providerUsageCaveat: "Berechnet aus unveränderlichen Anbieternutzungsdaten und einer versionierten Momentaufnahme öffentlicher Listenpreise. Dies ist eine Schätzung, keine Anbieterrechnung. Das Nutzungsfenster basiert auf dem Beobachtungszeitpunkt und ist unabhängig von der Anruferstellungs-Kohorte oben.",
+  providerReportedTitle: "Vom Anbieter gemeldete Ist-Kosten",
+  providerReportedStatuses: {
+    unavailable: "Keine gemeldeten Anbieterkosten in diesem Zeitraum",
+    reported: "Vom Anbieter gemeldet"
+  },
+  providerReportedCaveat: "Dies ist eine unveränderliche, vom Anbieter gemeldete Belastung und keine lokale Schätzung. Währungen bleiben getrennt; es erfolgt keine implizite Umrechnung. Der Twilio-Verbindungspreis enthält keine separat berechneten Funktionen wie Aufzeichnungsspeicher.",
+  providerCostRecords: "Anbieter-Kostendatensätze",
+  providerCostComponent: "Verbindung",
   providerUsageComponents: {
     briefCompilation: "Brief-Kompilierung",
     realtimeText: "Realtime-Text",
@@ -496,6 +513,7 @@ const de: AdminOperationsCopy = {
     final_transcription: "Finale Transkription",
     recording_retention: "Aufzeichnungsaufbewahrung",
     provider_call_reconciliation: "Anbieterabgleich für Anruf",
+    provider_call_cost_reconciliation: "Anbieterkostenabgleich für Anruf",
     provider_recording_reconciliation: "Anbieterabgleich für Aufzeichnung"
   },
   jobStatuses: {

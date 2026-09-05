@@ -864,6 +864,86 @@ describe("CallService", () => {
       .toBeNull();
   });
 
+  it("reconciles delayed Twilio cost into one immutable provider cost record", async () => {
+    const userId = "6def8c45-9cb5-4c5a-a0a2-d5466df8be55";
+    const repository = new InMemoryCallRepository();
+    await repository.grantSignupCredits(userId);
+    const getCallStatus = vi.fn().mockResolvedValue({
+      providerCallId: "CA-cost-reconciliation",
+      status: "completed" as const,
+      durationSeconds: 37,
+      providerReportedCost: {
+        amountMicros: 13_700,
+        currency: "USD",
+        rawAmount: "-0.013700"
+      }
+    });
+    const provider: TelephonyProvider = {
+      mode: "twilio",
+      async startCall() {
+        return {
+          providerCallId: "CA-cost-reconciliation",
+          providerStatus: "queued"
+        };
+      },
+      async stopCall() {},
+      async startRecording() {
+        throw new Error("not used");
+      },
+      async getRecordingMedia() {
+        throw new Error("not used");
+      },
+      async deleteRecording() {},
+      getCallStatus
+    };
+    const service = new CallService(repository, provider, () => undefined);
+    services.push(service);
+    await service.initialize();
+    const brief = await service.create({
+      recipientName: "Cost reconciliation office",
+      phoneNumber: "+41523686688",
+      objective: "Verify delayed provider cost reconciliation",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    }, userId);
+    await service.approveCompilation(brief.id);
+    await service.start(brief.id, userId);
+    await service.handleTwilioStatus(
+      "CA-cost-reconciliation",
+      "completed",
+      brief.id
+    );
+
+    await vi.waitFor(async () => {
+      expect((await repository.listDurableJobs()).find(
+        ({ type }) => type === "provider_call_cost_reconciliation"
+      )?.status).toBe("succeeded");
+    });
+    expect(repository.providerCostsForTest()).toEqual([
+      expect.objectContaining({
+        provider: "twilio",
+        providerCostId: "CA-cost-reconciliation:connectivity",
+        costBasis: "provider_reported_actual",
+        component: "connectivity",
+        amountMicros: 13_700,
+        currency: "USD",
+        rawCost: { price: "-0.013700", price_unit: "USD" }
+      })
+    ]);
+
+    await service.handleTwilioStatus(
+      "CA-cost-reconciliation",
+      "completed",
+      brief.id
+    );
+    expect(repository.providerCostsForTest()).toHaveLength(1);
+  });
+
   it("reserves one attempt before concurrent provider starts", async () => {
     const startCall = vi.fn().mockResolvedValue({
       providerCallId: "CA-concurrent",

@@ -62,6 +62,7 @@ import {
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
+  type AdminProviderCostBucket,
   type AdminProviderUsageBucket,
   type AdminSystemFacts,
   type AdminWebhookDeliveryFacts,
@@ -95,8 +96,10 @@ import {
   type RealtimeProviderOperationRecord,
   type RealtimeProviderSessionInput,
   type TelephonyLegUsageInput,
+  type TelephonyProviderCostInput,
   type TelephonyProviderOperationInput,
   type TelephonyProviderOperationRecord,
+  type ProviderCostRecord,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 import {
@@ -202,6 +205,7 @@ export class InMemoryCallRepository implements CallRepository {
     | RealtimeProviderOperationRecord
     | TelephonyProviderOperationRecord
   >();
+  readonly #providerCosts = new Map<string, ProviderCostRecord>();
   readonly #postCallTranscriptionChunks = new Map<
     string,
     PostCallTranscriptionChunkLookupInput & {
@@ -756,8 +760,81 @@ export class InMemoryCallRepository implements CallRepository {
       };
       this.#providerOperations.set(operation.id, operation);
     }
-    if (operation.result) return;
-    operation.result = createTelephonyLegResult(input);
+    if (!operation.result) {
+      operation.result = createTelephonyLegResult(input);
+    }
+    await this.enqueueDurableJob({
+      type: "provider_call_cost_reconciliation",
+      callAttemptId: input.callAttemptId,
+      runAfter: input.occurredAt,
+      maxAttempts: durableJobMaxAttempts.provider_call_cost_reconciliation
+    });
+  }
+
+  async recordTelephonyProviderCost(
+    input: TelephonyProviderCostInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (
+      !attempt ||
+      attempt.provider !== "twilio" ||
+      attempt.providerCallId !== input.providerCallId
+    ) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    let operation = [...this.#providerOperations.values()].find(
+      (candidate): candidate is TelephonyProviderOperationRecord =>
+        "callAttemptId" in candidate &&
+        candidate.callAttemptId === input.callAttemptId &&
+        candidate.operationType === "telephony_leg"
+    );
+    if (!operation) {
+      operation = {
+        id: input.fallbackOperationId,
+        callBriefId: input.callBriefId,
+        callAttemptId: input.callAttemptId,
+        provider: "twilio",
+        operationType: "telephony_leg",
+        stage: "outbound_call",
+        requestedModel: "programmable_voice",
+        clientRequestId: input.fallbackOperationId,
+        startedAt: attempt.startedAt,
+        result: null
+      };
+      this.#providerOperations.set(operation.id, operation);
+    }
+    const providerCostId = `${input.providerCallId}:connectivity`;
+    const existing = [...this.#providerCosts.values()].find(
+      (cost) => cost.operationId === operation.id ||
+        cost.providerCostId === providerCostId
+    );
+    if (existing) {
+      if (
+        existing.operationId !== operation.id ||
+        existing.amountMicros !== input.amountMicros ||
+        existing.currency !== input.currency ||
+        existing.rawCost.price !== input.rawAmount
+      ) {
+        throw new CallRepositoryError("PROVIDER_COST_CONFLICT");
+      }
+      return;
+    }
+    this.#providerCosts.set(input.id, {
+      id: input.id,
+      operationId: operation.id,
+      provider: "twilio",
+      providerCostId,
+      costBasis: "provider_reported_actual",
+      component: "connectivity",
+      amountMicros: input.amountMicros,
+      currency: input.currency,
+      rawCost: { price: input.rawAmount, price_unit: input.currency },
+      observedAt: input.observedAt
+    });
   }
 
   providerOperationsForTest(preparationId?: string) {
@@ -766,6 +843,10 @@ export class InMemoryCallRepository implements CallRepository {
       ("callPreparationId" in operation &&
         operation.callPreparationId === preparationId)
     ));
+  }
+
+  providerCostsForTest() {
+    return copy([...this.#providerCosts.values()]);
   }
 
   async cancelCallPreparations(userId: string, now: string) {
@@ -1337,6 +1418,8 @@ export class InMemoryCallRepository implements CallRepository {
     const facts = emptyAdminOperationsFacts();
     facts.providerUsage.incurredFrom = from;
     facts.providerUsage.incurredTo = to;
+    facts.providerCosts.incurredFrom = from;
+    facts.providerCosts.incurredTo = to;
     const durationValues: number[] = [];
     const firstAudioValues: number[] = [];
     for (const snapshot of scoped) {
@@ -1532,6 +1615,37 @@ export class InMemoryCallRepository implements CallRepository {
       (total, bucket) => total + bucket.usageRecords,
       0
     );
+    const providerCostBuckets = new Map<string, AdminProviderCostBucket>();
+    for (const cost of this.#providerCosts.values()) {
+      if (cost.observedAt < from || cost.observedAt > to) continue;
+      const key = [
+        cost.provider,
+        cost.costBasis,
+        cost.component,
+        cost.currency
+      ].join("\0");
+      const bucket = providerCostBuckets.get(key) ?? {
+        provider: cost.provider,
+        costBasis: cost.costBasis,
+        component: cost.component,
+        currency: cost.currency,
+        records: 0,
+        amountMicros: 0
+      };
+      bucket.records += 1;
+      bucket.amountMicros += cost.amountMicros;
+      providerCostBuckets.set(key, bucket);
+    }
+    facts.providerCosts.buckets = [...providerCostBuckets.values()].sort(
+      (left, right) =>
+        left.provider.localeCompare(right.provider) ||
+        left.component.localeCompare(right.component) ||
+        left.currency.localeCompare(right.currency)
+    );
+    facts.providerCosts.recordCount = facts.providerCosts.buckets.reduce(
+      (total, bucket) => total + bucket.records,
+      0
+    );
     return facts;
   }
 
@@ -1651,6 +1765,7 @@ export class InMemoryCallRepository implements CallRepository {
         ).length,
         providerReconciliationQueued: queued.filter(({ type }) =>
           type === "provider_call_reconciliation" ||
+          type === "provider_call_cost_reconciliation" ||
           type === "provider_recording_reconciliation"
         ).length,
         oldestDueAt: queued
@@ -2757,7 +2872,8 @@ export class InMemoryCallRepository implements CallRepository {
   async seedDurableJobs(now: string) {
     const before = this.#durableJobs.size;
     for (const snapshot of this.#calls.values()) {
-      const attempt = (this.#attempts.get(snapshot.brief.id) ?? []).at(-1);
+      const attempts = this.#attempts.get(snapshot.brief.id) ?? [];
+      const attempt = attempts.at(-1);
       if (
         interruptedStatuses.has(snapshot.brief.status) &&
         attempt?.provider === "twilio" &&
@@ -2769,6 +2885,20 @@ export class InMemoryCallRepository implements CallRepository {
           runAfter: now,
           maxAttempts: durableJobMaxAttempts.provider_call_reconciliation
         });
+      }
+      for (const terminalAttempt of attempts) {
+        if (
+          terminalStatuses.has(terminalAttempt.status) &&
+          terminalAttempt.provider === "twilio" &&
+          terminalAttempt.providerCallId
+        ) {
+          await this.enqueueDurableJob({
+            type: "provider_call_cost_reconciliation",
+            callAttemptId: terminalAttempt.id,
+            runAfter: now,
+            maxAttempts: durableJobMaxAttempts.provider_call_cost_reconciliation
+          });
+        }
       }
       const recording = snapshot.recording;
       if (
@@ -3280,6 +3410,13 @@ export class InMemoryCallRepository implements CallRepository {
     return type;
   }
 
+  async getAttempt(id: string, attemptId: string) {
+    this.#require(id);
+    return copy((this.#attempts.get(id) ?? []).find(
+      ({ id: candidateId }) => candidateId === attemptId
+    ) ?? null);
+  }
+
   #currentCompilation(id: string) {
     const current = this.#compilations.get(id)?.at(-1);
     if (!current?.compilation) {
@@ -3361,7 +3498,10 @@ export class InMemoryCallRepository implements CallRepository {
       }
       return { callId: null, targetId: input.callPreparationId };
     }
-    if (input.type === "provider_call_reconciliation") {
+    if (
+      input.type === "provider_call_reconciliation" ||
+      input.type === "provider_call_cost_reconciliation"
+    ) {
       if (!input.callAttemptId || input.recordingId || input.callPreparationId) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
@@ -3546,6 +3686,12 @@ function emptyAdminOperationsFacts(): AdminOperationsFacts {
       incurredTo: "",
       operationCount: 0,
       usageRecordCount: 0,
+      buckets: []
+    },
+    providerCosts: {
+      incurredFrom: "",
+      incurredTo: "",
+      recordCount: 0,
       buckets: []
     }
   };

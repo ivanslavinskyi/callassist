@@ -287,6 +287,56 @@ export function AdminOperationsDashboard() {
                   ))}
               </div>
               <p className="admin-cost-caveat">{copy.providerUsageCaveat}</p>
+              <div className="admin-cost-heading">
+                <div>
+                  <span
+                    className="admin-cost-state"
+                    data-state={overview.cost.providerReported.status}
+                  >
+                    {copy.providerReportedStatuses[
+                      overview.cost.providerReported.status
+                    ]}
+                  </span>
+                  <strong>
+                    {copy.providerReportedTitle}: {formatUsd(
+                      overview.cost.providerReported.usdMicros,
+                      copy.notAvailable
+                    )}
+                  </strong>
+                </div>
+              </div>
+              <dl className="admin-operations-list">
+                <Fact
+                  label={copy.providerCostRecords}
+                  value={String(overview.cost.providerReported.recordCount)}
+                />
+              </dl>
+              <div className="admin-cost-grid">
+                {overview.cost.providerReported.amounts.map((amount) => (
+                  <article key={[
+                    amount.provider,
+                    amount.component,
+                    amount.currency
+                  ].join(":")}>
+                    <h3>{amount.provider} · {copy.providerCostComponent}</h3>
+                    <dl>
+                      <Fact
+                        label={copy.providerCostRecords}
+                        value={String(amount.records)}
+                      />
+                      <Fact
+                        label={amount.currency}
+                        value={formatCurrency(
+                          amount.amountMicros,
+                          amount.currency,
+                          locale
+                        )}
+                      />
+                    </dl>
+                  </article>
+                ))}
+              </div>
+              <p className="admin-cost-caveat">{copy.providerReportedCaveat}</p>
             </OperationsSection>
           </div>
         ) : null}
@@ -391,6 +441,19 @@ function formatUsd(value: number | null, fallback: string) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6
+  }).format(value / 1_000_000);
+}
+
+function formatCurrency(
+  value: number,
+  currency: string,
+  locale: "en" | "de"
+) {
+  return new Intl.NumberFormat(locale === "de" ? "de-CH" : "en-GB", {
+    style: "currency",
+    currency,
     minimumFractionDigits: 4,
     maximumFractionDigits: 6
   }).format(value / 1_000_000);

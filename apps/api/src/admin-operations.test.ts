@@ -52,6 +52,12 @@ const facts: AdminOperationsFacts = {
     operationCount: 0,
     usageRecordCount: 0,
     buckets: []
+  },
+  providerCosts: {
+    incurredFrom: "2026-08-21T12:00:00.000Z",
+    incurredTo: "2026-08-22T12:00:00.000Z",
+    recordCount: 0,
+    buckets: []
   }
 };
 
@@ -172,7 +178,72 @@ describe("admin operations overview", () => {
       }
     });
   });
+
+  it("keeps provider-reported actual cost separate and currency-safe", () => {
+    const overview = buildAdminOperationsOverview({
+      facts: {
+        ...facts,
+        providerCosts: {
+          incurredFrom: "2026-08-15T12:00:00.000Z",
+          incurredTo: "2026-08-22T12:00:00.000Z",
+          recordCount: 2,
+          buckets: [
+            {
+              provider: "twilio",
+              costBasis: "provider_reported_actual",
+              component: "connectivity",
+              currency: "USD",
+              records: 1,
+              amountMicros: 13_700
+            },
+            {
+              provider: "twilio",
+              costBasis: "provider_reported_actual",
+              component: "connectivity",
+              currency: "CHF",
+              records: 1,
+              amountMicros: 12_100
+            }
+          ]
+        }
+      },
+      kind: "7d",
+      from: "2026-08-15T12:00:00.000Z",
+      to: "2026-08-22T12:00:00.000Z",
+      costPolicy: unavailableOperationalCostPolicy
+    });
+    expect(overview.cost.providerReported).toEqual({
+      status: "reported",
+      cohort: "cost_observed_at",
+      from: "2026-08-15T12:00:00.000Z",
+      to: "2026-08-22T12:00:00.000Z",
+      recordCount: 2,
+      usdMicros: 13_700,
+      amounts: factsWithProviderCosts()
+    });
+  });
 });
+
+function factsWithProviderCosts() {
+  return [
+    {
+      provider: "twilio",
+      costBasis: "provider_reported_actual" as const,
+      component: "connectivity",
+      currency: "USD",
+      records: 1,
+      amountMicros: 13_700
+    },
+    {
+      provider: "twilio",
+      costBasis: "provider_reported_actual" as const,
+      component: "connectivity",
+      currency: "CHF",
+      records: 1,
+      amountMicros: 12_100
+    }
+  ];
+}
 
 function providerBucket(
   overrides: Partial<AdminProviderUsageBucket>

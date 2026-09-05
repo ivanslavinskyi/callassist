@@ -90,6 +90,7 @@ import {
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
+  type AdminProviderCostBucket,
   type AdminSystemFacts,
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
@@ -121,6 +122,7 @@ import {
   type RealtimeProviderOperationInput,
   type RealtimeProviderSessionInput,
   type TelephonyLegUsageInput,
+  type TelephonyProviderCostInput,
   type TelephonyProviderOperationInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
@@ -349,6 +351,8 @@ type AdminProviderUsageRow = {
   billableSeconds: number;
   billableSamples: number;
 };
+
+type AdminProviderCostRow = AdminProviderCostBucket;
 
 type AdminSystemFactsRow = {
   outboundCallsEnabled: boolean;
@@ -1264,6 +1268,104 @@ export class PostgresCallRepository implements CallRepository {
         operation.id,
         createTelephonyLegResult(input)
       );
+      await this.#enqueueProviderCallCostReconciliation(
+        transaction,
+        input.callAttemptId,
+        new Date(input.occurredAt)
+      );
+    });
+  }
+
+  async recordTelephonyProviderCost(
+    input: TelephonyProviderCostInput,
+    lease: DurableJobLease
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [attempt] = await transaction<{ startedAt: DatabaseDate }[]>`
+        SELECT created_at AS "startedAt"
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+          AND provider = 'twilio'
+          AND provider_call_id = ${input.providerCallId}
+        FOR SHARE
+      `;
+      if (!attempt) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      let [operation] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM provider_operations
+        WHERE call_attempt_id = ${input.callAttemptId}
+          AND provider = 'twilio'
+          AND operation_type = 'telephony_leg'
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (!operation) {
+        [operation] = await transaction<{ id: string }[]>`
+          INSERT INTO provider_operations (
+            id, provider, operation_type, stage, requested_model,
+            client_request_id, call_brief_id, call_attempt_id, started_at
+          ) VALUES (
+            ${input.fallbackOperationId}, 'twilio', 'telephony_leg',
+            'outbound_call', 'programmable_voice', ${input.fallbackOperationId},
+            ${input.callBriefId}, ${input.callAttemptId}, ${attempt.startedAt}
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `;
+        if (!operation) {
+          [operation] = await transaction<{ id: string }[]>`
+            SELECT id
+            FROM provider_operations
+            WHERE call_attempt_id = ${input.callAttemptId}
+              AND provider = 'twilio'
+              AND operation_type = 'telephony_leg'
+            LIMIT 1
+            FOR SHARE
+          `;
+        }
+      }
+      if (!operation) throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      await transaction`
+        INSERT INTO provider_cost_records (
+          id, operation_id, provider, provider_cost_id, cost_basis,
+          component, amount_micros, currency, raw_cost, observed_at
+        ) VALUES (
+          ${input.id}, ${operation.id}, 'twilio',
+          ${`${input.providerCallId}:connectivity`},
+          'provider_reported_actual', 'connectivity', ${input.amountMicros},
+          ${input.currency}, ${transaction.json({
+            price: input.rawAmount,
+            price_unit: input.currency
+          })}, ${input.observedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+      const [stored] = await transaction<{
+        operationId: string;
+        amountMicros: number;
+        currency: string;
+        rawAmount: string;
+      }[]>`
+        SELECT
+          operation_id AS "operationId",
+          amount_micros::double precision AS "amountMicros",
+          currency,
+          raw_cost->>'price' AS "rawAmount"
+        FROM provider_cost_records
+        WHERE provider = 'twilio'
+          AND provider_cost_id = ${`${input.providerCallId}:connectivity`}
+      `;
+      if (
+        !stored ||
+        stored.operationId !== operation.id ||
+        stored.amountMicros !== input.amountMicros ||
+        stored.currency !== input.currency ||
+        stored.rawAmount !== input.rawAmount
+      ) {
+        throw new CallRepositoryError("PROVIDER_COST_CONFLICT");
+      }
     });
   }
 
@@ -2517,7 +2619,7 @@ export class PostgresCallRepository implements CallRepository {
       FROM signals
     `;
     if (!row) throw new Error("Admin operations query returned no row");
-    const [[operationCount], usageRows] = await Promise.all([
+    const [[operationCount], usageRows, costRows] = await Promise.all([
       this.#sql<AdminProviderOperationCountRow[]>`
         SELECT count(*)::int AS "operationCount"
         FROM provider_operations
@@ -2587,6 +2689,20 @@ export class PostgresCallRepository implements CallRepository {
           operations.operation_type,
           operations.stage,
           COALESCE(results.provider_model, operations.requested_model)
+      `,
+      this.#sql<AdminProviderCostRow[]>`
+        SELECT
+          provider,
+          cost_basis AS "costBasis",
+          component,
+          currency,
+          count(*)::int AS records,
+          sum(amount_micros)::double precision AS "amountMicros"
+        FROM provider_cost_records
+        WHERE observed_at >= ${from}::timestamptz
+          AND observed_at <= ${to}::timestamptz
+        GROUP BY provider, cost_basis, component, currency
+        ORDER BY provider, component, currency
       `
     ]);
     return {
@@ -2638,6 +2754,15 @@ export class PostgresCallRepository implements CallRepository {
           0
         ),
         buckets: usageRows
+      },
+      providerCosts: {
+        incurredFrom: from,
+        incurredTo: to,
+        recordCount: costRows.reduce(
+          (total, bucket) => total + bucket.records,
+          0
+        ),
+        buckets: costRows
       }
     };
   }
@@ -2738,6 +2863,7 @@ export class PostgresCallRepository implements CallRepository {
           WHERE status = 'queued'
             AND job_type IN (
               'provider_call_reconciliation',
+              'provider_call_cost_reconciliation',
               'provider_recording_reconciliation'
             )
         ) AS "providerReconciliationQueued",
@@ -3321,6 +3447,31 @@ export class PostgresCallRepository implements CallRepository {
       FROM call_attempts
       WHERE call_brief_id = ${id}
       ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    return row ? this.#mapAttempt(row) : null;
+  }
+
+  async getAttempt(id: string, attemptId: string) {
+    const [call] = await this.#sql`SELECT id FROM call_briefs WHERE id = ${id}`;
+    if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const [row] = await this.#sql<CallAttemptRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        compilation_id AS "compilationId",
+        provider,
+        provider_call_id AS "providerCallId",
+        status,
+        provider_status AS "providerStatus",
+        started_at AS "startedAt",
+        ended_at AS "endedAt",
+        failure_reason AS "failureReason",
+        compilation_revision AS "compilationRevision",
+        compilation_snapshot_hash AS "compilationSnapshotHash",
+        execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
+      FROM call_attempts
+      WHERE call_brief_id = ${id} AND id = ${attemptId}
       LIMIT 1
     `;
     return row ? this.#mapAttempt(row) : null;
@@ -4772,7 +4923,8 @@ export class PostgresCallRepository implements CallRepository {
   async enqueueDurableJob(input: EnqueueDurableJobInput) {
     const now = new Date();
     const jobId = await this.#sql.begin(async (transaction) => {
-      const callTarget = input.type === "provider_call_reconciliation";
+      const callTarget = input.type === "provider_call_reconciliation" ||
+        input.type === "provider_call_cost_reconciliation";
       const preparationTarget = input.type === "brief_compilation";
       const recordingTarget = !callTarget && !preparationTarget;
       if (
@@ -4894,8 +5046,8 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async seedDurableJobs(now: string) {
-    const [callReconciliations, recordingReconciliations,
-      transcriptions, retention] = await this.#sql.begin(
+    const [callReconciliations, callCostReconciliations,
+      recordingReconciliations, transcriptions, retention] = await this.#sql.begin(
       async (transaction) => {
         const callReconciliationRows = await transaction`
           INSERT INTO durable_jobs (
@@ -4915,6 +5067,26 @@ export class PostgresCallRepository implements CallRepository {
             AND call_briefs.status IN (
               'dialing', 'in_progress', 'awaiting_approval'
             )
+          ON CONFLICT (job_type, call_attempt_id)
+            WHERE call_attempt_id IS NOT NULL
+          DO NOTHING
+          RETURNING id
+        `;
+        const callCostReconciliationRows = await transaction`
+          INSERT INTO durable_jobs (
+            id, job_type, call_attempt_id, status, max_attempts, run_after
+          )
+          SELECT
+            gen_random_uuid(),
+            'provider_call_cost_reconciliation',
+            call_attempts.id,
+            'queued',
+            ${durableJobMaxAttempts.provider_call_cost_reconciliation},
+            ${now}::timestamptz
+          FROM call_attempts
+          WHERE call_attempts.provider = 'twilio'
+            AND call_attempts.provider_call_id IS NOT NULL
+            AND call_attempts.status IN ('completed', 'failed', 'stopped')
           ON CONFLICT (job_type, call_attempt_id)
             WHERE call_attempt_id IS NOT NULL
           DO NOTHING
@@ -4994,14 +5166,15 @@ export class PostgresCallRepository implements CallRepository {
         `;
         return [
           callReconciliationRows,
+          callCostReconciliationRows,
           recordingReconciliationRows,
           transcriptionRows,
           retentionRows
         ] as const;
       }
     );
-    return callReconciliations.count + recordingReconciliations.count +
-      transcriptions.count + retention.count;
+    return callReconciliations.count + callCostReconciliations.count +
+      recordingReconciliations.count + transcriptions.count + retention.count;
   }
 
   async claimDueDurableJob(input: ClaimDurableJobInput) {
@@ -5985,6 +6158,33 @@ export class PostgresCallRepository implements CallRepository {
         ORDER BY created_at DESC
         LIMIT 1
       )
+    `;
+  }
+
+  async #enqueueProviderCallCostReconciliation(
+    transaction: postgres.TransactionSql,
+    attemptId: string,
+    now: Date
+  ) {
+    await transaction`
+      INSERT INTO durable_jobs (
+        id, job_type, call_attempt_id, status, max_attempts,
+        run_after, created_at, updated_at
+      )
+      SELECT
+        ${randomUUID()}, 'provider_call_cost_reconciliation', call_attempts.id,
+        'queued', ${durableJobMaxAttempts.provider_call_cost_reconciliation},
+        ${now}, ${now}, ${now}
+      FROM call_attempts
+      WHERE call_attempts.id = ${attemptId}
+        AND call_attempts.provider = 'twilio'
+        AND call_attempts.provider_call_id IS NOT NULL
+      ON CONFLICT (job_type, call_attempt_id)
+        WHERE call_attempt_id IS NOT NULL
+      DO UPDATE SET
+        run_after = LEAST(durable_jobs.run_after, EXCLUDED.run_after),
+        updated_at = EXCLUDED.updated_at
+      WHERE durable_jobs.status = 'queued'
     `;
   }
 

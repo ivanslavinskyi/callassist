@@ -138,6 +138,22 @@ export const adminOperationsOverviewSchema = z.strictObject({
         postCallTranscription: providerUsageCostComponentSchema,
         telephony: providerUsageCostComponentSchema
       })
+    }),
+    providerReported: z.strictObject({
+      status: z.enum(["unavailable", "reported"]),
+      cohort: z.literal("cost_observed_at"),
+      from: z.iso.datetime(),
+      to: z.iso.datetime(),
+      recordCount: countSchema,
+      usdMicros: countSchema.nullable(),
+      amounts: z.array(z.strictObject({
+        provider: z.string().trim().min(1).max(40),
+        costBasis: z.literal("provider_reported_actual"),
+        component: z.string().trim().min(1).max(80),
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        records: countSchema,
+        amountMicros: countSchema
+      })).max(100)
     })
   })
 });
@@ -157,6 +173,7 @@ export const adminDurableJobTypeSchema = z.enum([
   "final_transcription",
   "recording_retention",
   "provider_call_reconciliation",
+  "provider_call_cost_reconciliation",
   "provider_recording_reconciliation"
 ]);
 export const adminDurableJobStatusSchema = z.enum([
