@@ -219,13 +219,45 @@ export type ProviderOperationReservationInput = {
 };
 
 export type ProviderTextTokenUsage = {
+  requestCount?: number | null;
   inputTextTokens: number | null;
   cachedInputTextTokens: number | null;
   cacheWriteInputTextTokens: number | null;
   outputTextTokens: number | null;
   reasoningOutputTokens: number | null;
+  inputAudioTokens?: number | null;
+  cachedInputAudioTokens?: number | null;
+  outputAudioTokens?: number | null;
   totalTokens: number | null;
+  durationSeconds?: number | null;
+  billableSeconds?: number | null;
   rawUsage: Record<string, unknown>;
+};
+
+export type RealtimeProviderSessionInput = {
+  id: string;
+  callBriefId: string;
+  callAttemptId: string;
+  provider: "openai";
+  operationType: "realtime_session";
+  stage: "conversation" | "consent_transcription";
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+};
+
+export type RealtimeProviderOperationInput = {
+  id: string;
+  parentOperationId: string;
+  callBriefId: string;
+  callAttemptId: string;
+  provider: "openai";
+  operationType: "realtime_response" | "transcription";
+  stage: string;
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+  result: Omit<CompleteProviderOperationInput, "operationId">;
 };
 
 export type CompleteProviderOperationInput = {
@@ -249,6 +281,12 @@ export type ProviderOperationRecord = Omit<
   durableJobId: string;
   result: Omit<CompleteProviderOperationInput, "operationId"> | null;
 };
+
+export type RealtimeProviderOperationRecord =
+  | (RealtimeProviderSessionInput & {
+      result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+    })
+  | RealtimeProviderOperationInput;
 
 export type AdminCallCursor = { createdAt: string; id: string };
 export type ListAdminCallsInput = AdminCallListFilters & {
@@ -509,6 +547,12 @@ export interface CallRepository {
     input: ProviderOperationReservationInput,
     lease: DurableJobLease
   ): Promise<boolean>;
+  startRealtimeProviderSessions(
+    inputs: RealtimeProviderSessionInput[]
+  ): Promise<void>;
+  recordRealtimeProviderOperation(
+    input: RealtimeProviderOperationInput
+  ): Promise<void>;
   completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;

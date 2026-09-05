@@ -37,7 +37,10 @@ import {
   type CallRepository,
   type AdminWebhookDeliveryFacts,
   type CallChangeSignal,
-  type ProviderWebhookDeliveryInput
+  type ProviderWebhookDeliveryInput,
+  type RealtimeProviderOperationInput,
+  type RealtimeProviderSessionInput,
+  type CompleteProviderOperationInput
 } from "./storage/call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
 import {
@@ -525,6 +528,18 @@ export class CallService {
 
   getLatestAttempt(id: string) {
     return this.repository.getLatestAttempt(id);
+  }
+
+  startRealtimeProviderSessions(inputs: RealtimeProviderSessionInput[]) {
+    return this.repository.startRealtimeProviderSessions(inputs);
+  }
+
+  recordRealtimeProviderOperation(input: RealtimeProviderOperationInput) {
+    return this.repository.recordRealtimeProviderOperation(input);
+  }
+
+  completeProviderOperation(input: CompleteProviderOperationInput) {
+    return this.repository.completeProviderOperation(input);
   }
 
   async approveCompilation(id: string, expected?: CompilationApprovalInput) {

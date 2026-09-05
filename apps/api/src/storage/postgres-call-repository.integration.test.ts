@@ -1700,11 +1700,12 @@ describeWithDatabase("PostgresCallRepository", () => {
     const acceptedOperationId = reservationInputs[
       reservations.findIndex(Boolean)
     ]!.id;
+    const providerUsageKey = randomUUID();
     const operationResult = {
       operationId: acceptedOperationId,
       outcome: "succeeded" as const,
-      providerRequestId: "req_postgres_usage",
-      providerResponseId: "resp_postgres_usage",
+      providerRequestId: `req_postgres_usage_${providerUsageKey}`,
+      providerResponseId: `resp_postgres_usage_${providerUsageKey}`,
       providerModel: "gpt-5.6-2026-08-01",
       statusCode: 200,
       completedAt: "2096-01-01T00:00:02.000Z",
@@ -1796,6 +1797,124 @@ describeWithDatabase("PostgresCallRepository", () => {
       SET input_text_tokens = 101
       WHERE operation_id = ${acceptedOperationId}
     `).rejects.toThrow(/append-only/);
+  });
+
+  it("persists and deduplicates Realtime text/audio usage by provider event", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Realtime usage office",
+      phoneNumber: "+41710000064",
+      objective: "Verify Realtime usage ledger persistence",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const { attempt } = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerA,
+      admissionPolicy: ledgerTestPolicy
+    });
+    const sessionIds = [randomUUID(), randomUUID()];
+    await repository.startRealtimeProviderSessions(sessionIds.map((id, index) => ({
+      id,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "openai" as const,
+      operationType: "realtime_session" as const,
+      stage: index === 0
+        ? "conversation" as const
+        : "consent_transcription" as const,
+      requestedModel: "gpt-realtime-2.1",
+      clientRequestId: id,
+      startedAt: "2096-01-03T00:00:00.000Z"
+    })));
+    const operationId = randomUUID();
+    const realtimeProviderResponseId = `resp_realtime_usage_${randomUUID()}`;
+    const realtimeOperation = {
+      id: operationId,
+      parentOperationId: sessionIds[0]!,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "openai" as const,
+      operationType: "realtime_response" as const,
+      stage: "conversation",
+      requestedModel: "gpt-realtime-2.1",
+      clientRequestId: operationId,
+      startedAt: "2096-01-03T00:00:01.000Z",
+      result: {
+        outcome: "succeeded" as const,
+        providerRequestId: null,
+        providerResponseId: realtimeProviderResponseId,
+        providerModel: "gpt-realtime-2.1-2026-08-01",
+        statusCode: null,
+        completedAt: "2096-01-03T00:00:02.000Z",
+        durationMs: 1_000,
+        errorCode: null,
+        usage: {
+          requestCount: 1,
+          inputTextTokens: 70,
+          cachedInputTextTokens: 20,
+          cacheWriteInputTextTokens: null,
+          outputTextTokens: 10,
+          reasoningOutputTokens: null,
+          inputAudioTokens: 50,
+          cachedInputAudioTokens: 5,
+          outputAudioTokens: 20,
+          totalTokens: 150,
+          durationSeconds: null,
+          billableSeconds: null,
+          rawUsage: { total_tokens: 150 }
+        }
+      }
+    };
+    await Promise.all([
+      repository.recordRealtimeProviderOperation(realtimeOperation),
+      repository.recordRealtimeProviderOperation(realtimeOperation)
+    ]);
+    const [ledger] = await inspection<{
+      sessions: number;
+      responses: number;
+      usageRecords: number;
+      inputAudioTokens: number;
+      cachedInputAudioTokens: number;
+      outputAudioTokens: number;
+    }[]>`
+      SELECT
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_attempt_id = ${attempt.id}
+            AND operation_type = 'realtime_session') AS sessions,
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_attempt_id = ${attempt.id}
+            AND operation_type = 'realtime_response') AS responses,
+        (SELECT count(*)::int
+          FROM provider_usage_records usage
+          INNER JOIN provider_operations operation
+            ON operation.id = usage.operation_id
+          WHERE operation.call_attempt_id = ${attempt.id}
+            AND operation.operation_type = 'realtime_response') AS "usageRecords",
+        (SELECT input_audio_tokens FROM provider_usage_records
+          WHERE operation_id = ${operationId}) AS "inputAudioTokens",
+        (SELECT cached_input_audio_tokens FROM provider_usage_records
+          WHERE operation_id = ${operationId}) AS "cachedInputAudioTokens",
+        (SELECT output_audio_tokens FROM provider_usage_records
+          WHERE operation_id = ${operationId}) AS "outputAudioTokens"
+    `;
+    expect(ledger).toEqual({
+      sessions: 2,
+      responses: 1,
+      usageRecords: 1,
+      inputAudioTokens: 50,
+      cachedInputAudioTokens: 5,
+      outputAudioTokens: 20
+    });
   });
 
   it("atomically cancels active preparations and erases their private input", async () => {

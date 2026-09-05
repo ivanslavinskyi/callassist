@@ -8,12 +8,20 @@ import {
   type ConsentEvidence,
   type TranscriptSegment
 } from "@callassist/contracts";
+import { randomUUID } from "node:crypto";
 import WebSocket, { type RawData } from "ws";
 import type { CallService } from "../call-service";
 import type { MediaStreamBinding } from "../telephony/telephony-provider";
 import { getTwilioCopy } from "../telephony/twilio-copy";
 import { classifyConsent } from "./consent-classifier";
 import { ConsentFlow, type ConsentFlowAction } from "./consent-flow";
+import {
+  createProviderEventOperationId,
+  parseRealtimeResponseUsage,
+  parseRealtimeTranscriptionUsage,
+  type RealtimeResponseUsage,
+  type RealtimeTranscriptionUsage
+} from "./openai-realtime-usage";
 
 type BridgeLogger = {
   info: (details: object, message: string) => void;
@@ -59,12 +67,32 @@ export type RealtimeTranscriptionDelay =
   | "xhigh";
 
 type OpenAIEvent = {
+  event_id?: string;
   type?: string;
   delta?: string;
   transcript?: string;
   item_id?: string;
   response_id?: string;
+  content_index?: number;
+  session?: { id?: string; model?: string };
+  response?: {
+    id?: string;
+    model?: string;
+    status?: "completed" | "cancelled" | "failed" | "incomplete" | string;
+    usage?: RealtimeResponseUsage;
+  };
+  usage?: RealtimeTranscriptionUsage;
   error?: { type?: string; code?: string; param?: string };
+};
+
+type RealtimeSessionTracker = {
+  operationId: string;
+  role: "conversation" | "consent_transcription";
+  startedAt: string;
+  startedAtMs: number;
+  providerSessionId: string | null;
+  providerModel: string | null;
+  completed: boolean;
 };
 
 type ResponsePurpose =
@@ -158,6 +186,7 @@ export class OpenAIRealtimeBridge {
     let openAISocket: WebSocket | null = null;
     let consentSocket: WebSocket | null = null;
     let callBriefId: string | null = null;
+    let callAttemptId: string | null = null;
     let currentBrief: CallBrief | null = null;
     let currentExecutionSnapshot: ApprovedExecutionSnapshot | null = null;
     let streamSid: string | null = null;
@@ -185,6 +214,14 @@ export class OpenAIRealtimeBridge {
     const storedTranscripts = new Set<string>();
     let transcriptWrites = Promise.resolve();
     let telemetryWrites = Promise.resolve();
+    let providerWrites = Promise.resolve();
+    let conversationSession: RealtimeSessionTracker | null = null;
+    let consentSession: RealtimeSessionTracker | null = null;
+    const responseStarts = new Map<
+      string,
+      { startedAtMs: number; purpose: ResponsePurpose | null }
+    >();
+    let closeForProviderWriteFailure: (() => void) | null = null;
 
     const clearConsentTimer = () => {
       if (!consentTimer) return;
@@ -218,6 +255,66 @@ export class OpenAIRealtimeBridge {
         });
     };
 
+    const queueProviderWrite = (
+      write: () => Promise<unknown>,
+      operation: string
+    ) => {
+      providerWrites = providerWrites
+        .then(write)
+        .then(() => undefined)
+        .catch(() => {
+          this.#logger.error(
+            { callBriefId, callAttemptId, operation },
+            "Failed to persist provider usage ledger"
+          );
+          closeForProviderWriteFailure?.();
+        });
+    };
+
+    const completeRealtimeSession = (
+      tracker: RealtimeSessionTracker | null,
+      outcome: "succeeded" | "network_error",
+      errorCode: string | null
+    ) => {
+      if (!tracker || tracker.completed) return;
+      tracker.completed = true;
+      const completedAtMs = Date.now();
+      const durationMs = Math.max(0, completedAtMs - tracker.startedAtMs);
+      queueProviderWrite(
+        () => this.#service.completeProviderOperation({
+          operationId: tracker.operationId,
+          outcome,
+          providerRequestId: null,
+          providerResponseId: tracker.providerSessionId,
+          providerModel: tracker.providerModel ?? this.#model,
+          statusCode: null,
+          completedAt: new Date(completedAtMs).toISOString(),
+          durationMs,
+          errorCode,
+          usage: {
+            requestCount: 1,
+            inputTextTokens: null,
+            cachedInputTextTokens: null,
+            cacheWriteInputTextTokens: null,
+            outputTextTokens: null,
+            reasoningOutputTokens: null,
+            inputAudioTokens: null,
+            cachedInputAudioTokens: null,
+            outputAudioTokens: null,
+            totalTokens: null,
+            durationSeconds: durationMs / 1_000,
+            billableSeconds: null,
+            rawUsage: {
+              source: "client_observed_realtime_session",
+              role: tracker.role,
+              duration_seconds: durationMs / 1_000
+            }
+          }
+        }),
+        `realtime_session:${tracker.role}`
+      );
+    };
+
     const close = (reason: ConversationEndReason = "socket_closed") => {
       if (closed) return;
       closed = true;
@@ -236,9 +333,23 @@ export class OpenAIRealtimeBridge {
           metadata: { reason }
         });
       }
+      const providerFailure = reason === "openai_error" || reason === "openai_closed";
+      completeRealtimeSession(
+        conversationSession,
+        providerFailure ? "network_error" : "succeeded",
+        providerFailure ? "OPENAI_REALTIME_SESSION_INTERRUPTED" : null
+      );
+      completeRealtimeSession(
+        consentSession,
+        providerFailure ? "network_error" : "succeeded",
+        providerFailure ? "OPENAI_REALTIME_SESSION_INTERRUPTED" : null
+      );
       if (openAISocket?.readyState === WebSocket.OPEN) openAISocket.close();
       if (consentSocket?.readyState === WebSocket.OPEN) consentSocket.close();
       if (twilioSocket.readyState === WebSocket.OPEN) twilioSocket.close();
+    };
+    closeForProviderWriteFailure = () => {
+      if (!closed) close("openai_error");
     };
 
     const sendOpenAI = (payload: object) => {
@@ -319,6 +430,7 @@ export class OpenAIRealtimeBridge {
       consentSocketReady = false;
       const socket = consentSocket;
       consentSocket = null;
+      completeRealtimeSession(consentSession, "succeeded", null);
       if (socket?.readyState === WebSocket.OPEN) socket.close();
     };
 
@@ -463,9 +575,137 @@ export class OpenAIRealtimeBridge {
       );
     };
 
+    const observeSession = (
+      tracker: RealtimeSessionTracker | null,
+      event: OpenAIEvent
+    ) => {
+      if (!tracker || !event.session) return;
+      tracker.providerSessionId = event.session.id ?? tracker.providerSessionId;
+      tracker.providerModel = event.session.model ?? tracker.providerModel;
+    };
+
+    const recordRealtimeResponse = (
+      event: OpenAIEvent,
+      purpose: ResponsePurpose | null
+    ) => {
+      if (!callBriefId || !callAttemptId || !conversationSession) return;
+      const responseId = event.response?.id ?? event.response_id;
+      if (!responseId) {
+        this.#logger.warn(
+          { callBriefId, callAttemptId },
+          "Realtime response.done omitted its response id"
+        );
+        return;
+      }
+      const usage = parseRealtimeResponseUsage(event.response?.usage);
+      if (event.response?.usage && !usage) {
+        this.#logger.warn(
+          { callBriefId, callAttemptId, responseId },
+          "Ignored malformed OpenAI Realtime response usage"
+        );
+      }
+      const completedAtMs = Date.now();
+      const started = responseStarts.get(responseId);
+      responseStarts.delete(responseId);
+      const status = event.response?.status;
+      const operationId = createProviderEventOperationId(
+        "realtime_response",
+        responseId
+      );
+      const parentOperationId = conversationSession.operationId;
+      queueProviderWrite(
+        () => this.#service.recordRealtimeProviderOperation({
+          id: operationId,
+          parentOperationId,
+          callBriefId: callBriefId!,
+          callAttemptId: callAttemptId!,
+          provider: "openai",
+          operationType: "realtime_response",
+          stage: purpose ?? started?.purpose ?? "conversation",
+          requestedModel: this.#model,
+          clientRequestId: operationId,
+          startedAt: new Date(started?.startedAtMs ?? completedAtMs).toISOString(),
+          result: {
+            outcome:
+              status === undefined || status === "completed"
+                ? "succeeded"
+                : "provider_error",
+            providerRequestId: null,
+            providerResponseId: responseId,
+            providerModel: event.response?.model ?? this.#model,
+            statusCode: null,
+            completedAt: new Date(completedAtMs).toISOString(),
+            durationMs: Math.max(
+              0,
+              completedAtMs - (started?.startedAtMs ?? completedAtMs)
+            ),
+            errorCode: realtimeResponseErrorCode(status),
+            usage
+          }
+        }),
+        "realtime_response"
+      );
+    };
+
+    const recordRealtimeTranscription = (
+      event: OpenAIEvent,
+      tracker: RealtimeSessionTracker | null
+    ) => {
+      if (!callBriefId || !callAttemptId || !tracker || !event.usage) return;
+      const usage = parseRealtimeTranscriptionUsage(event.usage);
+      if (!usage) {
+        this.#logger.warn(
+          { callBriefId, callAttemptId, itemId: event.item_id },
+          "Ignored malformed OpenAI Realtime transcription usage"
+        );
+        return;
+      }
+      const providerEventId =
+        event.event_id ??
+        `${tracker.providerSessionId ?? tracker.operationId}:${event.item_id ?? "unknown"}:${event.content_index ?? 0}`;
+      const operationId = createProviderEventOperationId(
+        "transcription",
+        providerEventId
+      );
+      const observedAt = new Date().toISOString();
+      queueProviderWrite(
+        () => this.#service.recordRealtimeProviderOperation({
+          id: operationId,
+          parentOperationId: tracker.operationId,
+          callBriefId: callBriefId!,
+          callAttemptId: callAttemptId!,
+          provider: "openai",
+          operationType: "transcription",
+          stage:
+            tracker.role === "conversation"
+              ? "conversation_input_audio"
+              : "consent_input_audio",
+          requestedModel: this.#transcriptionModel,
+          clientRequestId: operationId,
+          startedAt: observedAt,
+          result: {
+            outcome: "succeeded",
+            providerRequestId: null,
+            providerResponseId: event.event_id ?? null,
+            providerModel: this.#transcriptionModel,
+            statusCode: null,
+            completedAt: observedAt,
+            durationMs: Math.round((usage.durationSeconds ?? 0) * 1_000),
+            errorCode: null,
+            usage
+          }
+        }),
+        "realtime_transcription"
+      );
+    };
+
     const handleOpenAIEvent = (event: OpenAIEvent, brief: CallBrief) => {
       switch (event.type) {
+        case "session.created":
+          observeSession(conversationSession, event);
+          break;
         case "session.updated":
+          observeSession(conversationSession, event);
           openAIReady = true;
           recordTelemetry("realtime:ready", {
             name: "realtime.ready",
@@ -488,9 +728,16 @@ export class OpenAIRealtimeBridge {
           activeResponsePurpose ??= consentGranted
             ? "conversation"
             : "consent_prompt";
+          if (event.response?.id) {
+            responseStarts.set(event.response.id, {
+              startedAtMs: Date.now(),
+              purpose: activeResponsePurpose
+            });
+          }
           break;
         case "response.done": {
           const completedPurpose = activeResponsePurpose;
+          recordRealtimeResponse(event, completedPurpose);
           responseActive = false;
           activeResponsePurpose = null;
           if (startConversationAfterResponse && consentGranted) {
@@ -557,6 +804,7 @@ export class OpenAIRealtimeBridge {
           }
           break;
         case "conversation.item.input_audio_transcription.completed":
+          recordRealtimeTranscription(event, conversationSession);
           if (consentGranted && event.transcript) {
             storeTranscript(
               `recipient:${event.item_id ?? event.transcript}`,
@@ -696,10 +944,55 @@ export class OpenAIRealtimeBridge {
       }
 
       callBriefId = candidateCallBriefId;
+      callAttemptId = attempt.id;
       streamSid = candidateStreamSid;
       const brief = snapshot.brief;
       currentBrief = brief;
       currentExecutionSnapshot = executionSnapshot;
+      const sessionsStartedAtMs = Date.now();
+      const sessionsStartedAt = new Date(sessionsStartedAtMs).toISOString();
+      conversationSession = {
+        operationId: randomUUID(),
+        role: "conversation",
+        startedAt: sessionsStartedAt,
+        startedAtMs: sessionsStartedAtMs,
+        providerSessionId: null,
+        providerModel: null,
+        completed: false
+      };
+      consentSession = {
+        operationId: randomUUID(),
+        role: "consent_transcription",
+        startedAt: sessionsStartedAt,
+        startedAtMs: sessionsStartedAtMs,
+        providerSessionId: null,
+        providerModel: null,
+        completed: false
+      };
+      await this.#service.startRealtimeProviderSessions([
+        {
+          id: conversationSession.operationId,
+          callBriefId,
+          callAttemptId,
+          provider: "openai",
+          operationType: "realtime_session",
+          stage: conversationSession.role,
+          requestedModel: this.#model,
+          clientRequestId: conversationSession.operationId,
+          startedAt: sessionsStartedAt
+        },
+        {
+          id: consentSession.operationId,
+          callBriefId,
+          callAttemptId,
+          provider: "openai",
+          operationType: "realtime_session",
+          stage: consentSession.role,
+          requestedModel: this.#model,
+          clientRequestId: consentSession.operationId,
+          startedAt: sessionsStartedAt
+        }
+      ]);
       openAISocket = this.#createOpenAISocket(
         `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#model)}`,
         this.#apiKey
@@ -747,11 +1040,21 @@ export class OpenAIRealtimeBridge {
       });
       openAISocket.on("error", () => {
         this.#logger.error({ callBriefId: brief.id }, "OpenAI Realtime connection failed");
+        completeRealtimeSession(
+          conversationSession,
+          "network_error",
+          "OPENAI_REALTIME_CONNECTION_FAILED"
+        );
         close("openai_error");
       });
       openAISocket.on("close", () => {
         if (!closed) {
           this.#logger.info({ callBriefId: brief.id }, "OpenAI Realtime connection closed");
+          completeRealtimeSession(
+            conversationSession,
+            "network_error",
+            "OPENAI_REALTIME_CONNECTION_CLOSED"
+          );
           close("openai_closed");
         }
       });
@@ -788,21 +1091,28 @@ export class OpenAIRealtimeBridge {
       activeConsentSocket.on("message", (data: RawData) => {
         const event = parseJson<OpenAIEvent>(data);
         if (!event) return;
-        if (event.type === "session.updated") {
+        if (event.type === "session.created") {
+          observeSession(consentSession, event);
+        } else if (event.type === "session.updated") {
+          observeSession(consentSession, event);
           consentSocketReady = true;
           maybeStartConsentPrompt();
         } else if (
-          event.type === "conversation.item.input_audio_transcription.completed" &&
-          event.transcript &&
-          consentListening &&
-          !consentStarting &&
-          !consentGranted
+          event.type === "conversation.item.input_audio_transcription.completed"
         ) {
-          const decision = classifyConsent(event.transcript, brief.locale);
-          handleConsentAction(
-            consentFlow.decide(decision),
-            decision === "negative" ? "negative" : "timeout"
-          );
+          recordRealtimeTranscription(event, consentSession);
+          if (
+            event.transcript &&
+            consentListening &&
+            !consentStarting &&
+            !consentGranted
+          ) {
+            const decision = classifyConsent(event.transcript, brief.locale);
+            handleConsentAction(
+              consentFlow.decide(decision),
+              decision === "negative" ? "negative" : "timeout"
+            );
+          }
         } else if (event.type === "error") {
           this.#logger.error(
             { callBriefId: brief.id },
@@ -816,6 +1126,11 @@ export class OpenAIRealtimeBridge {
           { callBriefId: brief.id },
           "OpenAI consent transcription connection failed"
         );
+        completeRealtimeSession(
+          consentSession,
+          "network_error",
+          "OPENAI_TRANSCRIPTION_CONNECTION_FAILED"
+        );
         handleConsentAction("reject", "recognition_failed");
       });
       activeConsentSocket.on("close", () => {
@@ -825,6 +1140,11 @@ export class OpenAIRealtimeBridge {
           !consentStarting &&
           !consentGranted
         ) {
+          completeRealtimeSession(
+            consentSession,
+            "network_error",
+            "OPENAI_TRANSCRIPTION_CONNECTION_CLOSED"
+          );
           consentSocket = null;
           handleConsentAction("reject", "recognition_failed");
         }
@@ -935,6 +1255,22 @@ export class OpenAIRealtimeBridge {
 function safeTelemetryToken(value: string, fallback: string) {
   const normalized = value.trim();
   return /^[a-z0-9_.:/-]{1,160}$/i.test(normalized) ? normalized : fallback;
+}
+
+function realtimeResponseErrorCode(status: string | undefined) {
+  switch (status) {
+    case undefined:
+    case "completed":
+      return null;
+    case "cancelled":
+      return "OPENAI_REALTIME_RESPONSE_CANCELLED";
+    case "failed":
+      return "OPENAI_REALTIME_RESPONSE_FAILED";
+    case "incomplete":
+      return "OPENAI_REALTIME_RESPONSE_INCOMPLETE";
+    default:
+      return "OPENAI_REALTIME_RESPONSE_NOT_COMPLETED";
+  }
 }
 
 const keypadResponseInstructions =

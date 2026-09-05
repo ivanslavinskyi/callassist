@@ -52,10 +52,11 @@ Completed in the first branch increment:
   identifiers invented by the compiled runtime plan.
 
 Items 1 through 3 are implemented in code with a dual-read/dual-write rollout
-path. They are not a deployable completion until migration 0051 and the
-database-backed concurrency, immutability, owner-erasure, and legacy-backfill
-tests pass against PostgreSQL. The mutable current `call_briefs` blob remains only
-as a compatibility projection; immutable revision rows are the new audit anchor.
+path. Migrations 0051 through 0054 and the database-backed concurrency,
+immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
+Realtime audio-token tests pass locally against PostgreSQL. The mutable current
+`call_briefs` blob remains only as a compatibility projection; immutable revision
+rows are the new audit anchor.
 Item 4 is partially implemented: full-plan output moderation and the beta opaque
 identifier guard are present; broader address/name extraction and review UI still
 remain.
@@ -67,15 +68,19 @@ atomically before every physical compiler or moderation request and caps all
 transport and durable retries at eight requests. A crash after reservation is
 deliberately fail-closed and may consume budget without sending the request; the
 provider-operation ledger in item 6 will make that distinction observable.
-Item 6 has its first vertical slice: every compiler/moderation HTTP attempt is
-reserved as an immutable provider operation before network I/O, its bounded
-outcome is stored even on failure, and Responses token usage is written to a
-separate append-only usage record before schema/policy publication. Pricing and
-calculated cost are intentionally not part of these records. Realtime, Twilio,
-and transcription instrumentation still remain.
-Like the immutable compilation work, this slice is code-complete but remains a
-deployment blocker until migration 0053 and its append-only/deduplication checks
-pass against PostgreSQL in CI or a repaired local Docker environment.
+Item 6 has compiler and Realtime vertical slices: every compiler/moderation HTTP
+attempt is reserved as an immutable provider operation before network I/O, its
+bounded outcome is stored even on failure, and Responses token usage is written
+to a separate append-only usage record before schema/policy publication. Pricing and
+calculated cost are intentionally not part of these records. Each accepted media
+stream now reserves its main and consent-transcription Realtime sessions before
+opening provider sockets. `response.done` persists returned text, audio, cached,
+and total token counters, while input-audio transcription completion persists the
+provider's token or duration usage variant. Stable provider event/response IDs
+deduplicate replay, response/transcription operations point to the exact parent
+session, and locally observed session duration is retained even on interruption.
+Ledger persistence failure closes the stream to cap untracked spend. Twilio leg,
+recording, and post-call transcription instrumentation still remain.
 
 ## Why this roadmap exists
 
@@ -328,7 +333,7 @@ success.
 - Write usage immediately after a provider response/event is parsed and before
   downstream schema validation or business-state publication.
 
-### Implemented compiler slice
+### Implemented compiler and Realtime slices
 
 - `provider_operations` records physical request identity, requested model,
   stage, preparation, durable job generation, and start time. A reserved row
@@ -344,6 +349,14 @@ success.
 - The normalized Responses mapping follows the official API fields
   [`input_tokens`, cached/cache-write input details, `output_tokens`, reasoning
   details, and `total_tokens`](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+- Realtime `response.done` records response status/model plus the returned text,
+  audio, cached-text, cached-audio, output, and total token counters. Cancelled,
+  failed, and incomplete responses retain any usage already returned.
+- Realtime input-audio transcription completion records either its token
+  breakdown or processed seconds, exactly matching the provider usage variant.
+- Main and consent-transcription sessions are reserved together before either
+  WebSocket is opened. Child operations reference their exact session, and stable
+  provider response/event IDs converge replay on one immutable operation.
 - All three tables reject update/delete at the database boundary and are included
   in the recovery drill's critical-table set.
 - Usage insertion must not roll back with call creation, compilation validation, or

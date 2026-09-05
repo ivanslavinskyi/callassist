@@ -85,6 +85,9 @@ import {
   type ProviderWebhookKind,
   type ProviderOperationRecord,
   type ProviderOperationReservationInput,
+  type RealtimeProviderOperationInput,
+  type RealtimeProviderOperationRecord,
+  type RealtimeProviderSessionInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 import {
@@ -183,7 +186,10 @@ export class InMemoryCallRepository implements CallRepository {
     { callId: string; userId: string | null }
   >();
   readonly #callPreparations = new Map<string, StoredCallPreparation>();
-  readonly #providerOperations = new Map<string, ProviderOperationRecord>();
+  readonly #providerOperations = new Map<
+    string,
+    ProviderOperationRecord | RealtimeProviderOperationRecord
+  >();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
   readonly #compilations = new Map<
@@ -566,9 +572,52 @@ export class InMemoryCallRepository implements CallRepository {
     });
   }
 
+  async startRealtimeProviderSessions(inputs: RealtimeProviderSessionInput[]) {
+    for (const input of inputs) {
+      const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+        ({ id }) => id === input.callAttemptId
+      );
+      if (!attempt) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+    }
+    for (const input of inputs) {
+      if (this.#providerOperations.has(input.id)) continue;
+      this.#providerOperations.set(input.id, {
+        ...copy(input),
+        result: null
+      });
+    }
+  }
+
+  async recordRealtimeProviderOperation(
+    input: RealtimeProviderOperationInput
+  ) {
+    if (this.#providerOperations.has(input.id)) return;
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (!attempt) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    const parent = this.#providerOperations.get(input.parentOperationId);
+    if (
+      !parent ||
+      !("callAttemptId" in parent) ||
+      parent.callAttemptId !== input.callAttemptId ||
+      parent.callBriefId !== input.callBriefId ||
+      parent.operationType !== "realtime_session"
+    ) {
+      throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+    }
+    this.#providerOperations.set(input.id, copy(input));
+  }
+
   providerOperationsForTest(preparationId?: string) {
     return copy([...this.#providerOperations.values()].filter((operation) =>
-      !preparationId || operation.callPreparationId === preparationId
+      !preparationId ||
+      ("callPreparationId" in operation &&
+        operation.callPreparationId === preparationId)
     ));
   }
 

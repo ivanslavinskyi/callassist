@@ -114,6 +114,8 @@ import {
   type ProviderWebhookKind,
   type ProviderWebhookOutcome,
   type ProviderOperationReservationInput,
+  type RealtimeProviderOperationInput,
+  type RealtimeProviderSessionInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 
@@ -899,6 +901,94 @@ export class PostgresCallRepository implements CallRepository {
     });
   }
 
+  async startRealtimeProviderSessions(inputs: RealtimeProviderSessionInput[]) {
+    if (inputs.length === 0) return;
+    const [{ callBriefId, callAttemptId }] = inputs;
+    if (
+      inputs.some(
+        (input) =>
+          input.callBriefId !== callBriefId ||
+          input.callAttemptId !== callAttemptId
+      )
+    ) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    await this.#sql.begin(async (transaction) => {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${callAttemptId}
+          AND call_brief_id = ${callBriefId}
+        FOR SHARE
+      `;
+      if (attempt.count !== 1) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      for (const input of inputs) {
+        await transaction`
+          INSERT INTO provider_operations (
+            id, provider, operation_type, stage, requested_model,
+            client_request_id, call_brief_id, call_attempt_id, started_at
+          ) VALUES (
+            ${input.id}, ${input.provider}, ${input.operationType},
+            ${input.stage}, ${input.requestedModel}, ${input.clientRequestId},
+            ${input.callBriefId}, ${input.callAttemptId},
+            ${input.startedAt}::timestamptz
+          )
+          ON CONFLICT DO NOTHING
+        `;
+      }
+    });
+  }
+
+  async recordRealtimeProviderOperation(
+    input: RealtimeProviderOperationInput
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+        FOR SHARE
+      `;
+      if (attempt.count !== 1) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      const parent = await transaction`
+        SELECT id
+        FROM provider_operations
+        WHERE id = ${input.parentOperationId}
+          AND operation_type = 'realtime_session'
+          AND call_brief_id = ${input.callBriefId}
+          AND call_attempt_id = ${input.callAttemptId}
+        FOR SHARE
+      `;
+      if (parent.count !== 1) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_brief_id, call_attempt_id,
+          parent_operation_id, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.callBriefId}, ${input.callAttemptId},
+          ${input.parentOperationId},
+          ${input.startedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+      await this.#insertProviderOperationResult(
+        transaction,
+        input.id,
+        input.result
+      );
+    });
+  }
+
   async completeProviderOperation(input: CompleteProviderOperationInput) {
     await this.#sql.begin(async (transaction) => {
       const operation = await transaction`
@@ -908,41 +998,17 @@ export class PostgresCallRepository implements CallRepository {
       if (operation.count !== 1) {
         throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
       }
-      await transaction`
-        INSERT INTO provider_operation_results (
-          operation_id, outcome, provider_request_id, provider_response_id,
-          provider_model, http_status, error_code, completed_at, duration_ms
-        ) VALUES (
-          ${input.operationId}, ${input.outcome}, ${input.providerRequestId},
-          ${input.providerResponseId}, ${input.providerModel},
-          ${input.statusCode}, ${input.errorCode},
-          ${input.completedAt}::timestamptz, ${input.durationMs}
-        )
-        ON CONFLICT (operation_id) DO NOTHING
-      `;
-      if (input.outcome !== "network_error") {
-        await transaction`
-          INSERT INTO provider_usage_records (
-            id, operation_id, schema_version, request_count,
-            input_text_tokens, cached_input_text_tokens,
-            cache_write_input_text_tokens, output_text_tokens,
-            reasoning_output_tokens, total_tokens, raw_usage, observed_at
-          ) VALUES (
-            ${randomUUID()}, ${input.operationId}, 1, 1,
-            ${input.usage?.inputTextTokens ?? null},
-            ${input.usage?.cachedInputTextTokens ?? null},
-            ${input.usage?.cacheWriteInputTextTokens ?? null},
-            ${input.usage?.outputTextTokens ?? null},
-            ${input.usage?.reasoningOutputTokens ?? null},
-            ${input.usage?.totalTokens ?? null},
-            ${transaction.json(
-              (input.usage?.rawUsage ?? {}) as postgres.JSONValue
-            )},
-            ${input.completedAt}::timestamptz
-          )
-          ON CONFLICT (operation_id) DO NOTHING
-        `;
-      }
+      await this.#insertProviderOperationResult(transaction, input.operationId, {
+        outcome: input.outcome,
+        providerRequestId: input.providerRequestId,
+        providerResponseId: input.providerResponseId,
+        providerModel: input.providerModel,
+        statusCode: input.statusCode,
+        completedAt: input.completedAt,
+        durationMs: input.durationMs,
+        errorCode: input.errorCode,
+        usage: input.usage
+      });
     });
   }
 
@@ -5993,6 +6059,62 @@ export class PostgresCallRepository implements CallRepository {
         occurred_at AS "occurredAt"
     `;
     return mapCallTelemetryEvent(rows[0]!);
+  }
+
+  async #insertProviderOperationResult(
+    transaction: postgres.TransactionSql,
+    operationId: string,
+    input: Omit<CompleteProviderOperationInput, "operationId">
+  ) {
+    const insertedResult = await transaction`
+      INSERT INTO provider_operation_results (
+        operation_id, outcome, provider_request_id, provider_response_id,
+        provider_model, http_status, error_code, completed_at, duration_ms
+      ) VALUES (
+        ${operationId}, ${input.outcome}, ${input.providerRequestId},
+        ${input.providerResponseId}, ${input.providerModel},
+        ${input.statusCode}, ${input.errorCode},
+        ${input.completedAt}::timestamptz, ${input.durationMs}
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING operation_id
+    `;
+    if (insertedResult.count === 0) {
+      const existingResult = await transaction`
+        SELECT operation_id
+        FROM provider_operation_results
+        WHERE operation_id = ${operationId}
+      `;
+      if (existingResult.count === 0) return;
+    }
+    if (!input.usage) return;
+    await transaction`
+      INSERT INTO provider_usage_records (
+        id, operation_id, schema_version, request_count,
+        input_text_tokens, cached_input_text_tokens,
+        cache_write_input_text_tokens, output_text_tokens,
+        reasoning_output_tokens, input_audio_tokens,
+        cached_input_audio_tokens, output_audio_tokens, total_tokens,
+        duration_seconds, billable_seconds, raw_usage, observed_at
+      ) VALUES (
+        ${randomUUID()}, ${operationId}, 1,
+        ${input.usage.requestCount ?? 1},
+        ${input.usage.inputTextTokens},
+        ${input.usage.cachedInputTextTokens},
+        ${input.usage.cacheWriteInputTextTokens},
+        ${input.usage.outputTextTokens},
+        ${input.usage.reasoningOutputTokens},
+        ${input.usage.inputAudioTokens ?? null},
+        ${input.usage.cachedInputAudioTokens ?? null},
+        ${input.usage.outputAudioTokens ?? null},
+        ${input.usage.totalTokens},
+        ${input.usage.durationSeconds ?? null},
+        ${input.usage.billableSeconds ?? null},
+        ${transaction.json(input.usage.rawUsage as postgres.JSONValue)},
+        ${input.completedAt}::timestamptz
+      )
+      ON CONFLICT (operation_id) DO NOTHING
+    `;
   }
 
   async #audit(
