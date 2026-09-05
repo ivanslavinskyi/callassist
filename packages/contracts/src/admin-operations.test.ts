@@ -204,6 +204,8 @@ describe("admin operations contracts", () => {
       },
       callPlanCutover: {
         recoverableLegacyCalls: 0,
+        archivedLegacyCalls: 0,
+        recompileRequiredCalls: 0,
         unavailableLegacyCalls: 0,
         historicalAttemptsWithoutCompilation: 0,
         historicalAttemptsWithoutExecutionSnapshot: 0,

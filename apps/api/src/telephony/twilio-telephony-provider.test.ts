@@ -11,6 +11,8 @@ const brief: CallBrief = {
   assistantProfileId: "sebastian",
   agentName: "Sebastian",
   representedPerson: "Ivan Slavinskyi",
+  representedPersonFirstName: "Ivan",
+  representedPersonLastName: "Slavinskyi",
   assistanceReason: "speech_impairment",
   assistanceDisclosure:
     "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt.",

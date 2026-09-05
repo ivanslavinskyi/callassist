@@ -288,6 +288,8 @@ export const adminSystemStatusSchema = z.strictObject({
   }),
   callPlanCutover: z.strictObject({
     recoverableLegacyCalls: countSchema,
+    archivedLegacyCalls: countSchema,
+    recompileRequiredCalls: countSchema,
     unavailableLegacyCalls: countSchema,
     historicalAttemptsWithoutCompilation: countSchema,
     historicalAttemptsWithoutExecutionSnapshot: countSchema,

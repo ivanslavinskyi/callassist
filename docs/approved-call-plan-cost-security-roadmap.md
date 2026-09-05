@@ -157,39 +157,50 @@ be given a trustworthy execution snapshot after the fact and remain an explicit
 audit limitation; they do not block removal of the active-call media adapter.
 The validated backfill subsequently materialized 13 of those 21 compilations and
 created eight approval snapshots, with successful recovery drills immediately
-before and after the write. The remaining eight are deliberately untouched: two
+before and after the write. The remaining eight were initially left untouched
+pending explicit disposition: two
 use `brief-compiler-2`; six use `brief-compiler-3` but predate the required
 `rawBrief.representedPersonFirstName` and `representedPersonLastName` fields.
 They comprise six completed calls with historical attempts plus one blocked and
-one review-required draft without attempts. The 15 records with no compilation
+one review-required draft without attempts. They are now classified as six
+archived terminal plans and two drafts requiring recompilation without changing
+their encrypted legacy payloads. The 15 records with no compilation
 are also all terminal (12 completed, two stopped, one failed). This leaves no
 active legacy attempt, but it does not justify silently blessing or rewriting the
-eight incompatible snapshots.
+eight incompatible snapshots; the explicit disposition keeps them outside the
+execution path.
 For calls with `current_compilation_id`, repository reads, approval, recompilation,
 and attempt reservation now load the encrypted immutable revision, validate its
 canonical hash against the immutable row metadata, and hydrate approval time from
 the separate immutable approval record. A PostgreSQL regression test removes the
 mutable compatibility projection and proves that both read and attempt reservation
-still use the approved immutable plan. Only calls without an immutable pointer use
-the bounded legacy projection; therefore the eight incompatible records remain
-visible for explicit disposition without being promoted into the trusted path.
-The public call snapshot now labels the plan source as `immutable`, `legacy`, or
-`unavailable`. Approval and new attempt reservation fail closed with
+still use the approved immutable plan. Only unclassified calls without an
+immutable pointer use the bounded legacy projection. Explicitly classified
+incompatible records are never promoted into or returned from the trusted plan
+path.
+The public call snapshot now labels the plan source as `immutable`, `legacy`,
+`archived`, `recompile_required`, or `unavailable`. Approval and new attempt
+reservation fail closed with
 `CALL_COMPILATION_RECOMPILE_REQUIRED` unless the source is immutable. The call UI
-hides start/approval actions for legacy plans, keeps schema-compatible content
-read-only, and explains that a new plan must be created. Incompatible ciphertext
-remains encrypted for controlled audit/backfill disposition but is not represented
-as a current `CallCompilation` API object. This removes
-the mutable compilation from the execution trust boundary while retaining the
-temporary UI/audit read fallback needed for explicit legacy disposition.
-Migration 0059 mirrors the application boundary in PostgreSQL: every newly
+hides start/approval actions for legacy plans and keeps schema-compatible content
+read-only. Explicitly archived terminal plans expose no compilation object.
+`recompile_required` drafts expose a form reconstructed from the separately stored
+brief fields, with conservative defaults for legacy-only delivery preferences;
+submitting it creates a new immutable revision. Incompatible ciphertext remains
+encrypted for retention/audit but is no longer read by the normal application
+path. This removes explicitly classified mutable compilations from the execution
+trust boundary without rewriting or deleting historical content.
+Migration 0059 mirrors the execution boundary in PostgreSQL: every newly
 inserted attempt must contain compilation ID, revision, hash, and encrypted
 execution snapshot, and every newly written `ready` brief must have an immutable
 compilation pointer. The ready-row constraint is initially `NOT VALID` so the
 schema can be deployed without rewriting historical rows; it still protects all
 new and changed rows. Validation is deferred until legacy disposition reaches
-zero. The migration was applied locally after a 59-migration catalog check and
-the post-migration recovery drill passed.
+zero. Migration 0060 adds a constrained `legacy_compilation_disposition` column
+with only `archived_terminal` and `recompile_required` states. A non-null
+disposition requires a mutable ciphertext, no immutable pointer, and a compatible
+call status. Successful recompilation clears the disposition atomically while
+installing the new immutable pointer; owner erasure clears it with the ciphertext.
 
 The item 11 maintenance command is `pnpm db:backfill:call-plans`. Its default is
 a read-only dry run that emits aggregate JSON only. Execution additionally
@@ -219,6 +230,27 @@ Operational sequence for item 11:
 5. Run the recovery drill again and observe the admin cutover panel through at
    least the maximum active-call window. Removal of compatibility code is a later
    deployment, not part of the backfill deployment.
+
+The incompatible-record disposition command is
+`pnpm db:classify:legacy-call-plans`. It defaults to a read-only, aggregate-only
+dry run. Execution requires both `--execute` and
+`LEGACY_CALL_PLAN_CLASSIFICATION_CONFIRM=CLASSIFY_INCOMPATIBLE_LEGACY_CALL_PLANS`.
+Before writing, it reuses the full backfill validator and refuses to run if any
+valid compilation remains or if a recompilation is active. Terminal calls become
+`archived_terminal`; only `review_required`, `needs_clarification`, or `blocked`
+calls without attempts can become `recompile_required`. Any other candidate stays
+unclassified, keeps the cutover not ready, and makes execute fail.
+
+The local disposition run on 2026-09-05 was preceded by a successful recovery
+drill (60 migrations, 58 public tables, 10 encrypted samples verified). Its dry
+run found exactly eight invalid candidates, zero valid candidates, zero active
+recompilations, six terminal archive candidates, two draft recompilation
+candidates, and zero ambiguous candidates. Execute classified those exact rows.
+The post-run dry run found zero remaining candidates; the admin facts are now
+`recoverableLegacyCalls=0`, `archivedLegacyCalls=6`,
+`recompileRequiredCalls=2`, and `activeLegacyAttempts=0`. The 15 terminal records
+without any recoverable compilation remain an explicit historical-data limitation
+and are not execution candidates.
 
 Deployment rehearsal on 2026-09-05 applied migrations 0050–0057 first to an
 isolated restored clone and then to the local source database, verified a no-op

@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  ASSISTANT_PROFILES,
   SUPPORTED_CALL_LANGUAGES,
+  type CallBrief,
   type CallEvent,
   type CallBriefStatus,
   type CallSnapshot,
@@ -50,6 +52,33 @@ const activeStatuses = new Set<CallBriefStatus>([
   "in_progress",
   "awaiting_approval"
 ]);
+
+function editableInputFromStoredBrief(brief: CallBrief): CreateCallBriefInput {
+  const fallbackProfile = ASSISTANT_PROFILES.find(
+    ({ voiceGender }) => voiceGender === brief.voiceGender
+  )!;
+  return {
+    recipientName: brief.recipientName,
+    phoneNumber: brief.phoneNumber,
+    objective: brief.objective,
+    assistantProfileId: brief.assistantProfileId ?? fallbackProfile.id,
+    representedPersonFirstName: brief.representedPersonFirstName,
+    representedPersonLastName: brief.representedPersonLastName,
+    assistanceReason: brief.assistanceReason,
+    context: brief.context,
+    locale: brief.locale,
+    audioRetentionDays: brief.audioRetentionDays,
+    allowLanguageSwitch: brief.allowLanguageSwitch,
+    ...(brief.fallbackLocale ? { fallbackLocale: brief.fallbackLocale } : {}),
+    allowedFacts: brief.allowedFacts,
+    resultHandling: "capture_in_callassist",
+    addressingMode: "formal",
+    tonePreference: "auto",
+    voicemailPolicy: "do_not_leave_details",
+    deliveryInstruction: "",
+    clarificationAnswers: []
+  };
+}
 
 export function LiveCall({ callId }: { callId: string }) {
   const router = useRouter();
@@ -411,7 +440,28 @@ export function LiveCall({ callId }: { callId: string }) {
 
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
 
-        {compilation && !hasImmutableExecutionPlan ? (
+        {snapshot.executionPlanSource === "archived" ? (
+          <section className="compilation-review decision-blocked">
+            <span className="eyebrow">{copy.legacyBrief}</span>
+            <h2>{copy.archivedPlanTitle}</h2>
+            <p>{copy.archivedPlanHelp}</p>
+          </section>
+        ) : snapshot.executionPlanSource === "recompile_required" ? (
+          <>
+            <section className="compilation-review decision-blocked">
+              <span className="eyebrow">{copy.legacyBrief}</span>
+              <h2>{copy.recompilePlanTitle}</h2>
+              <p>{copy.recompilePlanHelp}</p>
+            </section>
+            <CreateCallForm
+              heading={copy.updateHeading}
+              initialValue={editableInputFromStoredBrief(brief)}
+              onCreated={() => undefined}
+              saveCallBrief={saveEditedBrief}
+              submitLabel={copy.updatePlan}
+            />
+          </>
+        ) : compilation && !hasImmutableExecutionPlan ? (
           <>
             <section className="compilation-review decision-blocked">
               <span className="eyebrow">{copy.legacyBrief}</span>

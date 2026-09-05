@@ -135,6 +135,10 @@ type DatabaseDate = Date | string;
 type CallBriefRow = {
   id: string;
   currentCompilationId: string | null;
+  legacyCompilationDisposition:
+    | "archived_terminal"
+    | "recompile_required"
+    | null;
   immutableCompilationCiphertext: string | null;
   immutableCompilationRevision: number | null;
   immutableCompilationSnapshotHash: string | null;
@@ -166,6 +170,7 @@ type CallBriefRow = {
 type CallCompilationSourceRow = Pick<
   CallBriefRow,
   | "currentCompilationId"
+  | "legacyCompilationDisposition"
   | "immutableCompilationCiphertext"
   | "immutableCompilationRevision"
   | "immutableCompilationSnapshotHash"
@@ -385,6 +390,8 @@ type AdminSystemFactsRow = {
   recentWarnings: number;
   recentErrors: number;
   recoverableLegacyCalls: number;
+  archivedLegacyCalls: number;
+  recompileRequiredCalls: number;
   unavailableLegacyCalls: number;
   historicalAttemptsWithoutCompilation: number;
   historicalAttemptsWithoutExecutionSnapshot: number;
@@ -731,7 +738,9 @@ export class PostgresCallRepository implements CallRepository {
         );
         await transaction`
           UPDATE call_briefs
-          SET current_compilation_id = ${compilationId}
+          SET
+            current_compilation_id = ${compilationId},
+            legacy_compilation_disposition = NULL
           WHERE id = ${resolvedId}
         `;
         await this.#audit(transaction, resolvedId, "call.created", {
@@ -1859,6 +1868,7 @@ export class PostgresCallRepository implements CallRepository {
           allowed_facts_ciphertext = ${encryptedFacts},
           context_ciphertext = ${encryptedContext},
           compilation_ciphertext = NULL,
+          legacy_compilation_disposition = NULL,
           assistance_reason_ciphertext = ${encryptedReason},
           assistance_disclosure = NULL,
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
@@ -2341,6 +2351,7 @@ export class PostgresCallRepository implements CallRepository {
           status,
           compilation_ciphertext AS "compilationCiphertext",
           current_compilation_id AS "currentCompilationId",
+          legacy_compilation_disposition AS "legacyCompilationDisposition",
           (
             SELECT call_compilations.compilation_ciphertext
             FROM call_compilations
@@ -2445,6 +2456,7 @@ export class PostgresCallRepository implements CallRepository {
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
           compilation_ciphertext = ${encryptedCompilation},
           current_compilation_id = ${compilationId},
+          legacy_compilation_disposition = NULL,
           context_ciphertext = ${encryptedContext},
           locale = ${parsed.locale},
           voice_gender = ${parsed.voiceGender},
@@ -2552,9 +2564,13 @@ export class PostgresCallRepository implements CallRepository {
     return {
       executionPlanSource: briefRow.currentCompilationId
         ? "immutable"
-        : briefRow.compilationCiphertext
-          ? "legacy"
-          : "unavailable",
+        : briefRow.legacyCompilationDisposition === "archived_terminal"
+          ? "archived"
+          : briefRow.legacyCompilationDisposition === "recompile_required"
+            ? "recompile_required"
+            : briefRow.compilationCiphertext
+              ? "legacy"
+              : "unavailable",
       brief: this.#mapBrief(briefRow),
       compilation: this.#mapCurrentCompilation(briefRow),
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
@@ -3211,7 +3227,18 @@ export class PostgresCallRepository implements CallRepository {
           WHERE data_deleted_at IS NULL
             AND current_compilation_id IS NULL
             AND compilation_ciphertext IS NOT NULL
+            AND legacy_compilation_disposition IS NULL
         ) AS "recoverableLegacyCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND legacy_compilation_disposition = 'archived_terminal'
+        ) AS "archivedLegacyCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND legacy_compilation_disposition = 'recompile_required'
+        ) AS "recompileRequiredCalls",
         (
           SELECT count(*)::int FROM call_briefs
           WHERE data_deleted_at IS NULL
@@ -3361,6 +3388,8 @@ export class PostgresCallRepository implements CallRepository {
       recentErrors: row.recentErrors,
       callPlanCutover: {
         recoverableLegacyCalls: row.recoverableLegacyCalls,
+        archivedLegacyCalls: row.archivedLegacyCalls,
+        recompileRequiredCalls: row.recompileRequiredCalls,
         unavailableLegacyCalls: row.unavailableLegacyCalls,
         historicalAttemptsWithoutCompilation:
           row.historicalAttemptsWithoutCompilation,
@@ -3907,6 +3936,7 @@ export class PostgresCallRepository implements CallRepository {
             WHERE data_deleted_at IS NULL
               AND current_compilation_id IS NULL
               AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
               AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
             ORDER BY id
             LIMIT ${limit}
@@ -3917,6 +3947,7 @@ export class PostgresCallRepository implements CallRepository {
             WHERE data_deleted_at IS NULL
               AND current_compilation_id IS NULL
               AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
               AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
             ORDER BY id
             LIMIT ${limit}
@@ -4109,6 +4140,115 @@ export class PostgresCallRepository implements CallRepository {
         approvalSnapshotsRequired,
         backfilledCompilations: valid.length,
         approvalSnapshotsCreated,
+        lastScannedId: rows.at(-1)?.id ?? null
+      };
+    });
+  }
+
+  async classifyLegacyCallPlanBatch(
+    limit: number,
+    afterId: string | null = null,
+    execute = true
+  ) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("Legacy call-plan classification limit must be 1..500");
+    }
+    if (afterId !== null && !isUuid(afterId)) {
+      throw new Error("Legacy call-plan classification cursor is invalid");
+    }
+    return this.#sql.begin(async (transaction) => {
+      if (execute) {
+        const [lock] = await transaction<{ acquired: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(742303986) AS acquired
+        `;
+        if (!lock?.acquired) {
+          throw new Error("Another legacy call-plan maintenance batch is running");
+        }
+      }
+      const rows = execute
+        ? await transaction<Array<{
+            id: string;
+            status: CallBrief["status"];
+            hasAttempts: boolean;
+          }>>`
+            SELECT
+              id,
+              status,
+              EXISTS (
+                SELECT 1 FROM call_attempts
+                WHERE call_attempts.call_brief_id = call_briefs.id
+              ) AS "hasAttempts"
+            FROM call_briefs
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED
+          `
+        : await transaction<Array<{
+            id: string;
+            status: CallBrief["status"];
+            hasAttempts: boolean;
+          }>>`
+            SELECT
+              id,
+              status,
+              EXISTS (
+                SELECT 1 FROM call_attempts
+                WHERE call_attempts.call_brief_id = call_briefs.id
+              ) AS "hasAttempts"
+            FROM call_briefs
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+          `;
+      let archivedTerminal = 0;
+      let recompileRequired = 0;
+      let unclassified = 0;
+      for (const row of rows) {
+        const disposition = ["completed", "stopped", "failed"].includes(
+          row.status
+        )
+          ? "archived_terminal" as const
+          : !row.hasAttempts && [
+                "review_required",
+                "needs_clarification",
+                "blocked"
+              ].includes(row.status)
+            ? "recompile_required" as const
+            : null;
+        if (!disposition) {
+          unclassified += 1;
+          continue;
+        }
+        if (disposition === "archived_terminal") archivedTerminal += 1;
+        else recompileRequired += 1;
+        if (!execute) continue;
+        const updated = await transaction<{ id: string }[]>`
+          UPDATE call_briefs
+          SET legacy_compilation_disposition = ${disposition}
+          WHERE id = ${row.id}
+            AND current_compilation_id IS NULL
+            AND compilation_ciphertext IS NOT NULL
+            AND legacy_compilation_disposition IS NULL
+          RETURNING id
+        `;
+        if (!updated[0]) {
+          throw new Error("Legacy call-plan candidate changed during classification");
+        }
+      }
+      return {
+        scannedCandidates: rows.length,
+        archivedTerminal,
+        recompileRequired,
+        unclassified,
         lastScannedId: rows.at(-1)?.id ?? null
       };
     });
@@ -6331,6 +6471,7 @@ export class PostgresCallRepository implements CallRepository {
       SELECT
         id,
         current_compilation_id AS "currentCompilationId",
+        legacy_compilation_disposition AS "legacyCompilationDisposition",
         ${includeImmutableCompilation ? this.#sql`
           (
             SELECT call_compilations.compilation_ciphertext
@@ -6387,6 +6528,7 @@ export class PostgresCallRepository implements CallRepository {
 
   #mapCurrentCompilation(row: CallCompilationSourceRow): CallCompilation | null {
     if (!row.currentCompilationId) {
+      if (row.legacyCompilationDisposition) return null;
       if (!row.compilationCiphertext) return null;
       const legacy = callCompilationSchema.safeParse(decryptJson<unknown>(
         row.compilationCiphertext,
@@ -6437,6 +6579,8 @@ export class PostgresCallRepository implements CallRepository {
       assistantProfileId: row.assistantProfileId,
       agentName: row.agentName,
       representedPerson: row.representedPerson,
+      representedPersonFirstName: row.representedPersonFirstName,
+      representedPersonLastName: row.representedPersonLastName,
       assistanceReason,
       assistanceDisclosure: row.assistanceDisclosureCiphertext
         ? decryptJson<string>(
@@ -7230,7 +7374,9 @@ export class PostgresCallRepository implements CallRepository {
     );
     await transaction`
       UPDATE call_briefs
-      SET current_compilation_id = ${compilationId}
+      SET
+        current_compilation_id = ${compilationId},
+        legacy_compilation_disposition = NULL
       WHERE id = ${callBriefId}
         AND current_compilation_id IS NULL
     `;

@@ -576,6 +576,8 @@ export type AdminSystemFacts = {
   recentErrors: number;
   callPlanCutover: {
     recoverableLegacyCalls: number;
+    archivedLegacyCalls: number;
+    recompileRequiredCalls: number;
     unavailableLegacyCalls: number;
     historicalAttemptsWithoutCompilation: number;
     historicalAttemptsWithoutExecutionSnapshot: number;

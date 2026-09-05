@@ -1663,6 +1663,8 @@ describeWithDatabase("PostgresCallRepository", () => {
       recentErrors: expect.any(Number),
       callPlanCutover: {
         recoverableLegacyCalls: expect.any(Number),
+        archivedLegacyCalls: expect.any(Number),
+        recompileRequiredCalls: expect.any(Number),
         unavailableLegacyCalls: expect.any(Number),
         historicalAttemptsWithoutCompilation: expect.any(Number),
         historicalAttemptsWithoutExecutionSnapshot: expect.any(Number),
@@ -1829,6 +1831,139 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(restored.callPlanCutover.recoverableLegacyCalls).toBe(
       before.callPlanCutover.recoverableLegacyCalls
     );
+  });
+
+  it("archives terminal incompatible plans and requires draft recompilation", async () => {
+    const terminalInput: CreateCallBriefInput = {
+      recipientName: "Archived legacy office",
+      phoneNumber: "+41710000068",
+      objective: "Preserve a terminal legacy call without executing it again",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const draftInput: CreateCallBriefInput = {
+      ...terminalInput,
+      recipientName: "Legacy draft office",
+      phoneNumber: "+41710000069",
+      objective: "Recompile this draft before it can be approved"
+    };
+    const compiler = new DeterministicBriefCompiler();
+    const terminalCompilation = await compiler.compile(
+      normalizeCreateCallBriefInput(terminalInput)
+    );
+    const draftCompilation = await compiler.compile(
+      normalizeCreateCallBriefInput(draftInput)
+    );
+    const terminal = await repository.create(
+      terminalInput,
+      terminalCompilation,
+      ownerA
+    );
+    const draft = await repository.create(draftInput, draftCompilation, ownerA);
+    const pointers = await inspection<{
+      id: string;
+      currentCompilationId: string;
+    }[]>`
+      SELECT id, current_compilation_id AS "currentCompilationId"
+      FROM call_briefs
+      WHERE id IN (${terminal.id}, ${draft.id})
+      ORDER BY id
+    `;
+    const pointerById = new Map(
+      pointers.map(({ id, currentCompilationId }) => [id, currentCompilationId])
+    );
+    const incompatibleCiphertext = encryptJson(
+      { compilerVersion: "brief-compiler-2" },
+      encryptionKey
+    );
+    try {
+      await inspection`
+        UPDATE call_briefs
+        SET
+          current_compilation_id = NULL,
+          compilation_ciphertext = ${incompatibleCiphertext},
+          status = CASE
+            WHEN id = ${terminal.id} THEN 'completed'
+            ELSE 'review_required'
+          END
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+      const preview = await repository.classifyLegacyCallPlanBatch(
+        500,
+        null,
+        false
+      );
+      expect(preview).toMatchObject({
+        archivedTerminal: expect.any(Number),
+        recompileRequired: expect.any(Number),
+        unclassified: 0
+      });
+      expect(preview.archivedTerminal).toBeGreaterThanOrEqual(1);
+      expect(preview.recompileRequired).toBeGreaterThanOrEqual(1);
+      const [unchanged] = await inspection<{
+        dispositions: number;
+      }[]>`
+        SELECT count(legacy_compilation_disposition)::int AS dispositions
+        FROM call_briefs
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+      expect(unchanged?.dispositions).toBe(0);
+
+      const classified = await repository.classifyLegacyCallPlanBatch(500);
+      expect(classified.archivedTerminal).toBeGreaterThanOrEqual(1);
+      expect(classified.recompileRequired).toBeGreaterThanOrEqual(1);
+      await expect(repository.get(terminal.id)).resolves.toMatchObject({
+        executionPlanSource: "archived",
+        compilation: null
+      });
+      await expect(repository.get(draft.id)).resolves.toMatchObject({
+        executionPlanSource: "recompile_required",
+        compilation: null
+      });
+      const [storedCiphertext] = await inspection<{
+        terminalCiphertext: string;
+        draftCiphertext: string;
+      }[]>`
+        SELECT
+          max(compilation_ciphertext) FILTER (WHERE id = ${terminal.id})
+            AS "terminalCiphertext",
+          max(compilation_ciphertext) FILTER (WHERE id = ${draft.id})
+            AS "draftCiphertext"
+        FROM call_briefs
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+      expect(storedCiphertext).toEqual({
+        terminalCiphertext: incompatibleCiphertext,
+        draftCiphertext: incompatibleCiphertext
+      });
+
+      const replacement = await compiler.compile(
+        normalizeCreateCallBriefInput(draftInput),
+        2
+      );
+      await repository.recompile(draft.id, draftInput, replacement);
+      await expect(repository.get(draft.id)).resolves.toMatchObject({
+        executionPlanSource: "immutable",
+        compilation: { revision: 2 }
+      });
+    } finally {
+      await inspection`
+        UPDATE call_briefs
+        SET
+          current_compilation_id = CASE
+            WHEN id = ${terminal.id}
+              THEN ${pointerById.get(terminal.id)!}::uuid
+            ELSE current_compilation_id
+          END,
+          legacy_compilation_disposition = NULL
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+    }
   });
 
   it("persists provider reconciliation targets and fences stale writes", async () => {

@@ -1057,6 +1057,8 @@ export class InMemoryCallRepository implements CallRepository {
       phoneNumber: "",
       objective: "Deleted by owner",
       representedPerson: "Deleted account",
+      representedPersonFirstName: "Deleted",
+      representedPersonLastName: "Account",
       assistanceReason: "speech_impairment",
       assistanceDisclosure: "Deleted by owner",
       context: "",
@@ -1950,6 +1952,8 @@ export class InMemoryCallRepository implements CallRepository {
           compilation !== null &&
           (this.#compilations.get(brief.id)?.length ?? 0) === 0
         ).length,
+        archivedLegacyCalls: 0,
+        recompileRequiredCalls: 0,
         unavailableLegacyCalls: visibleSnapshots.filter(({ brief, compilation }) =>
           compilation === null &&
           (this.#compilations.get(brief.id)?.length ?? 0) === 0
@@ -4134,6 +4138,8 @@ function storedBriefIdentity(parsed: NormalizedCallBriefInput) {
     assistantProfileId: parsed.assistantProfileId,
     agentName: parsed.agentName,
     representedPerson: parsed.representedPerson,
+    representedPersonFirstName: parsed.representedPersonFirstName,
+    representedPersonLastName: parsed.representedPersonLastName,
     assistanceReason: parsed.assistanceReason,
     assistanceDisclosure: parsed.assistanceDisclosure,
     locale: parsed.locale,

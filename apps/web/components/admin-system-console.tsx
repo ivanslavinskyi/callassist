@@ -158,6 +158,8 @@ export function AdminSystemConsole() {
               <p>{copy.cutoverIntro}</p>
               <dl className="admin-operations-list">
                 <Fact label={copy.recoverableLegacyCalls} value={String(status.callPlanCutover.recoverableLegacyCalls)} />
+                <Fact label={copy.archivedLegacyCalls} value={String(status.callPlanCutover.archivedLegacyCalls)} />
+                <Fact label={copy.recompileRequiredCalls} value={String(status.callPlanCutover.recompileRequiredCalls)} />
                 <Fact label={copy.unavailableLegacyCalls} value={String(status.callPlanCutover.unavailableLegacyCalls)} />
                 <Fact label={copy.historicalAttemptsWithoutCompilation} value={String(status.callPlanCutover.historicalAttemptsWithoutCompilation)} />
                 <Fact label={copy.historicalAttemptsWithoutExecutionSnapshot} value={String(status.callPlanCutover.historicalAttemptsWithoutExecutionSnapshot)} />

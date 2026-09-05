@@ -23,6 +23,8 @@ const brief: CallBrief = {
   assistantProfileId: "anna",
   agentName: "Anna",
   representedPerson: "Ivan Slavinskyi",
+  representedPersonFirstName: "Ivan",
+  representedPersonLastName: "Slavinskyi",
   assistanceReason: "speech_impairment",
   assistanceDisclosure: "Disability disclosure",
   context: "The company works in logistics. An unverified salary note says CHF 99,999.",

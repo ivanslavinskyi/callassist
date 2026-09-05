@@ -649,6 +649,8 @@ export const callBriefSchema = callBriefStoredFieldsSchema
   .extend({
     assistantProfileId: assistantProfileIdSchema.nullable(),
     agentName: z.string().trim().min(2),
+    representedPersonFirstName: personNamePartSchema,
+    representedPersonLastName: personNamePartSchema,
     voiceGender: callVoiceGenderSchema,
     assistanceDisclosure: z.string().trim(),
     id: z.string().uuid(),
@@ -739,7 +741,13 @@ export const approvalRequestSchema = z.object({
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const callSnapshotSchema = z.object({
-  executionPlanSource: z.enum(["immutable", "legacy", "unavailable"]),
+  executionPlanSource: z.enum([
+    "immutable",
+    "legacy",
+    "archived",
+    "recompile_required",
+    "unavailable"
+  ]),
   brief: callBriefSchema,
   compilation: callCompilationSchema.nullable(),
   transcript: z.array(transcriptSegmentSchema),
