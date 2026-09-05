@@ -1303,11 +1303,76 @@ describeWithDatabase("PostgresCallRepository", () => {
     });
     expect((await repository.get(brief.id))?.recording?.status).toBe("available");
 
+    const workerId = `transcription-ledger-${randomUUID()}`;
+    const checkedAt = new Date().toISOString();
+    const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();
+    const [leasedJob] = await inspection<{ id: string; generation: number }[]>`
+      UPDATE durable_jobs
+      SET
+        status = 'running',
+        attempt_count = attempt_count + 1,
+        lease_owner = ${workerId},
+        leased_at = ${checkedAt}::timestamptz,
+        lease_expires_at = ${leaseExpiresAt}::timestamptz,
+        updated_at = ${checkedAt}::timestamptz
+      WHERE job_type = 'final_transcription'
+        AND recording_id = ${begun.recording.id}
+        AND status = 'queued'
+      RETURNING id, generation
+    `;
+    expect(leasedJob).toBeDefined();
+    const lease = {
+      jobId: leasedJob!.id,
+      workerId,
+      checkedAt
+    };
+
     const claimed = await repository.claimFinalTranscript(
       begun.recording.id,
-      "gpt-transcribe"
+      "gpt-transcribe",
+      false,
+      lease
     );
     expect(claimed?.finalTranscript.status).toBe("processing");
+    const transcriptionOperationId = randomUUID();
+    await repository.reservePostCallTranscriptionProviderRequest({
+      id: transcriptionOperationId,
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      provider: "openai",
+      operationType: "transcription",
+      stage: "full_recording",
+      requestedModel: "gpt-transcribe",
+      clientRequestId: transcriptionOperationId,
+      startedAt: checkedAt,
+      durableJobGeneration: leasedJob!.generation
+    }, lease);
+    await repository.completeProviderOperation({
+      operationId: transcriptionOperationId,
+      outcome: "succeeded",
+      providerRequestId: `req_${transcriptionOperationId}`,
+      providerResponseId: null,
+      providerModel: null,
+      statusCode: 200,
+      completedAt: new Date().toISOString(),
+      durationMs: 250,
+      errorCode: null,
+      usage: {
+        requestCount: 1,
+        inputTextTokens: null,
+        cachedInputTextTokens: null,
+        cacheWriteInputTextTokens: null,
+        outputTextTokens: null,
+        reasoningOutputTokens: null,
+        inputAudioTokens: null,
+        cachedInputAudioTokens: null,
+        outputAudioTokens: null,
+        totalTokens: null,
+        durationSeconds: 51,
+        billableSeconds: null,
+        rawUsage: { type: "duration", seconds: 51 }
+      }
+    });
     await expect(
       repository.claimFinalTranscript(begun.recording.id, "gpt-transcribe")
     ).resolves.toBeNull();
@@ -1321,8 +1386,14 @@ describeWithDatabase("PostgresCallRepository", () => {
           startSeconds: 2.4,
           endSeconds: 4.8
         }
-      ]
+      ],
+      lease
     );
+    await expect(repository.completeDurableJob(
+      leasedJob!.id,
+      workerId,
+      new Date().toISOString()
+    )).resolves.toBe(true);
 
     const [stored] = await inspection<
       {
@@ -1343,6 +1414,32 @@ describeWithDatabase("PostgresCallRepository", () => {
     expect(stored?.textCiphertext).not.toContain("final private transcript");
     expect(stored?.segmentsCiphertext).not.toContain("final private transcript");
     expect(stored?.deleteAfter).toBeInstanceOf(Date);
+    const [providerUsage] = await inspection<{
+      operations: number;
+      results: number;
+      usageRecords: number;
+      durationSeconds: number;
+    }[]>`
+      SELECT
+        (SELECT count(*)::int FROM provider_operations
+          WHERE id = ${transcriptionOperationId}
+            AND call_brief_id = ${brief.id}
+            AND call_attempt_id = ${attempt.attempt.id}
+            AND recording_id = ${begun.recording.id}
+            AND durable_job_id = ${leasedJob!.id}) AS operations,
+        (SELECT count(*)::int FROM provider_operation_results
+          WHERE operation_id = ${transcriptionOperationId}) AS results,
+        (SELECT count(*)::int FROM provider_usage_records
+          WHERE operation_id = ${transcriptionOperationId}) AS "usageRecords",
+        (SELECT duration_seconds::float FROM provider_usage_records
+          WHERE operation_id = ${transcriptionOperationId}) AS "durationSeconds"
+    `;
+    expect(providerUsage).toEqual({
+      operations: 1,
+      results: 1,
+      usageRecords: 1,
+      durationSeconds: 51
+    });
 
     const snapshot = await repository.get(brief.id);
     expect(snapshot?.recording).toMatchObject({

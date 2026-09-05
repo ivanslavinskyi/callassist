@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   CallBrief,
   FinalTranscriptSegment,
@@ -24,13 +25,64 @@ export type PostCallTranscriptionResult = {
   model: string;
 };
 
+export type PostCallTranscriptionProviderStage =
+  | "full_recording"
+  | "assistant_utterance"
+  | "recipient_utterance";
+
+export type PostCallTranscriptionProviderRequest = {
+  clientRequestId: string;
+  stage: PostCallTranscriptionProviderStage;
+  model: string;
+  startedAt: string;
+};
+
+export type PostCallTranscriptionProviderUsage = {
+  requestCount: 1;
+  inputTextTokens: number | null;
+  cachedInputTextTokens: null;
+  cacheWriteInputTextTokens: null;
+  outputTextTokens: number | null;
+  reasoningOutputTokens: null;
+  inputAudioTokens: number | null;
+  cachedInputAudioTokens: null;
+  outputAudioTokens: null;
+  totalTokens: number | null;
+  durationSeconds: number | null;
+  billableSeconds: null;
+  rawUsage: Record<string, unknown>;
+};
+
+export type PostCallTranscriptionProviderResult = {
+  clientRequestId: string;
+  stage: PostCallTranscriptionProviderStage;
+  outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
+  providerRequestId: string | null;
+  providerResponseId: null;
+  providerModel: null;
+  statusCode: number | null;
+  completedAt: string;
+  durationMs: number;
+  usage: PostCallTranscriptionProviderUsage | null;
+};
+
+export type PostCallTranscriptionRuntime = {
+  beforeProviderRequest?: (
+    request: PostCallTranscriptionProviderRequest
+  ) => Promise<void>;
+  afterProviderRequest?: (
+    result: PostCallTranscriptionProviderResult
+  ) => Promise<void>;
+};
+
 export interface PostCallTranscriber {
   readonly model: string;
   transcribe(
     media: RecordingMedia,
     brief: CallBrief,
     liveTranscript?: TranscriptSegment[],
-    timing?: FinalTranscriptTiming
+    timing?: FinalTranscriptTiming,
+    runtime?: PostCallTranscriptionRuntime
   ): Promise<PostCallTranscriptionResult>;
 }
 
@@ -85,7 +137,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     media: RecordingMedia,
     brief: CallBrief,
     _liveTranscript: TranscriptSegment[] = [],
-    timing?: FinalTranscriptTiming
+    timing?: FinalTranscriptTiming,
+    runtime: PostCallTranscriptionRuntime = {}
   ) {
     if (media.bytes.byteLength === 0) {
       throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -104,7 +157,9 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         media.fileName,
         brief,
         buildPostCallTranscriptionPrompt(brief),
-        this.#fullRecordingModel
+        this.#fullRecordingModel,
+        "full_recording",
+        runtime
       );
       if (!text) throw new PostCallTranscriptionError("AUDIO_EMPTY");
       return { text, segments: [], model: this.#fullRecordingModel };
@@ -124,7 +179,9 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         recognized[index] = await this.#transcribeUtterance(
           utterances[index],
           index,
-          brief
+          brief,
+          undefined,
+          runtime
         );
       }
     );
@@ -141,7 +198,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
           utterances[index],
           index,
           brief,
-          previousAssistant
+          previousAssistant,
+          runtime
         );
       }
     );
@@ -170,7 +228,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     utterance: ChannelUtterance,
     index: number,
     brief: CallBrief,
-    previousAssistant?: string
+    previousAssistant?: string,
+    runtime: PostCallTranscriptionRuntime = {}
   ) {
     return {
       utterance,
@@ -180,7 +239,11 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         `utterance-${String(index + 1).padStart(3, "0")}.wav`,
         brief,
         buildUtteranceTranscriptionPrompt(brief, utterance, previousAssistant),
-        this.#utteranceModel
+        this.#utteranceModel,
+        utterance.role === "assistant"
+          ? "assistant_utterance"
+          : "recipient_utterance",
+        runtime
       )
     };
   }
@@ -191,7 +254,9 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     fileName: string,
     brief: CallBrief,
     prompt: string,
-    model = this.model
+    model = this.model,
+    stage: PostCallTranscriptionProviderStage,
+    runtime: PostCallTranscriptionRuntime
   ) {
     const form = new FormData();
     form.append(
@@ -212,6 +277,16 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
       }
     }
 
+    const clientRequestId = randomUUID();
+    const startedAt = new Date().toISOString();
+    const startedAtMs = Date.now();
+    await runtime.beforeProviderRequest?.({
+      clientRequestId,
+      stage,
+      model,
+      startedAt
+    });
+
     let response: Response;
     try {
       response = await this.#fetch(this.#endpoint, {
@@ -221,21 +296,165 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         signal: AbortSignal.timeout(this.#timeoutMs)
       });
     } catch (error) {
+      await reportProviderResult(runtime, {
+        clientRequestId,
+        stage,
+        outcome: "network_error",
+        providerRequestId: null,
+        statusCode: null,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+        usage: null
+      });
       throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED", {
         cause: error
       });
     }
+    const providerRequestId = response.headers.get("x-request-id");
     if (!response.ok) {
+      await reportProviderResult(runtime, {
+        clientRequestId,
+        stage,
+        outcome: "provider_error",
+        providerRequestId,
+        statusCode: response.status,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+        usage: null
+      });
       throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED");
     }
     const payload = (await response.json().catch(() => null)) as
-      | { text?: unknown }
+      | { text?: unknown; usage?: unknown }
       | null;
+    const usage = parsePostCallTranscriptionUsage(payload?.usage);
     if (!payload || typeof payload.text !== "string") {
+      await reportProviderResult(runtime, {
+        clientRequestId,
+        stage,
+        outcome: "invalid_response",
+        providerRequestId,
+        statusCode: response.status,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+        usage
+      });
       throw new PostCallTranscriptionError("OPENAI_RESPONSE_INVALID");
     }
+    await reportProviderResult(runtime, {
+      clientRequestId,
+      stage,
+      outcome: "succeeded",
+      providerRequestId,
+      statusCode: response.status,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAtMs,
+      usage
+    });
     return payload.text.trim();
   }
+}
+
+async function reportProviderResult(
+  runtime: PostCallTranscriptionRuntime,
+  result: Omit<
+    PostCallTranscriptionProviderResult,
+    "providerResponseId" | "providerModel"
+  >
+) {
+  await runtime.afterProviderRequest?.({
+    ...result,
+    providerResponseId: null,
+    providerModel: null
+  });
+}
+
+export function parsePostCallTranscriptionUsage(
+  raw: unknown
+): PostCallTranscriptionProviderUsage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const usage = raw as Record<string, unknown>;
+  if (usage.type === "duration") {
+    const seconds = nonNegativeNumber(usage.seconds);
+    if (seconds === null) return null;
+    return {
+      requestCount: 1,
+      inputTextTokens: null,
+      cachedInputTextTokens: null,
+      cacheWriteInputTextTokens: null,
+      outputTextTokens: null,
+      reasoningOutputTokens: null,
+      inputAudioTokens: null,
+      cachedInputAudioTokens: null,
+      outputAudioTokens: null,
+      totalTokens: null,
+      durationSeconds: seconds,
+      billableSeconds: null,
+      rawUsage: { type: "duration", seconds }
+    };
+  }
+  if (usage.type !== "tokens") return null;
+  const inputTokens = nonNegativeInteger(usage.input_tokens);
+  const outputTokens = nonNegativeInteger(usage.output_tokens);
+  const totalTokens = nonNegativeInteger(usage.total_tokens);
+  const details = usage.input_token_details &&
+      typeof usage.input_token_details === "object"
+    ? usage.input_token_details as Record<string, unknown>
+    : null;
+  const textTokens = nonNegativeInteger(details?.text_tokens);
+  const audioTokens = nonNegativeInteger(details?.audio_tokens);
+  if (
+    [usage.input_tokens, usage.output_tokens, usage.total_tokens]
+      .some((value, index) => value != null &&
+        [inputTokens, outputTokens, totalTokens][index] === null) ||
+    [details?.text_tokens, details?.audio_tokens]
+      .some((value, index) => value != null &&
+        [textTokens, audioTokens][index] === null)
+  ) {
+    return null;
+  }
+  if (
+    inputTokens === null && outputTokens === null && totalTokens === null &&
+    textTokens === null && audioTokens === null
+  ) {
+    return null;
+  }
+  return {
+    requestCount: 1,
+    inputTextTokens: textTokens,
+    cachedInputTextTokens: null,
+    cacheWriteInputTextTokens: null,
+    outputTextTokens: outputTokens,
+    reasoningOutputTokens: null,
+    inputAudioTokens: audioTokens,
+    cachedInputAudioTokens: null,
+    outputAudioTokens: null,
+    totalTokens,
+    durationSeconds: null,
+    billableSeconds: null,
+    rawUsage: {
+      type: "tokens",
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: totalTokens,
+      input_token_details: {
+        text_tokens: textTokens,
+        audio_tokens: audioTokens
+      }
+    }
+  };
+}
+
+function nonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function nonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 function safelyExtractChannelUtterances(bytes: Uint8Array) {

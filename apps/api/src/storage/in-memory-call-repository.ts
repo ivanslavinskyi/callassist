@@ -86,6 +86,8 @@ import {
   type ProviderWebhookKind,
   type ProviderOperationRecord,
   type ProviderOperationReservationInput,
+  type PostCallTranscriptionProviderOperationInput,
+  type PostCallTranscriptionProviderOperationRecord,
   type RealtimeProviderOperationInput,
   type RealtimeProviderOperationRecord,
   type RealtimeProviderSessionInput,
@@ -193,6 +195,7 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #providerOperations = new Map<
     string,
     | ProviderOperationRecord
+    | PostCallTranscriptionProviderOperationRecord
     | RealtimeProviderOperationRecord
     | TelephonyProviderOperationRecord
   >();
@@ -617,6 +620,32 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
     }
     this.#providerOperations.set(input.id, copy(input));
+  }
+
+  async reservePostCallTranscriptionProviderRequest(
+    input: PostCallTranscriptionProviderOperationInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const job = this.#findDurableJob(lease.jobId);
+    const { callId, snapshot } = this.#requireRecording(input.recordingId);
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    if (
+      job?.type !== "final_transcription" ||
+      job.recordingId !== input.recordingId ||
+      callId !== input.callBriefId ||
+      snapshot.finalTranscript?.status !== "processing" ||
+      !attempt
+    ) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    if (this.#providerOperations.has(input.id)) return;
+    this.#providerOperations.set(input.id, {
+      ...copy(input),
+      callAttemptId: attempt.id,
+      durableJobId: lease.jobId,
+      result: null
+    });
   }
 
   async startTelephonyProviderOperation(

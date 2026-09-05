@@ -4,7 +4,8 @@ import {
   OpenAIPostCallTranscriber,
   buildPostCallTranscriptionKeywords,
   buildPostCallTranscriptionLanguages,
-  buildPostCallTranscriptionPrompt
+  buildPostCallTranscriptionPrompt,
+  parsePostCallTranscriptionUsage
 } from "./openai-post-call-transcriber";
 
 const brief: CallBrief = {
@@ -123,6 +124,111 @@ describe("OpenAIPostCallTranscriber", () => {
       model: "gpt-transcribe"
     });
     expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it("reports every physical request and token usage to durable ledger hooks", async () => {
+    const events: string[] = [];
+    const beforeProviderRequest = vi.fn(async (
+      _request: { clientRequestId: string }
+    ) => {
+      events.push("reserved");
+    });
+    const afterProviderRequest = vi.fn(async () => {
+      events.push("completed");
+    });
+    const fetchImplementation = vi.fn(async () => {
+      events.push("requested");
+      return new Response(JSON.stringify({
+        text: "Die Anmeldung ist eingegangen.",
+        usage: {
+          type: "tokens",
+          input_tokens: 14,
+          input_token_details: { text_tokens: 10, audio_tokens: 4 },
+          output_tokens: 6,
+          total_tokens: 20
+        }
+      }), {
+        status: 200,
+        headers: { "x-request-id": "req_transcription_123" }
+      });
+    });
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      fetchImplementation: fetchImplementation as typeof fetch
+    });
+
+    await transcriber.transcribe(media, brief, [], undefined, {
+      beforeProviderRequest,
+      afterProviderRequest
+    });
+
+    expect(events).toEqual(["reserved", "requested", "completed"]);
+    expect(beforeProviderRequest).toHaveBeenCalledWith(expect.objectContaining({
+      clientRequestId: expect.any(String),
+      stage: "full_recording",
+      model: "gpt-transcribe"
+    }));
+    expect(afterProviderRequest).toHaveBeenCalledWith(expect.objectContaining({
+      clientRequestId: beforeProviderRequest.mock.calls[0]![0].clientRequestId,
+      stage: "full_recording",
+      outcome: "succeeded",
+      providerRequestId: "req_transcription_123",
+      providerResponseId: null,
+      providerModel: null,
+      statusCode: 200,
+      usage: expect.objectContaining({
+        requestCount: 1,
+        inputTextTokens: 10,
+        inputAudioTokens: 4,
+        outputTextTokens: 6,
+        totalTokens: 20
+      })
+    }));
+  });
+
+  it("reports failed requests before the durable retry layer sees them", async () => {
+    const afterNetworkFailure = vi.fn(async () => undefined);
+    const networkTranscriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      fetchImplementation: vi.fn().mockRejectedValue(new Error("timeout"))
+    });
+    await expect(networkTranscriber.transcribe(
+      media,
+      brief,
+      [],
+      undefined,
+      { afterProviderRequest: afterNetworkFailure }
+    )).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(afterNetworkFailure).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "network_error",
+      statusCode: null,
+      usage: null
+    }));
+
+    const afterProviderFailure = vi.fn(async () => undefined);
+    const providerTranscriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      fetchImplementation: vi.fn().mockResolvedValue(new Response(
+        "rate limited",
+        {
+          status: 429,
+          headers: { "x-request-id": "req_rate_limited" }
+        }
+      ))
+    });
+    await expect(providerTranscriber.transcribe(
+      media,
+      brief,
+      [],
+      undefined,
+      { afterProviderRequest: afterProviderFailure }
+    )).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(afterProviderFailure).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "provider_error",
+      providerRequestId: "req_rate_limited",
+      statusCode: 429,
+      usage: null
+    }));
   });
 
   it("does not promote wording from the live draft", async () => {
@@ -245,5 +351,36 @@ describe("post-call transcription context", () => {
       expect.arrayContaining(["Sebastian", "Ivan Slavinskyi", "Gemeinde Aadorf"])
     );
     expect(buildPostCallTranscriptionLanguages(brief)).toEqual(["de", "en"]);
+  });
+
+  it("parses both documented usage variants without inventing missing counters", () => {
+    expect(parsePostCallTranscriptionUsage({
+      type: "tokens",
+      input_tokens: 14,
+      input_token_details: { text_tokens: 10, audio_tokens: 4 },
+      output_tokens: 101,
+      total_tokens: 115
+    })).toMatchObject({
+      requestCount: 1,
+      inputTextTokens: 10,
+      inputAudioTokens: 4,
+      outputTextTokens: 101,
+      totalTokens: 115,
+      durationSeconds: null
+    });
+    expect(parsePostCallTranscriptionUsage({
+      type: "duration",
+      seconds: 8.47
+    })).toMatchObject({
+      requestCount: 1,
+      inputTextTokens: null,
+      inputAudioTokens: null,
+      durationSeconds: 8.47,
+      billableSeconds: null
+    });
+    expect(parsePostCallTranscriptionUsage({
+      type: "tokens",
+      input_tokens: "14"
+    })).toBeNull();
   });
 });

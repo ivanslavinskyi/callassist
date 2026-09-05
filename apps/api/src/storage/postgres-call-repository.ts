@@ -115,6 +115,7 @@ import {
   type ProviderWebhookKind,
   type ProviderWebhookOutcome,
   type ProviderOperationReservationInput,
+  type PostCallTranscriptionProviderOperationInput,
   type RealtimeProviderOperationInput,
   type RealtimeProviderSessionInput,
   type TelephonyLegUsageInput,
@@ -989,6 +990,62 @@ export class PostgresCallRepository implements CallRepository {
         input.id,
         input.result
       );
+    });
+  }
+
+  async reservePostCallTranscriptionProviderRequest(
+    input: PostCallTranscriptionProviderOperationInput,
+    lease: DurableJobLease
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [context] = await transaction<{ callAttemptId: string }[]>`
+        SELECT call_recordings.call_attempt_id AS "callAttemptId"
+        FROM call_recordings
+        INNER JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        INNER JOIN durable_jobs
+          ON durable_jobs.id = ${lease.jobId}
+          AND durable_jobs.job_type = 'final_transcription'
+          AND durable_jobs.recording_id = call_recordings.id
+          AND durable_jobs.generation = ${input.durableJobGeneration}
+        WHERE call_recordings.id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_recordings.status = 'available'
+          AND final_transcripts.status = 'processing'
+        FOR SHARE OF call_recordings, final_transcripts, durable_jobs
+      `;
+      if (!context) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const inserted = await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_brief_id, call_attempt_id, recording_id,
+          durable_job_id, durable_job_generation, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.callBriefId}, ${context.callAttemptId}, ${input.recordingId},
+          ${lease.jobId}, ${input.durableJobGeneration},
+          ${input.startedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+      if (inserted.count === 1) return;
+      const existing = await transaction`
+        SELECT id
+        FROM provider_operations
+        WHERE id = ${input.id}
+          AND provider = ${input.provider}
+          AND client_request_id = ${input.clientRequestId}
+          AND call_brief_id = ${input.callBriefId}
+          AND call_attempt_id = ${context.callAttemptId}
+          AND recording_id = ${input.recordingId}
+          AND durable_job_id = ${lease.jobId}
+          AND durable_job_generation = ${input.durableJobGeneration}
+      `;
+      if (existing.count !== 1) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
     });
   }
 

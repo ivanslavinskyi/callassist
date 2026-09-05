@@ -288,6 +288,26 @@ export type RealtimeProviderOperationRecord =
     })
   | RealtimeProviderOperationInput;
 
+export type PostCallTranscriptionProviderOperationInput = {
+  id: string;
+  callBriefId: string;
+  recordingId: string;
+  provider: "openai";
+  operationType: "transcription";
+  stage: "full_recording" | "assistant_utterance" | "recipient_utterance";
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+  durableJobGeneration: number;
+};
+
+export type PostCallTranscriptionProviderOperationRecord =
+  PostCallTranscriptionProviderOperationInput & {
+    callAttemptId: string;
+    durableJobId: string;
+    result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+  };
+
 export type TelephonyProviderOperationInput = {
   id: string;
   callBriefId: string;
@@ -619,6 +639,10 @@ export interface CallRepository {
   ): Promise<void>;
   recordRealtimeProviderOperation(
     input: RealtimeProviderOperationInput
+  ): Promise<void>;
+  reservePostCallTranscriptionProviderRequest(
+    input: PostCallTranscriptionProviderOperationInput,
+    lease: DurableJobLease
   ): Promise<void>;
   startTelephonyProviderOperation(
     input: TelephonyProviderOperationInput

@@ -1061,6 +1061,41 @@ export class CallService {
           recordingStartedAt: claimed.snapshot.recording?.startedAt ?? null,
           durationSeconds:
             claimed.snapshot.recording?.durationSeconds ?? null
+        },
+        {
+          beforeProviderRequest: (request) =>
+            this.repository.reservePostCallTranscriptionProviderRequest(
+              {
+                id: request.clientRequestId,
+                callBriefId: claimed.callId,
+                recordingId,
+                provider: "openai",
+                operationType: "transcription",
+                stage: request.stage,
+                requestedModel: request.model,
+                clientRequestId: request.clientRequestId,
+                startedAt: request.startedAt,
+                durableJobGeneration: job.generation
+              },
+              currentLease(lease)
+            ),
+          afterProviderRequest: (result) =>
+            this.repository.completeProviderOperation({
+              operationId: result.clientRequestId,
+              outcome: result.outcome,
+              providerRequestId: result.providerRequestId,
+              providerResponseId: result.providerResponseId,
+              providerModel: result.providerModel,
+              statusCode: result.statusCode,
+              completedAt: result.completedAt,
+              durationMs: result.durationMs,
+              errorCode: result.outcome === "succeeded"
+                ? null
+                : result.outcome === "invalid_response"
+                  ? "OPENAI_RESPONSE_INVALID"
+                  : "OPENAI_REQUEST_FAILED",
+              usage: result.usage
+            })
         }
       );
       const completed = await this.repository.completeFinalTranscript(
