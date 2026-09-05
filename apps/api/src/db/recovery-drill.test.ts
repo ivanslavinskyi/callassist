@@ -52,6 +52,7 @@ describe("database recovery drill", () => {
       "provider_operation_results",
       "provider_operations",
       "provider_usage_records",
+      "post_call_transcription_chunks",
       "sessions",
       "users"
     ])).not.toThrow();

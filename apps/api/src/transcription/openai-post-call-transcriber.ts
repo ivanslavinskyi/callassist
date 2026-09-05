@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   CallBrief,
   FinalTranscriptSegment,
@@ -30,12 +30,18 @@ export type PostCallTranscriptionProviderStage =
   | "assistant_utterance"
   | "recipient_utterance";
 
-export type PostCallTranscriptionProviderRequest = {
-  clientRequestId: string;
+export type PostCallTranscriptionChunk = {
   stage: PostCallTranscriptionProviderStage;
+  chunkKey: string;
+  inputFingerprint: string;
   model: string;
-  startedAt: string;
 };
+
+export type PostCallTranscriptionProviderRequest =
+  PostCallTranscriptionChunk & {
+    clientRequestId: string;
+    startedAt: string;
+  };
 
 export type PostCallTranscriptionProviderUsage = {
   requestCount: 1;
@@ -56,6 +62,8 @@ export type PostCallTranscriptionProviderUsage = {
 export type PostCallTranscriptionProviderResult = {
   clientRequestId: string;
   stage: PostCallTranscriptionProviderStage;
+  chunkKey: string;
+  inputFingerprint: string;
   outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
   providerRequestId: string | null;
   providerResponseId: null;
@@ -64,9 +72,13 @@ export type PostCallTranscriptionProviderResult = {
   completedAt: string;
   durationMs: number;
   usage: PostCallTranscriptionProviderUsage | null;
+  transcriptText: string | null;
 };
 
 export type PostCallTranscriptionRuntime = {
+  findCompletedChunk?: (
+    chunk: PostCallTranscriptionChunk
+  ) => Promise<string | null>;
   beforeProviderRequest?: (
     request: PostCallTranscriptionProviderRequest
   ) => Promise<void>;
@@ -159,6 +171,7 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         buildPostCallTranscriptionPrompt(brief),
         this.#fullRecordingModel,
         "full_recording",
+        "full_recording",
         runtime
       );
       if (!text) throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -243,6 +256,7 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         utterance.role === "assistant"
           ? "assistant_utterance"
           : "recipient_utterance",
+        `utterance_${String(index + 1).padStart(3, "0")}`,
         runtime
       )
     };
@@ -256,6 +270,7 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     prompt: string,
     model = this.model,
     stage: PostCallTranscriptionProviderStage,
+    chunkKey: string,
     runtime: PostCallTranscriptionRuntime
   ) {
     const form = new FormData();
@@ -266,16 +281,40 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     );
     form.append("model", model);
     form.append("prompt", prompt);
-    if (model.startsWith("gpt-4o-")) {
-      form.append("language", brief.locale.split("-")[0]);
+    const language = model.startsWith("gpt-4o-")
+      ? brief.locale.split("-")[0]
+      : null;
+    const keywords = language ? [] : buildPostCallTranscriptionKeywords(brief);
+    const languages = language ? [] : buildPostCallTranscriptionLanguages(brief);
+    if (language) {
+      form.append("language", language);
     } else {
-      for (const keyword of buildPostCallTranscriptionKeywords(brief)) {
+      for (const keyword of keywords) {
         form.append("keywords[]", keyword);
       }
-      for (const language of buildPostCallTranscriptionLanguages(brief)) {
-        form.append("languages[]", language);
+      for (const requestedLanguage of languages) {
+        form.append("languages[]", requestedLanguage);
       }
     }
+
+    const inputFingerprint = createTranscriptionInputFingerprint({
+      bytes,
+      contentType,
+      prompt,
+      model,
+      stage,
+      chunkKey,
+      language,
+      keywords,
+      languages
+    });
+    const cached = await runtime.findCompletedChunk?.({
+      stage,
+      chunkKey,
+      inputFingerprint,
+      model
+    });
+    if (cached !== undefined && cached !== null) return cached;
 
     const clientRequestId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -283,6 +322,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     await runtime.beforeProviderRequest?.({
       clientRequestId,
       stage,
+      chunkKey,
+      inputFingerprint,
       model,
       startedAt
     });
@@ -299,12 +340,15 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
       await reportProviderResult(runtime, {
         clientRequestId,
         stage,
+        chunkKey,
+        inputFingerprint,
         outcome: "network_error",
         providerRequestId: null,
         statusCode: null,
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAtMs,
-        usage: null
+        usage: null,
+        transcriptText: null
       });
       throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED", {
         cause: error
@@ -315,12 +359,15 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
       await reportProviderResult(runtime, {
         clientRequestId,
         stage,
+        chunkKey,
+        inputFingerprint,
         outcome: "provider_error",
         providerRequestId,
         statusCode: response.status,
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAtMs,
-        usage: null
+        usage: null,
+        transcriptText: null
       });
       throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED");
     }
@@ -332,27 +379,61 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
       await reportProviderResult(runtime, {
         clientRequestId,
         stage,
+        chunkKey,
+        inputFingerprint,
         outcome: "invalid_response",
         providerRequestId,
         statusCode: response.status,
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAtMs,
-        usage
+        usage,
+        transcriptText: null
       });
       throw new PostCallTranscriptionError("OPENAI_RESPONSE_INVALID");
     }
+    const transcriptText = payload.text.trim();
     await reportProviderResult(runtime, {
       clientRequestId,
       stage,
+      chunkKey,
+      inputFingerprint,
       outcome: "succeeded",
       providerRequestId,
       statusCode: response.status,
       completedAt: new Date().toISOString(),
       durationMs: Date.now() - startedAtMs,
-      usage
+      usage,
+      transcriptText: transcriptText || null
     });
-    return payload.text.trim();
+    return transcriptText;
   }
+}
+
+function createTranscriptionInputFingerprint(input: {
+  bytes: Uint8Array;
+  contentType: string;
+  prompt: string;
+  model: string;
+  stage: PostCallTranscriptionProviderStage;
+  chunkKey: string;
+  language: string | null;
+  keywords: string[];
+  languages: string[];
+}) {
+  const hash = createHash("sha256");
+  hash.update(input.bytes);
+  hash.update("\0");
+  hash.update(JSON.stringify({
+    contentType: input.contentType,
+    prompt: input.prompt,
+    model: input.model,
+    stage: input.stage,
+    chunkKey: input.chunkKey,
+    language: input.language,
+    keywords: input.keywords,
+    languages: input.languages
+  }));
+  return hash.digest("hex");
 }
 
 async function reportProviderResult(
@@ -496,7 +577,7 @@ async function mapWithConcurrency<T, R>(
 ) {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
-  await Promise.all(
+  const workers = await Promise.allSettled(
     Array.from({ length: Math.min(concurrency, values.length) }, async () => {
       while (nextIndex < values.length) {
         const index = nextIndex++;
@@ -504,6 +585,10 @@ async function mapWithConcurrency<T, R>(
       }
     })
   );
+  const failed = workers.find(
+    (worker): worker is PromiseRejectedResult => worker.status === "rejected"
+  );
+  if (failed) throw failed.reason;
   return results;
 }
 

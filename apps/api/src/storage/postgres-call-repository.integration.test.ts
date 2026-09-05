@@ -1347,8 +1347,14 @@ describeWithDatabase("PostgresCallRepository", () => {
       startedAt: checkedAt,
       durableJobGeneration: leasedJob!.generation
     }, lease);
-    await repository.completeProviderOperation({
+    await repository.completePostCallTranscriptionProviderRequest({
       operationId: transcriptionOperationId,
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      durableJobGeneration: leasedJob!.generation,
+      stage: "full_recording",
+      chunkKey: "full_recording",
+      inputFingerprint: "a".repeat(64),
       outcome: "succeeded",
       providerRequestId: `req_${transcriptionOperationId}`,
       providerResponseId: null,
@@ -1371,8 +1377,18 @@ describeWithDatabase("PostgresCallRepository", () => {
         durationSeconds: 51,
         billableSeconds: null,
         rawUsage: { type: "duration", seconds: 51 }
-      }
+      },
+      transcriptText: "The cached private transcript."
     });
+    await expect(repository.findCompletedPostCallTranscriptionChunk({
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      durableJobGeneration: leasedJob!.generation,
+      stage: "full_recording",
+      chunkKey: "full_recording",
+      inputFingerprint: "a".repeat(64),
+      requestedModel: "gpt-transcribe"
+    }, lease)).resolves.toBe("The cached private transcript.");
     await expect(
       repository.claimFinalTranscript(begun.recording.id, "gpt-transcribe")
     ).resolves.toBeNull();
@@ -1419,6 +1435,7 @@ describeWithDatabase("PostgresCallRepository", () => {
       results: number;
       usageRecords: number;
       durationSeconds: number;
+      chunkCiphertext: string;
     }[]>`
       SELECT
         (SELECT count(*)::int FROM provider_operations
@@ -1432,13 +1449,16 @@ describeWithDatabase("PostgresCallRepository", () => {
         (SELECT count(*)::int FROM provider_usage_records
           WHERE operation_id = ${transcriptionOperationId}) AS "usageRecords",
         (SELECT duration_seconds::float FROM provider_usage_records
-          WHERE operation_id = ${transcriptionOperationId}) AS "durationSeconds"
+          WHERE operation_id = ${transcriptionOperationId}) AS "durationSeconds",
+        (SELECT text_ciphertext FROM post_call_transcription_chunks
+          WHERE provider_operation_id = ${transcriptionOperationId}) AS "chunkCiphertext"
     `;
     expect(providerUsage).toEqual({
       operations: 1,
       results: 1,
       usageRecords: 1,
-      durationSeconds: 51
+      durationSeconds: 51,
+      chunkCiphertext: expect.not.stringContaining("cached private transcript")
     });
 
     const snapshot = await repository.get(brief.id);
@@ -1461,6 +1481,12 @@ describeWithDatabase("PostgresCallRepository", () => {
     const deleted = await repository.get(brief.id);
     expect(deleted?.recording?.status).toBe("deleted");
     expect(deleted?.finalTranscript?.text).toBe("The final private transcript.");
+    const [cacheAfterDeletion] = await inspection<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM post_call_transcription_chunks
+      WHERE recording_id = ${begun.recording.id}
+    `;
+    expect(cacheAfterDeletion?.count).toBe(0);
   });
 
   it("aggregates bounded operational and system facts in PostgreSQL", async () => {

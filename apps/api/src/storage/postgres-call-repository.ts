@@ -97,6 +97,7 @@ import {
   type CallAttemptRecord,
   type CallChangeSignal,
   type CompleteProviderOperationInput,
+  type CompletePostCallTranscriptionProviderOperationInput,
   type CallPreparationPublication,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
@@ -116,6 +117,7 @@ import {
   type ProviderWebhookOutcome,
   type ProviderOperationReservationInput,
   type PostCallTranscriptionProviderOperationInput,
+  type PostCallTranscriptionChunkLookupInput,
   type RealtimeProviderOperationInput,
   type RealtimeProviderSessionInput,
   type TelephonyLegUsageInput,
@@ -1049,6 +1051,99 @@ export class PostgresCallRepository implements CallRepository {
     });
   }
 
+  async findCompletedPostCallTranscriptionChunk(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ) {
+    return this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [chunk] = await transaction<{ textCiphertext: string }[]>`
+        SELECT chunks.text_ciphertext AS "textCiphertext"
+        FROM post_call_transcription_chunks chunks
+        INNER JOIN call_recordings
+          ON call_recordings.id = chunks.recording_id
+        INNER JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        INNER JOIN durable_jobs
+          ON durable_jobs.id = ${lease.jobId}
+          AND durable_jobs.job_type = 'final_transcription'
+          AND durable_jobs.recording_id = call_recordings.id
+          AND durable_jobs.generation = chunks.durable_job_generation
+        WHERE chunks.recording_id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_recordings.status = 'available'
+          AND final_transcripts.status = 'processing'
+          AND chunks.durable_job_generation = ${input.durableJobGeneration}
+          AND chunks.stage = ${input.stage}
+          AND chunks.chunk_key = ${input.chunkKey}
+          AND chunks.input_fingerprint = ${input.inputFingerprint}
+          AND chunks.requested_model = ${input.requestedModel}
+        LIMIT 1
+      `;
+      return chunk
+        ? decryptJson<string>(chunk.textCiphertext, this.#encryptionKey)
+        : null;
+    });
+  }
+
+  async completePostCallTranscriptionProviderRequest(
+    input: CompletePostCallTranscriptionProviderOperationInput
+  ) {
+    const textCiphertext = input.transcriptText
+      ? encryptJson(input.transcriptText, this.#encryptionKey)
+      : null;
+    await this.#sql.begin(async (transaction) => {
+      const [operation] = await transaction<{ requestedModel: string }[]>`
+        SELECT requested_model AS "requestedModel"
+        FROM provider_operations
+        WHERE id = ${input.operationId}
+          AND provider = 'openai'
+          AND operation_type = 'transcription'
+          AND stage = ${input.stage}
+          AND call_brief_id = ${input.callBriefId}
+          AND recording_id = ${input.recordingId}
+          AND durable_job_generation = ${input.durableJobGeneration}
+        FOR SHARE
+      `;
+      if (!operation) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await this.#insertProviderOperationResult(transaction, input.operationId, {
+        outcome: input.outcome,
+        providerRequestId: input.providerRequestId,
+        providerResponseId: input.providerResponseId,
+        providerModel: input.providerModel,
+        statusCode: input.statusCode,
+        completedAt: input.completedAt,
+        durationMs: input.durationMs,
+        errorCode: input.errorCode,
+        usage: input.usage
+      });
+      if (input.outcome !== "succeeded" || !textCiphertext) return;
+      await transaction`
+        INSERT INTO post_call_transcription_chunks (
+          id, recording_id, durable_job_generation, stage, chunk_key,
+          input_fingerprint, requested_model, provider_operation_id,
+          text_ciphertext, created_at
+        )
+        SELECT
+          ${randomUUID()}, ${input.recordingId},
+          ${input.durableJobGeneration}, ${input.stage}, ${input.chunkKey},
+          ${input.inputFingerprint}, ${operation.requestedModel},
+          ${input.operationId}, ${textCiphertext},
+          ${input.completedAt}::timestamptz
+        FROM call_recordings
+        INNER JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        WHERE call_recordings.id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_recordings.status = 'available'
+          AND final_transcripts.status = 'processing'
+        ON CONFLICT DO NOTHING
+      `;
+    });
+  }
+
   async startTelephonyProviderOperation(
     input: TelephonyProviderOperationInput
   ) {
@@ -1345,6 +1440,13 @@ export class PostgresCallRepository implements CallRepository {
       `;
       await transaction`
         DELETE FROM approval_requests WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        DELETE FROM post_call_transcription_chunks
+        WHERE recording_id IN (
+          SELECT id FROM call_recordings
+          WHERE call_brief_id = ${input.callId}
+        )
       `;
       await transaction`
         UPDATE final_transcripts
@@ -4526,6 +4628,12 @@ export class PostgresCallRepository implements CallRepository {
       if (lease) {
         await requirePostgresDurableJobLease(transaction, lease);
       }
+      await transaction`
+        DELETE FROM post_call_transcription_chunks
+        WHERE recording_id IN (
+          SELECT id FROM call_recordings WHERE call_brief_id = ${id}
+        )
+      `;
       const updated = await transaction`
         UPDATE call_recordings
         SET status = 'deleted', deleted_at = ${now}, updated_at = ${now}

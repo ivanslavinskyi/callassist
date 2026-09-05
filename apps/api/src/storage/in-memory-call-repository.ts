@@ -68,6 +68,7 @@ import {
   type CallAttemptRecord,
   type CallChangeSignal,
   type CompleteProviderOperationInput,
+  type CompletePostCallTranscriptionProviderOperationInput,
   type CallRepository,
   type CallPreparationPublication,
   type CallDataDeletionRecord,
@@ -88,6 +89,7 @@ import {
   type ProviderOperationReservationInput,
   type PostCallTranscriptionProviderOperationInput,
   type PostCallTranscriptionProviderOperationRecord,
+  type PostCallTranscriptionChunkLookupInput,
   type RealtimeProviderOperationInput,
   type RealtimeProviderOperationRecord,
   type RealtimeProviderSessionInput,
@@ -198,6 +200,13 @@ export class InMemoryCallRepository implements CallRepository {
     | PostCallTranscriptionProviderOperationRecord
     | RealtimeProviderOperationRecord
     | TelephonyProviderOperationRecord
+  >();
+  readonly #postCallTranscriptionChunks = new Map<
+    string,
+    PostCallTranscriptionChunkLookupInput & {
+      providerOperationId: string;
+      text: string;
+    }
   >();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
@@ -633,6 +642,7 @@ export class InMemoryCallRepository implements CallRepository {
     if (
       job?.type !== "final_transcription" ||
       job.recordingId !== input.recordingId ||
+      job.generation !== input.durableJobGeneration ||
       callId !== input.callBriefId ||
       snapshot.finalTranscript?.status !== "processing" ||
       !attempt
@@ -646,6 +656,56 @@ export class InMemoryCallRepository implements CallRepository {
       durableJobId: lease.jobId,
       result: null
     });
+  }
+
+  async findCompletedPostCallTranscriptionChunk(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertPostCallTranscriptionContext(input, lease);
+    return this.#postCallTranscriptionChunks.get(
+      postCallTranscriptionChunkKey(input)
+    )?.text ?? null;
+  }
+
+  async completePostCallTranscriptionProviderRequest(
+    input: CompletePostCallTranscriptionProviderOperationInput
+  ) {
+    const operation = this.#providerOperations.get(input.operationId);
+    if (
+      !operation ||
+      !("recordingId" in operation) ||
+      operation.operationType !== "transcription" ||
+      operation.callBriefId !== input.callBriefId ||
+      operation.recordingId !== input.recordingId ||
+      operation.durableJobGeneration !== input.durableJobGeneration ||
+      operation.stage !== input.stage
+    ) {
+      throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+    }
+    await this.completeProviderOperation(input);
+    const { snapshot } = this.#requireRecording(input.recordingId);
+    if (
+      input.outcome !== "succeeded" ||
+      !input.transcriptText ||
+      snapshot.recording?.status !== "available" ||
+      snapshot.finalTranscript?.status !== "processing"
+    ) return;
+    const chunk = {
+      callBriefId: input.callBriefId,
+      recordingId: input.recordingId,
+      durableJobGeneration: input.durableJobGeneration,
+      stage: input.stage,
+      chunkKey: input.chunkKey,
+      inputFingerprint: input.inputFingerprint,
+      requestedModel: operation.requestedModel,
+      providerOperationId: input.operationId,
+      text: input.transcriptText
+    };
+    this.#postCallTranscriptionChunks.set(
+      postCallTranscriptionChunkKey(chunk),
+      copy(chunk)
+    );
   }
 
   async startTelephonyProviderOperation(
@@ -784,6 +844,13 @@ export class InMemoryCallRepository implements CallRepository {
     }
     if (!terminalStatuses.has(snapshot.brief.status)) {
       throw new CallRepositoryError("CALL_DATA_DELETION_NOT_AVAILABLE");
+    }
+    if (snapshot.recording) {
+      for (const [key, chunk] of this.#postCallTranscriptionChunks) {
+        if (chunk.recordingId === snapshot.recording.id) {
+          this.#postCallTranscriptionChunks.delete(key);
+        }
+      }
     }
 
     snapshot.brief = {
@@ -2502,6 +2569,11 @@ export class InMemoryCallRepository implements CallRepository {
     const snapshot = this.#require(id);
     const recording = snapshot.recording;
     if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    for (const [key, chunk] of this.#postCallTranscriptionChunks) {
+      if (chunk.recordingId === recording.id) {
+        this.#postCallTranscriptionChunks.delete(key);
+      }
+    }
     recording.status = "deleted";
     recording.deletedAt = new Date().toISOString();
     return { callId: id, recording: copy(recording), snapshot: copy(snapshot) };
@@ -3118,6 +3190,25 @@ export class InMemoryCallRepository implements CallRepository {
     return [...this.#durableJobs.values()].find(({ id }) => id === jobId);
   }
 
+  #assertPostCallTranscriptionContext(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const job = this.#findDurableJob(lease.jobId);
+    const { callId, snapshot } = this.#requireRecording(input.recordingId);
+    if (
+      job?.type !== "final_transcription" ||
+      job.recordingId !== input.recordingId ||
+      job.generation !== input.durableJobGeneration ||
+      callId !== input.callBriefId ||
+      snapshot.recording?.status !== "available" ||
+      snapshot.finalTranscript?.status !== "processing"
+    ) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+  }
+
   #mapCallPreparation(stored: StoredCallPreparation): CallPreparation {
     const job = this.#durableJobs.get(
       durableJobKey("brief_compilation", stored.preparation.id)
@@ -3495,4 +3586,18 @@ function safeProviderWebhookErrorCode(value?: string | null) {
   return value && /^[a-z0-9_.:/-]{1,160}$/i.test(value)
     ? value
     : "WEBHOOK_DELIVERY_FAILED";
+}
+
+function postCallTranscriptionChunkKey(
+  input: Pick<
+    PostCallTranscriptionChunkLookupInput,
+    "recordingId" | "durableJobGeneration" | "chunkKey" | "inputFingerprint"
+  >
+) {
+  return [
+    input.recordingId,
+    input.durableJobGeneration,
+    input.chunkKey,
+    input.inputFingerprint
+  ].join(":");
 }

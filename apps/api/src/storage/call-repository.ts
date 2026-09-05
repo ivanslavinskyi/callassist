@@ -308,6 +308,27 @@ export type PostCallTranscriptionProviderOperationRecord =
     result: Omit<CompleteProviderOperationInput, "operationId"> | null;
   };
 
+export type PostCallTranscriptionChunkLookupInput = {
+  callBriefId: string;
+  recordingId: string;
+  durableJobGeneration: number;
+  stage: PostCallTranscriptionProviderOperationInput["stage"];
+  chunkKey: string;
+  inputFingerprint: string;
+  requestedModel: string;
+};
+
+export type CompletePostCallTranscriptionProviderOperationInput =
+  CompleteProviderOperationInput & {
+    callBriefId: string;
+    recordingId: string;
+    durableJobGeneration: number;
+    stage: PostCallTranscriptionProviderOperationInput["stage"];
+    chunkKey: string;
+    inputFingerprint: string;
+    transcriptText: string | null;
+  };
+
 export type TelephonyProviderOperationInput = {
   id: string;
   callBriefId: string;
@@ -643,6 +664,13 @@ export interface CallRepository {
   reservePostCallTranscriptionProviderRequest(
     input: PostCallTranscriptionProviderOperationInput,
     lease: DurableJobLease
+  ): Promise<void>;
+  findCompletedPostCallTranscriptionChunk(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ): Promise<string | null>;
+  completePostCallTranscriptionProviderRequest(
+    input: CompletePostCallTranscriptionProviderOperationInput
   ): Promise<void>;
   startTelephonyProviderOperation(
     input: TelephonyProviderOperationInput

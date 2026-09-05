@@ -93,6 +93,81 @@ describe("OpenAIPostCallTranscriber", () => {
     }
   });
 
+  it("reuses completed utterance chunks when a durable attempt retries", async () => {
+    const waveMedia = {
+      bytes: stereoWave(8_000, 3, [
+        { channel: 1 as const, start: 0.3, end: 0.9 },
+        { channel: 0 as const, start: 1.3, end: 1.8 },
+        { channel: 1 as const, start: 2.2, end: 2.7 }
+      ]),
+      contentType: "audio/wav",
+      fileName: "RE-retry.wav",
+      channels: 2 as const
+    };
+    const replies = ["Guten Tag.", "Ja, gern.", "Vielen Dank."];
+    let recipientFailed = false;
+    const fetchImplementation = vi.fn(async (_url, init) => {
+      const file = (init?.body as FormData).get("file") as File;
+      const index = Number(file.name.match(/(\d+)\.wav$/)?.[1]) - 1;
+      if (index === 1 && !recipientFailed) {
+        recipientFailed = true;
+        throw new Error("temporary timeout");
+      }
+      return new Response(JSON.stringify({ text: replies[index] }), {
+        status: 200
+      });
+    });
+    const completedChunks = new Map<string, string>();
+    const runtime = {
+      findCompletedChunk: vi.fn(async (chunk: {
+        chunkKey: string;
+        inputFingerprint: string;
+      }) => completedChunks.get(
+        `${chunk.chunkKey}:${chunk.inputFingerprint}`
+      ) ?? null),
+      beforeProviderRequest: vi.fn(async () => undefined),
+      afterProviderRequest: vi.fn(async (result: {
+        chunkKey: string;
+        inputFingerprint: string;
+        transcriptText: string | null;
+      }) => {
+        if (result.transcriptText) {
+          completedChunks.set(
+            `${result.chunkKey}:${result.inputFingerprint}`,
+            result.transcriptText
+          );
+        }
+      })
+    };
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      utteranceModel: "gpt-4o-transcribe",
+      fetchImplementation: fetchImplementation as typeof fetch
+    });
+
+    await expect(transcriber.transcribe(
+      waveMedia,
+      brief,
+      [],
+      { recordingStartedAt: null, durationSeconds: 3 },
+      runtime
+    )).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    await expect(transcriber.transcribe(
+      waveMedia,
+      brief,
+      [],
+      { recordingStartedAt: null, durationSeconds: 3 },
+      runtime
+    )).resolves.toMatchObject({
+      text: "Guten Tag. Ja, gern. Vielen Dank."
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(runtime.beforeProviderRequest).toHaveBeenCalledTimes(4);
+    expect(runtime.afterProviderRequest).toHaveBeenCalledTimes(4);
+    expect(completedChunks.size).toBe(3);
+  });
+
   it("transcribes the complete recording in one request", async () => {
     const fetchImplementation = vi.fn(async (_url, init) => {
       const form = init?.body as FormData;

@@ -32,6 +32,7 @@ const criticalTables = [
   "provider_operation_results",
   "provider_operations",
   "provider_usage_records",
+  "post_call_transcription_chunks",
   "sessions",
   "users"
 ] as const;
@@ -46,6 +47,7 @@ const encryptedColumns = [
   ["call_attempts", "execution_snapshot_ciphertext"],
   ["final_transcripts", "text_ciphertext"],
   ["final_transcripts", "segments_ciphertext"],
+  ["post_call_transcription_chunks", "text_ciphertext"],
   ["call_feedback_revisions", "comment_ciphertext"]
 ] as const;
 

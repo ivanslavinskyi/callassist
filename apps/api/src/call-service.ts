@@ -1063,6 +1063,19 @@ export class CallService {
             claimed.snapshot.recording?.durationSeconds ?? null
         },
         {
+          findCompletedChunk: (chunk) =>
+            this.repository.findCompletedPostCallTranscriptionChunk(
+              {
+                callBriefId: claimed.callId,
+                recordingId,
+                durableJobGeneration: job.generation,
+                stage: chunk.stage,
+                chunkKey: chunk.chunkKey,
+                inputFingerprint: chunk.inputFingerprint,
+                requestedModel: chunk.model
+              },
+              currentLease(lease)
+            ),
           beforeProviderRequest: (request) =>
             this.repository.reservePostCallTranscriptionProviderRequest(
               {
@@ -1080,8 +1093,14 @@ export class CallService {
               currentLease(lease)
             ),
           afterProviderRequest: (result) =>
-            this.repository.completeProviderOperation({
+            this.repository.completePostCallTranscriptionProviderRequest({
               operationId: result.clientRequestId,
+              callBriefId: claimed.callId,
+              recordingId,
+              durableJobGeneration: job.generation,
+              stage: result.stage,
+              chunkKey: result.chunkKey,
+              inputFingerprint: result.inputFingerprint,
               outcome: result.outcome,
               providerRequestId: result.providerRequestId,
               providerResponseId: result.providerResponseId,
@@ -1094,7 +1113,8 @@ export class CallService {
                 : result.outcome === "invalid_response"
                   ? "OPENAI_RESPONSE_INVALID"
                   : "OPENAI_REQUEST_FAILED",
-              usage: result.usage
+              usage: result.usage,
+              transcriptText: result.transcriptText
             })
         }
       );

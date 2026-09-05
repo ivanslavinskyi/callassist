@@ -25,7 +25,8 @@ const genericCiphertextColumns = [
   ["call_compilation_approvals", "execution_snapshot_ciphertext"],
   ["call_attempts", "execution_snapshot_ciphertext"],
   ["final_transcripts", "text_ciphertext"],
-  ["final_transcripts", "segments_ciphertext"]
+  ["final_transcripts", "segments_ciphertext"],
+  ["post_call_transcription_chunks", "text_ciphertext"]
 ] as const;
 
 type CiphertextRow = { id: string; payload: string };

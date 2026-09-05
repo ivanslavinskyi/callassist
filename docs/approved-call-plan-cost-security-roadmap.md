@@ -79,12 +79,22 @@ and total token counters, while input-audio transcription completion persists th
 provider's token or duration usage variant. Stable provider event/response IDs
 deduplicate replay, response/transcription operations point to the exact parent
 session, and locally observed session duration is retained even on interruption.
-Ledger persistence failure closes the stream to cap untracked spend. Twilio
+Ledger persistence failure closes the stream to cap untracked spend. Post-call
+transcription now reserves every physical OpenAI request before HTTP, persists
+the returned token or duration usage (including `x-request-id`) on success and
+failure, and keeps pricing out of raw usage. Twilio
 outbound legs are now reserved before the create-call request and terminal status
 callbacks persist connected `CallDuration` separately from the callback's billed
 `Duration`; callback replay and reconciliation converge on one leg operation.
-Provider-reported Twilio price, recording cost, and post-call transcription
-instrumentation still remain.
+Provider-reported Twilio price and recording cost still remain.
+Item 8 is implemented for the current dual-channel utterance path: successful
+chunks are stored encrypted with recording ID, durable-job generation, role/stage,
+chronological key, exact-request fingerprint, model, and provider operation. A
+same-generation durable retry loads matching chunks and submits only missing
+work. A deliberate administrative retry increments the generation and therefore
+does not silently reuse an earlier result. Partial chunks remain internal, are
+never published as a final transcript, participate in key rotation/recovery
+verification, and are erased with recording or owner-data deletion.
 
 ## Why this roadmap exists
 
