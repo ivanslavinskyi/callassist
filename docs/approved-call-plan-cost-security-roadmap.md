@@ -786,8 +786,11 @@ plan, but it is not a substitute for this worker/data cutover order.
 
 The release gate is implemented as `pnpm db:verify:call-plan-cutover`, is included
 in the production API artifact, and runs in CI after fresh-schema migration. The
-local populated database returns `ready=true` with an empty blocker list. During
-the same gate pass, patched transitive `fast-uri` and `qs` versions removed all
+local populated database returns `ready=true` with an empty blocker list. The
+migration runner independently checks the same blockers after migration 0060 and
+before applying migration 0061, so a direct full-catalog migration fails closed on
+an unprepared database. The standalone command remains mandatory release evidence.
+During the same gate pass, patched transitive `fast-uri` and `qs` versions removed all
 known production dependency advisories; the frozen install and production audit
 now pass with the system certificate store enabled.
 

@@ -205,6 +205,12 @@ not become trusted execution state. See
 `docs/approved-call-plan-cost-security-roadmap.md` for the mandatory two-phase
 commit and migration order.
 
+Migration tooling independently evaluates the same aggregate blockers immediately
+before applying `0061_complete_immutable_call_plan_cutover.sql`. This final
+fail-closed guard protects against invoking the full migration command on an
+unprepared database; it does not replace the dry runs, recovery evidence, worker
+drain, or preserved standalone gate output.
+
 Production API and worker processes must pass fail-closed environment validation.
 Never bypass a validation issue by changing `NODE_ENV`. Verify TLS termination before
 trusting HSTS, keep the main and Twilio listener ports separate, and do not reuse the

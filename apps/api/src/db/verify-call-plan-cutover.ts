@@ -1,28 +1,8 @@
 import "../config/load-env";
 import { pathToFileURL } from "node:url";
 import { parseDataEncryptionKeyring } from "../security/encryption";
-import type { AdminSystemFacts } from "../storage/call-repository";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
-
-type CallPlanCutoverFacts = AdminSystemFacts["callPlanCutover"];
-
-export function evaluateCallPlanCutoverGate(facts: CallPlanCutoverFacts) {
-  const blockers = [
-    facts.recoverableLegacyCalls > 0
-      ? "recoverable_legacy_calls"
-      : null,
-    facts.executableLegacyCalls > 0
-      ? "executable_legacy_calls"
-      : null,
-    facts.activeLegacyAttempts > 0
-      ? "active_legacy_attempts"
-      : null,
-    facts.activeRecompilations > 0
-      ? "active_recompilations"
-      : null
-  ].filter((value): value is string => value !== null);
-  return { ready: blockers.length === 0, blockers };
-}
+import { evaluateCallPlanCutoverGate } from "./call-plan-cutover-gate";
 
 export function callPlanCutoverVerificationErrorCode(error: unknown) {
   void error;

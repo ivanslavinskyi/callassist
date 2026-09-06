@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AdminSystemFacts } from "../storage/call-repository";
 import {
-  callPlanCutoverVerificationErrorCode,
-  evaluateCallPlanCutoverGate
+  callPlanCutoverVerificationErrorCode
 } from "./verify-call-plan-cutover";
+import { evaluateCallPlanCutoverGate } from "./call-plan-cutover-gate";
 
 const facts: AdminSystemFacts["callPlanCutover"] = {
   recoverableLegacyCalls: 0,
