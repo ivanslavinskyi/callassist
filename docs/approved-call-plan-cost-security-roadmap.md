@@ -1,0 +1,822 @@
+# Approved call plan, cost, and security roadmap
+
+## Status
+
+- Owner: engineering
+- Branch: `codex/approved-call-plan-safety`
+- Scope: the call lifecycle from brief preparation through Realtime execution,
+  provider usage capture, cost calculation, and administrator reporting
+- Delivery rule: ship in small, backward-compatible increments; do not make a
+  new call attempt depend on a partially deployed schema or worker
+
+## Implementation progress
+
+Completed in the first branch increment:
+
+- added the versioned `ApprovedExecutionSnapshot` contract and one canonical
+  projection from an approved compilation;
+- changed the Realtime system prompt and mandatory opening builder to accept only
+  that execution contract;
+- included the compiled objective, background, questions, follow-ups, outcome
+  criteria, approved call-language facts, and prohibited actions in the prompt;
+- removed the raw-brief legacy opening fallback;
+- made an unapproved or blocked compilation fail closed before provider sockets
+  are opened;
+- added regression coverage for raw objective, context, facts, clarification, and
+  delivery markers, plus the unapproved-stream failure path.
+- changed public approval and approve-and-start requests to compare-and-set the
+  exact reviewed compilation revision and snapshot hash;
+- captured an encrypted execution snapshot atomically when reserving a call
+  attempt and made Realtime load that attempt snapshot instead of current brief
+  state;
+- bound Twilio media parameters and their HMAC to call ID, attempt ID, and
+  compilation snapshot hash, with fail-closed mismatch and terminal-state checks;
+- added owner-erasure and encryption-key-rotation handling for attempt snapshots.
+- retired the bounded pre-migration Twilio token adapter after the active legacy
+  attempt count reached zero; every accepted stream now requires an attempt-bound
+  immutable compilation hash.
+- centralized the existing compilation hash format, recompute it from
+  schema-normalized content, and reject integrity failures at create, recompile,
+  approval, and attempt-reservation storage boundaries.
+- added append-only compilation revision and approval tables, backfilled the
+  latest recoverable legacy revision, bound new call attempts to `compilation_id`,
+  and then stopped the transitional mutable compilation dual-write;
+- added immutable logical-identity triggers while preserving the narrowly scoped
+  ciphertext-only updates required for owner erasure and key rotation.
+- made output moderation consume the same canonical execution-plan projection as
+  Realtime, including question purposes, follow-up conditions, all outcome/stop
+  criteria, and prohibited actions;
+- added local preservation checks for email, phone, numeric date, long numeric,
+  and opaque reference identifiers in approved facts and objectives, and reject
+  identifiers invented by the compiled runtime plan.
+
+Items 1 through 10 and the immutable-plan cutover are implemented in code.
+Migrations 0051 through 0061 and the database-backed concurrency,
+immutability, owner-erasure, legacy-backfill, provider-event deduplication, and
+Realtime audio-token tests pass locally against PostgreSQL. Immutable revision
+rows are the only normal compiled-plan read/write source. Historical mutable
+ciphertext remains encrypted solely for retention/audit and explicit offline
+maintenance.
+Item 4 has full-plan output moderation plus beta verbatim guards for opaque
+identifiers, email, phone, numeric dates, long numbers, the explicit recipient and
+represented-person fields, and common Swiss/German/French/Italian postal-address
+forms. Compiler-declared person, organisation, and location entities must have
+exact source provenance. General multilingual named-entity extraction from
+unstructured prose and dedicated review UI still remain.
+Item 5 now has explicit durable retry disposition for compiler failures: network,
+timeout, 408/409/429, and 5xx remain retryable; exhausted structured-output
+validation, malformed responses, and permanent 4xx failures dead-letter after
+one durable attempt. A preparation-scoped provider-request counter is reserved
+atomically before every physical compiler or moderation request and caps all
+transport and durable retries at eight requests. A crash after reservation is
+deliberately fail-closed and may consume budget without sending the request; the
+provider-operation ledger in item 6 makes that ambiguity observable as a reserved
+operation without a result.
+Initial creation and editing/clarification recompilation now share this durable
+boundary. A recompilation request captures the expected immutable compilation ID
+and next revision, deduplicates by owner/idempotency key/input fingerprint, permits
+only one active edit per call, and publishes only if the captured base revision is
+still current. The previous approved snapshot remains unchanged on failure, and a
+call attempt cannot start while a recompilation is active.
+Post-call transcription uses the same transient HTTP classification; empty or
+oversized audio, malformed successful responses, and permanent OpenAI 4xx errors
+are terminal instead of multiplying cost across all three durable attempts.
+Item 6 has compiler and Realtime vertical slices: every compiler/moderation HTTP
+attempt is reserved as an immutable provider operation before network I/O, its
+bounded outcome is stored even on failure, and Responses token usage is written
+to a separate append-only usage record before schema/policy publication. Pricing and
+calculated cost are intentionally not part of these records. Each accepted media
+stream now reserves its main and consent-transcription Realtime sessions before
+opening provider sockets. `response.done` persists returned text, audio, cached,
+and total token counters, while input-audio transcription completion persists the
+provider's token or duration usage variant. Stable provider event/response IDs
+deduplicate replay, response/transcription operations point to the exact parent
+session, and locally observed session duration is retained even on interruption.
+Ledger persistence failure closes the stream to cap untracked spend. Post-call
+transcription now reserves every physical OpenAI request before HTTP, persists
+the returned token or duration usage (including `x-request-id`) on success and
+failure, and keeps pricing out of raw usage. Twilio
+outbound legs are now reserved before the create-call request and terminal status
+callbacks persist connected `CallDuration` separately from the callback's billed
+`Duration`; callback replay and reconciliation converge on one leg operation.
+Provider-reported Twilio connectivity price is now reconciled after terminal
+calls; recording and other feature-specific Twilio charges still remain.
+The existing administrator overview now has a first calculated-cost read model:
+it aggregates immutable usage records by provider, operation, stage, and observed
+model over an independent `usage_observed_at` window. A centralized
+`openai-public-2026-09-05` public-list-price snapshot calculates compiler,
+Realtime text/audio, Realtime input transcription, and post-call transcription
+without modifying raw usage. Exact model-family matching is fail-open only for
+reporting: unknown SKUs and returned metrics without a configured rate remain
+explicitly unpriced and make the result partial, never zero. The previous
+configured per-minute estimate remains visible as a separate fallback view.
+Persisted price-rate and calculated-cost records remain pending. Twilio call
+connectivity price is now reconciled as a separate provider-reported actual cost;
+recording and other Twilio feature charges remain outside that record.
+Item 8 is implemented for the current dual-channel utterance path: successful
+chunks are stored encrypted with recording ID, durable-job generation, role/stage,
+chronological key, exact-request fingerprint, model, and provider operation. A
+same-generation durable retry loads matching chunks and submits only missing
+work. A deliberate administrative retry increments the generation and therefore
+does not silently reuse an earlier result. Partial chunks remain internal, are
+never published as a final transcript, participate in key rotation/recovery
+verification, and are erased with recording or owner-data deletion.
+Item 9 now has aggregate and drill-down beta slices: the existing admin API/UI shows raw
+request, text/audio token, cached-token, duration, and model facts alongside the
+calculated OpenAI amount, pricing version, reserved-operation count, usage-record
+count, and unpriced-bucket coverage. It deliberately keeps the call-created
+cohort for outcomes and uses usage observation time for incurred cost. Call
+Inspector shows attempt-bound call usage and linked compiler usage. A separate
+privacy-safe Preparation Inspector is reachable from recent durable preparation
+jobs, including failures without a call ID. A complete historical preparation
+list, trends, averages, invoice reconciliation, and persisted calculated-cost
+records remain.
+Item 10's beta input guard is implemented: one exported contract owns every
+per-field/array limit plus the 16,000 soft and 20,000 hard task-text budgets.
+The aggregate counts Unicode code points after trim, NFC, and line-ending
+normalization across objective, context, facts, delivery instructions, and all
+clarification answers. The API returns a field issue for direct requests, while
+the create/edit and clarification forms use the same constants for `maxLength`,
+counters, warnings, and submit blocking. Long-document upload remains separate.
+The existing administrator system view exposes cutover evidence without
+reading private call content: recoverable and unavailable legacy calls,
+explicitly archived and recompile-required plans, historical attempts missing
+immutable bindings, active legacy attempts, and active recompilations.
+Owner-erased calls are excluded because their snapshots are intentionally removed.
+The local cutover gates reached zero before the mutable reader and media adapter
+were removed. Deploy the API before the web console so the newly rendered status
+is present when the new UI loads.
+
+A read-only local pre-beta inspection on 2026-09-05 found 21 recoverable legacy
+calls, 15 visible calls with no recoverable compilation, 28 historical attempts
+without immutable compilation/execution snapshots, zero active legacy attempts,
+and zero active recompilations. Consequently item 11 still requires an explicit,
+resumable backfill before the mutable read is removed. Historical attempts cannot
+be given a trustworthy execution snapshot after the fact and remain an explicit
+audit limitation; they do not block removal of the active-call media adapter.
+The validated backfill subsequently materialized 13 of those 21 compilations and
+created eight approval snapshots, with successful recovery drills immediately
+before and after the write. The remaining eight were initially left untouched
+pending explicit disposition: two
+use `brief-compiler-2`; six use `brief-compiler-3` but predate the required
+`rawBrief.representedPersonFirstName` and `representedPersonLastName` fields.
+They comprise six completed calls with historical attempts plus one blocked and
+one review-required draft without attempts. They are now classified as six
+archived terminal plans and two drafts requiring recompilation without changing
+their encrypted legacy payloads. The 15 records with no compilation
+are also all terminal (12 completed, two stopped, one failed). This leaves no
+active legacy attempt, but it does not justify silently blessing or rewriting the
+eight incompatible snapshots; the explicit disposition keeps them outside the
+execution path.
+For calls with `current_compilation_id`, repository reads, approval, recompilation,
+and attempt reservation now load the encrypted immutable revision, validate its
+canonical hash against the immutable row metadata, and hydrate approval time from
+the separate immutable approval record. A PostgreSQL regression test removes the
+mutable compatibility projection and proves that both read and attempt reservation
+still use the approved immutable plan. Only unclassified calls without an
+immutable pointer use the bounded legacy projection. Explicitly classified
+incompatible records are never promoted into or returned from the trusted plan
+path.
+The public call snapshot now labels the plan source as `immutable`, `legacy`,
+`archived`, `recompile_required`, or `unavailable`. Approval and new attempt
+reservation fail closed with
+`CALL_COMPILATION_RECOMPILE_REQUIRED` unless the source is immutable. The call UI
+hides start/approval actions for legacy plans and keeps schema-compatible content
+read-only. Explicitly archived terminal plans expose no compilation object.
+`recompile_required` drafts expose a form reconstructed from the separately stored
+brief fields, with conservative defaults for legacy-only delivery preferences;
+submitting it creates a new immutable revision. Incompatible ciphertext remains
+encrypted for retention/audit but is no longer read by the normal application
+path. This removes explicitly classified mutable compilations from the execution
+trust boundary without rewriting or deleting historical content.
+Migration 0059 mirrors the execution boundary in PostgreSQL: every newly
+inserted attempt must contain compilation ID, revision, hash, and encrypted
+execution snapshot, and every newly written `ready` brief must have an immutable
+compilation pointer. The ready-row constraint is initially `NOT VALID` so the
+schema can be deployed without rewriting historical rows; it still protects all
+new and changed rows. Validation is deferred until legacy disposition reaches
+zero. Migration 0060 adds a constrained `legacy_compilation_disposition` column
+with only `archived_terminal` and `recompile_required` states. A non-null
+disposition requires a mutable ciphertext, no immutable pointer, and a compatible
+call status. Successful recompilation clears the disposition atomically while
+installing the new immutable pointer; owner erasure clears it with the ciphertext.
+
+The item 11 maintenance command is `pnpm db:backfill:call-plans`. Its default is
+a read-only dry run that emits aggregate JSON only. Execution additionally
+requires `--execute` and
+`CALL_COMPILATION_BACKFILL_CONFIRM=BACKFILL_RECOVERABLE_CALL_COMPILATIONS`.
+It validates and decrypts the existing compilation, verifies the canonical hash,
+inserts or verifies the immutable revision, reconstructs an approval snapshot
+only when the historical compilation itself contains a valid `approvedAt`, and
+sets the current immutable pointer in the same row-locked transaction. Batches
+are limited to 1..500, committed independently, protected by an advisory
+transaction lock, and can be rerun safely. It never fabricates an approval or an
+attempt execution snapshot.
+
+Operational sequence for item 11:
+
+1. Deploy migrations 0050 through 0058 and the dual-read API/worker build; retain
+   the compatibility reader.
+2. Preserve a successful backup/recovery-drill record, then run the command
+   without arguments and retain its aggregate dry-run evidence.
+3. Set the exact confirmation value in the controlled job environment and run
+   `pnpm --filter @callassist/api db:backfill:call-plans -- --execute`.
+4. Run the default dry run again. `recoverableLegacyCalls` must be zero before
+   reader removal. The command reports aggregate decryption, compiler-version,
+   schema-path, hash, approval-state, and approval-snapshot failures without call
+   IDs or private content. Investigate any remainder rather than skipping or
+   rewriting the affected call.
+5. Run the recovery drill again and observe the admin cutover panel through at
+   least the maximum active-call window. Removal of compatibility code is a later
+   deployment, not part of the backfill deployment.
+
+The incompatible-record disposition command is
+`pnpm db:classify:legacy-call-plans`. It defaults to a read-only, aggregate-only
+dry run. Execution requires both `--execute` and
+`LEGACY_CALL_PLAN_CLASSIFICATION_CONFIRM=CLASSIFY_INCOMPATIBLE_LEGACY_CALL_PLANS`.
+Before writing, it reuses the full backfill validator and refuses to run if any
+valid compilation remains or if a recompilation is active. Terminal calls become
+`archived_terminal`; only `review_required`, `needs_clarification`, or `blocked`
+calls without attempts can become `recompile_required`. Any other candidate stays
+unclassified, keeps the cutover not ready, and makes execute fail.
+
+The local disposition run on 2026-09-05 was preceded by a successful recovery
+drill (60 migrations, 58 public tables, 10 encrypted samples verified). Its dry
+run found exactly eight invalid candidates, zero valid candidates, zero active
+recompilations, six terminal archive candidates, two draft recompilation
+candidates, and zero ambiguous candidates. Execute classified those exact rows.
+The post-run dry run found zero remaining candidates; the admin facts are now
+`recoverableLegacyCalls=0`, `archivedLegacyCalls=6`,
+`recompileRequiredCalls=2`, and `activeLegacyAttempts=0`. The 15 terminal records
+without any recoverable compilation remain an explicit historical-data limitation
+and are not execution candidates.
+
+With the recoverable count at zero, the normal repository reader no longer
+decrypts or parses `call_briefs.compilation_ciphertext`. `CallCompilation` is
+returned only from the immutable `call_compilations` row selected by
+`current_compilation_id`. The maintenance backfill command retains its explicit,
+offline encrypted-legacy reader so a restored older database can still be
+upgraded; it is not reachable from call approval, attempt reservation, Realtime,
+or the public snapshot API. Approval and attempt reservation now use the already
+validated immutable ID directly, and attempt reservation no longer synthesizes a
+missing approval snapshot.
+
+The active legacy-attempt count was also zero, so the Realtime media adapter now
+accepts only a token bound to all three values: call brief ID, call attempt ID,
+and immutable compilation hash. The call-ID-only HMAC generator/validator and
+the fallback that rebuilt an execution snapshot from a current call snapshot
+have been removed. A late pre-migration media stream therefore fails closed
+instead of reconstructing task instructions from mutable state.
+
+New call creation, recompilation, and approval no longer dual-write the compiled
+plan into `call_briefs.compilation_ciphertext`; the immutable revision and approval
+tables are the sole write target. Normal brief queries project the legacy column
+as SQL `NULL` and do not fetch its encrypted value. Migration 0061 validates the
+previously deferred `ready`-brief constraint and documents the column as a
+deprecated historical/offline-maintenance projection. Dropping the column remains
+a later retention decision because doing so would destroy historical encrypted
+evidence rather than merely remove an execution path.
+The local post-cutover verification reports 61 migrations, zero backfill or
+classification candidates, and a successful recovery drill across 58 public
+tables with all 10 sampled encrypted records readable.
+
+Deployment rehearsal on 2026-09-05 applied migrations 0050–0057 first to an
+isolated restored clone and then to the local source database, verified a no-op
+second pass, and passed the full post-migration recovery drill. A real-provider
+call proved immutable attempt binding, compiler/Realtime/Twilio raw usage capture,
+provider-reported Twilio connectivity cost, calculated OpenAI cost, and provider-ID
+deduplication. It did **not** pass the end-to-end release gate: the Russian consent
+flow produced one unclear transcription and the media stream ended during the
+clarification before consent, task execution, recording, or post-call processing.
+The strict settlement inspection failed accordingly. Detailed privacy-safe evidence
+and the required repeat criteria are in `docs/real-provider-drills.md`.
+The recipient subsequently confirmed the first call had been missed and explicitly
+authorized one repeat. The repeat passed strict settlement: consent, task execution,
+recording, channel-aware post-call transcription, provider reconciliation, and
+zero-day deletion all completed. The run also revealed and corrected a legacy
+fallback undercount: Realtime-per-minute estimates now include the pre-consent
+`realtime.ready`-to-attempt-end interval instead of relying only on recording length.
+
+## Why this roadmap exists
+
+The original audited path replaced stored runtime `objective`, `context`, and
+`allowedFacts` with a compiled projection, but the boundary was implicit:
+Realtime still accepted a `CallBrief`, approval was not bound to the exact reviewed
+revision, some user-controlled identity text was added outside the compiled plan,
+and provider usage was not durable. The implementation above closes those normal
+execution paths. Raw task content remains available only in the owner-facing brief
+and encrypted immutable compilation history for editing, recompilation, history,
+export, and controlled audit.
+
+The target invariant is:
+
+```text
+untrusted brief
+  -> bounded input
+  -> moderation and compilation
+  -> local schema, policy, and identifier validation
+  -> reviewed immutable execution snapshot
+  -> approval of that exact hash
+  -> call attempt bound to that snapshot
+  -> Realtime execution and durable provider usage
+```
+
+## Non-negotiable invariants
+
+1. Realtime cannot accept a raw call brief as task instructions.
+2. A call attempt always identifies the exact approved compilation it executes.
+3. The operator approves every task-specific field that can affect the call.
+4. Provider usage is recorded even when the enclosing business operation fails.
+5. Provider retries are bounded across the complete durable operation, not reset
+   for every worker attempt.
+6. Raw usage, pricing assumptions, and calculated monetary cost remain separate.
+7. Historical records with unavailable usage are `unknown`, never zero.
+
+## Release classes
+
+- **Production blocker:** items 1 through 7. These establish the execution trust
+  boundary, immutable approval, bounded retries, and minimum actual usage capture.
+- **Public-beta requirement:** item 8 and the beta subset of items 9 and 10.
+- **Can follow a limited invite alpha:** advanced admin percentiles, invoice
+  reconciliation, document upload, answering-machine detection, and historical
+  usage backfill that cannot be reconstructed exactly.
+
+## 1. Explicit `ApprovedExecutionSnapshot`
+
+### Objective
+
+Replace the semantic overloading of `CallBrief` with an explicit runtime contract.
+Realtime must receive a reviewed call plan and a narrow set of trusted technical
+metadata, never a raw user form object.
+
+### Contract
+
+The execution snapshot contains only:
+
+- compilation schema version, revision, and snapshot hash;
+- call locale and approved spoken identities;
+- localized objective and background summary;
+- mandatory opening;
+- ordered questions and required flags;
+- conditional follow-ups;
+- success, unresolved, and stop criteria;
+- approved call-language facts and protected identifiers;
+- application-owned policy controls;
+- tone, addressing, result handling, refusal, and voicemail behaviour.
+
+Technical runtime metadata remains separate:
+
+- call, attempt, compilation, and provider stream identifiers;
+- trusted assistant profile and voice;
+- locale-switch policy;
+- static disclosure, consent, recording, and retention policy;
+- audio format, VAD, timeout, and model settings.
+
+Phone number is telephony metadata and must not enter the model prompt. Raw
+objective, context, facts, clarification answers, delivery instructions, and raw
+identity strings are forbidden in the Realtime API surface.
+
+### Work
+
+- Add versioned schemas and types under `packages/contracts`.
+- Add one canonical projection function from a validated compilation.
+- Make prompt builders accept the new contract rather than `CallBrief`.
+- Add compile-time and runtime tests proving raw fields cannot be supplied.
+- Keep a temporary legacy adapter only for already-active legacy attempts.
+
+### Definition of done
+
+- No new-call Realtime function accepts `RawCallBrief` or `CallBrief`.
+- The snapshot schema rejects missing revision/hash and unapproved plans.
+- Characterization tests prove every required compiled field is preserved.
+- Raw injection markers used in fixtures are absent from all Realtime messages.
+
+## 2. Immutable compilation and approval by hash
+
+### Objective
+
+Make every compilation revision reconstructable and bind approval to the exact
+content shown to the operator.
+
+### Data model
+
+- Add append-only `call_compilations` rows keyed by call and revision.
+- Store encrypted raw brief, compiled plan, execution projection, policy decision,
+  compiler/model versions, provider response ID, and canonical snapshot hash.
+- Add immutable `call_compilation_approvals` keyed by compilation ID.
+- Approval input is `{ revision, snapshotHash }`; while holding the call row lock,
+  the server resolves that unique pair to `compilationId` and stores the ID in the
+  immutable approval and attempt records.
+- Never mutate an approved compilation; editing creates a new revision.
+
+### Compatibility
+
+- Dual-write the current encrypted blob and the new tables during rollout.
+- Backfill the latest recoverable legacy compilation only and mark it as backfilled.
+- Do not invent lost historical revisions.
+
+### Definition of done
+
+- Concurrent recompile/approve tests cannot approve an unseen revision.
+- Database triggers prevent logical compilation and approval mutation/deletion,
+  with a ciphertext-only exception for key rotation and owner erasure.
+- Audit/export can reconstruct the exact approved plan.
+
+## 3. Attempt-bound Realtime
+
+### Objective
+
+Ensure the media stream can execute only the compilation selected when the call
+attempt was reserved.
+
+### Work
+
+- Add `call_attempts.compilation_id` and execution snapshot hash.
+- Atomically verify approval and bind the compilation inside `startAttempt`.
+- Bind the Twilio stream token to call ID, attempt ID, compilation hash, and expiry.
+- Resolve Realtime state by active attempt/provider Call SID, not by mutable current
+  call-brief state.
+- Reject absent, terminal, mismatched, unapproved, or expired streams.
+- Remove the legacy opening fallback for all new attempts.
+
+### Definition of done
+
+- Recompilation cannot affect an existing attempt.
+- A token for revision N cannot start revision N+1.
+- Restart/reconciliation still resolves the same execution snapshot.
+
+## 4. Complete runtime validation, moderation, and identifier integrity
+
+### Objective
+
+Validate exactly what Realtime will execute and preserve critical identifiers.
+
+### Work
+
+- Serialize one canonical execution projection and send that exact projection to
+  output moderation.
+- Include follow-up conditions, success/unresolved/stop criteria, prohibited
+  actions, and every other runtime string.
+- Replace model-generated free-text policy guardrails with trusted policy codes
+  expanded by application-owned copy wherever possible.
+- Validate recipient and represented-person spoken identities locally or include
+  their approved forms in the reviewed compiled plan.
+- Extract protected identifiers locally from source facts: case/reference IDs,
+  email addresses, phone numbers, dates, postal addresses, and names.
+- Require exact preservation for opaque identifiers. Store canonical and approved
+  spoken renderings separately where natural-language rendering is necessary.
+- Show source and spoken fact text side by side in review.
+
+### Definition of done
+
+- Injection placed in any raw field cannot reach a Realtime message unchanged.
+- Injection placed in an omitted compiled field is detected by full-output checks.
+- Mutation or loss of a protected identifier blocks approval.
+- The operator can verify every execution-relevant field.
+
+## 5. Retry classification and cumulative request budget
+
+### Objective
+
+Retry transient provider failures without replaying terminal semantic or
+configuration failures and without multiplicative cost amplification.
+
+### Error policy
+
+- Retryable: timeout/network, HTTP 408, documented transient 409, HTTP 429 with
+  `Retry-After`, and HTTP 5xx.
+- Terminal: ordinary OpenAI 4xx, authentication/authorization, missing model or
+  endpoint, permanent configuration, input moderation rejection, model refusal,
+  invalid structured output after one correction, internal schema mismatch, and
+  invalid media such as empty/oversized audio.
+- A malformed successful HTTP response may receive one transport retry; a second
+  malformed response is terminal and both attempts remain visible.
+
+### Work
+
+- Add typed `retryDisposition`, provider stage, status, and error code.
+- Persist request counters on the logical preparation/recompilation operation.
+- Enforce one cumulative budget across worker attempts.
+- Honour provider backoff with jitter.
+- Give recompilation the same durable idempotency boundary as initial preparation.
+- Record ambiguous requests separately because a timed-out request may have been
+  processed and billed by the provider.
+
+### Initial safety budget
+
+Start with at most four Responses submissions and four moderation submissions per
+compilation revision. Revisit only after production measurements and evaluation.
+
+### Implemented increment
+
+- `call_preparation_requests.provider_request_count` persists the cumulative
+  budget across worker restarts and durable attempts.
+- The compiler reserves budget before each HTTP request, including transport
+  retries, and refuses to call the provider when reservation is denied.
+- `OPENAI_REQUEST_BUDGET_EXHAUSTED` is terminal and maps to the existing
+  privacy-safe unavailable result at the public preparation boundary.
+- Initial preparation and recompilation are covered. Both reserve provider requests
+  against their preparation-scoped cumulative budget, retain billable failed usage,
+  and use the same durable retry classification.
+
+### Definition of done
+
+- Terminal failures never re-enter the durable queue automatically.
+- Schema correction does not trigger a second complete durable compilation.
+- Request counts remain bounded after worker restart and lease replay.
+
+## 6. Raw usage ledger
+
+### Objective
+
+Persist immutable provider facts independently of calculated money and business
+success.
+
+### Data model
+
+- `provider_operations`: logical run, actual HTTP request, Realtime session/response,
+  telephony leg/recording, or transcription chunk, with parent-child correlation.
+- `usage_records`: token, cached token, cache-write, reasoning, text/audio/image,
+  duration, billable duration, and request-count facts returned by providers.
+- Link usage to preparation even if no call is created; additionally link to
+  compilation, call, attempt, job attempt, session, or recording where applicable.
+- Preserve provider response/request/session/SID identifiers as deduplication keys.
+- Keep raw provider usage JSON in a bounded schema-versioned column for forward
+  compatibility; never store prompts or transcripts there.
+
+### Write semantics
+
+- Write usage immediately after a provider response/event is parsed and before
+  downstream schema validation or business-state publication.
+
+### Implemented compiler and Realtime slices
+
+- `provider_operations` records physical request identity, requested model,
+  stage, preparation, durable job generation, and start time. A reserved row
+  without a result explicitly represents an ambiguous crash/interruption.
+- `provider_operation_results` records one deduplicated outcome, provider
+  request/response IDs, actual returned model, HTTP status, duration, and a
+  bounded error code.
+- `provider_usage_records` stores request count plus independent text, cached,
+  reasoning, audio, and duration dimensions. Compiler Responses currently fill
+  only counters actually returned by the API; moderation tokens remain unknown.
+- `provider_cost_records` separately stores immutable provider-reported monetary
+  facts. Twilio Call connectivity price is keyed by Call SID and component,
+  preserves its signed raw amount for audit, stores a positive integer micros
+  value, and never converts currencies implicitly.
+- The bounded raw `usage` object is retained for forward-compatible parsing,
+  while prompts, brief content, and provider error bodies are never stored.
+- The normalized Responses mapping follows the official API fields
+  [`input_tokens`, cached/cache-write input details, `output_tokens`, reasoning
+  details, and `total_tokens`](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+- Realtime `response.done` records response status/model plus the returned text,
+  audio, cached-text, cached-audio, output, and total token counters. Cancelled,
+  failed, and incomplete responses retain any usage already returned.
+- Realtime input-audio transcription completion records either its token
+  breakdown or processed seconds, exactly matching the provider usage variant.
+- Main and consent-transcription sessions are reserved together before either
+  WebSocket is opened. Child operations reference their exact session, and stable
+  provider response/event IDs converge replay on one immutable operation.
+- All three tables reject update/delete at the database boundary and are included
+  in the recovery drill's critical-table set.
+- Usage insertion must not roll back with call creation, compilation validation, or
+  final transcript assembly.
+- Duplicate provider events converge on one record.
+- Missing usage is `unknown`; an app-side duration estimate is a separate fact.
+
+### Definition of done
+
+- Failed preparation and failed call/session retain already incurred usage.
+- Idempotent replay cannot double-count a provider response.
+- Distinct provider retries are never incorrectly deduplicated.
+
+## 7. Provider instrumentation
+
+### Brief compiler
+
+Capture model, response ID, input/cached/cache-write/output/total/reasoning tokens,
+logical schema attempt, correction count, transport retry, moderation request count,
+duration, and terminal status.
+
+### Realtime
+
+Capture both the main and consent-transcription WebSocket sessions. Record model,
+session attempt, response ID/status, text/audio/image input, cached input details,
+text/audio output, local session duration, and disconnect/reconnect reason. Record
+cancelled, failed, and incomplete responses when usage is present.
+
+### Twilio
+
+Capture Call SID/Recording SID, connected seconds, provider billed duration, start,
+end and queue times, final call and recording price/currency, and webhook sequence
+metadata. Provider-reported Call price covers connectivity only; recording and other
+features remain separate components.
+
+Implemented: outbound leg reservation, Call SID deduplication, terminal callback
+`CallDuration`, billed callback `Duration`, callback timestamp/sequence, REST
+reconciliation of connected seconds, and a dedicated durable reconciliation for
+eventually consistent final Call connectivity price/currency. Missing final price
+retries with bounded backoff; malformed or permanent authentication/not-found
+responses are terminal. Pending: recording price and explicit queue/start/end
+timestamps.
+
+### Post-call transcription
+
+Capture response usage exactly as returned: token breakdown or processed seconds,
+model, request ID, chunk duration/hash/index, retry, and total duration.
+
+### Definition of done
+
+- A single call can be reconciled from preparation through every provider operation.
+- Instrumentation failure is observable and does not silently convert usage to zero.
+- Admin coverage reports actual/calculated/fallback/unknown proportions.
+
+## 8. Resumable transcription chunks
+
+### Objective
+
+Do not retranscribe successful dual-channel utterances when one chunk fails.
+
+### Work
+
+- Persist chunk identity as recording ID, transcript generation, chronological
+  index, role, and audio hash.
+- Persist encrypted chunk text and its provider operation immediately.
+- On retry, load completed chunks and submit only missing/retryable chunks.
+- Assemble the final transcript only after every required chunk succeeds.
+- Keep the one-request full-recording path for mono/unsupported media.
+
+### Definition of done
+
+- A failure in chunk N does not resubmit chunks 1 through N-1.
+- Partial chunks never appear as a completed final transcript.
+- Usage of every successful and failed attempt is retained.
+
+## 9. Existing administrator cost/usage section
+
+### Objective
+
+Extend the existing operations dashboard instead of creating a competing telemetry
+system.
+
+### Beta scope
+
+- Per preparation/call: compilation, Realtime text, Realtime audio, Realtime input
+  transcription, telephony connectivity, recording, post-call transcription, total.
+- Show underlying units, provider/model, attempts/retries, and cost basis.
+- Aggregate preparation/call/success/failure counts, connected/billed minutes,
+  average duration, compiler and Realtime token totals, transcription usage, total
+  spend, average preparation/call/successful-call cost, component/provider/model
+  breakdown, time trend, and usage coverage.
+- Add incurred-at aggregation; retain call-created cohort for operational outcomes.
+
+Implemented aggregate slice: the existing dashboard now keeps configured
+per-minute estimates, token/duration-based list-price calculations, and
+provider-reported actual charges as three visibly separate views. Reported
+currencies are grouped independently; the USD total never absorbs CHF/EUR through
+an implicit exchange rate. The existing Call Inspector now exposes the same
+breakdown for one call and includes compiler operations linked through that call's
+preparation. Recent durable jobs link to a dedicated privacy-safe Preparation
+Inspector, so failed compilation usage remains inspectable even without a call ID.
+A complete paginated preparation history and coverage ratios remain pending.
+
+### Later scope
+
+- p50/p95 cost, anomaly detection, destination/SKU analysis, CSV export, and invoice
+  reconciliation drill-down.
+
+### Definition of done
+
+- Estimates are never labelled actual.
+- Failed preparations are visible even without a call ID.
+- Historical unknown usage is excluded from averages or shown with explicit coverage.
+
+## 10. Input UX and further analytics
+
+### Beta input policy
+
+- Reuse exported server constants in the form.
+- Preserve current per-field limits initially.
+- Add a 16,000-character soft warning and a 20,000-code-point hard aggregate limit
+  across objective, context, allowed facts, clarification answers, and delivery
+  instruction.
+- Count after trim, Unicode NFC normalization, and line-ending normalization.
+- Enforce the same function on the API; arrays cannot bypass the aggregate limit.
+- Add `maxLength`, per-field counters, a total counter, fact-count limits, and
+  field-specific API errors.
+
+Implemented for the current textarea workflow. The hard aggregate budget is a
+server-side invariant and therefore cannot be bypassed by direct API calls or by
+splitting text across facts/clarification answers. Browser counters are an early
+UX guard, not the security boundary.
+
+Twenty thousand is intentionally above the initial 12–16k guideline: the currently
+supported 12k context plus 4k objective already consumes 16k and leaves no room for
+facts needed in Gemeinde, Krankenkasse, school, social-service, and medical use
+cases.
+
+### Long documents
+
+Move larger documents to a later upload/extraction/OCR/summarization pipeline with
+its own file, security, moderation, token, citation, identifier, and approval
+budgets. Never place a complete uploaded document in Realtime instructions.
+
+### Definition of done
+
+- Browser and direct API enforce identical limits.
+- Unicode and whitespace handling is deterministic.
+- Oversized input produces actionable field and aggregate errors.
+
+## Pricing and calculated cost
+
+Raw usage is immutable. Monetary calculation uses separate versioned tables:
+
+- `pricing_rates`: provider, model/SKU, usage metric, unit scale, currency,
+  effective interval, source, and version;
+- `cost_records`: usage record, rate/version, amount/currency, calculation time, and
+  basis (`provider_reported_actual`, `calculated`, `fallback_estimate`, `unknown`).
+
+Evolution of current configured per-minute rates:
+
+- Realtime USD/min becomes a legacy fallback when token usage is missing.
+- Telephony USD/min remains a fallback until Twilio final price is available.
+- Transcription USD/min remains valid only for duration-priced models and as a
+  fallback for legacy records.
+- Compiler pricing is added from versioned token rates.
+- No provider prices are hardcoded in business logic.
+
+## Migration and rollout sequence
+
+1. Characterization tests and explicit execution contracts.
+2. Full canonical runtime projection and validation.
+3. Add immutable compilation/approval schema and dual writes.
+4. Bind attempts and media streams to compilation IDs/hashes.
+5. Introduce retry dispositions and cumulative budgets.
+6. Add provider operation, usage, pricing, and cost ledgers.
+7. Instrument compiler, Realtime, Twilio, and transcription.
+8. Make transcription chunks resumable.
+9. Extend admin APIs and UI.
+10. Add shared input limits/counters and advanced analytics.
+11. Backfill recoverable legacy records and cut over readers.
+12. Remove mutable/legacy execution paths after active legacy work drains.
+
+Production rollout must preserve the two cutover boundaries represented by the
+commits; do not deploy branch HEAD directly to an unprepared database:
+
+1. Deploy through `73da326` (migrations through 0060) while retaining the bounded
+   readers/adapters. In external-worker mode, drain and replace old workers first.
+2. Run the compilation backfill dry-run/execute/dry-run sequence. Then run the
+   incompatible-plan classification dry-run/execute/dry-run sequence.
+3. Require `recoverableLegacyCalls=0`, `activeLegacyAttempts=0`,
+   `activeRecompilations=0`, `executableLegacyCalls=0`, and no ambiguous
+   classification candidates. Run `pnpm db:verify:call-plan-cutover` and preserve
+   its aggregate evidence together with the recovery-drill evidence.
+4. Only then deploy the final reviewed release containing `922de05` and migration
+   0061. It validates the historical `ready`-brief constraint and removes the
+   mutable reader, dual-write, legacy media-token adapter, and snapshot
+   reconstruction fallback. The read-only gate command can be run from the final
+   built artifact before invoking its migration entry point.
+5. Deploy the web build after the API and verify the two `recompile_required`
+   drafts can submit a new immutable plan. Monitor rejected media streams,
+   compilation-integrity failures, usage-ledger persistence failures, and provider
+   reconciliation lag.
+
+The database trigger prevents new call-attempt insertion without an immutable
+plan, but it is not a substitute for this worker/data cutover order.
+
+The release gate is implemented as `pnpm db:verify:call-plan-cutover`, is included
+in the production API artifact, and runs in CI after fresh-schema migration. The
+local populated database returns `ready=true` with an empty blocker list. The
+migration runner independently checks the same blockers after migration 0060 and
+before applying migration 0061, so a direct full-catalog migration fails closed on
+an unprepared database. The standalone command remains mandatory release evidence.
+During the same gate pass, patched transitive `fast-uri` and `qs` versions removed all
+known production dependency advisories; the frozen install and production audit
+now pass with the system certificate store enabled.
+
+## Test matrix
+
+At minimum cover:
+
+- raw task fields and injection markers absent from Realtime;
+- every required compiled field present;
+- approved revision/hash compare-and-set and attempt binding;
+- protected identifiers preserved;
+- direct API and frontend limit parity, arrays, Unicode, and whitespace;
+- retryable versus terminal provider errors and cumulative budgets;
+- every billable compiler attempt, Realtime response/session, Twilio leg/recording,
+  and transcription chunk;
+- failure-path usage retention and duplicate-event convergence;
+- reconnect and multi-session aggregation;
+- actual/calculated/fallback/unknown admin totals and averages;
+- migration, dual-read/write, active-job compatibility, export, and deletion.
+
+## Risks intentionally left outside this roadmap
+
+- Legal/privacy launch approval and production infrastructure readiness remain in
+  `docs/mvp-plan.md`.
+- Answering-machine detection and automatic redial require separate product policy.
+- Historical provider usage that was never captured cannot be reconstructed exactly.
+- Full app-level encryption of remaining searchable PII requires a separate threat
+  model and blind-index design.
+- A long-document upload pipeline is a separate product and security project.

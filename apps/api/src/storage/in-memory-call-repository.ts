@@ -11,6 +11,7 @@ import {
   callOutcomeRevisionSchema,
   callOutcomeViewSchema,
   callTelemetryEventInputSchema,
+  createApprovedExecutionSnapshot,
   deriveTechnicalCallOutcome,
   describeCallTelemetryEvent,
   durableCallEventSchema,
@@ -20,11 +21,13 @@ import {
   semanticOutcomeForGoalResult,
   sensitiveCallAccessInputSchema,
   type AdminCallSummary,
+  type ApprovedExecutionSnapshot,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
   type CallPreparation,
   type CallCompilation,
+  type CompilationApprovalInput,
   type CallFeedbackRevision,
   type CallOutcomeMetrics,
   type CallOutcomeRevision,
@@ -46,6 +49,8 @@ import {
 } from "@callassist/contracts";
 import {
   CallRepositoryError,
+  createTelephonyLegResult,
+  assertCompilationIntegrity,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
   creditSettlementForStatus,
@@ -57,17 +62,22 @@ import {
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
+  type AdminProviderCostBucket,
+  type AdminProviderUsageBucket,
   type AdminSystemFacts,
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
   type CallAttemptRecord,
   type CallChangeSignal,
+  type CompleteProviderOperationInput,
+  type CompletePostCallTranscriptionProviderOperationInput,
   type CallRepository,
   type CallPreparationPublication,
   type CallDataDeletionRecord,
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
   type EnqueueCallPreparationRepositoryInput,
+  type EnqueueCallRecompilationRepositoryInput,
   type ListCallBriefsInput,
   type ListRecipientSuggestionsInput,
   type ListAdminCallsInput,
@@ -78,6 +88,19 @@ import {
   type StartAttemptInput,
   type ProviderWebhookDeliveryInput,
   type ProviderWebhookKind,
+  type ProviderOperationRecord,
+  type ProviderOperationReservationInput,
+  type PostCallTranscriptionProviderOperationInput,
+  type PostCallTranscriptionProviderOperationRecord,
+  type PostCallTranscriptionChunkLookupInput,
+  type RealtimeProviderOperationInput,
+  type RealtimeProviderOperationRecord,
+  type RealtimeProviderSessionInput,
+  type TelephonyLegUsageInput,
+  type TelephonyProviderCostInput,
+  type TelephonyProviderOperationInput,
+  type TelephonyProviderOperationRecord,
+  type ProviderCostRecord,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 import {
@@ -136,10 +159,14 @@ type StoredWorkerHeartbeat = DurableWorkerHeartbeatInput & {
 
 type StoredCallPreparation = {
   preparation: Omit<CallPreparation, "attemptCount">;
-  userId: string;
+  userId: string | null;
   idempotencyKey: string;
   inputFingerprint: string;
   input: CreateCallBriefInput | null;
+  providerRequestCount: number;
+  targetCallBriefId: string | null;
+  expectedCompilationId: string | null;
+  targetRevision: number;
 };
 
 const interruptedStatuses = new Set<CallBrief["status"]>([
@@ -175,8 +202,34 @@ export class InMemoryCallRepository implements CallRepository {
     { callId: string; userId: string | null }
   >();
   readonly #callPreparations = new Map<string, StoredCallPreparation>();
+  readonly #providerOperations = new Map<
+    string,
+    | ProviderOperationRecord
+    | PostCallTranscriptionProviderOperationRecord
+    | RealtimeProviderOperationRecord
+    | TelephonyProviderOperationRecord
+  >();
+  readonly #providerCosts = new Map<string, ProviderCostRecord>();
+  readonly #postCallTranscriptionChunks = new Map<
+    string,
+    PostCallTranscriptionChunkLookupInput & {
+      providerOperationId: string;
+      text: string;
+    }
+  >();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
+  readonly #compilations = new Map<
+    string,
+    Array<{
+      id: string;
+      revision: number;
+      snapshotHash: string;
+      compilation: CallCompilation | null;
+      approvedAt: string | null;
+      executionSnapshot: ApprovedExecutionSnapshot | null;
+    }>
+  >();
   readonly #callTelemetryEvents = new Map<
     string,
     StoredCallTelemetryEvent[]
@@ -308,6 +361,7 @@ export class InMemoryCallRepository implements CallRepository {
     creationIdempotencyKey: string = randomUUID(),
     publication?: CallPreparationPublication
   ) {
+    assertCompilationIntegrity(compilation);
     let preparation: StoredCallPreparation | null = null;
     if (publication) {
       this.#assertDurableJobLease(publication.lease);
@@ -362,6 +416,7 @@ export class InMemoryCallRepository implements CallRepository {
     };
 
     this.#calls.set(brief.id, {
+      executionPlanSource: "immutable",
       brief,
       compilation: copy(compilation),
       transcript: [],
@@ -369,6 +424,14 @@ export class InMemoryCallRepository implements CallRepository {
       recording: null,
       finalTranscript: null
     });
+    this.#compilations.set(brief.id, [{
+      id: randomUUID(),
+      revision: compilation.revision,
+      snapshotHash: compilation.snapshotHash,
+      compilation: copy(compilation),
+      approvedAt: null,
+      executionSnapshot: null
+    }]);
     this.#owners.set(brief.id, userId);
     this.#creationRequests.set(
       creationIdempotencyKey,
@@ -411,7 +474,10 @@ export class InMemoryCallRepository implements CallRepository {
     const existingId = this.#callPreparationRequests.get(requestKey);
     if (existingId) {
       const existing = this.#callPreparations.get(existingId)!;
-      if (existing.inputFingerprint !== input.inputFingerprint) {
+      if (
+        existing.inputFingerprint !== input.inputFingerprint ||
+        existing.targetCallBriefId !== null
+      ) {
         throw new CallRepositoryError(
           "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
         );
@@ -433,7 +499,101 @@ export class InMemoryCallRepository implements CallRepository {
       userId: input.userId,
       idempotencyKey: input.idempotencyKey,
       inputFingerprint: input.inputFingerprint,
-      input: copy(input.input)
+      input: copy(input.input),
+      providerRequestCount: 0,
+      targetCallBriefId: null,
+      expectedCompilationId: null,
+      targetRevision: 1
+    };
+    this.#callPreparations.set(id, stored);
+    this.#callPreparationRequests.set(requestKey, id);
+    try {
+      await this.enqueueDurableJob({
+        type: "brief_compilation",
+        callPreparationId: id,
+        runAfter: input.now,
+        maxAttempts: durableJobMaxAttempts.brief_compilation
+      });
+    } catch (error) {
+      this.#callPreparations.delete(id);
+      this.#callPreparationRequests.delete(requestKey);
+      throw error;
+    }
+    return this.#mapCallPreparation(stored);
+  }
+
+  async enqueueCallRecompilation(
+    input: EnqueueCallRecompilationRepositoryInput
+  ) {
+    const requestKey = `${input.userId}:${input.idempotencyKey}`;
+    const existingId = this.#callPreparationRequests.get(requestKey);
+    if (existingId) {
+      const existing = this.#callPreparations.get(existingId)!;
+      if (
+        existing.inputFingerprint !== input.inputFingerprint ||
+        existing.targetCallBriefId !== input.callBriefId
+      ) {
+        throw new CallRepositoryError(
+          "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+        );
+      }
+      return this.#mapCallPreparation(existing);
+    }
+
+    const snapshot = this.#calls.get(input.callBriefId);
+    if (
+      !snapshot ||
+      this.#owners.get(input.callBriefId) !== input.userId ||
+      this.#callDataDeletions.has(input.callBriefId)
+    ) {
+      throw new CallRepositoryError("CALL_NOT_FOUND");
+    }
+    if (
+      !["review_required", "needs_clarification", "blocked", "ready"].includes(
+        snapshot.brief.status
+      ) ||
+      (this.#attempts.get(input.callBriefId)?.length ?? 0) > 0
+    ) {
+      throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
+    }
+    const active = [...this.#callPreparations.values()].find(
+      (stored) =>
+        stored.targetCallBriefId === input.callBriefId &&
+        ["queued", "processing", "retrying"].includes(
+          stored.preparation.status
+        )
+    );
+    if (active) {
+      throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+    }
+    const currentCompilation = (this.#compilations.get(input.callBriefId) ?? [])
+      .find((stored) =>
+        stored.revision === snapshot.compilation?.revision &&
+        stored.snapshotHash === snapshot.compilation?.snapshotHash
+      );
+    if (!currentCompilation || !snapshot.compilation) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+
+    const id = randomUUID();
+    const stored: StoredCallPreparation = {
+      preparation: {
+        id,
+        status: "queued",
+        callBriefId: null,
+        failureCode: null,
+        createdAt: input.now,
+        updatedAt: input.now,
+        completedAt: null
+      },
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      inputFingerprint: input.inputFingerprint,
+      input: copy(input.input),
+      providerRequestCount: 0,
+      targetCallBriefId: input.callBriefId,
+      expectedCompilationId: currentCompilation.id,
+      targetRevision: snapshot.compilation.revision + 1
     };
     this.#callPreparations.set(id, stored);
     this.#callPreparationRequests.set(requestKey, id);
@@ -457,16 +617,25 @@ export class InMemoryCallRepository implements CallRepository {
     return stored?.userId === userId ? this.#mapCallPreparation(stored) : null;
   }
 
+  async getAdminCallPreparation(id: string) {
+    const stored = this.#callPreparations.get(id);
+    return stored ? this.#mapCallPreparation(stored) : null;
+  }
+
   async findCallPreparationByRequest(
-    userId: string,
+    userId: string | null,
     idempotencyKey: string,
-    inputFingerprint: string
+    inputFingerprint: string,
+    targetCallBriefId: string | null = null
   ) {
     const id = this.#callPreparationRequests.get(`${userId}:${idempotencyKey}`);
     if (!id) return null;
     const stored = this.#callPreparations.get(id);
     if (!stored) return null;
-    if (stored.inputFingerprint !== inputFingerprint) {
+    if (
+      stored.inputFingerprint !== inputFingerprint ||
+      stored.targetCallBriefId !== targetCallBriefId
+    ) {
       throw new CallRepositoryError("CALL_PREPARATION_IDEMPOTENCY_CONFLICT");
     }
     return this.#mapCallPreparation(stored);
@@ -487,8 +656,313 @@ export class InMemoryCallRepository implements CallRepository {
       preparation: this.#mapCallPreparation(stored),
       userId: stored.userId,
       idempotencyKey: stored.idempotencyKey,
-      input: stored.input
+      input: stored.input,
+      targetCallBriefId: stored.targetCallBriefId,
+      expectedCompilationId: stored.expectedCompilationId,
+      targetRevision: stored.targetRevision
     });
+  }
+
+  async reserveCallPreparationProviderRequest(
+    input: ProviderOperationReservationInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const job = this.#findDurableJob(lease.jobId);
+    const stored = this.#callPreparations.get(input.preparationId);
+    if (
+      !stored ||
+      job?.callPreparationId !== input.preparationId ||
+      stored.preparation.status !== "processing"
+    ) {
+      throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    }
+    if (this.#providerOperations.has(input.id)) return true;
+    if (stored.providerRequestCount >= input.maxRequests) return false;
+    const { preparationId, maxRequests: _maxRequests, ...operation } = input;
+    stored.providerRequestCount += 1;
+    stored.preparation.updatedAt = lease.checkedAt;
+    this.#providerOperations.set(input.id, {
+      ...copy(operation),
+      callPreparationId: preparationId,
+      durableJobId: lease.jobId,
+      result: null
+    });
+    return true;
+  }
+
+  async completeProviderOperation(input: CompleteProviderOperationInput) {
+    const stored = this.#providerOperations.get(input.operationId);
+    if (!stored) throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+    if (stored.result) return;
+    stored.result = copy({
+      outcome: input.outcome,
+      providerRequestId: input.providerRequestId,
+      providerResponseId: input.providerResponseId,
+      providerModel: input.providerModel,
+      statusCode: input.statusCode,
+      completedAt: input.completedAt,
+      durationMs: input.durationMs,
+      errorCode: input.errorCode,
+      usage: input.usage
+    });
+  }
+
+  async startRealtimeProviderSessions(inputs: RealtimeProviderSessionInput[]) {
+    for (const input of inputs) {
+      const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+        ({ id }) => id === input.callAttemptId
+      );
+      if (!attempt) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+    }
+    for (const input of inputs) {
+      if (this.#providerOperations.has(input.id)) continue;
+      this.#providerOperations.set(input.id, {
+        ...copy(input),
+        result: null
+      });
+    }
+  }
+
+  async recordRealtimeProviderOperation(
+    input: RealtimeProviderOperationInput
+  ) {
+    if (this.#providerOperations.has(input.id)) return;
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (!attempt) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    const parent = this.#providerOperations.get(input.parentOperationId);
+    if (
+      !parent ||
+      !("callAttemptId" in parent) ||
+      parent.callAttemptId !== input.callAttemptId ||
+      parent.callBriefId !== input.callBriefId ||
+      parent.operationType !== "realtime_session"
+    ) {
+      throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+    }
+    this.#providerOperations.set(input.id, copy(input));
+  }
+
+  async reservePostCallTranscriptionProviderRequest(
+    input: PostCallTranscriptionProviderOperationInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const job = this.#findDurableJob(lease.jobId);
+    const { callId, snapshot } = this.#requireRecording(input.recordingId);
+    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    if (
+      job?.type !== "final_transcription" ||
+      job.recordingId !== input.recordingId ||
+      job.generation !== input.durableJobGeneration ||
+      callId !== input.callBriefId ||
+      snapshot.finalTranscript?.status !== "processing" ||
+      !attempt
+    ) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
+    if (this.#providerOperations.has(input.id)) return;
+    this.#providerOperations.set(input.id, {
+      ...copy(input),
+      callAttemptId: attempt.id,
+      durableJobId: lease.jobId,
+      result: null
+    });
+  }
+
+  async findCompletedPostCallTranscriptionChunk(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertPostCallTranscriptionContext(input, lease);
+    return this.#postCallTranscriptionChunks.get(
+      postCallTranscriptionChunkKey(input)
+    )?.text ?? null;
+  }
+
+  async completePostCallTranscriptionProviderRequest(
+    input: CompletePostCallTranscriptionProviderOperationInput
+  ) {
+    const operation = this.#providerOperations.get(input.operationId);
+    if (
+      !operation ||
+      !("recordingId" in operation) ||
+      operation.operationType !== "transcription" ||
+      operation.callBriefId !== input.callBriefId ||
+      operation.recordingId !== input.recordingId ||
+      operation.durableJobGeneration !== input.durableJobGeneration ||
+      operation.stage !== input.stage
+    ) {
+      throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+    }
+    await this.completeProviderOperation(input);
+    const { snapshot } = this.#requireRecording(input.recordingId);
+    if (
+      input.outcome !== "succeeded" ||
+      !input.transcriptText ||
+      snapshot.recording?.status !== "available" ||
+      snapshot.finalTranscript?.status !== "processing"
+    ) return;
+    const chunk = {
+      callBriefId: input.callBriefId,
+      recordingId: input.recordingId,
+      durableJobGeneration: input.durableJobGeneration,
+      stage: input.stage,
+      chunkKey: input.chunkKey,
+      inputFingerprint: input.inputFingerprint,
+      requestedModel: operation.requestedModel,
+      providerOperationId: input.operationId,
+      text: input.transcriptText
+    };
+    this.#postCallTranscriptionChunks.set(
+      postCallTranscriptionChunkKey(chunk),
+      copy(chunk)
+    );
+  }
+
+  async startTelephonyProviderOperation(
+    input: TelephonyProviderOperationInput
+  ) {
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (!attempt || attempt.provider !== "twilio") {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    const existing = [...this.#providerOperations.values()].find(
+      (operation) =>
+        "callAttemptId" in operation &&
+        operation.callAttemptId === input.callAttemptId &&
+        operation.operationType === "telephony_leg"
+    );
+    if (existing) return;
+    this.#providerOperations.set(input.id, { ...copy(input), result: null });
+  }
+
+  async recordTelephonyLegUsage(input: TelephonyLegUsageInput) {
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (!attempt || attempt.providerCallId !== input.providerCallId) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    let operation = [...this.#providerOperations.values()].find(
+      (candidate): candidate is TelephonyProviderOperationRecord =>
+        "callAttemptId" in candidate &&
+        candidate.callAttemptId === input.callAttemptId &&
+        candidate.operationType === "telephony_leg"
+    );
+    if (!operation) {
+      operation = {
+        id: input.fallbackOperationId,
+        callBriefId: input.callBriefId,
+        callAttemptId: input.callAttemptId,
+        provider: "twilio",
+        operationType: "telephony_leg",
+        stage: "outbound_call",
+        requestedModel: "programmable_voice",
+        clientRequestId: input.fallbackOperationId,
+        startedAt: attempt.startedAt,
+        result: null
+      };
+      this.#providerOperations.set(operation.id, operation);
+    }
+    if (
+      !operation.result &&
+      (input.durationSeconds !== null || input.billableSeconds !== null)
+    ) {
+      operation.result = createTelephonyLegResult(input);
+    }
+    await this.enqueueDurableJob({
+      type: "provider_call_cost_reconciliation",
+      callAttemptId: input.callAttemptId,
+      runAfter: input.occurredAt,
+      maxAttempts: durableJobMaxAttempts.provider_call_cost_reconciliation
+    });
+  }
+
+  async recordTelephonyProviderCost(
+    input: TelephonyProviderCostInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
+      ({ id }) => id === input.callAttemptId
+    );
+    if (
+      !attempt ||
+      attempt.provider !== "twilio" ||
+      attempt.providerCallId !== input.providerCallId
+    ) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    let operation = [...this.#providerOperations.values()].find(
+      (candidate): candidate is TelephonyProviderOperationRecord =>
+        "callAttemptId" in candidate &&
+        candidate.callAttemptId === input.callAttemptId &&
+        candidate.operationType === "telephony_leg"
+    );
+    if (!operation) {
+      operation = {
+        id: input.fallbackOperationId,
+        callBriefId: input.callBriefId,
+        callAttemptId: input.callAttemptId,
+        provider: "twilio",
+        operationType: "telephony_leg",
+        stage: "outbound_call",
+        requestedModel: "programmable_voice",
+        clientRequestId: input.fallbackOperationId,
+        startedAt: attempt.startedAt,
+        result: null
+      };
+      this.#providerOperations.set(operation.id, operation);
+    }
+    const providerCostId = `${input.providerCallId}:connectivity`;
+    const existing = [...this.#providerCosts.values()].find(
+      (cost) => cost.operationId === operation.id ||
+        cost.providerCostId === providerCostId
+    );
+    if (existing) {
+      if (
+        existing.operationId !== operation.id ||
+        existing.amountMicros !== input.amountMicros ||
+        existing.currency !== input.currency ||
+        existing.rawCost.price !== input.rawAmount
+      ) {
+        throw new CallRepositoryError("PROVIDER_COST_CONFLICT");
+      }
+      return;
+    }
+    this.#providerCosts.set(input.id, {
+      id: input.id,
+      operationId: operation.id,
+      provider: "twilio",
+      providerCostId,
+      costBasis: "provider_reported_actual",
+      component: "connectivity",
+      amountMicros: input.amountMicros,
+      currency: input.currency,
+      rawCost: { price: input.rawAmount, price_unit: input.currency },
+      observedAt: input.observedAt
+    });
+  }
+
+  providerOperationsForTest(preparationId?: string) {
+    return copy([...this.#providerOperations.values()].filter((operation) =>
+      !preparationId ||
+      ("callPreparationId" in operation &&
+        operation.callPreparationId === preparationId)
+    ));
+  }
+
+  providerCostsForTest() {
+    return copy([...this.#providerCosts.values()]);
   }
 
   async cancelCallPreparations(userId: string, now: string) {
@@ -569,6 +1043,13 @@ export class InMemoryCallRepository implements CallRepository {
     if (!terminalStatuses.has(snapshot.brief.status)) {
       throw new CallRepositoryError("CALL_DATA_DELETION_NOT_AVAILABLE");
     }
+    if (snapshot.recording) {
+      for (const [key, chunk] of this.#postCallTranscriptionChunks) {
+        if (chunk.recordingId === snapshot.recording.id) {
+          this.#postCallTranscriptionChunks.delete(key);
+        }
+      }
+    }
 
     snapshot.brief = {
       ...snapshot.brief,
@@ -576,6 +1057,8 @@ export class InMemoryCallRepository implements CallRepository {
       phoneNumber: "",
       objective: "Deleted by owner",
       representedPerson: "Deleted account",
+      representedPersonFirstName: "Deleted",
+      representedPersonLastName: "Account",
       assistanceReason: "speech_impairment",
       assistanceDisclosure: "Deleted by owner",
       context: "",
@@ -583,6 +1066,10 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: input.deletedAt
     };
     snapshot.compilation = null;
+    for (const stored of this.#compilations.get(input.callId) ?? []) {
+      stored.compilation = null;
+      stored.executionSnapshot = null;
+    }
     snapshot.transcript = [];
     snapshot.pendingApproval = null;
     if (snapshot.recording) {
@@ -608,12 +1095,21 @@ export class InMemoryCallRepository implements CallRepository {
     for (const attempt of attempts) {
       attempt.providerCallId = null;
       attempt.failureReason = null;
+      attempt.compilationRevision = null;
+      attempt.compilationSnapshotHash = null;
+      attempt.executionSnapshot = null;
     }
     const feedback = this.#callFeedbackRevisions.get(input.callId) ?? [];
     for (const item of feedback) item.revision.comment = null;
     for (const job of this.#durableJobs.values()) {
+      const preparation = job.callPreparationId
+        ? this.#callPreparations.get(job.callPreparationId)
+        : null;
       if (
-        job.callId !== input.callId ||
+        (
+          job.callId !== input.callId &&
+          preparation?.targetCallBriefId !== input.callId
+        ) ||
         ["succeeded", "dead_letter", "cancelled"].includes(job.status)
       ) continue;
       if (job.status === "running") {
@@ -636,6 +1132,13 @@ export class InMemoryCallRepository implements CallRepository {
       job.lastErrorCode = "call_data_deleted";
       job.updatedAt = input.deletedAt;
       job.completedAt = input.deletedAt;
+      if (preparation) {
+        preparation.preparation.status = "cancelled";
+        preparation.preparation.failureCode = null;
+        preparation.preparation.updatedAt = input.deletedAt;
+        preparation.preparation.completedAt = input.deletedAt;
+        preparation.input = null;
+      }
     }
     const deletion: CallDataDeletionRecord = {
       requestId: input.requestId,
@@ -887,9 +1390,38 @@ export class InMemoryCallRepository implements CallRepository {
   async recompile(
     id: string,
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    publication?: CallPreparationPublication
   ) {
+    assertCompilationIntegrity(compilation);
     const snapshot = this.#require(id);
+    let preparation: StoredCallPreparation | null = null;
+    if (publication) {
+      this.#assertDurableJobLease(publication.lease);
+      preparation = this.#callPreparations.get(publication.preparationId) ?? null;
+      if (
+        !preparation ||
+        preparation.targetCallBriefId !== id ||
+        preparation.targetRevision !== compilation.revision ||
+        ["failed", "cancelled"].includes(preparation.preparation.status)
+      ) {
+        throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+      }
+      if (preparation.preparation.status === "succeeded") {
+        return copy(snapshot);
+      }
+      const currentCompilation = (this.#compilations.get(id) ?? []).find(
+        (stored) =>
+          stored.revision === snapshot.compilation?.revision &&
+          stored.snapshotHash === snapshot.compilation?.snapshotHash
+      );
+      if (
+        !currentCompilation ||
+        currentCompilation.id !== preparation.expectedCompilationId
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_STALE");
+      }
+    }
     if (
       !["review_required", "needs_clarification", "blocked", "ready"].includes(
         snapshot.brief.status
@@ -909,8 +1441,31 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: now
     };
     snapshot.compilation = copy(compilation);
+    const history = this.#compilations.get(id) ?? [];
+    history.push({
+      id: randomUUID(),
+      revision: compilation.revision,
+      snapshotHash: compilation.snapshotHash,
+      compilation: copy(compilation),
+      approvedAt: null,
+      executionSnapshot: null
+    });
+    this.#compilations.set(id, history);
     snapshot.pendingApproval = null;
     this.#appendCompilationTelemetry(id, compilation, now);
+    if (preparation && publication) {
+      preparation.preparation = {
+        ...preparation.preparation,
+        status: "succeeded",
+        callBriefId: id,
+        failureCode: null,
+        updatedAt: publication.lease.checkedAt,
+        completedAt: publication.lease.checkedAt
+      };
+      preparation.input = null;
+      const job = this.#findDurableJob(publication.lease.jobId);
+      if (job) job.callId = id;
+    }
     return copy(snapshot);
   }
 
@@ -1027,12 +1582,20 @@ export class InMemoryCallRepository implements CallRepository {
 
   async getAdminOperationsFacts(
     from: string,
-    to: string
+    to: string,
+    callId?: string,
+    preparationId?: string
   ): Promise<AdminOperationsFacts> {
     const scoped = [...this.#calls.values()].filter(({ brief }) =>
-      brief.createdAt >= from && brief.createdAt <= to
+      !preparationId &&
+      brief.createdAt >= from && brief.createdAt <= to &&
+      (!callId || brief.id === callId)
     );
     const facts = emptyAdminOperationsFacts();
+    facts.providerUsage.incurredFrom = from;
+    facts.providerUsage.incurredTo = to;
+    facts.providerCosts.incurredFrom = from;
+    facts.providerCosts.incurredTo = to;
     const durationValues: number[] = [];
     const firstAudioValues: number[] = [];
     for (const snapshot of scoped) {
@@ -1069,9 +1632,6 @@ export class InMemoryCallRepository implements CallRepository {
       const duration = snapshot.recording?.durationSeconds;
       if (duration !== null && duration !== undefined) {
         durationValues.push(duration);
-        if (events.some(({ payload }) => payload.name === "realtime.ready")) {
-          facts.usageSeconds.realtime += duration;
-        }
         if (events.some(
           ({ payload }) => payload.name === "transcription.started"
         )) {
@@ -1097,8 +1657,22 @@ export class InMemoryCallRepository implements CallRepository {
           facts.recoveries += 1;
         }
       }
+      let realtimeElapsedSeconds = 0;
       for (const attempt of attempts) {
         if (!attempt.endedAt) continue;
+        const realtimeReadyAt = events.find((event) =>
+          event.callAttemptId === attempt.id &&
+          event.payload.name === "realtime.ready"
+        )?.occurredAt;
+        if (realtimeReadyAt) {
+          realtimeElapsedSeconds += Math.max(
+            0,
+            Math.floor(
+              (Date.parse(attempt.endedAt) - Date.parse(realtimeReadyAt)) /
+                1_000
+            )
+          );
+        }
         const connectedAt = events.find((event) =>
           event.callAttemptId === attempt.id &&
           event.payload.name === "connection.confirmed"
@@ -1111,9 +1685,173 @@ export class InMemoryCallRepository implements CallRepository {
           )
         );
       }
+      if (events.some(({ payload }) => payload.name === "realtime.ready")) {
+        facts.usageSeconds.realtime += Math.max(
+          duration ?? 0,
+          realtimeElapsedSeconds
+        );
+      }
     }
     facts.recordedDurationSeconds = aggregateFacts(durationValues);
     facts.firstAudioLatencyMs = aggregateFacts(firstAudioValues);
+    const providerBuckets = new Map<string, AdminProviderUsageBucket>();
+    for (const operation of this.#providerOperations.values()) {
+      if (!this.#providerOperationMatchesScope(
+        operation,
+        callId,
+        preparationId
+      )) continue;
+      if (operation.startedAt >= from && operation.startedAt <= to) {
+        facts.providerUsage.operationCount += 1;
+      }
+      const result = operation.result;
+      if (
+        !result?.usage ||
+        result.completedAt < from ||
+        result.completedAt > to
+      ) continue;
+      const model = result.providerModel ?? operation.requestedModel;
+      const key = [
+        operation.provider,
+        operation.operationType,
+        operation.stage,
+        model
+      ].join("\0");
+      let bucket = providerBuckets.get(key);
+      if (!bucket) {
+        bucket = emptyAdminProviderUsageBucket({
+          provider: operation.provider,
+          operationType: operation.operationType,
+          stage: operation.stage,
+          model
+        });
+        providerBuckets.set(key, bucket);
+      }
+      bucket.usageRecords += 1;
+      bucket.requestCount += result.usage.requestCount ?? 0;
+      addAdminProviderMetric(
+        bucket,
+        "inputTextTokens",
+        "inputTextTokenSamples",
+        result.usage.inputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "cachedInputTextTokens",
+        "cachedInputTextTokenSamples",
+        result.usage.cachedInputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "cacheWriteInputTextTokens",
+        "cacheWriteInputTextTokenSamples",
+        result.usage.cacheWriteInputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "outputTextTokens",
+        "outputTextTokenSamples",
+        result.usage.outputTextTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "reasoningOutputTokens",
+        "reasoningOutputTokenSamples",
+        result.usage.reasoningOutputTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "inputAudioTokens",
+        "inputAudioTokenSamples",
+        result.usage.inputAudioTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "cachedInputAudioTokens",
+        "cachedInputAudioTokenSamples",
+        result.usage.cachedInputAudioTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "outputAudioTokens",
+        "outputAudioTokenSamples",
+        result.usage.outputAudioTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "totalTokens",
+        "totalTokenSamples",
+        result.usage.totalTokens
+      );
+      addAdminProviderMetric(
+        bucket,
+        "durationSeconds",
+        "durationSamples",
+        result.usage.durationSeconds
+      );
+      addAdminProviderMetric(
+        bucket,
+        "billableSeconds",
+        "billableSamples",
+        result.usage.billableSeconds
+      );
+    }
+    facts.providerUsage.buckets = [...providerBuckets.values()].sort(
+      (left, right) => [
+        left.provider,
+        left.operationType,
+        left.stage,
+        left.model
+      ].join("\0").localeCompare([
+        right.provider,
+        right.operationType,
+        right.stage,
+        right.model
+      ].join("\0"))
+    );
+    facts.providerUsage.usageRecordCount = facts.providerUsage.buckets.reduce(
+      (total, bucket) => total + bucket.usageRecords,
+      0
+    );
+    const providerCostBuckets = new Map<string, AdminProviderCostBucket>();
+    for (const cost of this.#providerCosts.values()) {
+      if (cost.observedAt < from || cost.observedAt > to) continue;
+      const operation = this.#providerOperations.get(cost.operationId);
+      if (!operation || !this.#providerOperationMatchesScope(
+        operation,
+        callId,
+        preparationId
+      )) {
+        continue;
+      }
+      const key = [
+        cost.provider,
+        cost.costBasis,
+        cost.component,
+        cost.currency
+      ].join("\0");
+      const bucket = providerCostBuckets.get(key) ?? {
+        provider: cost.provider,
+        costBasis: cost.costBasis,
+        component: cost.component,
+        currency: cost.currency,
+        records: 0,
+        amountMicros: 0
+      };
+      bucket.records += 1;
+      bucket.amountMicros += cost.amountMicros;
+      providerCostBuckets.set(key, bucket);
+    }
+    facts.providerCosts.buckets = [...providerCostBuckets.values()].sort(
+      (left, right) =>
+        left.provider.localeCompare(right.provider) ||
+        left.component.localeCompare(right.component) ||
+        left.currency.localeCompare(right.currency)
+    );
+    facts.providerCosts.recordCount = facts.providerCosts.buckets.reduce(
+      (total, bucket) => total + bucket.records,
+      0
+    );
     return facts;
   }
 
@@ -1123,6 +1861,12 @@ export class InMemoryCallRepository implements CallRepository {
     webhookSince = recentSince
   ): Promise<AdminSystemFacts> {
     const snapshots = [...this.#calls.values()];
+    const visibleSnapshots = snapshots.filter(
+      ({ brief }) => !this.#callDataDeletions.has(brief.id)
+    );
+    const attempts = [...this.#attempts.entries()]
+      .filter(([callId]) => !this.#callDataDeletions.has(callId))
+      .flatMap(([, stored]) => stored);
     const events = [...this.#callTelemetryEvents.values()]
       .flatMap((stored) => stored.map(({ event }) => event))
       .filter(({ occurredAt }) => occurredAt >= recentSince);
@@ -1203,6 +1947,36 @@ export class InMemoryCallRepository implements CallRepository {
         .length,
       recentErrors: events.filter(({ severity }) => severity === "error")
         .length,
+      callPlanCutover: {
+        recoverableLegacyCalls: visibleSnapshots.filter(({ brief, compilation }) =>
+          compilation !== null &&
+          (this.#compilations.get(brief.id)?.length ?? 0) === 0
+        ).length,
+        archivedLegacyCalls: 0,
+        recompileRequiredCalls: 0,
+        unavailableLegacyCalls: visibleSnapshots.filter(({ brief, compilation }) =>
+          compilation === null &&
+          (this.#compilations.get(brief.id)?.length ?? 0) === 0
+        ).length,
+        executableLegacyCalls: 0,
+        historicalAttemptsWithoutCompilation: attempts.filter((attempt) =>
+          attempt.endedAt !== null && attempt.compilationId === null
+        ).length,
+        historicalAttemptsWithoutExecutionSnapshot: attempts.filter((attempt) =>
+          attempt.endedAt !== null && attempt.executionSnapshot === null
+        ).length,
+        activeLegacyAttempts: attempts.filter((attempt) =>
+          attempt.endedAt === null &&
+          (attempt.compilationId === null || attempt.executionSnapshot === null)
+        ).length,
+        activeRecompilations: [...this.#callPreparations.values()].filter(
+          (preparation) =>
+            preparation.targetCallBriefId !== null &&
+            ["queued", "processing", "retrying"].includes(
+              preparation.preparation.status
+            )
+        ).length
+      },
       externalWorker: {
         healthyInstances: healthyWorkerHeartbeats.length,
         staleInstances: staleWorkerHeartbeats.length,
@@ -1233,6 +2007,7 @@ export class InMemoryCallRepository implements CallRepository {
         ).length,
         providerReconciliationQueued: queued.filter(({ type }) =>
           type === "provider_call_reconciliation" ||
+          type === "provider_call_cost_reconciliation" ||
           type === "provider_recording_reconciliation"
         ).length,
         oldestDueAt: queued
@@ -1479,7 +2254,10 @@ export class InMemoryCallRepository implements CallRepository {
     return callOutcomeMetricsSchema.parse(metrics);
   }
 
-  async approveCompilation(id: string) {
+  async approveCompilation(
+    id: string,
+    expected?: CompilationApprovalInput
+  ) {
     const snapshot = this.#require(id);
     if (
       snapshot.brief.status !== "review_required" ||
@@ -1488,8 +2266,21 @@ export class InMemoryCallRepository implements CallRepository {
     ) {
       throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
     }
+    assertCompilationIntegrity(snapshot.compilation);
+    if (
+      expected &&
+      (snapshot.compilation.revision !== expected.revision ||
+        snapshot.compilation.snapshotHash !== expected.snapshotHash)
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_STALE");
+    }
     const now = new Date().toISOString();
     snapshot.compilation.approvedAt = now;
+    const storedCompilation = this.#currentCompilation(id);
+    storedCompilation.approvedAt = now;
+    storedCompilation.executionSnapshot = createApprovedExecutionSnapshot(
+      snapshot
+    );
     snapshot.brief.status = "ready";
     snapshot.brief.updatedAt = now;
     this.#appendTelemetry(id, {
@@ -1515,9 +2306,22 @@ export class InMemoryCallRepository implements CallRepository {
     if (userId !== null && this.#owners.get(id) !== userId) {
       throw new CallRepositoryError("CALL_NOT_FOUND");
     }
+    if ([...this.#callPreparations.values()].some(
+      (stored) =>
+        stored.targetCallBriefId === id &&
+        ["queued", "processing", "retrying"].includes(
+          stored.preparation.status
+        )
+    )) {
+      throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+    }
     if (snapshot.brief.status !== "ready") {
       throw new CallRepositoryError("CALL_NOT_READY");
     }
+    if (!snapshot.compilation) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    assertCompilationIntegrity(snapshot.compilation);
     if (!this.#outboundCallsEnabled) {
       throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
     }
@@ -1539,16 +2343,24 @@ export class InMemoryCallRepository implements CallRepository {
       );
     }
     const now = new Date().toISOString();
+    const currentCompilation = this.#currentCompilation(id);
+    if (!currentCompilation.executionSnapshot) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
     const attempt: CallAttemptRecord = {
       id: randomUUID(),
       callBriefId: id,
+      compilationId: currentCompilation.id,
       provider: input.provider,
       providerCallId: null,
       status: "dialing",
       providerStatus: null,
       startedAt: now,
       endedAt: null,
-      failureReason: null
+      failureReason: null,
+      compilationRevision: snapshot.compilation!.revision,
+      compilationSnapshotHash: snapshot.compilation!.snapshotHash,
+      executionSnapshot: copy(currentCompilation.executionSnapshot)
     };
     const attempts = this.#attempts.get(id) ?? [];
     attempts.push(attempt);
@@ -1733,7 +2545,7 @@ export class InMemoryCallRepository implements CallRepository {
           now
         );
       }
-      return { callId, snapshot: copy(snapshot) };
+      return { callId, attemptId: attempt.id, snapshot: copy(snapshot) };
     }
     return null;
   }
@@ -2240,6 +3052,11 @@ export class InMemoryCallRepository implements CallRepository {
     const snapshot = this.#require(id);
     const recording = snapshot.recording;
     if (!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    for (const [key, chunk] of this.#postCallTranscriptionChunks) {
+      if (chunk.recordingId === recording.id) {
+        this.#postCallTranscriptionChunks.delete(key);
+      }
+    }
     recording.status = "deleted";
     recording.deletedAt = new Date().toISOString();
     return { callId: id, recording: copy(recording), snapshot: copy(snapshot) };
@@ -2306,7 +3123,8 @@ export class InMemoryCallRepository implements CallRepository {
   async seedDurableJobs(now: string) {
     const before = this.#durableJobs.size;
     for (const snapshot of this.#calls.values()) {
-      const attempt = (this.#attempts.get(snapshot.brief.id) ?? []).at(-1);
+      const attempts = this.#attempts.get(snapshot.brief.id) ?? [];
+      const attempt = attempts.at(-1);
       if (
         interruptedStatuses.has(snapshot.brief.status) &&
         attempt?.provider === "twilio" &&
@@ -2318,6 +3136,20 @@ export class InMemoryCallRepository implements CallRepository {
           runAfter: now,
           maxAttempts: durableJobMaxAttempts.provider_call_reconciliation
         });
+      }
+      for (const terminalAttempt of attempts) {
+        if (
+          terminalStatuses.has(terminalAttempt.status) &&
+          terminalAttempt.provider === "twilio" &&
+          terminalAttempt.providerCallId
+        ) {
+          await this.enqueueDurableJob({
+            type: "provider_call_cost_reconciliation",
+            callAttemptId: terminalAttempt.id,
+            runAfter: now,
+            maxAttempts: durableJobMaxAttempts.provider_call_cost_reconciliation
+          });
+        }
       }
       const recording = snapshot.recording;
       if (
@@ -2464,11 +3296,12 @@ export class InMemoryCallRepository implements CallRepository {
     workerId: string,
     errorCode: string,
     now: string,
-    retryAt: string
+    retryAt: string,
+    retryable = true
   ) {
     const job = this.#findDurableJob(jobId);
     if (!job || !durableJobLeaseIsValid(job, workerId, now)) return null;
-    const deadLetter = job.attemptCount >= job.maxAttempts;
+    const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
     this.#durableJobAttempts.push({
       id: randomUUID(),
       jobId,
@@ -2828,6 +3661,45 @@ export class InMemoryCallRepository implements CallRepository {
     return type;
   }
 
+  async getAttempt(id: string, attemptId: string) {
+    this.#require(id);
+    return copy((this.#attempts.get(id) ?? []).find(
+      ({ id: candidateId }) => candidateId === attemptId
+    ) ?? null);
+  }
+
+  #currentCompilation(id: string) {
+    const current = this.#compilations.get(id)?.at(-1);
+    if (!current?.compilation) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    return current;
+  }
+
+  #providerOperationMatchesScope(
+    operation: ProviderOperationRecord | PostCallTranscriptionProviderOperationRecord |
+      RealtimeProviderOperationRecord | TelephonyProviderOperationRecord,
+    callId?: string,
+    preparationId?: string
+  ) {
+    if (preparationId) {
+      return "callPreparationId" in operation &&
+        operation.callPreparationId === preparationId;
+    }
+    if (!callId) return true;
+    if ("callBriefId" in operation && operation.callBriefId === callId) {
+      return true;
+    }
+    if ("callPreparationId" in operation) {
+      const preparation = this.#callPreparations.get(operation.callPreparationId);
+      return (
+        preparation?.preparation.callBriefId === callId ||
+        preparation?.targetCallBriefId === callId
+      );
+    }
+    return false;
+  }
+
   #require(id: string) {
     const snapshot = this.#calls.get(id);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -2845,6 +3717,25 @@ export class InMemoryCallRepository implements CallRepository {
 
   #findDurableJob(jobId: string) {
     return [...this.#durableJobs.values()].find(({ id }) => id === jobId);
+  }
+
+  #assertPostCallTranscriptionContext(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ) {
+    this.#assertDurableJobLease(lease);
+    const job = this.#findDurableJob(lease.jobId);
+    const { callId, snapshot } = this.#requireRecording(input.recordingId);
+    if (
+      job?.type !== "final_transcription" ||
+      job.recordingId !== input.recordingId ||
+      job.generation !== input.durableJobGeneration ||
+      callId !== input.callBriefId ||
+      snapshot.recording?.status !== "available" ||
+      snapshot.finalTranscript?.status !== "processing"
+    ) {
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    }
   }
 
   #mapCallPreparation(stored: StoredCallPreparation): CallPreparation {
@@ -2880,9 +3771,16 @@ export class InMemoryCallRepository implements CallRepository {
       if (input.recordingId || input.callAttemptId || !input.callPreparationId) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
-      return { callId: null, targetId: input.callPreparationId };
+      return {
+        callId: this.#callPreparations.get(input.callPreparationId)
+          ?.targetCallBriefId ?? null,
+        targetId: input.callPreparationId
+      };
     }
-    if (input.type === "provider_call_reconciliation") {
+    if (
+      input.type === "provider_call_reconciliation" ||
+      input.type === "provider_call_cost_reconciliation"
+    ) {
       if (!input.callAttemptId || input.recordingId || input.callPreparationId) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
@@ -3061,8 +3959,68 @@ function emptyAdminOperationsFacts(): AdminOperationsFacts {
     transcriptionRetries: 0,
     realtimeDisconnects: 0,
     recoveries: 0,
-    usageSeconds: { telephony: 0, realtime: 0, transcription: 0 }
+    usageSeconds: { telephony: 0, realtime: 0, transcription: 0 },
+    providerUsage: {
+      incurredFrom: "",
+      incurredTo: "",
+      operationCount: 0,
+      usageRecordCount: 0,
+      buckets: []
+    },
+    providerCosts: {
+      incurredFrom: "",
+      incurredTo: "",
+      recordCount: 0,
+      buckets: []
+    }
   };
+}
+
+function emptyAdminProviderUsageBucket(identity: Pick<
+  AdminProviderUsageBucket,
+  "provider" | "operationType" | "stage" | "model"
+>): AdminProviderUsageBucket {
+  return {
+    ...identity,
+    usageRecords: 0,
+    requestCount: 0,
+    inputTextTokens: 0,
+    inputTextTokenSamples: 0,
+    cachedInputTextTokens: 0,
+    cachedInputTextTokenSamples: 0,
+    cacheWriteInputTextTokens: 0,
+    cacheWriteInputTextTokenSamples: 0,
+    outputTextTokens: 0,
+    outputTextTokenSamples: 0,
+    reasoningOutputTokens: 0,
+    reasoningOutputTokenSamples: 0,
+    inputAudioTokens: 0,
+    inputAudioTokenSamples: 0,
+    cachedInputAudioTokens: 0,
+    cachedInputAudioTokenSamples: 0,
+    outputAudioTokens: 0,
+    outputAudioTokenSamples: 0,
+    totalTokens: 0,
+    totalTokenSamples: 0,
+    durationSeconds: 0,
+    durationSamples: 0,
+    billableSeconds: 0,
+    billableSamples: 0
+  };
+}
+
+function addAdminProviderMetric<
+  ValueKey extends keyof AdminProviderUsageBucket,
+  SampleKey extends keyof AdminProviderUsageBucket
+>(
+  bucket: AdminProviderUsageBucket,
+  valueKey: ValueKey,
+  sampleKey: SampleKey,
+  value: number | null | undefined
+) {
+  if (value === null || value === undefined) return;
+  (bucket[valueKey] as number) += value;
+  (bucket[sampleKey] as number) += 1;
 }
 
 function incrementAdminSemanticOutcome(
@@ -3181,6 +4139,8 @@ function storedBriefIdentity(parsed: NormalizedCallBriefInput) {
     assistantProfileId: parsed.assistantProfileId,
     agentName: parsed.agentName,
     representedPerson: parsed.representedPerson,
+    representedPersonFirstName: parsed.representedPersonFirstName,
+    representedPersonLastName: parsed.representedPersonLastName,
     assistanceReason: parsed.assistanceReason,
     assistanceDisclosure: parsed.assistanceDisclosure,
     locale: parsed.locale,
@@ -3224,4 +4184,18 @@ function safeProviderWebhookErrorCode(value?: string | null) {
   return value && /^[a-z0-9_.:/-]{1,160}$/i.test(value)
     ? value
     : "WEBHOOK_DELIVERY_FAILED";
+}
+
+function postCallTranscriptionChunkKey(
+  input: Pick<
+    PostCallTranscriptionChunkLookupInput,
+    "recordingId" | "durableJobGeneration" | "chunkKey" | "inputFingerprint"
+  >
+) {
+  return [
+    input.recordingId,
+    input.durableJobGeneration,
+    input.chunkKey,
+    input.inputFingerprint
+  ].join(":");
 }

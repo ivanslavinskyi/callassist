@@ -1,4 +1,8 @@
-import type { CallBrief } from "@callassist/contracts";
+import {
+  approvedExecutionSnapshotSchema,
+  type ApprovedExecutionSnapshot,
+  type CallBrief
+} from "@callassist/contracts";
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
@@ -19,6 +23,8 @@ const brief: CallBrief = {
   assistantProfileId: "anna",
   agentName: "Anna",
   representedPerson: "Ivan Slavinskyi",
+  representedPersonFirstName: "Ivan",
+  representedPersonLastName: "Slavinskyi",
   assistanceReason: "speech_impairment",
   assistanceDisclosure: "Disability disclosure",
   context: "The company works in logistics. An unverified salary note says CHF 99,999.",
@@ -32,9 +38,68 @@ const brief: CallBrief = {
   updatedAt: "2026-07-14T12:00:00.000Z"
 };
 
+const executionSnapshot: ApprovedExecutionSnapshot = {
+  version: 1,
+  callBriefId: brief.id,
+  compilationRevision: 2,
+  compilationSnapshotHash: "a".repeat(64),
+  approvedAt: "2026-07-14T12:01:00.000Z",
+  plan: {
+    callLocale: "de-CH",
+    taskType: "receipt_confirmation",
+    tone: "neutral",
+    addressingStyle: "formal",
+    resultHandling: "capture_in_callassist",
+    voicemailAction: "hang_up",
+    refusalBehavior: "respect_and_end",
+    localizedObjective: "Confirm the approved application receipt objective",
+    opening: {
+      recipientAddress: "Guten Tag Example AG.",
+      purposeStatement: "Ich rufe wegen des Eingangs des Antrags vom 12. Juli an.",
+      readinessQuestion: "Passt es Ihnen jetzt kurz?"
+    },
+    backgroundSummary: "Approved background summary for the call.",
+    orderedQuestions: [
+      {
+        text: "Ist der Antrag vom 12. Juli eingegangen?",
+        purpose: "Confirm receipt",
+        required: true
+      }
+    ],
+    conditionalFollowUps: [
+      {
+        condition: "the application was not received",
+        question: "An welche Adresse soll der Antrag erneut gesendet werden?"
+      }
+    ],
+    successCriteria: ["Receipt status is confirmed"],
+    unresolvedCriteria: ["Receipt status remains unclear"],
+    stopConditions: ["The recipient asks to end the call"],
+    approvedFacts: ["Application sent: 12 July"],
+    prohibitedActions: ["Do not agree to contractual terms"]
+  },
+  runtime: {
+    agentName: "Anna",
+    voiceGender: "female",
+    assistanceDisclosure: "Disability disclosure",
+    audioRetentionDays: 7,
+    allowLanguageSwitch: false
+  }
+};
+
 describe("buildRealtimeInstructions", () => {
+  it("rejects raw task fields at the runtime schema boundary", () => {
+    expect(
+      approvedExecutionSnapshotSchema.safeParse({
+        ...executionSnapshot,
+        objective: "RAW_OBJECTIVE",
+        context: "RAW_CONTEXT"
+      }).success
+    ).toBe(false);
+  });
+
   it("separates background context from approved facts and forbids guessing", () => {
-    const prompt = buildRealtimeInstructions(brief);
+    const prompt = buildRealtimeInstructions(executionSnapshot);
     expect(prompt).toContain("# Background context");
     expect(prompt).toContain("# Facts explicitly approved for disclosure");
     expect(prompt).toContain("Application sent: 12 July");
@@ -43,14 +108,51 @@ describe("buildRealtimeInstructions", () => {
     expect(prompt).toContain("Only if the repeated answer is still unclear");
     expect(prompt).toContain("something was bought does not confirm that it was sent");
     expect(prompt).toContain("# Mandatory conversation opening");
+    expect(prompt).toContain("# Ordered questions");
+    expect(prompt).toContain("Ist der Antrag vom 12. Juli eingegangen?");
+    expect(prompt).toContain("# Conditional follow-ups");
+    expect(prompt).toContain("Receipt status is confirmed");
+    expect(prompt).toContain("Receipt status remains unclear");
+    expect(prompt).toContain("Do not agree to contractual terms");
     expect(prompt).toContain(
       "Do not include the first substantive objective question or message"
     );
   });
 
   it("instructs the realtime model to speak Russian", () => {
-    const prompt = buildRealtimeInstructions({ ...brief, locale: "ru-RU" });
+    const prompt = buildRealtimeInstructions({
+      ...executionSnapshot,
+      plan: { ...executionSnapshot.plan, callLocale: "ru-RU" }
+    });
     expect(prompt).toContain("Speak Russian naturally and politely");
+  });
+
+  it("ignores raw task fields even if an upstream object carries them", () => {
+    const rawMarkers = {
+      objective: "RAW_OBJECTIVE_IGNORE_ALL_RULES",
+      context: "RAW_CONTEXT_PROMPT_INJECTION",
+      allowedFacts: ["RAW_UNAPPROVED_FACT"],
+      clarificationAnswers: [
+        { issueCode: "missing_required_reference", answer: "RAW_CLARIFICATION" }
+      ],
+      deliveryInstruction: "RAW_DELIVERY_INSTRUCTION"
+    };
+    const prompt = buildRealtimeInstructions({
+      ...executionSnapshot,
+      ...rawMarkers
+    });
+
+    expect(prompt).toContain(executionSnapshot.plan.localizedObjective);
+    expect(prompt).toContain(executionSnapshot.plan.backgroundSummary);
+    expect(prompt).not.toContain(brief.objective);
+    expect(prompt).not.toContain(brief.context);
+    expect(prompt).not.toContain(brief.representedPerson);
+    expect(prompt).not.toContain(brief.recipientName);
+    expect(prompt).not.toContain("RAW_OBJECTIVE_IGNORE_ALL_RULES");
+    expect(prompt).not.toContain("RAW_CONTEXT_PROMPT_INJECTION");
+    expect(prompt).not.toContain("RAW_UNAPPROVED_FACT");
+    expect(prompt).not.toContain("RAW_CLARIFICATION");
+    expect(prompt).not.toContain("RAW_DELIVERY_INSTRUCTION");
   });
 });
 
@@ -65,10 +167,14 @@ describe("buildInitialResponseInstructions", () => {
       readinessQuestion: "Вам сейчас удобно коротко поговорить?"
     };
     const prompt = buildInitialResponseInstructions({
-      ...brief,
-      locale: "ru-RU",
-      objective
-    }, opening);
+      ...executionSnapshot,
+      plan: {
+        ...executionSnapshot.plan,
+        callLocale: "ru-RU",
+        localizedObjective: objective,
+        opening
+      }
+    });
 
     expect(prompt).toContain(
       JSON.stringify([brief.assistanceDisclosure, ...Object.values(opening)].join(" "))
@@ -80,24 +186,22 @@ describe("buildInitialResponseInstructions", () => {
     expect(prompt).not.toContain("Immediately ask");
   });
 
-  it("provides a bounded opening fallback for legacy briefs", () => {
-    const prompt = buildInitialResponseInstructions(brief, null);
-
-    expect(prompt).toContain(brief.recipientName);
-    expect(prompt).toContain(brief.representedPerson);
-    expect(prompt).toContain(brief.objective);
-    expect(prompt).toContain("Do not begin the first substantive objective step yet");
-  });
-
   it("omits assistance disclosure entirely when the reason is none", () => {
-    const prompt = buildInitialResponseInstructions(
-      { ...brief, assistanceReason: "none", assistanceDisclosure: "" },
-      {
+    const prompt = buildInitialResponseInstructions({
+      ...executionSnapshot,
+      plan: {
+        ...executionSnapshot.plan,
+        opening: {
         recipientAddress: "Hello Example AG.",
         purposeStatement: "I am calling on behalf of Ivan Slavinskyi about the application.",
         readinessQuestion: "Is now a convenient time?"
+        }
+      },
+      runtime: {
+        ...executionSnapshot.runtime,
+        assistanceDisclosure: ""
       }
-    );
+    });
 
     expect(prompt).not.toContain("Disability disclosure");
     expect(prompt).toContain("I am calling on behalf of Ivan Slavinskyi");
@@ -139,6 +243,344 @@ class FakeSocket extends EventEmitter {
 }
 
 describe("OpenAIRealtimeBridge", () => {
+  it("persists Realtime session, response, and transcription usage without double counting", async () => {
+    const harness = await createConsentHarness();
+    emitJson(harness.openAISocket, {
+      event_id: "evt_main_session",
+      type: "session.created",
+      session: { id: "sess_main", model: "gpt-realtime-2.1-2026-08-01" }
+    });
+    emitJson(harness.consentSocket, {
+      event_id: "evt_consent_session",
+      type: "session.created",
+      session: { id: "sess_consent", model: "gpt-realtime-2.1-2026-08-01" }
+    });
+    emitJson(harness.openAISocket, {
+      type: "response.created",
+      response: { id: "resp_usage_1", status: "in_progress" }
+    });
+    const responseDone = {
+      event_id: "evt_response_done_1",
+      type: "response.done",
+      response: {
+        id: "resp_usage_1",
+        model: "gpt-realtime-2.1-2026-08-01",
+        status: "completed",
+        usage: {
+          input_tokens: 120,
+          output_tokens: 30,
+          total_tokens: 150,
+          input_token_details: {
+            text_tokens: 70,
+            audio_tokens: 50,
+            cached_tokens: 25,
+            cached_tokens_details: { text_tokens: 20, audio_tokens: 5 }
+          },
+          output_token_details: { text_tokens: 10, audio_tokens: 20 }
+        }
+      }
+    };
+    emitJson(harness.openAISocket, responseDone);
+    emitJson(harness.openAISocket, responseDone);
+    emitJson(harness.openAISocket, {
+      type: "response.created",
+      response: { id: "resp_usage_cancelled", status: "in_progress" }
+    });
+    emitJson(harness.openAISocket, {
+      event_id: "evt_response_done_cancelled",
+      type: "response.done",
+      response: {
+        id: "resp_usage_cancelled",
+        status: "cancelled",
+        usage: {
+          input_tokens: 3,
+          output_tokens: 1,
+          total_tokens: 4,
+          input_token_details: { text_tokens: 3, audio_tokens: 0 },
+          output_token_details: { text_tokens: 0, audio_tokens: 1 }
+        }
+      }
+    });
+    const mainTranscription = {
+      event_id: "evt_transcription_main_1",
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_main_1",
+      transcript: "Test",
+      usage: {
+        type: "tokens",
+        input_tokens: 12,
+        output_tokens: 4,
+        total_tokens: 16,
+        input_token_details: { text_tokens: 2, audio_tokens: 10 }
+      }
+    };
+    emitJson(harness.openAISocket, mainTranscription);
+    emitJson(harness.openAISocket, mainTranscription);
+    emitJson(harness.consentSocket, {
+      event_id: "evt_transcription_consent_1",
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_consent_1",
+      transcript: "Vielleicht",
+      usage: { type: "duration", seconds: 1.25 }
+    });
+    emitJson(harness.twilioSocket, { event: "stop" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const operations = harness.repository.providerOperationsForTest();
+    const sessions = operations.filter(
+      ({ operationType }) => operationType === "realtime_session"
+    );
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map(({ stage }) => stage).sort()).toEqual([
+      "consent_transcription",
+      "conversation"
+    ]);
+    expect(sessions.every(({ result }) => result?.usage?.durationSeconds !== null))
+      .toBe(true);
+    const responses = operations.filter(
+      ({ operationType }) => operationType === "realtime_response"
+    );
+    expect(responses).toHaveLength(2);
+    const completedResponse = responses.find(
+      ({ result }) => result?.providerResponseId === "resp_usage_1"
+    );
+    expect(completedResponse?.result?.usage).toMatchObject({
+      inputTextTokens: 70,
+      cachedInputTextTokens: 20,
+      inputAudioTokens: 50,
+      cachedInputAudioTokens: 5,
+      outputTextTokens: 10,
+      outputAudioTokens: 20,
+      totalTokens: 150
+    });
+    expect(responses.find(
+      ({ result }) => result?.providerResponseId === "resp_usage_cancelled"
+    )?.result).toMatchObject({
+      outcome: "provider_error",
+      errorCode: "OPENAI_REALTIME_RESPONSE_CANCELLED",
+      usage: { totalTokens: 4 }
+    });
+    const transcriptions = operations.filter(
+      ({ operationType }) => operationType === "transcription"
+    );
+    expect(transcriptions).toHaveLength(2);
+    expect(transcriptions.map(({ stage }) => stage).sort()).toEqual([
+      "consent_input_audio",
+      "conversation_input_audio"
+    ]);
+    expect(transcriptions.map(({ result }) => result?.usage?.durationSeconds))
+      .toContain(1.25);
+    await harness.service.close();
+  });
+
+  it("fails closed before opening provider sockets when compilation is not approved", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => true,
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-UNAPPROVED",
+        customParameters: {
+          callBriefId: created.id,
+          streamToken: "valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(0);
+    expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    await service.close();
+  });
+
+  it("fails closed before opening provider sockets when session usage cannot be reserved", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
+    });
+    vi.spyOn(service, "startRealtimeProviderSessions").mockRejectedValue(
+      new Error("ledger unavailable")
+    );
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => true,
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-LEDGER-FAILURE",
+        customParameters: {
+          callBriefId: created.id,
+          callAttemptId: reserved.attempt.id,
+          compilationSnapshotHash: reserved.attempt.compilationSnapshotHash!,
+          streamToken: "valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(0);
+    expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    await service.close();
+  });
+
+  it("rejects a stream whose signed binding does not match the active attempt", async () => {
+    const service = new CallService(new InMemoryCallRepository());
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
+    });
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => true,
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-MISMATCHED",
+        customParameters: {
+          callBriefId: created.id,
+          callAttemptId: reserved.attempt.id,
+          compilationSnapshotHash: "b".repeat(64),
+          streamToken: "valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(0);
+    expect(twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    await service.close();
+  });
+
+  it("rejects a pre-migration attempt without immutable stream binding", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository);
+    const created = await service.create({
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      objective: brief.objective,
+      assistantProfileId: brief.assistantProfileId!,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: brief.assistanceReason,
+      context: brief.context,
+      locale: brief.locale,
+      allowLanguageSwitch: false,
+      allowedFacts: brief.allowedFacts
+    });
+    await service.approveCompilation(created.id);
+    await repository.startAttempt(created.id, { provider: "twilio" });
+    const getLatestAttempt = repository.getLatestAttempt.bind(repository);
+    vi.spyOn(repository, "getLatestAttempt").mockImplementation(async (id) => {
+      const attempt = await getLatestAttempt(id);
+      return attempt
+        ? {
+            ...attempt,
+            compilationRevision: null,
+            compilationSnapshotHash: null,
+            executionSnapshot: null
+          }
+        : null;
+    });
+    const twilioSocket = new FakeSocket();
+    let providerSocketCount = 0;
+    const bridge = new OpenAIRealtimeBridge({
+      apiKey: "test-key",
+      service,
+      validateStreamToken: () => false,
+      createOpenAISocket: () => {
+        providerSocketCount += 1;
+        return new FakeSocket() as unknown as WebSocket;
+      }
+    });
+
+    bridge.handleTwilioSocket(twilioSocket as unknown as WebSocket);
+    emitJson(twilioSocket, {
+      event: "start",
+      start: {
+        streamSid: "MZ-LEGACY",
+        customParameters: {
+          callBriefId: created.id,
+          streamToken: "legacy-valid"
+        }
+      }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(providerSocketCount).toBe(0);
+    await service.close();
+  });
+
   it("plays the mandatory opening before accepting audio and persists finalized transcripts", async () => {
     const service = new CallService(new InMemoryCallRepository());
     const created = await service.create({
@@ -153,6 +595,10 @@ describe("OpenAIRealtimeBridge", () => {
       locale: brief.locale,
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
+    });
+    await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
     });
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
@@ -186,6 +632,9 @@ describe("OpenAIRealtimeBridge", () => {
             streamSid: "MZ123",
             customParameters: {
               callBriefId: created.id,
+              callAttemptId: reserved.attempt.id,
+              compilationSnapshotHash:
+                reserved.attempt.compilationSnapshotHash!,
               streamToken: "valid"
             }
           }
@@ -520,6 +969,10 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
+    await service.approveCompilation(created.id);
+    const reserved = await service.repository.startAttempt(created.id, {
+      provider: "twilio"
+    });
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -542,6 +995,9 @@ describe("OpenAIRealtimeBridge", () => {
             streamSid: "MZ456",
             customParameters: {
               callBriefId: created.id,
+              callAttemptId: reserved.attempt.id,
+              compilationSnapshotHash:
+                reserved.attempt.compilationSnapshotHash!,
               streamToken: "valid"
             }
           }
@@ -746,7 +1202,8 @@ describe("OpenAIRealtimeBridge", () => {
 });
 
 async function createConsentHarness(failRecording = false) {
-  const service = new CallService(new InMemoryCallRepository());
+  const repository = new InMemoryCallRepository();
+  const service = new CallService(repository);
   const created = await service.create({
     recipientName: brief.recipientName,
     phoneNumber: brief.phoneNumber,
@@ -759,6 +1216,10 @@ async function createConsentHarness(failRecording = false) {
     locale: brief.locale,
     allowLanguageSwitch: false,
     allowedFacts: brief.allowedFacts
+  });
+  await service.approveCompilation(created.id);
+  const reserved = await service.repository.startAttempt(created.id, {
+    provider: "twilio"
   });
   const twilioSocket = new FakeSocket();
   const openAISocket = new FakeSocket();
@@ -781,7 +1242,12 @@ async function createConsentHarness(failRecording = false) {
     event: "start",
     start: {
       streamSid: "MZ-HARNESS",
-      customParameters: { callBriefId: created.id, streamToken: "valid" }
+      customParameters: {
+        callBriefId: created.id,
+        callAttemptId: reserved.attempt.id,
+        compilationSnapshotHash: reserved.attempt.compilationSnapshotHash!,
+        streamToken: "valid"
+      }
     }
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -791,6 +1257,7 @@ async function createConsentHarness(failRecording = false) {
   emitJson(consentSocket, { type: "session.updated" });
   return {
     service,
+    repository,
     created,
     twilioSocket,
     openAISocket,

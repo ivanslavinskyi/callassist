@@ -193,6 +193,29 @@ that branch protection requires the workflow and review. A passing dependency au
 means no finding at or above its configured high-severity threshold; moderate findings
 still require triage and a recorded disposition.
 
+The API test runner bounds file concurrency to four workers and allows ten seconds
+per test because PostgreSQL migration/integration suites otherwise contend with
+Fastify unit suites on high-core hosts. A timeout remains a failure; do not treat an
+isolated passing rerun as release evidence in place of a clean complete CI run.
+
+For the immutable call-plan finalization release, run
+`pnpm db:verify:call-plan-cutover` against the target database before applying the
+finalizing migration. The command is read-only, emits aggregate counts only, and
+must return `call_plan_cutover_ready` with an empty `blockers` array. A non-zero
+recoverable legacy count, executable call without an immutable plan, active legacy
+attempt, or active recompilation is a hard stop. Archived terminal plans, drafts
+explicitly awaiting recompilation, unavailable terminal history, and historical
+attempts without reconstructable usage/snapshots remain visible evidence but do
+not become trusted execution state. See
+`docs/approved-call-plan-cost-security-roadmap.md` for the mandatory two-phase
+commit and migration order.
+
+Migration tooling independently evaluates the same aggregate blockers immediately
+before applying `0061_complete_immutable_call_plan_cutover.sql`. This final
+fail-closed guard protects against invoking the full migration command on an
+unprepared database; it does not replace the dry runs, recovery evidence, worker
+drain, or preserved standalone gate output.
+
 Production API and worker processes must pass fail-closed environment validation.
 Never bypass a validation issue by changing `NODE_ENV`. Verify TLS termination before
 trusting HSTS, keep the main and Twilio listener ports separate, and do not reuse the

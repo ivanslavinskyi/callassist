@@ -3,6 +3,7 @@ export const durableJobTypes = [
   "final_transcription",
   "recording_retention",
   "provider_call_reconciliation",
+  "provider_call_cost_reconciliation",
   "provider_recording_reconciliation"
 ] as const;
 
@@ -82,6 +83,7 @@ export const durableJobMaxAttempts: Record<DurableJobType, number> = {
   final_transcription: 3,
   recording_retention: 5,
   provider_call_reconciliation: 5,
+  provider_call_cost_reconciliation: 10,
   provider_recording_reconciliation: 5
 };
 
@@ -91,13 +93,21 @@ export function durableJobRetryDelayMs(attemptNumber: number) {
 }
 
 export class DurableJobExecutionError extends Error {
+  readonly retryable: boolean;
+
   constructor(
     readonly code: string,
-    options?: { cause?: unknown }
+    options?: { cause?: unknown; retryable?: boolean }
   ) {
     super(code, options);
     this.name = "DurableJobExecutionError";
+    this.retryable =
+      options?.retryable ?? code !== "DURABLE_JOB_TARGET_INVALID";
   }
+}
+
+export function durableJobErrorIsRetryable(error: unknown) {
+  return !(error instanceof DurableJobExecutionError) || error.retryable;
 }
 
 export function durableJobErrorCode(error: unknown) {

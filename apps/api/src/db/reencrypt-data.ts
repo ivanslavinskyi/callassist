@@ -21,8 +21,12 @@ const genericCiphertextColumns = [
   ["call_briefs", "compilation_ciphertext"],
   ["call_briefs", "assistance_reason_ciphertext"],
   ["call_briefs", "assistance_disclosure_ciphertext"],
+  ["call_compilations", "compilation_ciphertext"],
+  ["call_compilation_approvals", "execution_snapshot_ciphertext"],
+  ["call_attempts", "execution_snapshot_ciphertext"],
   ["final_transcripts", "text_ciphertext"],
-  ["final_transcripts", "segments_ciphertext"]
+  ["final_transcripts", "segments_ciphertext"],
+  ["post_call_transcription_chunks", "text_ciphertext"]
 ] as const;
 
 type CiphertextRow = { id: string; payload: string };
@@ -139,6 +143,9 @@ async function reencryptGenericColumn(
   let rewritten = 0;
   while (true) {
     const changed = await sql.begin(async (transaction) => {
+      await transaction`
+        SELECT set_config('callassist.encryption_rotation', 'enabled', true)
+      `;
       const rows = await transaction.unsafe<CiphertextRow[]>(`
         SELECT id::text AS id, ${quoteIdentifier(column)} AS payload
         FROM ${quoteIdentifier(table)}

@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type {
   CallBrief,
   FinalTranscriptSegment,
@@ -24,27 +25,102 @@ export type PostCallTranscriptionResult = {
   model: string;
 };
 
+export type PostCallTranscriptionProviderStage =
+  | "full_recording"
+  | "assistant_utterance"
+  | "recipient_utterance";
+
+export type PostCallTranscriptionChunk = {
+  stage: PostCallTranscriptionProviderStage;
+  chunkKey: string;
+  inputFingerprint: string;
+  model: string;
+};
+
+export type PostCallTranscriptionProviderRequest =
+  PostCallTranscriptionChunk & {
+    clientRequestId: string;
+    startedAt: string;
+  };
+
+export type PostCallTranscriptionProviderUsage = {
+  requestCount: 1;
+  inputTextTokens: number | null;
+  cachedInputTextTokens: null;
+  cacheWriteInputTextTokens: null;
+  outputTextTokens: number | null;
+  reasoningOutputTokens: null;
+  inputAudioTokens: number | null;
+  cachedInputAudioTokens: null;
+  outputAudioTokens: null;
+  totalTokens: number | null;
+  durationSeconds: number | null;
+  billableSeconds: null;
+  rawUsage: Record<string, unknown>;
+};
+
+export type PostCallTranscriptionProviderResult = {
+  clientRequestId: string;
+  stage: PostCallTranscriptionProviderStage;
+  chunkKey: string;
+  inputFingerprint: string;
+  outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
+  providerRequestId: string | null;
+  providerResponseId: null;
+  providerModel: null;
+  statusCode: number | null;
+  completedAt: string;
+  durationMs: number;
+  usage: PostCallTranscriptionProviderUsage | null;
+  transcriptText: string | null;
+};
+
+export type PostCallTranscriptionRuntime = {
+  findCompletedChunk?: (
+    chunk: PostCallTranscriptionChunk
+  ) => Promise<string | null>;
+  beforeProviderRequest?: (
+    request: PostCallTranscriptionProviderRequest
+  ) => Promise<void>;
+  afterProviderRequest?: (
+    result: PostCallTranscriptionProviderResult
+  ) => Promise<void>;
+};
+
 export interface PostCallTranscriber {
   readonly model: string;
   transcribe(
     media: RecordingMedia,
     brief: CallBrief,
     liveTranscript?: TranscriptSegment[],
-    timing?: FinalTranscriptTiming
+    timing?: FinalTranscriptTiming,
+    runtime?: PostCallTranscriptionRuntime
   ): Promise<PostCallTranscriptionResult>;
 }
 
 export class PostCallTranscriptionError extends Error {
+  readonly statusCode: number | null;
+  readonly providerRequestId: string | null;
+  readonly retryable: boolean;
+
   constructor(
     readonly code:
       | "AUDIO_EMPTY"
       | "AUDIO_TOO_LARGE"
       | "OPENAI_REQUEST_FAILED"
       | "OPENAI_RESPONSE_INVALID",
-    options?: { cause?: unknown }
+    options?: {
+      cause?: unknown;
+      statusCode?: number | null;
+      providerRequestId?: string | null;
+    }
   ) {
     super(code, options);
     this.name = "PostCallTranscriptionError";
+    this.statusCode = options?.statusCode ?? null;
+    this.providerRequestId = options?.providerRequestId ?? null;
+    this.retryable = code === "OPENAI_REQUEST_FAILED" &&
+      isRetryableTranscriptionStatus(this.statusCode);
   }
 }
 
@@ -85,7 +161,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     media: RecordingMedia,
     brief: CallBrief,
     _liveTranscript: TranscriptSegment[] = [],
-    timing?: FinalTranscriptTiming
+    timing?: FinalTranscriptTiming,
+    runtime: PostCallTranscriptionRuntime = {}
   ) {
     if (media.bytes.byteLength === 0) {
       throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -104,7 +181,10 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         media.fileName,
         brief,
         buildPostCallTranscriptionPrompt(brief),
-        this.#fullRecordingModel
+        this.#fullRecordingModel,
+        "full_recording",
+        "full_recording",
+        runtime
       );
       if (!text) throw new PostCallTranscriptionError("AUDIO_EMPTY");
       return { text, segments: [], model: this.#fullRecordingModel };
@@ -124,7 +204,9 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         recognized[index] = await this.#transcribeUtterance(
           utterances[index],
           index,
-          brief
+          brief,
+          undefined,
+          runtime
         );
       }
     );
@@ -141,7 +223,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
           utterances[index],
           index,
           brief,
-          previousAssistant
+          previousAssistant,
+          runtime
         );
       }
     );
@@ -170,7 +253,8 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     utterance: ChannelUtterance,
     index: number,
     brief: CallBrief,
-    previousAssistant?: string
+    previousAssistant?: string,
+    runtime: PostCallTranscriptionRuntime = {}
   ) {
     return {
       utterance,
@@ -180,7 +264,12 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         `utterance-${String(index + 1).padStart(3, "0")}.wav`,
         brief,
         buildUtteranceTranscriptionPrompt(brief, utterance, previousAssistant),
-        this.#utteranceModel
+        this.#utteranceModel,
+        utterance.role === "assistant"
+          ? "assistant_utterance"
+          : "recipient_utterance",
+        `utterance_${String(index + 1).padStart(3, "0")}`,
+        runtime
       )
     };
   }
@@ -191,7 +280,10 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     fileName: string,
     brief: CallBrief,
     prompt: string,
-    model = this.model
+    model = this.model,
+    stage: PostCallTranscriptionProviderStage,
+    chunkKey: string,
+    runtime: PostCallTranscriptionRuntime
   ) {
     const form = new FormData();
     form.append(
@@ -201,16 +293,52 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
     );
     form.append("model", model);
     form.append("prompt", prompt);
-    if (model.startsWith("gpt-4o-")) {
-      form.append("language", brief.locale.split("-")[0]);
+    const language = model.startsWith("gpt-4o-")
+      ? brief.locale.split("-")[0]
+      : null;
+    const keywords = language ? [] : buildPostCallTranscriptionKeywords(brief);
+    const languages = language ? [] : buildPostCallTranscriptionLanguages(brief);
+    if (language) {
+      form.append("language", language);
     } else {
-      for (const keyword of buildPostCallTranscriptionKeywords(brief)) {
+      for (const keyword of keywords) {
         form.append("keywords[]", keyword);
       }
-      for (const language of buildPostCallTranscriptionLanguages(brief)) {
-        form.append("languages[]", language);
+      for (const requestedLanguage of languages) {
+        form.append("languages[]", requestedLanguage);
       }
     }
+
+    const inputFingerprint = createTranscriptionInputFingerprint({
+      bytes,
+      contentType,
+      prompt,
+      model,
+      stage,
+      chunkKey,
+      language,
+      keywords,
+      languages
+    });
+    const cached = await runtime.findCompletedChunk?.({
+      stage,
+      chunkKey,
+      inputFingerprint,
+      model
+    });
+    if (cached !== undefined && cached !== null) return cached;
+
+    const clientRequestId = randomUUID();
+    const startedAt = new Date().toISOString();
+    const startedAtMs = Date.now();
+    await runtime.beforeProviderRequest?.({
+      clientRequestId,
+      stage,
+      chunkKey,
+      inputFingerprint,
+      model,
+      startedAt
+    });
 
     let response: Response;
     try {
@@ -221,21 +349,220 @@ export class OpenAIPostCallTranscriber implements PostCallTranscriber {
         signal: AbortSignal.timeout(this.#timeoutMs)
       });
     } catch (error) {
+      await reportProviderResult(runtime, {
+        clientRequestId,
+        stage,
+        chunkKey,
+        inputFingerprint,
+        outcome: "network_error",
+        providerRequestId: null,
+        statusCode: null,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+        usage: null,
+        transcriptText: null
+      });
       throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED", {
         cause: error
       });
     }
+    const providerRequestId = response.headers.get("x-request-id");
     if (!response.ok) {
-      throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED");
+      await reportProviderResult(runtime, {
+        clientRequestId,
+        stage,
+        chunkKey,
+        inputFingerprint,
+        outcome: "provider_error",
+        providerRequestId,
+        statusCode: response.status,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+        usage: null,
+        transcriptText: null
+      });
+      throw new PostCallTranscriptionError("OPENAI_REQUEST_FAILED", {
+        statusCode: response.status,
+        providerRequestId
+      });
     }
     const payload = (await response.json().catch(() => null)) as
-      | { text?: unknown }
+      | { text?: unknown; usage?: unknown }
       | null;
+    const usage = parsePostCallTranscriptionUsage(payload?.usage);
     if (!payload || typeof payload.text !== "string") {
+      await reportProviderResult(runtime, {
+        clientRequestId,
+        stage,
+        chunkKey,
+        inputFingerprint,
+        outcome: "invalid_response",
+        providerRequestId,
+        statusCode: response.status,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+        usage,
+        transcriptText: null
+      });
       throw new PostCallTranscriptionError("OPENAI_RESPONSE_INVALID");
     }
-    return payload.text.trim();
+    const transcriptText = payload.text.trim();
+    await reportProviderResult(runtime, {
+      clientRequestId,
+      stage,
+      chunkKey,
+      inputFingerprint,
+      outcome: "succeeded",
+      providerRequestId,
+      statusCode: response.status,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAtMs,
+      usage,
+      transcriptText: transcriptText || null
+    });
+    return transcriptText;
   }
+}
+
+export function isPostCallTranscriptionErrorRetryable(error: unknown) {
+  return error instanceof PostCallTranscriptionError && error.retryable;
+}
+
+function isRetryableTranscriptionStatus(statusCode: number | null) {
+  return statusCode === null ||
+    statusCode === 408 ||
+    statusCode === 409 ||
+    statusCode === 429 ||
+    statusCode >= 500;
+}
+
+function createTranscriptionInputFingerprint(input: {
+  bytes: Uint8Array;
+  contentType: string;
+  prompt: string;
+  model: string;
+  stage: PostCallTranscriptionProviderStage;
+  chunkKey: string;
+  language: string | null;
+  keywords: string[];
+  languages: string[];
+}) {
+  const hash = createHash("sha256");
+  hash.update(input.bytes);
+  hash.update("\0");
+  hash.update(JSON.stringify({
+    contentType: input.contentType,
+    prompt: input.prompt,
+    model: input.model,
+    stage: input.stage,
+    chunkKey: input.chunkKey,
+    language: input.language,
+    keywords: input.keywords,
+    languages: input.languages
+  }));
+  return hash.digest("hex");
+}
+
+async function reportProviderResult(
+  runtime: PostCallTranscriptionRuntime,
+  result: Omit<
+    PostCallTranscriptionProviderResult,
+    "providerResponseId" | "providerModel"
+  >
+) {
+  await runtime.afterProviderRequest?.({
+    ...result,
+    providerResponseId: null,
+    providerModel: null
+  });
+}
+
+export function parsePostCallTranscriptionUsage(
+  raw: unknown
+): PostCallTranscriptionProviderUsage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const usage = raw as Record<string, unknown>;
+  if (usage.type === "duration") {
+    const seconds = nonNegativeNumber(usage.seconds);
+    if (seconds === null) return null;
+    return {
+      requestCount: 1,
+      inputTextTokens: null,
+      cachedInputTextTokens: null,
+      cacheWriteInputTextTokens: null,
+      outputTextTokens: null,
+      reasoningOutputTokens: null,
+      inputAudioTokens: null,
+      cachedInputAudioTokens: null,
+      outputAudioTokens: null,
+      totalTokens: null,
+      durationSeconds: seconds,
+      billableSeconds: null,
+      rawUsage: { type: "duration", seconds }
+    };
+  }
+  if (usage.type !== "tokens") return null;
+  const inputTokens = nonNegativeInteger(usage.input_tokens);
+  const outputTokens = nonNegativeInteger(usage.output_tokens);
+  const totalTokens = nonNegativeInteger(usage.total_tokens);
+  const details = usage.input_token_details &&
+      typeof usage.input_token_details === "object"
+    ? usage.input_token_details as Record<string, unknown>
+    : null;
+  const textTokens = nonNegativeInteger(details?.text_tokens);
+  const audioTokens = nonNegativeInteger(details?.audio_tokens);
+  if (
+    [usage.input_tokens, usage.output_tokens, usage.total_tokens]
+      .some((value, index) => value != null &&
+        [inputTokens, outputTokens, totalTokens][index] === null) ||
+    [details?.text_tokens, details?.audio_tokens]
+      .some((value, index) => value != null &&
+        [textTokens, audioTokens][index] === null)
+  ) {
+    return null;
+  }
+  if (
+    inputTokens === null && outputTokens === null && totalTokens === null &&
+    textTokens === null && audioTokens === null
+  ) {
+    return null;
+  }
+  return {
+    requestCount: 1,
+    inputTextTokens: textTokens,
+    cachedInputTextTokens: null,
+    cacheWriteInputTextTokens: null,
+    outputTextTokens: outputTokens,
+    reasoningOutputTokens: null,
+    inputAudioTokens: audioTokens,
+    cachedInputAudioTokens: null,
+    outputAudioTokens: null,
+    totalTokens,
+    durationSeconds: null,
+    billableSeconds: null,
+    rawUsage: {
+      type: "tokens",
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: totalTokens,
+      input_token_details: {
+        text_tokens: textTokens,
+        audio_tokens: audioTokens
+      }
+    }
+  };
+}
+
+function nonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function nonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 function safelyExtractChannelUtterances(bytes: Uint8Array) {
@@ -277,7 +604,7 @@ async function mapWithConcurrency<T, R>(
 ) {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
-  await Promise.all(
+  const workers = await Promise.allSettled(
     Array.from({ length: Math.min(concurrency, values.length) }, async () => {
       while (nextIndex < values.length) {
         const index = nextIndex++;
@@ -285,6 +612,10 @@ async function mapWithConcurrency<T, R>(
       }
     })
   );
+  const failed = workers.find(
+    (worker): worker is PromiseRejectedResult => worker.status === "rejected"
+  );
+  if (failed) throw failed.reason;
   return results;
 }
 

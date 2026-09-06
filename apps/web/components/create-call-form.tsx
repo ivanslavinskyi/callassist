@@ -2,7 +2,9 @@
 
 import {
   ASSISTANT_PROFILES,
+  CALL_BRIEF_INPUT_LIMITS,
   SUPPORTED_CALL_LANGUAGES,
+  callBriefTaskTextLength,
   formatPersonName,
   getAssistanceDisclosure,
   type AssistanceReason,
@@ -125,6 +127,20 @@ export function CreateCallForm({
   ];
   const completedRequiredCount = requiredComplete.filter(Boolean).length;
   const requiredRemaining = requiredComplete.length - completedRequiredCount;
+  const allowedFacts = useMemo(() => parseFactsText(factsText), [factsText]);
+  const taskTextLength = useMemo(() => callBriefTaskTextLength({
+    ...form,
+    allowedFacts
+  }), [allowedFacts, form]);
+  const taskTextOverLimit =
+    taskTextLength > CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard;
+  const taskTextNearLimit =
+    taskTextLength > CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextSoft;
+  const factsInvalid =
+    allowedFacts.length > CALL_BRIEF_INPUT_LIMITS.allowedFacts ||
+    allowedFacts.some((fact) =>
+      fact.length > CALL_BRIEF_INPUT_LIMITS.allowedFact
+    );
 
   function update<Value extends keyof CreateCallBriefInput>(
     field: Value,
@@ -141,11 +157,18 @@ export function CreateCallForm({
     const input = {
       ...form,
       phoneNumber: normalizePhoneNumber(form.phoneNumber),
-      allowedFacts: factsText
-        .split("\n")
-        .map((fact) => fact.trim())
-        .filter(Boolean)
+      allowedFacts
     };
+    if (taskTextOverLimit) {
+      setError(messages.form.taskTextTooLong);
+      setSubmitting(false);
+      return;
+    }
+    if (factsInvalid) {
+      setError(messages.form.factsTooLong);
+      setSubmitting(false);
+      return;
+    }
 
     let brief: CallBrief;
     try {
@@ -264,11 +287,17 @@ export function CreateCallForm({
           <textarea
             value={form.objective}
             onChange={(event) => update("objective", event.target.value)}
+            maxLength={CALL_BRIEF_INPUT_LIMITS.objective}
             placeholder={copy.objectivePlaceholder}
             rows={5}
             required
           />
-          <small>{copy.objectiveHelp}</small>
+          <small>
+            {copy.objectiveHelp} {messages.form.characterCount(
+              form.objective.length,
+              CALL_BRIEF_INPUT_LIMITS.objective
+            )}
+          </small>
         </label>
 
         <label className="field">
@@ -314,6 +343,7 @@ export function CreateCallForm({
           <input
             value={form.representedPersonFirstName}
             onChange={(event) => update("representedPersonFirstName", event.target.value)}
+            maxLength={CALL_BRIEF_INPUT_LIMITS.representedPersonNamePart}
             autoComplete="given-name"
             placeholder={copy.representedPersonFirstNamePlaceholder}
             required
@@ -325,6 +355,7 @@ export function CreateCallForm({
           <input
             value={form.representedPersonLastName}
             onChange={(event) => update("representedPersonLastName", event.target.value)}
+            maxLength={CALL_BRIEF_INPUT_LIMITS.representedPersonNamePart}
             autoComplete="family-name"
             placeholder={copy.representedPersonLastNamePlaceholder}
             required
@@ -414,6 +445,7 @@ export function CreateCallForm({
               <input
                 value={form.deliveryInstruction ?? ""}
                 onChange={(event) => update("deliveryInstruction", event.target.value)}
+                maxLength={CALL_BRIEF_INPUT_LIMITS.deliveryInstruction}
                 placeholder={copy.deliveryPlaceholder}
               />
             </label>
@@ -448,9 +480,14 @@ export function CreateCallForm({
             <textarea
               value={form.context ?? ""}
               onChange={(event) => update("context", event.target.value)}
+              maxLength={CALL_BRIEF_INPUT_LIMITS.context}
               rows={5}
               placeholder={copy.contextPlaceholder}
             />
+            <small>{messages.form.characterCount(
+              (form.context ?? "").length,
+              CALL_BRIEF_INPUT_LIMITS.context
+            )}</small>
           </label>
         </div>
 
@@ -503,14 +540,39 @@ export function CreateCallForm({
             <textarea
               value={factsText}
               onChange={(event) => setFactsText(event.target.value)}
+              maxLength={
+                CALL_BRIEF_INPUT_LIMITS.allowedFact *
+                  CALL_BRIEF_INPUT_LIMITS.allowedFacts +
+                CALL_BRIEF_INPUT_LIMITS.allowedFacts - 1
+              }
               rows={5}
               placeholder={copy.approvedInformationPlaceholder}
             />
+            <small className={factsInvalid ? "field-invalid" : undefined}>
+              {factsInvalid
+                ? messages.form.factsTooLong
+                : messages.form.factCount(
+                    allowedFacts.length,
+                    CALL_BRIEF_INPUT_LIMITS.allowedFacts
+                  )}
+            </small>
           </label>
         </div>
       </details>
 
       {error ? <p className="form-error">{error}</p> : null}
+
+      <p
+        className={taskTextOverLimit
+          ? "field-invalid"
+          : taskTextNearLimit ? "field-warning" : undefined}
+        role={taskTextOverLimit ? "alert" : "status"}
+      >
+        {messages.form.taskTextBudget(
+          taskTextLength,
+          CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard
+        )}
+      </p>
 
       {submitting ? (
         <div className="compilation-progress" role="status" aria-live="polite">
@@ -530,7 +592,12 @@ export function CreateCallForm({
         ) : null}
         <button
           className="primary-button"
-          disabled={submitting || requiredRemaining > 0}
+          disabled={
+            submitting ||
+            requiredRemaining > 0 ||
+            taskTextOverLimit ||
+            factsInvalid
+          }
           type="submit"
         >
           <span>{submitting ? copy.preparing : resolvedSubmitLabel}</span>
@@ -549,4 +616,11 @@ function cleanLegacyDemoFacts(facts: string[] | undefined) {
     return [];
   }
   return facts ?? [];
+}
+
+function parseFactsText(value: string) {
+  return value
+    .split("\n")
+    .map((fact) => fact.trim())
+    .filter(Boolean);
 }

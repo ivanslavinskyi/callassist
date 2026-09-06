@@ -2,6 +2,7 @@
 
 import type {
   AdminCallInspector as AdminCallInspectorData,
+  AdminCallCostBreakdown,
   AdminCallSensitiveContent,
   UserRole
 } from "@callassist/contracts";
@@ -10,9 +11,11 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useAdminSession } from "./admin-session-provider";
 import {
   accessAdminCallSensitiveContent,
+  getAdminCallCostBreakdown,
   getAdminCallInspector
 } from "@/lib/api";
 import { adminCallMessages } from "@/lib/i18n/admin-call-messages";
+import { AdminCostBreakdown } from "./admin-cost-breakdown";
 
 export function AdminCallInspector({ callId }: { callId: string }) {
   const locale = "en" as const;
@@ -20,6 +23,7 @@ export function AdminCallInspector({ callId }: { callId: string }) {
   const copy = adminCallMessages[locale];
   const role: UserRole = user.role;
   const [inspector, setInspector] = useState<AdminCallInspectorData | null>(null);
+  const [cost, setCost] = useState<AdminCallCostBreakdown | null>(null);
   const [sensitive, setSensitive] = useState<AdminCallSensitiveContent | null>(
     null
   );
@@ -30,10 +34,14 @@ export function AdminCallInspector({ callId }: { callId: string }) {
 
   useEffect(() => {
     let active = true;
-    void getAdminCallInspector(callId)
-      .then((data) => {
+    void Promise.all([
+      getAdminCallInspector(callId),
+      getAdminCallCostBreakdown(callId)
+    ])
+      .then(([data, costData]) => {
         if (!active) return;
         setInspector(data);
+        setCost(costData);
       })
       .catch(() => {
         if (active) setError(copy.inspectorError);
@@ -109,6 +117,8 @@ export function AdminCallInspector({ callId }: { callId: string }) {
                 <Fact label={copy.eventCount} value={String(summary.eventCount)} />
               </dl>
             </section>
+
+            {cost ? <AdminCostBreakdown cost={cost.cost} locale={locale} /> : null}
 
             <div className="admin-inspector-grid">
               <section className="admin-inspector-panel">

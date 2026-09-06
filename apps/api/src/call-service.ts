@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   adminOperationsWindowBounds,
+  adminCallCostBreakdownSchema,
+  adminCallPreparationInspectorSchema,
   adminSystemStatusSchema,
   normalizeCreateCallBriefInput,
   isSwissDestinationPhone,
@@ -14,13 +16,19 @@ import {
   type CallOutcomeView,
   type CallSnapshot,
   type CallTelemetryEventInput,
+  type CompilationApprovalInput,
   type CreateCallBriefInput,
   type OwnerCallFeedbackInput,
   type TranscriptSegment
 } from "@callassist/contracts";
-import { buildAdminOperationsOverview } from "./admin-operations";
+import {
+  buildAdminCostOverview,
+  buildAdminOperationsOverview
+} from "./admin-operations";
 import {
   BriefCompilerError,
+  briefCompilationProviderRequestBudget,
+  isBriefCompilerErrorRetryable,
   DeterministicBriefCompiler,
   type BriefCompiler
 } from "./brief-compiler/brief-compiler";
@@ -34,16 +42,21 @@ import {
   type CallRepository,
   type AdminWebhookDeliveryFacts,
   type CallChangeSignal,
-  type ProviderWebhookDeliveryInput
+  type ProviderWebhookDeliveryInput,
+  type RealtimeProviderOperationInput,
+  type RealtimeProviderSessionInput,
+  type CompleteProviderOperationInput
 } from "./storage/call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
 import {
   mapTwilioStatusToCallStatus,
   type RecordingMedia,
   type TelephonyProvider,
-  type TwilioCallStatusCallbackValue
+  type TwilioCallStatusCallbackValue,
+  type TwilioCallStatusUsage
 } from "./telephony/telephony-provider";
 import {
+  isPostCallTranscriptionErrorRetryable,
   PostCallTranscriptionError,
   type PostCallTranscriber
 } from "./transcription/openai-post-call-transcriber";
@@ -172,7 +185,11 @@ export class CallService {
               provider_call_reconciliation: (
                 job: DurableJob,
                 lease: DurableJobLease
-              ) => this.#reconcileProviderCall(job, lease)
+              ) => this.#reconcileProviderCall(job, lease),
+              provider_call_cost_reconciliation: (
+                job: DurableJob,
+                lease: DurableJobLease
+              ) => this.#reconcileProviderCallCost(job, lease)
             }
           : {}),
         ...(telephonyProvider.getRecordingStatus
@@ -282,6 +299,40 @@ export class CallService {
     return this.repository.getAdminCallInspector(id);
   }
 
+  async getAdminCallCostBreakdown(id: string) {
+    await this.repository.getAdminCallInspector(id);
+    const generatedAt = new Date().toISOString();
+    const facts = await this.repository.getAdminOperationsFacts(
+      "1970-01-01T00:00:00.000Z",
+      generatedAt,
+      id
+    );
+    return adminCallCostBreakdownSchema.parse({
+      callId: id,
+      generatedAt,
+      cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
+    });
+  }
+
+  async getAdminCallPreparationInspector(id: string) {
+    const preparation = await this.repository.getAdminCallPreparation(id);
+    if (!preparation) {
+      throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    }
+    const generatedAt = new Date().toISOString();
+    const facts = await this.repository.getAdminOperationsFacts(
+      "1970-01-01T00:00:00.000Z",
+      generatedAt,
+      undefined,
+      id
+    );
+    return adminCallPreparationInspectorSchema.parse({
+      preparation,
+      generatedAt,
+      cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
+    });
+  }
+
   getAdminCallSensitiveContent(
     id: string,
     actorUserId: string,
@@ -367,6 +418,15 @@ export class CallService {
         transcriptionFailed: facts.transcriptionFailed,
         retentionScheduled: facts.retentionScheduled,
         retentionOverdue: facts.retentionOverdue
+      },
+      callPlanCutover: {
+        ...facts.callPlanCutover,
+        mutableCompilationReadRemovalReady:
+          facts.callPlanCutover.recoverableLegacyCalls === 0 &&
+          facts.callPlanCutover.executableLegacyCalls === 0 &&
+          facts.callPlanCutover.activeRecompilations === 0,
+        legacyMediaAdapterRemovalReady:
+          facts.callPlanCutover.activeLegacyAttempts === 0
       },
       jobs: facts.jobs,
       webhooks: {
@@ -468,6 +528,20 @@ export class CallService {
     );
   }
 
+  findRecompilationByRequest(
+    id: string,
+    input: CreateCallBriefInput,
+    userId: string | null,
+    idempotencyKey: string
+  ) {
+    return this.repository.findCallPreparationByRequest(
+      userId,
+      idempotencyKey,
+      callPreparationFingerprint(normalizeCreateCallBriefInput(input)),
+      id
+    );
+  }
+
   async getPreparation(id: string, userId: string) {
     if (!isUuid(id)) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
     const preparation = await this.repository.getCallPreparation(id, userId);
@@ -491,45 +565,66 @@ export class CallService {
     return this.repository.getCreditUsage(userId);
   }
 
-  async recompile(id: string, input: CreateCallBriefInput) {
-    const current = await this.#require(id);
-    const revision = current.compilation
-      ? (current.compilation.revision ?? 1) + 1
-      : 1;
-    try {
-      const compilation = await this.#briefCompiler.compile(
-        normalizeCreateCallBriefInput(input),
-        revision
-      );
-      const snapshot = await this.repository.recompile(
-        id,
-        input,
-        compilation
-      );
-      this.#publish(id, { type: "call.updated", brief: snapshot.brief });
-      return snapshot;
-    } catch (error) {
-      if (error instanceof BriefCompilerError) {
-        throw mapBriefCompilerError(error);
-      }
-      throw error;
-    }
+  async recompile(
+    id: string,
+    input: CreateCallBriefInput,
+    userId: string | null,
+    idempotencyKey: string = randomUUID()
+  ) {
+    const normalized = normalizeCreateCallBriefInput(input);
+    const preparation = await this.repository.enqueueCallRecompilation({
+      callBriefId: id,
+      userId,
+      idempotencyKey,
+      inputFingerprint: callPreparationFingerprint(normalized),
+      input: normalized,
+      now: new Date().toISOString()
+    });
+    this.#durableJobWorker.wake();
+    return preparation;
   }
 
   get(id: string) {
     return this.repository.get(id);
   }
 
-  async approveCompilation(id: string) {
-    const snapshot = await this.repository.approveCompilation(id);
+  getLatestAttempt(id: string) {
+    return this.repository.getLatestAttempt(id);
+  }
+
+  startRealtimeProviderSessions(inputs: RealtimeProviderSessionInput[]) {
+    return this.repository.startRealtimeProviderSessions(inputs);
+  }
+
+  recordRealtimeProviderOperation(input: RealtimeProviderOperationInput) {
+    return this.repository.recordRealtimeProviderOperation(input);
+  }
+
+  completeProviderOperation(input: CompleteProviderOperationInput) {
+    return this.repository.completeProviderOperation(input);
+  }
+
+  async approveCompilation(id: string, expected?: CompilationApprovalInput) {
+    const snapshot = await this.repository.approveCompilation(id, expected);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
   }
 
-  async approveAndStart(id: string, userId: string | null = null) {
+  async approveAndStart(
+    id: string,
+    userId: string | null = null,
+    expected?: CompilationApprovalInput
+  ) {
     const current = await this.#require(id);
+    if (
+      expected &&
+      (current.compilation?.revision !== expected.revision ||
+        current.compilation.snapshotHash !== expected.snapshotHash)
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_STALE");
+    }
     if (!current.compilation?.approvedAt) {
-      await this.approveCompilation(id);
+      await this.approveCompilation(id, expected);
     }
     return this.start(id, userId);
   }
@@ -572,6 +667,20 @@ export class CallService {
 
     let started;
     try {
+      if (this.telephonyProvider.mode === "twilio") {
+        const operationId = randomUUID();
+        await this.repository.startTelephonyProviderOperation({
+          id: operationId,
+          callBriefId: id,
+          callAttemptId: reserved.attempt.id,
+          provider: "twilio",
+          operationType: "telephony_leg",
+          stage: "outbound_call",
+          requestedModel: "programmable_voice",
+          clientRequestId: operationId,
+          startedAt: reserved.attempt.startedAt
+        });
+      }
       started = await this.telephonyProvider.startCall(current.brief);
     } catch (error) {
       await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
@@ -671,7 +780,8 @@ export class CallService {
     providerCallId: string,
     status: TwilioCallStatusCallbackValue,
     callBriefId?: string,
-    lease?: DurableJobLease
+    lease?: DurableJobLease,
+    usage?: TwilioCallStatusUsage
   ) {
     const result = await this.repository.applyProviderStatus(
       providerCallId,
@@ -681,6 +791,24 @@ export class CallService {
       lease
     );
     if (result) {
+      if (
+        ["completed", "failed", "busy", "no-answer", "canceled"].includes(status)
+      ) {
+        await this.repository.recordTelephonyLegUsage({
+          fallbackOperationId: randomUUID(),
+          callBriefId: result.callId,
+          callAttemptId: result.attemptId,
+          providerCallId,
+          providerStatus: status,
+          durationSeconds: usage?.durationSeconds ?? null,
+          billableSeconds:
+            usage?.billableMinutes === undefined
+              ? null
+              : usage.billableMinutes * 60,
+          occurredAt: usage?.occurredAt ?? new Date().toISOString(),
+          sequenceNumber: usage?.sequenceNumber ?? null
+        });
+      }
       if (["completed", "failed", "stopped"].includes(result.snapshot.brief.status)) {
         this.#clearTimers(result.callId);
       }
@@ -992,6 +1120,61 @@ export class CallService {
           recordingStartedAt: claimed.snapshot.recording?.startedAt ?? null,
           durationSeconds:
             claimed.snapshot.recording?.durationSeconds ?? null
+        },
+        {
+          findCompletedChunk: (chunk) =>
+            this.repository.findCompletedPostCallTranscriptionChunk(
+              {
+                callBriefId: claimed.callId,
+                recordingId,
+                durableJobGeneration: job.generation,
+                stage: chunk.stage,
+                chunkKey: chunk.chunkKey,
+                inputFingerprint: chunk.inputFingerprint,
+                requestedModel: chunk.model
+              },
+              currentLease(lease)
+            ),
+          beforeProviderRequest: (request) =>
+            this.repository.reservePostCallTranscriptionProviderRequest(
+              {
+                id: request.clientRequestId,
+                callBriefId: claimed.callId,
+                recordingId,
+                provider: "openai",
+                operationType: "transcription",
+                stage: request.stage,
+                requestedModel: request.model,
+                clientRequestId: request.clientRequestId,
+                startedAt: request.startedAt,
+                durableJobGeneration: job.generation
+              },
+              currentLease(lease)
+            ),
+          afterProviderRequest: (result) =>
+            this.repository.completePostCallTranscriptionProviderRequest({
+              operationId: result.clientRequestId,
+              callBriefId: claimed.callId,
+              recordingId,
+              durableJobGeneration: job.generation,
+              stage: result.stage,
+              chunkKey: result.chunkKey,
+              inputFingerprint: result.inputFingerprint,
+              outcome: result.outcome,
+              providerRequestId: result.providerRequestId,
+              providerResponseId: result.providerResponseId,
+              providerModel: result.providerModel,
+              statusCode: result.statusCode,
+              completedAt: result.completedAt,
+              durationMs: result.durationMs,
+              errorCode: result.outcome === "succeeded"
+                ? null
+                : result.outcome === "invalid_response"
+                  ? "OPENAI_RESPONSE_INVALID"
+                  : "OPENAI_REQUEST_FAILED",
+              usage: result.usage,
+              transcriptText: result.transcriptText
+            })
         }
       );
       const completed = await this.repository.completeFinalTranscript(
@@ -1022,7 +1205,12 @@ export class CallService {
           });
           await this.#syncSystemOutcome(failed.callId);
         }
-        throw new DurableJobExecutionError(failureCode, { cause: error });
+        throw new DurableJobExecutionError(failureCode, {
+          cause: error,
+          retryable: error instanceof PostCallTranscriptionError
+            ? isPostCallTranscriptionErrorRetryable(error)
+            : true
+        });
       }
       throw error;
     } finally {
@@ -1040,30 +1228,102 @@ export class CallService {
     );
     if (work.preparation.status === "succeeded") return;
     if (!work.input) {
-      throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED");
+      throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED", {
+        retryable: false
+      });
     }
     try {
       const compilation = await this.#briefCompiler.compile(
-        normalizeCreateCallBriefInput(work.input)
-      );
-      await this.repository.create(
-        work.input,
-        compilation,
-        work.userId,
-        work.idempotencyKey,
+        normalizeCreateCallBriefInput(work.input),
+        work.targetRevision,
         {
-          preparationId: job.callPreparationId,
-          lease: currentLease(lease)
+          maxProviderRequests: briefCompilationProviderRequestBudget,
+          beforeProviderRequest: (request) =>
+            this.repository.reserveCallPreparationProviderRequest(
+              {
+                id: request.clientRequestId,
+                preparationId: job.callPreparationId!,
+                provider: request.provider,
+                operationType: request.operationType,
+                stage: request.stage,
+                requestedModel: request.model,
+                clientRequestId: request.clientRequestId,
+                startedAt: request.startedAt,
+                maxRequests: briefCompilationProviderRequestBudget,
+                durableJobGeneration: job.generation
+              },
+              currentLease(lease)
+            ),
+          afterProviderRequest: (result) =>
+            this.repository.completeProviderOperation({
+              operationId: result.clientRequestId,
+              outcome: result.outcome,
+              providerRequestId: result.providerRequestId,
+              providerResponseId: result.providerResponseId,
+              providerModel: result.providerModel,
+              statusCode: result.statusCode,
+              completedAt: result.completedAt,
+              durationMs: result.durationMs,
+              errorCode: result.outcome === "succeeded"
+                ? null
+                : result.outcome === "invalid_response"
+                  ? "OPENAI_RESPONSE_INVALID"
+                  : "OPENAI_REQUEST_FAILED",
+              usage: result.usage
+            })
         }
       );
+      const publication = {
+        preparationId: job.callPreparationId,
+        lease: currentLease(lease)
+      };
+      if (work.targetCallBriefId) {
+        const snapshot = await this.repository.recompile(
+          work.targetCallBriefId,
+          work.input,
+          compilation,
+          publication
+        );
+        this.#publish(work.targetCallBriefId, {
+          type: "call.updated",
+          brief: snapshot.brief
+        });
+      } else {
+        await this.repository.create(
+          work.input,
+          compilation,
+          work.userId,
+          work.idempotencyKey,
+          publication
+        );
+      }
     } catch (error) {
       if (error instanceof BriefCompilerError) {
         throw new DurableJobExecutionError(
           mapBriefCompilerError(error).code,
-          { cause: error }
+          {
+            cause: error,
+            retryable: isBriefCompilerErrorRetryable(error)
+          }
         );
       }
       if (error instanceof DurableJobExecutionError) throw error;
+      if (
+        error instanceof CallRepositoryError &&
+        [
+          "CALL_COMPILATION_INTEGRITY_FAILED",
+          "CALL_COMPILATION_STALE",
+          "CALL_BRIEF_NOT_EDITABLE",
+          "CALL_CREATION_IDEMPOTENCY_CONFLICT",
+          "CALL_PREPARATION_IDEMPOTENCY_CONFLICT",
+          "DURABLE_JOB_TARGET_INVALID"
+        ].includes(error.code)
+      ) {
+        throw new DurableJobExecutionError(error.code, {
+          cause: error,
+          retryable: false
+        });
+      }
       throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED", {
         cause: error
       });
@@ -1104,14 +1364,13 @@ export class CallService {
     if (!job.callAttemptId || !job.callId || !this.telephonyProvider.getCallStatus) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
-    const snapshot = await this.#require(job.callId);
-    if (["completed", "failed", "stopped"].includes(snapshot.brief.status)) {
-      return;
-    }
-    const attempt = await this.repository.getLatestAttempt(job.callId);
+    await this.#require(job.callId);
+    const attempt = await this.repository.getAttempt(
+      job.callId,
+      job.callAttemptId
+    );
     if (
       !attempt ||
-      attempt.id !== job.callAttemptId ||
       !attempt.providerCallId
     ) {
       throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
@@ -1124,14 +1383,14 @@ export class CallService {
         provider.providerCallId,
         provider.status,
         job.callId,
-        currentLease(lease)
+        currentLease(lease),
+        { durationSeconds: provider.durationSeconds }
       );
       if (!reconciled) {
         throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
       }
-      if (!["completed", "failed", "stopped"].includes(
-        reconciled.brief.status
-      )) {
+      if (!["canceled", "completed", "failed", "busy", "no-answer"]
+        .includes(provider.status)) {
         await this.telephonyProvider.stopCall(provider.providerCallId);
         throw new DurableJobExecutionError("PROVIDER_CALL_STOP_PENDING");
       }
@@ -1141,6 +1400,91 @@ export class CallService {
         providerReconciliationFailureCode(error, "PROVIDER_CALL_FETCH_FAILED"),
         { cause: error }
       );
+    }
+  }
+
+  async #reconcileProviderCallCost(job: DurableJob, lease: DurableJobLease) {
+    if (!job.callAttemptId || !job.callId || !this.telephonyProvider.getCallStatus) {
+      throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID", {
+        retryable: false
+      });
+    }
+    const attempt = await this.repository.getAttempt(
+      job.callId,
+      job.callAttemptId
+    );
+    if (
+      !attempt ||
+      attempt.provider !== "twilio" ||
+      !attempt.providerCallId
+    ) {
+      throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING", {
+        retryable: false
+      });
+    }
+    try {
+      const provider = await this.telephonyProvider.getCallStatus(
+        attempt.providerCallId
+      );
+      if (provider.providerCallId !== attempt.providerCallId) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISMATCH", {
+          retryable: false
+        });
+      }
+      if (![
+        "canceled",
+        "completed",
+        "failed",
+        "busy",
+        "no-answer"
+      ].includes(provider.status)) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_COST_NOT_FINAL");
+      }
+      const observedAt = new Date().toISOString();
+      await this.repository.recordTelephonyLegUsage({
+        fallbackOperationId: randomUUID(),
+        callBriefId: job.callId,
+        callAttemptId: attempt.id,
+        providerCallId: provider.providerCallId,
+        providerStatus: provider.status,
+        durationSeconds: provider.durationSeconds ?? null,
+        billableSeconds: null,
+        occurredAt: observedAt,
+        sequenceNumber: null
+      });
+      if (!provider.providerReportedCost) {
+        throw new DurableJobExecutionError("PROVIDER_CALL_COST_PENDING");
+      }
+      await this.repository.recordTelephonyProviderCost({
+        id: randomUUID(),
+        fallbackOperationId: randomUUID(),
+        callBriefId: job.callId,
+        callAttemptId: attempt.id,
+        providerCallId: provider.providerCallId,
+        amountMicros: provider.providerReportedCost.amountMicros,
+        currency: provider.providerReportedCost.currency,
+        rawAmount: provider.providerReportedCost.rawAmount,
+        observedAt
+      }, currentLease(lease));
+    } catch (error) {
+      if (error instanceof DurableJobExecutionError) throw error;
+      if (
+        error instanceof CallRepositoryError &&
+        error.code === "PROVIDER_COST_CONFLICT"
+      ) {
+        throw new DurableJobExecutionError(error.code, {
+          cause: error,
+          retryable: false
+        });
+      }
+      const code = providerReconciliationFailureCode(
+        error,
+        "PROVIDER_CALL_COST_FETCH_FAILED"
+      );
+      throw new DurableJobExecutionError(code, {
+        cause: error,
+        retryable: providerCallCostFailureIsRetryable(code)
+      });
     }
   }
 
@@ -1392,6 +1736,17 @@ function providerReconciliationFailureCode(
   return fallback;
 }
 
+function providerCallCostFailureIsRetryable(code: string) {
+  return ![
+    "TWILIO_CALL_COST_INVALID",
+    "TWILIO_CALL_STATUS_UNSUPPORTED",
+    "TWILIO_CALL_FETCH_400",
+    "TWILIO_CALL_FETCH_401",
+    "TWILIO_CALL_FETCH_403",
+    "TWILIO_CALL_FETCH_404"
+  ].includes(code);
+}
+
 function currentLease(lease: DurableJobLease): DurableJobLease {
   return { ...lease, checkedAt: new Date().toISOString() };
 }
@@ -1416,7 +1771,8 @@ function callPreparationFingerprint(input: CreateCallBriefInput) {
 
 function mapBriefCompilerError(error: BriefCompilerError) {
   return new CallServiceError(
-    error.code === "OPENAI_REQUEST_FAILED"
+    error.code === "OPENAI_REQUEST_FAILED" ||
+      error.code === "OPENAI_REQUEST_BUDGET_EXHAUSTED"
       ? "BRIEF_COMPILER_UNAVAILABLE"
       : "BRIEF_COMPILER_RESPONSE_INVALID",
     {

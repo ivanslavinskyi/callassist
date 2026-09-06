@@ -4,6 +4,11 @@
 
 SHPROHLI is an AI assistant that places outbound calls under a narrowly scoped call plan. During a call, the user can monitor the transcript, stop the call, and approve or reject sensitive disclosures.
 
+The staged implementation plan for making the approved compilation the explicit
+Realtime trust boundary, binding call attempts to immutable revisions, and adding
+provider usage/cost accounting is maintained in
+[`approved-call-plan-cost-security-roadmap.md`](approved-call-plan-cost-security-roadmap.md).
+
 ## System overview
 
 ```text
@@ -49,7 +54,7 @@ Twilio dual-channel recording ──► authenticated API download
 - OpenAI Moderation: checks both raw input and generated runtime text.
 - OpenAI Realtime: direct speech-to-speech conversation. External actions remain under server control.
 - OpenAI file transcription: post-call processing of the complete recording with bounded call context.
-- PostgreSQL durable jobs: transactional enqueue, exclusive expiring leases, worker fencing, bounded retry/dead-letter state, and immutable attempt evidence for brief compilation, final transcription, recording retention, and Twilio call/recording status reconciliation. Local development defaults to an embedded worker; `DURABLE_WORKER_MODE=external` turns the API into an enqueue-only process and moves recovery, seeding, polling, lease renewal, runtime heartbeats, and execution to the dedicated worker entry point.
+- PostgreSQL durable jobs: transactional enqueue, exclusive expiring leases, worker fencing, bounded retry/dead-letter state, and immutable attempt evidence for brief compilation, final transcription, recording retention, Twilio call/recording status reconciliation, and delayed Twilio Call cost reconciliation. Local development defaults to an embedded worker; `DURABLE_WORKER_MODE=external` turns the API into an enqueue-only process and moves recovery, seeding, polling, lease renewal, runtime heartbeats, and execution to the dedicated worker entry point.
 - Cross-process live state: PostgreSQL `LISTEN/NOTIFY` carries only a versioned invalidation signal containing a random process UUID and application call UUID. It never carries a brief, phone number, transcript, provider identifier, or credential. Receiving API processes re-read the authorized canonical snapshot and emit the existing SSE envelope to their local subscribers.
 - Webhook delivery evidence: bounded hourly PostgreSQL aggregates for accepted, rejected, unmatched, and failed Twilio HTTP callbacks. They retain controlled error codes and timestamps for 30 days, never provider/call IDs or payloads, and do not replace signature validation or upstream monitoring.
 
@@ -93,9 +98,15 @@ allow-list of fixed issue codes whose answers can materially change the task.
 
 For a reviewable plan, the server stores an encrypted source/compiled snapshot,
 compiler model and version, policy version, response ID, and SHA-256 snapshot hash.
-Editing or answering a clarification recompiles the same call ID, increments the
-compilation revision, resets approval, and records an audit event containing only
-hashes and version metadata. The operator sees a compact call-language plan, including
+Editing or answering a clarification creates an idempotent encrypted preparation
+request for the same call ID. A durable worker compiles the captured target revision
+under the same cumulative provider-request budget as initial preparation. The
+previous approved revision remains authoritative while that job is queued or
+retrying, and call start is blocked during the transition. Publication atomically
+verifies that the current immutable compilation ID still matches the revision the
+job started from, increments the revision, resets approval, erases the queued raw
+input, and records an audit event containing only hashes and version metadata. A
+failed or stale job leaves the previous revision unchanged. The operator sees a compact call-language plan, including
 the exact opening spoken after consent; source, guardrail, policy, and snapshot metadata
 remain available under technical details.
 The combined approve-and-call action records `approvedAt` before starting Twilio;
@@ -115,7 +126,7 @@ The Twilio voice webhook immediately opens a bidirectional Media Stream with cal
 
 After voice or fallback keypad consent, the API persists the consent method and timestamp and asks Twilio to start a dual-channel recording of both tracks on the active call. Recipient media remains blocked until Twilio confirms recording startup. Only then does the main Realtime session read the approved opening in the same voice: it addresses the intended recipient, states the specific purpose and scope, and asks whether it is convenient to continue. The response stops there. An affirmative answer advances to the first objective question, an immediate substantive answer is treated as willingness to continue, and a refusal ends the call politely. A failed recording start produces a same-voice technical notice and terminates the call.
 
-Twilio sends call and recording lifecycle events to signed webhooks, which remain the primary synchronization path. Each HTTP callback records only its kind and accepted/rejected/unmatched/failed outcome in an hourly aggregate; instrumentation failures are logged but never change the webhook response. Provider IDs also transactionally schedule bounded reconciliation jobs after the maximum call window; startup recovery advances unfinished work immediately, and a terminal callback advances its queued reconciliation job so it can complete without an unnecessary provider read. A leased worker may fetch controlled call/recording status from Twilio when a callback is lost. Provider reads and stop requests may repeat after a crash, while repository lease fencing ensures that only the current worker can publish domain state. A completed recording transition transactionally creates an idempotent post-call transcription job. That worker downloads the complete consented media with server-side Twilio credentials and submits it to the configured OpenAI transcription model. The request includes only bounded compiled context, literal names, the selected call language, any explicitly allowed fallback language, and the expected writing system. The final wording comes only from this recording request; it is never replaced or merged with the live draft. A deterministic local aligner may use already stored live events as a role/time scaffold without copying their words. It emits approximate structured segments only when the evidence is sufficient, marks unresolved spans as `unknown`, and otherwise keeps the canonical result as plain text. Browser audio playback is proxied through the main API so critical details can be checked while the Twilio recording is retained; the media URL and credentials remain server-side.
+Twilio sends call and recording lifecycle events to signed webhooks, which remain the primary synchronization path. Each HTTP callback records only its kind and accepted/rejected/unmatched/failed outcome in an hourly aggregate; instrumentation failures are logged but never change the webhook response. Provider IDs also transactionally schedule bounded reconciliation jobs after the maximum call window; startup recovery advances unfinished work immediately, and a terminal callback advances its queued reconciliation job. A leased worker may fetch controlled call/recording status from Twilio when a callback is lost, including after a local terminal transition, so terminal duration evidence is not skipped. Terminal leg usage transactionally schedules a separate bounded cost reconciliation. That job polls the completed Twilio Call until its eventually consistent connectivity `price` and `priceUnit` exist, then writes one lease-fenced append-only provider cost record keyed by Call SID and component. Usage, calculated list-price cost, configured per-minute fallback estimates, and provider-reported actual currency amounts remain separate facts. Provider reads and stop requests may repeat after a crash, while repository lease fencing and provider identifiers make state, usage, and cost writes converge. A completed recording transition transactionally creates an idempotent post-call transcription job. That worker downloads the complete consented media with server-side Twilio credentials and submits it to the configured OpenAI transcription model. The request includes only bounded compiled context, literal names, the selected call language, any explicitly allowed fallback language, and the expected writing system. The final wording comes only from this recording request; it is never replaced or merged with the live draft. A deterministic local aligner may use already stored live events as a role/time scaffold without copying their words. It emits approximate structured segments only when the evidence is sufficient, marks unresolved spans as `unknown`, and otherwise keeps the canonical result as plain text. Browser audio playback is proxied through the main API so critical details can be checked while the Twilio recording is retained; the media URL and credentials remain server-side.
 
 The complete decision, constraints, and deferred improvements are documented in
 [the post-call transcription plan](./post-call-transcription-plan.md#stable-mvp-transcription-decision).

@@ -34,6 +34,35 @@ const costComponentSchema = z.strictObject({
   estimatedUsdMicros: countSchema.nullable()
 });
 
+const providerUsageCostComponentSchema = z.strictObject({
+  usageRecords: countSchema,
+  requests: countSchema,
+  models: z.array(z.string().trim().min(1).max(160)).max(50),
+  inputTextTokens: countSchema,
+  inputTextTokenSamples: countSchema,
+  cachedInputTextTokens: countSchema,
+  cachedInputTextTokenSamples: countSchema,
+  cacheWriteInputTextTokens: countSchema,
+  cacheWriteInputTextTokenSamples: countSchema,
+  outputTextTokens: countSchema,
+  outputTextTokenSamples: countSchema,
+  reasoningOutputTokens: countSchema,
+  reasoningOutputTokenSamples: countSchema,
+  inputAudioTokens: countSchema,
+  inputAudioTokenSamples: countSchema,
+  cachedInputAudioTokens: countSchema,
+  cachedInputAudioTokenSamples: countSchema,
+  outputAudioTokens: countSchema,
+  outputAudioTokenSamples: countSchema,
+  totalTokens: countSchema,
+  totalTokenSamples: countSchema,
+  durationSeconds: z.number().nonnegative(),
+  durationSamples: countSchema,
+  billableSeconds: z.number().nonnegative(),
+  billableSamples: countSchema,
+  calculatedUsdMicros: countSchema.nullable()
+});
+
 export const adminOperationsOverviewSchema = z.strictObject({
   generatedAt: z.iso.datetime(),
   window: z.strictObject({
@@ -90,6 +119,41 @@ export const adminOperationsOverviewSchema = z.strictObject({
       telephony: costComponentSchema,
       realtime: costComponentSchema,
       transcription: costComponentSchema
+    }),
+    providerUsage: z.strictObject({
+      status: z.enum(["unavailable", "partial", "calculated"]),
+      cohort: z.literal("usage_observed_at"),
+      from: z.iso.datetime(),
+      to: z.iso.datetime(),
+      pricingVersion: z.string().trim().min(1).max(80),
+      operationCount: countSchema,
+      usageRecordCount: countSchema,
+      unpricedBuckets: countSchema,
+      calculatedUsdMicros: countSchema.nullable(),
+      components: z.strictObject({
+        briefCompilation: providerUsageCostComponentSchema,
+        realtimeText: providerUsageCostComponentSchema,
+        realtimeAudio: providerUsageCostComponentSchema,
+        realtimeTranscription: providerUsageCostComponentSchema,
+        postCallTranscription: providerUsageCostComponentSchema,
+        telephony: providerUsageCostComponentSchema
+      })
+    }),
+    providerReported: z.strictObject({
+      status: z.enum(["unavailable", "reported"]),
+      cohort: z.literal("cost_observed_at"),
+      from: z.iso.datetime(),
+      to: z.iso.datetime(),
+      recordCount: countSchema,
+      usdMicros: countSchema.nullable(),
+      amounts: z.array(z.strictObject({
+        provider: z.string().trim().min(1).max(40),
+        costBasis: z.literal("provider_reported_actual"),
+        component: z.string().trim().min(1).max(80),
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        records: countSchema,
+        amountMicros: countSchema
+      })).max(100)
     })
   })
 });
@@ -109,6 +173,7 @@ export const adminDurableJobTypeSchema = z.enum([
   "final_transcription",
   "recording_retention",
   "provider_call_reconciliation",
+  "provider_call_cost_reconciliation",
   "provider_recording_reconciliation"
 ]);
 export const adminDurableJobStatusSchema = z.enum([
@@ -220,6 +285,19 @@ export const adminSystemStatusSchema = z.strictObject({
     transcriptionFailed: countSchema,
     retentionScheduled: countSchema,
     retentionOverdue: countSchema
+  }),
+  callPlanCutover: z.strictObject({
+    recoverableLegacyCalls: countSchema,
+    archivedLegacyCalls: countSchema,
+    recompileRequiredCalls: countSchema,
+    unavailableLegacyCalls: countSchema,
+    executableLegacyCalls: countSchema,
+    historicalAttemptsWithoutCompilation: countSchema,
+    historicalAttemptsWithoutExecutionSnapshot: countSchema,
+    activeLegacyAttempts: countSchema,
+    activeRecompilations: countSchema,
+    mutableCompilationReadRemovalReady: z.boolean(),
+    legacyMediaAdapterRemovalReady: z.boolean()
   }),
   jobs: z.strictObject({
     queued: countSchema,

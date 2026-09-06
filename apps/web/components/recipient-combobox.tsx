@@ -1,6 +1,9 @@
 "use client";
 
-import type { RecipientSuggestion } from "@callassist/contracts";
+import {
+  CALL_BRIEF_INPUT_LIMITS,
+  type RecipientSuggestion
+} from "@callassist/contracts";
 import {
   useEffect,
   useId,
@@ -106,6 +109,7 @@ export function RecipientCombobox({
       <label className="field field-wide">
         <span>{copy.recipient}</span>
         <input
+          maxLength={CALL_BRIEF_INPUT_LIMITS.recipientName}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={copy.recipientPlaceholder}
@@ -133,6 +137,7 @@ export function RecipientCombobox({
         {copy.recipient}
       </label>
       <input
+        maxLength={CALL_BRIEF_INPUT_LIMITS.recipientName}
         id={inputId}
         role="combobox"
         aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}

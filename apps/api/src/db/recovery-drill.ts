@@ -24,9 +24,16 @@ const temporaryDirectoryPrefix = "callassist-recovery-";
 const criticalTables = [
   "audit_events",
   "call_briefs",
+  "call_compilations",
+  "call_compilation_approvals",
   "call_events",
   "credit_transactions",
   "durable_jobs",
+  "provider_operation_results",
+  "provider_operations",
+  "provider_cost_records",
+  "provider_usage_records",
+  "post_call_transcription_chunks",
   "sessions",
   "users"
 ] as const;
@@ -36,8 +43,12 @@ const encryptedColumns = [
   ["call_briefs", "compilation_ciphertext"],
   ["call_briefs", "assistance_reason_ciphertext"],
   ["call_briefs", "assistance_disclosure_ciphertext"],
+  ["call_compilations", "compilation_ciphertext"],
+  ["call_compilation_approvals", "execution_snapshot_ciphertext"],
+  ["call_attempts", "execution_snapshot_ciphertext"],
   ["final_transcripts", "text_ciphertext"],
   ["final_transcripts", "segments_ciphertext"],
+  ["post_call_transcription_chunks", "text_ciphertext"],
   ["call_feedback_revisions", "comment_ciphertext"]
 ] as const;
 

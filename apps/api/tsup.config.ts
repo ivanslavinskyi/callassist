@@ -6,6 +6,9 @@ export default defineConfig({
     index: "src/index.ts",
     worker: "src/worker.ts",
     "db/migrate": "src/db/migrate.ts",
+    "db/backfill-call-compilations": "src/db/backfill-call-compilations.ts",
+    "db/classify-legacy-call-plans": "src/db/classify-legacy-call-plans.ts",
+    "db/verify-call-plan-cutover": "src/db/verify-call-plan-cutover.ts",
     "db/reencrypt-data": "src/db/reencrypt-data.ts",
     "db/recovery-drill": "src/db/recovery-drill.ts",
     "db/set-outbound-calls": "src/db/set-outbound-calls.ts"

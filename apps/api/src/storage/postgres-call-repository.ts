@@ -1,16 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  BRIEF_COMPILER_VERSION,
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
   adminCallInspectorSchema,
   adminCallListSchema,
   adminCallSensitiveContentSchema,
   adminCallSummarySchema,
+  approvedExecutionSnapshotSchema,
   callFeedbackRevisionSchema,
+  callCompilationSchema,
   callOutcomeMetricsSchema,
   callOutcomeRevisionSchema,
   callOutcomeViewSchema,
   callTelemetryEventInputSchema,
+  createApprovedExecutionSnapshot,
   deriveTechnicalCallOutcome,
   describeCallTelemetryEvent,
   durableCallEventSchema,
@@ -21,11 +25,13 @@ import {
   semanticOutcomeForGoalResult,
   sensitiveCallAccessInputSchema,
   type AdminCallSummary,
+  type ApprovedExecutionSnapshot,
   type ApprovalDecision,
   type ApprovalRequest,
   type CallBrief,
   type CallPreparation,
   type CallCompilation,
+  type CompilationApprovalInput,
   type CallFeedbackRevision,
   type CallGoalResult,
   type CallOutcomeMetrics,
@@ -72,8 +78,10 @@ import {
 } from "../jobs/durable-job";
 import {
   CallRepositoryError,
+  assertCompilationIntegrity,
   buildRuntimeBriefFields,
   connectedProviderStatuses,
+  createTelephonyLegResult,
   creditSettlementForStatus,
   defaultCallAdmissionPolicy,
   durableWorkerHeartbeatRetentionMs,
@@ -84,17 +92,21 @@ import {
   shouldApplyProviderCallStatus,
   type AdminCreditGrantRepositoryInput,
   type AdminOperationsFacts,
+  type AdminProviderCostBucket,
   type AdminSystemFacts,
   type AdminWebhookDeliveryFacts,
   type ApprovalRequestDraft,
   type CallDataDeletionRecord,
   type CallAttemptRecord,
   type CallChangeSignal,
+  type CompleteProviderOperationInput,
+  type CompletePostCallTranscriptionProviderOperationInput,
   type CallPreparationPublication,
   type CallRepository,
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
   type EnqueueCallPreparationRepositoryInput,
+  type EnqueueCallRecompilationRepositoryInput,
   type PromoCodeCreationResult,
   type ListCallBriefsInput,
   type ListRecipientSuggestionsInput,
@@ -107,6 +119,14 @@ import {
   type ProviderWebhookDeliveryInput,
   type ProviderWebhookKind,
   type ProviderWebhookOutcome,
+  type ProviderOperationReservationInput,
+  type PostCallTranscriptionProviderOperationInput,
+  type PostCallTranscriptionChunkLookupInput,
+  type RealtimeProviderOperationInput,
+  type RealtimeProviderSessionInput,
+  type TelephonyLegUsageInput,
+  type TelephonyProviderCostInput,
+  type TelephonyProviderOperationInput,
   type DurableWorkerHeartbeatInput
 } from "./call-repository";
 
@@ -114,6 +134,15 @@ type DatabaseDate = Date | string;
 
 type CallBriefRow = {
   id: string;
+  currentCompilationId: string | null;
+  legacyCompilationDisposition:
+    | "archived_terminal"
+    | "recompile_required"
+    | null;
+  immutableCompilationCiphertext: string | null;
+  immutableCompilationRevision: number | null;
+  immutableCompilationSnapshotHash: string | null;
+  immutableCompilationApprovedAt: DatabaseDate | null;
   recipientName: string;
   phoneNumber: string;
   objective: string;
@@ -138,6 +167,17 @@ type CallBriefRow = {
   updatedAt: DatabaseDate;
 };
 
+type CallCompilationSourceRow = Pick<
+  CallBriefRow,
+  | "currentCompilationId"
+  | "legacyCompilationDisposition"
+  | "immutableCompilationCiphertext"
+  | "immutableCompilationRevision"
+  | "immutableCompilationSnapshotHash"
+  | "immutableCompilationApprovedAt"
+  | "compilationCiphertext"
+>;
+
 type TranscriptRow = {
   id: string;
   role: TranscriptSegment["role"];
@@ -160,6 +200,7 @@ type ApprovalRow = {
 type CallAttemptRow = {
   id: string;
   callBriefId: string;
+  compilationId: string | null;
   provider: CallAttemptRecord["provider"];
   providerCallId: string | null;
   status: CallBrief["status"];
@@ -167,6 +208,9 @@ type CallAttemptRow = {
   startedAt: DatabaseDate;
   endedAt: DatabaseDate | null;
   failureReason: string | null;
+  compilationRevision: number | null;
+  compilationSnapshotHash: string | null;
+  executionSnapshotCiphertext: string | null;
 };
 
 type CallRecordingRow = {
@@ -297,6 +341,41 @@ type AdminOperationsFactsRow = {
   transcriptionUsageSeconds: number;
 };
 
+type AdminProviderOperationCountRow = { operationCount: number };
+
+type AdminProviderUsageRow = {
+  provider: string;
+  operationType: string;
+  stage: string;
+  model: string;
+  usageRecords: number;
+  requestCount: number;
+  inputTextTokens: number;
+  inputTextTokenSamples: number;
+  cachedInputTextTokens: number;
+  cachedInputTextTokenSamples: number;
+  cacheWriteInputTextTokens: number;
+  cacheWriteInputTextTokenSamples: number;
+  outputTextTokens: number;
+  outputTextTokenSamples: number;
+  reasoningOutputTokens: number;
+  reasoningOutputTokenSamples: number;
+  inputAudioTokens: number;
+  inputAudioTokenSamples: number;
+  cachedInputAudioTokens: number;
+  cachedInputAudioTokenSamples: number;
+  outputAudioTokens: number;
+  outputAudioTokenSamples: number;
+  totalTokens: number;
+  totalTokenSamples: number;
+  durationSeconds: number;
+  durationSamples: number;
+  billableSeconds: number;
+  billableSamples: number;
+};
+
+type AdminProviderCostRow = AdminProviderCostBucket;
+
 type AdminSystemFactsRow = {
   outboundCallsEnabled: boolean;
   outboundCallsReason: string;
@@ -310,6 +389,15 @@ type AdminSystemFactsRow = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  recoverableLegacyCalls: number;
+  archivedLegacyCalls: number;
+  recompileRequiredCalls: number;
+  unavailableLegacyCalls: number;
+  executableLegacyCalls: number;
+  historicalAttemptsWithoutCompilation: number;
+  historicalAttemptsWithoutExecutionSnapshot: number;
+  activeLegacyAttempts: number;
+  activeRecompilations: number;
   jobsQueued: number;
   jobsRunning: number;
   jobsSucceeded: number;
@@ -354,6 +442,11 @@ type CallPreparationRow = {
   idempotencyKey: string;
   inputFingerprint: string;
   inputCiphertext: string | null;
+  providerRequestCount: number;
+  operationKind: "creation" | "recompilation";
+  targetCallBriefId: string | null;
+  expectedCompilationId: string | null;
+  targetRevision: number;
   status: CallPreparation["status"];
   callBriefId: string | null;
   failureCode: CallPreparation["failureCode"];
@@ -515,6 +608,7 @@ export class PostgresCallRepository implements CallRepository {
     creationIdempotencyKey: string = randomUUID(),
     publication?: CallPreparationPublication
   ) {
+    assertCompilationIntegrity(compilation);
     if (!publication) {
       const existing = await this.findByCreationRequest(
         userId,
@@ -529,7 +623,6 @@ export class PostgresCallRepository implements CallRepository {
     const now = new Date();
     const encryptedFacts = encryptJson(runtime.allowedFacts, this.#encryptionKey);
     const encryptedContext = encryptJson(runtime.context, this.#encryptionKey);
-    const encryptedCompilation = encryptJson(compilation, this.#encryptionKey);
     const encryptedReason = encryptJson(
       parsed.assistanceReason,
       this.#encryptionKey
@@ -618,7 +711,7 @@ export class PostgresCallRepository implements CallRepository {
           ${encryptedReason},
           ${null},
           ${encryptedDisclosure},
-          ${encryptedCompilation},
+          ${null},
           ${encryptedContext},
           ${parsed.locale},
           ${parsed.voiceGender},
@@ -637,6 +730,19 @@ export class PostgresCallRepository implements CallRepository {
       `;
       let resolvedId = insertedRows[0]?.id;
       if (resolvedId) {
+        const compilationId = await this.#insertCompilationRecord(
+          transaction,
+          resolvedId,
+          compilation,
+          "native"
+        );
+        await transaction`
+          UPDATE call_briefs
+          SET
+            current_compilation_id = ${compilationId},
+            legacy_compilation_disposition = NULL
+          WHERE id = ${resolvedId}
+        `;
         await this.#audit(transaction, resolvedId, "call.created", {
           locale: parsed.locale,
           status: runtime.status,
@@ -743,7 +849,15 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!stored) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
-      if (stored.inputFingerprint !== input.inputFingerprint) {
+      const [target] = await transaction<{ targetCallBriefId: string | null }[]>`
+        SELECT target_call_brief_id AS "targetCallBriefId"
+        FROM call_preparation_requests
+        WHERE id = ${stored.id}
+      `;
+      if (
+        stored.inputFingerprint !== input.inputFingerprint ||
+        target?.targetCallBriefId !== null
+      ) {
         throw new CallRepositoryError(
           "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
         );
@@ -769,24 +883,176 @@ export class PostgresCallRepository implements CallRepository {
     return mapCallPreparationRow(preparation);
   }
 
+  async enqueueCallRecompilation(
+    input: EnqueueCallRecompilationRepositoryInput
+  ) {
+    const id = randomUUID();
+    const encryptedInput = encryptJson(
+      normalizeCreateCallBriefInput(input.input),
+      this.#encryptionKey
+    );
+    const preparationId = await this.#sql.begin(async (transaction) => {
+      const [brief] = await transaction<{
+        userId: string | null;
+        status: CallBrief["status"];
+        currentCompilationId: string | null;
+        currentRevision: number | null;
+        attemptCount: number;
+      }[]>`
+        SELECT
+          call_briefs.user_id AS "userId",
+          call_briefs.status,
+          call_briefs.current_compilation_id AS "currentCompilationId",
+          call_compilations.revision AS "currentRevision",
+          (
+            SELECT COUNT(*)::int
+            FROM call_attempts
+            WHERE call_attempts.call_brief_id = call_briefs.id
+          ) AS "attemptCount"
+        FROM call_briefs
+        LEFT JOIN call_compilations
+          ON call_compilations.id = call_briefs.current_compilation_id
+        WHERE call_briefs.id = ${input.callBriefId}
+          AND call_briefs.data_deleted_at IS NULL
+        FOR UPDATE OF call_briefs
+      `;
+      if (!brief || brief.userId !== input.userId) {
+        throw new CallRepositoryError("CALL_NOT_FOUND");
+      }
+
+      const [existing] = await transaction<{
+        id: string;
+        inputFingerprint: string;
+        targetCallBriefId: string | null;
+      }[]>`
+        SELECT
+          id,
+          input_fingerprint AS "inputFingerprint",
+          target_call_brief_id AS "targetCallBriefId"
+        FROM call_preparation_requests
+        WHERE user_id = ${input.userId}
+          AND idempotency_key = ${input.idempotencyKey}
+        FOR UPDATE
+      `;
+      if (existing) {
+        if (
+          existing.inputFingerprint !== input.inputFingerprint ||
+          existing.targetCallBriefId !== input.callBriefId
+        ) {
+          throw new CallRepositoryError(
+            "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+          );
+        }
+        return existing.id;
+      }
+      if (
+        !["review_required", "needs_clarification", "blocked", "ready"].includes(
+          brief.status
+        ) ||
+        brief.attemptCount > 0
+      ) {
+        throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
+      }
+      if (!brief.currentCompilationId || !brief.currentRevision) {
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+      }
+      const active = await transaction`
+        SELECT id
+        FROM call_preparation_requests
+        WHERE target_call_brief_id = ${input.callBriefId}
+          AND status IN ('queued', 'processing', 'retrying')
+        LIMIT 1
+      `;
+      if (active.count > 0) {
+        throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+      }
+
+      const inserted = await transaction`
+        INSERT INTO call_preparation_requests (
+          id, user_id, idempotency_key, input_fingerprint, input_ciphertext,
+          operation_kind, target_call_brief_id, expected_compilation_id,
+          target_revision, status, created_at, updated_at
+        ) VALUES (
+          ${id}, ${input.userId}, ${input.idempotencyKey},
+          ${input.inputFingerprint}, ${encryptedInput}, 'recompilation',
+          ${input.callBriefId}, ${brief.currentCompilationId},
+          ${brief.currentRevision + 1}, 'queued',
+          ${input.now}::timestamptz, ${input.now}::timestamptz
+        )
+        ON CONFLICT (user_id, idempotency_key) DO NOTHING
+        RETURNING id
+      `;
+      if (inserted.count !== 1) {
+        const [raced] = await transaction<{
+          id: string;
+          inputFingerprint: string;
+          targetCallBriefId: string | null;
+        }[]>`
+          SELECT
+            id,
+            input_fingerprint AS "inputFingerprint",
+            target_call_brief_id AS "targetCallBriefId"
+          FROM call_preparation_requests
+          WHERE user_id = ${input.userId}
+            AND idempotency_key = ${input.idempotencyKey}
+          FOR UPDATE
+        `;
+        if (
+          !raced ||
+          raced.inputFingerprint !== input.inputFingerprint ||
+          raced.targetCallBriefId !== input.callBriefId
+        ) {
+          throw new CallRepositoryError(
+            "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+          );
+        }
+        return raced.id;
+      }
+      await transaction`
+        INSERT INTO durable_jobs (
+          id, job_type, call_preparation_id, status, max_attempts,
+          run_after, force_requested, created_at, updated_at
+        ) VALUES (
+          ${randomUUID()}, 'brief_compilation', ${id}, 'queued',
+          ${durableJobMaxAttempts.brief_compilation},
+          ${input.now}::timestamptz, false,
+          ${input.now}::timestamptz, ${input.now}::timestamptz
+        )
+      `;
+      return id;
+    });
+    const preparation = await this.#getCallPreparation(preparationId);
+    if (!preparation) throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    return mapCallPreparationRow(preparation);
+  }
+
   async getCallPreparation(id: string, userId: string) {
     const row = await this.#getCallPreparation(id, userId);
     return row ? mapCallPreparationRow(row) : null;
   }
 
+  async getAdminCallPreparation(id: string) {
+    const row = await this.#getCallPreparation(id);
+    return row ? mapCallPreparationRow(row) : null;
+  }
+
   async findCallPreparationByRequest(
-    userId: string,
+    userId: string | null,
     idempotencyKey: string,
-    inputFingerprint: string
+    inputFingerprint: string,
+    targetCallBriefId: string | null = null
   ) {
     const [row] = await this.#sql<CallPreparationRow[]>`
       ${this.#callPreparationSelect()}
-      WHERE call_preparation_requests.user_id = ${userId}
+      WHERE call_preparation_requests.user_id IS NOT DISTINCT FROM ${userId}::uuid
         AND call_preparation_requests.idempotency_key = ${idempotencyKey}
       LIMIT 1
     `;
     if (!row) return null;
-    if (row.inputFingerprint !== inputFingerprint) {
+    if (
+      row.inputFingerprint !== inputFingerprint ||
+      row.targetCallBriefId !== targetCallBriefId
+    ) {
       throw new CallRepositoryError("CALL_PREPARATION_IDEMPOTENCY_CONFLICT");
     }
     return mapCallPreparationRow(row);
@@ -822,8 +1088,508 @@ export class PostgresCallRepository implements CallRepository {
               row.inputCiphertext,
               this.#encryptionKey
             )
-          : null
+          : null,
+        targetCallBriefId: row.targetCallBriefId,
+        expectedCompilationId: row.expectedCompilationId,
+        targetRevision: row.targetRevision
       };
+    });
+  }
+
+  async reserveCallPreparationProviderRequest(
+    input: ProviderOperationReservationInput,
+    lease: DurableJobLease
+  ) {
+    return this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const existing = await transaction`
+        SELECT id
+        FROM provider_operations
+        WHERE id = ${input.id}
+          AND call_preparation_id = ${input.preparationId}
+          AND durable_job_id = ${lease.jobId}
+      `;
+      if (existing.count === 1) return true;
+      const rows = await transaction`
+        UPDATE call_preparation_requests
+        SET
+          provider_request_count = provider_request_count + 1,
+          updated_at = ${lease.checkedAt}::timestamptz
+        WHERE id = ${input.preparationId}
+          AND status = 'processing'
+          AND provider_request_count < ${input.maxRequests}
+          AND EXISTS (
+            SELECT 1
+            FROM durable_jobs
+            WHERE durable_jobs.id = ${lease.jobId}
+              AND durable_jobs.call_preparation_id = call_preparation_requests.id
+          )
+        RETURNING provider_request_count
+      `;
+      if (rows.count !== 1) return false;
+      await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_preparation_id, durable_job_id,
+          durable_job_generation, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.preparationId}, ${lease.jobId},
+          ${input.durableJobGeneration}, ${input.startedAt}::timestamptz
+        )
+      `;
+      return true;
+    });
+  }
+
+  async startRealtimeProviderSessions(inputs: RealtimeProviderSessionInput[]) {
+    if (inputs.length === 0) return;
+    const [{ callBriefId, callAttemptId }] = inputs;
+    if (
+      inputs.some(
+        (input) =>
+          input.callBriefId !== callBriefId ||
+          input.callAttemptId !== callAttemptId
+      )
+    ) {
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    }
+    await this.#sql.begin(async (transaction) => {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${callAttemptId}
+          AND call_brief_id = ${callBriefId}
+        FOR SHARE
+      `;
+      if (attempt.count !== 1) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      for (const input of inputs) {
+        await transaction`
+          INSERT INTO provider_operations (
+            id, provider, operation_type, stage, requested_model,
+            client_request_id, call_brief_id, call_attempt_id, started_at
+          ) VALUES (
+            ${input.id}, ${input.provider}, ${input.operationType},
+            ${input.stage}, ${input.requestedModel}, ${input.clientRequestId},
+            ${input.callBriefId}, ${input.callAttemptId},
+            ${input.startedAt}::timestamptz
+          )
+          ON CONFLICT DO NOTHING
+        `;
+      }
+    });
+  }
+
+  async recordRealtimeProviderOperation(
+    input: RealtimeProviderOperationInput
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+        FOR SHARE
+      `;
+      if (attempt.count !== 1) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      const parent = await transaction`
+        SELECT id
+        FROM provider_operations
+        WHERE id = ${input.parentOperationId}
+          AND operation_type = 'realtime_session'
+          AND call_brief_id = ${input.callBriefId}
+          AND call_attempt_id = ${input.callAttemptId}
+        FOR SHARE
+      `;
+      if (parent.count !== 1) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_brief_id, call_attempt_id,
+          parent_operation_id, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.callBriefId}, ${input.callAttemptId},
+          ${input.parentOperationId},
+          ${input.startedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+      await this.#insertProviderOperationResult(
+        transaction,
+        input.id,
+        input.result
+      );
+    });
+  }
+
+  async reservePostCallTranscriptionProviderRequest(
+    input: PostCallTranscriptionProviderOperationInput,
+    lease: DurableJobLease
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [context] = await transaction<{ callAttemptId: string }[]>`
+        SELECT call_recordings.call_attempt_id AS "callAttemptId"
+        FROM call_recordings
+        INNER JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        INNER JOIN durable_jobs
+          ON durable_jobs.id = ${lease.jobId}
+          AND durable_jobs.job_type = 'final_transcription'
+          AND durable_jobs.recording_id = call_recordings.id
+          AND durable_jobs.generation = ${input.durableJobGeneration}
+        WHERE call_recordings.id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_recordings.status = 'available'
+          AND final_transcripts.status = 'processing'
+        FOR SHARE OF call_recordings, final_transcripts, durable_jobs
+      `;
+      if (!context) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const inserted = await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_brief_id, call_attempt_id, recording_id,
+          durable_job_id, durable_job_generation, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.callBriefId}, ${context.callAttemptId}, ${input.recordingId},
+          ${lease.jobId}, ${input.durableJobGeneration},
+          ${input.startedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+      if (inserted.count === 1) return;
+      const existing = await transaction`
+        SELECT id
+        FROM provider_operations
+        WHERE id = ${input.id}
+          AND provider = ${input.provider}
+          AND client_request_id = ${input.clientRequestId}
+          AND call_brief_id = ${input.callBriefId}
+          AND call_attempt_id = ${context.callAttemptId}
+          AND recording_id = ${input.recordingId}
+          AND durable_job_id = ${lease.jobId}
+          AND durable_job_generation = ${input.durableJobGeneration}
+      `;
+      if (existing.count !== 1) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+    });
+  }
+
+  async findCompletedPostCallTranscriptionChunk(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ) {
+    return this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [chunk] = await transaction<{ textCiphertext: string }[]>`
+        SELECT chunks.text_ciphertext AS "textCiphertext"
+        FROM post_call_transcription_chunks chunks
+        INNER JOIN call_recordings
+          ON call_recordings.id = chunks.recording_id
+        INNER JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        INNER JOIN durable_jobs
+          ON durable_jobs.id = ${lease.jobId}
+          AND durable_jobs.job_type = 'final_transcription'
+          AND durable_jobs.recording_id = call_recordings.id
+          AND durable_jobs.generation = chunks.durable_job_generation
+        WHERE chunks.recording_id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_recordings.status = 'available'
+          AND final_transcripts.status = 'processing'
+          AND chunks.durable_job_generation = ${input.durableJobGeneration}
+          AND chunks.stage = ${input.stage}
+          AND chunks.chunk_key = ${input.chunkKey}
+          AND chunks.input_fingerprint = ${input.inputFingerprint}
+          AND chunks.requested_model = ${input.requestedModel}
+        LIMIT 1
+      `;
+      return chunk
+        ? decryptJson<string>(chunk.textCiphertext, this.#encryptionKey)
+        : null;
+    });
+  }
+
+  async completePostCallTranscriptionProviderRequest(
+    input: CompletePostCallTranscriptionProviderOperationInput
+  ) {
+    const textCiphertext = input.transcriptText
+      ? encryptJson(input.transcriptText, this.#encryptionKey)
+      : null;
+    await this.#sql.begin(async (transaction) => {
+      const [operation] = await transaction<{ requestedModel: string }[]>`
+        SELECT requested_model AS "requestedModel"
+        FROM provider_operations
+        WHERE id = ${input.operationId}
+          AND provider = 'openai'
+          AND operation_type = 'transcription'
+          AND stage = ${input.stage}
+          AND call_brief_id = ${input.callBriefId}
+          AND recording_id = ${input.recordingId}
+          AND durable_job_generation = ${input.durableJobGeneration}
+        FOR SHARE
+      `;
+      if (!operation) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await this.#insertProviderOperationResult(transaction, input.operationId, {
+        outcome: input.outcome,
+        providerRequestId: input.providerRequestId,
+        providerResponseId: input.providerResponseId,
+        providerModel: input.providerModel,
+        statusCode: input.statusCode,
+        completedAt: input.completedAt,
+        durationMs: input.durationMs,
+        errorCode: input.errorCode,
+        usage: input.usage
+      });
+      if (input.outcome !== "succeeded" || !textCiphertext) return;
+      await transaction`
+        INSERT INTO post_call_transcription_chunks (
+          id, recording_id, durable_job_generation, stage, chunk_key,
+          input_fingerprint, requested_model, provider_operation_id,
+          text_ciphertext, created_at
+        )
+        SELECT
+          ${randomUUID()}, ${input.recordingId},
+          ${input.durableJobGeneration}, ${input.stage}, ${input.chunkKey},
+          ${input.inputFingerprint}, ${operation.requestedModel},
+          ${input.operationId}, ${textCiphertext},
+          ${input.completedAt}::timestamptz
+        FROM call_recordings
+        INNER JOIN final_transcripts
+          ON final_transcripts.call_recording_id = call_recordings.id
+        WHERE call_recordings.id = ${input.recordingId}
+          AND call_recordings.call_brief_id = ${input.callBriefId}
+          AND call_recordings.status = 'available'
+          AND final_transcripts.status = 'processing'
+        ON CONFLICT DO NOTHING
+      `;
+    });
+  }
+
+  async startTelephonyProviderOperation(
+    input: TelephonyProviderOperationInput
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      const attempt = await transaction`
+        SELECT id
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+          AND provider = 'twilio'
+        FOR SHARE
+      `;
+      if (attempt.count !== 1) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      await transaction`
+        INSERT INTO provider_operations (
+          id, provider, operation_type, stage, requested_model,
+          client_request_id, call_brief_id, call_attempt_id, started_at
+        ) VALUES (
+          ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
+          ${input.requestedModel}, ${input.clientRequestId},
+          ${input.callBriefId}, ${input.callAttemptId},
+          ${input.startedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+    });
+  }
+
+  async recordTelephonyLegUsage(input: TelephonyLegUsageInput) {
+    await this.#sql.begin(async (transaction) => {
+      const [attempt] = await transaction<{ startedAt: DatabaseDate }[]>`
+        SELECT created_at AS "startedAt"
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+          AND provider = 'twilio'
+          AND provider_call_id = ${input.providerCallId}
+        FOR SHARE
+      `;
+      if (!attempt) {
+        throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      }
+      let [operation] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM provider_operations
+        WHERE call_attempt_id = ${input.callAttemptId}
+          AND provider = 'twilio'
+          AND operation_type = 'telephony_leg'
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (!operation) {
+        [operation] = await transaction<{ id: string }[]>`
+          INSERT INTO provider_operations (
+            id, provider, operation_type, stage, requested_model,
+            client_request_id, call_brief_id, call_attempt_id, started_at
+          ) VALUES (
+            ${input.fallbackOperationId}, 'twilio', 'telephony_leg',
+            'outbound_call', 'programmable_voice',
+            ${input.fallbackOperationId}, ${input.callBriefId},
+            ${input.callAttemptId}, ${attempt.startedAt}
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `;
+        if (!operation) {
+          [operation] = await transaction<{ id: string }[]>`
+            SELECT id
+            FROM provider_operations
+            WHERE call_attempt_id = ${input.callAttemptId}
+              AND provider = 'twilio'
+              AND operation_type = 'telephony_leg'
+            LIMIT 1
+            FOR SHARE
+          `;
+        }
+      }
+      if (!operation) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      if (input.durationSeconds !== null || input.billableSeconds !== null) {
+        await this.#insertProviderOperationResult(
+          transaction,
+          operation.id,
+          createTelephonyLegResult(input)
+        );
+      }
+      await this.#enqueueProviderCallCostReconciliation(
+        transaction,
+        input.callAttemptId,
+        new Date(input.occurredAt)
+      );
+    });
+  }
+
+  async recordTelephonyProviderCost(
+    input: TelephonyProviderCostInput,
+    lease: DurableJobLease
+  ) {
+    await this.#sql.begin(async (transaction) => {
+      await requirePostgresDurableJobLease(transaction, lease);
+      const [attempt] = await transaction<{ startedAt: DatabaseDate }[]>`
+        SELECT created_at AS "startedAt"
+        FROM call_attempts
+        WHERE id = ${input.callAttemptId}
+          AND call_brief_id = ${input.callBriefId}
+          AND provider = 'twilio'
+          AND provider_call_id = ${input.providerCallId}
+        FOR SHARE
+      `;
+      if (!attempt) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      let [operation] = await transaction<{ id: string }[]>`
+        SELECT id
+        FROM provider_operations
+        WHERE call_attempt_id = ${input.callAttemptId}
+          AND provider = 'twilio'
+          AND operation_type = 'telephony_leg'
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (!operation) {
+        [operation] = await transaction<{ id: string }[]>`
+          INSERT INTO provider_operations (
+            id, provider, operation_type, stage, requested_model,
+            client_request_id, call_brief_id, call_attempt_id, started_at
+          ) VALUES (
+            ${input.fallbackOperationId}, 'twilio', 'telephony_leg',
+            'outbound_call', 'programmable_voice', ${input.fallbackOperationId},
+            ${input.callBriefId}, ${input.callAttemptId}, ${attempt.startedAt}
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `;
+        if (!operation) {
+          [operation] = await transaction<{ id: string }[]>`
+            SELECT id
+            FROM provider_operations
+            WHERE call_attempt_id = ${input.callAttemptId}
+              AND provider = 'twilio'
+              AND operation_type = 'telephony_leg'
+            LIMIT 1
+            FOR SHARE
+          `;
+        }
+      }
+      if (!operation) throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      await transaction`
+        INSERT INTO provider_cost_records (
+          id, operation_id, provider, provider_cost_id, cost_basis,
+          component, amount_micros, currency, raw_cost, observed_at
+        ) VALUES (
+          ${input.id}, ${operation.id}, 'twilio',
+          ${`${input.providerCallId}:connectivity`},
+          'provider_reported_actual', 'connectivity', ${input.amountMicros},
+          ${input.currency}, ${transaction.json({
+            price: input.rawAmount,
+            price_unit: input.currency
+          })}, ${input.observedAt}::timestamptz
+        )
+        ON CONFLICT DO NOTHING
+      `;
+      const [stored] = await transaction<{
+        operationId: string;
+        amountMicros: number;
+        currency: string;
+        rawAmount: string;
+      }[]>`
+        SELECT
+          operation_id AS "operationId",
+          amount_micros::double precision AS "amountMicros",
+          currency,
+          raw_cost->>'price' AS "rawAmount"
+        FROM provider_cost_records
+        WHERE provider = 'twilio'
+          AND provider_cost_id = ${`${input.providerCallId}:connectivity`}
+      `;
+      if (
+        !stored ||
+        stored.operationId !== operation.id ||
+        stored.amountMicros !== input.amountMicros ||
+        stored.currency !== input.currency ||
+        stored.rawAmount !== input.rawAmount
+      ) {
+        throw new CallRepositoryError("PROVIDER_COST_CONFLICT");
+      }
+    });
+  }
+
+  async completeProviderOperation(input: CompleteProviderOperationInput) {
+    await this.#sql.begin(async (transaction) => {
+      const operation = await transaction`
+        SELECT id FROM provider_operations WHERE id = ${input.operationId}
+        FOR SHARE
+      `;
+      if (operation.count !== 1) {
+        throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
+      }
+      await this.#insertProviderOperationResult(transaction, input.operationId, {
+        outcome: input.outcome,
+        providerRequestId: input.providerRequestId,
+        providerResponseId: input.providerResponseId,
+        providerModel: input.providerModel,
+        statusCode: input.statusCode,
+        completedAt: input.completedAt,
+        durationMs: input.durationMs,
+        errorCode: input.errorCode,
+        usage: input.usage
+      });
     });
   }
 
@@ -980,6 +1746,10 @@ export class PostgresCallRepository implements CallRepository {
               SELECT id FROM call_attempts
               WHERE call_brief_id = ${input.callId}
             )
+            OR durable_jobs.call_preparation_id IN (
+              SELECT id FROM call_preparation_requests
+              WHERE target_call_brief_id = ${input.callId}
+            )
           )
         ON CONFLICT (job_id, generation, attempt_number) DO NOTHING
       `;
@@ -1003,13 +1773,35 @@ export class PostgresCallRepository implements CallRepository {
               SELECT id FROM call_attempts
               WHERE call_brief_id = ${input.callId}
             )
+            OR call_preparation_id IN (
+              SELECT id FROM call_preparation_requests
+              WHERE target_call_brief_id = ${input.callId}
+            )
           )
+      `;
+      await transaction`
+        UPDATE call_preparation_requests
+        SET
+          status = 'cancelled',
+          failure_code = NULL,
+          input_ciphertext = NULL,
+          updated_at = ${new Date(input.deletedAt)},
+          completed_at = ${new Date(input.deletedAt)}
+        WHERE target_call_brief_id = ${input.callId}
+          AND status IN ('queued', 'processing', 'retrying')
       `;
       await transaction`
         DELETE FROM transcript_segments WHERE call_brief_id = ${input.callId}
       `;
       await transaction`
         DELETE FROM approval_requests WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        DELETE FROM post_call_transcription_chunks
+        WHERE recording_id IN (
+          SELECT id FROM call_recordings
+          WHERE call_brief_id = ${input.callId}
+        )
       `;
       await transaction`
         UPDATE final_transcripts
@@ -1031,8 +1823,26 @@ export class PostgresCallRepository implements CallRepository {
       `;
       await transaction`
         UPDATE call_attempts
-        SET provider_call_id = NULL, failure_reason = NULL
+        SET
+          provider_call_id = NULL,
+          failure_reason = NULL,
+          compilation_id = NULL,
+          compilation_revision = NULL,
+          compilation_snapshot_hash = NULL,
+          execution_snapshot_ciphertext = NULL
         WHERE call_brief_id = ${input.callId}
+      `;
+      await transaction`
+        UPDATE call_compilations
+        SET compilation_ciphertext = NULL
+        WHERE call_brief_id = ${input.callId}
+          AND compilation_ciphertext IS NOT NULL
+      `;
+      await transaction`
+        UPDATE call_compilation_approvals
+        SET execution_snapshot_ciphertext = NULL
+        WHERE call_brief_id = ${input.callId}
+          AND execution_snapshot_ciphertext IS NOT NULL
       `;
       await transaction`
         UPDATE call_recordings
@@ -1058,6 +1868,7 @@ export class PostgresCallRepository implements CallRepository {
           allowed_facts_ciphertext = ${encryptedFacts},
           context_ciphertext = ${encryptedContext},
           compilation_ciphertext = NULL,
+          legacy_compilation_disposition = NULL,
           assistance_reason_ciphertext = ${encryptedReason},
           assistance_disclosure = NULL,
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
@@ -1510,14 +2321,15 @@ export class PostgresCallRepository implements CallRepository {
   async recompile(
     id: string,
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    publication?: CallPreparationPublication
   ) {
+    assertCompilationIntegrity(compilation);
     const parsed = normalizeCreateCallBriefInput(input);
     const runtime = buildRuntimeBriefFields(compilation);
     const now = new Date();
     const encryptedFacts = encryptJson(runtime.allowedFacts, this.#encryptionKey);
     const encryptedContext = encryptJson(runtime.context, this.#encryptionKey);
-    const encryptedCompilation = encryptJson(compilation, this.#encryptionKey);
     const encryptedReason = encryptJson(
       parsed.assistanceReason,
       this.#encryptionKey
@@ -1529,21 +2341,88 @@ export class PostgresCallRepository implements CallRepository {
 
     await this.#sql.begin(async (transaction) => {
       const [row] = await transaction<
-        {
+        Array<CallCompilationSourceRow & {
           status: CallBrief["status"];
-          compilationCiphertext: string | null;
           attemptCount: number;
-        }[]
+        }>
       >`
         SELECT
           status,
-          compilation_ciphertext AS "compilationCiphertext",
+          NULL::text AS "compilationCiphertext",
+          current_compilation_id AS "currentCompilationId",
+          legacy_compilation_disposition AS "legacyCompilationDisposition",
+          (
+            SELECT call_compilations.compilation_ciphertext
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationCiphertext",
+          (
+            SELECT call_compilations.revision
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationRevision",
+          (
+            SELECT call_compilations.snapshot_hash
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationSnapshotHash",
+          (
+            SELECT call_compilation_approvals.approved_at
+            FROM call_compilation_approvals
+            WHERE call_compilation_approvals.compilation_id =
+              call_briefs.current_compilation_id
+          ) AS "immutableCompilationApprovedAt",
           (SELECT COUNT(*)::int FROM call_attempts WHERE call_brief_id = ${id}) AS "attemptCount"
         FROM call_briefs
         WHERE id = ${id}
         FOR UPDATE
       `;
       if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
+      let expectedCompilationId: string | null = null;
+      if (publication) {
+        await requirePostgresDurableJobLease(transaction, publication.lease);
+        const [target] = await transaction<{
+          status: CallPreparation["status"];
+          callBriefId: string | null;
+          targetCallBriefId: string | null;
+          expectedCompilationId: string | null;
+          targetRevision: number;
+        }[]>`
+          SELECT
+            call_preparation_requests.status,
+            call_preparation_requests.call_brief_id AS "callBriefId",
+            call_preparation_requests.target_call_brief_id AS "targetCallBriefId",
+            call_preparation_requests.expected_compilation_id AS "expectedCompilationId",
+            call_preparation_requests.target_revision AS "targetRevision"
+          FROM call_preparation_requests
+          INNER JOIN durable_jobs
+            ON durable_jobs.call_preparation_id = call_preparation_requests.id
+          WHERE call_preparation_requests.id = ${publication.preparationId}
+            AND durable_jobs.id = ${publication.lease.jobId}
+          FOR UPDATE OF call_preparation_requests
+        `;
+        if (
+          !target ||
+          target.targetCallBriefId !== id ||
+          target.targetRevision !== compilation.revision ||
+          ["failed", "cancelled"].includes(target.status)
+        ) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+        }
+        if (target.status === "succeeded") {
+          if (target.callBriefId !== id) {
+            throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+          }
+          return;
+        }
+        expectedCompilationId = target.expectedCompilationId;
+      }
+      if (
+        publication &&
+        (!expectedCompilationId || row.currentCompilationId !== expectedCompilationId)
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_STALE");
+      }
       if (
         !["review_required", "needs_clarification", "blocked", "ready"].includes(
           row.status
@@ -1552,12 +2431,13 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_BRIEF_NOT_EDITABLE");
       }
-      const previousCompilation = row.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            row.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null;
+      const previousCompilation = this.#mapCurrentCompilation(row);
+      const compilationId = await this.#insertCompilationRecord(
+        transaction,
+        id,
+        compilation,
+        "native"
+      );
 
       await transaction`
         UPDATE call_briefs
@@ -1573,7 +2453,8 @@ export class PostgresCallRepository implements CallRepository {
           assistance_reason_ciphertext = ${encryptedReason},
           assistance_disclosure = ${null},
           assistance_disclosure_ciphertext = ${encryptedDisclosure},
-          compilation_ciphertext = ${encryptedCompilation},
+          current_compilation_id = ${compilationId},
+          legacy_compilation_disposition = NULL,
           context_ciphertext = ${encryptedContext},
           locale = ${parsed.locale},
           voice_gender = ${parsed.voiceGender},
@@ -1597,14 +2478,31 @@ export class PostgresCallRepository implements CallRepository {
         compilation,
         now.toISOString()
       );
+      if (publication) {
+        const updated = await transaction`
+          UPDATE call_preparation_requests
+          SET
+            status = 'succeeded',
+            call_brief_id = ${id},
+            failure_code = NULL,
+            input_ciphertext = NULL,
+            updated_at = ${publication.lease.checkedAt}::timestamptz,
+            completed_at = ${publication.lease.checkedAt}::timestamptz
+          WHERE id = ${publication.preparationId}
+            AND status IN ('queued', 'processing', 'retrying')
+        `;
+        if (updated.count !== 1) {
+          throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+        }
+      }
     });
 
     return this.#require(id);
   }
 
-  async get(id: string) {
+  async get(id: string): Promise<CallSnapshot | null> {
     const [briefRow] = await this.#sql<CallBriefRow[]>`
-      ${this.#briefSelect()}
+      ${this.#briefSelect(true)}
       WHERE id = ${id} AND data_deleted_at IS NULL
     `;
     if (!briefRow) return null;
@@ -1662,13 +2560,15 @@ export class PostgresCallRepository implements CallRepository {
       ]);
 
     return {
+      executionPlanSource: briefRow.currentCompilationId
+        ? "immutable"
+        : briefRow.legacyCompilationDisposition === "archived_terminal"
+          ? "archived"
+          : briefRow.legacyCompilationDisposition === "recompile_required"
+            ? "recompile_required"
+            : "unavailable",
       brief: this.#mapBrief(briefRow),
-      compilation: briefRow.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            briefRow.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null,
+      compilation: this.#mapCurrentCompilation(briefRow),
       transcript: transcriptRows.map((row) => this.#mapTranscript(row)),
       pendingApproval: approvalRows[0]
         ? this.#mapApproval(approvalRows[0])
@@ -1840,7 +2740,9 @@ export class PostgresCallRepository implements CallRepository {
 
   async getAdminOperationsFacts(
     from: string,
-    to: string
+    to: string,
+    callId?: string,
+    preparationId?: string
   ): Promise<AdminOperationsFacts> {
     const [row] = await this.#sql<AdminOperationsFactsRow[]>`
       WITH scoped_calls AS (
@@ -1848,6 +2750,8 @@ export class PostgresCallRepository implements CallRepository {
         FROM call_briefs
         WHERE created_at >= ${from}::timestamptz
           AND created_at <= ${to}::timestamptz
+          AND ${preparationId ?? null}::uuid IS NULL
+          AND (${callId ?? null}::uuid IS NULL OR id = ${callId ?? null})
       ),
       signals AS (
         SELECT
@@ -1952,7 +2856,26 @@ export class PostgresCallRepository implements CallRepository {
             SELECT 1 FROM call_events
             WHERE call_events.call_brief_id = scoped_calls.id
               AND call_events.event_name = 'realtime.ready'
-          ) THEN COALESCE(call_recordings.duration_seconds, 0) ELSE 0 END
+          ) THEN GREATEST(
+            COALESCE(call_recordings.duration_seconds, 0),
+            COALESCE((
+              SELECT floor(sum(GREATEST(
+                0,
+                EXTRACT(EPOCH FROM (
+                  call_attempts.ended_at - realtime_ready.occurred_at
+                ))
+              )))::int
+              FROM call_attempts
+              JOIN LATERAL (
+                SELECT min(call_events.occurred_at) AS occurred_at
+                FROM call_events
+                WHERE call_events.call_attempt_id = call_attempts.id
+                  AND call_events.event_name = 'realtime.ready'
+              ) AS realtime_ready ON realtime_ready.occurred_at IS NOT NULL
+              WHERE call_attempts.call_brief_id = scoped_calls.id
+                AND call_attempts.ended_at IS NOT NULL
+            ), 0)
+          ) ELSE 0 END
             AS realtime_usage_seconds,
           CASE WHEN EXISTS (
             SELECT 1 FROM call_events
@@ -2021,6 +2944,155 @@ export class PostgresCallRepository implements CallRepository {
       FROM signals
     `;
     if (!row) throw new Error("Admin operations query returned no row");
+    const [[operationCount], usageRows, costRows] = await Promise.all([
+      this.#sql<AdminProviderOperationCountRow[]>`
+        SELECT count(*)::int AS "operationCount"
+        FROM provider_operations
+        WHERE started_at >= ${from}::timestamptz
+          AND started_at <= ${to}::timestamptz
+          AND (
+            (
+              ${preparationId ?? null}::uuid IS NOT NULL
+              AND provider_operations.call_preparation_id =
+                ${preparationId ?? null}
+            )
+            OR (
+              ${preparationId ?? null}::uuid IS NULL
+              AND ${callId ?? null}::uuid IS NULL
+            )
+            OR provider_operations.call_brief_id = ${callId ?? null}
+            OR EXISTS (
+              SELECT 1
+              FROM call_preparation_requests
+              WHERE call_preparation_requests.id =
+                provider_operations.call_preparation_id
+                AND COALESCE(
+                  call_preparation_requests.call_brief_id,
+                  call_preparation_requests.target_call_brief_id
+                ) = ${callId ?? null}
+            )
+          )
+      `,
+      this.#sql<AdminProviderUsageRow[]>`
+        SELECT
+          operations.provider,
+          operations.operation_type AS "operationType",
+          operations.stage,
+          COALESCE(results.provider_model, operations.requested_model)
+            AS model,
+          count(*)::int AS "usageRecords",
+          COALESCE(sum(usage.request_count), 0)::int AS "requestCount",
+          COALESCE(sum(usage.input_text_tokens), 0)::double precision
+            AS "inputTextTokens",
+          count(usage.input_text_tokens)::int AS "inputTextTokenSamples",
+          COALESCE(sum(usage.cached_input_text_tokens), 0)::double precision
+            AS "cachedInputTextTokens",
+          count(usage.cached_input_text_tokens)::int
+            AS "cachedInputTextTokenSamples",
+          COALESCE(sum(usage.cache_write_input_text_tokens), 0)::double precision
+            AS "cacheWriteInputTextTokens",
+          count(usage.cache_write_input_text_tokens)::int
+            AS "cacheWriteInputTextTokenSamples",
+          COALESCE(sum(usage.output_text_tokens), 0)::double precision
+            AS "outputTextTokens",
+          count(usage.output_text_tokens)::int AS "outputTextTokenSamples",
+          COALESCE(sum(usage.reasoning_output_tokens), 0)::double precision
+            AS "reasoningOutputTokens",
+          count(usage.reasoning_output_tokens)::int
+            AS "reasoningOutputTokenSamples",
+          COALESCE(sum(usage.input_audio_tokens), 0)::double precision
+            AS "inputAudioTokens",
+          count(usage.input_audio_tokens)::int AS "inputAudioTokenSamples",
+          COALESCE(sum(usage.cached_input_audio_tokens), 0)::double precision
+            AS "cachedInputAudioTokens",
+          count(usage.cached_input_audio_tokens)::int
+            AS "cachedInputAudioTokenSamples",
+          COALESCE(sum(usage.output_audio_tokens), 0)::double precision
+            AS "outputAudioTokens",
+          count(usage.output_audio_tokens)::int AS "outputAudioTokenSamples",
+          COALESCE(sum(usage.total_tokens), 0)::double precision
+            AS "totalTokens",
+          count(usage.total_tokens)::int AS "totalTokenSamples",
+          COALESCE(sum(usage.duration_seconds), 0)::double precision
+            AS "durationSeconds",
+          count(usage.duration_seconds)::int AS "durationSamples",
+          COALESCE(sum(usage.billable_seconds), 0)::double precision
+            AS "billableSeconds",
+          count(usage.billable_seconds)::int AS "billableSamples"
+        FROM provider_usage_records usage
+        JOIN provider_operations operations
+          ON operations.id = usage.operation_id
+        LEFT JOIN provider_operation_results results
+          ON results.operation_id = operations.id
+        WHERE usage.observed_at >= ${from}::timestamptz
+          AND usage.observed_at <= ${to}::timestamptz
+          AND (
+            (
+              ${preparationId ?? null}::uuid IS NOT NULL
+              AND operations.call_preparation_id = ${preparationId ?? null}
+            )
+            OR (
+              ${preparationId ?? null}::uuid IS NULL
+              AND ${callId ?? null}::uuid IS NULL
+            )
+            OR operations.call_brief_id = ${callId ?? null}
+            OR EXISTS (
+              SELECT 1
+              FROM call_preparation_requests
+              WHERE call_preparation_requests.id = operations.call_preparation_id
+                AND COALESCE(
+                  call_preparation_requests.call_brief_id,
+                  call_preparation_requests.target_call_brief_id
+                ) = ${callId ?? null}
+            )
+          )
+        GROUP BY
+          operations.provider,
+          operations.operation_type,
+          operations.stage,
+          COALESCE(results.provider_model, operations.requested_model)
+        ORDER BY
+          operations.provider,
+          operations.operation_type,
+          operations.stage,
+          COALESCE(results.provider_model, operations.requested_model)
+      `,
+      this.#sql<AdminProviderCostRow[]>`
+        SELECT
+          costs.provider,
+          costs.cost_basis AS "costBasis",
+          costs.component,
+          costs.currency,
+          count(*)::int AS records,
+          sum(costs.amount_micros)::double precision AS "amountMicros"
+        FROM provider_cost_records costs
+        JOIN provider_operations operations ON operations.id = costs.operation_id
+        WHERE costs.observed_at >= ${from}::timestamptz
+          AND costs.observed_at <= ${to}::timestamptz
+          AND (
+            (
+              ${preparationId ?? null}::uuid IS NOT NULL
+              AND operations.call_preparation_id = ${preparationId ?? null}
+            )
+            OR (
+              ${preparationId ?? null}::uuid IS NULL
+              AND ${callId ?? null}::uuid IS NULL
+            )
+            OR operations.call_brief_id = ${callId ?? null}
+            OR EXISTS (
+              SELECT 1
+              FROM call_preparation_requests
+              WHERE call_preparation_requests.id = operations.call_preparation_id
+                AND COALESCE(
+                  call_preparation_requests.call_brief_id,
+                  call_preparation_requests.target_call_brief_id
+                ) = ${callId ?? null}
+            )
+          )
+        GROUP BY costs.provider, costs.cost_basis, costs.component, costs.currency
+        ORDER BY costs.provider, costs.component, costs.currency
+      `
+    ]);
     return {
       createdCalls: row.createdCalls,
       attemptedCalls: row.attemptedCalls,
@@ -2060,6 +3132,25 @@ export class PostgresCallRepository implements CallRepository {
         telephony: row.telephonyUsageSeconds,
         realtime: row.realtimeUsageSeconds,
         transcription: row.transcriptionUsageSeconds
+      },
+      providerUsage: {
+        incurredFrom: from,
+        incurredTo: to,
+        operationCount: operationCount?.operationCount ?? 0,
+        usageRecordCount: usageRows.reduce(
+          (total, bucket) => total + bucket.usageRecords,
+          0
+        ),
+        buckets: usageRows
+      },
+      providerCosts: {
+        incurredFrom: from,
+        incurredTo: to,
+        recordCount: costRows.reduce(
+          (total, bucket) => total + bucket.records,
+          0
+        ),
+        buckets: costRows
       }
     };
   }
@@ -2128,6 +3219,75 @@ export class PostgresCallRepository implements CallRepository {
             AND severity = 'error'
         ) AS "recentErrors",
         (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND current_compilation_id IS NULL
+            AND compilation_ciphertext IS NOT NULL
+            AND legacy_compilation_disposition IS NULL
+        ) AS "recoverableLegacyCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND legacy_compilation_disposition = 'archived_terminal'
+        ) AS "archivedLegacyCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND legacy_compilation_disposition = 'recompile_required'
+        ) AS "recompileRequiredCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND current_compilation_id IS NULL
+            AND compilation_ciphertext IS NULL
+        ) AS "unavailableLegacyCalls",
+        (
+          SELECT count(*)::int FROM call_briefs
+          WHERE data_deleted_at IS NULL
+            AND current_compilation_id IS NULL
+            AND status IN (
+              'ready',
+              'dialing',
+              'in_progress',
+              'awaiting_approval'
+            )
+        ) AS "executableLegacyCalls",
+        (
+          SELECT count(*)::int
+          FROM call_attempts
+          JOIN call_briefs
+            ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_briefs.data_deleted_at IS NULL
+            AND call_attempts.ended_at IS NOT NULL
+            AND call_attempts.compilation_id IS NULL
+        ) AS "historicalAttemptsWithoutCompilation",
+        (
+          SELECT count(*)::int
+          FROM call_attempts
+          JOIN call_briefs
+            ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_briefs.data_deleted_at IS NULL
+            AND call_attempts.ended_at IS NOT NULL
+            AND call_attempts.execution_snapshot_ciphertext IS NULL
+        ) AS "historicalAttemptsWithoutExecutionSnapshot",
+        (
+          SELECT count(*)::int
+          FROM call_attempts
+          JOIN call_briefs
+            ON call_briefs.id = call_attempts.call_brief_id
+          WHERE call_briefs.data_deleted_at IS NULL
+            AND call_attempts.ended_at IS NULL
+            AND (
+              call_attempts.compilation_id IS NULL
+              OR call_attempts.execution_snapshot_ciphertext IS NULL
+            )
+        ) AS "activeLegacyAttempts",
+        (
+          SELECT count(*)::int FROM call_preparation_requests
+          WHERE operation_kind = 'recompilation'
+            AND status IN ('queued', 'processing', 'retrying')
+        ) AS "activeRecompilations",
+        (
           SELECT count(*)::int FROM durable_jobs WHERE status = 'queued'
         ) AS "jobsQueued",
         (
@@ -2160,6 +3320,7 @@ export class PostgresCallRepository implements CallRepository {
           WHERE status = 'queued'
             AND job_type IN (
               'provider_call_reconciliation',
+              'provider_call_cost_reconciliation',
               'provider_recording_reconciliation'
             )
         ) AS "providerReconciliationQueued",
@@ -2232,6 +3393,19 @@ export class PostgresCallRepository implements CallRepository {
       retentionOverdue: row.retentionOverdue,
       recentWarnings: row.recentWarnings,
       recentErrors: row.recentErrors,
+      callPlanCutover: {
+        recoverableLegacyCalls: row.recoverableLegacyCalls,
+        archivedLegacyCalls: row.archivedLegacyCalls,
+        recompileRequiredCalls: row.recompileRequiredCalls,
+        unavailableLegacyCalls: row.unavailableLegacyCalls,
+        executableLegacyCalls: row.executableLegacyCalls,
+        historicalAttemptsWithoutCompilation:
+          row.historicalAttemptsWithoutCompilation,
+        historicalAttemptsWithoutExecutionSnapshot:
+          row.historicalAttemptsWithoutExecutionSnapshot,
+        activeLegacyAttempts: row.activeLegacyAttempts,
+        activeRecompilations: row.activeRecompilations
+      },
       externalWorker: {
         healthyInstances: row.workerHealthyInstances,
         staleInstances: row.workerStaleInstances,
@@ -2631,26 +3805,21 @@ export class PostgresCallRepository implements CallRepository {
     return callOutcomeMetricsSchema.parse(metrics);
   }
 
-  async approveCompilation(id: string) {
+  async approveCompilation(id: string, expected?: CompilationApprovalInput) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
-      const [row] = await transaction<
-        { status: CallBrief["status"]; compilationCiphertext: string | null }[]
-      >`
-        SELECT
-          status,
-          compilation_ciphertext AS "compilationCiphertext"
-        FROM call_briefs
-        WHERE id = ${id}
+      const [row] = await transaction<CallBriefRow[]>`
+        ${this.#briefSelect(true)}
+        WHERE call_briefs.id = ${id}
         FOR UPDATE
       `;
       if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
-      const compilation = row.compilationCiphertext
-        ? decryptJson<CallCompilation>(
-            row.compilationCiphertext,
-            this.#encryptionKey
-          )
-        : null;
+      if (!row.currentCompilationId) {
+        throw new CallRepositoryError(
+          "CALL_COMPILATION_RECOMPILE_REQUIRED"
+        );
+      }
+      const compilation = this.#mapCurrentCompilation(row);
       if (
         row.status !== "review_required" ||
         compilation?.policyDecision.status !== "ready_for_review" ||
@@ -2658,15 +3827,43 @@ export class PostgresCallRepository implements CallRepository {
       ) {
         throw new CallRepositoryError("CALL_BRIEF_NOT_REVIEWABLE");
       }
+      assertCompilationIntegrity(compilation);
+      if (
+        expected &&
+        (compilation.revision !== expected.revision ||
+          compilation.snapshotHash !== expected.snapshotHash)
+      ) {
+        throw new CallRepositoryError("CALL_COMPILATION_STALE");
+      }
+      const compilationId = row.currentCompilationId;
       compilation.approvedAt = now.toISOString();
+      const executionSnapshot = createApprovedExecutionSnapshot({
+        brief: this.#mapBrief(row),
+        compilation
+      });
+      await transaction`
+        INSERT INTO call_compilation_approvals (
+          id,
+          compilation_id,
+          call_brief_id,
+          revision,
+          snapshot_hash,
+          approved_at,
+          execution_snapshot_ciphertext
+        ) VALUES (
+          ${randomUUID()},
+          ${compilationId},
+          ${id},
+          ${compilation.revision},
+          ${compilation.snapshotHash},
+          ${now},
+          ${encryptJson(executionSnapshot, this.#encryptionKey)}
+        )
+      `;
       await transaction`
         UPDATE call_briefs
         SET
           status = 'ready',
-          compilation_ciphertext = ${encryptJson(
-            compilation,
-            this.#encryptionKey
-          )},
           updated_at = ${now}
         WHERE id = ${id}
       `;
@@ -2693,16 +3890,388 @@ export class PostgresCallRepository implements CallRepository {
       SELECT
         id,
         call_brief_id AS "callBriefId",
+        compilation_id AS "compilationId",
         provider,
         provider_call_id AS "providerCallId",
         status,
         provider_status AS "providerStatus",
         started_at AS "startedAt",
         ended_at AS "endedAt",
-        failure_reason AS "failureReason"
+        failure_reason AS "failureReason",
+        compilation_revision AS "compilationRevision",
+        compilation_snapshot_hash AS "compilationSnapshotHash",
+        execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
       FROM call_attempts
       WHERE call_brief_id = ${id}
       ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    return row ? this.#mapAttempt(row) : null;
+  }
+
+  async backfillLegacyCompilationBatch(
+    limit: number,
+    afterId: string | null = null,
+    execute = true
+  ) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("Legacy compilation backfill limit must be 1..500");
+    }
+    if (afterId !== null && !isUuid(afterId)) {
+      throw new Error("Legacy compilation backfill cursor is invalid");
+    }
+    return this.#sql.begin(async (transaction) => {
+      if (execute) {
+        const [lock] = await transaction<{ acquired: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(742303986) AS acquired
+        `;
+        if (!lock?.acquired) {
+          throw new Error("Another legacy compilation backfill batch is running");
+        }
+      }
+      const rows = execute
+        ? await transaction<CallBriefRow[]>`
+            ${this.#briefSelect(false, true)}
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED
+          `
+        : await transaction<CallBriefRow[]>`
+            ${this.#briefSelect(false, true)}
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+          `;
+      const valid: Array<{
+        row: CallBriefRow;
+        compilation: CallCompilation;
+        executionSnapshot: ApprovedExecutionSnapshot | null;
+      }> = [];
+      let invalidCandidates = 0;
+      let decryptionFailures = 0;
+      let unsupportedCompilerVersions = 0;
+      const unsupportedCompilerVersionCounts: Record<string, number> = {};
+      let schemaValidationFailures = 0;
+      const schemaIssueCounts: Record<string, number> = {};
+      let snapshotHashFailures = 0;
+      let approvalStateFailures = 0;
+      let approvalSnapshotFailures = 0;
+      let approvalSnapshotsRequired = 0;
+      for (const row of rows) {
+        let decrypted: unknown;
+        try {
+          decrypted = decryptJson<unknown>(
+            row.compilationCiphertext!,
+            this.#encryptionKey
+          );
+        } catch {
+          invalidCandidates += 1;
+          decryptionFailures += 1;
+          continue;
+        }
+        const storedCompilerVersion =
+          decrypted && typeof decrypted === "object" && !Array.isArray(decrypted)
+            ? Reflect.get(decrypted, "compilerVersion")
+            : null;
+        if (
+          typeof storedCompilerVersion === "string" &&
+          storedCompilerVersion !== BRIEF_COMPILER_VERSION
+        ) {
+          invalidCandidates += 1;
+          unsupportedCompilerVersions += 1;
+          const version = /^[a-zA-Z0-9._-]{1,64}$/.test(storedCompilerVersion)
+            ? storedCompilerVersion
+            : "invalid";
+          unsupportedCompilerVersionCounts[version] =
+            (unsupportedCompilerVersionCounts[version] ?? 0) + 1;
+          continue;
+        }
+        const parsed = callCompilationSchema.safeParse(decrypted);
+        if (!parsed.success) {
+          invalidCandidates += 1;
+          schemaValidationFailures += 1;
+          for (const issue of parsed.error.issues) {
+            const path = issue.path.length === 0
+              ? "root"
+              : issue.path.map((part) =>
+                  typeof part === "number" ? "[]" : String(part)
+                ).join(".");
+            const key = `${issue.code}:${path}`;
+            schemaIssueCounts[key] = (schemaIssueCounts[key] ?? 0) + 1;
+          }
+          continue;
+        }
+        const compilation = parsed.data;
+        try {
+          assertCompilationIntegrity(compilation);
+        } catch {
+          invalidCandidates += 1;
+          snapshotHashFailures += 1;
+          continue;
+        }
+        if (row.status === "ready" && !compilation.approvedAt) {
+          invalidCandidates += 1;
+          approvalStateFailures += 1;
+          continue;
+        }
+        try {
+          const executionSnapshot = compilation.approvedAt
+            ? createApprovedExecutionSnapshot({
+                brief: this.#mapBrief(row),
+                compilation
+              })
+            : null;
+          if (executionSnapshot) approvalSnapshotsRequired += 1;
+          valid.push({ row, compilation, executionSnapshot });
+        } catch {
+          invalidCandidates += 1;
+          approvalSnapshotFailures += 1;
+        }
+      }
+      let approvalSnapshotsCreated = 0;
+      if (!execute) {
+        return {
+          scannedCandidates: rows.length,
+          validCandidates: valid.length,
+          invalidCandidates,
+          decryptionFailures,
+          unsupportedCompilerVersions,
+          unsupportedCompilerVersionCounts,
+          schemaValidationFailures,
+          schemaIssueCounts,
+          snapshotHashFailures,
+          approvalStateFailures,
+          approvalSnapshotFailures,
+          approvalSnapshotsRequired,
+          backfilledCompilations: 0,
+          approvalSnapshotsCreated: 0,
+          lastScannedId: rows.at(-1)?.id ?? null
+        };
+      }
+      for (const { row, compilation, executionSnapshot } of valid) {
+        const compilationId = await this.#materializeLegacyCompilation(
+          transaction,
+          row.id,
+          compilation
+        );
+        if (!executionSnapshot || !compilation.approvedAt) continue;
+        const inserted = await transaction<{ id: string }[]>`
+          INSERT INTO call_compilation_approvals (
+            id,
+            compilation_id,
+            call_brief_id,
+            revision,
+            snapshot_hash,
+            approved_at,
+            execution_snapshot_ciphertext
+          ) VALUES (
+            ${randomUUID()},
+            ${compilationId},
+            ${row.id},
+            ${compilation.revision},
+            ${compilation.snapshotHash},
+            ${new Date(compilation.approvedAt)},
+            ${encryptJson(executionSnapshot, this.#encryptionKey)}
+          )
+          ON CONFLICT (compilation_id) DO NOTHING
+          RETURNING id
+        `;
+        if (inserted[0]) {
+          approvalSnapshotsCreated += 1;
+          continue;
+        }
+        const [existing] = await transaction<{
+          callBriefId: string;
+          revision: number;
+          snapshotHash: string;
+          approvedAt: DatabaseDate;
+          executionSnapshotCiphertext: string | null;
+        }[]>`
+          SELECT
+            call_brief_id AS "callBriefId",
+            revision,
+            snapshot_hash AS "snapshotHash",
+            approved_at AS "approvedAt",
+            execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
+          FROM call_compilation_approvals
+          WHERE compilation_id = ${compilationId}
+          FOR SHARE
+        `;
+        const storedSnapshot = existing?.executionSnapshotCiphertext
+          ? approvedExecutionSnapshotSchema.parse(decryptJson<unknown>(
+              existing.executionSnapshotCiphertext,
+              this.#encryptionKey
+            ))
+          : null;
+        if (
+          !existing ||
+          existing.callBriefId !== row.id ||
+          existing.revision !== compilation.revision ||
+          existing.snapshotHash !== compilation.snapshotHash ||
+          toIso(existing.approvedAt) !== compilation.approvedAt ||
+          JSON.stringify(storedSnapshot) !== JSON.stringify(executionSnapshot)
+        ) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+      }
+      return {
+        scannedCandidates: rows.length,
+        validCandidates: valid.length,
+        invalidCandidates,
+        decryptionFailures,
+        unsupportedCompilerVersions,
+        unsupportedCompilerVersionCounts,
+        schemaValidationFailures,
+        schemaIssueCounts,
+        snapshotHashFailures,
+        approvalStateFailures,
+        approvalSnapshotFailures,
+        approvalSnapshotsRequired,
+        backfilledCompilations: valid.length,
+        approvalSnapshotsCreated,
+        lastScannedId: rows.at(-1)?.id ?? null
+      };
+    });
+  }
+
+  async classifyLegacyCallPlanBatch(
+    limit: number,
+    afterId: string | null = null,
+    execute = true
+  ) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("Legacy call-plan classification limit must be 1..500");
+    }
+    if (afterId !== null && !isUuid(afterId)) {
+      throw new Error("Legacy call-plan classification cursor is invalid");
+    }
+    return this.#sql.begin(async (transaction) => {
+      if (execute) {
+        const [lock] = await transaction<{ acquired: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(742303986) AS acquired
+        `;
+        if (!lock?.acquired) {
+          throw new Error("Another legacy call-plan maintenance batch is running");
+        }
+      }
+      const rows = execute
+        ? await transaction<Array<{
+            id: string;
+            status: CallBrief["status"];
+            hasAttempts: boolean;
+          }>>`
+            SELECT
+              id,
+              status,
+              EXISTS (
+                SELECT 1 FROM call_attempts
+                WHERE call_attempts.call_brief_id = call_briefs.id
+              ) AS "hasAttempts"
+            FROM call_briefs
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED
+          `
+        : await transaction<Array<{
+            id: string;
+            status: CallBrief["status"];
+            hasAttempts: boolean;
+          }>>`
+            SELECT
+              id,
+              status,
+              EXISTS (
+                SELECT 1 FROM call_attempts
+                WHERE call_attempts.call_brief_id = call_briefs.id
+              ) AS "hasAttempts"
+            FROM call_briefs
+            WHERE data_deleted_at IS NULL
+              AND current_compilation_id IS NULL
+              AND compilation_ciphertext IS NOT NULL
+              AND legacy_compilation_disposition IS NULL
+              AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid)
+            ORDER BY id
+            LIMIT ${limit}
+          `;
+      let archivedTerminal = 0;
+      let recompileRequired = 0;
+      let unclassified = 0;
+      for (const row of rows) {
+        const disposition = ["completed", "stopped", "failed"].includes(
+          row.status
+        )
+          ? "archived_terminal" as const
+          : !row.hasAttempts && [
+                "review_required",
+                "needs_clarification",
+                "blocked"
+              ].includes(row.status)
+            ? "recompile_required" as const
+            : null;
+        if (!disposition) {
+          unclassified += 1;
+          continue;
+        }
+        if (disposition === "archived_terminal") archivedTerminal += 1;
+        else recompileRequired += 1;
+        if (!execute) continue;
+        const updated = await transaction<{ id: string }[]>`
+          UPDATE call_briefs
+          SET legacy_compilation_disposition = ${disposition}
+          WHERE id = ${row.id}
+            AND current_compilation_id IS NULL
+            AND compilation_ciphertext IS NOT NULL
+            AND legacy_compilation_disposition IS NULL
+          RETURNING id
+        `;
+        if (!updated[0]) {
+          throw new Error("Legacy call-plan candidate changed during classification");
+        }
+      }
+      return {
+        scannedCandidates: rows.length,
+        archivedTerminal,
+        recompileRequired,
+        unclassified,
+        lastScannedId: rows.at(-1)?.id ?? null
+      };
+    });
+  }
+
+  async getAttempt(id: string, attemptId: string) {
+    const [call] = await this.#sql`SELECT id FROM call_briefs WHERE id = ${id}`;
+    if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const [row] = await this.#sql<CallAttemptRow[]>`
+      SELECT
+        id,
+        call_brief_id AS "callBriefId",
+        compilation_id AS "compilationId",
+        provider,
+        provider_call_id AS "providerCallId",
+        status,
+        provider_status AS "providerStatus",
+        started_at AS "startedAt",
+        ended_at AS "endedAt",
+        failure_reason AS "failureReason",
+        compilation_revision AS "compilationRevision",
+        compilation_snapshot_hash AS "compilationSnapshotHash",
+        execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
+      FROM call_attempts
+      WHERE call_brief_id = ${id} AND id = ${attemptId}
       LIMIT 1
     `;
     return row ? this.#mapAttempt(row) : null;
@@ -2717,19 +4286,79 @@ export class PostgresCallRepository implements CallRepository {
         await this.#lockCreditAccount(transaction, userId);
         await this.#lockActiveUser(transaction, userId);
       }
-      const [call] = await transaction<
-        { status: CallBrief["status"]; phoneE164: string }[]
-      >`
-        SELECT status, phone_number AS "phoneE164"
-        FROM call_briefs
-        WHERE id = ${id}
+      const [call] = await transaction<CallBriefRow[]>`
+        ${this.#briefSelect(true)}
+        WHERE call_briefs.id = ${id}
           AND (${userId}::uuid IS NULL OR user_id = ${userId})
         FOR UPDATE
       `;
       if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const activeRecompilation = await transaction`
+        SELECT id
+        FROM call_preparation_requests
+        WHERE target_call_brief_id = ${id}
+          AND status IN ('queued', 'processing', 'retrying')
+        LIMIT 1
+        FOR SHARE
+      `;
+      if (activeRecompilation.count > 0) {
+        throw new CallRepositoryError("CALL_RECOMPILATION_IN_PROGRESS");
+      }
       if (call.status !== "ready") {
         throw new CallRepositoryError("CALL_NOT_READY");
       }
+      if (!call.currentCompilationId) {
+        throw new CallRepositoryError(
+          "CALL_COMPILATION_RECOMPILE_REQUIRED"
+        );
+      }
+      const compilation = this.#mapCurrentCompilation(call);
+      if (!compilation) {
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+      }
+      assertCompilationIntegrity(compilation);
+      const compilationId = call.currentCompilationId;
+      const [approval] = await transaction<{
+        approvedAt: DatabaseDate;
+        executionSnapshotCiphertext: string | null;
+      }[]>`
+        SELECT
+          approved_at AS "approvedAt",
+          execution_snapshot_ciphertext AS "executionSnapshotCiphertext"
+        FROM call_compilation_approvals
+        WHERE compilation_id = ${compilationId}
+        FOR SHARE
+      `;
+      let executionSnapshot: ApprovedExecutionSnapshot;
+      if (!approval) {
+        throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+      } else {
+        if (!approval.executionSnapshotCiphertext) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+        try {
+          executionSnapshot = approvedExecutionSnapshotSchema.parse(
+            decryptJson<unknown>(
+              approval.executionSnapshotCiphertext,
+              this.#encryptionKey
+            )
+          );
+        } catch {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+        if (
+          executionSnapshot.callBriefId !== id ||
+          executionSnapshot.compilationRevision !== compilation.revision ||
+          executionSnapshot.compilationSnapshotHash !== compilation.snapshotHash ||
+          executionSnapshot.approvedAt !== toIso(approval.approvedAt)
+        ) {
+          throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+        }
+      }
+      const encryptedExecutionSnapshot = encryptJson(
+        executionSnapshot,
+        this.#encryptionKey
+      );
       const [control] = await transaction<{ enabled: boolean }[]>`
         SELECT enabled
         FROM system_controls
@@ -2739,11 +4368,11 @@ export class PostgresCallRepository implements CallRepository {
       if (!control?.enabled) {
         throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
       }
-      await this.#lockRecipient(transaction, call.phoneE164);
+      await this.#lockRecipient(transaction, call.phoneNumber);
       const suppression = await transaction`
         SELECT id
         FROM recipient_suppressions
-        WHERE phone_e164 = ${call.phoneE164} AND lifted_at IS NULL
+        WHERE phone_e164 = ${call.phoneNumber} AND lifted_at IS NULL
         LIMIT 1
       `;
       if (suppression.count > 0) {
@@ -2778,7 +4407,7 @@ export class PostgresCallRepository implements CallRepository {
             )::int AS "dailyStarts",
             count(*) FILTER (
               WHERE call_attempts.started_at >= ${dayStart}
-                AND call_briefs.phone_number = ${call.phoneE164}
+                AND call_briefs.phone_number = ${call.phoneNumber}
             )::int AS "recipientDailyStarts"
           FROM call_attempts
           JOIN call_briefs ON call_briefs.id = call_attempts.call_brief_id
@@ -2828,21 +4457,29 @@ export class PostgresCallRepository implements CallRepository {
         INSERT INTO call_attempts (
           id,
           call_brief_id,
+          compilation_id,
           user_id,
           provider,
           provider_call_id,
           status,
           provider_status,
+          compilation_revision,
+          compilation_snapshot_hash,
+          execution_snapshot_ciphertext,
           started_at,
           created_at
         ) VALUES (
           ${attemptId},
           ${id},
+          ${compilationId},
           ${userId},
           ${input.provider},
           ${null},
           'dialing',
           ${null},
+          ${executionSnapshot.compilationRevision},
+          ${executionSnapshot.compilationSnapshotHash},
+          ${encryptedExecutionSnapshot},
           ${now},
           ${now}
         )
@@ -2996,7 +4633,7 @@ export class PostgresCallRepository implements CallRepository {
     lease?: DurableJobLease
   ) {
     const now = new Date();
-    const callId = await this.#sql.begin(async (transaction) => {
+    const target = await this.#sql.begin(async (transaction) => {
       if (lease) {
         await requirePostgresDurableJobLease(transaction, lease);
       }
@@ -3123,11 +4760,14 @@ export class PostgresCallRepository implements CallRepository {
           status: callStatus
         });
       }
-      return row.callId;
+      return { callId: row.callId, attemptId: row.attemptId };
     });
 
-    if (!callId) return null;
-    return { callId, snapshot: await this.#require(callId) };
+    if (!target) return null;
+    return {
+      ...target,
+      snapshot: await this.#require(target.callId)
+    };
   }
 
   async updateStatus(id: string, status: CallBrief["status"]) {
@@ -4031,6 +5671,12 @@ export class PostgresCallRepository implements CallRepository {
       if (lease) {
         await requirePostgresDurableJobLease(transaction, lease);
       }
+      await transaction`
+        DELETE FROM post_call_transcription_chunks
+        WHERE recording_id IN (
+          SELECT id FROM call_recordings WHERE call_brief_id = ${id}
+        )
+      `;
       const updated = await transaction`
         UPDATE call_recordings
         SET status = 'deleted', deleted_at = ${now}, updated_at = ${now}
@@ -4054,7 +5700,8 @@ export class PostgresCallRepository implements CallRepository {
   async enqueueDurableJob(input: EnqueueDurableJobInput) {
     const now = new Date();
     const jobId = await this.#sql.begin(async (transaction) => {
-      const callTarget = input.type === "provider_call_reconciliation";
+      const callTarget = input.type === "provider_call_reconciliation" ||
+        input.type === "provider_call_cost_reconciliation";
       const preparationTarget = input.type === "brief_compilation";
       const recordingTarget = !callTarget && !preparationTarget;
       if (
@@ -4176,8 +5823,8 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async seedDurableJobs(now: string) {
-    const [callReconciliations, recordingReconciliations,
-      transcriptions, retention] = await this.#sql.begin(
+    const [callReconciliations, callCostReconciliations,
+      recordingReconciliations, transcriptions, retention] = await this.#sql.begin(
       async (transaction) => {
         const callReconciliationRows = await transaction`
           INSERT INTO durable_jobs (
@@ -4197,6 +5844,26 @@ export class PostgresCallRepository implements CallRepository {
             AND call_briefs.status IN (
               'dialing', 'in_progress', 'awaiting_approval'
             )
+          ON CONFLICT (job_type, call_attempt_id)
+            WHERE call_attempt_id IS NOT NULL
+          DO NOTHING
+          RETURNING id
+        `;
+        const callCostReconciliationRows = await transaction`
+          INSERT INTO durable_jobs (
+            id, job_type, call_attempt_id, status, max_attempts, run_after
+          )
+          SELECT
+            gen_random_uuid(),
+            'provider_call_cost_reconciliation',
+            call_attempts.id,
+            'queued',
+            ${durableJobMaxAttempts.provider_call_cost_reconciliation},
+            ${now}::timestamptz
+          FROM call_attempts
+          WHERE call_attempts.provider = 'twilio'
+            AND call_attempts.provider_call_id IS NOT NULL
+            AND call_attempts.status IN ('completed', 'failed', 'stopped')
           ON CONFLICT (job_type, call_attempt_id)
             WHERE call_attempt_id IS NOT NULL
           DO NOTHING
@@ -4276,14 +5943,15 @@ export class PostgresCallRepository implements CallRepository {
         `;
         return [
           callReconciliationRows,
+          callCostReconciliationRows,
           recordingReconciliationRows,
           transcriptionRows,
           retentionRows
         ] as const;
       }
     );
-    return callReconciliations.count + recordingReconciliations.count +
-      transcriptions.count + retention.count;
+    return callReconciliations.count + callCostReconciliations.count +
+      recordingReconciliations.count + transcriptions.count + retention.count;
   }
 
   async claimDueDurableJob(input: ClaimDurableJobInput) {
@@ -4488,7 +6156,8 @@ export class PostgresCallRepository implements CallRepository {
     workerId: string,
     errorCode: string,
     now: string,
-    retryAt: string
+    retryAt: string,
+    retryable = true
   ) {
     const found = await this.#sql.begin(async (transaction) => {
       const [job] = await transaction<{
@@ -4514,7 +6183,7 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!job) return false;
-      const deadLetter = job.attemptCount >= job.maxAttempts;
+      const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
       await transaction`
         INSERT INTO durable_job_attempts (
           id, job_id, generation, attempt_number, worker_id,
@@ -4765,10 +6434,43 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.end({ timeout: 5 });
   }
 
-  #briefSelect() {
+  #briefSelect(
+    includeImmutableCompilation = false,
+    includeLegacyCompilation = false
+  ) {
     return this.#sql`
       SELECT
         id,
+        current_compilation_id AS "currentCompilationId",
+        legacy_compilation_disposition AS "legacyCompilationDisposition",
+        ${includeImmutableCompilation ? this.#sql`
+          (
+            SELECT call_compilations.compilation_ciphertext
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationCiphertext",
+          (
+            SELECT call_compilations.revision
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationRevision",
+          (
+            SELECT call_compilations.snapshot_hash
+            FROM call_compilations
+            WHERE call_compilations.id = call_briefs.current_compilation_id
+          ) AS "immutableCompilationSnapshotHash",
+          (
+            SELECT call_compilation_approvals.approved_at
+            FROM call_compilation_approvals
+            WHERE call_compilation_approvals.compilation_id =
+              call_briefs.current_compilation_id
+          ) AS "immutableCompilationApprovedAt",
+        ` : this.#sql`
+          NULL::text AS "immutableCompilationCiphertext",
+          NULL::integer AS "immutableCompilationRevision",
+          NULL::text AS "immutableCompilationSnapshotHash",
+          NULL::timestamptz AS "immutableCompilationApprovedAt",
+        `}
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
         objective,
@@ -4780,7 +6482,9 @@ export class PostgresCallRepository implements CallRepository {
         assistance_reason_ciphertext AS "assistanceReasonCiphertext",
         assistance_disclosure AS "assistanceDisclosure",
         assistance_disclosure_ciphertext AS "assistanceDisclosureCiphertext",
-        compilation_ciphertext AS "compilationCiphertext",
+        ${includeLegacyCompilation
+          ? this.#sql`compilation_ciphertext`
+          : this.#sql`NULL::text`} AS "compilationCiphertext",
         context_ciphertext AS "contextCiphertext",
         locale,
         voice_gender AS "voiceGender",
@@ -4793,6 +6497,35 @@ export class PostgresCallRepository implements CallRepository {
         updated_at AS "updatedAt"
       FROM call_briefs
     `;
+  }
+
+  #mapCurrentCompilation(row: CallCompilationSourceRow): CallCompilation | null {
+    if (!row.currentCompilationId) return null;
+    if (
+      !row.immutableCompilationCiphertext ||
+      row.immutableCompilationRevision === null ||
+      !row.immutableCompilationSnapshotHash
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    const compilation = decryptJson<CallCompilation>(
+      row.immutableCompilationCiphertext,
+      this.#encryptionKey
+    );
+    assertCompilationIntegrity(compilation);
+    if (
+      compilation.revision !== row.immutableCompilationRevision ||
+      compilation.snapshotHash !== row.immutableCompilationSnapshotHash
+    ) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    const approvedAt = row.immutableCompilationApprovedAt
+      ? toIso(row.immutableCompilationApprovedAt)
+      : null;
+    if (compilation.approvedAt && compilation.approvedAt !== approvedAt) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    return { ...compilation, approvedAt };
   }
 
   #mapBrief(row: CallBriefRow): CallBrief {
@@ -4811,6 +6544,8 @@ export class PostgresCallRepository implements CallRepository {
       assistantProfileId: row.assistantProfileId,
       agentName: row.agentName,
       representedPerson: row.representedPerson,
+      representedPersonFirstName: row.representedPersonFirstName,
+      representedPersonLastName: row.representedPersonLastName,
       assistanceReason,
       assistanceDisclosure: row.assistanceDisclosureCiphertext
         ? decryptJson<string>(
@@ -4856,10 +6591,19 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapAttempt(row: CallAttemptRow): CallAttemptRecord {
+    const { executionSnapshotCiphertext, ...attempt } = row;
     return {
-      ...row,
+      ...attempt,
       startedAt: toIso(row.startedAt),
-      endedAt: row.endedAt ? toIso(row.endedAt) : null
+      endedAt: row.endedAt ? toIso(row.endedAt) : null,
+      executionSnapshot: executionSnapshotCiphertext
+        ? approvedExecutionSnapshotSchema.parse(
+            decryptJson<unknown>(
+              executionSnapshotCiphertext,
+              this.#encryptionKey
+            )
+          )
+        : null
     };
   }
 
@@ -4930,7 +6674,8 @@ export class PostgresCallRepository implements CallRepository {
         COALESCE(
           call_recordings.call_brief_id,
           reconciliation_attempt.call_brief_id,
-          call_preparation_requests.call_brief_id
+          call_preparation_requests.call_brief_id,
+          call_preparation_requests.target_call_brief_id
         ) AS "callId",
         durable_jobs.status,
         durable_jobs.generation,
@@ -4963,6 +6708,11 @@ export class PostgresCallRepository implements CallRepository {
         call_preparation_requests.idempotency_key AS "idempotencyKey",
         call_preparation_requests.input_fingerprint AS "inputFingerprint",
         call_preparation_requests.input_ciphertext AS "inputCiphertext",
+        call_preparation_requests.provider_request_count AS "providerRequestCount",
+        call_preparation_requests.operation_kind AS "operationKind",
+        call_preparation_requests.target_call_brief_id AS "targetCallBriefId",
+        call_preparation_requests.expected_compilation_id AS "expectedCompilationId",
+        call_preparation_requests.target_revision AS "targetRevision",
         call_preparation_requests.status,
         call_preparation_requests.call_brief_id AS "callBriefId",
         call_preparation_requests.failure_code AS "failureCode",
@@ -5258,6 +7008,33 @@ export class PostgresCallRepository implements CallRepository {
     `;
   }
 
+  async #enqueueProviderCallCostReconciliation(
+    transaction: postgres.TransactionSql,
+    attemptId: string,
+    now: Date
+  ) {
+    await transaction`
+      INSERT INTO durable_jobs (
+        id, job_type, call_attempt_id, status, max_attempts,
+        run_after, created_at, updated_at
+      )
+      SELECT
+        ${randomUUID()}, 'provider_call_cost_reconciliation', call_attempts.id,
+        'queued', ${durableJobMaxAttempts.provider_call_cost_reconciliation},
+        ${now}, ${now}, ${now}
+      FROM call_attempts
+      WHERE call_attempts.id = ${attemptId}
+        AND call_attempts.provider = 'twilio'
+        AND call_attempts.provider_call_id IS NOT NULL
+      ON CONFLICT (job_type, call_attempt_id)
+        WHERE call_attempt_id IS NOT NULL
+      DO UPDATE SET
+        run_after = LEAST(durable_jobs.run_after, EXCLUDED.run_after),
+        updated_at = EXCLUDED.updated_at
+      WHERE durable_jobs.status = 'queued'
+    `;
+  }
+
   async #getDurableJob(jobId: string) {
     const rows = await this.#sql<DurableJobRow[]>`
       ${this.#durableJobSelect()}
@@ -5480,6 +7257,75 @@ export class PostgresCallRepository implements CallRepository {
     });
   }
 
+  async #insertCompilationRecord(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    compilation: CallCompilation,
+    origin: "native" | "legacy_backfill"
+  ) {
+    assertCompilationIntegrity(compilation);
+    const id = randomUUID();
+    const inserted = await transaction<{ id: string }[]>`
+      INSERT INTO call_compilations (
+        id,
+        call_brief_id,
+        revision,
+        snapshot_hash,
+        compilation_ciphertext,
+        origin,
+        created_at
+      ) VALUES (
+        ${id},
+        ${callBriefId},
+        ${compilation.revision},
+        ${compilation.snapshotHash},
+        ${encryptJson(compilation, this.#encryptionKey)},
+        ${origin},
+        ${new Date(compilation.compiledAt)}
+      )
+      ON CONFLICT (call_brief_id, revision) DO NOTHING
+      RETURNING id
+    `;
+    if (inserted[0]) return inserted[0].id;
+
+    const [existing] = await transaction<{
+      id: string;
+      snapshotHash: string;
+    }[]>`
+      SELECT id, snapshot_hash AS "snapshotHash"
+      FROM call_compilations
+      WHERE call_brief_id = ${callBriefId}
+        AND revision = ${compilation.revision}
+      FOR SHARE
+    `;
+    if (!existing || existing.snapshotHash !== compilation.snapshotHash) {
+      throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
+    }
+    return existing.id;
+  }
+
+  async #materializeLegacyCompilation(
+    transaction: postgres.TransactionSql,
+    callBriefId: string,
+    compilation: CallCompilation
+  ) {
+    const compilationId = await this.#insertCompilationRecord(
+      transaction,
+      callBriefId,
+      compilation,
+      "legacy_backfill"
+    );
+    await transaction`
+      UPDATE call_briefs
+      SET
+        current_compilation_id = ${compilationId},
+        legacy_compilation_disposition = NULL
+      WHERE id = ${callBriefId}
+        AND current_compilation_id IS NULL
+    `;
+    return compilationId;
+  }
+
   async #appendCompilationTelemetry(
     transaction: postgres.TransactionSql,
     callBriefId: string,
@@ -5616,6 +7462,62 @@ export class PostgresCallRepository implements CallRepository {
         occurred_at AS "occurredAt"
     `;
     return mapCallTelemetryEvent(rows[0]!);
+  }
+
+  async #insertProviderOperationResult(
+    transaction: postgres.TransactionSql,
+    operationId: string,
+    input: Omit<CompleteProviderOperationInput, "operationId">
+  ) {
+    const insertedResult = await transaction`
+      INSERT INTO provider_operation_results (
+        operation_id, outcome, provider_request_id, provider_response_id,
+        provider_model, http_status, error_code, completed_at, duration_ms
+      ) VALUES (
+        ${operationId}, ${input.outcome}, ${input.providerRequestId},
+        ${input.providerResponseId}, ${input.providerModel},
+        ${input.statusCode}, ${input.errorCode},
+        ${input.completedAt}::timestamptz, ${input.durationMs}
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING operation_id
+    `;
+    if (insertedResult.count === 0) {
+      const existingResult = await transaction`
+        SELECT operation_id
+        FROM provider_operation_results
+        WHERE operation_id = ${operationId}
+      `;
+      if (existingResult.count === 0) return;
+    }
+    if (!input.usage) return;
+    await transaction`
+      INSERT INTO provider_usage_records (
+        id, operation_id, schema_version, request_count,
+        input_text_tokens, cached_input_text_tokens,
+        cache_write_input_text_tokens, output_text_tokens,
+        reasoning_output_tokens, input_audio_tokens,
+        cached_input_audio_tokens, output_audio_tokens, total_tokens,
+        duration_seconds, billable_seconds, raw_usage, observed_at
+      ) VALUES (
+        ${randomUUID()}, ${operationId}, 1,
+        ${input.usage.requestCount ?? 1},
+        ${input.usage.inputTextTokens},
+        ${input.usage.cachedInputTextTokens},
+        ${input.usage.cacheWriteInputTextTokens},
+        ${input.usage.outputTextTokens},
+        ${input.usage.reasoningOutputTokens},
+        ${input.usage.inputAudioTokens ?? null},
+        ${input.usage.cachedInputAudioTokens ?? null},
+        ${input.usage.outputAudioTokens ?? null},
+        ${input.usage.totalTokens},
+        ${input.usage.durationSeconds ?? null},
+        ${input.usage.billableSeconds ?? null},
+        ${transaction.json(input.usage.rawUsage as postgres.JSONValue)},
+        ${input.completedAt}::timestamptz
+      )
+      ON CONFLICT (operation_id) DO NOTHING
+    `;
   }
 
   async #audit(

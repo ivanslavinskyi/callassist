@@ -62,9 +62,10 @@ await request("/api/onboarding/accept", {
   }
 });
 
-const created = await request("/api/call-briefs", {
+let preparation = await request("/api/call-preparations", {
   method: "POST",
   cookie,
+  headers: { "idempotency-key": randomUUID() },
   body: {
     recipientName: "Тестовый получатель",
     phoneNumber: target,
@@ -81,20 +82,50 @@ const created = await request("/api/call-briefs", {
     allowLanguageSwitch: false,
     allowedFacts: []
   },
-  expectedStatus: 201,
+  expectedStatus: 202,
   includeResponse: true,
   timeoutMs: 120_000
 });
-const callId = created.body.id;
+
+const preparationDeadline = Date.now() + 120_000;
+while (preparation.body.status !== "succeeded") {
+  if (["failed", "cancelled"].includes(preparation.body.status)) {
+    throw new Error(
+      `REAL_CALL_PREPARATION_${preparation.body.status.toUpperCase()}_` +
+      `${preparation.body.failureCode ?? "UNKNOWN"}`
+    );
+  }
+  if (Date.now() >= preparationDeadline) {
+    throw new Error(`REAL_CALL_PREPARATION_TIMEOUT_${preparation.body.status}`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  preparation = await request(`/api/call-preparations/${preparation.body.id}`, {
+    cookie,
+    includeResponse: true,
+    timeoutMs: 10_000
+  });
+}
+
+const callId = preparation.body.callBriefId;
+if (!callId) throw new Error("REAL_CALL_PREPARATION_MISSING_CALL_BRIEF");
+const created = await request(`/api/call-briefs/${callId}`, {
+  cookie,
+  includeResponse: true,
+  timeoutMs: 10_000
+});
 process.stdout.write(`${JSON.stringify({
   event: "real_call_brief_created",
   callId,
-  status: created.body.status
+  status: created.body.brief.status
 })}\n`);
 
 const started = await request(`/api/call-briefs/${callId}/approve-and-start`, {
   method: "POST",
   cookie,
+  body: {
+    revision: created.body.compilation.revision,
+    snapshotHash: created.body.compilation.snapshotHash
+  },
   includeResponse: true,
   timeoutMs: 120_000
 });
@@ -152,7 +183,8 @@ async function request(path, options = {}) {
       method: options.method ?? "GET",
       headers: {
         ...(options.body ? { "content-type": "application/json" } : {}),
-        ...(options.cookie ? { cookie: options.cookie } : {})
+        ...(options.cookie ? { cookie: options.cookie } : {}),
+        ...options.headers
       },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       signal: controller.signal

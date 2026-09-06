@@ -66,3 +66,83 @@ The drill proves recovery of a real queued workload across worker absence and a 
 provider callback compatibility failure. It does not claim external exactly-once
 execution: provider operations remain retryable and repository lease fencing protects
 application state.
+
+## Evidence — 2026-09-05
+
+An authorized local deployment rehearsal was run against PostgreSQL 17, real Twilio
+Voice, and OpenAI. No recipient number, provider identifier, credential, recording,
+or transcript text is retained here.
+
+- Migrations 0050 through 0057 applied to an isolated restored clone and then to the
+  local source database. A second migration pass was a no-op. The post-migration
+  recovery drill verified 57 canonical migrations, 58 public tables, 14 critical
+  tables, and seven encrypted samples. Generated clone/dump resources were removed.
+- The migration-created backlog of 25 Twilio call-cost reconciliation jobs succeeded.
+  Two unrelated overdue recording-retention jobs were temporarily moved out of the
+  rehearsal window and restored to their original `delete_after` schedule after the
+  worker stopped; the rehearsal did not delete those recordings.
+- The first runner invocation failed before preparation because it still used the
+  removed synchronous create route. The second produced a compiled review but failed
+  closed before telephony because it omitted the immutable revision/hash approval.
+  Its billable compiler usage remained in the preparation-scoped provider ledger.
+  The runner now uses asynchronous preparation and approves the exact returned
+  compilation revision and snapshot hash.
+- The corrected call connected and reached provider/application `completed`. The
+  attempt was bound to the approved 64-character snapshot hash. Twilio reported 28
+  connected seconds, 60 billable seconds, and USD 0.180200 actual connectivity cost.
+  The call-cost reconciliation jobs each succeeded once, and no duplicate provider
+  request or response IDs were found.
+- OpenAI raw usage was retained separately: compilation used 1,577 input tokens
+  (1,574 cached), 657 output tokens, 127 reasoning tokens, and 2,234 total tokens.
+  Consent prompt/clarification used 231 text input, 148 text output, and 322 audio
+  output tokens; consent transcription reported one second. The versioned public-rate
+  calculation was USD 0.039150 total (compiler USD 0.013782, Realtime text USD
+  0.004476, Realtime audio USD 0.020608, transcription USD 0.000284).
+- This is **failed release evidence**, not a successful end-to-end task execution.
+  Consent transcription classified the first response as unclear, issued a
+  clarification, and the media stream ended before consent was granted. Telemetry
+  recorded `consent.failed` with `stream_ended_before_consent`; no task opening,
+  recording, or post-call transcription ran. The strict `settled` assertion therefore
+  failed as intended.
+- Configured per-minute fallback rates were absent, so the fallback estimate remained
+  explicitly unavailable. Token-based OpenAI cost remained `partial` because the
+  telephony usage bucket is not list-price calculated, while Twilio actual connectivity
+  cost was separately provider-reported.
+
+Before treating this release gate as passed, reproduce the Russian consent flow with
+the recipient instructed to answer the recording question explicitly (or press the
+documented DTMF fallback), capture whether clarification audio completes, and obtain a
+trace containing `consent.granted`, `conversation.started`, recording/post-call jobs,
+and a passing strict `settled` inspection. A repeat call requires fresh recipient
+authorization; the drill must never redial automatically.
+
+### Authorized repeat — passed
+
+The recipient later confirmed that the earlier call had simply been missed and
+explicitly authorized one repeat. That repeat passed the strict `settled` inspection:
+
+- voice consent was granted, recording and conversation started, first audio was
+  observed, the conversation ended cleanly, and final transcription completed;
+- call, recording, cost, transcription, and zero-day retention reconciliation all
+  succeeded on their first durable attempt; the 69-second recording was deleted;
+- Twilio reported 88 connected seconds, 120 billable seconds, and USD 0.360400 actual
+  connectivity cost;
+- the versioned OpenAI public-rate calculation was USD 0.115863: compilation USD
+  0.011722, Realtime text USD 0.028168, Realtime audio USD 0.069696, Realtime input
+  transcription USD 0.003684, and post-call transcription USD 0.002593;
+- compiler usage was 1,577 input tokens (1,574 cached), 554 output tokens, 52 reasoning
+  tokens, and 2,131 total tokens. Six Realtime responses retained 5,614 text input
+  tokens (1,280 cached), 430 text output tokens, 180 audio input tokens, and 999 audio
+  output tokens. Five Realtime transcription observations covered 13 seconds. Eight
+  post-call utterance requests retained 4,831 total tokens, including 473 audio input
+  tokens;
+- one interrupted/non-completed Realtime response still retained its provider outcome
+  and usage, and later responses completed the flow. Provider request/response keys
+  remained deduplicated and the call attempt matched the exact approved snapshot.
+
+The repeat also exposed an estimate-only accounting gap: the configured legacy
+Realtime-per-minute fallback used recording duration and therefore omitted the
+pre-consent interval. The fallback now uses the greater of recording duration and
+the bounded `realtime.ready`-to-attempt-end interval. Raw provider session/token usage
+remains the preferred source and is unchanged; this correction only makes the legacy
+fallback conservative when actual token data is unavailable.

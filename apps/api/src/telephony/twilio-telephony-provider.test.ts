@@ -11,6 +11,8 @@ const brief: CallBrief = {
   assistantProfileId: "sebastian",
   agentName: "Sebastian",
   representedPerson: "Ivan Slavinskyi",
+  representedPersonFirstName: "Ivan",
+  representedPersonLastName: "Slavinskyi",
   assistanceReason: "speech_impairment",
   assistanceDisclosure:
     "Herr Slavinskyi ist aufgrund einer Sprechbehinderung beim Telefonieren eingeschränkt.",
@@ -138,6 +140,57 @@ describe("TwilioTelephonyProvider", () => {
     expect(fetchCall).toHaveBeenCalledOnce();
   });
 
+  it("returns completed connected duration without inferring billed duration", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({
+      sid: "CA123",
+      status: "completed",
+      duration: "37"
+    });
+
+    await expect(provider.getCallStatus("CA123")).resolves.toEqual({
+      providerCallId: "CA123",
+      status: "completed",
+      durationSeconds: 37
+    });
+  });
+
+  it("returns an exact positive micros value for Twilio's signed final price", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({
+      sid: "CA123",
+      status: "completed",
+      duration: "37",
+      price: "-0.013700",
+      priceUnit: "USD"
+    });
+
+    await expect(provider.getCallStatus("CA123")).resolves.toEqual({
+      providerCallId: "CA123",
+      status: "completed",
+      durationSeconds: 37,
+      providerReportedCost: {
+        amountMicros: 13_700,
+        currency: "USD",
+        rawAmount: "-0.013700"
+      }
+    });
+  });
+
+  it("rejects malformed provider cost instead of silently estimating it", async () => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({
+      sid: "CA123",
+      status: "completed",
+      price: "not-a-price",
+      priceUnit: "USD"
+    });
+
+    await expect(provider.getCallStatus("CA123")).rejects.toThrow(
+      "TWILIO_CALL_COST_INVALID"
+    );
+  });
+
   it("returns a controlled error for an unsupported provider call status", async () => {
     const { fetchCall, provider } = createProvider();
     fetchCall.mockResolvedValueOnce({ sid: "CA123", status: "mystery" });
@@ -254,19 +307,34 @@ describe("TwilioTelephonyProvider", () => {
 
   it("opens the signed bidirectional media stream immediately", () => {
     const { provider } = createProvider();
-    const xml = provider.createVoiceTwiml(brief);
+    const binding = {
+      callBriefId: brief.id,
+      callAttemptId: "629774e8-726b-44d9-96b4-d6c44be03490",
+      compilationSnapshotHash: "a".repeat(64)
+    };
+    const xml = provider.createVoiceTwiml(brief, binding);
     expect(xml).toContain("<Connect>");
     expect(xml).toContain(
       '<Stream url="wss://calls.example.test/webhooks/twilio/media">'
     );
     expect(xml).toContain(`name="callBriefId" value="${brief.id}"`);
+    expect(xml).toContain(
+      `name="callAttemptId" value="${binding.callAttemptId}"`
+    );
+    expect(xml).toContain(
+      `name="compilationSnapshotHash" value="${binding.compilationSnapshotHash}"`
+    );
     expect(xml).not.toContain("<Say");
     expect(xml).not.toContain("<Gather");
     expect(xml).toContain("<Hangup/>");
 
-    const token = provider.createMediaStreamToken(brief.id);
-    expect(provider.validateMediaStreamToken(brief.id, token)).toBe(true);
-    expect(provider.validateMediaStreamToken(brief.id, `${token}x`)).toBe(false);
+    const token = provider.createMediaStreamToken(binding);
+    expect(provider.validateMediaStreamToken(binding, token)).toBe(true);
+    expect(provider.validateMediaStreamToken(binding, `${token}x`)).toBe(false);
+    expect(provider.validateMediaStreamToken({
+      ...binding,
+      compilationSnapshotHash: "b".repeat(64)
+    }, token)).toBe(false);
   });
 
   it("validates the exact signed webhook URL", () => {

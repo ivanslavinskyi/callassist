@@ -5,6 +5,7 @@ import {
 } from "@callassist/contracts";
 import twilio from "twilio";
 import type {
+  MediaStreamBinding,
   StartCallRecordingInput,
   TelephonyProvider
 } from "./telephony-provider";
@@ -79,7 +80,17 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       if (!isTwilioCallResourceStatus(call.status)) {
         throw new Error("TWILIO_CALL_STATUS_UNSUPPORTED");
       }
-      return { providerCallId, status: call.status };
+      const durationSeconds = optionalNonNegativeInteger(call.duration);
+      const providerReportedCost = parseTwilioProviderReportedCost(
+        call.price,
+        call.priceUnit
+      );
+      return {
+        providerCallId,
+        status: call.status,
+        ...(durationSeconds === undefined ? {} : { durationSeconds }),
+        ...(providerReportedCost === undefined ? {} : { providerReportedCost })
+      };
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("TWILIO_")) {
         throw error;
@@ -214,27 +225,40 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     );
   }
 
-  createVoiceTwiml(brief: CallBrief) {
+  createVoiceTwiml(brief: CallBrief, binding: MediaStreamBinding) {
+    if (binding.callBriefId !== brief.id) {
+      throw new Error("MEDIA_STREAM_BINDING_CALL_MISMATCH");
+    }
     const response = new twilio.twiml.VoiceResponse();
     const connect = response.connect();
     const stream = connect.stream({ url: this.mediaStreamUrl() });
     stream.parameter({ name: "callBriefId", value: brief.id });
+    stream.parameter({ name: "callAttemptId", value: binding.callAttemptId });
+    stream.parameter({
+      name: "compilationSnapshotHash",
+      value: binding.compilationSnapshotHash
+    });
     stream.parameter({
       name: "streamToken",
-      value: this.createMediaStreamToken(brief.id)
+      value: this.createMediaStreamToken(binding)
     });
     response.hangup();
     return response.toString();
   }
 
-  createMediaStreamToken(callBriefId: string) {
+  createMediaStreamToken(binding: MediaStreamBinding) {
     return createHmac("sha256", this.#authToken)
-      .update(`callassist-media:${callBriefId}`)
+      .update([
+        "callassist-media-v2",
+        binding.callBriefId,
+        binding.callAttemptId,
+        binding.compilationSnapshotHash
+      ].join(":"))
       .digest("base64url");
   }
 
-  validateMediaStreamToken(callBriefId: string, token: string) {
-    const expected = Buffer.from(this.createMediaStreamToken(callBriefId));
+  validateMediaStreamToken(binding: MediaStreamBinding, token: string) {
+    const expected = Buffer.from(this.createMediaStreamToken(binding));
     const received = Buffer.from(token);
     return (
       expected.length === received.length && timingSafeEqual(expected, received)
@@ -266,4 +290,31 @@ function optionalNonNegativeInteger(value: unknown) {
 function optionalPositiveInteger(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+export function parseTwilioProviderReportedCost(
+  rawAmount: unknown,
+  rawCurrency: unknown
+) {
+  if (rawAmount === null || rawAmount === undefined || rawAmount === "") {
+    return undefined;
+  }
+  if (typeof rawAmount !== "string" ||
+      typeof rawCurrency !== "string" ||
+      !/^[A-Z]{3}$/.test(rawCurrency)) {
+    throw new Error("TWILIO_CALL_COST_INVALID");
+  }
+  const match = /^-?(\d+)(?:\.(\d{1,6}))?$/.exec(rawAmount);
+  if (!match) throw new Error("TWILIO_CALL_COST_INVALID");
+  const whole = BigInt(match[1]!);
+  const fractional = BigInt((match[2] ?? "").padEnd(6, "0"));
+  const amountMicros = whole * 1_000_000n + fractional;
+  if (amountMicros > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("TWILIO_CALL_COST_INVALID");
+  }
+  return {
+    amountMicros: Number(amountMicros),
+    currency: rawCurrency,
+    rawAmount
+  };
 }
