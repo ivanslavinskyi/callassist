@@ -193,6 +193,11 @@ that branch protection requires the workflow and review. A passing dependency au
 means no finding at or above its configured high-severity threshold; moderate findings
 still require triage and a recorded disposition.
 
+The API test runner bounds file concurrency to four workers and allows ten seconds
+per test because PostgreSQL migration/integration suites otherwise contend with
+Fastify unit suites on high-core hosts. A timeout remains a failure; do not treat an
+isolated passing rerun as release evidence in place of a clean complete CI run.
+
 For the immutable call-plan finalization release, run
 `pnpm db:verify:call-plan-cutover` against the target database before applying the
 finalizing migration. The command is read-only, emits aggregate counts only, and
