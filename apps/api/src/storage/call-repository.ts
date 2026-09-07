@@ -1,13 +1,15 @@
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ApprovedExecutionSnapshot,
   AdminCallInspector,
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
    CallBrief,
-   CallPreparation,
+  CallPreparation,
   CallCompilation,
+  CompilationApprovalInput,
   CallOutcomeMetrics,
   CallOutcomeView,
    CallTelemetryEventInput,
@@ -33,6 +35,7 @@ import type {
   DurableJobLease,
   EnqueueDurableJobInput
 } from "../jobs/durable-job";
+import { hasValidCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 
 export type ProviderRecordingDeletionDisposition =
   | "not_present"
@@ -68,6 +71,7 @@ export type ApprovalMutationResult = {
 export type CallAttemptRecord = {
   id: string;
   callBriefId: string;
+  compilationId: string | null;
   provider: "mock" | "twilio";
   providerCallId: string | null;
   status: CallBrief["status"];
@@ -75,6 +79,9 @@ export type CallAttemptRecord = {
   startedAt: string;
   endedAt: string | null;
   failureReason: string | null;
+  compilationRevision: number | null;
+  compilationSnapshotHash: string | null;
+  executionSnapshot: ApprovedExecutionSnapshot | null;
 };
 
 export type StartAttemptInput = Pick<
@@ -186,17 +193,241 @@ export type EnqueueCallPreparationRepositoryInput = {
   now: string;
 };
 
+export type EnqueueCallRecompilationRepositoryInput =
+  Omit<EnqueueCallPreparationRepositoryInput, "userId"> & {
+    callBriefId: string;
+    userId: string | null;
+  };
+
 export type CallPreparationWork = {
   preparation: CallPreparation;
-  userId: string;
+  userId: string | null;
   idempotencyKey: string;
   input: CreateCallBriefInput | null;
+  targetCallBriefId: string | null;
+  expectedCompilationId: string | null;
+  targetRevision: number;
 };
 
 export type CallPreparationPublication = {
   preparationId: string;
   lease: DurableJobLease;
 };
+
+export type ProviderOperationReservationInput = {
+  id: string;
+  preparationId: string;
+  provider: "openai";
+  operationType: "brief_moderation" | "brief_compilation";
+  stage: "input_moderation" | "compilation" | "output_moderation";
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+  maxRequests: number;
+  durableJobGeneration: number;
+};
+
+export type ProviderTextTokenUsage = {
+  requestCount?: number | null;
+  inputTextTokens: number | null;
+  cachedInputTextTokens: number | null;
+  cacheWriteInputTextTokens: number | null;
+  outputTextTokens: number | null;
+  reasoningOutputTokens: number | null;
+  inputAudioTokens?: number | null;
+  cachedInputAudioTokens?: number | null;
+  outputAudioTokens?: number | null;
+  totalTokens: number | null;
+  durationSeconds?: number | null;
+  billableSeconds?: number | null;
+  rawUsage: Record<string, unknown>;
+};
+
+export type RealtimeProviderSessionInput = {
+  id: string;
+  callBriefId: string;
+  callAttemptId: string;
+  provider: "openai";
+  operationType: "realtime_session";
+  stage: "conversation" | "consent_transcription";
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+};
+
+export type RealtimeProviderOperationInput = {
+  id: string;
+  parentOperationId: string;
+  callBriefId: string;
+  callAttemptId: string;
+  provider: "openai";
+  operationType: "realtime_response" | "transcription";
+  stage: string;
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+  result: Omit<CompleteProviderOperationInput, "operationId">;
+};
+
+export type CompleteProviderOperationInput = {
+  operationId: string;
+  outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
+  providerRequestId: string | null;
+  providerResponseId: string | null;
+  providerModel: string | null;
+  statusCode: number | null;
+  completedAt: string;
+  durationMs: number;
+  errorCode: string | null;
+  usage: ProviderTextTokenUsage | null;
+};
+
+export type ProviderOperationRecord = Omit<
+  ProviderOperationReservationInput,
+  "preparationId" | "maxRequests"
+> & {
+  callPreparationId: string;
+  durableJobId: string;
+  result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+};
+
+export type RealtimeProviderOperationRecord =
+  | (RealtimeProviderSessionInput & {
+      result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+    })
+  | RealtimeProviderOperationInput;
+
+export type PostCallTranscriptionProviderOperationInput = {
+  id: string;
+  callBriefId: string;
+  recordingId: string;
+  provider: "openai";
+  operationType: "transcription";
+  stage: "full_recording" | "assistant_utterance" | "recipient_utterance";
+  requestedModel: string;
+  clientRequestId: string;
+  startedAt: string;
+  durableJobGeneration: number;
+};
+
+export type PostCallTranscriptionProviderOperationRecord =
+  PostCallTranscriptionProviderOperationInput & {
+    callAttemptId: string;
+    durableJobId: string;
+    result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+  };
+
+export type PostCallTranscriptionChunkLookupInput = {
+  callBriefId: string;
+  recordingId: string;
+  durableJobGeneration: number;
+  stage: PostCallTranscriptionProviderOperationInput["stage"];
+  chunkKey: string;
+  inputFingerprint: string;
+  requestedModel: string;
+};
+
+export type CompletePostCallTranscriptionProviderOperationInput =
+  CompleteProviderOperationInput & {
+    callBriefId: string;
+    recordingId: string;
+    durableJobGeneration: number;
+    stage: PostCallTranscriptionProviderOperationInput["stage"];
+    chunkKey: string;
+    inputFingerprint: string;
+    transcriptText: string | null;
+  };
+
+export type TelephonyProviderOperationInput = {
+  id: string;
+  callBriefId: string;
+  callAttemptId: string;
+  provider: "twilio";
+  operationType: "telephony_leg";
+  stage: "outbound_call";
+  requestedModel: "programmable_voice";
+  clientRequestId: string;
+  startedAt: string;
+};
+
+export type TelephonyLegUsageInput = {
+  fallbackOperationId: string;
+  callBriefId: string;
+  callAttemptId: string;
+  providerCallId: string;
+  providerStatus: string;
+  durationSeconds: number | null;
+  billableSeconds: number | null;
+  occurredAt: string;
+  sequenceNumber: number | null;
+};
+
+export type TelephonyProviderOperationRecord =
+  TelephonyProviderOperationInput & {
+    result: Omit<CompleteProviderOperationInput, "operationId"> | null;
+  };
+
+export type TelephonyProviderCostInput = {
+  id: string;
+  fallbackOperationId: string;
+  callBriefId: string;
+  callAttemptId: string;
+  providerCallId: string;
+  amountMicros: number;
+  currency: string;
+  rawAmount: string;
+  observedAt: string;
+};
+
+export type ProviderCostRecord = {
+  id: string;
+  operationId: string;
+  provider: "twilio";
+  providerCostId: string;
+  costBasis: "provider_reported_actual";
+  component: "connectivity";
+  amountMicros: number;
+  currency: string;
+  rawCost: { price: string; price_unit: string };
+  observedAt: string;
+};
+
+export function createTelephonyLegResult(
+  input: TelephonyLegUsageInput
+): Omit<CompleteProviderOperationInput, "operationId"> {
+  return {
+    outcome: input.providerStatus === "failed" ? "provider_error" : "succeeded",
+    providerRequestId: null,
+    providerResponseId: input.providerCallId,
+    providerModel: "programmable_voice",
+    statusCode: null,
+    completedAt: input.occurredAt,
+    durationMs: Math.round((input.durationSeconds ?? 0) * 1_000),
+    errorCode: input.providerStatus === "failed" ? "TWILIO_CALL_FAILED" : null,
+    usage: {
+      requestCount: 1,
+      inputTextTokens: null,
+      cachedInputTextTokens: null,
+      cacheWriteInputTextTokens: null,
+      outputTextTokens: null,
+      reasoningOutputTokens: null,
+      inputAudioTokens: null,
+      cachedInputAudioTokens: null,
+      outputAudioTokens: null,
+      totalTokens: null,
+      durationSeconds: input.durationSeconds,
+      billableSeconds: input.billableSeconds,
+      rawUsage: {
+        call_status: input.providerStatus,
+        call_duration_seconds: input.durationSeconds,
+        billable_minutes:
+          input.billableSeconds === null ? null : input.billableSeconds / 60,
+        billable_seconds: input.billableSeconds,
+        sequence_number: input.sequenceNumber
+      }
+    }
+  };
+}
 
 export type AdminCallCursor = { createdAt: string; id: string };
 export type ListAdminCallsInput = AdminCallListFilters & {
@@ -209,6 +440,46 @@ export type AdminOperationsAggregateFacts = {
   total: number;
   average: number | null;
   p95: number | null;
+};
+
+export type AdminProviderUsageBucket = {
+  provider: string;
+  operationType: string;
+  stage: string;
+  model: string;
+  usageRecords: number;
+  requestCount: number;
+  inputTextTokens: number;
+  inputTextTokenSamples: number;
+  cachedInputTextTokens: number;
+  cachedInputTextTokenSamples: number;
+  cacheWriteInputTextTokens: number;
+  cacheWriteInputTextTokenSamples: number;
+  outputTextTokens: number;
+  outputTextTokenSamples: number;
+  reasoningOutputTokens: number;
+  reasoningOutputTokenSamples: number;
+  inputAudioTokens: number;
+  inputAudioTokenSamples: number;
+  cachedInputAudioTokens: number;
+  cachedInputAudioTokenSamples: number;
+  outputAudioTokens: number;
+  outputAudioTokenSamples: number;
+  totalTokens: number;
+  totalTokenSamples: number;
+  durationSeconds: number;
+  durationSamples: number;
+  billableSeconds: number;
+  billableSamples: number;
+};
+
+export type AdminProviderCostBucket = {
+  provider: string;
+  costBasis: "provider_reported_actual";
+  component: string;
+  currency: string;
+  records: number;
+  amountMicros: number;
 };
 
 export type AdminOperationsFacts = {
@@ -240,6 +511,19 @@ export type AdminOperationsFacts = {
     telephony: number;
     realtime: number;
     transcription: number;
+  };
+  providerUsage: {
+    incurredFrom: string;
+    incurredTo: string;
+    operationCount: number;
+    usageRecordCount: number;
+    buckets: AdminProviderUsageBucket[];
+  };
+  providerCosts: {
+    incurredFrom: string;
+    incurredTo: string;
+    recordCount: number;
+    buckets: AdminProviderCostBucket[];
   };
 };
 
@@ -290,6 +574,17 @@ export type AdminSystemFacts = {
   retentionOverdue: number;
   recentWarnings: number;
   recentErrors: number;
+  callPlanCutover: {
+    recoverableLegacyCalls: number;
+    archivedLegacyCalls: number;
+    recompileRequiredCalls: number;
+    unavailableLegacyCalls: number;
+    executableLegacyCalls: number;
+    historicalAttemptsWithoutCompilation: number;
+    historicalAttemptsWithoutExecutionSnapshot: number;
+    activeLegacyAttempts: number;
+    activeRecompilations: number;
+  };
   externalWorker: {
     healthyInstances: number;
     staleInstances: number;
@@ -387,6 +682,7 @@ export function isUuid(value: string) {
 
 export type ProviderStatusResult = {
   callId: string;
+  attemptId: string;
   snapshot: CallSnapshot;
 };
 
@@ -440,19 +736,54 @@ export interface CallRepository {
   enqueueCallPreparation(
     input: EnqueueCallPreparationRepositoryInput
   ): Promise<CallPreparation>;
+  enqueueCallRecompilation(
+    input: EnqueueCallRecompilationRepositoryInput
+  ): Promise<CallPreparation>;
   findCallPreparationByRequest(
-    userId: string,
+    userId: string | null,
     idempotencyKey: string,
-    inputFingerprint: string
+    inputFingerprint: string,
+    targetCallBriefId?: string | null
   ): Promise<CallPreparation | null>;
   getCallPreparation(
     id: string,
     userId: string
   ): Promise<CallPreparation | null>;
+  getAdminCallPreparation(id: string): Promise<CallPreparation | null>;
   claimCallPreparation(
     id: string,
     lease: DurableJobLease
   ): Promise<CallPreparationWork>;
+  reserveCallPreparationProviderRequest(
+    input: ProviderOperationReservationInput,
+    lease: DurableJobLease
+  ): Promise<boolean>;
+  startRealtimeProviderSessions(
+    inputs: RealtimeProviderSessionInput[]
+  ): Promise<void>;
+  recordRealtimeProviderOperation(
+    input: RealtimeProviderOperationInput
+  ): Promise<void>;
+  reservePostCallTranscriptionProviderRequest(
+    input: PostCallTranscriptionProviderOperationInput,
+    lease: DurableJobLease
+  ): Promise<void>;
+  findCompletedPostCallTranscriptionChunk(
+    input: PostCallTranscriptionChunkLookupInput,
+    lease: DurableJobLease
+  ): Promise<string | null>;
+  completePostCallTranscriptionProviderRequest(
+    input: CompletePostCallTranscriptionProviderOperationInput
+  ): Promise<void>;
+  startTelephonyProviderOperation(
+    input: TelephonyProviderOperationInput
+  ): Promise<void>;
+  recordTelephonyLegUsage(input: TelephonyLegUsageInput): Promise<void>;
+  recordTelephonyProviderCost(
+    input: TelephonyProviderCostInput,
+    lease: DurableJobLease
+  ): Promise<void>;
+  completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   findCallDataDeletion(
@@ -484,7 +815,8 @@ export interface CallRepository {
   recompile(
     id: string,
     input: CreateCallBriefInput,
-    compilation: CallCompilation
+    compilation: CallCompilation,
+    publication?: CallPreparationPublication
   ): Promise<CallSnapshot>;
   get(id: string): Promise<CallSnapshot | null>;
   appendCallTelemetryEvent(
@@ -501,7 +833,9 @@ export interface CallRepository {
   ): Promise<AdminCallSensitiveContent>;
   getAdminOperationsFacts(
     from: string,
-    to: string
+    to: string,
+    callId?: string,
+    preparationId?: string
   ): Promise<AdminOperationsFacts>;
   getAdminSystemFacts(
     now: string,
@@ -527,7 +861,11 @@ export interface CallRepository {
     input: OwnerCallFeedbackInput
   ): Promise<CallOutcomeView>;
   getCallOutcomeMetrics(): Promise<CallOutcomeMetrics>;
-  approveCompilation(id: string): Promise<CallSnapshot>;
+  approveCompilation(
+    id: string,
+    expected?: CompilationApprovalInput
+  ): Promise<CallSnapshot>;
+  getAttempt(id: string, attemptId: string): Promise<CallAttemptRecord | null>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
   startAttempt(id: string, input: StartAttemptInput): Promise<StartAttemptResult>;
   attachProviderCall(
@@ -620,7 +958,8 @@ export interface CallRepository {
     workerId: string,
     errorCode: string,
     now: string,
-    retryAt: string
+    retryAt: string,
+    retryable?: boolean
   ): Promise<DurableJob | null>;
   listDurableJobs(): Promise<DurableJob[]>;
   listDurableJobAttempts(jobId: string): Promise<DurableJobAttempt[]>;
@@ -642,9 +981,14 @@ export class CallRepositoryError extends Error {
       | "APPROVAL_NOT_FOUND"
       | "CALL_NOT_READY"
       | "CALL_BRIEF_NOT_REVIEWABLE"
+      | "CALL_COMPILATION_STALE"
+      | "CALL_COMPILATION_INTEGRITY_FAILED"
+      | "CALL_COMPILATION_RECOMPILE_REQUIRED"
       | "CALL_BRIEF_NOT_EDITABLE"
       | "CALL_ATTEMPT_NOT_FOUND"
       | "CALL_PREPARATION_NOT_FOUND"
+      | "PROVIDER_OPERATION_NOT_FOUND"
+      | "PROVIDER_COST_CONFLICT"
       | "INSUFFICIENT_CREDITS"
       | "CONCURRENT_CALL_LIMIT"
       | "OUTBOUND_CALLS_DISABLED"
@@ -668,6 +1012,7 @@ export class CallRepositoryError extends Error {
       | "CALL_FEEDBACK_IDEMPOTENCY_CONFLICT"
       | "CALL_CREATION_IDEMPOTENCY_CONFLICT"
       | "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
+      | "CALL_RECOMPILATION_IN_PROGRESS"
       | "DURABLE_JOB_LEASE_LOST"
       | "DURABLE_JOB_NOT_FOUND"
       | "DURABLE_JOB_NOT_RETRYABLE"
@@ -676,6 +1021,12 @@ export class CallRepositoryError extends Error {
   ) {
     super(message);
     this.name = "CallRepositoryError";
+  }
+}
+
+export function assertCompilationIntegrity(compilation: CallCompilation) {
+  if (!hasValidCompilationSnapshotHash(compilation)) {
+    throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
   }
 }
 

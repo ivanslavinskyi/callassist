@@ -17,6 +17,7 @@ import {
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
+  compilationApprovalInputSchema,
   contentAdminActionInputSchema,
   contentDraftUpdateInputSchema,
   editorialCollectionKeySchema,
@@ -1619,6 +1620,44 @@ export function buildApp({
       }
     );
 
+    app.get<{ Params: { id: string } }>(
+      "/api/admin/calls/:id/cost",
+      async (request, reply) => {
+        const actor = await authorizeAdminRead(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.id)) {
+          return reply.status(404).send({ error: "CALL_NOT_FOUND" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await service.getAdminCallCostBreakdown(request.params.id));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      }
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/admin/call-preparations/:id",
+      async (request, reply) => {
+        const actor = await authorizeAdminRead(request, reply);
+        if (!actor) return;
+        if (!isUuid(request.params.id)) {
+          return reply.status(404).send({ error: "CALL_PREPARATION_NOT_FOUND" });
+        }
+        try {
+          return reply
+            .header("Cache-Control", "private, no-store")
+            .send(await service.getAdminCallPreparationInspector(
+              request.params.id
+            ));
+        } catch (error) {
+          return sendRepositoryError(reply, error);
+        }
+      }
+    );
+
     app.post<{ Params: { id: string } }>(
       "/api/admin/calls/:id/sensitive-access",
       async (request, reply) => {
@@ -2078,6 +2117,30 @@ export function buildApp({
           issues: parsed.error.flatten()
         });
       }
+      const idempotencyHeader = request.headers["idempotency-key"];
+      if (
+        typeof idempotencyHeader !== "string" ||
+        !isUuid(idempotencyHeader)
+      ) {
+        return reply.status(400).send({ error: "INVALID_IDEMPOTENCY_KEY" });
+      }
+      try {
+        const existing = await service.findRecompilationByRequest(
+          request.params.id,
+          parsed.data,
+          access.userId,
+          idempotencyHeader
+        );
+        if (existing) {
+          return reply
+            .header("Location", `/api/call-preparations/${existing.id}`)
+            .header("Cache-Control", "private, no-store")
+            .status(202)
+            .send(existing);
+        }
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
       if (!(await enforceEndpointRateLimit(
         request,
         reply,
@@ -2086,7 +2149,17 @@ export function buildApp({
         endpointRateLimitPolicy.briefPreparation
       ))) return;
       try {
-        return await service.recompile(request.params.id, parsed.data);
+        const preparation = await service.recompile(
+          request.params.id,
+          parsed.data,
+          access.userId,
+          idempotencyHeader
+        );
+        return reply
+          .header("Location", `/api/call-preparations/${preparation.id}`)
+          .header("Cache-Control", "private, no-store")
+          .status(202)
+          .send(preparation);
       } catch (error) {
         logCallPreparationError(request.log, error);
         return sendRepositoryError(reply, error);
@@ -2212,7 +2285,7 @@ export function buildApp({
     }
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: unknown }>(
     "/api/call-briefs/:id/approve",
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
@@ -2220,15 +2293,19 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
+      const parsed = compilationApprovalInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_COMPILATION_APPROVAL" });
+      }
       try {
-        return await service.approveCompilation(request.params.id);
+        return await service.approveCompilation(request.params.id, parsed.data);
       } catch (error) {
         return sendRepositoryError(reply, error);
       }
     }
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: unknown }>(
     "/api/call-briefs/:id/approve-and-start",
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
@@ -2243,8 +2320,16 @@ export function buildApp({
         "call-start",
         endpointRateLimitPolicy.callStart
       ))) return;
+      const parsed = compilationApprovalInputSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "INVALID_COMPILATION_APPROVAL" });
+      }
       try {
-        return await service.approveAndStart(request.params.id, access.userId);
+        return await service.approveAndStart(
+          request.params.id,
+          access.userId,
+          parsed.data
+        );
       } catch (error) {
         return sendRepositoryError(reply, error);
       }
@@ -2608,7 +2693,21 @@ export function buildWebhookApp({
             });
             return reply.status(404).send({ error: "CALL_NOT_FOUND" });
           }
-          const twiml = twilioProvider.createVoiceTwiml(snapshot.brief);
+          const attempt = await service.getLatestAttempt(callBriefId);
+          if (!attempt?.compilationSnapshotHash || !attempt.executionSnapshot) {
+            await recordWebhookDelivery(request, {
+              kind: "voice",
+              outcome: "unmatched",
+              receivedAt,
+              errorCode: "CALL_ATTEMPT_NOT_FOUND"
+            });
+            return reply.status(409).send({ error: "CALL_ATTEMPT_NOT_FOUND" });
+          }
+          const twiml = twilioProvider.createVoiceTwiml(snapshot.brief, {
+            callBriefId,
+            callAttemptId: attempt.id,
+            compilationSnapshotHash: attempt.compilationSnapshotHash
+          });
           await recordWebhookDelivery(request, {
             kind: "voice",
             outcome: "accepted",
@@ -2677,7 +2776,18 @@ export function buildWebhookApp({
           const snapshot = await service.handleTwilioStatus(
             providerCallId,
             status,
-            request.query.callBriefId
+            request.query.callBriefId,
+            undefined,
+            {
+              durationSeconds: optionalNonNegativeInteger(
+                parameters.CallDuration
+              ),
+              billableMinutes: optionalNonNegativeNumber(parameters.Duration),
+              occurredAt: optionalIsoDate(parameters.Timestamp) ?? receivedAt,
+              sequenceNumber: optionalNonNegativeInteger(
+                parameters.SequenceNumber
+              )
+            }
           );
           await recordWebhookDelivery(request, snapshot
             ? { kind: "call_status", outcome: "accepted", receivedAt }
@@ -2818,6 +2928,11 @@ function optionalNonNegativeNumber(value: string | undefined) {
 function optionalPositiveNumber(value: string | undefined) {
   const parsed = optionalNonNegativeNumber(value);
   return parsed !== undefined && parsed > 0 ? parsed : undefined;
+}
+
+function optionalNonNegativeInteger(value: string | undefined) {
+  const parsed = optionalNonNegativeNumber(value);
+  return parsed !== undefined && Number.isInteger(parsed) ? parsed : undefined;
 }
 
 function optionalIsoDate(value: string | undefined) {

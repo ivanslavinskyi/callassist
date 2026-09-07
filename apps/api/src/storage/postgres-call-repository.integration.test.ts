@@ -8,6 +8,7 @@ import {
 import postgres from "postgres";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { runMigrations } from "../db/migrate";
+import { encryptJson } from "../security/encryption";
 import { PostgresCallRepository } from "./postgres-call-repository";
 import {
   decodeCallBriefCursor,
@@ -210,6 +211,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
     await repository.addTranscript(
       brief.id,
       "recipient",
@@ -225,13 +227,36 @@ describe("PostgresCallRepository", () => {
     });
     const attemptId = randomUUID();
     const jobId = randomUUID();
+    const [attemptPlan] = await inspection<{
+      compilationId: string;
+      revision: number;
+      snapshotHash: string;
+      executionSnapshotCiphertext: string;
+    }[]>`
+      SELECT
+        call_compilations.id AS "compilationId",
+        call_compilations.revision,
+        call_compilations.snapshot_hash AS "snapshotHash",
+        call_compilation_approvals.execution_snapshot_ciphertext
+          AS "executionSnapshotCiphertext"
+      FROM call_briefs
+      JOIN call_compilations
+        ON call_compilations.id = call_briefs.current_compilation_id
+      JOIN call_compilation_approvals
+        ON call_compilation_approvals.compilation_id = call_compilations.id
+      WHERE call_briefs.id = ${brief.id}
+    `;
     await inspection`
       INSERT INTO call_attempts (
         id, call_brief_id, user_id, provider, provider_call_id,
-        status, provider_status, started_at, ended_at, created_at
+        status, provider_status, compilation_id, compilation_revision,
+        compilation_snapshot_hash, execution_snapshot_ciphertext,
+        started_at, ended_at, created_at
       ) VALUES (
         ${attemptId}, ${brief.id}, ${ownerA}, 'twilio', 'CA-private-delete',
-        'completed', 'completed', now(), now(), now()
+        'completed', 'completed', ${attemptPlan!.compilationId},
+        ${attemptPlan!.revision}, ${attemptPlan!.snapshotHash},
+        ${attemptPlan!.executionSnapshotCiphertext}, now(), now(), now()
       )
     `;
     await inspection`
@@ -286,11 +311,14 @@ describe("PostgresCallRepository", () => {
       phoneNumber: string;
       objective: string;
       compilationCiphertext: string | null;
+      immutableCompilationCiphertexts: number;
+      approvalExecutionSnapshotCiphertexts: number;
       dataDeletedAt: Date;
       transcriptCount: number;
       feedbackCommentCiphertext: string | null;
       deletionEvents: number;
       providerCallId: string | null;
+      attemptCompilationId: string | null;
       jobStatus: string;
       jobAttemptOutcome: string;
     }[]>`
@@ -299,6 +327,14 @@ describe("PostgresCallRepository", () => {
         phone_number AS "phoneNumber",
         objective,
         compilation_ciphertext AS "compilationCiphertext",
+        (SELECT count(*)::int FROM call_compilations
+          WHERE call_brief_id = call_briefs.id
+            AND compilation_ciphertext IS NOT NULL)
+          AS "immutableCompilationCiphertexts",
+        (SELECT count(*)::int FROM call_compilation_approvals
+          WHERE call_brief_id = call_briefs.id
+            AND execution_snapshot_ciphertext IS NOT NULL)
+          AS "approvalExecutionSnapshotCiphertexts",
         data_deleted_at AS "dataDeletedAt",
         (SELECT count(*)::int FROM transcript_segments
           WHERE call_brief_id = call_briefs.id) AS "transcriptCount",
@@ -309,6 +345,8 @@ describe("PostgresCallRepository", () => {
           WHERE call_brief_id = call_briefs.id) AS "deletionEvents"
         ,(SELECT provider_call_id FROM call_attempts
           WHERE id = ${attemptId}) AS "providerCallId"
+        ,(SELECT compilation_id FROM call_attempts
+          WHERE id = ${attemptId}) AS "attemptCompilationId"
         ,(SELECT status FROM durable_jobs
           WHERE id = ${jobId}) AS "jobStatus"
         ,(SELECT outcome FROM durable_job_attempts
@@ -322,10 +360,13 @@ describe("PostgresCallRepository", () => {
       phoneNumber: "",
       objective: "Deleted by owner",
       compilationCiphertext: null,
+      immutableCompilationCiphertexts: 0,
+      approvalExecutionSnapshotCiphertexts: 0,
       transcriptCount: 0,
       feedbackCommentCiphertext: null,
       deletionEvents: 1,
       providerCallId: null,
+      attemptCompilationId: null,
       jobStatus: "cancelled",
       jobAttemptOutcome: "cancelled"
     });
@@ -867,12 +908,107 @@ describe("PostgresCallRepository", () => {
       revision: 2,
       approvedAt: null
     });
-    const approved = await repository.approveCompilation(brief.id);
+    await expect(repository.approveCompilation(brief.id, {
+      revision: 1,
+      snapshotHash: compilation.snapshotHash
+    })).rejects.toMatchObject({ code: "CALL_COMPILATION_STALE" });
+    const approved = await repository.approveCompilation(brief.id, {
+      revision: revisedCompilation.revision,
+      snapshotHash: revisedCompilation.snapshotHash
+    });
     expect(approved.brief.status).toBe("ready");
 
+    const [mutableProjection] = await inspection<{
+      compilationCiphertext: string;
+    }[]>`
+      SELECT compilation_ciphertext AS "compilationCiphertext"
+      FROM call_briefs
+      WHERE id = ${brief.id}
+    `;
+    await inspection`
+      UPDATE call_briefs
+      SET compilation_ciphertext = NULL
+      WHERE id = ${brief.id}
+    `;
+    const immutableRead = await repository.get(brief.id);
+    expect(immutableRead?.compilation).toMatchObject({
+      revision: revisedCompilation.revision,
+      snapshotHash: revisedCompilation.snapshotHash,
+      approvedAt: expect.any(String)
+    });
     const started = await repository.startAttempt(brief.id, {
       provider: "mock"
     });
+    await inspection`
+      UPDATE call_briefs
+      SET compilation_ciphertext = ${mutableProjection!.compilationCiphertext}
+      WHERE id = ${brief.id}
+    `;
+    const compilationRows = await inspection<{
+      id: string;
+      revision: number;
+      snapshotHash: string;
+      origin: string;
+      approved: boolean;
+      executionSnapshotStored: boolean;
+      current: boolean;
+    }[]>`
+      SELECT
+        call_compilations.id,
+        call_compilations.revision,
+        call_compilations.snapshot_hash AS "snapshotHash",
+        call_compilations.origin,
+        call_compilation_approvals.id IS NOT NULL AS approved,
+        call_compilation_approvals.execution_snapshot_ciphertext IS NOT NULL
+          AS "executionSnapshotStored",
+        call_briefs.current_compilation_id = call_compilations.id AS current
+      FROM call_compilations
+      JOIN call_briefs ON call_briefs.id = call_compilations.call_brief_id
+      LEFT JOIN call_compilation_approvals
+        ON call_compilation_approvals.compilation_id = call_compilations.id
+      WHERE call_compilations.call_brief_id = ${brief.id}
+      ORDER BY call_compilations.revision
+    `;
+    expect(compilationRows).toEqual([
+      expect.objectContaining({
+        revision: 1,
+        snapshotHash: compilation.snapshotHash,
+        origin: "native",
+        approved: false,
+        executionSnapshotStored: false,
+        current: false
+      }),
+      expect.objectContaining({
+        revision: 2,
+        snapshotHash: revisedCompilation.snapshotHash,
+        origin: "native",
+        approved: true,
+        executionSnapshotStored: true,
+        current: true
+      })
+    ]);
+    expect(started.attempt).toMatchObject({
+      compilationId: compilationRows[1]!.id,
+      compilationRevision: revisedCompilation.revision,
+      compilationSnapshotHash: revisedCompilation.snapshotHash,
+      executionSnapshot: {
+        compilationRevision: revisedCompilation.revision,
+        compilationSnapshotHash: revisedCompilation.snapshotHash,
+        plan: { localizedObjective: revisedInput.objective }
+      }
+    });
+    expect(await repository.getLatestAttempt(brief.id)).toEqual(
+      started.attempt
+    );
+    await expect(inspection`
+      UPDATE call_compilations
+      SET snapshot_hash = ${"0".repeat(64)}
+      WHERE id = ${compilationRows[1]!.id}
+    `).rejects.toThrow("immutable");
+    await expect(inspection`
+      DELETE FROM call_compilation_approvals
+      WHERE compilation_id = ${compilationRows[1]!.id}
+    `).rejects.toThrow("immutable");
     const providerCallId = `mock-${brief.id}`;
     await repository.attachProviderCall(
       started.attempt.id,
@@ -913,7 +1049,8 @@ describe("PostgresCallRepository", () => {
       {
         allowedFactsCiphertext: string;
         assistanceReasonCiphertext: string;
-        compilationCiphertext: string;
+        compilationCiphertext: string | null;
+        immutableCompilationCiphertext: string;
         representedPersonFirstName: string;
         representedPersonLastName: string;
         userId: string;
@@ -923,6 +1060,11 @@ describe("PostgresCallRepository", () => {
         allowed_facts_ciphertext AS "allowedFactsCiphertext",
         assistance_reason_ciphertext AS "assistanceReasonCiphertext",
         compilation_ciphertext AS "compilationCiphertext",
+        (
+          SELECT compilation_ciphertext
+          FROM call_compilations
+          WHERE id = call_briefs.current_compilation_id
+        ) AS "immutableCompilationCiphertext",
         represented_person_first_name AS "representedPersonFirstName",
         represented_person_last_name AS "representedPersonLastName",
         user_id AS "userId"
@@ -933,7 +1075,8 @@ describe("PostgresCallRepository", () => {
     expect(stored?.assistanceReasonCiphertext).not.toContain(
       "language_barrier"
     );
-    expect(stored?.compilationCiphertext).not.toContain(
+    expect(stored?.compilationCiphertext).toBeNull();
+    expect(stored?.immutableCompilationCiphertext).not.toContain(
       "Verify the PostgreSQL persistence"
     );
     expect(stored?.representedPersonFirstName).toBe("Nina");
@@ -1216,11 +1359,92 @@ describe("PostgresCallRepository", () => {
     });
     expect((await repository.get(brief.id))?.recording?.status).toBe("available");
 
+    const workerId = `transcription-ledger-${randomUUID()}`;
+    const checkedAt = new Date().toISOString();
+    const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();
+    const [leasedJob] = await inspection<{ id: string; generation: number }[]>`
+      UPDATE durable_jobs
+      SET
+        status = 'running',
+        attempt_count = attempt_count + 1,
+        lease_owner = ${workerId},
+        leased_at = ${checkedAt}::timestamptz,
+        lease_expires_at = ${leaseExpiresAt}::timestamptz,
+        updated_at = ${checkedAt}::timestamptz
+      WHERE job_type = 'final_transcription'
+        AND recording_id = ${begun.recording.id}
+        AND status = 'queued'
+      RETURNING id, generation
+    `;
+    expect(leasedJob).toBeDefined();
+    const lease = {
+      jobId: leasedJob!.id,
+      workerId,
+      checkedAt
+    };
+
     const claimed = await repository.claimFinalTranscript(
       begun.recording.id,
-      "gpt-transcribe"
+      "gpt-transcribe",
+      false,
+      lease
     );
     expect(claimed?.finalTranscript.status).toBe("processing");
+    const transcriptionOperationId = randomUUID();
+    await repository.reservePostCallTranscriptionProviderRequest({
+      id: transcriptionOperationId,
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      provider: "openai",
+      operationType: "transcription",
+      stage: "full_recording",
+      requestedModel: "gpt-transcribe",
+      clientRequestId: transcriptionOperationId,
+      startedAt: checkedAt,
+      durableJobGeneration: leasedJob!.generation
+    }, lease);
+    await repository.completePostCallTranscriptionProviderRequest({
+      operationId: transcriptionOperationId,
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      durableJobGeneration: leasedJob!.generation,
+      stage: "full_recording",
+      chunkKey: "full_recording",
+      inputFingerprint: "a".repeat(64),
+      outcome: "succeeded",
+      providerRequestId: `req_${transcriptionOperationId}`,
+      providerResponseId: null,
+      providerModel: null,
+      statusCode: 200,
+      completedAt: new Date().toISOString(),
+      durationMs: 250,
+      errorCode: null,
+      usage: {
+        requestCount: 1,
+        inputTextTokens: null,
+        cachedInputTextTokens: null,
+        cacheWriteInputTextTokens: null,
+        outputTextTokens: null,
+        reasoningOutputTokens: null,
+        inputAudioTokens: null,
+        cachedInputAudioTokens: null,
+        outputAudioTokens: null,
+        totalTokens: null,
+        durationSeconds: 51,
+        billableSeconds: null,
+        rawUsage: { type: "duration", seconds: 51 }
+      },
+      transcriptText: "The cached private transcript."
+    });
+    await expect(repository.findCompletedPostCallTranscriptionChunk({
+      callBriefId: brief.id,
+      recordingId: begun.recording.id,
+      durableJobGeneration: leasedJob!.generation,
+      stage: "full_recording",
+      chunkKey: "full_recording",
+      inputFingerprint: "a".repeat(64),
+      requestedModel: "gpt-transcribe"
+    }, lease)).resolves.toBe("The cached private transcript.");
     await expect(
       repository.claimFinalTranscript(begun.recording.id, "gpt-transcribe")
     ).resolves.toBeNull();
@@ -1234,8 +1458,14 @@ describe("PostgresCallRepository", () => {
           startSeconds: 2.4,
           endSeconds: 4.8
         }
-      ]
+      ],
+      lease
     );
+    await expect(repository.completeDurableJob(
+      leasedJob!.id,
+      workerId,
+      new Date().toISOString()
+    )).resolves.toBe(true);
 
     const [stored] = await inspection<
       {
@@ -1256,6 +1486,36 @@ describe("PostgresCallRepository", () => {
     expect(stored?.textCiphertext).not.toContain("final private transcript");
     expect(stored?.segmentsCiphertext).not.toContain("final private transcript");
     expect(stored?.deleteAfter).toBeInstanceOf(Date);
+    const [providerUsage] = await inspection<{
+      operations: number;
+      results: number;
+      usageRecords: number;
+      durationSeconds: number;
+      chunkCiphertext: string;
+    }[]>`
+      SELECT
+        (SELECT count(*)::int FROM provider_operations
+          WHERE id = ${transcriptionOperationId}
+            AND call_brief_id = ${brief.id}
+            AND call_attempt_id = ${attempt.attempt.id}
+            AND recording_id = ${begun.recording.id}
+            AND durable_job_id = ${leasedJob!.id}) AS operations,
+        (SELECT count(*)::int FROM provider_operation_results
+          WHERE operation_id = ${transcriptionOperationId}) AS results,
+        (SELECT count(*)::int FROM provider_usage_records
+          WHERE operation_id = ${transcriptionOperationId}) AS "usageRecords",
+        (SELECT duration_seconds::float FROM provider_usage_records
+          WHERE operation_id = ${transcriptionOperationId}) AS "durationSeconds",
+        (SELECT text_ciphertext FROM post_call_transcription_chunks
+          WHERE provider_operation_id = ${transcriptionOperationId}) AS "chunkCiphertext"
+    `;
+    expect(providerUsage).toEqual({
+      operations: 1,
+      results: 1,
+      usageRecords: 1,
+      durationSeconds: 51,
+      chunkCiphertext: expect.not.stringContaining("cached private transcript")
+    });
 
     const snapshot = await repository.get(brief.id);
     expect(snapshot?.recording).toMatchObject({
@@ -1277,6 +1537,12 @@ describe("PostgresCallRepository", () => {
     const deleted = await repository.get(brief.id);
     expect(deleted?.recording?.status).toBe("deleted");
     expect(deleted?.finalTranscript?.text).toBe("The final private transcript.");
+    const [cacheAfterDeletion] = await inspection<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM post_call_transcription_chunks
+      WHERE recording_id = ${begun.recording.id}
+    `;
+    expect(cacheAfterDeletion?.count).toBe(0);
   });
 
   it("aggregates bounded operational and system facts in PostgreSQL", async () => {
@@ -1316,6 +1582,43 @@ describe("PostgresCallRepository", () => {
     });
     expect(facts.firstAudioLatencyMs.samples).toBeGreaterThanOrEqual(1);
     expect(facts.firstAudioLatencyMs.total).toBeGreaterThanOrEqual(275);
+
+    await repository.grantSignupCredits(ownerA);
+    await repository.approveCompilation(brief.id);
+    const started = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerA,
+      admissionPolicy: ledgerTestPolicy
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "postgres-pre-consent-realtime-ready",
+      occurredAt: new Date(Date.now() - 12_000).toISOString(),
+      payload: {
+        name: "realtime.ready",
+        metadata: {
+          model: "gpt-realtime-test",
+          transcriptionModel: "gpt-transcribe-test"
+        }
+      }
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "postgres-pre-consent-stream-ended",
+      payload: {
+        name: "consent.failed",
+        metadata: { reason: "stream_ended_before_consent" }
+      }
+    });
+    await repository.updateStatus(brief.id, "completed");
+    const preConsentFacts = await repository.getAdminOperationsFacts(
+      new Date(now.getTime() - 60_000).toISOString(),
+      new Date(now.getTime() + 60_000).toISOString(),
+      brief.id
+    );
+    expect(preConsentFacts.usageSeconds.realtime).toBeGreaterThanOrEqual(11);
+    expect(preConsentFacts.usageSeconds.transcription).toBe(0);
+    expect(preConsentFacts.recordedDurationSeconds.samples).toBe(0);
 
     await inspection`DELETE FROM provider_webhook_delivery_buckets`;
     await repository.recordProviderWebhookDelivery({
@@ -1366,6 +1669,17 @@ describe("PostgresCallRepository", () => {
       activeCalls: expect.any(Number),
       recentWarnings: expect.any(Number),
       recentErrors: expect.any(Number),
+      callPlanCutover: {
+        recoverableLegacyCalls: expect.any(Number),
+        archivedLegacyCalls: expect.any(Number),
+        recompileRequiredCalls: expect.any(Number),
+        unavailableLegacyCalls: expect.any(Number),
+        executableLegacyCalls: expect.any(Number),
+        historicalAttemptsWithoutCompilation: expect.any(Number),
+        historicalAttemptsWithoutExecutionSnapshot: expect.any(Number),
+        activeLegacyAttempts: expect.any(Number),
+        activeRecompilations: expect.any(Number)
+      },
       externalWorker: {
         healthyInstances: 1,
         staleInstances: 1,
@@ -1407,6 +1721,259 @@ describe("PostgresCallRepository", () => {
       SET last_error_code = 'private provider error text'
       WHERE outcome = 'failed'
     `).rejects.toThrow("provider_webhook_delivery_error_code_check");
+  });
+
+  it("reports recoverable legacy compilations until the immutable pointer is restored", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Cutover readiness office",
+      phoneNumber: "+41710000058",
+      objective: "Verify the immutable compilation cutover counter",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    const [stored] = await inspection<{ currentCompilationId: string }[]>`
+      SELECT current_compilation_id AS "currentCompilationId"
+      FROM call_briefs
+      WHERE id = ${brief.id}
+    `;
+    expect(stored?.currentCompilationId).toBeTypeOf("string");
+    const before = await repository.getAdminSystemFacts(
+      new Date().toISOString(),
+      new Date(Date.now() - 86_400_000).toISOString()
+    );
+
+    const approvedAt = new Date().toISOString();
+    const approvedCompilation = { ...compilation, approvedAt };
+    try {
+      await inspection`
+        UPDATE call_briefs
+        SET
+          current_compilation_id = NULL,
+          compilation_ciphertext = ${encryptJson(
+            approvedCompilation,
+            encryptionKey
+          )},
+          status = 'completed'
+        WHERE id = ${brief.id}
+      `;
+      const during = await repository.getAdminSystemFacts(
+        new Date().toISOString(),
+        new Date(Date.now() - 86_400_000).toISOString()
+      );
+      expect(during.callPlanCutover.recoverableLegacyCalls).toBe(
+        before.callPlanCutover.recoverableLegacyCalls + 1
+      );
+      await expect(repository.get(brief.id)).resolves.toMatchObject({
+        executionPlanSource: "unavailable",
+        compilation: null
+      });
+      await expect(repository.approveCompilation(brief.id)).rejects
+        .toMatchObject({ code: "CALL_COMPILATION_RECOMPILE_REQUIRED" });
+      await expect(repository.startAttempt(brief.id, {
+        provider: "mock"
+      })).rejects.toMatchObject({
+        code: "CALL_NOT_READY"
+      });
+      await expect(inspection`
+        INSERT INTO call_attempts (
+          id, call_brief_id, provider, status, started_at, created_at
+        ) VALUES (
+          ${randomUUID()}, ${brief.id}, 'mock', 'dialing', now(), now()
+        )
+      `).rejects.toThrow("require an immutable execution plan");
+      const preview = await repository.backfillLegacyCompilationBatch(
+        500,
+        null,
+        false
+      );
+      expect(preview.validCandidates).toBeGreaterThanOrEqual(1);
+      expect(preview.backfilledCompilations).toBe(0);
+      const [afterPreview] = await inspection<{
+        currentCompilationId: string | null;
+      }[]>`
+        SELECT current_compilation_id AS "currentCompilationId"
+        FROM call_briefs
+        WHERE id = ${brief.id}
+      `;
+      expect(afterPreview?.currentCompilationId).toBeNull();
+      const backfilled = await repository.backfillLegacyCompilationBatch(500);
+      expect(backfilled.backfilledCompilations).toBeGreaterThanOrEqual(1);
+      expect(backfilled.approvalSnapshotsCreated).toBeGreaterThanOrEqual(1);
+      const [materialized] = await inspection<{
+        currentCompilationId: string | null;
+        approvalSnapshotStored: boolean;
+      }[]>`
+        SELECT
+          call_briefs.current_compilation_id AS "currentCompilationId",
+          call_compilation_approvals.execution_snapshot_ciphertext IS NOT NULL
+            AS "approvalSnapshotStored"
+        FROM call_briefs
+        LEFT JOIN call_compilation_approvals
+          ON call_compilation_approvals.compilation_id =
+            call_briefs.current_compilation_id
+        WHERE call_briefs.id = ${brief.id}
+      `;
+      expect(materialized).toEqual({
+        currentCompilationId: stored!.currentCompilationId,
+        approvalSnapshotStored: true
+      });
+    } finally {
+      await inspection`
+        UPDATE call_briefs
+        SET current_compilation_id = ${stored!.currentCompilationId}
+        WHERE id = ${brief.id}
+      `;
+    }
+
+    const restored = await repository.getAdminSystemFacts(
+      new Date().toISOString(),
+      new Date(Date.now() - 86_400_000).toISOString()
+    );
+    expect(restored.callPlanCutover.recoverableLegacyCalls).toBe(
+      before.callPlanCutover.recoverableLegacyCalls
+    );
+  });
+
+  it("archives terminal incompatible plans and requires draft recompilation", async () => {
+    const terminalInput: CreateCallBriefInput = {
+      recipientName: "Archived legacy office",
+      phoneNumber: "+41710000068",
+      objective: "Preserve a terminal legacy call without executing it again",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const draftInput: CreateCallBriefInput = {
+      ...terminalInput,
+      recipientName: "Legacy draft office",
+      phoneNumber: "+41710000069",
+      objective: "Recompile this draft before it can be approved"
+    };
+    const compiler = new DeterministicBriefCompiler();
+    const terminalCompilation = await compiler.compile(
+      normalizeCreateCallBriefInput(terminalInput)
+    );
+    const draftCompilation = await compiler.compile(
+      normalizeCreateCallBriefInput(draftInput)
+    );
+    const terminal = await repository.create(
+      terminalInput,
+      terminalCompilation,
+      ownerA
+    );
+    const draft = await repository.create(draftInput, draftCompilation, ownerA);
+    const pointers = await inspection<{
+      id: string;
+      currentCompilationId: string;
+    }[]>`
+      SELECT id, current_compilation_id AS "currentCompilationId"
+      FROM call_briefs
+      WHERE id IN (${terminal.id}, ${draft.id})
+      ORDER BY id
+    `;
+    const pointerById = new Map(
+      pointers.map(({ id, currentCompilationId }) => [id, currentCompilationId])
+    );
+    const incompatibleCiphertext = encryptJson(
+      { compilerVersion: "brief-compiler-2" },
+      encryptionKey
+    );
+    try {
+      await inspection`
+        UPDATE call_briefs
+        SET
+          current_compilation_id = NULL,
+          compilation_ciphertext = ${incompatibleCiphertext},
+          status = CASE
+            WHEN id = ${terminal.id} THEN 'completed'
+            ELSE 'review_required'
+          END
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+      const preview = await repository.classifyLegacyCallPlanBatch(
+        500,
+        null,
+        false
+      );
+      expect(preview).toMatchObject({
+        archivedTerminal: expect.any(Number),
+        recompileRequired: expect.any(Number),
+        unclassified: 0
+      });
+      expect(preview.archivedTerminal).toBeGreaterThanOrEqual(1);
+      expect(preview.recompileRequired).toBeGreaterThanOrEqual(1);
+      const [unchanged] = await inspection<{
+        dispositions: number;
+      }[]>`
+        SELECT count(legacy_compilation_disposition)::int AS dispositions
+        FROM call_briefs
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+      expect(unchanged?.dispositions).toBe(0);
+
+      const classified = await repository.classifyLegacyCallPlanBatch(500);
+      expect(classified.archivedTerminal).toBeGreaterThanOrEqual(1);
+      expect(classified.recompileRequired).toBeGreaterThanOrEqual(1);
+      await expect(repository.get(terminal.id)).resolves.toMatchObject({
+        executionPlanSource: "archived",
+        compilation: null
+      });
+      await expect(repository.get(draft.id)).resolves.toMatchObject({
+        executionPlanSource: "recompile_required",
+        compilation: null
+      });
+      const [storedCiphertext] = await inspection<{
+        terminalCiphertext: string;
+        draftCiphertext: string;
+      }[]>`
+        SELECT
+          max(compilation_ciphertext) FILTER (WHERE id = ${terminal.id})
+            AS "terminalCiphertext",
+          max(compilation_ciphertext) FILTER (WHERE id = ${draft.id})
+            AS "draftCiphertext"
+        FROM call_briefs
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+      expect(storedCiphertext).toEqual({
+        terminalCiphertext: incompatibleCiphertext,
+        draftCiphertext: incompatibleCiphertext
+      });
+
+      const replacement = await compiler.compile(
+        normalizeCreateCallBriefInput(draftInput),
+        2
+      );
+      await repository.recompile(draft.id, draftInput, replacement);
+      await expect(repository.get(draft.id)).resolves.toMatchObject({
+        executionPlanSource: "immutable",
+        compilation: { revision: 2 }
+      });
+    } finally {
+      await inspection`
+        UPDATE call_briefs
+        SET
+          current_compilation_id = CASE
+            WHEN id = ${terminal.id}
+              THEN ${pointerById.get(terminal.id)!}::uuid
+            ELSE current_compilation_id
+          END,
+          legacy_compilation_disposition = NULL
+        WHERE id IN (${terminal.id}, ${draft.id})
+      `;
+    }
   });
 
   it("persists provider reconciliation targets and fences stale writes", async () => {
@@ -1589,6 +2156,57 @@ describe("PostgresCallRepository", () => {
     };
     const work = await repository.claimCallPreparation(queued.id, lease);
     expect(work.input).toEqual(normalizeCreateCallBriefInput(input));
+    const reservationInputs = Array.from({ length: 12 }, () => {
+      const id = randomUUID();
+      return {
+          id,
+          preparationId: queued.id,
+          provider: "openai" as const,
+          operationType: "brief_compilation" as const,
+          stage: "compilation" as const,
+          requestedModel: "gpt-5.6",
+          clientRequestId: id,
+          startedAt: lease.checkedAt,
+          maxRequests: 8,
+          durableJobGeneration: job!.generation
+      };
+    });
+    const reservations = await Promise.all(
+      reservationInputs.map((reservation) =>
+        repository.reserveCallPreparationProviderRequest(reservation, lease)
+      )
+    );
+    expect(reservations.filter(Boolean)).toHaveLength(8);
+    const acceptedOperationId = reservationInputs[
+      reservations.findIndex(Boolean)
+    ]!.id;
+    const providerUsageKey = randomUUID();
+    const operationResult = {
+      operationId: acceptedOperationId,
+      outcome: "succeeded" as const,
+      providerRequestId: `req_postgres_usage_${providerUsageKey}`,
+      providerResponseId: `resp_postgres_usage_${providerUsageKey}`,
+      providerModel: "gpt-5.6-2026-08-01",
+      statusCode: 200,
+      completedAt: "2096-01-01T00:00:02.000Z",
+      durationMs: 123,
+      errorCode: null,
+      usage: {
+        inputTextTokens: 100,
+        cachedInputTextTokens: 25,
+        cacheWriteInputTextTokens: null,
+        outputTextTokens: 40,
+        reasoningOutputTokens: 5,
+        totalTokens: 140,
+        rawUsage: {
+          input_tokens: 100,
+          output_tokens: 40,
+          total_tokens: 140
+        }
+      }
+    };
+    await repository.completeProviderOperation(operationResult);
+    await repository.completeProviderOperation(operationResult);
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
@@ -1612,12 +2230,648 @@ describe("PostgresCallRepository", () => {
       });
     const [stored] = await inspection<{
       inputCiphertext: string | null;
+      providerRequestCount: number;
     }[]>`
-      SELECT input_ciphertext AS "inputCiphertext"
+      SELECT
+        input_ciphertext AS "inputCiphertext",
+        provider_request_count AS "providerRequestCount"
       FROM call_preparation_requests
       WHERE id = ${queued.id}
     `;
     expect(stored?.inputCiphertext).toBeNull();
+    expect(stored?.providerRequestCount).toBe(8);
+    const [ledger] = await inspection<{
+      operations: number;
+      results: number;
+      usageRecords: number;
+      inputTextTokens: number;
+    }[]>`
+      SELECT
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_preparation_id = ${queued.id}) AS operations,
+        (SELECT count(*)::int FROM provider_operation_results
+          WHERE operation_id = ${acceptedOperationId}) AS results,
+        (SELECT count(*)::int FROM provider_usage_records
+          WHERE operation_id = ${acceptedOperationId}) AS "usageRecords",
+        (SELECT input_text_tokens FROM provider_usage_records
+          WHERE operation_id = ${acceptedOperationId}) AS "inputTextTokens"
+    `;
+    expect(ledger).toEqual({
+      operations: 8,
+      results: 1,
+      usageRecords: 1,
+      inputTextTokens: 100
+    });
+    const callFacts = await repository.getAdminOperationsFacts(
+      "2096-01-01T00:00:00.000Z",
+      "2096-01-01T00:01:00.000Z",
+      brief.id
+    );
+    expect(callFacts.providerUsage).toMatchObject({
+      operationCount: 8,
+      usageRecordCount: 1,
+      buckets: [expect.objectContaining({
+        provider: "openai",
+        operationType: "brief_compilation",
+        inputTextTokens: 100,
+        outputTextTokens: 40
+      })]
+    });
+    const preparationFacts = await repository.getAdminOperationsFacts(
+      "2096-01-01T00:00:00.000Z",
+      "2096-01-01T00:01:00.000Z",
+      undefined,
+      queued.id
+    );
+    expect(preparationFacts).toMatchObject({
+      createdCalls: 0,
+      providerUsage: {
+        operationCount: 8,
+        usageRecordCount: 1,
+        buckets: [expect.objectContaining({
+          operationType: "brief_compilation",
+          inputTextTokens: 100
+        })]
+      }
+    });
+    await expect(inspection`
+      UPDATE provider_operations
+      SET stage = 'output_moderation'
+      WHERE id = ${acceptedOperationId}
+    `).rejects.toThrow(/append-only/);
+    await expect(inspection`
+      UPDATE provider_operation_results
+      SET duration_ms = 124
+      WHERE operation_id = ${acceptedOperationId}
+    `).rejects.toThrow(/append-only/);
+    await expect(inspection`
+      UPDATE provider_usage_records
+      SET input_text_tokens = 101
+      WHERE operation_id = ${acceptedOperationId}
+    `).rejects.toThrow(/append-only/);
+  });
+
+  it("publishes a durable recompilation only against its expected immutable revision", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Durable recompilation office",
+      phoneNumber: "+41710000065",
+      objective: "Ask whether the original documents were received",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compiler = new DeterministicBriefCompiler();
+    const brief = await repository.create(
+      input,
+      await compiler.compile(normalizeCreateCallBriefInput(input)),
+      ownerA
+    );
+    const approved = await repository.approveCompilation(brief.id);
+    const approvedHash = approved.compilation!.snapshotHash;
+    const changed = {
+      ...input,
+      objective: "Ask whether the updated documents were received"
+    };
+    const idempotencyKey = randomUUID();
+    const now = "2096-02-01T00:00:00.000Z";
+    const queued = await repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "c".repeat(64),
+      input: changed,
+      now
+    });
+    await expect(repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey,
+      inputFingerprint: "c".repeat(64),
+      input: changed,
+      now
+    })).resolves.toMatchObject({ id: queued.id, status: "queued" });
+    await expect(repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "c".repeat(64),
+      input: changed,
+      now
+    })).rejects.toMatchObject({ code: "CALL_RECOMPILATION_IN_PROGRESS" });
+    await expect(repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerA
+    })).rejects.toMatchObject({ code: "CALL_RECOMPILATION_IN_PROGRESS" });
+    await expect(repository.get(brief.id)).resolves.toMatchObject({
+      brief: { status: "ready", objective: input.objective },
+      compilation: {
+        revision: 1,
+        snapshotHash: approvedHash,
+        approvedAt: expect.any(String)
+      }
+    });
+
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE job_type = 'brief_compilation'
+        AND call_preparation_id <> ${queued.id}
+        AND status = 'queued'
+    `;
+    const job = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "postgres-recompilation-worker",
+      now,
+      leaseExpiresAt: "2096-02-01T00:01:00.000Z"
+    });
+    expect(job).toMatchObject({
+      callPreparationId: queued.id,
+      callId: brief.id,
+      attemptCount: 1
+    });
+    const lease = {
+      jobId: job!.id,
+      workerId: "postgres-recompilation-worker",
+      checkedAt: "2096-02-01T00:00:01.000Z"
+    };
+    const work = await repository.claimCallPreparation(queued.id, lease);
+    expect(work).toMatchObject({
+      targetCallBriefId: brief.id,
+      expectedCompilationId: expect.any(String),
+      targetRevision: 2,
+      input: normalizeCreateCallBriefInput(changed)
+    });
+    const compilation = await compiler.compile(
+      normalizeCreateCallBriefInput(changed),
+      work.targetRevision
+    );
+    await repository.recompile(
+      brief.id,
+      changed,
+      compilation,
+      { preparationId: queued.id, lease }
+    );
+    await expect(repository.completeDurableJob(
+      job!.id,
+      "postgres-recompilation-worker",
+      "2096-02-01T00:00:02.000Z"
+    )).resolves.toBe(true);
+    await expect(repository.getCallPreparation(queued.id, ownerA))
+      .resolves.toMatchObject({
+        status: "succeeded",
+        callBriefId: brief.id,
+        attemptCount: 1
+      });
+    await expect(repository.get(brief.id)).resolves.toMatchObject({
+      brief: {
+        status: "review_required",
+        objective: changed.objective
+      },
+      compilation: {
+        revision: 2,
+        approvedAt: null,
+        rawBrief: { objective: changed.objective }
+      }
+    });
+    const [stored] = await inspection<{
+      operationKind: string;
+      targetCallBriefId: string | null;
+      expectedCompilationId: string | null;
+      targetRevision: number;
+      inputCiphertext: string | null;
+    }[]>`
+      SELECT
+        operation_kind AS "operationKind",
+        target_call_brief_id AS "targetCallBriefId",
+        expected_compilation_id AS "expectedCompilationId",
+        target_revision AS "targetRevision",
+        input_ciphertext AS "inputCiphertext"
+      FROM call_preparation_requests
+      WHERE id = ${queued.id}
+    `;
+    expect(stored).toMatchObject({
+      operationKind: "recompilation",
+      targetCallBriefId: brief.id,
+      expectedCompilationId: work.expectedCompilationId,
+      targetRevision: 2,
+      inputCiphertext: null
+    });
+
+    const staleInput = {
+      ...changed,
+      objective: "Ask whether a third document set was received"
+    };
+    const stalePreparation = await repository.enqueueCallRecompilation({
+      callBriefId: brief.id,
+      userId: ownerA,
+      idempotencyKey: randomUUID(),
+      inputFingerprint: "d".repeat(64),
+      input: staleInput,
+      now: "2096-03-01T00:00:00.000Z"
+    });
+    const interveningInput = {
+      ...changed,
+      objective: "Ask whether an intervening document set was received"
+    };
+    await repository.recompile(
+      brief.id,
+      interveningInput,
+      await compiler.compile(
+        normalizeCreateCallBriefInput(interveningInput),
+        3
+      )
+    );
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE job_type = 'brief_compilation'
+        AND call_preparation_id <> ${stalePreparation.id}
+        AND status = 'queued'
+    `;
+    const staleJob = await repository.claimDueDurableJob({
+      types: ["brief_compilation"],
+      workerId: "postgres-stale-recompilation-worker",
+      now: "2096-03-01T00:00:00.000Z",
+      leaseExpiresAt: "2096-03-01T00:01:00.000Z"
+    });
+    expect(staleJob).toMatchObject({
+      callPreparationId: stalePreparation.id,
+      callId: brief.id
+    });
+    const staleLease = {
+      jobId: staleJob!.id,
+      workerId: "postgres-stale-recompilation-worker",
+      checkedAt: "2096-03-01T00:00:01.000Z"
+    };
+    const staleWork = await repository.claimCallPreparation(
+      stalePreparation.id,
+      staleLease
+    );
+    await expect(repository.recompile(
+      brief.id,
+      staleInput,
+      await compiler.compile(
+        normalizeCreateCallBriefInput(staleInput),
+        staleWork.targetRevision
+      ),
+      { preparationId: stalePreparation.id, lease: staleLease }
+    )).rejects.toMatchObject({ code: "CALL_COMPILATION_STALE" });
+    await repository.failDurableJob(
+      staleJob!.id,
+      staleLease.workerId,
+      "CALL_COMPILATION_STALE",
+      "2096-03-01T00:00:02.000Z",
+      "2096-03-01T00:00:03.000Z",
+      false
+    );
+    await expect(repository.getCallPreparation(stalePreparation.id, ownerA))
+      .resolves.toMatchObject({
+        status: "failed",
+        callBriefId: null,
+        attemptCount: 1
+      });
+    await expect(repository.get(brief.id)).resolves.toMatchObject({
+      compilation: {
+        revision: 3,
+        rawBrief: { objective: interveningInput.objective }
+      }
+    });
+  });
+
+  it("persists and deduplicates Realtime text/audio usage by provider event", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Realtime usage office",
+      phoneNumber: "+41710000064",
+      objective: "Verify Realtime usage ledger persistence",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const { attempt } = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerA,
+      admissionPolicy: ledgerTestPolicy
+    });
+    const telephonyOperationId = randomUUID();
+    await repository.startTelephonyProviderOperation({
+      id: telephonyOperationId,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "twilio",
+      operationType: "telephony_leg",
+      stage: "outbound_call",
+      requestedModel: "programmable_voice",
+      clientRequestId: telephonyOperationId,
+      startedAt: "2096-01-03T00:00:00.000Z"
+    });
+    const providerCallId = `CA-usage-${randomUUID()}`;
+    await repository.attachProviderCall(
+      attempt.id,
+      providerCallId,
+      "in-progress"
+    );
+    const telephonyUsage = {
+      fallbackOperationId: randomUUID(),
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      providerCallId,
+      providerStatus: "completed",
+      durationSeconds: 37,
+      billableSeconds: 60,
+      occurredAt: "2096-01-03T00:00:37.000Z",
+      sequenceNumber: 3
+    };
+    await Promise.all([
+      repository.recordTelephonyLegUsage(telephonyUsage),
+      repository.recordTelephonyLegUsage(telephonyUsage)
+    ]);
+    const sessionIds = [randomUUID(), randomUUID()];
+    await repository.startRealtimeProviderSessions(sessionIds.map((id, index) => ({
+      id,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "openai" as const,
+      operationType: "realtime_session" as const,
+      stage: index === 0
+        ? "conversation" as const
+        : "consent_transcription" as const,
+      requestedModel: "gpt-realtime-2.1",
+      clientRequestId: id,
+      startedAt: "2096-01-03T00:00:00.000Z"
+    })));
+    const operationId = randomUUID();
+    const realtimeProviderResponseId = `resp_realtime_usage_${randomUUID()}`;
+    const realtimeOperation = {
+      id: operationId,
+      parentOperationId: sessionIds[0]!,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "openai" as const,
+      operationType: "realtime_response" as const,
+      stage: "conversation",
+      requestedModel: "gpt-realtime-2.1",
+      clientRequestId: operationId,
+      startedAt: "2096-01-03T00:00:01.000Z",
+      result: {
+        outcome: "succeeded" as const,
+        providerRequestId: null,
+        providerResponseId: realtimeProviderResponseId,
+        providerModel: "gpt-realtime-2.1-2026-08-01",
+        statusCode: null,
+        completedAt: "2096-01-03T00:00:02.000Z",
+        durationMs: 1_000,
+        errorCode: null,
+        usage: {
+          requestCount: 1,
+          inputTextTokens: 70,
+          cachedInputTextTokens: 20,
+          cacheWriteInputTextTokens: null,
+          outputTextTokens: 10,
+          reasoningOutputTokens: null,
+          inputAudioTokens: 50,
+          cachedInputAudioTokens: 5,
+          outputAudioTokens: 20,
+          totalTokens: 150,
+          durationSeconds: null,
+          billableSeconds: null,
+          rawUsage: { total_tokens: 150 }
+        }
+      }
+    };
+    await Promise.all([
+      repository.recordRealtimeProviderOperation(realtimeOperation),
+      repository.recordRealtimeProviderOperation(realtimeOperation)
+    ]);
+    const [ledger] = await inspection<{
+      sessions: number;
+      responses: number;
+      usageRecords: number;
+      inputAudioTokens: number;
+      cachedInputAudioTokens: number;
+      outputAudioTokens: number;
+      telephonyLegs: number;
+      connectedSeconds: number;
+      billableSeconds: number;
+    }[]>`
+      SELECT
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_attempt_id = ${attempt.id}
+            AND operation_type = 'realtime_session') AS sessions,
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_attempt_id = ${attempt.id}
+            AND operation_type = 'realtime_response') AS responses,
+        (SELECT count(*)::int
+          FROM provider_usage_records usage
+          INNER JOIN provider_operations operation
+            ON operation.id = usage.operation_id
+          WHERE operation.call_attempt_id = ${attempt.id}
+            AND operation.operation_type = 'realtime_response') AS "usageRecords",
+        (SELECT input_audio_tokens FROM provider_usage_records
+          WHERE operation_id = ${operationId}) AS "inputAudioTokens",
+        (SELECT cached_input_audio_tokens FROM provider_usage_records
+          WHERE operation_id = ${operationId}) AS "cachedInputAudioTokens",
+        (SELECT output_audio_tokens FROM provider_usage_records
+          WHERE operation_id = ${operationId}) AS "outputAudioTokens",
+        (SELECT count(*)::int FROM provider_operations
+          WHERE call_attempt_id = ${attempt.id}
+            AND operation_type = 'telephony_leg') AS "telephonyLegs",
+        (SELECT duration_seconds::float FROM provider_usage_records
+          WHERE operation_id = ${telephonyOperationId}) AS "connectedSeconds",
+        (SELECT billable_seconds::float FROM provider_usage_records
+          WHERE operation_id = ${telephonyOperationId}) AS "billableSeconds"
+    `;
+    expect(ledger).toEqual({
+      sessions: 2,
+      responses: 1,
+      usageRecords: 1,
+      inputAudioTokens: 50,
+      cachedInputAudioTokens: 5,
+      outputAudioTokens: 20,
+      telephonyLegs: 1,
+      connectedSeconds: 37,
+      billableSeconds: 60
+    });
+    const facts = await repository.getAdminOperationsFacts(
+      "2096-01-03T00:00:00.000Z",
+      "2096-01-03T00:01:00.000Z"
+    );
+    expect(facts.providerUsage.operationCount).toBeGreaterThanOrEqual(4);
+    expect(facts.providerUsage.usageRecordCount).toBeGreaterThanOrEqual(2);
+    const realtimeBucket = facts.providerUsage.buckets.find((bucket) =>
+      bucket.provider === "openai" &&
+      bucket.operationType === "realtime_response" &&
+      bucket.model === "gpt-realtime-2.1-2026-08-01"
+    );
+    expect(realtimeBucket).toMatchObject({
+      stage: "conversation",
+      usageRecords: expect.any(Number)
+    });
+    expect(realtimeBucket!.inputTextTokens).toBeGreaterThanOrEqual(70);
+    expect(realtimeBucket!.cachedInputTextTokens).toBeGreaterThanOrEqual(20);
+    expect(realtimeBucket!.inputAudioTokens).toBeGreaterThanOrEqual(50);
+    expect(realtimeBucket!.cachedInputAudioTokens).toBeGreaterThanOrEqual(5);
+    expect(realtimeBucket!.outputAudioTokens).toBeGreaterThanOrEqual(20);
+    const telephonyBucket = facts.providerUsage.buckets.find((bucket) =>
+      bucket.provider === "twilio" &&
+      bucket.operationType === "telephony_leg"
+    );
+    expect(telephonyBucket!.durationSeconds).toBeGreaterThanOrEqual(37);
+    expect(telephonyBucket!.billableSeconds).toBeGreaterThanOrEqual(60);
+  });
+
+  it("persists provider-reported Twilio cost once behind a durable lease", async () => {
+    const input: CreateCallBriefInput = {
+      recipientName: "Provider cost office",
+      phoneNumber: "+41710000068",
+      objective: "Verify provider-reported cost persistence",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput(input)
+    );
+    const brief = await repository.create(input, compilation, ownerA);
+    await repository.approveCompilation(brief.id);
+    const { attempt } = await repository.startAttempt(brief.id, {
+      provider: "twilio"
+    });
+    const operationId = randomUUID();
+    await repository.startTelephonyProviderOperation({
+      id: operationId,
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      provider: "twilio",
+      operationType: "telephony_leg",
+      stage: "outbound_call",
+      requestedModel: "programmable_voice",
+      clientRequestId: operationId,
+      startedAt: "2096-02-01T00:00:00.000Z"
+    });
+    const providerCallId = `CA-cost-${randomUUID()}`;
+    await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
+    await repository.applyProviderStatus(
+      providerCallId,
+      "completed",
+      "completed",
+      brief.id
+    );
+    await repository.recordTelephonyLegUsage({
+      fallbackOperationId: randomUUID(),
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      providerCallId,
+      providerStatus: "completed",
+      durationSeconds: 37,
+      billableSeconds: null,
+      occurredAt: "2096-02-01T00:00:00.000Z",
+      sequenceNumber: null
+    });
+    const [costJob] = await inspection<{ id: string }[]>`
+      SELECT id
+      FROM durable_jobs
+      WHERE job_type = 'provider_call_cost_reconciliation'
+        AND call_attempt_id = ${attempt.id}
+    `;
+    expect(costJob).toBeDefined();
+    await inspection`
+      UPDATE durable_jobs
+      SET run_after = '2200-01-01T00:00:00.000Z'
+      WHERE job_type = 'provider_call_cost_reconciliation'
+        AND id <> ${costJob!.id}
+        AND status = 'queued'
+    `;
+    const leased = await repository.claimDueDurableJob({
+      types: ["provider_call_cost_reconciliation"],
+      workerId: "postgres-provider-cost-worker",
+      now: "2096-02-01T00:00:01.000Z",
+      leaseExpiresAt: "2096-02-01T00:01:00.000Z"
+    });
+    expect(leased).toMatchObject({ id: costJob!.id, callAttemptId: attempt.id });
+    const costObservedAt = new Date();
+    const cost = {
+      id: randomUUID(),
+      fallbackOperationId: randomUUID(),
+      callBriefId: brief.id,
+      callAttemptId: attempt.id,
+      providerCallId,
+      amountMicros: 13_700,
+      currency: "USD",
+      rawAmount: "-0.013700",
+      observedAt: costObservedAt.toISOString()
+    };
+    const lease = {
+      jobId: leased!.id,
+      workerId: "postgres-provider-cost-worker",
+      checkedAt: "2096-02-01T00:00:02.000Z"
+    };
+    await Promise.all([
+      repository.recordTelephonyProviderCost(cost, lease),
+      repository.recordTelephonyProviderCost({ ...cost, id: randomUUID() }, lease)
+    ]);
+    const [stored] = await inspection<{
+      records: number;
+      amountMicros: number;
+      currency: string;
+      rawPrice: string;
+    }[]>`
+      SELECT
+        count(*)::int AS records,
+        max(amount_micros)::int AS "amountMicros",
+        max(currency) AS currency,
+        max(raw_cost->>'price') AS "rawPrice"
+      FROM provider_cost_records
+      WHERE operation_id = ${operationId}
+    `;
+    expect(stored).toEqual({
+      records: 1,
+      amountMicros: 13_700,
+      currency: "USD",
+      rawPrice: "-0.013700"
+    });
+    const facts = await repository.getAdminOperationsFacts(
+      new Date(costObservedAt.getTime() - 1_000).toISOString(),
+      new Date(costObservedAt.getTime() + 1_000).toISOString(),
+      brief.id
+    );
+    expect(facts.providerCosts).toMatchObject({
+      recordCount: 1,
+      buckets: [{
+        provider: "twilio",
+        costBasis: "provider_reported_actual",
+        component: "connectivity",
+        currency: "USD",
+        records: 1,
+        amountMicros: 13_700
+      }]
+    });
+    await expect(inspection`
+      UPDATE provider_cost_records
+      SET amount_micros = 1
+      WHERE operation_id = ${operationId}
+    `).rejects.toThrow(/append-only/);
+    await expect(repository.completeDurableJob(
+      leased!.id,
+      "postgres-provider-cost-worker",
+      "2096-02-01T00:00:03.000Z"
+    )).resolves.toBe(true);
   });
 
   it("atomically cancels active preparations and erases their private input", async () => {

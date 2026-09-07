@@ -120,12 +120,10 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-Audit results: **503 tests passed** (325 API, 108 web, 70 contracts), lint/typecheck
-and build passed; 49 migrations applied/replayed; backup/restore verified 51 tables.
-The dependency gate **failed** with 8 high and 2 moderate findings. Targeted probes
-also found consent false positives and transcript delivery after session revocation,
-plus rotation, worker-configuration and deletion gaps. See the
-[dated evidence and limitations](docs/project-audit-2026-09-07.md#verification).
+Merged verification: **609 tests passed** (425 API, 111 web, 73 contracts).
+The schema now contains 61 migrations and 58 public tables. The original audit and
+541-test remediation reports remain historical; current integration checks are in
+[merge verification](docs/merge-verification-2026-09-07.md).
 
 ## Real providers and deployment
 
@@ -135,16 +133,16 @@ reachable signed webhook/Media Stream listener. `pnpm tunnel:twilio` exposes onl
 the development Twilio gateway at `127.0.0.1:4001`; Quick Tunnel is development-only.
 Model IDs and voice settings are listed in [runtime reference](docs/runtime-reference.md).
 
-The legacy `drill:real-call` runner is currently incompatible with asynchronous
-preparation. Do not treat it as a working launch check; use the manual supervised
-procedure and limitations in [real-provider drills](docs/real-provider-drills.md).
-No real calls, SMS or email are part of the automated audit suite.
+The two-stage drill prepares before dialling and requires an existing verified
+account. Start is bound to the reviewed compilation revision/hash and explicit
+recipient authorization. See [real-provider drills](docs/real-provider-drills.md).
+No provider calls are made by automated verification.
 
 Production requires external workers, durable storage, managed secrets, TLS, a
 same-host web/API cookie topology, restricted Twilio geographic permissions and
 completed operational/privacy gates. Both API and worker require explicit
 `BRIEF_COMPILER_DRIVER=openai` in production; missing or mock drivers fail startup.
-Rotation and restore verification cover all nine ciphertext families. See the
+Rotation and restore verification cover all thirteen ciphertext families. See the
 [remediation evidence](docs/remediation-2026-09-07.md) and [recovery runbook](docs/database-recovery-and-secrets.md).
 
 ## Documentation

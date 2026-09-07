@@ -1,7 +1,7 @@
 # SHPROHLI release roadmap
 
-Updated 2026-09-07 for the remediation working tree based on `96229ea`.
-See the original [audit](project-audit-2026-09-07.md) and current [fix evidence](remediation-2026-09-07.md).
+Updated 2026-09-07 for the integration of `51a61da` and `14abd28`.
+See the original [audit](project-audit-2026-09-07.md) and [fix evidence](remediation-2026-09-07.md), followed by the current [merge verification](merge-verification-2026-09-07.md).
 This is the single current backlog and release checklist. Earlier checkpoint numbers
 (5A–5D, 6A–6F6) in policy documents identify delivery history, not pending milestones.
 Git history retains the previous chronological roadmap and its historical test counts.
@@ -12,6 +12,9 @@ The supervised MVP and much of the beta foundation are implemented. The reposito
 does not establish an approved public deployment. **Current recommendation: NO-GO
 for unrestricted public beta** until the P0 release gates below are closed.
 
+The mainline immutable-plan/cost/cutover work is integrated; see its
+[delivery record](approved-call-plan-cost-security-roadmap.md) and the
+[merge verification](merge-verification-2026-09-07.md).
 R01-R05 and R18/R19 are implemented and verified locally. R06 tooling is repaired
 and covered by a non-billable harness; a recipient-authorized live drill remains.
 The next work is R07 disclosure/copy approval and R08 enforceable voice safety,
@@ -51,7 +54,7 @@ are agreed; no delivery date is implied by this backlog.
 | CMS/SEO | Pages including Impressum, Landing/FAQ/Navigation, bilingual content, private drafts, immutable publication/history, preview/rollback, metadata/sitemap/robots | [content](../apps/api/src/content), [SEO](../apps/web/lib/seo-audit.ts) |
 | Admin | English-only shell/RBAC, call list/Inspector, separately audited superadmin text access, users/status/sessions/grants, content/SEO, safety/credits forms | [admin architecture](admin-interface-architecture.md) |
 | Operations | Durable events distinct from action audit, outcomes/feedback, cohorts/cost estimates, jobs/leases/retries/fencing, reconciliation, invalidation/SSE, heartbeats, local alerts | [operations](operations-readiness.md) |
-| Storage/tooling | 49 checksummed migrations/51 tables, memory/PostgreSQL repositories, versioned encryption, nine-family rotation verifier, backup/restore tool, CI source and Dependabot | [architecture](architecture.md), [audit](project-audit-2026-09-07.md) |
+| Storage/tooling | 61 checksummed migrations/58 tables, memory/PostgreSQL repositories, versioned encryption, thirteen-family rotation verifier, backup/restore tool, CI source and Dependabot | [architecture](architecture.md), [audit](project-audit-2026-09-07.md) |
 
 ## Milestone 1 — repository release blockers
 
@@ -69,7 +72,7 @@ can be split by subsystem, but R02 must precede the final verification of every 
 | R05 / P0 | Implemented — backend/privacy | Erase temporary email/phone challenge PII during account deletion; schedule bounded cleanup without relying on new traffic | Pending/completed/expired challenges seeded before deletion lose contact data; user/session references cannot bypass cleanup; immutable minimal security events remain; idle retention test passes |
 | R06 / P0 | Partial — backend/QA | Repair the real-call drill for async preparation and split worker ordering; use existing verified accounts only | Runner uses UUID enqueue/poll/read rather than removed POST; prepares with worker running, permits controlled stop before dialling, never registers an account or sends Verify SMS; non-billable harness passes before a recipient-authorized drill |
 | R07 / P0 | Open — product/privacy/backend | Align live notice, UI and versioned public copy with isolated pre-consent recognition, actual spoken retention information and Resend email processing | Approved EN/DE copy and all call-language scripts describe actual processing; new immutable revisions/migration where needed; acceptance booleans are not presented as four independent choices; evidence captured on the released commit |
-| R08 / P0 | Partial — backend/safety | Complete deterministic sensitive-disclosure/action controls for Realtime or formally restrict release scope to an enforceable boundary | Model tool/action path cannot disclose protected facts without an authorized, unexpired decision; reject/expiry/stop and adversarial recipient cases proven with bridge tests and approved live drills |
+| R08 / P0 | Partial — backend/safety | Immutable plan projection, revision/hash approval, fenced attempts and full-plan moderation are implemented. Complete in-call sensitive-disclosure/action controls or formally restrict release scope | Model tool/action path cannot disclose protected facts without an authorized, unexpired decision; reject/expiry/stop and adversarial recipient cases proven with bridge tests and approved live drills |
 
 R01-R05/R18/R19 are closed at the repository implementation boundary; their
 acceptance evidence is in the [remediation record](remediation-2026-09-07.md).
@@ -105,8 +108,9 @@ These remain P1 unless a release owner escalates a specific acceptance item to P
 
 Do not fold provider/model reconnect into “already done” recovery: durable job recovery
 and SSE resubscription exist; a broken Realtime model session currently ends the call.
-Separate call-duration cost estimates from ASR utterance, compilation, consent-recognition,
-SMS/email usage and provider invoices when extending cost monitoring.
+Provider operations/usage and actual/calculated/fallback/unknown costs now cover
+compilation, Realtime, consent recognition, telephony and post-call ASR. SMS/email
+accounting and broader invoice reconciliation remain separate expansion work.
 
 ## P2 — explicitly deferred
 

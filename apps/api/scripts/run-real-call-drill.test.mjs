@@ -5,6 +5,7 @@ import { runRealCallDrill } from "./run-real-call-drill.mjs";
 
 const callId = randomUUID();
 const preparationId = randomUUID();
+const snapshotHash = "a".repeat(64);
 const env = { REAL_CALL_DRILL_EMAIL: "fixture@example.test", REAL_CALL_DRILL_PASSWORD: "test-only",
   REAL_CALL_DRILL_TARGET: "+41710000001" };
 
@@ -28,7 +29,10 @@ function harness({ failure, stalled = false, onboardingRequired = false, started
       body = { id: preparationId, status: failure || (stalled || polls === 1 ? "processing" : "succeeded"),
         callBriefId: !stalled && polls > 1 && !failure ? callId : null };
     } else if (path === `/api/call-briefs/${callId}/approve-and-start`) { started = true; body = { brief: { id: callId, status: "dialing" } }; }
-    else if (path === `/api/call-briefs/${callId}`) body = { brief: { id: callId, status: started ? "completed" : "review_required" } };
+    else if (path === `/api/call-briefs/${callId}`) body = {
+      brief: { id: callId, status: started ? "completed" : "review_required" },
+      compilation: { revision: 1, snapshotHash }
+    };
     else throw new Error(`Unexpected request ${path}`);
     return Response.json(body, { status, headers });
   });
@@ -48,9 +52,19 @@ describe("non-billable drill harness", () => {
   it("starts a reviewed existing brief without a worker-dependent preparation", async () => {
     const h = harness();
     expect(await runRealCallDrill({ ...env, REAL_CALL_DRILL_MODE: "start", REAL_CALL_DRILL_CALL_ID: callId,
-      REAL_CALL_DRILL_CONFIRM: "CALL_AUTHORIZED" }, h)).toEqual({ callId, status: "completed" });
+      REAL_CALL_DRILL_CONFIRM: "CALL_AUTHORIZED", REAL_CALL_DRILL_REVISION: "1",
+      REAL_CALL_DRILL_SNAPSHOT_HASH: snapshotHash }, h)).toEqual({ callId, status: "completed" });
     expect(h.requests.some((r) => r.path.startsWith("/api/call-preparations"))).toBe(false);
     expect(h.requests.filter((r) => r.path.endsWith("approve-and-start"))).toHaveLength(1);
+    expect(JSON.parse(h.requests.find((r) => r.path.endsWith("approve-and-start")).body))
+      .toEqual({ revision: 1, snapshotHash });
+  });
+  it("refuses to approve a changed plan after the prepare/review boundary", async () => {
+    const h = harness();
+    await expect(runRealCallDrill({ ...env, REAL_CALL_DRILL_MODE: "start", REAL_CALL_DRILL_CALL_ID: callId,
+      REAL_CALL_DRILL_CONFIRM: "CALL_AUTHORIZED", REAL_CALL_DRILL_REVISION: "1",
+      REAL_CALL_DRILL_SNAPSHOT_HASH: "b".repeat(64) }, h)).rejects.toThrow("Reviewed plan changed");
+    expect(h.requests.some((r) => r.path.endsWith("approve-and-start"))).toBe(false);
   });
   it.each(["failed", "cancelled"])("never dials after preparation %s", async (failure) => {
     const h = harness({ failure });

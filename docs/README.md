@@ -1,12 +1,14 @@
 # Documentation index
 
-Reviewed 2026-09-07 against commit `96229ea`. Public brand: SHPROHLI; internal package
+Reviewed 2026-09-07 against the integration of `51a61da` and `14abd28`. Public brand: SHPROHLI; internal package
 names, cookies, database names and legacy migration identifiers still use callassist.
 
 ## Current sources of truth
 
 | Document | Purpose |
 | --- | --- |
+| [Merge verification](merge-verification-2026-09-07.md) | Current mainline integration, checks and schema |
+| [Immutable plans and cost delivery](approved-call-plan-cost-security-roadmap.md) | Immutable execution, provider ledgers, resumable ASR and staged cutover |
 | [Project README](../README.md) | Product scope, local setup, commands and release status |
 | [Architecture](architecture.md) | Implemented runtime, data, security, voice and worker boundaries |
 | [Runtime/API reference](runtime-reference.md) | Configuration, process topology and source-derived route inventory |
@@ -19,7 +21,7 @@ names, cookies, database names and legacy migration identifiers still use callas
 | Document | Current scope |
 | --- | --- |
 | [Operations](operations-readiness.md) | Health, logs, snapshot alerts, responders and deployment gaps |
-| [Database recovery and secrets](database-recovery-and-secrets.md) | Restore/rotation procedure, nine-family verification and external evidence |
+| [Database recovery and secrets](database-recovery-and-secrets.md) | Restore/rotation procedure, thirteen-family verification and external evidence |
 | [Data deletion](data-deletion-policy.md) | Provider-first deletion, anonymization, retained evidence and scheduled contact-challenge erasure |
 | [Password recovery](password-recovery-policy.md) | Verified-phone recovery, capability limits and session invalidation |
 | [Phone change](phone-change-policy.md) | Session-bound replacement, OTP and temporary challenge lifecycle |

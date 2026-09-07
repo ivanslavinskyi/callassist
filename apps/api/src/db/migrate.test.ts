@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  assertCallPlanCutoverMigrationReady,
   readMigrationCatalog,
   validateAppliedMigrationNames,
   validateMigrationSequence
@@ -23,6 +24,25 @@ async function temporaryDirectory() {
 }
 
 describe("migration catalog", () => {
+  const cutoverFacts = {
+    recoverableLegacyCalls: 0,
+    executableLegacyCalls: 0,
+    activeLegacyAttempts: 0,
+    activeRecompilations: 0
+  };
+
+  it("fails closed before finalizing an unsafe immutable-plan cutover", () => {
+    expect(() => assertCallPlanCutoverMigrationReady(cutoverFacts)).not.toThrow();
+    expect(() => assertCallPlanCutoverMigrationReady({
+      ...cutoverFacts,
+      executableLegacyCalls: 1,
+      activeLegacyAttempts: 1
+    })).toThrow(
+      "Immutable call-plan finalization blocked: " +
+        "executable_legacy_calls,active_legacy_attempts"
+    );
+  });
+
   it("loads a contiguous catalog with stable SHA-256 checksums", async () => {
     const directory = await temporaryDirectory();
     await writeFile(join(directory, "0001_initial.sql"), "SELECT 1;\n");

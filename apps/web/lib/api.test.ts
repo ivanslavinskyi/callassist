@@ -16,6 +16,8 @@ import {
   deleteCallData,
   getAccountDeletion,
   getCreditUsage,
+  getAdminCallCostBreakdown,
+  getAdminCallPreparationInspector,
   getAdminCallInspector,
   getAdminOperationsOverview,
   getAdminSystemStatus,
@@ -541,6 +543,14 @@ describe("API client headers", () => {
         outcomeHistory: []
       }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        callId,
+        generatedAt: "2026-08-22T12:00:00.000Z"
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        preparation: { id: callId, status: "failed" },
+        generatedAt: "2026-08-22T12:00:00.000Z"
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         callBriefId: callId,
         phoneNumber: "+41710000000"
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -557,6 +567,8 @@ describe("API client headers", () => {
       dateTo: "2026-08-31T23:59:59.999Z"
     });
     await getAdminCallInspector(callId);
+    await getAdminCallCostBreakdown(callId);
+    await getAdminCallPreparationInspector(callId);
     await accessAdminCallSensitiveContent(
       callId,
       "Investigating support ticket 123"
@@ -569,9 +581,15 @@ describe("API client headers", () => {
       `/api/admin/calls/${callId}`
     );
     expect(fetchMock.mock.calls[2]?.[0]).toContain(
+      `/api/admin/calls/${callId}/cost`
+    );
+    expect(fetchMock.mock.calls[3]?.[0]).toContain(
+      `/api/admin/call-preparations/${callId}`
+    );
+    expect(fetchMock.mock.calls[4]?.[0]).toContain(
       `/api/admin/calls/${callId}/sensitive-access`
     );
-    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+    expect(fetchMock.mock.calls[4]?.[1]).toMatchObject({
       method: "POST",
       credentials: "include",
       body: JSON.stringify({ reason: "Investigating support ticket 123" })
@@ -1006,9 +1024,24 @@ describe("API client headers", () => {
     )).toBe(true);
   });
 
-  it("updates a brief with JSON and keeps approve-and-start bodyless", async () => {
-    const fetchMock = vi.fn().mockImplementation(async () =>
-      new Response(JSON.stringify({ brief: { id: "call-id" } }), {
+  it("updates a brief and binds approval to the reviewed compilation", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (request: string) =>
+      new Response(JSON.stringify(
+        request.includes("/approve-and-start") ||
+        request.endsWith("/api/call-briefs/call-id") &&
+          fetchMock.mock.calls.length > 1
+          ? { brief: { id: "call-id" } }
+          : {
+              id: "5d006a34-f9e1-4c92-8395-36fd4ae4ab25",
+              status: "succeeded",
+              callBriefId: "call-id",
+              failureCode: null,
+              attemptCount: 1,
+              createdAt: "2026-09-05T10:00:00.000Z",
+              updatedAt: "2026-09-05T10:00:01.000Z",
+              completedAt: "2026-09-05T10:00:01.000Z"
+            }
+      ), {
         status: 200,
         headers: { "Content-Type": "application/json" }
       })
@@ -1027,22 +1060,86 @@ describe("API client headers", () => {
       allowedFacts: []
     };
 
-    await recompileCallBrief("call-id", input);
-    await approveAndStartCall("call-id");
+    const idempotencyKey = "5d006a34-f9e1-4c92-8395-36fd4ae4ab26";
+    await recompileCallBrief("call-id", input, idempotencyKey);
+    await approveAndStartCall("call-id", {
+      revision: 3,
+      snapshotHash: "a".repeat(64)
+    });
 
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/call-briefs/call-id");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "PUT" });
     expect(
       new Headers((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).get(
+        "Idempotency-Key"
+      )
+    ).toBe(idempotencyKey);
+    expect(
+      new Headers((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).get(
         "Content-Type"
       )
     ).toBe("application/json");
-    expect(fetchMock.mock.calls[1]?.[0]).toContain("/approve-and-start");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/call-briefs/call-id");
+    expect(fetchMock.mock.calls[2]?.[0]).toContain("/approve-and-start");
     expect(
-      new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).has(
+      new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).get(
         "Content-Type"
       )
-    ).toBe(false);
+    ).toBe("application/json");
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(JSON.stringify({
+      revision: 3,
+      snapshotHash: "a".repeat(64)
+    }));
+  });
+
+  it("replays an uncertain recompilation with the same idempotency key", async () => {
+    const preparation = {
+      id: "5d006a34-f9e1-4c92-8395-36fd4ae4ab30",
+      status: "succeeded",
+      callBriefId: "call-id",
+      failureCode: null,
+      attemptCount: 1,
+      createdAt: "2026-09-05T10:00:00.000Z",
+      updatedAt: "2026-09-05T10:00:01.000Z",
+      completedAt: "2026-09-05T10:00:01.000Z"
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 504 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(preparation), {
+        status: 202,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        brief: { id: "call-id" }
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      recipientName: "Elena",
+      phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most",
+      assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment" as const,
+      locale: "de-CH" as const,
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const idempotencyKey = "5d006a34-f9e1-4c92-8395-36fd4ae4ab31";
+
+    await expect(recompileCallBrief(
+      "call-id",
+      input,
+      idempotencyKey
+    )).resolves.toMatchObject({ brief: { id: "call-id" } });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.slice(0, 2).every(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key") === idempotencyKey
+    )).toBe(true);
   });
 
   it("loads the private outcome and submits bounded owner feedback", async () => {

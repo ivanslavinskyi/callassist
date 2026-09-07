@@ -115,9 +115,22 @@ describe("call API", () => {
       "ready_for_review"
     );
 
-    const approveResponse = await app.inject({
+    const invalidApproval = await app.inject({
       method: "POST",
       url: `/api/call-briefs/${created.id}/approve`
+    });
+    expect(invalidApproval.statusCode).toBe(400);
+    expect(invalidApproval.json()).toEqual({
+      error: "INVALID_COMPILATION_APPROVAL"
+    });
+
+    const approveResponse = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${created.id}/approve`,
+      payload: {
+        revision: getResponse.json().compilation.revision,
+        snapshotHash: getResponse.json().compilation.snapshotHash
+      }
     });
     expect(approveResponse.statusCode).toBe(200);
     expect(approveResponse.json().brief.status).toBe("ready");
@@ -184,6 +197,7 @@ describe("call API", () => {
 
   it("updates an existing brief and approves and starts it with one request", async () => {
     const { app, service } = createAppWithService();
+    await service.initialize();
     const payload: CreateCallBriefInput = {
       recipientName: "Elena",
       phoneNumber: "+41710000001",
@@ -198,22 +212,71 @@ describe("call API", () => {
     };
     const created = await service.create(payload);
     const id = created.id;
+    const originalCompilation = (await service.get(id))!.compilation!;
 
     const updated = await app.inject({
       method: "PUT",
       url: `/api/call-briefs/${id}`,
+      headers: {
+        "idempotency-key": "5d006a34-f9e1-4c92-8395-36fd4ae4ab27"
+      },
       payload: {
         ...payload,
         objective: "Ask Elena which book and country she likes most"
       }
     });
-    expect(updated.statusCode).toBe(200);
-    expect(updated.json().brief.id).toBe(id);
-    expect(updated.json().compilation.revision).toBe(2);
+    expect(updated.statusCode).toBe(202);
+    let preparation = updated.json<{
+      id: string;
+      status: string;
+      callBriefId: string | null;
+    }>();
+    for (let index = 0; index < 30 && preparation.status !== "succeeded"; index++) {
+      await new Promise((resolve) => setImmediate(resolve));
+      preparation = (await service.getAdminCallPreparationInspector(
+        preparation.id
+      )).preparation;
+    }
+    expect(preparation).toMatchObject({ status: "succeeded", callBriefId: id });
+    const replay = await app.inject({
+      method: "PUT",
+      url: `/api/call-briefs/${id}`,
+      headers: {
+        "idempotency-key": "5d006a34-f9e1-4c92-8395-36fd4ae4ab27"
+      },
+      payload: {
+        ...payload,
+        objective: "Ask Elena which book and country she likes most"
+      }
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toMatchObject({
+      id: preparation.id,
+      status: "succeeded",
+      callBriefId: id
+    });
+    const recompiled = (await service.get(id))!;
+    expect(recompiled.brief.id).toBe(id);
+    expect(recompiled.compilation?.revision).toBe(2);
+
+    const staleApproval = await app.inject({
+      method: "POST",
+      url: `/api/call-briefs/${id}/approve-and-start`,
+      payload: {
+        revision: originalCompilation.revision,
+        snapshotHash: originalCompilation.snapshotHash
+      }
+    });
+    expect(staleApproval.statusCode).toBe(409);
+    expect(staleApproval.json()).toEqual({ error: "CALL_COMPILATION_STALE" });
 
     const started = await app.inject({
       method: "POST",
-      url: `/api/call-briefs/${id}/approve-and-start`
+      url: `/api/call-briefs/${id}/approve-and-start`,
+      payload: {
+        revision: recompiled.compilation!.revision,
+        snapshotHash: recompiled.compilation!.snapshotHash
+      }
     });
     expect(started.statusCode).toBe(200);
     expect(started.json().brief.status).toBe("dialing");
@@ -309,6 +372,43 @@ describe("call API", () => {
       payload: { objective: "x".repeat(256 * 1_024) }
     });
     expect(response.statusCode).toBe(413);
+  });
+
+  it("rejects aggregate task text that stays within individual field limits", async () => {
+    const { app, service } = createAppWithService();
+    const base: CreateCallBriefInput = {
+      recipientName: "Aggregate budget office",
+      phoneNumber: "+41523686688",
+      objective: "Ask whether the submitted documents were received",
+      assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller",
+      assistanceReason: "speech_impairment",
+      context: "",
+      locale: "en-GB",
+      allowLanguageSwitch: false,
+      allowedFacts: []
+    };
+    const brief = await service.create(base);
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/call-briefs/${brief.id}`,
+      payload: {
+        ...base,
+        objective: "o".repeat(4_000),
+        context: "c".repeat(12_000),
+        allowedFacts: Array.from({ length: 14 }, () => "f".repeat(300))
+      }
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "INVALID_CALL_BRIEF",
+      issues: {
+        fieldErrors: {
+          objective: [expect.stringContaining("20000")]
+        }
+      }
+    });
   });
 
   it("applies the origin boundary before an unsafe route is dispatched", async () => {
@@ -466,7 +566,11 @@ describe("call API", () => {
 
     expect((await app.inject({
       method: "POST",
-      url: `/api/call-briefs/${callId}/approve`
+      url: `/api/call-briefs/${callId}/approve`,
+      payload: {
+        revision: 1,
+        snapshotHash: (await service.get(callId))!.compilation!.snapshotHash
+      }
     })).statusCode).toBe(200);
     expect((await app.inject({
       method: "POST",

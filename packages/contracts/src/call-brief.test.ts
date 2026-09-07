@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  CALL_BRIEF_INPUT_LIMITS,
+  callBriefTaskTextLength,
+  compilationApprovalInputSchema,
   createCallBriefInputSchema,
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput
@@ -19,6 +22,22 @@ const validBrief = {
 };
 
 describe("createCallBriefInputSchema", () => {
+  it("requires an exact revision and SHA-256 hash for compilation approval", () => {
+    expect(compilationApprovalInputSchema.safeParse({
+      revision: 2,
+      snapshotHash: "a".repeat(64)
+    }).success).toBe(true);
+    expect(compilationApprovalInputSchema.safeParse({
+      revision: 2,
+      snapshotHash: "not-a-hash"
+    }).success).toBe(false);
+    expect(compilationApprovalInputSchema.safeParse({
+      revision: 2,
+      snapshotHash: "a".repeat(64),
+      objective: "unexpected raw field"
+    }).success).toBe(false);
+  });
+
   it("accepts a supported Swiss German call brief", () => {
     const result = createCallBriefInputSchema.safeParse(validBrief);
     expect(result.success).toBe(true);
@@ -94,6 +113,47 @@ describe("createCallBriefInputSchema", () => {
         ]
       }).success
     ).toBe(false);
+  });
+
+  it("enforces one normalized aggregate budget across every task text field", () => {
+    const atLimit = {
+      ...validBrief,
+      objective: "o".repeat(CALL_BRIEF_INPUT_LIMITS.objective),
+      context: "c".repeat(CALL_BRIEF_INPUT_LIMITS.context),
+      allowedFacts: [
+        ...Array.from({ length: 13 }, () =>
+          "f".repeat(CALL_BRIEF_INPUT_LIMITS.allowedFact)
+        ),
+        "f".repeat(100)
+      ]
+    };
+    expect(callBriefTaskTextLength(atLimit)).toBe(
+      CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard
+    );
+    expect(createCallBriefInputSchema.safeParse(atLimit).success).toBe(true);
+    const overLimit = {
+      ...atLimit,
+      allowedFacts: [
+        ...atLimit.allowedFacts,
+        "f".repeat(CALL_BRIEF_INPUT_LIMITS.allowedFact)
+      ]
+    };
+    const parsed = createCallBriefInputSchema.safeParse(overLimit);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.flatten().fieldErrors.objective?.[0]).toContain(
+        String(CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard)
+      );
+    }
+  });
+
+  it("counts Unicode code points after trim, NFC and line-ending normalization", () => {
+    expect(callBriefTaskTextLength({
+      objective: "  e\u0301  ",
+      context: "😀",
+      allowedFacts: ["  fact  "],
+      deliveryInstruction: "\r\nline one\rline two\r\n"
+    })).toBe(1 + 1 + 4 + "line one\nline two".length);
   });
 
   it("derives a female voice from a preset assistant profile", () => {

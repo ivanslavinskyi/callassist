@@ -1,11 +1,50 @@
 import { z } from "zod";
 import { swissDestinationPhoneSchema } from "./phone";
 
+export const CALL_BRIEF_INPUT_LIMITS = {
+  recipientName: 160,
+  objective: 4_000,
+  representedPersonNamePart: 80,
+  representedPerson: 161,
+  context: 12_000,
+  allowedFact: 300,
+  allowedFacts: 40,
+  deliveryInstruction: 1_000,
+  clarificationAnswer: 1_000,
+  clarificationAnswers: 10,
+  aggregateTaskTextSoft: 16_000,
+  aggregateTaskTextHard: 20_000
+} as const;
+
+export function normalizeCallBriefBudgetText(value: string) {
+  return value.replace(/\r\n?/g, "\n").normalize("NFC").trim();
+}
+
+export function callBriefTaskTextLength(input: {
+  objective?: string;
+  context?: string;
+  allowedFacts?: string[];
+  deliveryInstruction?: string;
+  clarificationAnswers?: Array<{ answer: string }>;
+}) {
+  return [
+    input.objective ?? "",
+    input.context ?? "",
+    ...(input.allowedFacts ?? []),
+    input.deliveryInstruction ?? "",
+    ...(input.clarificationAnswers ?? []).map(({ answer }) => answer)
+  ].reduce(
+    (total, value) =>
+      total + [...normalizeCallBriefBudgetText(value)].length,
+    0
+  );
+}
+
 export const personNamePartSchema = z
   .string()
   .trim()
   .min(1, "Enter a name")
-  .max(80);
+  .max(CALL_BRIEF_INPUT_LIMITS.representedPersonNamePart);
 
 export function formatPersonName(firstName: string, lastName: string) {
   return `${firstName.trim()} ${lastName.trim()}`;
@@ -123,7 +162,8 @@ export type CallBlockingIssueCode = z.infer<
 
 export const clarificationAnswerSchema = z.object({
   issueCode: callBlockingIssueCodeSchema,
-  answer: z.string().trim().min(1).max(1_000)
+  answer: z.string().trim().min(1)
+    .max(CALL_BRIEF_INPUT_LIMITS.clarificationAnswer)
 });
 export type ClarificationAnswer = z.infer<typeof clarificationAnswerSchema>;
 
@@ -207,28 +247,29 @@ export const callBriefStatusSchema = z.enum([
 export type CallBriefStatus = z.infer<typeof callBriefStatusSchema>;
 
 const callBriefStoredFieldsSchema = z.object({
-  recipientName: z.string().trim().min(2, "Enter a recipient").max(160),
+  recipientName: z.string().trim().min(2, "Enter a recipient")
+    .max(CALL_BRIEF_INPUT_LIMITS.recipientName),
   phoneNumber: swissDestinationPhoneSchema,
   objective: z
     .string()
     .trim()
     .min(10, "Describe the call objective in more detail")
-    .max(4_000),
+    .max(CALL_BRIEF_INPUT_LIMITS.objective),
   assistantProfileId: assistantProfileIdSchema,
   representedPerson: z
     .string()
     .trim()
     .min(2, "Enter the person represented by the assistant")
-    .max(161),
+    .max(CALL_BRIEF_INPUT_LIMITS.representedPerson),
   assistanceReason: assistanceReasonSchema.default("none"),
-  context: z.string().trim().max(12_000).default(""),
+  context: z.string().trim().max(CALL_BRIEF_INPUT_LIMITS.context).default(""),
   locale: callLocaleSchema,
   audioRetentionDays: audioRetentionDaysSchema.default(7),
   allowLanguageSwitch: z.boolean().default(false),
   fallbackLocale: callLocaleSchema.optional(),
   allowedFacts: z
-    .array(z.string().trim().min(1).max(300))
-    .max(40)
+    .array(z.string().trim().min(1).max(CALL_BRIEF_INPUT_LIMITS.allowedFact))
+    .max(CALL_BRIEF_INPUT_LIMITS.allowedFacts)
     .default([])
 });
 
@@ -241,8 +282,10 @@ const callBriefInputBaseSchema = callBriefStoredFieldsSchema
     addressingMode: callAddressingModeSchema.default("formal"),
     tonePreference: callTonePreferenceSchema.default("auto"),
     voicemailPolicy: voicemailPolicySchema.default("do_not_leave_details"),
-    deliveryInstruction: z.string().trim().max(1_000).default(""),
-    clarificationAnswers: z.array(clarificationAnswerSchema).max(10).default([])
+    deliveryInstruction: z.string().trim()
+      .max(CALL_BRIEF_INPUT_LIMITS.deliveryInstruction).default(""),
+    clarificationAnswers: z.array(clarificationAnswerSchema)
+      .max(CALL_BRIEF_INPUT_LIMITS.clarificationAnswers).default([])
   })
   .transform((input) => ({
     ...input,
@@ -286,7 +329,17 @@ function validateLanguagePolicy(
 }
 
 export const createCallBriefInputSchema = callBriefInputBaseSchema.superRefine(
-  validateLanguagePolicy
+  (input, context) => {
+    validateLanguagePolicy(input, context);
+    const taskTextLength = callBriefTaskTextLength(input);
+    if (taskTextLength > CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard) {
+      context.addIssue({
+        code: "custom",
+        message: `Call task text must be at most ${CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard} characters in total`,
+        path: ["objective"]
+      });
+    }
+  }
 );
 
 export type CreateCallBriefInput = z.input<typeof createCallBriefInputSchema>;
@@ -427,6 +480,110 @@ export const compiledCallBriefSchema = z.object({
 });
 export type CompiledCallBrief = z.infer<typeof compiledCallBriefSchema>;
 
+export const APPROVED_EXECUTION_SNAPSHOT_VERSION = 1 as const;
+
+/**
+ * The task-specific contract accepted by Realtime after preparation approval.
+ * Audit-only compiler fields (including fact sourceText) and raw form fields are
+ * deliberately excluded so they cannot be interpolated into runtime prompts.
+ */
+export const approvedExecutionPlanSchema = z.object({
+  callLocale: callLocaleSchema,
+  taskType: callTaskTypeSchema,
+  tone: z.enum(["formal", "neutral", "friendly"]),
+  addressingStyle: z.enum(["formal", "informal"]),
+  resultHandling: callResultHandlingSchema,
+  voicemailAction: z.enum(["hang_up", "leave_neutral_message"]),
+  refusalBehavior: z.literal("respect_and_end"),
+  localizedObjective: z.string().trim().min(10).max(2_000),
+  opening: compiledOpeningSchema,
+  backgroundSummary: z.string().trim().max(4_000),
+  orderedQuestions: z.array(compiledQuestionSchema).min(1).max(12),
+  conditionalFollowUps: z.array(compiledFollowUpSchema).max(12),
+  successCriteria: z.array(z.string().trim().min(2).max(400)).min(1).max(10),
+  unresolvedCriteria: z.array(z.string().trim().min(2).max(400)).min(1).max(10),
+  stopConditions: z.array(z.string().trim().min(2).max(400)).min(1).max(10),
+  approvedFacts: z.array(z.string().trim().min(1).max(400)).max(40),
+  prohibitedActions: z.array(z.string().trim().min(2).max(400)).min(1).max(12)
+}).strict();
+export type ApprovedExecutionPlan = z.infer<
+  typeof approvedExecutionPlanSchema
+>;
+
+export const approvedExecutionRuntimeSchema = z.object({
+  agentName: z.string().trim().min(2),
+  voiceGender: callVoiceGenderSchema,
+  assistanceDisclosure: z.string().trim(),
+  audioRetentionDays: audioRetentionDaysSchema,
+  allowLanguageSwitch: z.boolean(),
+  fallbackLocale: callLocaleSchema.optional()
+}).strict();
+export type ApprovedExecutionRuntime = z.infer<
+  typeof approvedExecutionRuntimeSchema
+>;
+
+export const approvedExecutionSnapshotSchema = z.object({
+  version: z.literal(APPROVED_EXECUTION_SNAPSHOT_VERSION),
+  callBriefId: z.string().uuid(),
+  compilationRevision: z.number().int().positive(),
+  compilationSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  approvedAt: z.string().datetime(),
+  plan: approvedExecutionPlanSchema,
+  runtime: approvedExecutionRuntimeSchema
+}).strict().superRefine((snapshot, context) => {
+  const { allowLanguageSwitch, fallbackLocale } = snapshot.runtime;
+  if (allowLanguageSwitch && !fallbackLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "Select a fallback language",
+      path: ["runtime", "fallbackLocale"]
+    });
+  }
+  if (!allowLanguageSwitch && fallbackLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "A fallback language is available only when language switching is enabled",
+      path: ["runtime", "fallbackLocale"]
+    });
+  }
+  if (fallbackLocale === snapshot.plan.callLocale) {
+    context.addIssue({
+      code: "custom",
+      message: "The fallback language must differ from the primary language",
+      path: ["runtime", "fallbackLocale"]
+    });
+  }
+});
+export type ApprovedExecutionSnapshot = z.infer<
+  typeof approvedExecutionSnapshotSchema
+>;
+
+export function createApprovedExecutionPlan(
+  compiled: CompiledCallBrief
+): ApprovedExecutionPlan {
+  return approvedExecutionPlanSchema.parse({
+    callLocale: compiled.callLocale,
+    taskType: compiled.taskType,
+    tone: compiled.tone,
+    addressingStyle: compiled.addressingStyle,
+    resultHandling: compiled.resultHandling,
+    voicemailAction: compiled.voicemailAction,
+    refusalBehavior: compiled.refusalBehavior,
+    localizedObjective: compiled.localizedObjective,
+    opening: compiled.opening,
+    backgroundSummary: compiled.backgroundSummary,
+    orderedQuestions: compiled.orderedQuestions,
+    conditionalFollowUps: compiled.conditionalFollowUps,
+    successCriteria: compiled.successCriteria,
+    unresolvedCriteria: compiled.unresolvedCriteria,
+    stopConditions: compiled.stopConditions,
+    approvedFacts: compiled.approvedFacts.map(
+      ({ callLanguageText }) => callLanguageText
+    ),
+    prohibitedActions: compiled.prohibitedActions
+  });
+}
+
 export const policyDecisionStatusSchema = z.enum([
   "ready_for_review",
   "needs_clarification",
@@ -471,10 +628,29 @@ export const callCompilationSchema = z.object({
 });
 export type CallCompilation = z.infer<typeof callCompilationSchema>;
 
+export const compilationApprovalInputSchema = z.strictObject({
+  revision: z.number().int().positive(),
+  snapshotHash: z.string().regex(/^[a-f0-9]{64}$/)
+});
+export type CompilationApprovalInput = z.infer<
+  typeof compilationApprovalInputSchema
+>;
+
+export function compilationApprovalInput(
+  compilation: Pick<CallCompilation, "revision" | "snapshotHash">
+): CompilationApprovalInput {
+  return {
+    revision: compilation.revision,
+    snapshotHash: compilation.snapshotHash
+  };
+}
+
 export const callBriefSchema = callBriefStoredFieldsSchema
   .extend({
     assistantProfileId: assistantProfileIdSchema.nullable(),
     agentName: z.string().trim().min(2),
+    representedPersonFirstName: personNamePartSchema,
+    representedPersonLastName: personNamePartSchema,
     voiceGender: callVoiceGenderSchema,
     assistanceDisclosure: z.string().trim(),
     id: z.string().uuid(),
@@ -565,6 +741,13 @@ export const approvalRequestSchema = z.object({
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const callSnapshotSchema = z.object({
+  executionPlanSource: z.enum([
+    "immutable",
+    "legacy",
+    "archived",
+    "recompile_required",
+    "unavailable"
+  ]),
   brief: callBriefSchema,
   compilation: callCompilationSchema.nullable(),
   transcript: z.array(transcriptSegmentSchema),
@@ -573,6 +756,39 @@ export const callSnapshotSchema = z.object({
   finalTranscript: finalTranscriptSchema.nullable()
 });
 export type CallSnapshot = z.infer<typeof callSnapshotSchema>;
+
+export function createApprovedExecutionSnapshot(
+  snapshot: Pick<CallSnapshot, "brief" | "compilation">
+): ApprovedExecutionSnapshot {
+  const compilation = snapshot.compilation;
+  const compiled = compilation?.compiledBrief;
+  if (
+    !compilation ||
+    !compiled ||
+    !compilation.approvedAt ||
+    compilation.policyDecision.status !== "ready_for_review" ||
+    compiled.blockingIssues.length > 0
+  ) {
+    throw new Error("CALL_EXECUTION_SNAPSHOT_NOT_APPROVED");
+  }
+
+  return approvedExecutionSnapshotSchema.parse({
+    version: APPROVED_EXECUTION_SNAPSHOT_VERSION,
+    callBriefId: snapshot.brief.id,
+    compilationRevision: compilation.revision,
+    compilationSnapshotHash: compilation.snapshotHash,
+    approvedAt: compilation.approvedAt,
+    plan: createApprovedExecutionPlan(compiled),
+    runtime: {
+      agentName: snapshot.brief.agentName,
+      voiceGender: snapshot.brief.voiceGender,
+      assistanceDisclosure: snapshot.brief.assistanceDisclosure,
+      audioRetentionDays: snapshot.brief.audioRetentionDays,
+      allowLanguageSwitch: snapshot.brief.allowLanguageSwitch,
+      fallbackLocale: snapshot.brief.fallbackLocale
+    }
+  });
+}
 
 export const approvalDecisionSchema = z.object({
   decision: z.enum(["approved", "declined"])

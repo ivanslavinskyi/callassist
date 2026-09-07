@@ -158,6 +158,11 @@ export type Messages = {
     phoneInvalid: string;
     requiredComplete: string;
     requiredRemaining: (count: number) => string;
+    characterCount: (count: number, maximum: number) => string;
+    factCount: (count: number, maximum: number) => string;
+    taskTextBudget: (count: number, maximum: number) => string;
+    taskTextTooLong: string;
+    factsTooLong: string;
     rateLimited: string;
     preparationError: string;
     preparationUnavailable: string;
@@ -198,7 +203,9 @@ export type Messages = {
     loadingBrief: string; unavailableTitle: string; returnDashboard: string;
     activeBrief: string; startCall: string; stopCall: string;
     updateHeading: string; updatePlan: string; legacyBrief: string;
-    legacyTitle: string; legacyHelp: string; liveTranscriptEyebrow: string;
+    legacyTitle: string; legacyHelp: string; archivedPlanTitle: string;
+    archivedPlanHelp: string; recompilePlanTitle: string;
+    recompilePlanHelp: string; liveTranscriptEyebrow: string;
     liveCaptions: string; liveTranscriptHelp: string; transcriptEmptyTitle: string;
     transcriptEmptyHelp: string; liveTime: string; decisionRequired: string;
     assistantWillSay: string; approve: string; doNotDisclose: string;
@@ -385,6 +392,11 @@ const en: Messages = {
     phoneInvalid: "During the public beta SHPROHLI can only call Swiss phone numbers, for example +41710000000",
     requiredComplete: "All required fields complete",
     requiredRemaining: (count: number) => `${count} required ${count === 1 ? "field" : "fields"} remaining`,
+    characterCount: (count, maximum) => `${count} / ${maximum} characters`,
+    factCount: (count, maximum) => `${count} / ${maximum} facts`,
+    taskTextBudget: (count, maximum) => `${count} / ${maximum} total task characters`,
+    taskTextTooLong: "Shorten the objective, context, approved information, delivery instruction, or clarification answers before preparing this call.",
+    factsTooLong: "Use no more than 40 approved facts and keep each fact within 300 characters.",
     rateLimited: "Too many call-planning requests. Wait a moment and try again.",
     preparationError: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
     preparationUnavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
@@ -438,6 +450,10 @@ const en: Messages = {
     updatePlan: "Update call plan", legacyBrief: "Earlier call plan",
     legacyTitle: "This call plan cannot be started",
     legacyHelp: "This call plan uses an older format. Recreate it from the dashboard before starting the call.",
+    archivedPlanTitle: "This completed call plan is archived",
+    archivedPlanHelp: "Its original encrypted data remains subject to the normal retention policy, but the older plan can no longer be executed.",
+    recompilePlanTitle: "Review and rebuild this call plan",
+    recompilePlanHelp: "The earlier plan format is no longer executable. Review the recovered call details below and submit them to create a new approved plan.",
     liveTranscriptEyebrow: "During the call", liveCaptions: "Live transcript",
     liveTranscriptHelp: "Appears during the call. Fast, provisional, and may contain recognition errors.",
     transcriptEmptyTitle: "The transcript will appear here",
@@ -587,6 +603,11 @@ const de: Messages = {
     phoneInvalid: "Während der öffentlichen Beta kann SHPROHLI nur Schweizer Telefonnummern anrufen, zum Beispiel +41710000000",
     requiredComplete: "Alle Pflichtfelder sind ausgefüllt",
     requiredRemaining: (count: number) => `${count} ${count === 1 ? "Pflichtfeld ist" : "Pflichtfelder sind"} noch offen`,
+    characterCount: (count, maximum) => `${count} / ${maximum} Zeichen`,
+    factCount: (count, maximum) => `${count} / ${maximum} Fakten`,
+    taskTextBudget: (count, maximum) => `${count} / ${maximum} Zeichen für die gesamte Aufgabe`,
+    taskTextTooLong: "Kürzen Sie Ziel, Kontext, freigegebene Informationen, Zustellungsanweisung oder Klärungsantworten, bevor Sie diesen Anruf vorbereiten.",
+    factsTooLong: "Verwenden Sie höchstens 40 freigegebene Fakten mit jeweils maximal 300 Zeichen.",
     rateLimited: "Zu viele Anfragen zur Anrufplanung. Warten Sie kurz und versuchen Sie es erneut.",
     preparationError: "SHPROHLI konnte diese Anfrage nicht sicher vorbereiten. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
     preparationUnavailable: "Die Anrufvorbereitung ist vorübergehend nicht verfügbar. Ihre Eingaben bleiben erhalten. Versuchen Sie es später erneut.",
@@ -703,6 +724,10 @@ const de: Messages = {
     updatePlan: "Anrufplan aktualisieren", legacyBrief: "Früherer Anrufplan",
     legacyTitle: "Dieser Anrufplan kann nicht gestartet werden",
     legacyHelp: "Dieser Anrufplan verwendet ein älteres Format. Erstellen Sie ihn in der Übersicht neu, bevor Sie den Anruf starten.",
+    archivedPlanTitle: "Dieser abgeschlossene Anrufplan ist archiviert",
+    archivedPlanHelp: "Die ursprünglichen verschlüsselten Daten unterliegen weiterhin der normalen Aufbewahrungsrichtlinie, der ältere Plan kann jedoch nicht erneut ausgeführt werden.",
+    recompilePlanTitle: "Anrufplan prüfen und neu erstellen",
+    recompilePlanHelp: "Das frühere Planformat kann nicht mehr ausgeführt werden. Prüfen Sie die wiederhergestellten Angaben und senden Sie sie ab, um einen neuen freigegebenen Plan zu erstellen.",
     liveTranscriptEyebrow: "Während des Anrufs", liveCaptions: "Live-Transkript",
     liveTranscriptHelp: "Erscheint während des Anrufs. Schnell, vorläufig und möglicherweise fehlerhaft.",
     transcriptEmptyTitle: "Das Transkript erscheint hier",

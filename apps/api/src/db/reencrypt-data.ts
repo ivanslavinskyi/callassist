@@ -131,6 +131,9 @@ async function reencryptGenericColumn(
   let rewritten = 0;
   while (true) {
     const changed = await sql.begin(async (transaction) => {
+      await transaction`
+        SELECT set_config('callassist.encryption_rotation', 'enabled', true)
+      `;
       const rows = await transaction.unsafe<CiphertextRow[]>(`
         SELECT id::text AS id, ${quoteIdentifier(column)} AS payload
         FROM ${quoteIdentifier(table)}

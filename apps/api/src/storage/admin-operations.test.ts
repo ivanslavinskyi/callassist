@@ -21,6 +21,59 @@ const callInput: CreateCallBriefInput = {
 };
 
 describe("admin operational read models", () => {
+  it("includes pre-consent Realtime time when no recording was created", async () => {
+    const repository = new InMemoryCallRepository();
+    const ownerUserId = randomUUID();
+    await repository.grantSignupCredits(ownerUserId);
+    const compilation = await new DeterministicBriefCompiler().compile(
+      normalizeCreateCallBriefInput({
+        ...callInput,
+        phoneNumber: "+41710000063"
+      })
+    );
+    const brief = await repository.create(
+      { ...callInput, phoneNumber: "+41710000063" },
+      compilation,
+      ownerUserId
+    );
+    await repository.approveCompilation(brief.id);
+    const started = await repository.startAttempt(brief.id, {
+      provider: "twilio",
+      userId: ownerUserId
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "pre-consent-realtime-ready",
+      occurredAt: new Date(Date.now() - 12_000).toISOString(),
+      payload: {
+        name: "realtime.ready",
+        metadata: {
+          model: "gpt-realtime-test",
+          transcriptionModel: "gpt-transcribe-test"
+        }
+      }
+    });
+    await repository.appendCallTelemetryEvent(brief.id, {
+      callAttemptId: started.attempt.id,
+      idempotencyKey: "pre-consent-stream-ended",
+      payload: {
+        name: "consent.failed",
+        metadata: { reason: "stream_ended_before_consent" }
+      }
+    });
+    await repository.updateStatus(brief.id, "completed");
+
+    const now = new Date();
+    const facts = await repository.getAdminOperationsFacts(
+      new Date(now.getTime() - 60_000).toISOString(),
+      new Date(now.getTime() + 60_000).toISOString(),
+      brief.id
+    );
+    expect(facts.usageSeconds.realtime).toBeGreaterThanOrEqual(11);
+    expect(facts.usageSeconds.transcription).toBe(0);
+    expect(facts.recordedDurationSeconds.samples).toBe(0);
+  });
+
   it("derives cohort metrics and system workload from bounded facts", async () => {
     const repository = new InMemoryCallRepository();
     const ownerUserId = randomUUID();
@@ -44,6 +97,18 @@ describe("admin operational read models", () => {
       providerCallId,
       "queued"
     );
+    const telephonyOperationId = randomUUID();
+    await repository.startTelephonyProviderOperation({
+      id: telephonyOperationId,
+      callBriefId: brief.id,
+      callAttemptId: started.attempt.id,
+      provider: "twilio",
+      operationType: "telephony_leg",
+      stage: "outbound_call",
+      requestedModel: "programmable_voice",
+      clientRequestId: telephonyOperationId,
+      startedAt: new Date().toISOString()
+    });
     await repository.applyProviderStatus(
       providerCallId,
       "in-progress",
@@ -97,6 +162,17 @@ describe("admin operational read models", () => {
       "gpt-transcribe-test",
       true
     );
+    await repository.recordTelephonyLegUsage({
+      fallbackOperationId: telephonyOperationId,
+      callBriefId: brief.id,
+      callAttemptId: started.attempt.id,
+      providerCallId,
+      providerStatus: "completed",
+      durationSeconds: 125,
+      billableSeconds: 180,
+      occurredAt: new Date().toISOString(),
+      sequenceNumber: 1
+    });
     await repository.updateStatus(brief.id, "completed");
     await repository.submitOwnerCallFeedback(brief.id, ownerUserId, {
       idempotencyKey: randomUUID(),
@@ -131,7 +207,22 @@ describe("admin operational read models", () => {
         p95: 420
       },
       transcriptionRetries: 1,
-      usageSeconds: { realtime: 120, transcription: 120 }
+      usageSeconds: { realtime: 120, transcription: 120 },
+      providerUsage: {
+        operationCount: 1,
+        usageRecordCount: 1,
+        buckets: [expect.objectContaining({
+          provider: "twilio",
+          operationType: "telephony_leg",
+          model: "programmable_voice",
+          usageRecords: 1,
+          requestCount: 1,
+          durationSeconds: 125,
+          durationSamples: 1,
+          billableSeconds: 180,
+          billableSamples: 1
+        })]
+      }
     });
 
     await repository.setOutboundCallsEnabled(false, {
@@ -174,6 +265,17 @@ describe("admin operational read models", () => {
       transcriptionProcessing: 1,
       transcriptionFailed: 0,
       retentionScheduled: 0,
+      callPlanCutover: {
+        recoverableLegacyCalls: 0,
+        archivedLegacyCalls: 0,
+        recompileRequiredCalls: 0,
+        unavailableLegacyCalls: 0,
+        executableLegacyCalls: 0,
+        historicalAttemptsWithoutCompilation: 0,
+        historicalAttemptsWithoutExecutionSnapshot: 0,
+        activeLegacyAttempts: 0,
+        activeRecompilations: 0
+      },
       webhooks: {
         voice: {
           accepted: 1,

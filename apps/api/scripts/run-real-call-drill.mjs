@@ -20,6 +20,8 @@ export async function runRealCallDrill(environment = process.env, dependencies =
   if (!email || !password) throw new Error("Existing verified REAL_CALL_DRILL_EMAIL and REAL_CALL_DRILL_PASSWORD are required");
   const target = environment.REAL_CALL_DRILL_TARGET?.trim();
   let callId = environment.REAL_CALL_DRILL_CALL_ID?.trim();
+  const reviewedRevision = Number(environment.REAL_CALL_DRILL_REVISION);
+  const reviewedHash = environment.REAL_CALL_DRILL_SNAPSHOT_HASH?.trim();
   const idempotencyKey = environment.REAL_CALL_DRILL_IDEMPOTENCY_KEY?.trim() || randomUUID();
   if (mode === "prepare" && (!target || !/^\+41\d{9}$/.test(target))) throw new Error("REAL_CALL_DRILL_TARGET must be an approved CH E.164 destination");
   if (mode === "prepare" && !isUuid(idempotencyKey)) throw new Error("Invalid REAL_CALL_DRILL_IDEMPOTENCY_KEY");
@@ -27,6 +29,9 @@ export async function runRealCallDrill(environment = process.env, dependencies =
     if (!isUuid(callId)) throw new Error("REAL_CALL_DRILL_CALL_ID must be a prepared call UUID");
     if (environment.REAL_CALL_DRILL_CONFIRM !== "CALL_AUTHORIZED") {
       throw new Error("Set REAL_CALL_DRILL_CONFIRM=CALL_AUTHORIZED after reviewing the prepared call and obtaining recipient approval");
+    }
+    if (!Number.isSafeInteger(reviewedRevision) || reviewedRevision < 1 || !/^[a-f0-9]{64}$/.test(reviewedHash ?? "")) {
+      throw new Error("REAL_CALL_DRILL_REVISION and REAL_CALL_DRILL_SNAPSHOT_HASH must identify the reviewed plan");
     }
   }
   let cookie;
@@ -79,12 +84,19 @@ export async function runRealCallDrill(environment = process.env, dependencies =
       callId = preparation.callBriefId;
       const { body: snapshot } = await request(`/api/call-briefs/${callId}`);
       if (snapshot.brief.id !== callId || snapshot.brief.status !== "review_required") throw new Error("Prepared call is not awaiting review");
-      write({ event: "real_call_prepared", callId, status: snapshot.brief.status });
+      write({ event: "real_call_prepared", callId, status: snapshot.brief.status,
+        revision: snapshot.compilation.revision, snapshotHash: snapshot.compilation.snapshotHash });
       return { callId, status: "prepared" };
     }
     const { body: snapshot } = await request(`/api/call-briefs/${callId}`);
     if (snapshot.brief.id !== callId || !["review_required", "ready"].includes(snapshot.brief.status)) throw new Error("Call is not prepared for starting");
-    const { body: started } = await request(`/api/call-briefs/${callId}/approve-and-start`, { method: "POST" });
+    if (snapshot.compilation.revision !== reviewedRevision || snapshot.compilation.snapshotHash !== reviewedHash) {
+      throw new Error("Reviewed plan changed; review the current compilation before starting");
+    }
+    const { body: started } = await request(`/api/call-briefs/${callId}/approve-and-start`, { method: "POST", body: {
+      revision: reviewedRevision,
+      snapshotHash: reviewedHash
+    } });
     let status = started.brief.status;
     write({ event: "real_call_started", callId, status });
     const deadline = now() + 10 * 60_000;

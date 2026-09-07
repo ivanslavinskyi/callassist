@@ -44,9 +44,16 @@ describe("database recovery drill", () => {
     expect(() => validateCriticalTables([
       "audit_events",
       "call_briefs",
+      "call_compilations",
+      "call_compilation_approvals",
       "call_events",
       "credit_transactions",
       "durable_jobs",
+      "provider_operation_results",
+      "provider_operations",
+      "provider_cost_records",
+      "provider_usage_records",
+      "post_call_transcription_chunks",
       "sessions",
       "users"
     ])).not.toThrow();

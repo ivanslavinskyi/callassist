@@ -63,6 +63,8 @@ jobs:
           pnpm db:test:prepare
           pnpm db:migrate
           pnpm db:migrate
+      - name: Verify immutable call-plan cutover gate on fresh schema
+        run: pnpm db:verify:call-plan-cutover
       - name: Audit production dependencies
         run: pnpm security:audit
       - name: Check public copy consistency

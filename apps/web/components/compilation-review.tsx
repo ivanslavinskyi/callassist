@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  CALL_BRIEF_INPUT_LIMITS,
+  callBriefTaskTextLength,
   type CallCompilation,
   type ClarificationAnswer
 } from "@callassist/contracts";
@@ -119,6 +121,7 @@ export function CompilationReview({
           <p>{copy.clarificationHelp}</p>
           {blockingIssues.length > 0 ? (
             <ClarificationForm
+              baseBrief={compilation.rawBrief}
               busy={busy}
               issues={blockingIssues}
               onSubmit={onAnswerClarifications}
@@ -182,16 +185,34 @@ export function CompilationReview({
   );
 }
 function ClarificationForm({
+  baseBrief,
   busy,
   issues,
   onSubmit
 }: {
+  baseBrief: CallCompilation["rawBrief"];
   busy: boolean;
   issues: NonNullable<CallCompilation["compiledBrief"]>["blockingIssues"];
   onSubmit: (answers: ClarificationAnswer[]) => Promise<void>;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const { messages } = useUiLocale();
+  const issueCodes = new Set(issues.map(({ code }) => code));
+  const draftAnswers = issues.map(({ code }) => ({
+    issueCode: code,
+    answer: answers[code] ?? ""
+  }));
+  const taskTextLength = callBriefTaskTextLength({
+    ...baseBrief,
+    clarificationAnswers: [
+      ...baseBrief.clarificationAnswers.filter(({ issueCode }) =>
+        !issueCodes.has(issueCode)
+      ),
+      ...draftAnswers
+    ]
+  });
+  const taskTextOverLimit =
+    taskTextLength > CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -216,14 +237,21 @@ function ClarificationForm({
                 [code]: event.target.value
               }))
             }
+            maxLength={CALL_BRIEF_INPUT_LIMITS.clarificationAnswer}
             rows={2}
             value={answers[code] ?? ""}
           />
         </label>
       ))}
+      <p className={taskTextOverLimit ? "field-invalid" : undefined}>
+        {messages.form.taskTextBudget(
+          taskTextLength,
+          CALL_BRIEF_INPUT_LIMITS.aggregateTaskTextHard
+        )}
+      </p>
       <button
         className="primary-button compact-button"
-        disabled={busy || !complete}
+        disabled={busy || !complete || taskTextOverLimit}
         type="submit"
       >
         {busy ? messages.review.updating : messages.review.continue}

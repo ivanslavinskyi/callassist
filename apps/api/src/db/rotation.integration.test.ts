@@ -35,13 +35,23 @@ it("rotates queued preparation input, completes without the old key, and replays
     };
     const idempotencyKey = randomUUID();
     const now = new Date().toISOString();
+    const historical = await old.create(input,
+      await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input)), userId);
+    await old.approveCompilation(historical.id);
+    await old.grantSignupCredits(userId);
+    await old.startAttempt(historical.id, { provider: "twilio" });
+    const historicalHash = (await old.get(historical.id))?.compilation?.snapshotHash;
+    expect(historicalHash).toMatch(/^[a-f0-9]{64}$/);
     const queued = await old.enqueueCallPreparation({ userId, idempotencyKey, inputFingerprint: "a".repeat(64), input, now });
     const environment = { DATABASE_URL: database.url, DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current", DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "old",
       DATA_ENCRYPTION_PREVIOUS_KEYS: JSON.stringify({ old: oldKey }), DATA_ENCRYPTION_REENCRYPT_CONFIRM: "current" };
-    expect(await reencryptDatabase(environment)).toMatchObject({
-      ciphertextFamilies: 9, rewrittenCiphertexts: 1, remainingNonActiveCiphertexts: 0
+    const rotation = await reencryptDatabase(environment);
+    expect(rotation).toMatchObject({
+      ciphertextFamilies: 13, remainingNonActiveCiphertexts: 0
     });
+    expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
+    expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);
     expect(await reencryptDatabase({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
       DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current" })).toMatchObject({ rewrittenCiphertexts: 0 });
     const job = await current.claimDueDurableJob({ types: ["brief_compilation"], workerId: "rotation-test", now,

@@ -1,8 +1,12 @@
 # SHPROHLI architecture
 
-Reviewed against source commit `96229ea` on 2026-09-07. This describes implemented
+Reviewed against the integration of `51a61da` and `14abd28` on 2026-09-07. This describes implemented
 behavior. Open defects and release decisions live in the [audit](project-audit-2026-09-07.md)
 and [roadmap](mvp-plan.md), rather than being presented as implemented safeguards.
+
+The immutable-plan, provider-cost and staged database-cutover implementation is
+recorded in [the delivery roadmap](approved-call-plan-cost-security-roadmap.md).
+This architecture includes the integration of that mainline work with the audit fixes.
 
 ## Runtime and repository boundaries
 
@@ -45,7 +49,7 @@ No production deployment manifest currently resolves that topology.
 `external` makes the API enqueue initial preparations and durable call work; the
 standalone worker owns startup recovery, seeding, polling, leases and heartbeats.
 `AccountDeletionService` uses a separate leased request/attempt store in the same
-worker process; it is not a sixth `durable_jobs` type. Production requires external
+worker process; it is separate from the six `durable_jobs` types. Production requires external
 mode. [Configuration and endpoints](runtime-reference.md) describe the actual inputs.
 
 ## Browser, session and role boundaries
@@ -135,11 +139,14 @@ access. Public content reads never expose drafts. Web public-content fetches use
    cancelled preparations also erase input. At-least-once execution converges on one
    call through the creation key. Status polling returns bounded progress or a
    controlled failure; a browser timeout does not cancel durable work.
-4. The user reviews the resulting call snapshot. Editing/recompilation of an existing
-   brief uses its existing API routes and runs in the API service; it is not moved
-   to the initial-preparation queue. Recompilation increments revision and resets approval.
-5. Approve-and-start records approval before reservation/dialling. There is no
-   synchronous `POST /api/call-briefs` creation endpoint.
+4. Editing or clarifying an existing call also queues an idempotent encrypted
+   preparation. The worker compiles the captured target revision; publication checks
+   the immutable compilation ID, increments revision, resets approval and erases
+   input atomically. Failure/stale publication leaves the previous revision intact;
+   starting is blocked during active recompilation.
+5. Approval and approve-and-start require the exact reviewed revision and snapshot
+   hash. Append-only compilation/approval rows bind each attempt and stream token to
+   that plan. There is no synchronous POST /api/call-briefs create endpoint.
 
 The OpenAI compiler produces strict structured output: detected source language,
 localized objective/opening/questions, task classification, allowed-fact translations,
@@ -149,12 +156,13 @@ are moderated separately. Deterministic policy decides review/clarification/bloc
 the model cannot approve itself. Formal addressing, captured spoken results and
 voicemail without private details are explicit defaults.
 
-Raw and compiled snapshots, model/policy version, response ID, approval time and
-snapshot hash remain available for review. Realtime and final-ASR context receive the
-approved runtime brief rather than the raw authoring snapshot. Prompt restrictions
-still matter: the Realtime bridge does not implement a model tool dispatcher for
-`request_approval` or `end_call`. Approval routes, UI and mock scenarios exist, but
-they do not prove deterministic in-call disclosure enforcement. This is R08.
+Immutable call_compilations rows are the authoritative source for plans. The
+canonical hash is revalidated at reads, approvals and attempt reservation. Realtime
+receives an ApprovedExecutionSnapshot projection of the reviewed plan; raw authoring
+fields are excluded. Full runtime text is moderated and protected identifiers must
+be preserved. The legacy mutable reader/dual-write and media adapter are removed.
+Model tool dispatch for request_approval/end_call and deterministic in-call disclosure
+control remain separate acceptance work under R08.
 
 Profiles are `sebastian`, `daniel`, `martin`, `anna`, `sofia`, `maria`; name/gender
 snapshots are server-derived. Assistance reasons are `none` (default, no disclosure),
@@ -165,7 +173,7 @@ names are required. Supported call locales are `de-CH`, `de-DE`, `fr-CH`, `it-CH
 ## Consent, audio and transcription
 
 Twilio creates calls with recording disabled and connects a signed Media Stream with
-an additional call-scoped HMAC token. Two OpenAI sockets are opened. The **main audio
+an attempt-scoped HMAC token bound to the approved snapshot hash. Two OpenAI sockets are opened. The **main audio
 session** speaks the short AI identity/represented-person/recording question. The
 separate text-output session recognizes recipient consent speech with automatic
 response creation disabled. It does not generate the spoken disclosure.
@@ -212,8 +220,8 @@ updates that deadline. Zero-day audio becomes eligible immediately then. Failed
 transcription can retain audio for retry. Retention work is durable and monitored, not a wall-clock guarantee during
 provider/worker outages. Deletion of a terminal call deletes provider audio before
 local redaction and fences content jobs. Account anonymization processes owned calls
-before tombstoning identity and revoking sessions. Challenge-data cleanup remains an
-open gap; see [data lifecycle](data-deletion-policy.md).
+before tombstoning identity and revoking sessions. Contact challenges are erased
+atomically; startup/hourly maintenance enforces their 30-day limit. See [data lifecycle](data-deletion-policy.md).
 
 ## Credits, admission and abuse
 
@@ -240,29 +248,33 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog is **49 migrations**, `0001` through
-`0049_imprint_content_page.sql`, producing **51 public tables** including
+The current catalog is **61 migrations**, `0001` through
+`0061_complete_immutable_call_plan_cutover.sql`, producing **58 public tables** including
 `schema_migrations`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
-Applied files must never be edited to resolve drift.
+Applied files must never be edited to resolve drift. Before 0061, populated databases
+must pass the immutable cutover gate: backfill/classify through 0060, drain legacy
+attempts/recompilations, verify zero blockers, then deploy the final cutover. The
+migration runner enforces the gate; see the [rollout sequence](approved-call-plan-cost-security-roadmap.md#migration-and-rollout-sequence).
 
 | Data family | Representation and protection |
 | --- | --- |
 | Users, sessions, recovery/contact challenges | Relational identity and capability lifecycle; password/session/grant hashes; pending replacement contacts remain plaintext |
-| Call briefs and compilation | Plain recipient/name/phone/runtime objective/profile snapshots; encrypted context, facts, assistance reason/disclosure and compilation |
+| Call briefs and compilation | Searchable recipient/name/phone/profile fields; encrypted context/facts/assistance; immutable encrypted call_compilations and approval snapshots are authoritative |
 | Preparation requests | Encrypted normalized input while pending; retained fingerprint/idempotency/status; erased input on terminal state |
-| Attempts, recordings | Provider IDs/status, consent/time/duration/channels/deadline; audio held at Twilio, not stored as SQL blobs |
+| Attempts, recordings | Immutable approved execution snapshot/hash; provider IDs/status, consent/time/duration/channels/deadline; audio held at Twilio |
 | Live transcript and approvals | Relational plaintext transcript and proposed disclosure text, access-controlled |
-| Final transcript | Encrypted text and structured segments, model/status/error metadata |
+| Final transcript | Encrypted text/segments and resumable encrypted transcription chunks; model/status/error/usage metadata |
+| Provider accounting | Deduplicated operations, request results, raw usage and reported costs; versioned calculated rates separate from actual/fallback/unknown |
 | Feedback/outcomes | Encrypted optional comment; immutable categorical ratings/outcomes and provenance |
 | Credits/promos/suppression | Immutable ledger/redemptions, code HMACs, retained safety evidence; suppression phone/reason remain personal data |
 | Content/editorial/onboarding | Private drafts, immutable publications/audit, localized slugs, legal revision acceptances |
-| Jobs/operations/audit | Five durable call-job types, separate deletion requests, leases/attempts/heartbeats, bounded technical and action events |
+| Jobs/operations/audit | Six durable call-job types, separate deletion requests, leases/attempts/heartbeats, bounded technical and action events |
 
 AES-256-GCM `v2` envelopes authenticate key ID as additional data; the keyring supports
 an active write key, up to four decrypt-only previous keys and an explicit legacy `v1`
-mapping. Rotation and restore verification share an inventory of all nine ciphertext
+mapping. Rotation and restore verification share an inventory of all thirteen ciphertext
 families, including `call_preparation_requests.input_ciphertext`. An integration test
 checks the inventory against the migrated schema and completes a queued preparation
 after rotating and removing the old runtime key. See the [recovery runbook](database-recovery-and-secrets.md).
@@ -276,7 +288,8 @@ and deletion replay are separate deployment obligations.
 ## Jobs, live state and operations
 
 `brief_compilation`, `final_transcription`, `recording_retention`,
-`provider_call_reconciliation`, `provider_recording_reconciliation` are the five call
+`provider_call_reconciliation`, `provider_call_cost_reconciliation`,
+`provider_recording_reconciliation` are the six call
 job types. Transactions enqueue; expiring leases, renewal and fencing prevent stale
 workers from publishing; retries/backoff/dead letters retain immutable attempt
 evidence. Provider operations may repeat after a crash. External execution is not
@@ -313,6 +326,12 @@ and API/web headers exist. Web CSP permits inline scripts/styles for the current
 Next.js implementation; it is not a nonce-based CSP. PII-safe logger configuration
 and controlled telemetry are tested. Protected log storage, WAF, monitoring/paging,
 named owners and exercised deployment recovery remain open.
+
+Compiler attempts consume a cumulative preparation request budget across retries;
+terminal failures do not retry. Completed ASR chunks are reused on retry, with usage
+retained even when a request fails. Admin views expose per-call and failed-preparation
+costs, raw usage and separate provider-reported/calculated/fallback/unknown amounts.
+Public-rate assumptions live in the versioned provider-pricing-policy module.
 
 ## Verification and limits
 

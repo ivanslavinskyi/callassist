@@ -6,9 +6,14 @@ import {
 } from "@callassist/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BriefCompilerError,
   DeterministicBriefCompiler,
   OpenAIBriefCompiler,
-  evaluateCompiledBrief
+  evaluateCompiledBrief,
+  isBriefCompilerErrorRetryable,
+  protectedIdentifiers,
+  protectedPostalAddresses,
+  type BriefCompilerProviderRequestResult
 } from "./brief-compiler";
 
 const rawInput: CreateCallBriefInput = {
@@ -39,7 +44,7 @@ const modelOutput = {
   opening: {
     recipientAddress: "Vielen Dank, Gemeinde Aadorf.",
     purposeStatement:
-      "Ich rufe im Auftrag von Ivan Slavinskyi an, um den Eingang eines am 12. Juli gesendeten Antrags zu klären.",
+      "Ich rufe im Auftrag von Nina Keller an, um den Eingang eines am 12. Juli gesendeten Antrags zu klären.",
     readinessQuestion: "Passt es Ihnen, wenn wir das jetzt kurz besprechen?"
   },
   backgroundSummary:
@@ -51,7 +56,12 @@ const modelOutput = {
       required: true
     }
   ],
-  conditionalFollowUps: [],
+  conditionalFollowUps: [
+    {
+      condition: "Der Antrag ist nicht auffindbar",
+      question: "Welche Stelle kann den Eingang sonst prüfen?"
+    }
+  ],
   successCriteria: ["Der Eingang wird eindeutig bestätigt oder verneint"],
   unresolvedCriteria: ["Der Eingang kann nicht geprüft werden"],
   stopConditions: ["Die Frage ist beantwortet", "Die angerufene Person lehnt ab"],
@@ -119,6 +129,111 @@ describe("deterministic brief policy", () => {
     });
   });
 
+  it("preserves opaque identifiers in facts and the execution plan", () => {
+    expect(protectedIdentifiers(
+      "Case AB-123-XY, email nina@example.com, date 12.07.2026, phone +41 52 368 66 88"
+    )).toEqual(expect.arrayContaining([
+      "AB-123-XY",
+      "nina@example.com",
+      "12.07.2026",
+      "+41 52 368 66 88"
+    ]));
+
+    const raw = normalizeCreateCallBriefInput({
+      ...rawInput,
+      objective: "Ask whether case AB-123-XY was received",
+      allowedFacts: ["Case reference: AB-123-XY"]
+    });
+    const changed = compiled({
+      localizedObjective: "Klären, ob der Fall AB-123-XZ eingegangen ist.",
+      approvedFacts: [{
+        sourceText: "Case reference: AB-123-XY",
+        callLanguageText: "Fallreferenz: AB-123-XZ"
+      }]
+    });
+    expect(evaluateCompiledBrief(raw, changed)).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      localizedObjective: "Klären, ob der Fall AB-123-XY eingegangen ist.",
+      backgroundSummary: "Interne Referenz ZX-999-QQ verwenden.",
+      approvedFacts: [{
+        sourceText: "Case reference: AB-123-XY",
+        callLanguageText: "Fallreferenz: AB-123-XY"
+      }]
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    const preserved = compiled({
+      localizedObjective: "Klären, ob der Fall AB-123-XY eingegangen ist.",
+      approvedFacts: [{
+        sourceText: "Case reference: AB-123-XY",
+        callLanguageText: "Fallreferenz: AB-123-XY"
+      }]
+    });
+    expect(evaluateCompiledBrief(raw, preserved).status).toBe(
+      "ready_for_review"
+    );
+  });
+
+  it("requires primary names and postal addresses verbatim", () => {
+    const zurich = "Z\u00fcrich";
+    const geneva = "Gen\u00e8ve";
+    const raw = normalizeCreateCallBriefInput({
+      ...rawInput,
+      context: `Reply address: Bahnhofstrasse 10, 8001 ${zurich}.`
+    });
+    expect(protectedPostalAddresses(raw.context)).toEqual([
+      `Bahnhofstrasse 10, 8001 ${zurich}`
+    ]);
+    expect(protectedPostalAddresses(`Rue de Lausanne 12, 1201 ${geneva}`))
+      .toEqual([`Rue de Lausanne 12, 1201 ${geneva}`]);
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 11, 8001 ${zurich}.`
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Bahnhofstrasse 10, 8001 ${zurich}; Bahnhofstrasse 11, 8001 ${zurich}.`
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 10, 8001 ${zurich}.`
+    })).status).toBe("ready_for_review");
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      opening: {
+        ...modelOutput.opening,
+        purposeStatement: "Ich rufe im Auftrag von Nena Keller an."
+      },
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 10, 8001 ${zurich}.`
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+
+    expect(evaluateCompiledBrief(raw, compiled({
+      backgroundSummary: `Antwortadresse: Bahnhofstrasse 10, 8001 ${zurich}.`,
+      namedEntities: [
+        ...modelOutput.namedEntities,
+        { type: "person", value: "Hans Meier" }
+      ] as CompiledCallBrief["namedEntities"]
+    }))).toMatchObject({
+      status: "blocked",
+      reasonCodes: ["fact_integrity_failure"]
+    });
+  });
+
   it("blocks risk categories and requests clarification only for fixed issues", () => {
     const raw = normalizeCreateCallBriefInput(rawInput);
     expect(
@@ -156,6 +271,11 @@ describe("deterministic brief policy", () => {
       compiled({
         addressingStyle: "formal",
         tone: "friendly",
+        opening: {
+          ...modelOutput.opening,
+          recipientAddress: "Danke, Elena."
+        },
+        namedEntities: [{ type: "date", value: "12. Juli" }],
         blockingIssues: [],
         assumptions: [
           "spoken_answers_saved_in_callassist",
@@ -171,6 +291,21 @@ describe("deterministic brief policy", () => {
 });
 
 describe("OpenAIBriefCompiler", () => {
+  it("classifies only transient compiler failures as durable-retryable", () => {
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_RESPONSE_INVALID")
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED", { statusCode: 400 })
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED", { statusCode: 429 })
+    )).toBe(true);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED")
+    )).toBe(true);
+  });
+
   it("moderates input and requests a strict Structured Output", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -242,8 +377,24 @@ describe("OpenAIBriefCompiler", () => {
       minItems: 1,
       maxItems: 12
     });
-    expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain(
-      modelOutput.opening.purposeStatement
+    const outputModerationRequest = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body)
+    );
+    const moderatedPlan = JSON.parse(outputModerationRequest.input);
+    expect(moderatedPlan).toMatchObject({
+      localizedObjective: modelOutput.localizedObjective,
+      opening: modelOutput.opening,
+      orderedQuestions: modelOutput.orderedQuestions,
+      conditionalFollowUps: modelOutput.conditionalFollowUps,
+      successCriteria: modelOutput.successCriteria,
+      unresolvedCriteria: modelOutput.unresolvedCriteria,
+      stopConditions: modelOutput.stopConditions,
+      approvedFacts: ["Antrag gesendet: 12. Juli"],
+      prohibitedActions: modelOutput.prohibitedActions
+    });
+    expect(outputModerationRequest.input).not.toContain("sourceText");
+    expect(outputModerationRequest.input).not.toContain(
+      "Application sent: 12 July"
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [, init] of fetchMock.mock.calls) {
@@ -498,5 +649,132 @@ describe("OpenAIBriefCompiler", () => {
       status: "blocked",
       reasonCodes: ["prohibited_content"]
     });
+  });
+
+  it("reserves budget before every physical provider request", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "resp_usage",
+          model: "gpt-5.6-2026-08-01",
+          output_text: JSON.stringify(modelOutput),
+          usage: {
+            input_tokens: 321,
+            input_tokens_details: {
+              cached_tokens: 120,
+              cache_write_tokens: 11
+            },
+            output_tokens: 87,
+            output_tokens_details: { reasoning_tokens: 19 },
+            total_tokens: 408
+          }
+        }), {
+          status: 200,
+          headers: { "x-request-id": "req_usage" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ flagged: false }] }), {
+          status: 200
+        })
+      );
+    const reservations: Array<{
+      clientRequestId: string;
+      stage: "input_moderation" | "compilation" | "output_moderation";
+    }> = [];
+    const beforeProviderRequest = vi.fn(async (
+      request: (typeof reservations)[number]
+    ) => {
+      reservations.push(request);
+      return true;
+    });
+    const completions: BriefCompilerProviderRequestResult[] = [];
+    const afterProviderRequest = vi.fn(async (
+      result: BriefCompilerProviderRequestResult
+    ) => {
+      completions.push(result);
+    });
+
+    await new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    }).compile(normalizeCreateCallBriefInput(rawInput), 1, {
+      beforeProviderRequest,
+      afterProviderRequest
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(beforeProviderRequest).toHaveBeenCalledTimes(4);
+    expect(reservations.map(({ stage }) => stage)).toEqual([
+        "input_moderation",
+        "input_moderation",
+        "compilation",
+        "output_moderation"
+      ]);
+    expect(new Set(reservations.map(({ clientRequestId }) => clientRequestId)).size)
+      .toBe(4);
+    expect(completions).toHaveLength(4);
+    expect(completions.map(({ outcome }) => outcome)).toEqual([
+      "provider_error",
+      "succeeded",
+      "succeeded",
+      "succeeded"
+    ]);
+    expect(completions[2]).toMatchObject({
+      providerRequestId: "req_usage",
+      providerResponseId: "resp_usage",
+      providerModel: "gpt-5.6-2026-08-01",
+      statusCode: 200,
+      usage: {
+        inputTextTokens: 321,
+        cachedInputTextTokens: 120,
+        cacheWriteInputTextTokens: 11,
+        outputTextTokens: 87,
+        reasoningOutputTokens: 19,
+        totalTokens: 408
+      }
+    });
+  });
+
+  it("fails terminally before fetch when provider request budget is exhausted", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const compiler = new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    });
+
+    await expect(compiler.compile(
+      normalizeCreateCallBriefInput(rawInput),
+      1,
+      { maxProviderRequests: 0 }
+    )).rejects.toMatchObject({
+      code: "OPENAI_REQUEST_BUDGET_EXHAUSTED",
+      stage: "input_moderation"
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch when the persisted budget reservation is denied", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const beforeProviderRequest = vi.fn(async () => false);
+
+    await expect(new OpenAIBriefCompiler({
+      apiKey: "test-key",
+      fetchImplementation: fetchMock
+    }).compile(normalizeCreateCallBriefInput(rawInput), 1, {
+      beforeProviderRequest
+    })).rejects.toMatchObject({
+      code: "OPENAI_REQUEST_BUDGET_EXHAUSTED",
+      stage: "input_moderation"
+    });
+    expect(beforeProviderRequest).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

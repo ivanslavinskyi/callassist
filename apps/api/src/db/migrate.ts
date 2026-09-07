@@ -4,6 +4,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import postgres from "postgres";
+import {
+  evaluateCallPlanCutoverGate,
+  type CallPlanCutoverGateFacts
+} from "./call-plan-cutover-gate";
 
 const migrationsDirectory = fileURLToPath(new URL("migrations", import.meta.url));
 const legacyAppliedMigrationTombstones = new Set([
@@ -11,6 +15,19 @@ const legacyAppliedMigrationTombstones = new Set([
   // established the current contiguous catalog. It is never run on a fresh DB.
   "0013_final_transcript_quality.sql"
 ]);
+const immutableCallPlanFinalizationMigration =
+  "0061_complete_immutable_call_plan_cutover.sql";
+
+export function assertCallPlanCutoverMigrationReady(
+  facts: CallPlanCutoverGateFacts
+) {
+  const gate = evaluateCallPlanCutoverGate(facts);
+  if (!gate.ready) {
+    throw new Error(
+      `Immutable call-plan finalization blocked: ${gate.blockers.join(",")}`
+    );
+  }
+}
 
 export type MigrationCatalogEntry = {
   name: string;
@@ -139,6 +156,55 @@ export async function runMigrations(
       }
 
       await sql.begin(async (transaction) => {
+        if (migration.name === immutableCallPlanFinalizationMigration) {
+          await transaction.unsafe(
+            "LOCK TABLE call_briefs, call_attempts, " +
+              "call_preparation_requests IN SHARE MODE"
+          );
+          const [facts] = await transaction<CallPlanCutoverGateFacts[]>`
+            SELECT
+              (
+                SELECT count(*)::int FROM call_briefs
+                WHERE data_deleted_at IS NULL
+                  AND current_compilation_id IS NULL
+                  AND compilation_ciphertext IS NOT NULL
+                  AND legacy_compilation_disposition IS NULL
+              ) AS "recoverableLegacyCalls",
+              (
+                SELECT count(*)::int FROM call_briefs
+                WHERE data_deleted_at IS NULL
+                  AND current_compilation_id IS NULL
+                  AND status IN (
+                    'ready',
+                    'dialing',
+                    'in_progress',
+                    'awaiting_approval'
+                  )
+              ) AS "executableLegacyCalls",
+              (
+                SELECT count(*)::int
+                FROM call_attempts
+                JOIN call_briefs
+                  ON call_briefs.id = call_attempts.call_brief_id
+                WHERE call_briefs.data_deleted_at IS NULL
+                  AND call_attempts.ended_at IS NULL
+                  AND (
+                    call_attempts.compilation_id IS NULL
+                    OR call_attempts.execution_snapshot_ciphertext IS NULL
+                  )
+              ) AS "activeLegacyAttempts",
+              (
+                SELECT count(*)::int FROM call_preparation_requests
+                WHERE operation_kind = 'recompilation'
+                  AND status IN ('queued', 'processing', 'retrying')
+              ) AS "activeRecompilations"
+          `;
+          if (!facts) {
+            throw new Error("Immutable call-plan finalization facts unavailable");
+          }
+          assertCallPlanCutoverMigrationReady(facts);
+        }
+
         await transaction.unsafe(migration.sql);
         await transaction`
           INSERT INTO schema_migrations (name, checksum_sha256)

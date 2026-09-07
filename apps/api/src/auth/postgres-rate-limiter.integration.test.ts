@@ -18,6 +18,12 @@ describe("PostgresRateLimiter", () => {
     first = new PostgresRateLimiter(databaseUrl!, Buffer.alloc(32, 11));
     second = new PostgresRateLimiter(databaseUrl!, Buffer.alloc(32, 11));
     inspection = postgres(databaseUrl!, { max: 1, onnotice: () => undefined });
+    await inspection`
+      DELETE FROM rate_limit_hourly_metrics WHERE scope LIKE 'test:%'
+    `;
+    await inspection`
+      DELETE FROM rate_limit_buckets WHERE scope LIKE 'test:%'
+    `;
   });
 
   afterAll(async () => {

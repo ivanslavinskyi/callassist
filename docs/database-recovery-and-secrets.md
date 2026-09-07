@@ -1,7 +1,7 @@
 # Database recovery and secret operations
 
-Updated 2026-09-07 for R03 remediation. Rotation/restore share all nine ciphertext
-families. The current catalog has 49 migrations and 51 public tables. See the
+Updated 2026-09-07 for mainline integration. Rotation/restore share all thirteen ciphertext
+families. The current catalog has 61 migrations and 58 public tables. See the
 [remediation evidence](remediation-2026-09-07.md).
 
 This document defines the repository-owned recovery contract. The executable drill
@@ -123,9 +123,17 @@ owners, access policy and one exercised credential/key procedure are evidenced.
 
 The shared inventory includes `call_preparation_requests.input_ciphertext`.
 The queued-old-key regression rotates it, removes the old runtime key, completes
-the preparation and proves a no-op replay. Restore has verified samples of all nine
-families. Do not retire a key using success evidence from older eight-family builds;
+the preparation and proves a no-op replay. The merged rotation regression also
+verifies immutable plans and attempt snapshots after retiring the old runtime key.
+The current restore drill verified 12 populated families from the 13-family inventory;
+schema parity tests cover all 13 columns. See [merge evidence](merge-verification-2026-09-07.md).
+Do not retire a key using success evidence from older builds;
 run the updated tool against the target data and preserve the results below.
+
+New immutable compilation/approval, attempt snapshot and transcription-chunk columns
+are included alongside pending preparation input; schema inventory tests enforce
+coverage. Before migrating populated databases through 0061, follow the
+[cutover sequence](approved-call-plan-cost-security-roadmap.md#migration-and-rollout-sequence).
 
 New encrypted values use `v2:<key-id>:<iv>:<tag>:<ciphertext>`. AES-GCM authenticates
 the key ID as additional data, so changing the envelope ID invalidates authentication.
@@ -149,7 +157,7 @@ Use this sequence for every production rotation:
 4. Set `DATA_ENCRYPTION_REENCRYPT_CONFIRM` to the exact active key ID and run
    `pnpm db:reencrypt`. The command applies pending migrations, takes a dedicated
    PostgreSQL advisory lock, commits bounded batches, refuses unverified feedback,
-   and emits only aggregate versioned JSON evidence. It covers all nine
+   and emits only aggregate versioned JSON evidence. It covers all thirteen
    enumerated families, including pending preparation input. An interrupted
    run is resumable; rows already using the active key are skipped.
 5. Run `pnpm db:reencrypt` again with the same confirmation. Preserve evidence that
@@ -171,7 +179,7 @@ DATA_ENCRYPTION_LEGACY_V1_KEY_ID=primary-2026-01
 DATA_ENCRYPTION_REENCRYPT_CONFIRM=primary-2026-08
 ```
 
-## Latest local evidence
+## Historical remediation evidence (before mainline integration)
 
 The 2026-09-07 audit restored the populated test database in a disposable Docker
 PostgreSQL 17.10 container: 49 migration/checksum rows, 51 public-table row counts,

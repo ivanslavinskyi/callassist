@@ -4,7 +4,9 @@ import {
   OpenAIPostCallTranscriber,
   buildPostCallTranscriptionKeywords,
   buildPostCallTranscriptionLanguages,
-  buildPostCallTranscriptionPrompt
+  buildPostCallTranscriptionPrompt,
+  isPostCallTranscriptionErrorRetryable,
+  parsePostCallTranscriptionUsage
 } from "./openai-post-call-transcriber";
 
 const brief: CallBrief = {
@@ -15,6 +17,8 @@ const brief: CallBrief = {
   assistantProfileId: "sebastian",
   agentName: "Sebastian",
   representedPerson: "Ivan Slavinskyi",
+  representedPersonFirstName: "Ivan",
+  representedPersonLastName: "Slavinskyi",
   assistanceReason: "speech_impairment",
   assistanceDisclosure: "Mr Slavinskyi has a speech impairment.",
   context: "The application concerns the Einwohnerdienste in Aadorf.",
@@ -92,6 +96,81 @@ describe("OpenAIPostCallTranscriber", () => {
     }
   });
 
+  it("reuses completed utterance chunks when a durable attempt retries", async () => {
+    const waveMedia = {
+      bytes: stereoWave(8_000, 3, [
+        { channel: 1 as const, start: 0.3, end: 0.9 },
+        { channel: 0 as const, start: 1.3, end: 1.8 },
+        { channel: 1 as const, start: 2.2, end: 2.7 }
+      ]),
+      contentType: "audio/wav",
+      fileName: "RE-retry.wav",
+      channels: 2 as const
+    };
+    const replies = ["Guten Tag.", "Ja, gern.", "Vielen Dank."];
+    let recipientFailed = false;
+    const fetchImplementation = vi.fn(async (_url, init) => {
+      const file = (init?.body as FormData).get("file") as File;
+      const index = Number(file.name.match(/(\d+)\.wav$/)?.[1]) - 1;
+      if (index === 1 && !recipientFailed) {
+        recipientFailed = true;
+        throw new Error("temporary timeout");
+      }
+      return new Response(JSON.stringify({ text: replies[index] }), {
+        status: 200
+      });
+    });
+    const completedChunks = new Map<string, string>();
+    const runtime = {
+      findCompletedChunk: vi.fn(async (chunk: {
+        chunkKey: string;
+        inputFingerprint: string;
+      }) => completedChunks.get(
+        `${chunk.chunkKey}:${chunk.inputFingerprint}`
+      ) ?? null),
+      beforeProviderRequest: vi.fn(async () => undefined),
+      afterProviderRequest: vi.fn(async (result: {
+        chunkKey: string;
+        inputFingerprint: string;
+        transcriptText: string | null;
+      }) => {
+        if (result.transcriptText) {
+          completedChunks.set(
+            `${result.chunkKey}:${result.inputFingerprint}`,
+            result.transcriptText
+          );
+        }
+      })
+    };
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      utteranceModel: "gpt-4o-transcribe",
+      fetchImplementation: fetchImplementation as typeof fetch
+    });
+
+    await expect(transcriber.transcribe(
+      waveMedia,
+      brief,
+      [],
+      { recordingStartedAt: null, durationSeconds: 3 },
+      runtime
+    )).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    await expect(transcriber.transcribe(
+      waveMedia,
+      brief,
+      [],
+      { recordingStartedAt: null, durationSeconds: 3 },
+      runtime
+    )).resolves.toMatchObject({
+      text: "Guten Tag. Ja, gern. Vielen Dank."
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(runtime.beforeProviderRequest).toHaveBeenCalledTimes(4);
+    expect(runtime.afterProviderRequest).toHaveBeenCalledTimes(4);
+    expect(completedChunks.size).toBe(3);
+  });
+
   it("transcribes the complete recording in one request", async () => {
     const fetchImplementation = vi.fn(async (_url, init) => {
       const form = init?.body as FormData;
@@ -123,6 +202,140 @@ describe("OpenAIPostCallTranscriber", () => {
       model: "gpt-transcribe"
     });
     expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it("reports every physical request and token usage to durable ledger hooks", async () => {
+    const events: string[] = [];
+    const beforeProviderRequest = vi.fn(async (
+      _request: { clientRequestId: string }
+    ) => {
+      events.push("reserved");
+    });
+    const afterProviderRequest = vi.fn(async () => {
+      events.push("completed");
+    });
+    const fetchImplementation = vi.fn(async () => {
+      events.push("requested");
+      return new Response(JSON.stringify({
+        text: "Die Anmeldung ist eingegangen.",
+        usage: {
+          type: "tokens",
+          input_tokens: 14,
+          input_token_details: { text_tokens: 10, audio_tokens: 4 },
+          output_tokens: 6,
+          total_tokens: 20
+        }
+      }), {
+        status: 200,
+        headers: { "x-request-id": "req_transcription_123" }
+      });
+    });
+    const transcriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      fetchImplementation: fetchImplementation as typeof fetch
+    });
+
+    await transcriber.transcribe(media, brief, [], undefined, {
+      beforeProviderRequest,
+      afterProviderRequest
+    });
+
+    expect(events).toEqual(["reserved", "requested", "completed"]);
+    expect(beforeProviderRequest).toHaveBeenCalledWith(expect.objectContaining({
+      clientRequestId: expect.any(String),
+      stage: "full_recording",
+      model: "gpt-transcribe"
+    }));
+    expect(afterProviderRequest).toHaveBeenCalledWith(expect.objectContaining({
+      clientRequestId: beforeProviderRequest.mock.calls[0]![0].clientRequestId,
+      stage: "full_recording",
+      outcome: "succeeded",
+      providerRequestId: "req_transcription_123",
+      providerResponseId: null,
+      providerModel: null,
+      statusCode: 200,
+      usage: expect.objectContaining({
+        requestCount: 1,
+        inputTextTokens: 10,
+        inputAudioTokens: 4,
+        outputTextTokens: 6,
+        totalTokens: 20
+      })
+    }));
+  });
+
+  it("reports failed requests before the durable retry layer sees them", async () => {
+    const afterNetworkFailure = vi.fn(async () => undefined);
+    const networkTranscriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      fetchImplementation: vi.fn().mockRejectedValue(new Error("timeout"))
+    });
+    await expect(networkTranscriber.transcribe(
+      media,
+      brief,
+      [],
+      undefined,
+      { afterProviderRequest: afterNetworkFailure }
+    )).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(afterNetworkFailure).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "network_error",
+      statusCode: null,
+      usage: null
+    }));
+
+    const afterProviderFailure = vi.fn(async () => undefined);
+    const providerTranscriber = new OpenAIPostCallTranscriber({
+      apiKey: "test-key",
+      fetchImplementation: vi.fn().mockResolvedValue(new Response(
+        "rate limited",
+        {
+          status: 429,
+          headers: { "x-request-id": "req_rate_limited" }
+        }
+      ))
+    });
+    await expect(providerTranscriber.transcribe(
+      media,
+      brief,
+      [],
+      undefined,
+      { afterProviderRequest: afterProviderFailure }
+    )).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(afterProviderFailure).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "provider_error",
+      providerRequestId: "req_rate_limited",
+      statusCode: 429,
+      usage: null
+    }));
+  });
+
+  it("retries only transient provider failures", async () => {
+    for (const status of [408, 409, 429, 500, 503]) {
+      const transcriber = new OpenAIPostCallTranscriber({
+        apiKey: "test-key",
+        fetchImplementation: vi.fn().mockResolvedValue(
+          new Response("transient", { status })
+        )
+      });
+      const error = await transcriber.transcribe(media, brief).catch(
+        (caught: unknown) => caught
+      );
+      expect(error).toMatchObject({ statusCode: status, retryable: true });
+      expect(isPostCallTranscriptionErrorRetryable(error)).toBe(true);
+    }
+    for (const status of [400, 401, 403, 404, 422]) {
+      const transcriber = new OpenAIPostCallTranscriber({
+        apiKey: "test-key",
+        fetchImplementation: vi.fn().mockResolvedValue(
+          new Response("terminal", { status })
+        )
+      });
+      const error = await transcriber.transcribe(media, brief).catch(
+        (caught: unknown) => caught
+      );
+      expect(error).toMatchObject({ statusCode: status, retryable: false });
+      expect(isPostCallTranscriptionErrorRetryable(error)).toBe(false);
+    }
   });
 
   it("does not promote wording from the live draft", async () => {
@@ -245,5 +458,36 @@ describe("post-call transcription context", () => {
       expect.arrayContaining(["Sebastian", "Ivan Slavinskyi", "Gemeinde Aadorf"])
     );
     expect(buildPostCallTranscriptionLanguages(brief)).toEqual(["de", "en"]);
+  });
+
+  it("parses both documented usage variants without inventing missing counters", () => {
+    expect(parsePostCallTranscriptionUsage({
+      type: "tokens",
+      input_tokens: 14,
+      input_token_details: { text_tokens: 10, audio_tokens: 4 },
+      output_tokens: 101,
+      total_tokens: 115
+    })).toMatchObject({
+      requestCount: 1,
+      inputTextTokens: 10,
+      inputAudioTokens: 4,
+      outputTextTokens: 101,
+      totalTokens: 115,
+      durationSeconds: null
+    });
+    expect(parsePostCallTranscriptionUsage({
+      type: "duration",
+      seconds: 8.47
+    })).toMatchObject({
+      requestCount: 1,
+      inputTextTokens: null,
+      inputAudioTokens: null,
+      durationSeconds: 8.47,
+      billableSeconds: null
+    });
+    expect(parsePostCallTranscriptionUsage({
+      type: "tokens",
+      input_tokens: "14"
+    })).toBeNull();
   });
 });
