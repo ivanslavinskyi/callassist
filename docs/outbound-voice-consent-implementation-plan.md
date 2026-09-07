@@ -1,5 +1,14 @@
 # Outbound voice consent implementation plan
 
+Status: core implementation present, including the subsequent consent-audio fix;
+reviewed 2026-09-07 against `96229ea`. Stages below are a delivery record, not the
+next backlog. Current release follow-ups are R06/R07/R08/R14 in the [roadmap](mvp-plan.md).
+
+**R18 implemented:** full-phrase affirmative matching replaces prefix acceptance.
+Unrecognized qualifications, conditions, questions and quoted affirmative speech
+route to clarification; recognized negatives retain precedence. EN/DE/RU bridge
+regressions assert no recording, consent grant or conversation audio forwarding.
+
 ## Goal
 
 Replace mandatory DTMF consent with a short voice-first consent flow while
@@ -10,13 +19,18 @@ explicit consent has been durably recorded.
 
 - Create Twilio calls with `record: false`.
 - Route pre-consent recipient media only to a short-lived Realtime
-  transcription session configured for PCMU and the call locale.
+  text-output session used for transcription, configured for PCMU and the call locale.
+  The main audio session speaks the disclosure; the recognition session does not.
 - Never append pre-consent media to the main Realtime conversation.
 - Never store pre-consent audio or the raw recognized phrase.
 - Add only a deterministic system transcript segment after consent is granted.
 - Start the normal conversation only after provider recording startup succeeds.
+- Also wait for the mandatory opening playback mark before forwarding recipient
+  media to the main session. Assistance reason defaults to `none`; optional reason
+  disclosure occurs after consent. Provider-side consent recognition already processes
+  speech before consent; “no processing before consent” is not the implemented contract.
 
-## Implementation stages
+## Implemented stages
 
 1. Add `none` to `ASSISTANCE_REASON_IDS`, make it the input and UI default, and
    return an empty assistance disclosure for that value. Preserve existing
@@ -26,7 +40,8 @@ explicit consent has been durably recorded.
    negative goodbye, and recording-failure copy into explicit fields.
 3. Add a small locale-aware `consent-classifier.ts` that returns only
    `affirmative`, `negative`, or `unclear`, with negative matches taking
-   precedence and ambiguous text failing closed.
+   precedence. Only complete allow-listed affirmatives grant; extra conditions and
+   quoted/questioned affirmations fail closed (R18 implemented).
 4. Add an isolated consent transcription socket/session. It receives Twilio
    media only while listening for consent and is closed and dereferenced after
    a decision or terminal timeout.
@@ -55,5 +70,7 @@ explicit consent has been durably recorded.
 - UI tests for the default selector and disclosure warning.
 - Full `test`, `typecheck`, `lint`, and `build` suites before merge.
 
-No merge to `main` is performed without a green verification gate and explicit
-approval.
+The 2026-09-07 audit ran the automated contract/classifier/bridge/repository suite;
+no real recipient call was placed. Current live-provider, multilingual quality and
+notice acceptance remain open. Historical branch/merge instructions are superseded
+by the current release roadmap.

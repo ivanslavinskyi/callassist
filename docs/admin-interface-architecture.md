@@ -1,6 +1,7 @@
 # Admin interface architecture
 
-Status: accepted for implementation on 2026-08-27.
+Status: implemented; reviewed against `96229ea` on 2026-09-07. The original design
+was accepted on 2026-08-27. Remaining admin workflows are roadmap R16.
 
 ## Decision
 

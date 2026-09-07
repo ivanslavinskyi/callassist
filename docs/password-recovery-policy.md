@@ -1,5 +1,8 @@
 # Password and account recovery policy
 
+Reviewed 2026-09-07 against `96229ea`. Current evidence is in the
+[project audit](project-audit-2026-09-07.md); follow-up retention/step-up work is R15/R17.
+
 Status: implemented application baseline in checkpoint 6F4. This flow restores access only when the account still controls its previously verified phone number. Authenticated replacement of a controlled new number is separately implemented by `docs/phone-change-policy.md`; support-assisted identity recovery remains outside this boundary.
 
 ## Security invariants

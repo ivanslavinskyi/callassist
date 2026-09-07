@@ -1,3 +1,4 @@
+import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
@@ -2341,30 +2342,26 @@ export function buildApp({
       reply.raw.flushHeaders();
       reply.raw.write("retry: 2000\n: connected\n\n");
 
-      let closed = false;
-      const send = (event: CallEvent) => {
-        if (closed || reply.raw.destroyed || reply.raw.writableEnded) return;
-        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
-      };
-      const unsubscribe = service.subscribe(request.params.id, send);
-      send({ type: "call.updated", brief: snapshot.brief });
-      const heartbeat = setInterval(
-        () => {
-          if (!closed && !reply.raw.destroyed && !reply.raw.writableEnded) {
-            reply.raw.write(": heartbeat\n\n");
-          }
+      createAuthorizedEventStream<CallEvent>({
+        response: reply.raw,
+        authorize: async () => {
+          if (authService) {
+            const user = await authService.authenticate(
+              sessionTokenFromHeaders(request.headers, secureCookies)
+            );
+            if (!user || user.id !== access.userId || user.role === "content_editor") {
+              return false;
+            }
+            if (contentService && !(await contentService.hasCurrentAcceptance(user.id))) {
+              return false;
+            }
+          } else if (!allowAnonymousCallsForTesting) return false;
+          await service.assertOwned(request.params.id, access.userId);
+          return true;
         },
-        5_000
-      );
-
-      const cleanup = () => {
-        if (closed) return;
-        closed = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-      };
-      reply.raw.once("close", cleanup);
-      reply.raw.once("error", cleanup);
+        subscribe: (send) => service.subscribe(request.params.id, send),
+        initial: { type: "call.updated", brief: snapshot.brief }
+      });
     }
   );
 

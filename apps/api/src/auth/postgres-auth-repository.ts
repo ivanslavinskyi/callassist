@@ -772,6 +772,9 @@ export class PostgresAuthRepository implements AuthRepository {
       if (remainingCall) {
         throw new AuthRepositoryError("ACCOUNT_DELETION_CALLS_REMAIN");
       }
+      // User lock serializes challenge creation/completion with anonymization.
+      await transaction`DELETE FROM phone_change_challenges WHERE user_id = ${request.userId}`;
+      await transaction`DELETE FROM email_change_challenges WHERE user_id = ${request.userId}`;
       const now = new Date(input.now);
       const revokedSessions = await transaction<{ id: string }[]>`
         UPDATE sessions
@@ -838,6 +841,18 @@ export class PostgresAuthRepository implements AuthRepository {
         )
       `;
       return true;
+    });
+  }
+
+  async purgeContactChangeChallenges(now: string) {
+    const cutoff = new Date(new Date(now).getTime() - 30 * 24 * 60 * 60 * 1_000);
+    await this.#sql.begin(async (transaction) => {
+      await transaction`DELETE FROM phone_change_challenges
+        WHERE created_at < ${cutoff}
+          OR user_id IN (SELECT id FROM users WHERE status = 'deleted')`;
+      await transaction`DELETE FROM email_change_challenges
+        WHERE created_at < ${cutoff}
+          OR user_id IN (SELECT id FROM users WHERE status = 'deleted')`;
     });
   }
 

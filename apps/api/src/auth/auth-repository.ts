@@ -203,6 +203,7 @@ export interface AuthRepository {
   }): Promise<boolean>;
   failAccountDeletion(input: FailAccountDeletionInput): Promise<boolean>;
   completeAccountDeletion(input: AccountDeletionLeaseInput): Promise<boolean>;
+  purgeContactChangeChallenges(now: string): Promise<void>;
   retryAccountDeletion(input: RetryAccountDeletionInput): Promise<void>;
   createPasswordRecoveryChallenge(input: {
     id: string;

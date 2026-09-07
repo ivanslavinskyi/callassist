@@ -1,19 +1,24 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [".env", "**/.env*"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["NODE_ENV", "NEXT_PUBLIC_*", "INTERNAL_API_URL"],
       "outputs": [".next/**", "dist/**", "!.next/cache/**"]
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["*"]
     },
     "lint": {
       "dependsOn": ["^lint"]
     },
     "test": {
       "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["TEST_DATABASE_URL", "DATABASE_URL", "DATA_ENCRYPTION_*", "PROMO_CODE_HASH_KEY", "RATE_LIMIT_HASH_KEY", "EMAIL_VERIFICATION_HASH_KEY", "NEXT_PUBLIC_*", "INTERNAL_API_URL"],
       "outputs": ["coverage/**"]
     },
     "typecheck": {

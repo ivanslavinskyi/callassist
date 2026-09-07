@@ -1,13 +1,14 @@
+import { requireTestDatabaseUrl } from "../db/require-test-database";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import { runMigrations } from "../db/migrate";
 import { PostgresRateLimiter } from "./postgres-rate-limiter";
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const describeWithDatabase = databaseUrl ? describe : describe.skip;
+const databaseUrl = requireTestDatabaseUrl();
 
-describeWithDatabase("PostgresRateLimiter", () => {
+
+describe("PostgresRateLimiter", () => {
   let first: PostgresRateLimiter;
   let second: PostgresRateLimiter;
   let inspection: postgres.Sql;

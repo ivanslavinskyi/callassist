@@ -1,14 +1,17 @@
 # UI/UX Stabilization Plan
 
-Status: **accepted as the next delivery milestone**
-Source: UI/UX audit of the current operator console
-Scope: 45 findings across navigation, forms, feedback, visual hierarchy,
+Status: **historical design checklist; substantially implemented, acceptance incomplete**
+Reviewed against `96229ea` on 2026-09-07. Source: earlier UI/UX audit of the operator console.
+Original scope: 45 findings across navigation, forms, feedback, visual hierarchy,
 accessibility, responsive layout, and interaction polish.
 
-This milestone is a release gate. Product-roadmap work that adds new authenticated
-screens or operator workflows should not begin until the P0-P2 acceptance criteria
-below are met. P3 may be completed in the same milestone, except for explicitly
-deferred visual preferences such as a manual theme toggle.
+The current delivery sequence is owned by the [release roadmap](mvp-plan.md).
+This document preserves the earlier design targets; it is not a new-work freeze or
+proof that all 45 findings have passed acceptance. Customer routing/catalogues,
+pagination, preparation progress, confirmations, transcript scroll, loading/error
+states and responsive styling exist. Full browser/a11y acceptance remains R13.
+Admin routing subsequently changed to English-only `/admin`; EN/DE rules below apply
+to customer flows and edited content, not the admin shell.
 
 ## Product decisions
 
@@ -67,9 +70,10 @@ Implementation rules:
 - Translation loading must not block live-call events. The active locale catalogue is
   loaded at the route boundary; live event payloads remain language-neutral codes/data.
 
-The exact i18n package should be selected in the first implementation slice after a
-short proof of locale routing, typed keys, server/client rendering, and test support.
-The architectural contract above is package-independent.
+The implementation uses repository-owned typed catalogues, middleware and a locale
+provider, with no external i18n package. The URL/browser cookie controls customer
+locale. A user locale is stored at registration; a settings API for updating that
+preference remains deferred.
 
 ## Delivery slices
 
@@ -77,8 +81,9 @@ The architectural contract above is package-independent.
 
 - Capture desktop, tablet, and mobile reference screenshots for dashboard, create,
   review, active call, completed call, loading, empty, reconnecting, and error states.
-- Add shared tokens for type, spacing, color, focus, motion, and minimum target size;
-  load a self-hosted font through `next/font` and provide robust fallbacks.
+- Shared CSS tokens, embedded Geist WOFF2 via CSS `@font-face`, and system-font
+  fallbacks are implemented. The earlier proposed `next/font` loading path is not
+  used; any replacement requires measured loading and layout acceptance.
 - Introduce primitives for Button, Field/Error, Alert, Toast/Status, Skeleton,
   Accordion, and Dialog. Respect `prefers-reduced-motion`.
 - Install the i18n route/catalogue foundation and migrate the app shell first.
@@ -163,7 +168,7 @@ complete when:
 
 ## Recommended implementation order
 
-Work in vertical slices rather than a single styling pass: foundation → safety →
-create/review flow → live-call flow → history/API scale → responsive/a11y polish.
-This keeps each merge independently testable and prevents new translated screens from
-being built on temporary component or message APIs.
+The sequence above is historical. Continue with the current roadmap's repository
+blockers, then complete R13 browser/a11y evidence across the existing flows. Preserve
+the original acceptance targets as a checklist; do not describe screenshots or a
+screen-reader review as completed unless the dated evidence is available.

@@ -1,5 +1,9 @@
 # Database recovery and secret operations
 
+Updated 2026-09-07 for R03 remediation. Rotation/restore share all nine ciphertext
+families. The current catalog has 49 migrations and 51 public tables. See the
+[remediation evidence](remediation-2026-09-07.md).
+
 This document defines the repository-owned recovery contract. The executable drill
 proves local backup and restore mechanics; it does not claim that managed production
 backups, point-in-time recovery, secret-manager policy, or a production restore test
@@ -117,6 +121,12 @@ owners, access policy and one exercised credential/key procedure are evidenced.
 
 ## Data-encryption key rotation
 
+The shared inventory includes `call_preparation_requests.input_ciphertext`.
+The queued-old-key regression rotates it, removes the old runtime key, completes
+the preparation and proves a no-op replay. Restore has verified samples of all nine
+families. Do not retire a key using success evidence from older eight-family builds;
+run the updated tool against the target data and preserve the results below.
+
 New encrypted values use `v2:<key-id>:<iv>:<tag>:<ciphertext>`. AES-GCM authenticates
 the key ID as additional data, so changing the envelope ID invalidates authentication.
 The runtime still reads legacy `v1` values by resolving them through the explicitly
@@ -139,8 +149,9 @@ Use this sequence for every production rotation:
 4. Set `DATA_ENCRYPTION_REENCRYPT_CONFIRM` to the exact active key ID and run
    `pnpm db:reencrypt`. The command applies pending migrations, takes a dedicated
    PostgreSQL advisory lock, commits bounded batches, refuses unverified feedback,
-   and emits only aggregate versioned JSON evidence. An interrupted run is resumable;
-   rows already using the active key are skipped.
+   and emits only aggregate versioned JSON evidence. It covers all nine
+   enumerated families, including pending preparation input. An interrupted
+   run is resumable; rows already using the active key are skipped.
 5. Run `pnpm db:reencrypt` again with the same confirmation. Preserve evidence that
    both remaining counts are zero and the second run rewrites zero rows. Run
    `pnpm db:recovery:drill` with the complete keyring and preserve its minimized
@@ -159,3 +170,12 @@ DATA_ENCRYPTION_PREVIOUS_KEYS={"primary-2026-01":"<old-base64-key>"}
 DATA_ENCRYPTION_LEGACY_V1_KEY_ID=primary-2026-01
 DATA_ENCRYPTION_REENCRYPT_CONFIRM=primary-2026-08
 ```
+
+## Latest local evidence
+
+The 2026-09-07 audit restored the populated test database in a disposable Docker
+PostgreSQL 17.10 container: 49 migration/checksum rows, 51 public-table row counts,
+seven critical tables and eight available ciphertext-family samples verified.
+The drill reported temporary resources removed. This proves the current tool's
+enumerated coverage, not verification of preparation ciphertext or production PITR.
+The targeted rotation probe separately reproduced the omitted-family failure.

@@ -1,5 +1,9 @@
 # Consent-Based Recording and Post-Call Transcription Plan
 
+Status: implemented decision, reviewed 2026-09-07 against `96229ea`.
+Current release evidence and outstanding quality work are in the
+[audit](project-audit-2026-09-07.md) and [roadmap](mvp-plan.md).
+
 ## Objective
 
 Keep the Realtime conversation and fast live draft while producing a more reliable
@@ -11,18 +15,28 @@ of truth. The final transcript remains AI-generated until an operator checks it.
 ### Before consent
 
 1. Twilio connects the bidirectional Media Stream with call recording disabled.
-2. The selected OpenAI voice introduces the assistant, explains the controlled
-   assistance reason, and states the recording purpose and retention period.
-3. Recipient audio is discarded and is not sent to OpenAI.
-4. Pressing `1` is the only consent signal accepted by the application.
-5. No response or any other key ends the call without recording.
+2. The main OpenAI audio session speaks the short AI identity, represented-person
+   and recording/transcription question in the selected voice. The current prompt
+   does not state the retention period or optional assistance reason.
+3. After the prompt playback mark, recipient audio can reach a separate text-output
+   OpenAI session solely to recognize consent. Automatic responses are disabled there;
+   the application stores neither pre-consent audio nor the raw recognized phrase.
+4. A deterministic classifier matches complete affirmative phrases, rejects
+   unrecognized qualifications/quotes/questions and gives recognized negatives precedence.
+   Unclear speech/timeouts allow one clarification, then keypad fallback.
+   Key `1` is accepted only in that fallback stage.
+5. Refusal or exhaustion of the flow ends the call without recording or forwarding
+   recipient media into the main conversation. Provider processing of the consent
+   answer is still pre-consent processing; public notice alignment is roadmap R07.
 
 ### After consent
 
 1. Persist the consent event and timestamp.
 2. Ask Twilio to start a dual-channel recording of the active call.
 3. Wait for Twilio to confirm that recording has started.
-4. Only then permit recipient audio to reach Realtime and start the objective.
+4. Deliver the optional assistance disclosure and mandatory opening; wait for its
+   playback mark before permitting recipient audio into the main Realtime session.
+   The opening asks whether it is convenient to continue before the objective.
 5. If recording cannot start, explain the failure and end the call.
 
 ### After the call
@@ -31,8 +45,9 @@ of truth. The final transcript remains AI-generated until an operator checks it.
 2. A completed callback creates or resumes an idempotent transcription job.
 3. The backend downloads the complete consented recording using server-side
    credentials; no authenticated media URL is exposed to the browser.
-4. The recording is sent once to `gpt-transcribe` with bounded compiled context,
-   literal names, selected languages, and the expected writing system.
+4. Supported stereo WAV is split into channel-labelled speech utterances, normally
+   transcribed with `gpt-4o-transcribe`. Mono/unsupported media uses one full-file
+   `gpt-transcribe` fallback with bounded compiled context and language guidance.
 5. The encrypted recording-derived text is stored separately from the live draft.
 6. The UI labels the two outputs clearly and retains audio for verification until
    the configured deletion deadline.
@@ -51,19 +66,26 @@ none -> processing -> completed
 completed -> processing (explicit regeneration while audio is retained)
 ```
 
-The conversation gate opens only after the `recording` transition.
+The conversation input gate opens only after recording startup and completion of
+the mandatory opening playback. The diagram describes recording/transcript states,
+not the separate consent orchestration stages.
 
 ## Data and access
 
 - Audio retention is immediate, 7 days (default), or 30 days.
+- The deletion deadline is calculated when final transcription completes successfully;
+  regeneration updates it. Failed transcription can retain audio for retry, so the
+  selected value is not a hard deadline measured from call start.
 - Recording metadata contains provider IDs, channel count, duration, lifecycle
   timestamps, deletion deadline, and non-sensitive failure codes.
 - The application never stores Twilio credentials or an authenticated recording URL.
 - The final transcript stores model ID, encrypted text, status, processing timestamps,
   and a non-sensitive failure code.
 - Realtime transcript segments are never overwritten by the post-call result.
-- Browser audio playback is proxied by the main API. Public deployment requires an
-  authenticated owner check before any recording or transcript can be returned.
+- Browser audio playback is proxied by the main API with an implemented authenticated
+  owner check. Recording URLs and credentials stay server-side.
+- Live transcript rows are plaintext in PostgreSQL; final text/segments are encrypted.
+  Access controls and deployment storage encryption are separate boundaries.
 
 ## Stable transcription decision
 
@@ -91,12 +113,14 @@ Each utterance request contains:
 
 Roles come only from the physical recording channel. Realtime events never provide
 final wording or role metadata. Speech regions are normalized, padded, and uploaded
-with bounded concurrency. If channel extraction is unavailable, the application
+with concurrency four, processing assistant utterances before recipient utterances.
+If channel extraction is unavailable, the application
 publishes canonical full-recording text without roles.
 
 ### Why this path was selected
 
-Experiments on retained German calls compared the candidate paths:
+Historical experiments recorded during implementation compared the candidate paths
+(not re-run as part of the 2026-09-07 audit):
 
 - full-call diarization retained roles and timestamps but rendered several German
   recipient utterances as Cyrillic phonetics, including with `language=de`;
@@ -147,7 +171,8 @@ guessing. Retained audio remains the verification source for critical details.
 - Re-evaluate diarization only when corpus results show that it does not reduce wording
   accuracy; do not restore speaker attribution based on a single successful call.
 - Add click-to-seek verification and immutable operator-corrected transcript revisions.
-- Move temporary audio to encrypted customer-controlled storage for production.
+- Decide whether provider-held audio satisfies the reviewed deployment policy or
+  requires encrypted customer-controlled storage; the latter is not implemented.
 
 ## OpenAI references
 

@@ -2,6 +2,12 @@
 
 Status: core implementation complete; final multi-browser/device acceptance remains.
 
+Reviewed 2026-09-07 against `96229ea`. The dated checkpoint counts below are historical;
+the [current audit](project-audit-2026-09-07.md) ran 503 automated tests. These tests
+do not prove real password-manager or screen-reader behavior. R05 contact-challenge
+erasure/cleanup is now implemented; see [remediation](remediation-2026-09-07.md).
+R13 browser acceptance and R15 durable notifications remain open.
+
 ## Goals
 
 - Prevent password managers from placing the account email in the replacement-phone field.
@@ -26,6 +32,17 @@ Status: core implementation complete; final multi-browser/device acceptance rema
 - Reworked the page into compact Profile, Usage, Data & privacy, and Security sections; removed duplicate session actions and nested mobile ledger scrolling.
 - Verified TypeScript, ESLint, package builds, migration catalogue, 70 contract tests, 52 focused API/PostgreSQL tests, and 105 web tests. Browser automation covered the 390 px and 1280 px layouts and the live form semantics.
 - Remaining release gate: hands-on autofill checks in Chrome, Edge, Safari, and Firefox plus the complete light/dark and 320/768 px visual matrix.
+
+## Current operational limits
+
+Email-change codes are HMAC-hashed and challenge records contain the proposed email
+in plaintext until cleanup. Both email/phone challenge tables currently purge old
+rows only when a new challenge is created; account anonymization does not erase them.
+This is an open lifecycle defect, not completed anonymization. Verification mail to
+the new address and a notice to the old address are sent concurrently during challenge
+creation. Either delivery failure invalidates the challenge and returns
+`EMAIL_DELIVERY_UNAVAILABLE`. There is no durable retry/outbox or separate completion
+notification. See audit A05 and roadmap R15.
 
 ## Acceptance criteria
 

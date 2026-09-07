@@ -15,15 +15,7 @@ import { createCallFeedbackFingerprint } from "../security/feedback-fingerprint"
 import { runMigrations } from "./migrate";
 
 const rotationLockId = 742_303_985;
-const genericCiphertextColumns = [
-  ["call_briefs", "allowed_facts_ciphertext"],
-  ["call_briefs", "context_ciphertext"],
-  ["call_briefs", "compilation_ciphertext"],
-  ["call_briefs", "assistance_reason_ciphertext"],
-  ["call_briefs", "assistance_disclosure_ciphertext"],
-  ["final_transcripts", "text_ciphertext"],
-  ["final_transcripts", "segments_ciphertext"]
-] as const;
+import { genericCiphertextColumns } from "./encrypted-columns";
 
 type CiphertextRow = { id: string; payload: string };
 type FeedbackRow = {

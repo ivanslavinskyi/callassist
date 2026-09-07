@@ -30,16 +30,7 @@ const criticalTables = [
   "sessions",
   "users"
 ] as const;
-const encryptedColumns = [
-  ["call_briefs", "allowed_facts_ciphertext"],
-  ["call_briefs", "context_ciphertext"],
-  ["call_briefs", "compilation_ciphertext"],
-  ["call_briefs", "assistance_reason_ciphertext"],
-  ["call_briefs", "assistance_disclosure_ciphertext"],
-  ["final_transcripts", "text_ciphertext"],
-  ["final_transcripts", "segments_ciphertext"],
-  ["call_feedback_revisions", "comment_ciphertext"]
-] as const;
+import { encryptedColumns } from "./encrypted-columns";
 
 type AppliedMigrationRow = {
   name: string;

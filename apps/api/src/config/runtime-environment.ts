@@ -24,6 +24,7 @@ export function validateRuntimeEnvironment(
   requireExact(environment, "STORAGE_DRIVER", "postgres", issues);
   requireExact(environment, "TELEPHONY_DRIVER", "twilio", issues);
   requireExact(environment, "DURABLE_WORKER_MODE", "external", issues);
+  requireExact(environment, "BRIEF_COMPILER_DRIVER", "openai", issues);
   requirePostgresUrl(environment.DATABASE_URL, issues);
   let dataEncryptionMaterial: DataEncryptionMaterial | undefined;
   try {
@@ -42,7 +43,6 @@ export function validateRuntimeEnvironment(
   if (runtime === "api") {
     requireExact(environment, "VERIFICATION_DRIVER", "twilio", issues);
     requireExact(environment, "EMAIL_DRIVER", "resend", issues);
-    requireExact(environment, "BRIEF_COMPILER_DRIVER", "openai", issues);
     requireSecret(environment, "TWILIO_VERIFY_SERVICE_SID", issues);
     requireSecret(environment, "RESEND_API_KEY", issues);
     requireSecret(environment, "EMAIL_FROM", issues);

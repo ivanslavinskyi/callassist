@@ -1,9 +1,14 @@
 # Channel-aware final transcription
 
+Status: implemented in the current runtime; reviewed 2026-09-07 against `96229ea`.
+The problem and experiments below describe the earlier alignment implementation.
+See [current transcription behavior](post-call-transcription-plan.md) and
+[current release evidence](project-audit-2026-09-07.md).
+
 ## Problem
 
-The retained Twilio recording is dual-channel, but the final transcript currently
-assigns roles by aligning one unstructured recording transcript with the Realtime
+The retained Twilio recording is dual-channel, but the earlier final transcript
+assigned roles by aligning one unstructured recording transcript with the Realtime
 draft. Realtime recognition errors and missing short turns can consequently move
 recording-derived words to the wrong role or publish an `unknown` speaker.
 
@@ -25,7 +30,8 @@ The recording channel is the only authority for speaker role:
 - a mono or unsupported recording falls back to canonical plain text without
   invented roles.
 
-No structured final segment may use the `unknown` role. Unintelligible audio on a
+New channel-derived final segments do not use the `unknown` role; historical segments
+and compatibility contracts can still contain it. Unintelligible audio on a
 known channel remains attached to that channel and may be represented as an
 explicit non-speech placeholder in a later operator-editing feature.
 
@@ -56,5 +62,7 @@ post-call latency remain bounded.
 
 ## Rollout
 
-Keep this work on `codex/channel-aware-final-transcript`. Do not merge until the
-latest retained call and representative German/Russian fixtures have been checked.
+The implementation is already present on the audited source commit; no feature-branch
+merge is pending. Channel extraction and transcriber tests pass in the dated audit.
+The prior retained-call experiment is historical evidence. Current-commit live calls
+and a representative multilingual/audio-quality corpus remain roadmap R06/R14.

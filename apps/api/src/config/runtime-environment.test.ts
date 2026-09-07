@@ -37,6 +37,12 @@ function productionEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe("production runtime configuration", () => {
+  it.each(["mock", "", undefined])("rejects worker compiler driver %s", (driver) => {
+    const environment = productionEnvironment();
+    environment.BRIEF_COMPILER_DRIVER = driver;
+    expect(() => validateRuntimeEnvironment(environment, "worker"))
+      .toThrow("BRIEF_COMPILER_DRIVER must be openai");
+  });
   it("accepts a fail-closed API configuration", () => {
     expect(() => validateRuntimeEnvironment(
       productionEnvironment(),
@@ -123,7 +129,7 @@ describe("production runtime configuration", () => {
     delete environment.RESEND_API_KEY;
     delete environment.EMAIL_FROM;
     delete environment.EMAIL_VERIFICATION_HASH_KEY;
-    delete environment.BRIEF_COMPILER_DRIVER;
+
 
     expect(() => validateRuntimeEnvironment(environment, "worker"))
       .not.toThrow();

@@ -3,6 +3,22 @@ import { classifyConsent } from "./consent-classifier";
 
 describe("classifyConsent", () => {
   it.each([
+    ["Yes, but I don't agree to recording", "en-GB"],
+    ["Ja, aber ohne Aufnahme", "de-CH"],
+    ["Да, но запись запрещаю", "ru-RU"],
+    ["Yes if you delete it", "en-US"],
+    ["Oui mais sans enregistrement", "fr-CH"],
+    ["Sì ma senza registrare", "it-CH"],
+    ["Ja falls Sie nicht aufnehmen", "de-DE"],
+    ["Yes?", "en-GB"],
+    ['"Yes"', "en-GB"],
+    ["'Yes'", "en-GB"],
+    ["You can call but cannot record", "en-GB"],
+    ["Да не надо", "ru-RU"]
+  ] as const)("never grants qualified or quoted answer %s", (text, locale) => {
+    expect(classifyConsent(text, locale)).not.toBe("affirmative");
+  });
+  it.each([
     ["Ja, gerne.", "de-CH"],
     ["Oui.", "fr-CH"],
     ["Sì, certo.", "it-CH"],

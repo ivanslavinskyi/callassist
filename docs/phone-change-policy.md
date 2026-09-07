@@ -5,6 +5,9 @@ self-service flow for an active, signed-in user who still knows the current pass
 and controls the replacement phone. It is not a support override for loss of both
 password and verified-phone access.
 
+Reviewed 2026-09-07 against `96229ea`; current implementation/release status is in
+the [audit](project-audit-2026-09-07.md) and [roadmap](mvp-plan.md).
+
 ## Security invariants
 
 1. Both endpoints require an allowed browser origin and an active verified account
@@ -46,9 +49,11 @@ payload, or exception text.
 ## Privacy and retention
 
 The pending challenge temporarily contains the replacement phone because the server
-must ask the verification provider to check that destination. Challenges are deleted
-after 30 days by the repository cleanup path; production maintenance must run the same
-cleanup even during periods without phone-change traffic. The immutable event stores
+must ask the verification provider to check that destination. The repository deletes
+rows older than 30 days on new challenge creation and via startup/hourly deletion-worker
+maintenance, including idle periods. Account deletion removes all challenge states
+atomically with anonymization. Existing deleted-user remnants are also purged by
+maintenance. The immutable event stores
 only user/challenge UUIDs, revoked-session count, invalidated-recovery counts, and
 time. It has no phone, phone hash, password/session credential, OTP, provider ID, or
 foreign key that would retain the temporary challenge row.

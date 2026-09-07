@@ -537,6 +537,12 @@ export class InMemoryAuthRepository implements AuthRepository {
     user.phoneVerifiedAt = null;
     user.lastLoginAt = null;
     user.status = "deleted";
+    for (const [id, challenge] of this.#phoneChangeChallenges) {
+      if (challenge.userId === user.id) this.#phoneChangeChallenges.delete(id);
+    }
+    for (const [id, challenge] of this.#emailChangeChallenges) {
+      if (challenge.userId === user.id) this.#emailChangeChallenges.delete(id);
+    }
     this.#revokeSessions(user.id, input.now);
     request.status = "completed";
     request.completedAt = input.now;
@@ -1146,6 +1152,22 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   phoneChangeChallengesForTest() {
     return structuredClone([...this.#phoneChangeChallenges.values()]);
+  }
+
+  async purgeContactChangeChallenges(now: string) {
+    const cutoff = new Date(now).getTime() - 30 * 24 * 60 * 60 * 1_000;
+    for (const [id, challenge] of this.#phoneChangeChallenges) {
+      if (new Date(challenge.createdAt).getTime() < cutoff ||
+        this.#requireUser(challenge.userId).status === "deleted") {
+        this.#phoneChangeChallenges.delete(id);
+      }
+    }
+    for (const [id, challenge] of this.#emailChangeChallenges) {
+      if (new Date(challenge.createdAt).getTime() < cutoff ||
+        this.#requireUser(challenge.userId).status === "deleted") {
+        this.#emailChangeChallenges.delete(id);
+      }
+    }
   }
 
   async close() {}

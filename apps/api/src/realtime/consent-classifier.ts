@@ -13,13 +13,13 @@ const phrases: Record<
     negative: ["non", "je ne suis pas d accord", "n enregistrez pas"]
   },
   "it-CH": {
-    affirmative: ["si", "va bene", "certo", "puo registrare"],
+    affirmative: ["si", "si certo", "va bene", "certo", "puo registrare"],
     negative: ["no", "non voglio", "non registrare"]
   },
   "en-GB": englishPhrases(),
   "en-US": englishPhrases(),
   "ru-RU": {
-    affirmative: ["да", "хорошо", "конечно", "можете", "согласен", "согласна"],
+    affirmative: ["да", "да конечно", "хорошо", "конечно", "можете", "согласен", "согласна"],
     negative: ["нет", "не записывайте", "не записывай", "я не согласен", "я не согласна"]
   }
 };
@@ -30,9 +30,12 @@ export function classifyConsent(
 ): ConsentDecision {
   const normalized = normalize(text);
   if (!normalized || normalized.split(" ").length > 10) return "unclear";
-
   const localePhrases = phrases[locale];
   if (containsAny(normalized, localePhrases.negative)) return "negative";
+  // Questions and quoted answers are not an unambiguous grant. Do not discard
+  // these markers during normalization and accidentally turn them into "yes".
+  if (/[?？"“”„«»]/u.test(text) || /^\s*['‘’]|['‘’]\s*$/u.test(text)) return "unclear";
+
   if (matchesAny(normalized, localePhrases.affirmative)) return "affirmative";
   return "unclear";
 }
@@ -43,9 +46,7 @@ function containsAny(value: string, candidates: readonly string[]) {
 }
 
 function matchesAny(value: string, candidates: readonly string[]) {
-  return candidates.some(
-    (candidate) => value === candidate || value.startsWith(`${candidate} `)
-  );
+  return candidates.includes(value);
 }
 
 function normalize(value: string) {
@@ -76,7 +77,7 @@ function germanPhrases() {
 
 function englishPhrases() {
   return {
-    affirmative: ["yes", "sure", "okay", "that s fine", "you can"],
+    affirmative: ["yes", "yes that s fine", "sure", "okay", "that s fine", "you can"],
     negative: ["no", "do not record", "don t record", "i do not consent"]
   } as const;
 }

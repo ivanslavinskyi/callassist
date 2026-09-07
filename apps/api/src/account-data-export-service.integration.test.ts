@@ -1,3 +1,4 @@
+import { requireTestDatabaseUrl } from "./db/require-test-database";
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
@@ -15,10 +16,10 @@ import { PostgresContentRepository } from "./content/postgres-content-repository
 import { runMigrations } from "./db/migrate";
 import { PostgresCallRepository } from "./storage/postgres-call-repository";
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const describeWithDatabase = databaseUrl ? describe : describe.skip;
+const databaseUrl = requireTestDatabaseUrl();
 
-describeWithDatabase("AccountDataExportService PostgreSQL", () => {
+
+describe("AccountDataExportService PostgreSQL", () => {
   const encryptionKey = Buffer.alloc(32, 19);
   let authRepository: PostgresAuthRepository;
   let callRepository: PostgresCallRepository;

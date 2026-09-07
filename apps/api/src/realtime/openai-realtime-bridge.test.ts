@@ -663,6 +663,29 @@ describe("OpenAIRealtimeBridge", () => {
     await service.close();
   });
 
+  it.each([
+    ["Yes, but I don't agree to recording", "en-GB"],
+    ["Ja, aber ohne Aufnahme", "de-CH"],
+    ["Да, но запись запрещаю", "ru-RU"]
+  ] as const)("never starts recording for qualified answer %s", async (transcript, locale) => {
+    const harness = await createConsentHarness(false, locale);
+    completeConsentPlayback(harness);
+    emitJson(harness.consentSocket, {
+      type: "conversation.item.input_audio_transcription.completed", transcript
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(harness.startRecording).not.toHaveBeenCalled();
+    expect((await harness.service.get(harness.created.id))?.recording).toBeNull();
+    expect((await harness.service.listTelemetry(harness.created.id)).some(
+      ({ payload }) => payload.name === "consent.granted" || payload.name === "conversation.started"
+    )).toBe(false);
+    emitJson(harness.twilioSocket, { event: "media", media: { payload: "private-audio" } });
+    expect(harness.openAISocket.sent).not.toContainEqual({
+      type: "input_audio_buffer.append", audio: "private-audio"
+    });
+    await harness.service.close();
+  });
+
   it("ends without recording or conversation on clear negative voice consent", async () => {
     const harness = await createConsentHarness();
     completeConsentPlayback(harness);
@@ -745,7 +768,7 @@ describe("OpenAIRealtimeBridge", () => {
   });
 });
 
-async function createConsentHarness(failRecording = false) {
+async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale) {
   const service = new CallService(new InMemoryCallRepository());
   const created = await service.create({
     recipientName: brief.recipientName,
@@ -756,7 +779,7 @@ async function createConsentHarness(failRecording = false) {
     representedPersonLastName: "Keller",
     assistanceReason: "none",
     context: brief.context,
-    locale: brief.locale,
+    locale,
     allowLanguageSwitch: false,
     allowedFacts: brief.allowedFacts
   });

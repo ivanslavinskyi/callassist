@@ -1,3 +1,4 @@
+import { requireTestDatabaseUrl } from "../db/require-test-database";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
@@ -9,10 +10,10 @@ import {
 import { hashSessionToken } from "./auth-service";
 import { PostgresAuthRepository } from "./postgres-auth-repository";
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const describeWithDatabase = databaseUrl ? describe : describe.skip;
+const databaseUrl = requireTestDatabaseUrl();
 
-describeWithDatabase("PostgresAuthRepository", () => {
+
+describe("PostgresAuthRepository", () => {
   let repository: PostgresAuthRepository;
   let inspection: postgres.Sql;
 

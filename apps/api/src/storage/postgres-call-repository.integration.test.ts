@@ -1,3 +1,4 @@
+import { requireTestDatabaseUrl } from "../db/require-test-database";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
@@ -20,10 +21,10 @@ const ledgerTestPolicy: CallAdmissionPolicy = {
   maxDurationSeconds: 900
 };
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const describeWithDatabase = databaseUrl ? describe : describe.skip;
+const databaseUrl = requireTestDatabaseUrl();
 
-describeWithDatabase("PostgresCallRepository", () => {
+
+describe("PostgresCallRepository", () => {
   const encryptionKey = Buffer.alloc(32, 7);
   let repository: PostgresCallRepository;
   let inspection: postgres.Sql;

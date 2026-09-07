@@ -1,0 +1,117 @@
+{
+  "date": "2026-09-07",
+  "baseCommit": "96229ea8572929c557f8dba45bb51248c28e7b4e",
+  "scope": "Uncommitted working tree; local verification only",
+  "source": {
+    "sha256": "2c5ea9ae30f5196dd115f0084a77366fa73f4b530cd4068b047b8d4544a49b13",
+    "fileCount": 366,
+    "normalization": "Sorted repo-relative paths, NUL, UTF-8 text with LF and no BOM, NUL",
+    "matchesTestedCopy": true
+  },
+  "closedRepositoryItems": [
+    "R01",
+    "R02",
+    "R03",
+    "R04",
+    "R05",
+    "R18",
+    "R19"
+  ],
+  "partialItems": [
+    "R06"
+  ],
+  "runtime": {
+    "os": "Windows",
+    "node": "v24.9.0",
+    "pnpm": "10.12.4",
+    "postgres": "17.10"
+  },
+  "cleanInstall": {
+    "frozenLockfile": true,
+    "initialEnvFile": false,
+    "initialNodeModules": false,
+    "initialBuildCache": false
+  },
+  "tests": {
+    "passed": 541,
+    "failed": 0,
+    "skipped": 0,
+    "api": {
+      "tests": 363,
+      "files": 54
+    },
+    "web": {
+      "tests": 108,
+      "files": 25
+    },
+    "contracts": {
+      "tests": 70,
+      "files": 14
+    },
+    "postgresSuites": 8,
+    "mode": "turbo strict; test cache disabled"
+  },
+  "checks": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "build": "passed",
+    "missingDatabaseUrlExit": 1,
+    "unavailableDatabaseExit": 1
+  },
+  "environment": {
+    "buildOriginCacheInvalidation": {
+      "NEXT_PUBLIC_API_URL": true,
+      "NEXT_PUBLIC_SITE_URL": true,
+      "INTERNAL_API_URL": true
+    },
+    "testStrictMode": "strict",
+    "testDatabaseDeclared": true,
+    "testCacheEnabled": false,
+    "devPassThrough": [
+      "*"
+    ],
+    "testDatabasePassed": true,
+    "envFileCacheInvalidation": true,
+    "webSettingLoaded": true,
+    "unrelatedSecretExcluded": true
+  },
+  "productionDependencies": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0
+  },
+  "rotation": {
+    "ciphertextFamilies": 9,
+    "oldKeyRemovedBeforeCompletion": true,
+    "secondRunRewrites": 0,
+    "schemaInventoryMatched": true
+  },
+  "recovery": {
+    "event": "database_recovery_drill_succeeded",
+    "schemaVersion": 1,
+    "completedAt": "2026-09-07T08:35:50.705Z",
+    "durationMs": 2348,
+    "databaseServerVersion": "17.10",
+    "dumpToolVersion": "pg_dump (PostgreSQL) 17.10",
+    "restoreToolVersion": "pg_restore (PostgreSQL) 17.10",
+    "backupFormat": "postgresql-custom",
+    "backupBytes": 682484,
+    "backupSha256": "8f4a8c977a429fd97cb04f5d6f10376e013050754d1c504b63eeb48f4206f517",
+    "migrationCount": 49,
+    "latestMigration": "0049_imprint_content_page.sql",
+    "publicTableCount": 51,
+    "rowCountChecks": 51,
+    "criticalTableCount": 7,
+    "encryptedSamplesVerified": 9,
+    "temporaryResourcesRemoved": true
+  },
+  "external": {
+    "realProviderCalls": 0,
+    "hostedCi": false,
+    "deployment": false,
+    "browserAcceptance": false
+  },
+  "releaseRecommendation": "NO-GO"
+}

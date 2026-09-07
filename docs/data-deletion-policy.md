@@ -2,6 +2,11 @@
 
 Status: implemented application baseline through checkpoint 6F3b. This document is a technical lifecycle policy, not a substitute for the final Swiss legal/privacy review or production backup evidence.
 
+Updated 2026-09-07 for the remediation working tree. R05 removes email/phone-change
+challenge contacts in the same transaction as account anonymization, under the user
+lock. The deletion worker also purges challenges older than 30 days and legacy
+deleted-user challenges on startup and hourly, even without new user traffic.
+
 ## Principles
 
 1. A deletion action removes or irreversibly redacts user-provided personal content. It does not rewrite immutable financial, consent, safety, or access evidence.
@@ -17,6 +22,9 @@ Status: implemented application baseline through checkpoint 6F3b. This document 
 | --- | --- | --- | --- |
 | User email, phone, first/last name, password, login time | Unchanged | Replace with unique tombstones; invalidate credential and verification; mark `deleted` | Remove account identity while preserving foreign-key continuity |
 | Sessions | Unchanged | Revoke all immediately after successful anonymization | Prevent future access |
+| Email/phone-change challenges | Unchanged | Delete all states atomically with anonymization | Independent startup/hourly worker cleanup after 30 days; contact-free immutable security events remain |
+| Password recovery challenges/grants | Unchanged | Capabilities fail eligibility after deletion, but rows are retained | Expiry is not erasure; scheduled retention remains R17 |
+| Pending call preparations | Unchanged | Cancel queued/running work and erase encrypted source input before publication | Prevent creation of new calls after deletion request |
 | Call brief recipient/person/objective/context/facts/compilation/disability or language-assistance text | Redact; hide call from owner reads | Redact every owned call | User-provided personal content |
 | Realtime and final transcript text/segments | Delete or null | Delete or null for every owned call | Conversation content |
 | Approval title/reason/proposed speech | Delete | Delete for every owned call | May contain sensitive proposed disclosures |
@@ -42,7 +50,13 @@ Account-wide deletion reuses the provider-first call primitive through a durable
 
 While a request is open, browser call mutations are rejected with `ACCOUNT_DELETION_PENDING`. A dialing, connected, or approval-paused call changes the request to `waiting_for_calls` without consuming its bounded provider-failure budget. Inactive pre-call drafts are safely stopped, and terminal calls are processed in bounded batches through the 6F3a provider-first primitive. Provider failures use exponential backoff and immutable attempt evidence; the fifth failed attempt enters `needs_support`. Admin or superadmin recovery requires an operational reason, creates a new retry generation, and does not restore content already removed by an earlier attempt.
 
-Only after no visible owned call remains does finalization tombstone email, phone, first/last name and password, clear phone verification and last-login time, mark the user `deleted`, revoke every remaining session, append immutable completion evidence, and mark the request `completed`. PostgreSQL performs those final identity/session/request/evidence changes in one transaction and rejects finalization if an undeleted call raced into the account. Global recipient suppressions are never selected or mutated by this flow.
+Only after no visible owned call remains does finalization tombstone the primary user
+email, phone, first/last name and password, clear verification/last-login time, mark
+the user `deleted`, revoke sessions and record completion atomically. PostgreSQL
+rejects finalization if an undeleted call raced into the account. Global recipient
+suppressions are never selected or mutated. The current finalization transaction
+does not remove secondary email/phone challenge contact values; `completed` therefore
+does not prove complete contact erasure across all tables.
 
 ## Backups and support
 

@@ -1,182 +1,110 @@
-import { randomInt, randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
-const apiUrl = process.env.REAL_CALL_DRILL_API_URL?.trim() ||
-  "http://127.0.0.1:4000";
-const target = process.env.REAL_CALL_DRILL_TARGET?.trim();
-const verificationCode =
-  process.env.REAL_CALL_DRILL_VERIFICATION_CODE?.trim();
-
-if (process.env.REAL_CALL_DRILL_CONFIRM !== "CALL_AUTHORIZED") {
-  throw new Error(
-    "Set REAL_CALL_DRILL_CONFIRM=CALL_AUTHORIZED after recipient approval"
-  );
-}
-if (!target) throw new Error("REAL_CALL_DRILL_TARGET is required");
-if (!verificationCode) {
-  throw new Error("REAL_CALL_DRILL_VERIFICATION_CODE is required");
-}
-
-const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
-const accountPhone = `+4179000${String(randomInt(10_000)).padStart(4, "0")}`;
-const registration = {
-  email: `real-call-drill-${suffix}@example.test`,
-  password: `Real-call-drill-${randomUUID()}!`,
-  phoneE164: accountPhone,
-  firstName: "Test",
-  lastName: "Operator",
-  uiLocale: "en"
-};
-
-await request("/api/auth/register", {
-  method: "POST",
-  body: registration,
-  expectedStatus: 202
-});
-const verified = await request("/api/auth/verify-phone", {
-  method: "POST",
-  body: { email: registration.email, code: verificationCode },
-  expectedStatus: 200,
-  includeResponse: true
-});
-const cookie = verified.response.headers.get("set-cookie")?.split(";", 1)[0];
-if (!cookie) throw new Error("Verification did not create a session");
-
-const onboarding = await request("/api/onboarding/status?locale=en", {
-  cookie,
-  includeResponse: true
-});
-const current = onboarding.body.current;
-await request("/api/onboarding/accept", {
-  method: "POST",
-  cookie,
-  body: {
-    locale: "en",
-    termsRevisionId: current.terms.id,
-    acceptableUseRevisionId: current.acceptableUse.id,
-    acceptTerms: true,
-    acceptAcceptableUse: true,
-    acknowledgeConsent: true,
-    acknowledgeRetention: true,
-    acknowledgeUseLimits: true,
-    acknowledgeCredits: true
+// Two invocations leave a review/worker-stop boundary. No registration or SMS.
+export async function runRealCallDrill(environment = process.env, dependencies = {}) {
+  const fetchImpl = dependencies.fetch ?? fetch;
+  const sleep = dependencies.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const now = dependencies.now ?? Date.now;
+  const write = dependencies.write ?? ((event) => process.stdout.write(`${JSON.stringify(event)}\n`));
+  const apiUrl = new URL(environment.REAL_CALL_DRILL_API_URL?.trim() || "http://127.0.0.1:4000");
+  if (!["http:", "https:"].includes(apiUrl.protocol) || apiUrl.username || apiUrl.password ||
+    apiUrl.pathname !== "/" || apiUrl.search || apiUrl.hash ||
+    (apiUrl.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(apiUrl.hostname))) {
+    throw new Error("REAL_CALL_DRILL_API_URL must be HTTPS or loopback HTTP origin");
   }
-});
-
-const created = await request("/api/call-briefs", {
-  method: "POST",
-  cookie,
-  body: {
-    recipientName: "Тестовый получатель",
-    phoneNumber: target,
-    objective:
-      "После согласия сообщить, что это контролируемая инженерная проверка SHPROHLI. " +
-      "Спросить, хорошо ли получатель слышит ассистента. Зафиксировать только ответ " +
-      "да или нет, поблагодарить и вежливо завершить звонок.",
-    assistantProfileId: "sebastian",
-    representedPersonFirstName: "Тестовый",
-    representedPersonLastName: "Оператор",
-    assistanceReason: "language_barrier",
-    locale: "ru-RU",
-    audioRetentionDays: 0,
-    allowLanguageSwitch: false,
-    allowedFacts: []
-  },
-  expectedStatus: 201,
-  includeResponse: true,
-  timeoutMs: 120_000
-});
-const callId = created.body.id;
-process.stdout.write(`${JSON.stringify({
-  event: "real_call_brief_created",
-  callId,
-  status: created.body.status
-})}\n`);
-
-const started = await request(`/api/call-briefs/${callId}/approve-and-start`, {
-  method: "POST",
-  cookie,
-  includeResponse: true,
-  timeoutMs: 120_000
-});
-process.stdout.write(`${JSON.stringify({
-  event: "real_call_started",
-  callId,
-  status: started.body.brief.status
-})}\n`);
-
-let previousStatus = started.body.brief.status;
-const deadline = Date.now() + 10 * 60_000;
-while (Date.now() < deadline) {
-  await new Promise((resolve) => setTimeout(resolve, 2_000));
-  try {
-    const snapshot = await request(`/api/call-briefs/${callId}`, {
-      cookie,
-      includeResponse: true,
-      timeoutMs: 10_000
-    });
-    const status = snapshot.body.brief.status;
-    if (status !== previousStatus) {
-      previousStatus = status;
-      process.stdout.write(`${JSON.stringify({
-        event: "real_call_status",
-        callId,
-        status
-      })}\n`);
+  const mode = environment.REAL_CALL_DRILL_MODE?.trim() || "prepare";
+  if (!["prepare", "start"].includes(mode)) throw new Error("REAL_CALL_DRILL_MODE must be prepare or start");
+  const email = environment.REAL_CALL_DRILL_EMAIL?.trim();
+  const password = environment.REAL_CALL_DRILL_PASSWORD;
+  if (!email || !password) throw new Error("Existing verified REAL_CALL_DRILL_EMAIL and REAL_CALL_DRILL_PASSWORD are required");
+  const target = environment.REAL_CALL_DRILL_TARGET?.trim();
+  let callId = environment.REAL_CALL_DRILL_CALL_ID?.trim();
+  const idempotencyKey = environment.REAL_CALL_DRILL_IDEMPOTENCY_KEY?.trim() || randomUUID();
+  if (mode === "prepare" && (!target || !/^\+41\d{9}$/.test(target))) throw new Error("REAL_CALL_DRILL_TARGET must be an approved CH E.164 destination");
+  if (mode === "prepare" && !isUuid(idempotencyKey)) throw new Error("Invalid REAL_CALL_DRILL_IDEMPOTENCY_KEY");
+  if (mode === "start") {
+    if (!isUuid(callId)) throw new Error("REAL_CALL_DRILL_CALL_ID must be a prepared call UUID");
+    if (environment.REAL_CALL_DRILL_CONFIRM !== "CALL_AUTHORIZED") {
+      throw new Error("Set REAL_CALL_DRILL_CONFIRM=CALL_AUTHORIZED after reviewing the prepared call and obtaining recipient approval");
     }
-    if (["completed", "failed", "stopped"].includes(status)) break;
-  } catch (error) {
-    process.stdout.write(`${JSON.stringify({
-      event: "real_call_poll_unavailable",
-      callId,
-      code: error instanceof Error ? error.message : "UNKNOWN"
-    })}\n`);
   }
-}
-process.stdout.write(`${JSON.stringify({
-  event: "real_call_drill_finished",
-  callId,
-  status: previousStatus
-})}\n`);
-if (!["completed", "failed", "stopped"].includes(previousStatus)) {
-  throw new Error(`REAL_CALL_DRILL_TIMEOUT_${previousStatus}`);
-}
-
-async function request(path, options = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    options.timeoutMs ?? 30_000
-  );
-  try {
-    const response = await fetch(`${apiUrl}${path}`, {
-      method: options.method ?? "GET",
+  let cookie;
+  async function request(path, options = {}) {
+    const response = await fetchImpl(new URL(path, apiUrl), {
+      method: options.method ?? "GET", redirect: "error",
       headers: {
         ...(options.body ? { "content-type": "application/json" } : {}),
-        ...(options.cookie ? { cookie: options.cookie } : {})
+        ...(cookie ? { cookie } : {}),
+        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {})
       },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-      signal: controller.signal
+      signal: AbortSignal.timeout(30_000)
     });
     const body = response.status === 204 ? null : await response.json();
-    if (
-      options.expectedStatus !== undefined &&
-      response.status !== options.expectedStatus
-    ) {
-      throw new Error(
-        `${path}:${response.status}:${controlledErrorCode(body)}`
-      );
+    if (!response.ok || (options.expectedStatus && response.status !== options.expectedStatus)) {
+      const code = /^[A-Z][A-Z0-9_]{0,80}$/.test(body?.error) ? body.error : "REQUEST_FAILED";
+      throw new Error(`DRILL_HTTP_${response.status}_${code}`);
     }
-    if (!response.ok) {
-      throw new Error(`${path}:${response.status}:${controlledErrorCode(body)}`);
+    return { body, response };
+  }
+  const login = await request("/api/auth/login", { method: "POST", body: { email, password }, expectedStatus: 200 });
+  cookie = login.response.headers.get("set-cookie")?.split(";", 1)[0];
+  if (!cookie) throw new Error("Login did not create a session");
+  try {
+    const { body: onboarding } = await request("/api/onboarding/status?locale=en");
+    if (onboarding.required) throw new Error("Accept the current Terms/AUP in the web UI before this drill");
+    if (mode === "prepare") {
+      write({ event: "real_call_preparation_requested", idempotencyKey });
+      let { body: preparation } = await request("/api/call-preparations", {
+        method: "POST", expectedStatus: 202, idempotencyKey,
+        body: {
+          recipientName: "Test recipient", phoneNumber: target,
+          objective: "After consent, explain this is a controlled SHPROHLI engineering check. Ask whether the recipient can hear the assistant clearly. Record only yes or no, thank them and politely end the call.",
+          assistantProfileId: "sebastian", representedPersonFirstName: "Test",
+          representedPersonLastName: "Operator", assistanceReason: "language_barrier",
+          locale: "ru-RU", audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: []
+        }
+      });
+      if (!isUuid(preparation.id)) throw new Error("Invalid preparation response");
+      const preparationId = preparation.id;
+      const deadline = now() + 5 * 60_000;
+      while (["queued", "processing", "retrying"].includes(preparation.status)) {
+        if (now() >= deadline) throw new Error("REAL_CALL_PREPARATION_TIMEOUT");
+        await sleep(2_000);
+        ({ body: preparation } = await request(`/api/call-preparations/${preparationId}`));
+        if (preparation.id !== preparationId) throw new Error("Preparation response mismatch");
+      }
+      if (preparation.status !== "succeeded" || !isUuid(preparation.callBriefId)) throw new Error("REAL_CALL_PREPARATION_FAILED");
+      callId = preparation.callBriefId;
+      const { body: snapshot } = await request(`/api/call-briefs/${callId}`);
+      if (snapshot.brief.id !== callId || snapshot.brief.status !== "review_required") throw new Error("Prepared call is not awaiting review");
+      write({ event: "real_call_prepared", callId, status: snapshot.brief.status });
+      return { callId, status: "prepared" };
     }
-    return options.includeResponse ? { response, body } : body;
+    const { body: snapshot } = await request(`/api/call-briefs/${callId}`);
+    if (snapshot.brief.id !== callId || !["review_required", "ready"].includes(snapshot.brief.status)) throw new Error("Call is not prepared for starting");
+    const { body: started } = await request(`/api/call-briefs/${callId}/approve-and-start`, { method: "POST" });
+    let status = started.brief.status;
+    write({ event: "real_call_started", callId, status });
+    const deadline = now() + 10 * 60_000;
+    while (!["completed", "failed", "stopped"].includes(status)) {
+      if (now() >= deadline) throw new Error("REAL_CALL_DRILL_TIMEOUT");
+      await sleep(2_000);
+      const { body: snapshot } = await request(`/api/call-briefs/${callId}`);
+      status = snapshot.brief.status;
+    }
+    write({ event: "real_call_drill_finished", callId, status });
+    return { callId, status };
   } finally {
-    clearTimeout(timeout);
+    await request("/api/auth/logout", { method: "POST" }).catch(() => undefined);
   }
 }
 
-function controlledErrorCode(body) {
-  return body && typeof body === "object" && typeof body.error === "string"
-    ? body.error
-    : "REQUEST_FAILED";
+function isUuid(value) {
+  return typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runRealCallDrill();
 }

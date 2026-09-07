@@ -4,6 +4,11 @@ Status: implemented repository baseline in checkpoint 6F5. PostgreSQL is the
 authoritative rate-limit store whenever `STORAGE_DRIVER=postgres`; the bounded
 in-memory implementation exists for local tests and single-process development only.
 
+Reviewed 2026-09-07 against `96229ea`. Email-change start/confirm and account name
+editing also use shared limits. Production keys must be independent of the email
+verification HMAC key as well as promo/data keys. Proxy/IP trust is a separate R09
+deployment decision; `request.ip` currently uses the direct connection peer.
+
 ## Invariants
 
 1. Every API instance uses the same PostgreSQL bucket tables and the same independent
@@ -34,6 +39,27 @@ in-memory implementation exists for local tests and single-process development o
 
 Unexpected store errors emit a controlled event name only. Exception messages,
 connection strings, identifiers, and request payloads do not enter operational logs.
+
+## Expensive endpoint defaults
+
+These values come from `config/endpoint-rate-limit-policy.ts`. Each user budget has
+an IP budget five times larger; authenticated preparation replay is resolved before
+charging a new preparation budget.
+
+| Action | User limit / window |
+| --- | --- |
+| Initial preparation and edit/recompile | 15 / hour |
+| Start and approve-and-start | 10 / 15 minutes |
+| Promo redemption | 10 / hour |
+| Recording download | 30 / hour |
+| Final transcription retry | 5 / day |
+| Account data export | 2 / day |
+| Call-data deletion | 5 / day |
+| Account deletion request | 3 / day |
+
+The configurable `API_RATE_LIMIT_*` names are in the [runtime reference](runtime-reference.md).
+Call admission's rolling-hour/UTC-day quotas and one-active-call invariant are
+additional constraints, independent from these fixed-window request budgets.
 
 ## Metrics and retention
 

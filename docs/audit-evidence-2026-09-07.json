@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-07",
+  "sourceCommit": "96229ea8572929c557f8dba45bb51248c28e7b4e",
+  "scope": "local repository audit; synthetic fixtures; no live provider traffic",
+  "runtime": { "node": "24.9.0", "pnpm": "10.12.4", "turbo": "2.10.5", "os": "Windows" },
+  "verification": {
+    "tests": {
+      "command": "pnpm test --force --env-mode=loose",
+      "explicitDisposableDatabaseEnvironment": true,
+      "api": { "passed": 325, "files": 49 },
+      "web": { "passed": 108, "files": 25 },
+      "contracts": { "passed": 70, "files": 14 },
+      "totalPassed": 503,
+      "skipped": 0,
+      "postgresSuitesExecuted": 5
+    },
+    "lint": "passed",
+    "typecheck": "passed after rebuild regenerated stale Next.js types",
+    "build": "passed",
+    "copyCheck": "passed",
+    "migrationCatalog": { "count": 49, "latest": "0049_imprint_content_page.sql", "freshApplyAndReplay": "passed" },
+    "recovery": {
+      "event": "database_recovery_drill_succeeded",
+      "completedAt": "2026-09-07T07:38:04.003Z",
+      "databaseServerVersion": "17.10",
+      "backupFormat": "postgresql-custom",
+      "backupBytes": 342240,
+      "backupSha256": "96df96c1ff611a1b0e564024b293f0200a2a41b65d1f8874b3fae6da2311b4d1",
+      "migrationCount": 49,
+      "publicTableCount": 51,
+      "rowCountChecks": 51,
+      "criticalTableCount": 7,
+      "encryptedSamplesVerified": 8,
+      "temporaryResourcesRemoved": true,
+      "preparationCiphertextCovered": false
+    },
+    "dependencyAudit": {
+      "command": "pnpm audit --prod --audit-level high --json",
+      "exitCode": 1,
+      "high": 8,
+      "moderate": 2,
+      "critical": 0,
+      "distinctAdvisories": 6,
+      "affectedLockedVersions": ["fast-uri@3.1.5", "fast-uri@4.1.2", "qs@6.15.3"],
+      "applicationExploitabilityEstablished": false
+    },
+    "documentation": { "markdownFiles": 19, "localLinksChecked": 210, "exampleEnvironmentNamesCovered": 57, "registeredRoutes": 87, "errors": 0 }
+  },
+  "targetedProbes": {
+    "A02": { "apiTestEnvMode": "strict", "configuredEnv": [], "passThroughEnv": null },
+    "A03": { "rotationReportedRemaining": 0, "actualPendingPreparationKeyId": "audit-old", "newActiveKeyId": "audit-new" },
+    "A04": { "productionWorkerAcceptedMock": true, "selectedCompiler": "DeterministicBriefCompiler" },
+    "A05": { "accountStatus": "deleted", "retainedEmailChallengeContacts": 1, "retainedPhoneChallengeContacts": 1 },
+    "A12": [
+      { "locale": "en-GB", "syntheticInput": "Yes, but I don't agree to recording", "actualDecision": "affirmative" },
+      { "locale": "de-CH", "syntheticInput": "Ja, aber ohne Aufnahme", "actualDecision": "affirmative" },
+      { "locale": "ru-RU", "syntheticInput": "Да, но запись запрещаю", "actualDecision": "affirmative" }
+    ],
+    "A13": { "freshRequestAfterRevokeAll": 401, "existingHttpSseReceivedNewTranscriptDelta": true }
+  },
+  "auditResourceCleanup": {
+    "auditDockerContainer": "stopped, retained",
+    "nativeTemporaryPostgres": "stopped, retained",
+    "reason": "Automatic approval review rejected resource deletion: blocked by policy",
+    "projectComposeContainer": "left running and healthy"
+  },
+  "notVerified": [
+    "fresh dependency installation",
+    "hosted Node 22.19/Linux CI and branch protection",
+    "production deployment, secrets, backups and provider account settings",
+    "real PSTN/SMS/email/model requests",
+    "browser visual, accessibility and password-manager acceptance",
+    "independent security and legal review"
+  ]
+}

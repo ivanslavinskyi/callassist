@@ -1,0 +1,4 @@
+# Preserve native design files without text or line-ending conversion.
+Design/*.ai binary
+Design/*.psd binary
+Design/*.pdf binary

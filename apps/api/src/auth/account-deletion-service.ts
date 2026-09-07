@@ -50,6 +50,7 @@ export class AccountDeletionService {
   #timer: NodeJS.Timeout | null = null;
   #drain: Promise<void> | null = null;
   #closed = false;
+  #nextChallengeCleanupAt = 0;
 
   constructor(options: AccountDeletionServiceOptions) {
     this.#authRepository = options.authRepository;
@@ -131,6 +132,11 @@ export class AccountDeletionService {
   }
 
   async #drainDueRequests() {
+    const cleanupNow = this.#now();
+    if (cleanupNow.getTime() >= this.#nextChallengeCleanupAt) {
+      await this.#authRepository.purgeContactChangeChallenges(cleanupNow.toISOString());
+      this.#nextChallengeCleanupAt = cleanupNow.getTime() + 60 * 60_000;
+    }
     while (!this.#closed) {
       const now = this.#now();
       const request = await this.#authRepository.claimAccountDeletion({

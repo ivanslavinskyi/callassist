@@ -4,15 +4,24 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
+Updated 2026-09-07. Repository blockers R01-R05/R18/R19 are implemented with
+[remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
+is repaired, but R06 remains partial pending an authorized live drill. Review the
+[roadmap](mvp-plan.md) for remaining provider, privacy, safety and deployment gates.
+
 ## Health contract
 
-The authenticated API listener exposes two unauthenticated, non-cacheable endpoints:
+The main API listener exposes two unauthenticated, non-cacheable endpoints:
 
 - `GET /health/live` returns `200 {"status":"alive"}` when the process can serve a
   request. It deliberately performs no database or provider operation.
 - `GET /health/ready` returns `200` only after a PostgreSQL ping. It returns a bounded
   `503 {"status":"not_ready","checks":{"database":"unavailable"}}` on failure and
   never returns a connection string or exception text.
+
+The PostgreSQL check applies to the PostgreSQL runtime; memory-mode development
+readiness does not prove a database connection. Neither probe validates provider
+availability, external worker execution or completion of the migration catalog.
 
 The Twilio-only listener exposes neither endpoint. A deployment must probe the main
 API directly, not make the private Twilio ingress a general application origin.
@@ -104,6 +113,11 @@ to grow.
 
 ### `durable-job-failure` and `durable-job-backlog`
 
+The queue includes initial `brief_compilation` as well as transcription, retention
+and both provider reconciliation types. Failed preparations erase source input and
+cannot use the generic superadmin retry; ask the owner to submit a new preparation.
+Account anonymization has a separate leased request/attempt store and recovery action.
+
 Inspect only the controlled job type, attempt count, run-after time and error code.
 Determine whether an external side effect may already have occurred. Fix the provider,
 configuration, capacity, or database cause first. A superadmin may retry dead-letter
@@ -192,6 +206,11 @@ typecheck, tests, populated-database re-encryption proof and builds. Confirm
 that branch protection requires the workflow and review. A passing dependency audit
 means no finding at or above its configured high-severity threshold; moderate findings
 still require triage and a recorded disposition.
+
+Turbo now passes declared environment in strict mode; test results are not cached.
+PostgreSQL suites fail without a dedicated test URL or available database. A clean
+local snapshot without `.env` passes the full suite; hosted Linux/Node 22 CI evidence
+remains a separate release gate. See [remediation](remediation-2026-09-07.md).
 
 Production API and worker processes must pass fail-closed environment validation.
 Never bypass a validation issue by changing `NODE_ENV`. Verify TLS termination before
