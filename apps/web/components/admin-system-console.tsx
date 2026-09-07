@@ -106,6 +106,9 @@ export function AdminSystemConsole() {
             {loading ? copy.refreshing : copy.refresh}
           </button>
         </header>
+        <nav className="section-navigation" aria-label="System sections">
+          <a href="#system-components">{copy.componentsTitle}</a><a href="#system-jobs">{copy.jobsTitle}</a><a href="#system-alerts">{copy.alertsTitle}</a><a href="#outbound-control">Outbound control</a>
+        </nav>
         {loading && !status ? <p role="status">{copy.loading}</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
@@ -113,15 +116,15 @@ export function AdminSystemConsole() {
           <div className="admin-system-content" aria-busy={loading}>
             <p className="admin-generated-at">{copy.generatedAt}: {formatDate(status.generatedAt, locale)}</p>
 
-            <section className="admin-system-panel">
+            <section className="admin-system-panel" id="system-components">
               <h2>{copy.componentsTitle}</h2>
-              <div className="admin-component-grid">
+              <table className="admin-components-table responsive-table"><thead><tr><th scope="col">Component</th><th scope="col">State</th><th scope="col">Evidence</th></tr></thead><tbody>
                 <ComponentCard label={copy.components.api} state={status.components.api.state} copy={copy} />
                 <ComponentCard label={copy.components.database} state={status.components.database.state} copy={copy} />
                 <ComponentCard label={`${copy.components.telephony} · ${status.components.telephony.mode}`} state={status.components.telephony.state} copy={copy} upstream />
                 <ComponentCard label={copy.components.realtime} state={status.components.realtime.state} copy={copy} upstream />
                 <ComponentCard label={copy.components.transcription} state={status.components.transcription.state} copy={copy} upstream />
-              </div>
+              </tbody></table>
             </section>
 
             <section className="admin-system-panel">
@@ -226,7 +229,7 @@ export function AdminSystemConsole() {
               </section>
             </div>
 
-            <section className="admin-system-panel">
+            <section className="admin-system-panel" id="system-alerts">
               <h2>{copy.alertsTitle}</h2>
               <p>{copy.alertsIntro} {status.alerts.policyVersion}.</p>
               {status.alerts.active.length === 0 ? <p>{copy.alertsNone}</p> : null}
@@ -278,7 +281,7 @@ export function AdminSystemConsole() {
               </small>
             </section>
 
-            <section className="admin-system-panel admin-jobs-panel">
+            <section className="admin-system-panel admin-jobs-panel" id="system-jobs">
               <h2>{copy.jobsTitle}</h2>
               <p>{copy.jobsIntro}</p>
               <div className="admin-metric-grid">
@@ -357,7 +360,7 @@ export function AdminSystemConsole() {
               {jobError ? <p className="form-error" role="alert">{jobError}</p> : null}
             </section>
 
-            <section className="admin-outbound-control" data-enabled={status.outboundCalls.enabled}>
+            <section className="admin-outbound-control" id="outbound-control" data-enabled={status.outboundCalls.enabled}>
               <div>
                 <span className="admin-control-state">
                   {status.outboundCalls.enabled ? copy.outboundEnabled : copy.outboundDisabled}
@@ -402,11 +405,11 @@ function ComponentCard({ copy, label, state, upstream = false }: {
   upstream?: boolean;
 }) {
   return (
-    <article className="admin-component-card" data-state={state}>
-      <span>{label}</span>
-      <strong>{copy.componentStates[state]}</strong>
-      {upstream ? <small>{copy.upstreamNotChecked}</small> : null}
-    </article>
+    <tr data-state={state}>
+      <td data-label="Component">{label}</td>
+      <td data-label="State"><span className="status-chip" data-status={state}>{copy.componentStates[state]}</span></td>
+      <td data-label="Evidence">{upstream ? copy.upstreamNotChecked : label === copy.components.database ? "Local database" : "Local process"}</td>
+    </tr>
   );
 }
 

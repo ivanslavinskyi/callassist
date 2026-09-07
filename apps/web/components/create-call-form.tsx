@@ -26,6 +26,7 @@ import {
 } from "@/lib/call-preparation-attempt";
 import { useUiLocale } from "./ui-locale-provider";
 import { isE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone-number";
+import { designMessages } from "@/lib/i18n/design-messages";
 import { RecipientCombobox } from "./recipient-combobox";
 
 const emptyForm: CreateCallBriefInput = {
@@ -64,6 +65,7 @@ type CreateCallFormProps = {
     idempotencyKey?: string
   ) => Promise<CallBrief>;
   heading?: string;
+  headingLevel?: 1 | 2;
   submitLabel?: string;
   onCancel?: () => void;
 };
@@ -74,10 +76,13 @@ export function CreateCallForm({
   initialValue,
   saveCallBrief = createCallBrief,
   heading,
+  headingLevel = 2,
   submitLabel,
   onCancel
 }: CreateCallFormProps) {
-  const { messages } = useUiLocale();
+  const { messages, locale: uiLocale } = useUiLocale();
+  const design = designMessages[uiLocale];
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   const copy = messages.form.copy;
   const resolvedHeading = heading ?? copy.defaultHeading;
   const resolvedSubmitLabel = submitLabel ?? copy.reviewCall;
@@ -217,7 +222,8 @@ export function CreateCallForm({
       <div className="form-heading">
         <div>
           <span className="eyebrow">{initialValue ? copy.editBrief : copy.newBrief}</span>
-          <h2>{resolvedHeading}</h2>
+          <Heading>{resolvedHeading}</Heading>
+          <p>{design.formLead}</p>
         </div>
         <span className="mode-badge">{copy.aiCall}</span>
       </div>
@@ -241,7 +247,8 @@ export function CreateCallForm({
       </div>
 
       <div className="form-grid">
-        <RecipientCombobox
+        <div className="form-section-title">{design.recipient}</div>
+        <div className="field-wide"><RecipientCombobox
           enabled={Boolean(userId)}
           value={form.recipientName}
           onChange={(value) => update("recipientName", value)}
@@ -250,7 +257,7 @@ export function CreateCallForm({
             recipientName: suggestion.recipientName,
             phoneNumber: suggestion.phoneNumber
           }))}
-        />
+        /></div>
 
         <label className="field">
           <span>{copy.phone}</span>
@@ -266,7 +273,7 @@ export function CreateCallForm({
           <small className={phoneEntered ? (phoneValid ? "field-valid" : "field-invalid") : ""}>
             {phoneEntered
               ? (phoneValid ? messages.form.phoneValid : messages.form.phoneInvalid)
-              : messages.form.phoneInvalid}
+              : design.phoneHint}
           </small>
         </label>
 
@@ -282,7 +289,8 @@ export function CreateCallForm({
           </select>
         </label>
 
-        <label className="field field-wide">
+        <div className="form-section-title">{design.task}</div>
+        <label className="field field-wide objective-field">
           <span>{copy.objective}</span>
           <textarea
             value={form.objective}
@@ -293,13 +301,14 @@ export function CreateCallForm({
             required
           />
           <small>
-            {copy.objectiveHelp} {messages.form.characterCount(
+            {messages.form.characterCount(
               form.objective.length,
               CALL_BRIEF_INPUT_LIMITS.objective
             )}
           </small>
         </label>
 
+        <div className="form-section-title">{design.assistant}</div>
         <label className="field">
           <span>{copy.assistant}</span>
           <select
@@ -368,6 +377,7 @@ export function CreateCallForm({
           <span>{messages.form.callOptions}</span>
           <span className="details-chevron" aria-hidden="true">⌄</span>
         </summary>
+        <p className="call-options-help">{copy.objectiveHelp}</p>
         <p>{copy.optionsHelp}</p>
 
         <div className="form-grid call-options-grid">

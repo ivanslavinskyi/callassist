@@ -30,6 +30,23 @@ export function Dashboard({ userId }: { userId: string }) {
   const [historyError, setHistoryError] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const requestId = useRef(0);
+  const [panel, setPanel] = useState<"new-call" | "history">("new-call");
+  function choosePanel(next: "new-call" | "history") {
+    setPanel(next);
+    window.history.replaceState(null, "", `${location.pathname}${location.search}#${next}`);
+  }
+  useEffect(() => {
+    const sync = () => setPanel(location.hash === "#history" ? "history" : "new-call");
+    const click = (event: MouseEvent) => {
+      const link = (event.target as HTMLElement).closest("a");
+      if (!link) return;
+      const url = new URL(link.href);
+      if (url.pathname === location.pathname && ["#history", "#new-call"].includes(url.hash)) setPanel(url.hash === "#history" ? "history" : "new-call");
+    };
+    sync(); window.addEventListener("hashchange", sync); document.addEventListener("click", click);
+    return () => { window.removeEventListener("hashchange", sync); document.removeEventListener("click", click); };
+  }, []);
+
 
   const loadHistory = useCallback(async (cursor?: string) => {
     const currentRequest = ++requestId.current;
@@ -67,7 +84,7 @@ export function Dashboard({ userId }: { userId: string }) {
       if (nextSearch) query.set("search", nextSearch);
       else query.delete("search");
       const suffix = query.size ? `?${query}` : "";
-      router.replace(`${pathname}${suffix}`, { scroll: false });
+      router.replace(`${pathname}${suffix}${location.hash}`, { scroll: false });
     }, 300);
     return () => window.clearTimeout(timeout);
   }, [pathname, router, searchInput, searchParams, searchQuery]);
@@ -77,7 +94,7 @@ export function Dashboard({ userId }: { userId: string }) {
     if (status) query.set("status", status);
     else query.delete("status");
     const suffix = query.size ? `?${query}` : "";
-    router.replace(`${pathname}${suffix}`, { scroll: false });
+    router.replace(`${pathname}${suffix}${location.hash}`, { scroll: false });
   }
 
   function openBrief(brief: CallBrief) {
@@ -86,23 +103,14 @@ export function Dashboard({ userId }: { userId: string }) {
 
   return (
     <AppShell>
-      <main className="dashboard-page" id="main-content" tabIndex={-1}>
-        <section className="hero-block">
-          <div>
-            <span className="eyebrow">{copy.eyebrow}</span>
-            <h1>
-              {copy.titleStart}
-              <span>{copy.titleAccent}</span>
-            </h1>
-            <p>
-              {copy.lead}
-            </p>
-          </div>
-        </section>
-
+      <main data-panel={panel} className="dashboard-page" id="main-content" tabIndex={-1}>
+        <nav className="workspace-tabs" aria-label={messages.app.newCall + " / " + messages.app.history}>
+          <button type="button" aria-pressed={panel === "new-call"} onClick={() => choosePanel("new-call")}>{messages.app.newCall}</button>
+          <button type="button" aria-pressed={panel === "history"} onClick={() => choosePanel("history")}>{messages.app.history}</button>
+        </nav>
         <div className="dashboard-grid">
           <div id="new-call">
-            <CreateCallForm onCreated={openBrief} userId={userId} />
+            <CreateCallForm headingLevel={1} onCreated={openBrief} userId={userId} />
           </div>
 
           <aside className="activity-panel" id="history">
@@ -179,7 +187,7 @@ export function Dashboard({ userId }: { userId: string }) {
                     <span className="brief-avatar">{brief.recipientName.slice(0, 1)}</span>
                     <span className="brief-copy">
                       <strong>{brief.recipientName}</strong>
-                      <small>{brief.locale} · {copy.status[brief.status]}</small>
+                      <small className={`history-status status-${brief.status}`}>{copy.status[brief.status]}</small>
                       {(() => {
                         const time = formatCallTime(brief.createdAt, locale);
                         return <time dateTime={brief.createdAt} title={time.exact}>{time.relative}</time>;

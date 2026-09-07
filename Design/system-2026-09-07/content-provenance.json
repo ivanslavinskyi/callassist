@@ -1,0 +1,16 @@
+[
+  {
+    "key": "privacy",
+    "locale": "de",
+    "source": "apps/api/src/content/seed-content.ts",
+    "revision": 1,
+    "reason": "Original DOM snapshot was empty. Source code is authoritative for this mock; live published revision could not be re-verified because the local app server was no longer running."
+  },
+  {
+    "key": "terms",
+    "locale": "de",
+    "source": "apps/api/src/content/seed-content.ts",
+    "revision": 1,
+    "reason": "Original DOM snapshot was empty. Source code is authoritative for this mock; live published revision could not be re-verified because the local app server was no longer running."
+  }
+]

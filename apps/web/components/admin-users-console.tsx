@@ -1,5 +1,7 @@
 "use client";
 
+import { FilterDisclosure } from "./filter-disclosure";
+
 import type {
   AccountDeletionRequest,
   AdminUserCreditLedger,
@@ -158,8 +160,7 @@ export function AdminUsersConsole() {
               <h1>{copy.title}</h1>
               <p>{copy.intro}</p>
         </section>
-          <div className="admin-users-grid">
-            <section className="admin-user-list-panel">
+          <FilterDisclosure label="Filters">
               <form className="admin-user-filters" onSubmit={search}>
                 <label className="field admin-user-search">
                   <span>{copy.search}</span>
@@ -183,10 +184,14 @@ export function AdminUsersConsole() {
                     )}
                   </select>
                 </label>
-                <button className="secondary-button" disabled={loadingUsers} type="submit">
+                <button className="primary-button compact-button" disabled={loadingUsers} type="submit">
                   {loadingUsers ? copy.applying : copy.apply}
                 </button>
               </form>
+          </FilterDisclosure>
+          <div className="admin-users-grid">
+            <section className="admin-user-list-panel">
+
               <div className="admin-user-list-heading">
                 <strong>{copy.resultCount(users.length)}</strong>
               </div>
@@ -196,35 +201,16 @@ export function AdminUsersConsole() {
               ) : users.length === 0 ? (
                 <p className="admin-empty">{copy.noUsers}</p>
               ) : (
-                <ul className="admin-user-list">
-                  {users.map((user) => (
-                    <li key={user.id}>
-                      <button
-                        aria-pressed={ledger?.user.id === user.id}
-                        className="admin-user-row"
-                        onClick={() => void selectUser(user.id)}
-                        type="button"
-                      >
-                        <span className="admin-user-identity">
-                          <strong>{user.firstName} {user.lastName}</strong>
-                          <small>{user.email}</small>
-                        </span>
-                        <span className="admin-user-badges">
-                          <small>{copy.roles[user.role]}</small>
-                          <small data-status={user.status}>{copy.statuses[user.status]}</small>
-                          <small>{user.phoneVerified ? copy.verified : copy.unverified}</small>
-                        </span>
-                        <span className="admin-user-dates">
-                          <small>{copy.created}: {formatDate(user.createdAt, locale)}</small>
-                          <small>{copy.lastLogin}: {user.lastLoginAt ? formatDate(user.lastLoginAt, locale) : copy.never}</small>
-                        </span>
-                        <span className="admin-user-open">
-                          {loadingLedgerId === user.id ? copy.loadingLedger : copy.viewLedger}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <table className="admin-users-table responsive-table"><thead><tr><th scope="col">User</th><th scope="col">{copy.status}</th><th scope="col">Action</th></tr></thead><tbody>
+                  {users.map(user => <tr key={user.id} data-selected={ledger?.user.id === user.id}>
+                    <td data-label="User"><strong>{user.firstName} {user.lastName}</strong><small className="user-table-email">{user.email} · {copy.roles[user.role]}</small>
+                      <details className="user-row-details"><summary>Account details</summary><p>{user.phoneVerified ? copy.verified : copy.unverified}</p><p>{copy.created}: {formatDate(user.createdAt, locale)}<br />{copy.lastLogin}: {user.lastLoginAt ? formatDate(user.lastLoginAt, locale) : copy.never}</p></details>
+                    </td>
+                    <td data-label={copy.status}><span className="status-chip" data-status={user.status}>{copy.statuses[user.status]}</span></td>
+                    <td><button className="text-button" aria-pressed={ledger?.user.id === user.id} aria-label={`${copy.viewLedger}: ${user.email}`} onClick={() => void selectUser(user.id)} type="button">{loadingLedgerId === user.id ? copy.loadingLedger : copy.viewLedger}</button></td>
+                  </tr>)}
+                </tbody></table>
+
               )}
               {nextCursor ? (
                 <button className="secondary-button admin-load-more" disabled={loadingMore} onClick={() => void loadMoreUsers()} type="button">

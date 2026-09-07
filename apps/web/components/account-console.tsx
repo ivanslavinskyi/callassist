@@ -47,6 +47,16 @@ export function AccountConsole() {
   const router = useRouter();
   const { locale, localizeHref } = useUiLocale();
   const copy = accountMessages[locale];
+  const [section, setSection] = useState("profile");
+  useEffect(() => {
+    const selectFromHash = () => {
+      const hash = window.location.hash.slice(1);
+      setSection(["usage", "data-privacy", "security"].includes(hash) ? hash : "profile");
+    };
+    selectFromHash();
+    window.addEventListener("hashchange", selectFromHash);
+    return () => window.removeEventListener("hashchange", selectFromHash);
+  }, []);
   const [data, setData] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -397,10 +407,9 @@ export function AccountConsole() {
         </header>
 
         <nav aria-label={copy.sectionNavigation} className="account-section-nav">
-          <a href="#profile">{copy.sectionProfile}</a>
-          <a href="#usage">{copy.sectionUsage}</a>
-          <a href="#data-privacy">{copy.sectionData}</a>
-          <a href="#security">{copy.sectionSecurity}</a>
+          {[["profile", copy.sectionProfile], ["usage", copy.sectionUsage], ["data-privacy", copy.sectionData], ["security", copy.sectionSecurity]].map(([id, label]) => (
+            <a key={id} href={`#${id}`} aria-current={section === id ? "page" : undefined} onClick={() => setSection(id)}>{label}</a>
+          ))}
         </nav>
 
         {loading ? (
@@ -414,15 +423,10 @@ export function AccountConsole() {
             </div>
           </section>
         ) : (
-          <div className="account-grid">
+          <div className="account-grid" data-section={section}>
             <section className="account-card" id="profile">
               <div className="account-card-heading">
                 <h2>{copy.identityTitle}</h2>
-                {!nameEditing ? (
-                  <button className="text-button" onClick={editName} type="button">
-                    {copy.nameEdit}
-                  </button>
-                ) : null}
               </div>
               {nameEditing ? (
                 <form className="account-profile-form" onSubmit={saveName}>
@@ -440,11 +444,11 @@ export function AccountConsole() {
                   </div>
                 </form>
               ) : <dl className="account-details">
-                <div><dt>{copy.name}</dt><dd>{data.user.firstName} {data.user.lastName}</dd></div>
+                <div><dt>{copy.name}</dt><dd className="account-detail-action"><strong>{data.user.firstName} {data.user.lastName}</strong><button className="text-button" onClick={editName} type="button">{copy.nameEdit}</button></dd></div>
                 <div><dt>{copy.email}</dt><dd className="account-detail-action"><span>{data.user.email}</span><button aria-controls="account-email-change" aria-expanded={emailChangeOpen || Boolean(emailChangeId)} aria-label={copy.emailChangeActionLabel} className="text-button" onClick={openEmailChange} type="button">{copy.emailChangeAction}</button></dd></div>
                 <div><dt>{copy.phone}</dt><dd className="account-detail-action"><span>{formatPhone(data.user.phoneE164)}</span><button aria-controls="account-phone-change" aria-expanded={phoneChangeOpen || Boolean(phoneChangeId)} aria-label={copy.phoneChangeActionLabel} className="text-button" onClick={openPhoneChange} type="button">{copy.phoneChangeAction}</button></dd></div>
                 <div><dt>{copy.role}</dt><dd>{copy.roles[data.user.role]}</dd></div>
-                <div><dt>{copy.status}</dt><dd>{copy.statuses[data.user.status]}</dd></div>
+                <div><dt>{copy.status}</dt><dd><span className="status-chip" data-status={data.user.status}>{copy.statuses[data.user.status]}</span></dd></div>
                 <div>
                   <dt>{copy.lastLogin}</dt>
                   <dd>{data.user.lastLoginAt ? dateFormatter.format(new Date(data.user.lastLoginAt)) : copy.never}</dd>

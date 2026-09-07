@@ -1,0 +1,1189 @@
+{
+  "baseline": "3676030e48b0b618cb4d02813fe18a233076d076",
+  "designRevision": "Emerald Paper rev02",
+  "scopeNote": "Mappings identify implementation ownership. browserObserved is a bounded local synthetic review, not exhaustive E2E or live-provider acceptance. Unobserved branches retain existing behavior and shared styles.",
+  "screens": [
+    {
+      "id": "landing",
+      "route": "/:locale",
+      "components": [
+        "apps/web/components/public-home.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Published CMS landing sections, FAQ and navigation; customer-aware AppShell. Example card is explicitly illustrative.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "preview",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "register",
+      "route": "/:locale/register",
+      "components": [
+        "apps/web/components/auth-forms.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "busy",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "route": "/:locale/verify",
+      "components": [
+        "apps/web/components/auth-forms.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "invalid-code",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "resent",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "busy",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "login",
+      "route": "/:locale/login",
+      "components": [
+        "apps/web/components/auth-forms.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "verification-required",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "suspended",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "rate-limited",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "recover",
+      "route": "/:locale/recover",
+      "components": [
+        "apps/web/components/auth-forms.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "verify",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "reset",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "success",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "expired",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "onboarding",
+      "route": "/:locale/onboarding",
+      "components": [
+        "apps/web/components/onboarding-form.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing current-revision legal acceptance payload and server route gates; published legal content is not replaced by atlas text.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "accepted",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "revision-changed",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "new-call",
+      "route": "/:locale/app",
+      "components": [
+        "apps/web/components/dashboard.tsx",
+        "apps/web/components/create-call-form.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing controlled form, input limits, recipient lookup, preparation/idempotency/retry and credit gates. History filters and mobile panels retain mounted form state.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "filled",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "options",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "history",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "empty",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "preparing",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "no-credits",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "active-call",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "paused",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "call",
+      "route": "/:locale/app/calls/:id",
+      "components": [
+        "apps/web/components/live-call.tsx",
+        "apps/web/components/compilation-review.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing policy decisions, clarification/recompile/edit, explicit start dialog, event stream, reconnect status, approval request and terminal statuses. Approved plan is collapsed once active/terminal.",
+      "states": [
+        {
+          "atlasState": "review",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "edit",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "clarification",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "blocked",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "confirm-start",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "dialing",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "live",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "approval",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "reconnecting",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "failed",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "stopped",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "archived",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "call-completed",
+      "route": "/:locale/app/calls/:id",
+      "components": [
+        "apps/web/components/live-call.tsx",
+        "apps/web/components/call-feedback.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Same call route. Existing final/provisional transcript, native recording player, copy/PDF, deletion and feedback endpoints; required goal result, optional quality/comment, 500-character limit.",
+      "states": [
+        {
+          "atlasState": "completed",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "provisional",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "transcribing",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "transcript-failed",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "no-recording",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "recording-deleted",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "delete-recording",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "delete-call",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "feedback-saved",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "account",
+      "route": "/:locale/app/account",
+      "components": [
+        "apps/web/components/account-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Hash-addressed profile/usage/data-privacy/security sections keep mounted forms. Existing profile/contact verification, session revocation, export and confirmed deletion handlers remain.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "edit-name",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "email",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "email-code",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "phone",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "phone-code",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "saved",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "usage",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "security",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "revoke",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "signout-all",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "privacy",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "delete",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "deletion-queued",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "deletion-waiting",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "deletion-support",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "redeem",
+      "route": "/:locale/redeem",
+      "components": [
+        "apps/web/components/promo-redemption-form.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "success",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "invalid",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "used",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "rate-limited",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "sign-in",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "opt-out",
+      "route": "/:locale/opt-out",
+      "components": [
+        "apps/web/components/recipient-opt-out-form.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "verify",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "success",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "faq",
+      "route": "/:locale/faq",
+      "components": [
+        "apps/web/components/content-page.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "support",
+      "route": "/en/support · /de/hilfe",
+      "components": [
+        "apps/web/components/content-page.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "privacy",
+      "route": "/en/privacy · /de/datenschutz",
+      "components": [
+        "apps/web/components/content-page.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "terms",
+      "route": "/en/terms · /de/nutzungsbedingungen",
+      "components": [
+        "apps/web/components/content-page.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "acceptable-use",
+      "route": "/en/acceptable-use · /de/nutzungsregeln",
+      "components": [
+        "apps/web/components/content-page.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "imprint",
+      "route": "/en/imprint · /de/impressum",
+      "components": [
+        "apps/web/components/content-page.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "admin-overview",
+      "route": "/admin",
+      "components": [
+        "apps/web/components/admin-operations-dashboard.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "empty",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-calls",
+      "route": "/admin/calls",
+      "components": [
+        "apps/web/components/admin-calls-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "filtered",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "empty",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-inspector",
+      "route": "/admin/calls/:id",
+      "components": [
+        "apps/web/components/admin-call-inspector.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Technical metadata remains default. Sensitive call content uses the existing separate authorization/audit gate.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "sensitive",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "sensitive-loaded",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "forbidden",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-preparation",
+      "route": "/admin/calls/preparations/:id",
+      "components": [
+        "apps/web/components/admin-call-preparation-inspector.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "retrying",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "failed",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-users",
+      "route": "/admin/users",
+      "components": [
+        "apps/web/components/admin-users-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "selected",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "actions",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "suspend",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "restore",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "force-logout",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "grant",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "restart-deletion",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "empty",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-credits",
+      "route": "/admin/credits",
+      "components": [
+        "apps/web/components/admin-credits-form.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "created",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "granted",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-safety",
+      "route": "/admin/safety",
+      "components": [
+        "apps/web/components/admin-safety-form.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "blocked",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "lifted",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-system",
+      "route": "/admin/system",
+      "components": [
+        "apps/web/components/admin-system-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "jobs",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "alerts",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "outbound",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "disable-confirm",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "disabled",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-content",
+      "route": "/admin/content",
+      "components": [
+        "apps/web/components/admin-content-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing draft/save/conflict/publish/rollback actions and revisions. Browser review saved a private synthetic draft, not a publication.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "sections",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "publish",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "history",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "rollback",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "conflict",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "no-draft",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-editorial",
+      "route": "/admin/content/editorial",
+      "components": [
+        "apps/web/components/admin-editorial-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing landing/FAQ/navigation draft editing and publishing contracts. No content was published during review.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "landing",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "faq",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "navigation",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "publish",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "rollback",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "no-draft",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "admin-seo",
+      "route": "/admin/seo",
+      "components": [
+        "apps/web/components/admin-seo-console.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Existing route component and API/state branches, with approved shared shell, controls and responsive theme tokens.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "warnings",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "stale",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "empty",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "preview-content",
+      "route": "/admin/content/:key/preview",
+      "components": [
+        "apps/web/components/content-draft-preview.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Private authorized draft, actual sections and links, shared article navigation/footer; preview indexing policy retained.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "preview-landing",
+      "route": "/admin/content/editorial/landing/preview",
+      "components": [
+        "apps/web/components/landing-draft-preview.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Private authorized draft rendered by existing landing component and shared shell; preview indexing policy retained.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        }
+      ]
+    },
+    {
+      "id": "error",
+      "route": "Shared boundaries / 404",
+      "components": [
+        "apps/web/components/admin-route-boundary.tsx",
+        "apps/web/app/error.tsx",
+        "apps/web/app/not-found.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Root error/not-found boundaries plus existing access/loading/error branches. The boundary retry reloads its component; no promise that a failed component retains unsaved data.",
+      "states": [
+        {
+          "atlasState": "loading",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "error",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "signed-out",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "forbidden",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "not-found",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": true
+        },
+        {
+          "atlasState": "offline",
+          "implementation": "existing component branch / shared presentation",
+          "browserObserved": false
+        }
+      ]
+    },
+    {
+      "id": "components",
+      "route": "Design only",
+      "components": [
+        "apps/web/app/emerald-paper.css",
+        "apps/web/components/ui-icon.tsx",
+        "apps/web/components/theme-toggle.tsx",
+        "apps/web/components/navigation-menu.tsx",
+        "apps/web/components/confirm-dialog.tsx"
+      ],
+      "styling": "apps/web/app/emerald-paper.css",
+      "binding": "Design reference only; mapped to tokens, shared controls, icons, navigation, dialogs and status treatments. No artificial application route added.",
+      "states": [
+        {
+          "atlasState": "default",
+          "implementation": "shared component reference",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "forms",
+          "implementation": "shared component reference",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "dialogs",
+          "implementation": "shared component reference",
+          "browserObserved": false
+        },
+        {
+          "atlasState": "status",
+          "implementation": "shared component reference",
+          "browserObserved": false
+        }
+      ]
+    }
+  ]
+}

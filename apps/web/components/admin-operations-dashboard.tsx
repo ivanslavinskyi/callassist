@@ -49,8 +49,8 @@ export function AdminOperationsDashboard() {
           <div>
             <span className="eyebrow">{copy.overviewEyebrow}</span>
             <h1>{copy.overviewTitle}</h1>
-            <p>{copy.overviewIntro}</p>
-            <small>{copy.privacyNote}</small>
+            <p>Privacy-safe operational cohorts. Missing data remains explicit.</p>
+            <details className="metrics-explanation"><summary>About these metrics</summary><p>{copy.overviewIntro}</p><p>{copy.privacyNote}</p></details>
           </div>
           <Link className="secondary-button" href="/admin/system">
             {copy.systemLink}
@@ -91,22 +91,24 @@ export function AdminOperationsDashboard() {
               {copy.updated}: {formatDate(overview.generatedAt, locale)}
             </p>
 
+            <div className="admin-summary-metrics" aria-label={copy.volumeTitle}>
+              {([
+                [copy.createdCalls, overview.volume.createdCalls],
+                [copy.attemptedCalls, overview.volume.attemptedCalls],
+                [copy.activeCalls, overview.volume.activeCalls],
+                [copy.terminalCalls, overview.volume.terminalCalls]
+              ] as const).map(([label, value]) => <MetricCard key={label} label={label} value={String(value)} />)}
+            </div>
             <OperationsSection title={copy.volumeTitle}>
-              <div className="admin-metric-grid">
+              <table className="admin-volume-table"><thead><tr><th scope="col">Stage</th><th scope="col">Count</th><th scope="col">Definition</th></tr></thead><tbody>
                 {([
-                  [copy.createdCalls, overview.volume.createdCalls],
-                  [copy.attemptedCalls, overview.volume.attemptedCalls],
-                  [copy.activeCalls, overview.volume.activeCalls],
-                  [copy.terminalCalls, overview.volume.terminalCalls],
-                  [copy.connectedCalls, overview.volume.connectedCalls],
-                  [copy.consentGrantedCalls, overview.volume.consentGrantedCalls],
-                  [copy.consentFailedCalls, overview.volume.consentFailedCalls],
-                  [copy.technicalFailureCalls, overview.volume.technicalFailureCalls],
-                  [copy.feedbackResponses, overview.volume.feedbackResponses]
-                ] as const).map(([label, value]) => (
-                  <MetricCard key={label} label={label} value={String(value)} />
-                ))}
-              </div>
+                  [copy.connectedCalls, overview.volume.connectedCalls, "Provider connection confirmed"],
+                  [copy.consentGrantedCalls, overview.volume.consentGrantedCalls, "Recipient agreed to continue"],
+                  [copy.consentFailedCalls, overview.volume.consentFailedCalls, "Attempt ended at consent"],
+                  [copy.technicalFailureCalls, overview.volume.technicalFailureCalls, "Terminal technical failure"],
+                  [copy.feedbackResponses, overview.volume.feedbackResponses, "User-provided feedback"]
+                ] as const).map(([label, value, definition]) => <tr key={label}><th scope="row">{label}</th><td>{value}</td><td>{definition}</td></tr>)}
+              </tbody></table>
             </OperationsSection>
 
             <OperationsSection title={copy.ratesTitle}>

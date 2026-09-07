@@ -1,5 +1,7 @@
 "use client";
 
+import { FilterDisclosure } from "./filter-disclosure";
+
 import {
   SUPPORTED_CALL_LOCALES,
   type AdminCallListFilters,
@@ -149,12 +151,11 @@ export function AdminCallsConsole() {
           <span className="eyebrow">{copy.eyebrow}</span>
           <h1>{copy.title}</h1>
           <p>{copy.intro}</p>
-          <small>{copy.privacyNote}</small>
         </header>
 
         {loading && items.length === 0 ? <p role="status">{copy.loading}</p> : null}
+            <FilterDisclosure label={copy.filters}>
             <form className="admin-call-filters" onSubmit={applyFilters}>
-              <strong>{copy.filters}</strong>
               <FilterSelect label={copy.status} name="status">
                 <option value="">{copy.all}</option>
                 {statuses.map((value) =>
@@ -207,6 +208,7 @@ export function AdminCallsConsole() {
                 </button>
               </div>
             </form>
+            </FilterDisclosure>
 
             <section className="admin-call-results" aria-busy={loading}>
               <header><strong>{copy.loaded(items.length)}</strong></header>
@@ -214,44 +216,23 @@ export function AdminCallsConsole() {
               {!loading && items.length === 0 ? (
                 <p className="admin-call-empty">{copy.noCalls}</p>
               ) : null}
-              <div className="admin-call-list">
-                {items.map((call) => (
-                  <article className="admin-call-row" key={call.id}>
-                    <div className="admin-call-row-title">
-                      <code>{call.id}</code>
-                      <span className="status-chip" data-status={call.status}>
-                        {copy.statuses[call.status]}
-                      </span>
-                    </div>
-                    <dl>
-                      <Fact label={copy.owner} value={call.ownerUserId ?? copy.notAvailable} />
-                      <Fact label={copy.language} value={copy.languages[call.locale]} />
-                      <Fact label={copy.created} value={formatDate(call.createdAt, locale)} />
-                      <Fact label={copy.duration} value={formatDuration(call.durationSeconds)} />
-                      <Fact label={copy.consent} value={copy.consents[call.technical.consent]} />
-                      <Fact
-                        label={copy.outcome}
-                        value={call.semanticOutcome
-                          ? copy.outcomes[call.semanticOutcome]
-                          : copy.notAvailable}
-                      />
-                      <Fact
-                        label={copy.failureStage}
-                        value={call.technical.failureStage
-                          ? copy.failures[call.technical.failureStage]
-                          : copy.notAvailable}
-                      />
-                      <Fact label={copy.eventCount} value={String(call.eventCount)} />
-                    </dl>
-                    <Link
-                      className="secondary-button"
-                      href={`/admin/calls/${call.id}`}
-                    >
-                      {copy.inspect}
-                    </Link>
-                  </article>
-                ))}
-              </div>
+              <div className="admin-table-container"><table className="admin-calls-table responsive-table"><thead><tr>
+                <th scope="col">Call</th><th scope="col">{copy.status}</th><th scope="col">{copy.language}</th><th scope="col">{copy.created}</th><th scope="col">{copy.duration}</th><th scope="col">{copy.consent}</th><th scope="col">{copy.outcome}</th><th scope="col"><span className="sr-only">{copy.inspect}</span></th>
+              </tr></thead><tbody>{items.map(call => <tr key={call.id}>
+                <td data-label="Call"><details className="call-row-details"><summary><code>{call.id.slice(0,8)}</code></summary><dl>
+                  <Fact label="Call ID" value={call.id} /><Fact label={copy.owner} value={call.ownerUserId ?? copy.notAvailable} />
+                  <Fact label={copy.consent} value={copy.consents[call.technical.consent]} />
+                  <Fact label={copy.failureStage} value={call.technical.failureStage ? copy.failures[call.technical.failureStage] : copy.notAvailable} />
+                  <Fact label={copy.eventCount} value={String(call.eventCount)} />
+                </dl></details></td>
+                <td data-label={copy.status}><span className="status-chip" data-status={call.status}>{copy.statuses[call.status]}</span></td>
+                <td data-label={copy.language}>{copy.languages[call.locale]}</td>
+                <td data-label={copy.created}><time dateTime={call.createdAt}>{formatDate(call.createdAt, locale)}</time></td>
+                <td data-label={copy.duration}>{formatDuration(call.durationSeconds)}</td>
+                <td data-label={copy.consent}>{copy.consents[call.technical.consent]}</td>
+                <td data-label={copy.outcome}>{call.semanticOutcome ? copy.outcomes[call.semanticOutcome] : copy.notAvailable}</td>
+                <td data-label="Action"><Link href={`/admin/calls/${call.id}`} aria-label={`${copy.inspect} ${call.id.slice(0,8)}`}>{copy.inspect}</Link></td>
+              </tr>)}</tbody></table></div>
               {nextCursor ? (
                 <button
                   className="secondary-button admin-call-load-more"
@@ -263,6 +244,7 @@ export function AdminCallsConsole() {
                 </button>
               ) : null}
             </section>
+            <p className="admin-access-note">{copy.privacyNote}</p>
     </main>
   );
 }

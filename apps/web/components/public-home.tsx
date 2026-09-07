@@ -9,6 +9,7 @@ import { SUPPORTED_CALL_LANGUAGES } from "@callassist/contracts";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppShell } from "./app-shell";
+import { designMessages } from "@/lib/i18n/design-messages";
 import { FaqList } from "./faq-list";
 import { useUiLocale } from "./ui-locale-provider";
 
@@ -49,6 +50,7 @@ export function PublicHomeContent({
       {landing.blocks.map((block) => (
         <LandingBlockView
           block={block}
+          exampleSteps={landing.blocks.find(item => item.blockType === "how_it_works")?.steps.slice(0, 3) ?? []}
           faq={faq}
           key={block.id}
           locale={landing.locale}
@@ -59,7 +61,8 @@ export function PublicHomeContent({
   );
 }
 
-function LandingBlockView({ block, faq, locale, registerHref }: {
+function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
+  exampleSteps: Array<{ id: string; title: string; text: string }>;
   block: PublishedLandingBlock;
   faq: PublishedFaq | null;
   locale: PublishedLanding["locale"];
@@ -69,8 +72,9 @@ function LandingBlockView({ block, faq, locale, registerHref }: {
     case "hero":
       return (
         <section className="public-hero">
+          <div className="public-hero-copy">
           <span className="eyebrow">{block.eyebrow}</span>
-          <h1>{block.title}</h1>
+          <h1><HeroTitle title={block.title} locale={locale} /></h1>
           {block.supportingTitle ? <p className="public-hero-support"><strong>{block.supportingTitle}</strong></p> : null}
           <p>{block.lead}</p>
           {block.secondaryText ? <p className="public-hero-secondary">{block.secondaryText}</p> : null}
@@ -81,6 +85,12 @@ function LandingBlockView({ block, faq, locale, registerHref }: {
           <ul className="public-badges" aria-label={block.eyebrow}>
             {block.badges.map((badge) => <li key={badge}>{badge}</li>)}
           </ul>
+          </div>
+          <aside className="hero-example" aria-label={designMessages[locale].example}>
+            <span className="eyebrow">{designMessages[locale].example}</span>
+            <h3>{designMessages[locale].exampleRecipient}</h3><p>{designMessages[locale].exampleGoal}</p>
+            <ol>{exampleSteps.map(step => <li key={step.id}><div><strong>{step.title}</strong><p>{step.text}</p></div></li>)}</ol>
+          </aside>
         </section>
       );
     case "problem":
@@ -106,7 +116,7 @@ function LandingBlockView({ block, faq, locale, registerHref }: {
           <ol className="public-steps">
             {block.steps.map((step, index) => (
               <li key={step.id}>
-                <span>{index + 1}</span>
+                <span>{String(index + 1).padStart(2, "0")}</span>
                 <h3>{step.title}</h3>
                 <p>{step.text}</p>
               </li>
@@ -210,4 +220,11 @@ function displayLanguageName(
   } catch {
     return fallback;
   }
+}
+
+function HeroTitle({ title, locale }: { title: string; locale: "en" | "de" }) {
+  const word = locale === "de" ? "Sprechen" : "speaking";
+  const index = title.indexOf(word);
+  if (index < 0) return title;
+  return <>{title.slice(0, index)}<span className="accent">{word}</span>{title.slice(index + word.length)}</>;
 }

@@ -1,0 +1,42 @@
+[
+  {
+    "check": "Review disabled with empty required fields",
+    "pass": true
+  },
+  {
+    "check": "Review enabled after five required fields",
+    "pass": true
+  },
+  {
+    "check": "Review opens separate start confirmation",
+    "pass": true
+  },
+  {
+    "check": "Escape cancels confirmation",
+    "pass": true
+  },
+  {
+    "check": "Mock start opens dialing state",
+    "pass": true
+  },
+  {
+    "check": "Account deletion disabled initially",
+    "pass": true
+  },
+  {
+    "check": "Wrong deletion phrase stays disabled",
+    "pass": true
+  },
+  {
+    "check": "Exact phrase and nonempty password enable mock action",
+    "pass": true
+  },
+  {
+    "check": "Mobile admin filters closed initially",
+    "pass": true
+  },
+  {
+    "check": "Mobile admin filters expand",
+    "pass": true
+  }
+]

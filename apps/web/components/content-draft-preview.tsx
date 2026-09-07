@@ -1,6 +1,8 @@
 import type { AdminContentLocalizedRevision } from "@callassist/contracts";
 import Link from "next/link";
 import { AppShell } from "./app-shell";
+import { ContentNavigation } from "./content-navigation";
+import { navigationPath } from "@/lib/i18n/content-routing";
 
 export function ContentDraftPreview({
   page,
@@ -27,6 +29,7 @@ export function ContentDraftPreview({
             {isGerman ? "Zurück zum Editor" : "Back to editor"}
           </Link>
         </div>
+        <ContentNavigation locale={page.locale} current={page.key} />
         <header className="content-heading">
           <span className="eyebrow">{page.locale.toUpperCase()} · {page.slug}</span>
           <h1>{page.title}</h1>
@@ -49,6 +52,10 @@ export function ContentDraftPreview({
                   ))}
                 </ul>
               ) : null}
+              {section.links?.length ? <div className="content-links">{section.links.map((link) => link.kind === "email"
+                ? <a href={`mailto:${link.address}`} key={`email:${link.address}`}>{link.label}</a>
+                : <Link href={navigationPath(page.locale, link.destination)} key={`page:${link.destination}`}>{link.label}</Link>
+              )}</div> : null}
             </section>
           ))}
         </div>

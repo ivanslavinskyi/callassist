@@ -1,0 +1,55 @@
+[
+  {
+    "check": "Tablet admin hamburger opens full navigation and becomes X",
+    "pass": true
+  },
+  {
+    "check": "Escape closes menu and returns focus to hamburger",
+    "pass": true
+  },
+  {
+    "check": "Click outside closes menu",
+    "pass": true
+  },
+  {
+    "check": "Old call/completed link resolves to completed call view",
+    "pass": true
+  },
+  {
+    "check": "Feedback requires goal result before Save",
+    "pass": true
+  },
+  {
+    "check": "Provisional transcript tab opens distinct transcript view",
+    "pass": true
+  },
+  {
+    "check": "Theme toggles moon to sun without resetting feedback or anchor",
+    "pass": true
+  },
+  {
+    "check": "Feedback Save confirms success and preserves entered values",
+    "pass": true
+  },
+  {
+    "check": "Transcript-quality choices are withheld while final transcript is processing",
+    "pass": true,
+    "evidence": "Transcribing view shows Available when the final transcript is ready and no quality radio inputs."
+  },
+  {
+    "check": "Completed call is a first-class atlas entry with nine states",
+    "pass": true
+  },
+  {
+    "check": "Atlas theme selector requests matching completed-call theme",
+    "pass": true
+  },
+  {
+    "check": "Atlas state selector opens provisional transcript",
+    "pass": true
+  },
+  {
+    "check": "Gallery contains 33 screens including completed-call capture",
+    "pass": true
+  }
+]

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { isUiLocale } from "@/lib/i18n/messages";
 import { siteOrigin } from "@/lib/site-config";
 import "./globals.css";
+import "./emerald-paper.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteOrigin),

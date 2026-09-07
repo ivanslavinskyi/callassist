@@ -1,0 +1,466 @@
+{
+  "repositoryCommit": "3676030e48b0b618cb4d02813fe18a233076d076",
+  "scope": "30 existing route/content screens, an additional dedicated completed-call view of the same call route, and 2 system reference sheets",
+  "screens": [
+    {
+      "id": "landing",
+      "group": "Публичные",
+      "title": "Лендинг",
+      "route": "/:locale",
+      "source": "public-home.tsx",
+      "states": [
+        "default",
+        "preview"
+      ]
+    },
+    {
+      "id": "register",
+      "group": "Доступ",
+      "title": "Регистрация",
+      "route": "/:locale/register",
+      "source": "auth-forms.tsx",
+      "states": [
+        "default",
+        "error",
+        "busy"
+      ]
+    },
+    {
+      "id": "verify",
+      "group": "Доступ",
+      "title": "Проверка телефона",
+      "route": "/:locale/verify",
+      "source": "auth-forms.tsx",
+      "states": [
+        "default",
+        "invalid-code",
+        "resent",
+        "busy"
+      ]
+    },
+    {
+      "id": "login",
+      "group": "Доступ",
+      "title": "Вход",
+      "route": "/:locale/login",
+      "source": "auth-forms.tsx",
+      "states": [
+        "default",
+        "error",
+        "verification-required",
+        "suspended",
+        "rate-limited"
+      ]
+    },
+    {
+      "id": "recover",
+      "group": "Доступ",
+      "title": "Восстановление доступа",
+      "route": "/:locale/recover",
+      "source": "auth-forms.tsx",
+      "states": [
+        "default",
+        "verify",
+        "reset",
+        "success",
+        "expired",
+        "error"
+      ]
+    },
+    {
+      "id": "onboarding",
+      "group": "Доступ",
+      "title": "Онбординг / согласие",
+      "route": "/:locale/onboarding",
+      "source": "onboarding-form.tsx",
+      "states": [
+        "default",
+        "accepted",
+        "error",
+        "revision-changed"
+      ]
+    },
+    {
+      "id": "new-call",
+      "group": "Звонки",
+      "title": "Новый звонок и история",
+      "route": "/:locale/app",
+      "source": "dashboard.tsx + create-call-form.tsx",
+      "states": [
+        "default",
+        "filled",
+        "options",
+        "history",
+        "empty",
+        "preparing",
+        "error",
+        "no-credits",
+        "active-call",
+        "paused"
+      ]
+    },
+    {
+      "id": "call",
+      "group": "Звонки",
+      "title": "Подготовка и ход звонка",
+      "route": "/:locale/app/calls/:id",
+      "source": "live-call.tsx + compilation-review.tsx",
+      "states": [
+        "review",
+        "edit",
+        "clarification",
+        "blocked",
+        "confirm-start",
+        "dialing",
+        "live",
+        "approval",
+        "reconnecting",
+        "failed",
+        "stopped",
+        "archived"
+      ]
+    },
+    {
+      "id": "call-completed",
+      "group": "Звонки",
+      "title": "Завершённый звонок и оценка качества",
+      "route": "/:locale/app/calls/:id",
+      "source": "live-call.tsx + call-feedback.tsx",
+      "states": [
+        "completed",
+        "provisional",
+        "transcribing",
+        "transcript-failed",
+        "no-recording",
+        "recording-deleted",
+        "delete-recording",
+        "delete-call",
+        "feedback-saved"
+      ]
+    },
+    {
+      "id": "account",
+      "group": "Аккаунт",
+      "title": "Профиль, использование и сессии",
+      "route": "/:locale/app/account",
+      "source": "account-console.tsx",
+      "states": [
+        "default",
+        "edit-name",
+        "email",
+        "email-code",
+        "phone",
+        "phone-code",
+        "saved",
+        "usage",
+        "security",
+        "revoke",
+        "signout-all",
+        "privacy",
+        "delete",
+        "deletion-queued",
+        "deletion-waiting",
+        "deletion-support",
+        "error"
+      ]
+    },
+    {
+      "id": "redeem",
+      "group": "Аккаунт",
+      "title": "Промокод",
+      "route": "/:locale/redeem",
+      "source": "promo-redemption-form.tsx",
+      "states": [
+        "default",
+        "success",
+        "invalid",
+        "used",
+        "rate-limited",
+        "sign-in"
+      ]
+    },
+    {
+      "id": "opt-out",
+      "group": "Публичные",
+      "title": "Блокировка будущих звонков",
+      "route": "/:locale/opt-out",
+      "source": "recipient-opt-out-form.tsx",
+      "states": [
+        "default",
+        "verify",
+        "success",
+        "error"
+      ]
+    },
+    {
+      "id": "faq",
+      "group": "Публичные",
+      "title": "FAQ",
+      "route": "/:locale/faq",
+      "source": "content-page.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "support",
+      "group": "Публичные",
+      "title": "Поддержка",
+      "route": "/en/support · /de/hilfe",
+      "source": "content-page.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "privacy",
+      "group": "Публичные",
+      "title": "Конфиденциальность",
+      "route": "/en/privacy · /de/datenschutz",
+      "source": "content-page.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "terms",
+      "group": "Публичные",
+      "title": "Условия использования",
+      "route": "/en/terms · /de/nutzungsbedingungen",
+      "source": "content-page.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "acceptable-use",
+      "group": "Публичные",
+      "title": "Допустимое использование",
+      "route": "/en/acceptable-use · /de/nutzungsregeln",
+      "source": "content-page.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "imprint",
+      "group": "Публичные",
+      "title": "Сведения об операторе",
+      "route": "/en/imprint · /de/impressum",
+      "source": "content-page.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "admin-overview",
+      "group": "Админка · операции",
+      "title": "Обзор",
+      "route": "/admin",
+      "source": "admin-operations-dashboard.tsx",
+      "states": [
+        "default",
+        "empty",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-calls",
+      "group": "Админка · операции",
+      "title": "Звонки",
+      "route": "/admin/calls",
+      "source": "admin-calls-console.tsx",
+      "states": [
+        "default",
+        "filtered",
+        "empty",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-inspector",
+      "group": "Админка · операции",
+      "title": "Инспектор звонка",
+      "route": "/admin/calls/:id",
+      "source": "admin-call-inspector.tsx",
+      "states": [
+        "default",
+        "sensitive",
+        "sensitive-loaded",
+        "forbidden",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-preparation",
+      "group": "Админка · операции",
+      "title": "Инспектор подготовки",
+      "route": "/admin/calls/preparations/:id",
+      "source": "admin-call-preparation-inspector.tsx",
+      "states": [
+        "default",
+        "retrying",
+        "failed",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-users",
+      "group": "Админка · операции",
+      "title": "Пользователи и журнал кредитов",
+      "route": "/admin/users",
+      "source": "admin-users-console.tsx",
+      "states": [
+        "default",
+        "selected",
+        "actions",
+        "suspend",
+        "restore",
+        "force-logout",
+        "grant",
+        "restart-deletion",
+        "empty",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-credits",
+      "group": "Админка · операции",
+      "title": "Промокоды и начисления",
+      "route": "/admin/credits",
+      "source": "admin-credits-form.tsx",
+      "states": [
+        "default",
+        "created",
+        "granted",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-safety",
+      "group": "Админка · операции",
+      "title": "Блокировка получателя",
+      "route": "/admin/safety",
+      "source": "admin-safety-form.tsx",
+      "states": [
+        "default",
+        "blocked",
+        "lifted",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-system",
+      "group": "Админка · операции",
+      "title": "Состояние системы",
+      "route": "/admin/system",
+      "source": "admin-system-console.tsx",
+      "states": [
+        "default",
+        "jobs",
+        "alerts",
+        "outbound",
+        "disable-confirm",
+        "disabled",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-content",
+      "group": "Админка · контент",
+      "title": "Редактор страниц",
+      "route": "/admin/content",
+      "source": "admin-content-console.tsx",
+      "states": [
+        "default",
+        "sections",
+        "publish",
+        "history",
+        "rollback",
+        "conflict",
+        "no-draft",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-editorial",
+      "group": "Админка · контент",
+      "title": "Лендинг, FAQ и навигация",
+      "route": "/admin/content/editorial",
+      "source": "admin-editorial-console.tsx",
+      "states": [
+        "default",
+        "landing",
+        "faq",
+        "navigation",
+        "publish",
+        "rollback",
+        "no-draft",
+        "error"
+      ]
+    },
+    {
+      "id": "admin-seo",
+      "group": "Админка · контент",
+      "title": "SEO-аудит",
+      "route": "/admin/seo",
+      "source": "admin-seo-console.tsx",
+      "states": [
+        "default",
+        "warnings",
+        "stale",
+        "empty",
+        "error"
+      ]
+    },
+    {
+      "id": "preview-content",
+      "group": "Админка · контент",
+      "title": "Предпросмотр документа",
+      "route": "/admin/content/:key/preview",
+      "source": "content-draft-preview.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "preview-landing",
+      "group": "Админка · контент",
+      "title": "Предпросмотр лендинга",
+      "route": "/admin/content/editorial/landing/preview",
+      "source": "landing-draft-preview.tsx",
+      "states": [
+        "default"
+      ]
+    },
+    {
+      "id": "error",
+      "group": "Система",
+      "title": "Состояния доступа и загрузки",
+      "route": "Shared boundaries / 404",
+      "source": "admin-route-boundary.tsx",
+      "states": [
+        "loading",
+        "error",
+        "signed-out",
+        "forbidden",
+        "not-found",
+        "offline"
+      ]
+    },
+    {
+      "id": "components",
+      "group": "Система",
+      "title": "Компоненты и состояния",
+      "route": "Design only",
+      "source": "Design tokens",
+      "states": [
+        "default",
+        "forms",
+        "dialogs",
+        "status"
+      ]
+    }
+  ],
+  "sourcePolicy": "Sources are repository screenshots and component code. New data are synthetic. New screens require approval."
+}

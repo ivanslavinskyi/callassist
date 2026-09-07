@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./app-shell";
+import { designMessages } from "@/lib/i18n/design-messages";
 import { CallFeedback } from "./call-feedback";
 import { CompilationReview } from "./compilation-review";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -102,6 +103,7 @@ export function LiveCall({ callId }: { callId: string }) {
   >("connecting");
   const [followLiveTranscript, setFollowLiveTranscript] = useState(true);
   const [showFullObjective, setShowFullObjective] = useState(false);
+  const [transcriptView, setTranscriptView] = useState<"final" | "provisional">("final");
   const transcriptListRef = useRef<HTMLDivElement>(null);
   const transcriptCardRef = useRef<HTMLElement>(null);
   const deletionRequestIdRef = useRef<string | null>(null);
@@ -387,19 +389,44 @@ export function LiveCall({ callId }: { callId: string }) {
   const hasImmutableExecutionPlan =
     snapshot.executionPlanSource === "immutable";
 
+  const reviewPanel = compilation ? (
+    <CompilationReview
+            busy={busy}
+            compilation={compilation}
+            onAnswerClarifications={answerClarifications}
+            onApproveAndCall={() =>
+              runAction(
+                () => approveAndStartCall(callId, {
+                  revision: compilation.revision,
+                  snapshotHash: compilation.snapshotHash
+                }),
+                revealLiveTranscript
+              )
+            }
+            onEdit={() => setEditingBrief(true)}
+            recipientName={brief.recipientName}
+            callDetails={[
+              {label: designMessages[uiLocale].recipient, value: brief.recipientName},
+              {label: designMessages[uiLocale].phoneNumber, value: brief.phoneNumber},
+              {label: copy.primaryLanguage, value: language?.label ?? brief.locale},
+              {label: copy.assistant, value: brief.agentName},
+              {label: copy.audioRetention, value: brief.audioRetentionDays === 0 ? copy.untilFinalTranscript : copy.retentionDays(brief.audioRetentionDays)}
+            ]}
+            showActions={!isTerminal && !isActive}
+          />
+  ) : null;
+
   return (
     <AppShell>
-      <main className="live-page" id="main-content" tabIndex={-1}>
+      <main data-terminal={isTerminal} className="live-page" id="main-content" tabIndex={-1}>
         <div className="live-nav">
           <nav aria-label={messages.live.breadcrumbLabel} className="breadcrumbs">
             <ol>
-              <li><Link href={localizeHref("/app")}>{messages.live.allCallBriefs}</Link></li>
+              <li><Link href={localizeHref("/app#history")}>{messages.live.allCallBriefs}</Link></li>
               <li aria-current="page">{brief.recipientName}</li>
             </ol>
           </nav>
-          <span className={`status-pill status-${brief.status}`}>
-            <span aria-hidden="true" /> {copy.status[brief.status]}
-          </span>
+
         </div>
 
         <section className="call-hero">
@@ -410,10 +437,15 @@ export function LiveCall({ callId }: { callId: string }) {
               <span>{brief.phoneNumber}</span>
               <span className="meta-divider" />
               <span>{language?.label ?? brief.locale}</span>
+              <time dateTime={brief.createdAt}>{new Intl.DateTimeFormat(uiLocale === "de" ? "de-CH" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(brief.createdAt))}</time>
+              {isTerminal && recording?.durationSeconds != null ? <span>{formatDuration(recording.durationSeconds)}</span> : null}
             </div>
           </div>
 
           <div className="call-actions">
+          <span className={`status-pill status-${brief.status}`}>
+            <span aria-hidden="true" /> {copy.status[brief.status]}
+          </span>
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
                 className="primary-button compact-button"
@@ -470,24 +502,8 @@ export function LiveCall({ callId }: { callId: string }) {
             saveCallBrief={saveEditedBrief}
             submitLabel={copy.updatePlan}
           />
-        ) : compilation ? (
-          <CompilationReview
-            busy={busy}
-            compilation={compilation}
-            onAnswerClarifications={answerClarifications}
-            onApproveAndCall={() =>
-              runAction(
-                () => approveAndStartCall(callId, {
-                  revision: compilation.revision,
-                  snapshotHash: compilation.snapshotHash
-                }),
-                revealLiveTranscript
-              )
-            }
-            onEdit={() => setEditingBrief(true)}
-            recipientName={brief.recipientName}
-            showActions={!isTerminal}
-          />
+        ) : compilation && !isTerminal && !isActive ? (
+          reviewPanel
         ) : !hasImmutableExecutionPlan ? (
           <section className="compilation-review decision-blocked">
             <span className="eyebrow">{copy.legacyBrief}</span>
@@ -506,11 +522,16 @@ export function LiveCall({ callId }: { callId: string }) {
           }`}
         >
           <div className="transcript-column">
-            <section className="transcript-card" ref={transcriptCardRef}>
+            {isTerminal && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
+              <button type="button" aria-pressed={transcriptView === "final"} onClick={() => setTranscriptView("final")}>{copy.finalTitle}</button>
+              <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{uiLocale === "de" ? "Vorläufiges Transkript" : "Provisional transcript"}</button>
+              <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
+            </nav> : null}
+            <section className="transcript-card" hidden={isTerminal && transcriptView !== "provisional"} ref={transcriptCardRef}>
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">{copy.liveTranscriptEyebrow}</span>
-                <h2>{copy.liveCaptions}</h2>
+                <h2>{isTerminal ? (uiLocale === "de" ? "Vorläufiges Transkript" : "Provisional transcript") : copy.liveCaptions}</h2>
                 <p className="transcript-subtitle">{copy.liveTranscriptHelp}</p>
               </div>
               {isActive ? (
@@ -610,7 +631,7 @@ export function LiveCall({ callId }: { callId: string }) {
             ) : null}
             </section>
 
-            <section className="final-transcript-card">
+            <section className="final-transcript-card" hidden={!isTerminal || transcriptView !== "final"}>
               <div className="final-transcript-heading">
                 <div>
                   <span className="eyebrow">
@@ -619,18 +640,7 @@ export function LiveCall({ callId }: { callId: string }) {
                   <h2>{copy.finalTitle}</h2>
                   <p className="transcript-subtitle">{copy.finalHelp}</p>
                 </div>
-                {finalTranscript ? (
-                  <span
-                    className={`processing-badge final-${finalTranscript.status}`}
-                  >
-                    {copy.finalTranscriptStatus[finalTranscript.status]}
-                  </span>
-                ) : null}
-              </div>
-
-              {finalTranscript?.status === "completed" &&
-              (finalTranscript.text || finalSegments.length > 0) ? (
-                <div className="final-transcript-body">
+                {finalTranscript?.status === "completed" ? (
                   <div className="final-transcript-actions">
                     <button
                       className="transcript-export-button"
@@ -667,6 +677,20 @@ export function LiveCall({ callId }: { callId: string }) {
                             : ""}
                     </span>
                   </div>
+                ) : null}
+                {finalTranscript && finalTranscript.status !== "completed" ? (
+                  <span
+                    className={`processing-badge final-${finalTranscript.status}`}
+                  >
+                    {copy.finalTranscriptStatus[finalTranscript.status]}
+                  </span>
+                ) : null}
+              </div>
+
+              {finalTranscript?.status === "completed" &&
+              (finalTranscript.text || finalSegments.length > 0) ? (
+                <div className="final-transcript-body">
+
                   {finalSegments.length > 0 ? (
                     <div className="final-transcript-list">
                       {finalSegments.map((segment, index) => (
@@ -765,7 +789,14 @@ export function LiveCall({ callId }: { callId: string }) {
                 </div>
               )}
 
-              {recording ? (
+            </section>
+            {compilation && (isTerminal || isActive) ? <details className="call-plan-disclosure">
+              <summary>{copy.briefEyebrow}</summary>{reviewPanel}
+            </details> : null}
+          </div>
+
+          <aside className="call-sidebar">
+            <section className="recording-section">              {recording ? (
                 <div className="recording-panel">
                   <div>
                     <strong>{copy.consentAudio}</strong>
@@ -802,7 +833,6 @@ export function LiveCall({ callId }: { callId: string }) {
                 </div>
               ) : null}
             </section>
-
             {isTerminalCallStatus(brief.status) && brief.status !== "blocked" ? (
               <CallFeedback
                 callId={callId}
@@ -810,62 +840,6 @@ export function LiveCall({ callId }: { callId: string }) {
               />
             ) : null}
 
-            {isTerminalCallStatus(brief.status) || brief.status === "blocked" ? (
-              <section className="call-data-deletion-card" aria-labelledby="call-data-deletion-title">
-                <h2 id="call-data-deletion-title">{copy.dataDeletionTitle}</h2>
-                <p>{copy.dataDeletionText}</p>
-                <p className="account-muted">{copy.dataDeletionRetained}</p>
-                <div className="call-data-deletion-fields">
-                  <label>
-                    <span>{copy.dataDeletionPassword}</span>
-                    <input
-                      autoComplete="current-password"
-                      disabled={deletionBusy}
-                      onChange={(event) => setDeletionPassword(event.target.value)}
-                      type="password"
-                      value={deletionPassword}
-                    />
-                  </label>
-                  <label>
-                    <span>{copy.dataDeletionConfirmation}</span>
-                    <input
-                      autoCapitalize="characters"
-                      autoComplete="off"
-                      disabled={deletionBusy}
-                      onChange={(event) => setDeletionConfirmation(event.target.value)}
-                      spellCheck={false}
-                      type="text"
-                      value={deletionConfirmation}
-                    />
-                    <small>{copy.dataDeletionConfirmationHint}</small>
-                  </label>
-                </div>
-                <button
-                  className="danger-button"
-                  disabled={
-                    deletionBusy ||
-                    !deletionPassword ||
-                    deletionConfirmation !== "DELETE"
-                  }
-                  onClick={() => void permanentlyDeleteCallData()}
-                  type="button"
-                >
-                  {deletionBusy
-                    ? copy.dataDeletionBusy
-                    : copy.dataDeletionAction}
-                </button>
-                {deletionError ? (
-                  <p className="form-error" role="alert">
-                    {deletionError === "invalid-password"
-                      ? copy.dataDeletionInvalidPassword
-                      : copy.dataDeletionError}
-                  </p>
-                ) : null}
-              </section>
-            ) : null}
-          </div>
-
-          <aside className="call-sidebar">
             {pendingApproval ? (
               <section className="approval-card">
                 <div className="approval-icon" aria-hidden="true">!</div>
@@ -968,6 +942,60 @@ export function LiveCall({ callId }: { callId: string }) {
                 <div><dt>{copy.assistant}</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>
+            {isTerminalCallStatus(brief.status) || brief.status === "blocked" ? (
+              <section className="call-data-deletion-card" aria-labelledby="call-data-deletion-title">
+                <h2 id="call-data-deletion-title">{copy.dataDeletionTitle}</h2>
+                <p>{copy.dataDeletionText}</p>
+                <p className="account-muted">{copy.dataDeletionRetained}</p>
+                <div className="call-data-deletion-fields">
+                  <label>
+                    <span>{copy.dataDeletionPassword}</span>
+                    <input
+                      autoComplete="current-password"
+                      disabled={deletionBusy}
+                      onChange={(event) => setDeletionPassword(event.target.value)}
+                      type="password"
+                      value={deletionPassword}
+                    />
+                  </label>
+                  <label>
+                    <span>{copy.dataDeletionConfirmation}</span>
+                    <input
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      disabled={deletionBusy}
+                      onChange={(event) => setDeletionConfirmation(event.target.value)}
+                      spellCheck={false}
+                      type="text"
+                      value={deletionConfirmation}
+                    />
+                    <small>{copy.dataDeletionConfirmationHint}</small>
+                  </label>
+                </div>
+                <button
+                  className="danger-button"
+                  disabled={
+                    deletionBusy ||
+                    !deletionPassword ||
+                    deletionConfirmation !== "DELETE"
+                  }
+                  onClick={() => void permanentlyDeleteCallData()}
+                  type="button"
+                >
+                  {deletionBusy
+                    ? copy.dataDeletionBusy
+                    : copy.dataDeletionAction}
+                </button>
+                {deletionError ? (
+                  <p className="form-error" role="alert">
+                    {deletionError === "invalid-password"
+                      ? copy.dataDeletionInvalidPassword
+                      : copy.dataDeletionError}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+
           </aside>
         </div>
         <ConfirmDialog

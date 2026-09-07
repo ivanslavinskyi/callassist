@@ -32,6 +32,7 @@ names, cookies, database names and legacy migration identifiers still use callas
 
 | Document | Status |
 | --- | --- |
+| [Emerald Paper design](../Design/system-2026-09-07/GUIDELINES.md) / [implementation milestone R20](mvp-plan.md#current-product-milestone--r20-approved-design-implementation) | Implemented in the actual app, including admin and revision 02 corrections; [local QA and evidence](../design-qa.md). R13 accessibility and provider/deployment release gates remain separate. |
 | [Admin architecture](admin-interface-architecture.md) | Implemented English-only admin separation |
 | [Voice consent](outbound-voice-consent-implementation-plan.md) | Implemented recognition/playback boundary; live/privacy acceptance remains open |
 | [Post-call transcription](post-call-transcription-plan.md) | Implemented channel-utterance default and full-file fallback |

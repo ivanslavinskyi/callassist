@@ -55,6 +55,7 @@ export function AdminSeoConsole() {
           <Summary label={copy.routes} value={routes.length} />
           <Summary label={copy.warnings} value={warningCount} warning={warningCount > 0} />
           <Summary label={copy.staleTranslations} value={staleCount} warning={staleCount > 0} />
+          <Summary label={copy.status} value={loading ? copy.loading : error ? copy.needsReview : copy.healthy} warning={Boolean(error)} />
         </dl>
 
         <section className="admin-seo-filters">
@@ -117,7 +118,7 @@ export function AdminSeoConsole() {
 
 function Summary({ label, value, warning = false }: {
   label: string;
-  value: number;
+  value: number | string;
   warning?: boolean;
 }) {
   return <div data-warning={warning}><dt>{label}</dt><dd>{value}</dd></div>;

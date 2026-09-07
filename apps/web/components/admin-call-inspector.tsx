@@ -84,13 +84,14 @@ export function AdminCallInspector({ callId }: { callId: string }) {
           <h1>{copy.inspectorTitle}</h1>
           <code>{callId}</code>
         </header>
+        <nav className="section-navigation" aria-label="Inspector sections"><a href="#technical-state">{copy.technical}</a><a href="#cost-breakdown">Usage and cost</a><a href="#call-timeline">{copy.timeline}</a><a href="#sensitive-content">{copy.sensitiveTitle}</a></nav>
 
         {loading ? <p role="status">{copy.loading}</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
         {summary && inspector ? (
           <>
-            <section className="admin-inspector-summary">
+            <section className="admin-inspector-summary" id="technical-state">
               <h2>{copy.technical}</h2>
               <dl>
                 <Fact label={copy.status} value={copy.statuses[summary.status]} />
@@ -118,10 +119,10 @@ export function AdminCallInspector({ callId }: { callId: string }) {
               </dl>
             </section>
 
-            {cost ? <AdminCostBreakdown cost={cost.cost} locale={locale} /> : null}
+            <div id="cost-breakdown">{cost ? <AdminCostBreakdown cost={cost.cost} locale={locale} /> : null}</div>
 
             <div className="admin-inspector-grid">
-              <section className="admin-inspector-panel">
+              <section className="admin-inspector-panel" id="call-timeline">
                 <h2>{copy.timeline}</h2>
                 {inspector.timeline.length === 0 ? <p>{copy.noTimeline}</p> : (
                   <ol className="admin-call-timeline">
@@ -167,7 +168,7 @@ export function AdminCallInspector({ callId }: { callId: string }) {
               </section>
             </div>
 
-            <section className="admin-sensitive-panel">
+            <section className="admin-sensitive-panel" id="sensitive-content">
               <h2>{copy.sensitiveTitle}</h2>
               <p>{copy.sensitiveHelp}</p>
               {role !== "superadmin" ? (

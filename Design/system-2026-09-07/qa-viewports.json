@@ -1,0 +1,770 @@
+[
+  {
+    "id": "landing",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 3241,
+    "h1": [
+      "Need to make a phone call, but speaking is the hard part?"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "register",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 523,
+    "h1": [
+      "Create your SHPROHLI account"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "verify",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 358,
+    "h1": [
+      "Verify your phone"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "login",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 380,
+    "h1": [
+      "Welcome back"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "recover",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 340,
+    "h1": [
+      "Recover your account"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "onboarding",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 431,
+    "h1": [
+      "Before your first call"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "new-call",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 978,
+    "h1": [
+      "Who are we calling, and why?"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "call",
+    "state": "review",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1041,
+    "h1": [
+      "Municipal office"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "account",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 331,
+    "h1": [
+      "Profile, usage, and sessions"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "redeem",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 153,
+    "h1": [
+      "Redeem a promo code"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "opt-out",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 151,
+    "h1": [
+      "Stop future calls"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "faq",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1753,
+    "h1": [
+      "Frequently asked questions"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "support",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1168,
+    "h1": [
+      "Support"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "privacy",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 3717,
+    "h1": [
+      "Privacy Notice"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "terms",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 2500,
+    "h1": [
+      "Terms of Use"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "acceptable-use",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1434,
+    "h1": [
+      "Acceptable Use Policy"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "imprint",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 697,
+    "h1": [
+      "Imprint"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "admin-overview",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1438,
+    "h1": [
+      "Service overview"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-calls",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 964,
+    "h1": [
+      "Calls"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-inspector",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1793,
+    "h1": [
+      "Call Inspector"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-preparation",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1164,
+    "h1": [
+      "Call Preparation Inspector"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-users",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 492,
+    "h1": [
+      "Users and credit ledger"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-credits",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 544,
+    "h1": [
+      "Promo codes and manual grants"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-safety",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 498,
+    "h1": [
+      "Recipient suppression"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-system",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1011,
+    "h1": [
+      "System status"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-content",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 859,
+    "h1": [
+      "Published content"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-editorial",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1143,
+    "h1": [
+      "Landing, FAQ and navigation"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "admin-seo",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 5090,
+    "h1": [
+      "SEO audit"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "preview-content",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 1434,
+    "h1": [
+      "Acceptable Use Policy"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "preview-landing",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 3241,
+    "h1": [
+      "Need to make a phone call, but speaking is the hard part?"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "error",
+    "state": "loading",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 67,
+    "h1": [
+      "Loading your account…"
+    ],
+    "scroll": 1440,
+    "width": 1440
+  },
+  {
+    "id": "components",
+    "state": "default",
+    "theme": "light",
+    "viewport": 1440,
+    "content": 814,
+    "h1": [
+      "Components"
+    ],
+    "scroll": 1425,
+    "width": 1440
+  },
+  {
+    "id": "landing",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 3241,
+    "h1": [
+      "Need to make a phone call, but speaking is the hard part?"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "register",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 319,
+    "h1": [
+      "Create your SHPROHLI account"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "verify",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 154,
+    "h1": [
+      "Verify your phone"
+    ],
+    "scroll": 390,
+    "width": 390
+  },
+  {
+    "id": "login",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 176,
+    "h1": [
+      "Welcome back"
+    ],
+    "scroll": 390,
+    "width": 390
+  },
+  {
+    "id": "recover",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 136,
+    "h1": [
+      "Recover your account"
+    ],
+    "scroll": 390,
+    "width": 390
+  },
+  {
+    "id": "onboarding",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 431,
+    "h1": [
+      "Before your first call"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "new-call",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 645,
+    "h1": [
+      "Who are we calling, and why?"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "call",
+    "state": "review",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1041,
+    "h1": [
+      "Municipal office"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "account",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 331,
+    "h1": [
+      "Profile, usage, and sessions"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "redeem",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 153,
+    "h1": [
+      "Redeem a promo code"
+    ],
+    "scroll": 390,
+    "width": 390
+  },
+  {
+    "id": "opt-out",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 151,
+    "h1": [
+      "Stop future calls"
+    ],
+    "scroll": 390,
+    "width": 390
+  },
+  {
+    "id": "faq",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1753,
+    "h1": [
+      "Frequently asked questions"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "support",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1168,
+    "h1": [
+      "Support"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "privacy",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 3717,
+    "h1": [
+      "Privacy Notice"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "terms",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 2500,
+    "h1": [
+      "Terms of Use"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "acceptable-use",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1434,
+    "h1": [
+      "Acceptable Use Policy"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "imprint",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 697,
+    "h1": [
+      "Imprint"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-overview",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1354,
+    "h1": [
+      "Service overview"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-calls",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 437,
+    "h1": [
+      "Calls"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-inspector",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1766,
+    "h1": [
+      "Call Inspector"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-preparation",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1137,
+    "h1": [
+      "Call Preparation Inspector"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-users",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 488,
+    "h1": [
+      "Users and credit ledger"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-credits",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 561,
+    "h1": [
+      "Promo codes and manual grants"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-safety",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 515,
+    "h1": [
+      "Recipient suppression"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-system",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1003,
+    "h1": [
+      "System status"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-content",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 876,
+    "h1": [
+      "Published content"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-editorial",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1160,
+    "h1": [
+      "Landing, FAQ and navigation"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "admin-seo",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 5107,
+    "h1": [
+      "SEO audit"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "preview-content",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 1434,
+    "h1": [
+      "Acceptable Use Policy"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "preview-landing",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 3241,
+    "h1": [
+      "Need to make a phone call, but speaking is the hard part?"
+    ],
+    "scroll": 375,
+    "width": 390
+  },
+  {
+    "id": "error",
+    "state": "loading",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 67,
+    "h1": [
+      "Loading your account…"
+    ],
+    "scroll": 390,
+    "width": 390
+  },
+  {
+    "id": "components",
+    "state": "default",
+    "theme": "dark",
+    "viewport": 390,
+    "content": 814,
+    "h1": [
+      "Components"
+    ],
+    "scroll": 375,
+    "width": 390
+  }
+]

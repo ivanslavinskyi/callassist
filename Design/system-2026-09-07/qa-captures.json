@@ -1,0 +1,3764 @@
+[
+  {
+    "id": "landing",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "register",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "verify",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "login",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "recover",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "onboarding",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "new-call",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "call",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "call-completed",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "account",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "redeem",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "opt-out",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "faq",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "support",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "privacy",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "terms",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "acceptable-use",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "imprint",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-overview",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-calls",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-inspector",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-preparation",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-users",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-credits",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-safety",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-system",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-content",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-editorial",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-seo",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "preview-content",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "preview-landing",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "error",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "components",
+    "theme": "light",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "landing",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "register",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "verify",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "login",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "recover",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "onboarding",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "new-call",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "call",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "call-completed",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "account",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "redeem",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "opt-out",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "faq",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "support",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "privacy",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "terms",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "acceptable-use",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "imprint",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-overview",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-calls",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-inspector",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-preparation",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-users",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-credits",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-safety",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-system",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-content",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-editorial",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "admin-seo",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "preview-content",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "preview-landing",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "error",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1440,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "components",
+    "theme": "dark",
+    "device": "desktop",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "scrollWidth": 1425,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 1440
+  },
+  {
+    "id": "landing",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "register",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "verify",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "login",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "recover",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "onboarding",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "new-call",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "call",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "call-completed",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "account",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "redeem",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "opt-out",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "faq",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "support",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "privacy",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "terms",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "acceptable-use",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "imprint",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-overview",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-calls",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-inspector",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-preparation",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-users",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-credits",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-safety",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-system",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-content",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-editorial",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-seo",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "preview-content",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "preview-landing",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "error",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "components",
+    "theme": "light",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "landing",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "register",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "verify",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "login",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "recover",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "onboarding",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "new-call",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "call",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "call-completed",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "account",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "redeem",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "opt-out",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "faq",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "support",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "privacy",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "terms",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "acceptable-use",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "imprint",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-overview",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-calls",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-inspector",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-preparation",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-users",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-credits",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-safety",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-system",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-content",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-editorial",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "admin-seo",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "preview-content",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "preview-landing",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "error",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 390,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  },
+  {
+    "id": "components",
+    "theme": "dark",
+    "device": "mobile",
+    "footer": 1,
+    "footerLinks": [
+      "FAQ",
+      "Support",
+      "Block calls",
+      "Privacy",
+      "Terms",
+      "Acceptable Use",
+      "Imprint"
+    ],
+    "h1": 1,
+    "loadedImages": true,
+    "main": 1,
+    "menu": "",
+    "scrollWidth": 375,
+    "themeButtons": [
+      {
+        "height": 44,
+        "icons": 1,
+        "text": "",
+        "width": 44
+      }
+    ],
+    "width": 390
+  }
+]

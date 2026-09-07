@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { middleware } from "./middleware";
 
 describe("admin middleware boundary", () => {
+  it.each(["/brand/logo-light.svg", "/brand/logo-dark.svg"])("serves %s without a locale redirect", pathname => {
+    const response = middleware(new NextRequest(`https://callassist.test${pathname}`, { headers: { "accept-language": "de" } }));
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.cookies.get("callassist_ui_locale")).toBeUndefined();
+  });
   it.each(["/admin", "/admin/calls", "/admin/content/editorial"]) (
     "keeps %s outside locale routing",
     (pathname) => {

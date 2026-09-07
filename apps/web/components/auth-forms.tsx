@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { designMessages } from "@/lib/i18n/design-messages";
 import { AppShell } from "@/components/app-shell";
 import {
   completePasswordRecovery,
@@ -17,9 +18,16 @@ import { authMessages, getAuthErrorMessage } from "@/lib/i18n/auth-messages";
 import { useUiLocale } from "@/components/ui-locale-provider";
 
 function AuthFrame({ children }: { children: ReactNode }) {
+  const { locale } = useUiLocale();
+  const design = designMessages[locale];
   return (
     <AppShell>
-      <main className="auth-page" id="main-content">
+      <main className="auth-page" id="main-content" tabIndex={-1}>
+        <aside className="auth-aside">
+          <span className="eyebrow">SHPROHLI</span>
+          <h2>{design.authTitle}</h2><p>{design.authLead}</p>
+          <div className="auth-aside-note"><p>{design.authCredits}</p><small>{design.authScope}</small></div>
+        </aside>
         <section className="auth-card">{children}</section>
       </main>
     </AppShell>

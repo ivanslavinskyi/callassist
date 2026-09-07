@@ -6,6 +6,7 @@ import Link from "next/link";
 import { navigationPath } from "@/lib/i18n/content-routing";
 import { AppShell } from "./app-shell";
 import { FaqList } from "./faq-list";
+import { ContentNavigation } from "./content-navigation";
 
 export function ContentPage({
   page,
@@ -22,10 +23,8 @@ export function ContentPage({
   return (
     <AppShell>
       <main className="content-page" id="main-content" tabIndex={-1}>
+        <ContentNavigation locale={page.locale} current={page.key} />
         <header className="content-heading">
-          <span className="eyebrow">
-            {page.locale === "de" ? "Öffentliche Information" : "Public information"}
-          </span>
           <h1>{page.title}</h1>
           <p>{page.summary}</p>
           <small>

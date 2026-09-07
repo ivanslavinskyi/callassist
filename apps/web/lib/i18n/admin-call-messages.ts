@@ -11,14 +11,14 @@ import type {
 import type { UiLocale } from "./messages";
 
 const en = {
-  eyebrow: "Call operations",
-  title: "Admin Calls",
-  intro: "Filter the privacy-minimized operational read model and open a technical Inspector. Call text, phone numbers and private comments are excluded by default.",
+  eyebrow: "Administration",
+  title: "Calls",
+  intro: "Technical metadata. Sensitive call content requires separate audited access.",
   privacyNote: "Default access contains technical metadata only. Sensitive content requires a separate superadmin action and immutable audit evidence.",
   loading: "Loading calls…",
   forbidden: "Administrator access is required.",
   signIn: "Sign in",
-  filters: "Operational filters",
+  filters: "Filters",
   status: "Status",
   outcome: "Outcome",
   consent: "Consent",

@@ -1,0 +1,38 @@
+window.SCREENS = [
+ ['landing','Публичные','Лендинг','/:locale','public-home.tsx',['default','preview']],
+ ['register','Доступ','Регистрация','/:locale/register','auth-forms.tsx',['default','error','busy']],
+ ['verify','Доступ','Проверка телефона','/:locale/verify','auth-forms.tsx',['default','invalid-code','resent','busy']],
+ ['login','Доступ','Вход','/:locale/login','auth-forms.tsx',['default','error','verification-required','suspended','rate-limited']],
+ ['recover','Доступ','Восстановление доступа','/:locale/recover','auth-forms.tsx',['default','verify','reset','success','expired','error']],
+ ['onboarding','Доступ','Онбординг / согласие','/:locale/onboarding','onboarding-form.tsx',['default','accepted','error','revision-changed']],
+ ['new-call','Звонки','Новый звонок и история','/:locale/app','dashboard.tsx + create-call-form.tsx',['default','filled','options','history','empty','preparing','error','no-credits','active-call','paused']],
+ ['call','Звонки','Подготовка и ход звонка','/:locale/app/calls/:id','live-call.tsx + compilation-review.tsx',['review','edit','clarification','blocked','confirm-start','dialing','live','approval','reconnecting','failed','stopped','archived']],
+ ['call-completed','Звонки','Завершённый звонок и оценка качества','/:locale/app/calls/:id','live-call.tsx + call-feedback.tsx',['completed','provisional','transcribing','transcript-failed','no-recording','recording-deleted','delete-recording','delete-call','feedback-saved']],
+ ['account','Аккаунт','Профиль, использование и сессии','/:locale/app/account','account-console.tsx',['default','edit-name','email','email-code','phone','phone-code','saved','usage','security','revoke','signout-all','privacy','delete','deletion-queued','deletion-waiting','deletion-support','error']],
+ ['redeem','Аккаунт','Промокод','/:locale/redeem','promo-redemption-form.tsx',['default','success','invalid','used','rate-limited','sign-in']],
+ ['opt-out','Публичные','Блокировка будущих звонков','/:locale/opt-out','recipient-opt-out-form.tsx',['default','verify','success','error']],
+ ['faq','Публичные','FAQ','/:locale/faq','content-page.tsx',['default']],
+ ['support','Публичные','Поддержка','/en/support · /de/hilfe','content-page.tsx',['default']],
+ ['privacy','Публичные','Конфиденциальность','/en/privacy · /de/datenschutz','content-page.tsx',['default']],
+ ['terms','Публичные','Условия использования','/en/terms · /de/nutzungsbedingungen','content-page.tsx',['default']],
+ ['acceptable-use','Публичные','Допустимое использование','/en/acceptable-use · /de/nutzungsregeln','content-page.tsx',['default']],
+ ['imprint','Публичные','Сведения об операторе','/en/imprint · /de/impressum','content-page.tsx',['default']],
+ ['admin-overview','Админка · операции','Обзор','/admin','admin-operations-dashboard.tsx',['default','empty','error']],
+ ['admin-calls','Админка · операции','Звонки','/admin/calls','admin-calls-console.tsx',['default','filtered','empty','error']],
+ ['admin-inspector','Админка · операции','Инспектор звонка','/admin/calls/:id','admin-call-inspector.tsx',['default','sensitive','sensitive-loaded','forbidden','error']],
+ ['admin-preparation','Админка · операции','Инспектор подготовки','/admin/calls/preparations/:id','admin-call-preparation-inspector.tsx',['default','retrying','failed','error']],
+ ['admin-users','Админка · операции','Пользователи и журнал кредитов','/admin/users','admin-users-console.tsx',['default','selected','actions','suspend','restore','force-logout','grant','restart-deletion','empty','error']],
+ ['admin-credits','Админка · операции','Промокоды и начисления','/admin/credits','admin-credits-form.tsx',['default','created','granted','error']],
+ ['admin-safety','Админка · операции','Блокировка получателя','/admin/safety','admin-safety-form.tsx',['default','blocked','lifted','error']],
+ ['admin-system','Админка · операции','Состояние системы','/admin/system','admin-system-console.tsx',['default','jobs','alerts','outbound','disable-confirm','disabled','error']],
+ ['admin-content','Админка · контент','Редактор страниц','/admin/content','admin-content-console.tsx',['default','sections','publish','history','rollback','conflict','no-draft','error']],
+ ['admin-editorial','Админка · контент','Лендинг, FAQ и навигация','/admin/content/editorial','admin-editorial-console.tsx',['default','landing','faq','navigation','publish','rollback','no-draft','error']],
+ ['admin-seo','Админка · контент','SEO-аудит','/admin/seo','admin-seo-console.tsx',['default','warnings','stale','empty','error']],
+ ['preview-content','Админка · контент','Предпросмотр документа','/admin/content/:key/preview','content-draft-preview.tsx',['default']],
+ ['preview-landing','Админка · контент','Предпросмотр лендинга','/admin/content/editorial/landing/preview','landing-draft-preview.tsx',['default']],
+ ['error','Система','Состояния доступа и загрузки','Shared boundaries / 404','admin-route-boundary.tsx',['loading','error','signed-out','forbidden','not-found','offline']],
+ ['components','Система','Компоненты и состояния','Design only','Design tokens',['default','forms','dialogs','status']]
+].map(([id,group,title,route,source,states])=>({id,group,title,route,source,states}));
+
+window.COMPLETED_CALL_STATES=["completed", "provisional", "transcribing", "transcript-failed", "no-recording", "recording-deleted", "delete-recording", "delete-call", "feedback-saved"];
+function resolveDesignScreen(id,state){if(id==='call'&&COMPLETED_CALL_STATES.includes(state))id='call-completed';if(id==='call-completed'&&state==='default')state='completed';if(id==='call-completed'&&!COMPLETED_CALL_STATES.includes(state))id='call';return {id,state}}

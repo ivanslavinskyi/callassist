@@ -269,7 +269,8 @@ export function AdminContentConsole() {
                       {copy.preview}
                     </Link>
                   </div>
-                  <div className="admin-content-fields">
+                  <nav className="section-navigation" aria-label="Page editor sections"><a href="#page-details">Page details</a>{!isFaq ? <a href="#page-sections">{copy.sections}</a> : null}</nav>
+                  <div className="admin-content-fields" id="page-details">
                     <TextInput label={copy.titleField} maxLength={180} value={editor.title} onChange={(title) => edit((current) => ({ ...current, title }))} />
                     <TextArea label={copy.summary} maxLength={1000} rows={4} value={editor.summary} onChange={(summary) => edit((current) => ({ ...current, summary }))} />
                     <TextInput label={copy.seoTitle} maxLength={180} value={editor.seoTitle} onChange={(seoTitle) => edit((current) => ({ ...current, seoTitle }))} />
@@ -309,7 +310,7 @@ export function AdminContentConsole() {
                         {copy.editorialModels}
                       </Link>
                     </div>
-                  ) : <div className="admin-section-list">
+                  ) : <div className="admin-section-list" id="page-sections">
                     <h3>{copy.sections}</h3>
                     {editor.sections.map((section, index) => (
                       <SectionEditor

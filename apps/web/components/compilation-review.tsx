@@ -9,6 +9,7 @@ import {
 import { useState, type FormEvent } from "react";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUiLocale } from "./ui-locale-provider";
+import { designMessages } from "@/lib/i18n/design-messages";
 
 export function CompilationReview({
   busy,
@@ -17,7 +18,8 @@ export function CompilationReview({
   onApproveAndCall,
   onEdit,
   recipientName,
-  showActions = true
+  showActions = true,
+  callDetails = []
 }: {
   busy: boolean;
   compilation: CallCompilation;
@@ -26,9 +28,11 @@ export function CompilationReview({
   onEdit: () => void;
   recipientName: string;
   showActions?: boolean;
+  callDetails?: Array<{ label: string; value: string }>;
 }) {
   const [confirmingCall, setConfirmingCall] = useState(false);
-  const { messages } = useUiLocale();
+  const { locale, messages } = useUiLocale();
+  const design = designMessages[locale];
   const copy = messages.review;
   const compiled = compilation.compiledBrief;
   const decision = compilation.policyDecision;
@@ -41,19 +45,19 @@ export function CompilationReview({
       : copy.changesNeeded;
 
   return (
-    <section className={`compilation-review decision-${decision.status}`}>
+    <section className={`compilation-review decision-${decision.status}`} data-actions={showActions}>
+      <div className="review-plan">
       <div className="compilation-review-heading">
         <div>
           <span className="eyebrow">{copy.preview}</span>
-          <h2>{stateLabel}</h2>
+          <h2>{showActions && !isReady ? stateLabel : copy.whatWillDo}</h2>
         </div>
       </div>
 
       {compiled ? (
         <>
           <p className="call-plan-lead">{compiled.localizedObjective}</p>
-          <div className="review-questions">
-            <span>{copy.whatWillDo}</span>
+          <div className="review-questions review-success-criteria">
             <ul>
               {compiled.successCriteria.map((criterion) => (
                 <li key={criterion}>{criterion}</li>
@@ -62,7 +66,7 @@ export function CompilationReview({
           </div>
 
           <div className="review-questions">
-            <span>{copy.callSettings}</span>
+            <h2>{copy.callSettings}</h2>
           </div>
           <div className="plan-setting-chips" aria-label={copy.callSettings}>
             <span>{copy.tone[compiled.tone]}</span>
@@ -76,7 +80,7 @@ export function CompilationReview({
 
           {compiled.opening ? (
             <div className="review-opening">
-              <span>{copy.opening}</span>
+              <h2>{copy.opening}</h2>
               <p>
                 {compiled.opening.recipientAddress}{" "}
                 {compiled.opening.purposeStatement}{" "}
@@ -86,7 +90,7 @@ export function CompilationReview({
           ) : null}
 
           <div className="review-questions">
-            <span>{copy.questions}</span>
+            <h2>{copy.questions}</h2>
             <ol>
               {compiled.orderedQuestions.map((question, index) => (
                 <li key={`${index}-${question.text}`}>{question.text}</li>
@@ -96,7 +100,7 @@ export function CompilationReview({
 
           <div className="compiled-plan-grid">
             <div>
-              <span>{copy.approvedInformation}</span>
+              <h2>{copy.approvedInformation}</h2>
               {compiled.approvedFacts.length > 0 ? (
                 <ul>
                   {compiled.approvedFacts.map((fact) => (
@@ -106,7 +110,7 @@ export function CompilationReview({
               ) : <p>{copy.none}</p>}
             </div>
             <div>
-              <span>{copy.guardrails}</span>
+              <h2>{copy.guardrails}</h2>
               <ul>
                 {compiled.prohibitedActions.map((action) => <li key={action}>{action}</li>)}
               </ul>
@@ -147,7 +151,11 @@ export function CompilationReview({
         </div>
       ) : null}
 
-      {showActions ? <div className="review-actions">
+      </div>
+      {showActions ? <aside className="review-sidebar">
+        {callDetails.length ? <section><h2>{design.callDetails}</h2><dl>{callDetails.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></section> : null}
+        <section><h2>{design.yourApproval}</h2><p>{design.approvalHelp}</p>
+        <div className="review-actions">
         <button
           className="secondary-button"
           disabled={busy}
@@ -166,7 +174,8 @@ export function CompilationReview({
             {busy ? copy.starting : copy.approveAndCall}
           </button>
         ) : null}
-      </div> : null}
+        </div></section>
+      </aside> : null}
 
       <ConfirmDialog
         busy={busy}

@@ -17,3 +17,10 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# Local design source captures contain account and call data.
+Design/system-2026-09-07/sources/
+Design/exploration-2026-09-07/source-desktop*.png
+Design/exploration-2026-09-07/source-mobile.png
+# Generated portable archive duplicates the versioned design package.
+Design/system-2026-09-07/SHPROHLI-design-review.zip

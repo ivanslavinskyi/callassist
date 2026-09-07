@@ -87,16 +87,16 @@ export function OnboardingForm({ initialStatus }: {
         </header>
 
         <form className="onboarding-form" onSubmit={submit}>
-          <fieldset>
-            <legend className="sr-only">{copy.title}</legend>
-            <OnboardingCheck name="legalAgreement" text={copy.agreement} />
-          </fieldset>
           <section className="onboarding-information">
-            <h2>{copy.informationHeading}</h2>
+            <h2 className="sr-only">{copy.informationHeading}</h2>
             <ul>
               {copy.information.map((item) => <li key={item}>{item}</li>)}
             </ul>
           </section>
+          <fieldset>
+            <legend className="sr-only">{copy.title}</legend>
+            <OnboardingCheck name="legalAgreement" text={copy.agreement} />
+          </fieldset>
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <div className="onboarding-actions">
             <button className="primary-button" disabled={busy} type="submit">

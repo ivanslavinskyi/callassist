@@ -1,0 +1,13 @@
+{
+  "library": "Heroicons",
+  "version": "2.2.0",
+  "style": "24 outline",
+  "license": "MIT",
+  "source": "https://github.com/tailwindlabs/heroicons/tree/v2.2.0/optimized/24/outline",
+  "sha256": {
+    "sun": "e55df00558e838b63e6aeebc4af511b37a427f739ce1c4a63a8116a558b1b12e",
+    "moon": "4dfd046e7cc6747a64b7656d5eec90907fe1eec8e7a1d3467ca25f6e599d3908",
+    "bars-3": "0e76cceaeef6685444adf1ccb47d743d791d30e19181289ce19d3fb5e5c7ed74",
+    "x-mark": "f44f8d4070a779c324f07a199122b4cc8686b5a8d9705727dc38d0cfd3bb27ec"
+  }
+}
