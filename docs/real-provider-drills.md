@@ -1,5 +1,18 @@
 # Real-provider drills
 
+## R21 supervised hangup acceptance — 2026-09-08
+
+One recipient-authorized Russian call passed through the signed-in web preparation,
+review and start flow. With migration 0062 and `REALTIME_AGENT_HANGUP_ENABLED=true`,
+the bridge received the farewell playback mark, closed with `agent_hangup`, and
+Twilio confirmed `completed` 0.429 seconds after that mark. The recipient confirmed
+full farewell playback and automatic termination. Recording and final ASR completed.
+See [R21 verification](r21-verification-2026-09-08.md) for the limits and local checks.
+This validates that single UI-driven scenario, not the repaired CLI runner, broader
+R08 voice safety, every call objective, or production rollout.
+
+## Earlier runner status
+
 Updated 2026-09-07: runner repaired for async preparation (R06). The non-billable
 harness passes; a current recipient-authorized live call has not been executed.
 The August and September provider evidence below is preserved from both histories;

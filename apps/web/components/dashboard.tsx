@@ -8,13 +8,14 @@ import { CreateCallForm } from "./create-call-form";
 import { listCallBriefs } from "@/lib/api";
 import { useUiLocale } from "./ui-locale-provider";
 import { formatCallTime } from "@/lib/call-time";
+import type { ProfileName } from "@/lib/represented-person-defaults";
 
 const callStatuses = [
   "review_required", "needs_clarification", "blocked", "ready", "dialing",
   "in_progress", "awaiting_approval", "completed", "stopped", "failed"
 ] as const satisfies readonly CallBrief["status"][];
 
-export function Dashboard({ userId }: { userId: string }) {
+export function Dashboard({ userId, profileName }: { userId: string; profileName: ProfileName }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -110,7 +111,7 @@ export function Dashboard({ userId }: { userId: string }) {
         </nav>
         <div className="dashboard-grid">
           <div id="new-call">
-            <CreateCallForm headingLevel={1} onCreated={openBrief} userId={userId} />
+            <CreateCallForm key={userId} headingLevel={1} onCreated={openBrief} userId={userId} profileName={profileName} />
           </div>
 
           <aside className="activity-panel" id="history">

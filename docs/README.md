@@ -32,6 +32,7 @@ names, cookies, database names and legacy migration identifiers still use callas
 
 | Document | Status |
 | --- | --- |
+| [Small improvements — R21](small-improvements-implementation-plan-2026-09-08.md) | Implemented locally: brand favicon, editable profile name defaults, and playback-aware agent hangup. [Verification](r21-verification-2026-09-08.md): signed-in form and one Russian live drill passed; broader voice acceptance and rollout remain separate. |
 | [Emerald Paper design](../Design/system-2026-09-07/GUIDELINES.md) / [implementation milestone R20](mvp-plan.md#current-product-milestone--r20-approved-design-implementation) | Implemented in the actual app, including admin and revision 02 corrections; [local QA and evidence](../design-qa.md). R13 accessibility and provider/deployment release gates remain separate. |
 | [Admin architecture](admin-interface-architecture.md) | Implemented English-only admin separation |
 | [Voice consent](outbound-voice-consent-implementation-plan.md) | Implemented recognition/playback boundary; live/privacy acceptance remains open |

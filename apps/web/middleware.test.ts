@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { middleware } from "./middleware";
 
 describe("admin middleware boundary", () => {
-  it.each(["/brand/logo-light.svg", "/brand/logo-dark.svg"])("serves %s without a locale redirect", pathname => {
+  it.each(["/brand/logo-light.svg", "/brand/logo-dark.svg", "/icon.svg", "/apple-icon.png", "/favicon.ico"])("serves %s without a locale redirect", pathname => {
     const response = middleware(new NextRequest(`https://callassist.test${pathname}`, { headers: { "accept-language": "de" } }));
     expect(response.headers.get("location")).toBeNull();
     expect(response.cookies.get("callassist_ui_locale")).toBeUndefined();

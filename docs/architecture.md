@@ -10,6 +10,43 @@ This architecture includes the integration of that mainline work with the audit 
 
 ## Runtime and repository boundaries
 
+### R21 additions — 2026-09-08
+
+New call forms receive only the current account's ID and first/last names from the
+server. Names remain directly editable for this call; stored plan inputs take precedence
+over profile defaults. Initialization is one-time and keyed by account, so rerenders
+do not overwrite edits. Recompilation/approval still creates immutable snapshots.
+Root App Router icon assets use the supplied portal geometry with `#222B25` and
+`#138553`; metadata resources bypass locale redirects.
+
+With `REALTIME_AGENT_HANGUP_ENABLED=true`, the bridge exposes `end_call` only after
+consent and opening playback. The function's validated reason requests a separate
+farewell audio response. A controller correlates response IDs, speech epochs and
+playback generations: a completed generation is not itself proof of playback.
+Only its matching Twilio mark causes normal hangup. Speech invalidates the pending
+mark before `clear`, truncates the model audio history and permits a fresh response.
+Late, duplicated or cancelled responses cannot finish a different turn.
+
+Before closing the stream (which continues existing TwiML to Hangup), the service
+advances the existing attempt-bound `provider_call_reconciliation` job to two
+seconds from now. The durable worker checks the provider state and stops that same
+leg if needed. Retries check status again after ambiguous errors; provider callbacks
+and reconciliation retain the existing status, credits, cost and ASR paths.
+Migration 0062 adds the hangup event to the database vocabulary; no alternate
+`stopped` transition was added. A transport `completed`
+status does not prove that the business objective succeeded.
+
+Generation has a 10-second watchdog; playback uses queued PCMU duration plus a
+2-second allowance, capped at 15 seconds from the farewell request. Persistence
+has a 2-second bridge deadline; on failure, the stream closes and the existing
+maximum-duration recovery remains the last bound. Twilio REST requests time out
+after 10 seconds. `conversation.hangup` records bounded phase/reason/trigger facts,
+with normal or fallback reasons in `conversation.ended`. Feature flag rollback
+requires an API restart and leaves consent/error paths and queued recovery intact.
+
+Local implementation evidence is in [R21 verification](r21-verification-2026-09-08.md).
+Live-provider acceptance is recorded separately and this addition does not close R08.
+
 The pnpm/Turbo monorepo has three packages:
 
 | Package | Responsibility | Main sources |
@@ -248,8 +285,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog is **61 migrations**, `0001` through
-`0061_complete_immutable_call_plan_cutover.sql`, producing **58 public tables** including
+The current catalog is **62 migrations**, `0001` through
+`0062_agent_hangup_telemetry.sql`, producing **58 public tables** including
 `schema_migrations`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.

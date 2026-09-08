@@ -28,6 +28,7 @@ import { useUiLocale } from "./ui-locale-provider";
 import { isE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone-number";
 import { designMessages } from "@/lib/i18n/design-messages";
 import { RecipientCombobox } from "./recipient-combobox";
+import { representedPersonDefaults, type ProfileName } from "@/lib/represented-person-defaults";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -59,6 +60,7 @@ const legacyDemoFacts = [
 type CreateCallFormProps = {
   onCreated: (brief: CallBrief) => void;
   userId?: string;
+  profileName?: ProfileName;
   initialValue?: CreateCallBriefInput;
   saveCallBrief?: (
     input: CreateCallBriefInput,
@@ -73,6 +75,7 @@ type CreateCallFormProps = {
 export function CreateCallForm({
   onCreated,
   userId,
+  profileName,
   initialValue,
   saveCallBrief = createCallBrief,
   heading,
@@ -89,6 +92,7 @@ export function CreateCallForm({
   const [form, setForm] = useState<CreateCallBriefInput>(() => ({
     ...emptyForm,
     ...initialValue,
+    ...representedPersonDefaults(initialValue, profileName),
     allowedFacts: cleanLegacyDemoFacts(initialValue?.allowedFacts),
     clarificationAnswers: initialValue?.clarificationAnswers ?? []
   }));
@@ -371,6 +375,10 @@ export function CreateCallForm({
           />
         </label>
       </div>
+
+      {!initialValue && profileName ? (
+        <p className="call-options-help">{copy.profileNameHelp}</p>
+      ) : null}
 
       <details className="call-options">
         <summary>

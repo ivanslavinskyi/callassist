@@ -143,6 +143,25 @@ be replaced by their application bindings. New backend/admin capabilities remain
 their own backlog items (including R15/R16); live-provider evidence remains R06/R14.
 Implementation authorization does not authorize a production deployment.
 
+## Planned product follow-up — R21: favicon, represented names and agent hangup
+
+Added 2026-09-08 at the user's request to prepare and record an implementation plan.
+Status: **Implemented locally; signed-in form and one Russian live hangup drill passed**.
+Broader voice acceptance and target-environment enablement remain separate.
+The [implementation plan](small-improvements-implementation-plan-2026-09-08.md)
+records source findings, file boundaries, failure handling, tests and rollout.
+See [R21 verification](r21-verification-2026-09-08.md) for current checks and limitations.
+
+- Add the supplied SHPROHLI SVG as a favicon in the existing dark/emerald palette.
+- Default new plans to current account first/last names in directly editable fields
+  without an unlock button; preserve stored plan values and immutable approval/recompilation.
+- Add structured agent termination, farewell playback confirmation, interruption
+  handling and bounded provider fallback with correct attempt/status accounting.
+
+Deliver favicon and name defaults before the voice lifecycle change. Accept voice
+completion only after local failure/race tests and controlled provider evidence.
+This follow-up does not close R08 voice safety or authorize production deployment.
+
 ## Milestone 1 — repository release blockers
 
 Complete R18/R19 and R01–R08 before using test results as a public-beta release decision. Work

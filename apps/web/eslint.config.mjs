@@ -7,7 +7,7 @@ const compat = new FlatCompat({ baseDirectory: currentDirectory });
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals"),
-  { ignores: [".next/**", "dist/**", "next-env.d.ts"] }
+  { ignores: [".next/**", ".next-*/**", "dist/**", "next-env.d.ts"] }
 ];
 
 export default eslintConfig;

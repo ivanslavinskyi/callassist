@@ -776,6 +776,28 @@ export class CallService {
     return snapshot;
   }
 
+  /** Persist an attempt-bound recovery job BEFORE the bridge closes its stream.
+   * TwiML Hangup is the immediate path; reconciliation checks and stops the same
+   * provider leg after two seconds if that path or its status callback was lost.
+   * This deliberately does not use the user's Stop / stopped status transition.
+   */
+  async prepareAgentHangup(id: string, attemptId: string, providerCallId: string) {
+    const attempt = await this.repository.getAttempt(id, attemptId);
+    const latest = await this.repository.getLatestAttempt(id);
+    if (!attempt || attempt.provider !== "twilio" ||
+        attempt.providerCallId !== providerCallId || latest?.id !== attemptId ||
+        terminalStatuses.has(attempt.status)) return false;
+    await this.repository.enqueueDurableJob({
+      type: "provider_call_reconciliation",
+      callAttemptId: attemptId,
+      runAfter: new Date(Date.now() + 2_000).toISOString(),
+      maxAttempts: durableJobMaxAttempts.provider_call_reconciliation,
+      restartTerminal: true
+    });
+    this.#durableJobWorker.wake();
+    return true;
+  }
+
   async handleTwilioStatus(
     providerCallId: string,
     status: TwilioCallStatusCallbackValue,

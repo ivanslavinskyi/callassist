@@ -15,5 +15,5 @@ export default async function AppPage({
   const { locale } = await params;
   const user = await getServerCurrentUser();
   if (!user) redirect(`/${locale}/login`);
-  return <Dashboard userId={user.id} />;
+  return <Dashboard key={user.id} userId={user.id} profileName={{ firstName: user.firstName, lastName: user.lastName }} />;
 }

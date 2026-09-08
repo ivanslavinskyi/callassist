@@ -49,6 +49,7 @@ does not activate the API production validator: it checks `NODE_ENV` exactly.
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` fallback | Browser HTTP/SSE, web CSP; public build-time value |
 | `NEXT_PUBLIC_SITE_URL` | Example `http://localhost:3000` | Canonical metadata, sitemap, robots, SEO, HTTPS web HSTS |
 | `INTERNAL_API_URL` | Falls back to public API URL then localhost:4000 | Private web SSR session/content lookups |
+| `NEXT_DIST_DIR` | `.next` | Optional separate output for a parallel local QA web server, e.g. `.next-r21`; use the same value with direct Next build/start commands |
 
 For web development, create `apps/web/.env.local` with only the three web settings
 above if overriding localhost defaults. In production, use the public web hostname
@@ -61,6 +62,7 @@ before treating the direct-peer IP as the individual caller's address (R09).
 | Variable | Repository default / requirement |
 | --- | --- |
 | `TELEPHONY_DRIVER` | `mock`; production requires `twilio` |
+| `REALTIME_AGENT_HANGUP_ENABLED` | `false` by default; apply migration 0062 first. Exact `true` enables ordinary-call `end_call` after opening playback. Read at API startup; restart required. Does not affect consent/error hangup. |
 | `DURABLE_WORKER_MODE` | `embedded`; production requires `external` |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Required for real outbound telephony |
 | `VERIFICATION_DRIVER` | Example `mock`; factory infers Twilio from real telephony if unset; production API requires explicit `twilio` |

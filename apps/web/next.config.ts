@@ -16,6 +16,8 @@ if (existsSync(workspaceEnv)) {
 }
 
 const nextConfig: NextConfig = {
+  // Parallel local QA must not replace a running dev server's build artifacts.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   transpilePackages: ["@callassist/contracts"],
   async headers() {
     return [{

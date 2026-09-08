@@ -1224,7 +1224,7 @@ describe("OpenAIRealtimeBridge", () => {
   });
 });
 
-async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale) {
+async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale, agentHangupEnabled = false) {
   const repository = new InMemoryCallRepository();
   const service = new CallService(repository);
   const created = await service.create({
@@ -1244,6 +1244,9 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
   const reserved = await service.repository.startAttempt(created.id, {
     provider: "twilio"
   });
+  if (agentHangupEnabled) {
+    await repository.attachProviderCall(reserved.attempt.id, "CA-HANGUP", "in-progress");
+  }
   const twilioSocket = new FakeSocket();
   const openAISocket = new FakeSocket();
   const consentSocket = new FakeSocket();
@@ -1256,6 +1259,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
   const bridge = new OpenAIRealtimeBridge({
     apiKey: "test-key",
     service,
+    agentHangupEnabled,
     validateStreamToken: (_id, token) => token === "valid",
     createOpenAISocket: () => openAISocket as unknown as WebSocket,
     createConsentSocket: () => consentSocket as unknown as WebSocket
@@ -1281,6 +1285,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
   return {
     service,
     repository,
+    attemptId: reserved.attempt.id,
     created,
     twilioSocket,
     openAISocket,
@@ -1303,3 +1308,141 @@ function completeConsentPlayback(harness: {
 function emitJson(socket: FakeSocket, payload: object) {
   socket.emit("message", Buffer.from(JSON.stringify(payload)));
 }
+
+describe("agent farewell integration", () => {
+  async function activeHarness(enabled = true) {
+    const harness = await createConsentHarness(false, "en-GB", enabled);
+    completeConsentPlayback(harness);
+    emitJson(harness.consentSocket, { type: "conversation.item.input_audio_transcription.completed", transcript: "Yes" });
+    await new Promise(resolve => setImmediate(resolve));
+    emitJson(harness.openAISocket, { type: "response.created", response: { id: "opening" } });
+    emitJson(harness.openAISocket, { type: "response.done", response: { id: "opening", status: "completed" } });
+    emitJson(harness.twilioSocket, { event: "mark", mark: { name: "callassist-opening-complete" } });
+    return harness;
+  }
+  type Harness = Awaited<ReturnType<typeof activeHarness>>;
+  function request(h: Harness, args = '{"reason":"objective_resolved"}', id = "tool-response", callId = "end-call-1", status = "completed") {
+    emitJson(h.openAISocket, { type: "response.created", response: { id } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id, status,
+      output: [{ type: "function_call", name: "end_call", call_id: callId, arguments: args }] } });
+  }
+  function farewell(h: Harness, generation = 1) {
+    const id = `farewell-${generation}`;
+    emitJson(h.openAISocket, { type: "response.created", response: { id, metadata: { farewell_generation: String(generation) } } });
+    emitJson(h.openAISocket, { type: "response.output_audio.delta", response_id: id, item_id: `audio-${generation}`, content_index: 0,
+      delta: Buffer.alloc(8_000).toString("base64") });
+    emitJson(h.openAISocket, { type: "response.output_audio_transcript.done", response_id: id, transcript: "Thank you for your time. Goodbye." });
+    emitJson(h.openAISocket, { type: "response.done", response: { id, status: "completed" } });
+    const mark = h.twilioSocket.sent.filter(message => message.event === "mark").at(-1)!;
+    return (mark.mark as { name: string }).name;
+  }
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+
+  it("persists the attempt recovery before closing, without the user's stopped transition", async () => {
+    const h = await activeHarness();
+    const stop = vi.spyOn(h.service, "stop");
+    const prepare = vi.spyOn(h.service, "prepareAgentHangup");
+    request(h);
+    const mark = farewell(h);
+    expect(h.twilioSocket.readyState).toBe(WebSocket.OPEN);
+    expect(prepare).not.toHaveBeenCalled();
+    emitJson(h.twilioSocket, { event: "mark", mark: { name: mark } });
+    await flush();
+    expect(prepare).toHaveBeenCalledExactlyOnceWith(h.created.id, h.attemptId, "CA-HANGUP");
+    expect(h.twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    expect(stop).not.toHaveBeenCalled();
+    expect((await h.repository.listDurableJobs()).filter(job => job.type === "provider_call_reconciliation")).toHaveLength(1);
+    await h.service.handleTwilioStatus("CA-HANGUP", "completed", h.created.id, undefined, { durationSeconds: 12 });
+    expect((await h.service.get(h.created.id))?.brief.status).toBe("completed");
+    const events = await h.service.listTelemetry(h.created.id);
+    expect(events.some(event => event.payload.name === "conversation.ended" && event.payload.metadata.reason === "agent_hangup")).toBe(true);
+    expect((await h.service.get(h.created.id))?.transcript.some(segment => segment.text.includes("Goodbye"))).toBe(true);
+    await h.service.close();
+  });
+
+  it("ignores marks returned by clear, then accepts a fresh farewell", async () => {
+    const h = await activeHarness();
+    const prepare = vi.spyOn(h.service, "prepareAgentHangup");
+    request(h);
+    const oldMark = farewell(h);
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+    emitJson(h.twilioSocket, { event: "mark", mark: { name: oldMark } });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(h.openAISocket.sent.some(event => event.type === "conversation.item.truncate")).toBe(true);
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_stopped" });
+    request(h, '{"reason":"recipient_requested_end"}', "new-tool-response", "end-call-2");
+    const mark = farewell(h, 2);
+    emitJson(h.twilioSocket, { event: "mark", mark: { name: mark } });
+    await flush();
+    expect(prepare).toHaveBeenCalledTimes(1);
+    await h.service.close();
+  });
+
+  it("ignores a late response.created for an interrupted farewell", async () => {
+    const h = await activeHarness();
+    request(h);
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+    const audioBefore = h.twilioSocket.sent.filter(event => event.event === "media").length;
+    farewell(h);
+    expect(h.twilioSocket.sent.filter(event => event.event === "media")).toHaveLength(audioBefore);
+    expect(h.twilioSocket.readyState).toBe(WebSocket.OPEN);
+    h.twilioSocket.close(); await h.service.close();
+  });
+
+  it.each(["missing-mark", "missing-generation", "socket-error"])("recovers %s with a bounded fallback", async scenario => {
+    const h = await activeHarness();
+    const prepare = vi.spyOn(h.service, "prepareAgentHangup");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      request(h);
+      if (scenario === "missing-mark") farewell(h);
+      if (scenario === "socket-error") h.openAISocket.emit("error", new Error("network"));
+      await vi.advanceTimersByTimeAsync(15_000);
+      await flush();
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(h.twilioSocket.readyState).toBe(WebSocket.CLOSED);
+    } finally { vi.useRealTimers(); await h.service.close(); }
+  });
+
+  it.each(["null", '{"reason":"unknown"}', '{"reason":"objective_resolved","providerCallId":"other"}'])("rejects invalid tool arguments %s", async args => {
+    const h = await activeHarness();
+    request(h, args);
+    expect(h.openAISocket.sent.filter(event => event.type === "response.create")).toHaveLength(2); // disclosure + opening
+    expect(h.twilioSocket.readyState).toBe(WebSocket.OPEN);
+    h.twilioSocket.close(); await h.service.close();
+  });
+
+  it("does not expose the tool before the opening or when the flag is off", async () => {
+    const before = await createConsentHarness(false, "en-GB", true);
+    expect(before.openAISocket.sent.some(event => (event.session as { tools?: unknown[] })?.tools?.length)).toBe(false);
+    before.twilioSocket.close(); await before.service.close();
+    const off = await activeHarness(false);
+    request(off);
+    expect(off.openAISocket.sent.some(event => (event.session as { tools?: unknown[] })?.tools?.length)).toBe(false);
+    expect(off.twilioSocket.readyState).toBe(WebSocket.OPEN);
+    off.twilioSocket.close(); await off.service.close();
+  });
+
+  it("rejects a completed tool response from before new recipient speech", async () => {
+    const h = await activeHarness();
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "old-turn" } });
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_stopped" });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "old-turn", status: "completed",
+      output: [{ type: "function_call", name: "end_call", call_id: "old-call", arguments: '{"reason":"objective_resolved"}' }] } });
+    expect(h.openAISocket.sent.filter(event => event.type === "response.create")).toHaveLength(2);
+    expect(h.twilioSocket.readyState).toBe(WebSocket.OPEN);
+    h.twilioSocket.close(); await h.service.close();
+  });
+
+  it("does not replay a duplicate tool response, nor accept a cancelled call", async () => {
+    const h = await activeHarness();
+    request(h, undefined, "cancelled-tool", "cancelled-call", "cancelled");
+    request(h);
+    const sent = h.openAISocket.sent.filter(event => event.type === "response.create").length;
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "tool-response", status: "completed",
+      output: [{ type: "function_call", name: "end_call", call_id: "end-call-1", arguments: '{"reason":"objective_resolved"}' }] } });
+    expect(h.openAISocket.sent.filter(event => event.type === "response.create")).toHaveLength(sent);
+    h.twilioSocket.close(); await flush(); await h.service.close();
+  });
+});

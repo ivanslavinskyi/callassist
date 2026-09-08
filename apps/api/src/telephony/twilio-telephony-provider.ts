@@ -41,7 +41,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       throw new Error("PUBLIC_BASE_URL must use HTTPS for Twilio webhooks");
     }
     this.#client =
-      options.client ?? twilio(options.accountSid, options.authToken);
+      options.client ?? twilio(options.accountSid, options.authToken, { timeout: 10_000 });
   }
 
   async startCall(brief: CallBrief) {

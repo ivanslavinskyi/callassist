@@ -105,6 +105,7 @@ const realtimeBridge =
         ),
         maleVoice: process.env.OPENAI_REALTIME_MALE_VOICE,
         femaleVoice: process.env.OPENAI_REALTIME_FEMALE_VOICE,
+        agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true",
         logger: app.log
       })
     : null;

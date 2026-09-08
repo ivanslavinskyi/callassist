@@ -70,6 +70,8 @@ input[aria-invalid="true"] { border: 2px solid var(--danger); }
 .topbar-link[aria-current="page"] { color: var(--green); font-weight: 600; }
 .topbar-link[aria-current="page"]:after { content: ""; position: absolute; inset: auto 0 -18px; height: 3px; background: var(--accent); }
 .topbar-actions, .desktop-tools, .admin-utility-actions { display: flex; align-items: center; gap: 12px; flex: none; width: auto; }
+/* Dropdowns must escape the legacy horizontally scrolling header actions. */
+.topbar-actions { overflow: visible; }
 .topbar-actions .primary-button { width: auto; margin: 0; }
 .topbar-actions .primary-button, .admin-utility-actions .secondary-button { font-size: 14px; }
 .topbar-actions .topbar-link, .credit-balance { font-size: 14px; color: var(--green); }

@@ -161,8 +161,19 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
         "no_consent",
         "recording_failure",
         "openai_closed",
-        "openai_error"
+        "openai_error",
+        "agent_hangup",
+        "agent_hangup_fallback"
       ])
+    })
+  }),
+  z.strictObject({
+    name: z.literal("conversation.hangup"),
+    metadata: z.strictObject({
+      phase: z.enum(["requested", "interrupted", "playback_complete", "fallback", "scheduled", "schedule_failed"]),
+      reason: z.enum(["objective_resolved", "recipient_requested_end", "cannot_proceed", "voicemail"]),
+      generation: z.number().int().positive(),
+      trigger: z.enum(["playback_complete", "generation_timeout", "playback_timeout", "response_failed", "transport_closed"]).optional()
     })
   }),
   z.strictObject({
@@ -315,6 +326,7 @@ export function describeCallTelemetryEvent(
     case "conversation.started":
     case "conversation.first_audio":
     case "conversation.ended":
+    case "conversation.hangup":
       return { source: "realtime", stage: "conversation", severity: "info" };
     case "transcription.started":
     case "transcription.completed":

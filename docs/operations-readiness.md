@@ -11,6 +11,15 @@ is repaired, but R06 remains partial pending an authorized live drill. Review th
 
 ## Health contract
 
+R21 adds `REALTIME_AGENT_HANGUP_ENABLED` (default false). Apply migration 0062 before
+enabling it and restart the API with the new setting. Observe `conversation.hangup`
+phase/reason/trigger facts, normal/fallback `conversation.ended`, and the existing
+provider reconciliation queue. `schedule_failed` means the short recovery deadline
+could not be persisted; the stream still closes and maximum-duration recovery is
+the last bound. Investigate repeated fallback/dead-letter jobs. Disable the flag
+and restart the API to roll back ordinary-call automation; do not delete recovery
+jobs or undo the additive event migration. Detailed checks: [R21 verification](r21-verification-2026-09-08.md).
+
 The main API listener exposes two unauthenticated, non-cacheable endpoints:
 
 - `GET /health/live` returns `200 {"status":"alive"}` when the process can serve a

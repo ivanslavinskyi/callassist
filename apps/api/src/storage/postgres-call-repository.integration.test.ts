@@ -10,6 +10,8 @@ import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { runMigrations } from "../db/migrate";
 import { encryptJson } from "../security/encryption";
 import { PostgresCallRepository } from "./postgres-call-repository";
+import { verifyAgentHangupRecovery } from "../realtime/agent-hangup-recovery.fixture";
+import { isolatedTestDatabase } from "../db/isolated-test-database";
 import {
   decodeCallBriefCursor,
   type CallAdmissionPolicy
@@ -96,6 +98,18 @@ describe("PostgresCallRepository", () => {
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerA)).resolves.toBe(true);
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
+
+  it("recovers a persisted agent hangup after restart and a lost provider response", async () => {
+    // This exercise starts a real worker, which must not consume other fixtures' jobs.
+    const database = isolatedTestDatabase();
+    await database.setup();
+    try {
+      const reopen = () => new PostgresCallRepository(database.url, encryptionKey);
+      await verifyAgentHangupRecovery(reopen(), reopen);
+    } finally {
+      await database.teardown();
+    }
+  }, 15_000);
 
   it("returns privacy-minimized recipient suggestions for one owner", async () => {
     const compiler = new DeterministicBriefCompiler();

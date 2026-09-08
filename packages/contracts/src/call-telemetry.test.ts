@@ -6,6 +6,13 @@ import {
 } from "./call-telemetry";
 
 describe("durable call telemetry contracts", () => {
+  it("accepts bounded agent hangup reasons but rejects transcript metadata", () => {
+    const payload = { name: "conversation.hangup", metadata: { phase: "fallback", reason: "cannot_proceed", generation: 1, trigger: "playback_timeout" } };
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "hangup:1", payload }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "hangup:1", payload: {
+      ...payload, metadata: { ...payload.metadata, transcript: "private words" }
+    } }).success).toBe(false);
+  });
   it("accepts only bounded event-specific metadata", () => {
     expect(callTelemetryEventInputSchema.safeParse({
       idempotencyKey: "call:1:provider:ringing",

@@ -12,7 +12,7 @@ const ignoredDirectories = new Set([
 async function collectFiles(directory) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
+    if (entry.isDirectory() && (ignoredDirectories.has(entry.name) || entry.name.startsWith(".next-"))) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await collectFiles(path));
     else if (textExtensions.has(extname(entry.name))) files.push(path);
