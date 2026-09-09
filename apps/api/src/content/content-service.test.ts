@@ -237,7 +237,7 @@ describe("ContentService", () => {
   it("publishes reusable FAQ and internal navigation through audited revisions", async () => {
     const actorUserId = "48b5be1e-555c-4193-b60b-1bbfbbaac82a";
     const initialFaq = await service.getPublishedFaq("de");
-    expect(initialFaq?.items).toHaveLength(8);
+    expect(initialFaq?.items).toHaveLength(9);
     expect(initialFaq?.items[0]?.question).toContain("KI-Assistent");
 
     await expect(service.getPublishedNavigation("de")).resolves.toEqual(

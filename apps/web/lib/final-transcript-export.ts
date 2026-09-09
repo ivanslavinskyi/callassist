@@ -3,18 +3,25 @@ import type {
   FinalTranscript,
   FinalTranscriptSegment
 } from "@callassist/contracts";
-import type { Content, TDocumentDefinitions } from "pdfmake/interfaces";
+import type { TDocumentDefinitions } from "pdfmake/interfaces";
+import { buildTranscriptPdfLayout } from "./transcript-pdf-layout";
+import { uiLocaleRegistry, type UiLocale } from "./i18n/registry";
 
 type ExportInput = {
   brief: CallBrief;
   finalTranscript: FinalTranscript;
   languageLabel: string;
-  uiLocale: "en" | "de";
+  uiLocale: UiLocale;
 };
 
-const exportCopy = {
+export const transcriptExportCopy = {
   en: {
     title: "Final transcript",
+    translationTitle: "Translated transcript",
+    callLanguage: "Call language",
+    textLanguage: "Translation language",
+    sourceCreated: "Transcript created",
+    source: "Document source",
     created: "Created from the call recording after the conversation ended.",
     recipient: "Recipient",
     assistant: "Assistant",
@@ -25,6 +32,11 @@ const exportCopy = {
   },
   de: {
     title: "Endtranskript",
+    translationTitle: "Übersetztes Transkript",
+    callLanguage: "Anrufsprache",
+    textLanguage: "Übersetzungssprache",
+    sourceCreated: "Transkript erstellt",
+    source: "Dokumentquelle",
     created: "Wurde nach dem Gespräch aus der Anrufaufnahme erstellt.",
     recipient: "Angerufene Person",
     assistant: "Assistent",
@@ -37,7 +49,7 @@ const exportCopy = {
 
 export function buildFinalTranscriptCopyText(input: ExportInput) {
   const { brief, finalTranscript, languageLabel, uiLocale } = input;
-  const copy = exportCopy[uiLocale];
+  const copy = transcriptExportCopy[uiLocale];
   const header = [
     `SHPROHLI — ${copy.title}`,
     `${copy.recipient}: ${brief.recipientName}`,
@@ -59,98 +71,31 @@ export function buildFinalTranscriptCopyText(input: ExportInput) {
 }
 
 export function buildFinalTranscriptPdfDefinition(
-  input: ExportInput
+  input: ExportInput,
+  logoSvg?: string
 ): TDocumentDefinitions {
   const { brief, finalTranscript, languageLabel, uiLocale } = input;
-  const copy = exportCopy[uiLocale];
-  const segments = normalizedSegments(finalTranscript);
-
-  return {
-    pageSize: "A4",
-    pageMargins: [48, 48, 48, 56],
+  const copy = transcriptExportCopy[uiLocale];
+  return buildTranscriptPdfLayout({
+    logoSvg,
+    title: copy.title,
+    description: copy.created,
+    variant: copy.title,
+    recipient: brief.recipientName,
     language: brief.locale,
-    info: {
-      title: `${copy.title} — ${brief.recipientName}`,
-      author: "SHPROHLI",
-      subject: copy.created
-    },
-    defaultStyle: {
-      font: "Roboto",
-      color: "#10231d",
-      fontSize: 10.5,
-      lineHeight: 1.38
-    },
-    footer: (currentPage, pageCount) => ({
-      columns: [
-        { text: `SHPROHLI · ${copy.title}`, color: "#74837d" },
-        {
-          text: `${currentPage} / ${pageCount}`,
-          alignment: "right",
-          color: "#74837d"
-        }
-      ],
-      fontSize: 8,
-      margin: [48, 18, 48, 0]
-    }),
-    content: [
-      {
-        text: "SHPROHLI",
-        color: "#176d5d",
-        bold: true,
-        characterSpacing: 1.8,
-        fontSize: 9,
-        margin: [0, 0, 0, 8]
-      },
-      {
-        text: copy.title,
-        bold: true,
-        fontSize: 24,
-        margin: [0, 0, 0, 8]
-      },
-      {
-        text: copy.created,
-        color: "#65746e",
-        fontSize: 10,
-        margin: [0, 0, 0, 22]
-      },
-      metadataLine(copy.recipient, brief.recipientName),
-      metadataLine(copy.assistant, brief.agentName),
-      metadataLine(copy.language, languageLabel),
-      metadataLine(
-        copy.completed,
-        formatExportDate(finalTranscript.completedAt ?? finalTranscript.updatedAt, uiLocale)
-      ),
-      {
-        canvas: [
-          {
-            type: "line",
-            x1: 0,
-            y1: 0,
-            x2: 499,
-            y2: 0,
-            lineColor: "#dce5e0",
-            lineWidth: 1
-          }
-        ],
-        margin: [0, 18, 0, 22]
-      },
-      ...(segments.length > 0
-        ? segments.map((segment) => transcriptTurn(brief, segment, copy.unassigned))
-        : [
-            {
-              text: finalTranscript.text ?? "",
-              margin: [0, 0, 0, 16]
-            } satisfies Content
-          ]),
-      {
-        text: copy.warning,
-        color: "#74837d",
-        fontSize: 8.5,
-        italics: true,
-        margin: [0, 12, 0, 0]
-      }
-    ]
-  };
+    metadata: [
+      { label: copy.recipient, value: brief.recipientName },
+      { label: copy.assistant, value: brief.agentName },
+      { label: copy.language, value: languageLabel },
+      { label: copy.completed, value: formatExportDate(finalTranscript.completedAt ?? finalTranscript.updatedAt, uiLocale) }
+    ],
+    turns: finalTranscript.segments.map(segment => ({
+      speaker: speakerName(brief, segment.role, copy.unassigned), role: segment.role,
+      offset: `~${formatTranscriptOffset(segment.startSeconds)}`, text: segment.text
+    })),
+    text: finalTranscript.text ?? "",
+    notes: [copy.warning]
+  });
 }
 
 export function finalTranscriptPdfFileName(input: ExportInput) {
@@ -194,60 +139,6 @@ function transcriptLines(brief: CallBrief, finalTranscript: FinalTranscript, una
   );
 }
 
-function normalizedSegments(
-  finalTranscript: FinalTranscript
-): FinalTranscriptSegment[] {
-  return finalTranscript.segments;
-}
-
-function metadataLine(label: string, value: string): Content {
-  return {
-    columns: [
-      { text: label, width: 72, color: "#74837d", fontSize: 9 },
-      { text: value, width: "*", bold: true, fontSize: 9 }
-    ],
-    margin: [0, 0, 0, 7]
-  };
-}
-
-function transcriptTurn(
-  brief: CallBrief,
-  segment: FinalTranscriptSegment,
-  unassigned: string
-): Content {
-  return {
-    stack: [
-      {
-        columns: [
-          {
-            text: `~${formatTranscriptOffset(segment.startSeconds)}`,
-            width: 46,
-            color: "#87948f",
-            fontSize: 8.5
-          },
-          {
-            text: speakerName(brief, segment.role, unassigned),
-            width: "*",
-            bold: true,
-            color:
-              segment.role === "assistant"
-                ? "#10231d"
-                : segment.role === "recipient"
-                  ? "#176d5d"
-                  : "#65746e",
-            fontSize: 9.5
-          }
-        ]
-      },
-      {
-        text: segment.text,
-        margin: [46, 5, 0, 0]
-      }
-    ],
-    margin: [0, 0, 0, 16]
-  };
-}
-
 function speakerName(
   brief: CallBrief,
   role: FinalTranscriptSegment["role"],
@@ -269,8 +160,8 @@ export function formatTranscriptOffset(seconds: number) {
     : `${minutes.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`;
 }
 
-function formatExportDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+function formatExportDate(value: string, locale: UiLocale) {
+  return new Intl.DateTimeFormat(uiLocaleRegistry[locale].formatLocale, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

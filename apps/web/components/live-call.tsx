@@ -2,13 +2,17 @@
 
 import {
   ASSISTANT_PROFILES,
-  SUPPORTED_CALL_LANGUAGES,
+  TEXT_LANGUAGES,
+  supportedTextLanguage,
   type CallBrief,
   type CallEvent,
   type CallBriefStatus,
   type CallSnapshot,
   type ClarificationAnswer,
-  type CreateCallBriefInput
+  type CreateCallBriefInput,
+  type TaskLanguagePreferences,
+  type TextLanguage,
+  type ReviewEvidence
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -17,11 +21,17 @@ import { AppShell } from "./app-shell";
 import { designMessages } from "@/lib/i18n/design-messages";
 import { CallFeedback } from "./call-feedback";
 import { CompilationReview } from "./compilation-review";
+import { TranslatedPlanReview } from "./translated-plan-review";
+import { CallResultPanel } from "./call-result-panel";
 import { ConfirmDialog } from "./confirm-dialog";
 import { CreateCallForm } from "./create-call-form";
 import { useUiLocale } from "./ui-locale-provider";
+import { useCallDraftStore } from "./call-draft-provider";
+import { getCallLanguageLabel, getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 import { isTerminalCallStatus } from "@/lib/call-status";
 import { isNearTranscriptBottom } from "@/lib/transcript-scroll";
+import { currentCallSnapshot } from "@/lib/current-call-snapshot";
+import { compilationApprovalInput } from "@/lib/compilation-approval";
 import {
   callRecordingUrl,
   callEventsUrl,
@@ -35,6 +45,7 @@ import {
   retryFinalTranscript,
   startCall,
   stopCall,
+  updateCallContentLanguage,
   ApiError
 } from "@/lib/api";
 import {
@@ -81,14 +92,16 @@ function editableInputFromStoredBrief(brief: CallBrief): CreateCallBriefInput {
   };
 }
 
-export function LiveCall({ callId }: { callId: string }) {
+export function LiveCall({ callId, userId }: { callId: string; userId: string }) {
   const router = useRouter();
   const { locale: uiLocale, localizeHref, messages } = useUiLocale();
   const copy = messages.live;
+  const languageCopy = languageMessages[uiLocale];
+  const draftStore = useCallDraftStore();
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [editingBrief, setEditingBrief] = useState(false);
+  const [editingBrief, setEditingBrief] = useState(() => Boolean(draftStore.forOwner(userId).get(userId, callId)));
   const [confirmingAudioDelete, setConfirmingAudioDelete] = useState(false);
   const [deletionPassword, setDeletionPassword] = useState("");
   const [deletionConfirmation, setDeletionConfirmation] = useState("");
@@ -123,7 +136,7 @@ export function LiveCall({ callId }: { callId: string }) {
   const refresh = useCallback(async (reportError = true) => {
     try {
       const nextSnapshot = await getCallSnapshot(callId);
-      setSnapshot(nextSnapshot);
+      setSnapshot((current) => currentCallSnapshot(current, nextSnapshot));
       consumeCallPreparationAttempt(getCallPreparationSessionStorage(), callId);
       setLoadError(null);
     } catch {
@@ -138,7 +151,7 @@ export function LiveCall({ callId }: { callId: string }) {
     const events = new EventSource(callEventsUrl(callId), {
       withCredentials: true
     });
-    events.onopen = () => setConnectionStatus("connected");
+    events.onopen = () => { setConnectionStatus("connected"); void refresh(false); };
     events.onmessage = (message) => {
       let event: CallEvent;
       try {
@@ -201,11 +214,10 @@ export function LiveCall({ callId }: { callId: string }) {
   }, [messages.app.defaultTitle, messages.live, snapshot?.brief.recipientName]);
 
   const language = useMemo(
-    () =>
-      SUPPORTED_CALL_LANGUAGES.find(
-        ({ locale }) => locale === snapshot?.brief.locale
-      ),
-    [snapshot?.brief.locale]
+    () => snapshot?.brief.locale
+      ? { label: getCallLanguageLabel(snapshot.brief.locale, uiLocale) }
+      : null,
+    [snapshot?.brief.locale, uiLocale]
   );
 
   function revealLiveTranscript() {
@@ -228,7 +240,8 @@ export function LiveCall({ callId }: { callId: string }) {
     setBusy(true);
     setActionError(null);
     try {
-      setSnapshot(await action());
+      const next = await action();
+      setSnapshot((current) => currentCallSnapshot(current, next));
       onSuccess?.();
     } catch (error) {
       setActionError(
@@ -258,9 +271,9 @@ export function LiveCall({ callId }: { callId: string }) {
     }
   }
 
-  async function saveEditedBrief(input: CreateCallBriefInput) {
-    const updated = await recompileCallBrief(callId, input);
-    setSnapshot(updated);
+  async function saveEditedBrief(input: CreateCallBriefInput, idempotencyKey?: string, languagePreferences?: TaskLanguagePreferences) {
+    const updated = await recompileCallBrief(callId, input, idempotencyKey, languagePreferences);
+    setSnapshot((current) => currentCallSnapshot(current, updated));
     setEditingBrief(false);
     setActionError(null);
     return updated.brief;
@@ -279,8 +292,10 @@ export function LiveCall({ callId }: { callId: string }) {
           ...previousAnswers.filter(({ issueCode }) => !answerCodes.has(issueCode)),
           ...answers
         ]
-      });
-      setSnapshot(updated);
+      }, undefined, snapshot.languageContext
+        ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage, uiLocaleHint: uiLocale }
+        : { mode: "auto", uiLocaleHint: uiLocale });
+      setSnapshot((current) => currentCallSnapshot(current, updated));
     } catch (error) {
       setActionError(getCallPreparationErrorMessage(error, {
         rateLimited: messages.live.rateLimited
@@ -317,11 +332,11 @@ export function LiveCall({ callId }: { callId: string }) {
         languageLabel: language.label,
         uiLocale
       };
-      const { downloadTranscriptPdf } = await import(
+      const { downloadTranscriptPdf, loadTranscriptLogo } = await import(
         "@/lib/download-transcript-pdf"
       );
       await downloadTranscriptPdf(
-        buildFinalTranscriptPdfDefinition(input),
+        buildFinalTranscriptPdfDefinition(input, await loadTranscriptLogo()),
         finalTranscriptPdfFileName(input)
       );
       setPdfStatus("idle");
@@ -389,31 +404,57 @@ export function LiveCall({ callId }: { callId: string }) {
   const hasImmutableExecutionPlan =
     snapshot.executionPlanSource === "immutable";
 
+  const reviewProps = compilation ? {
+    busy, compilation, onAnswerClarifications: answerClarifications,
+    onApproveAndCall: (review?: ReviewEvidence) => {
+      void runAction(() => approveAndStartCall(callId, compilationApprovalInput(compilation, review)), revealLiveTranscript);
+    },
+    onEdit: () => setEditingBrief(true), recipientName: brief.recipientName,
+    callDetails: [
+      { label: designMessages[uiLocale].recipient, value: brief.recipientName },
+      { label: designMessages[uiLocale].phoneNumber, value: brief.phoneNumber },
+      { label: copy.primaryLanguage, value: language?.label ?? brief.locale },
+      { label: copy.assistant, value: brief.agentName },
+      { label: copy.audioRetention, value: brief.audioRetentionDays === 0 ? copy.untilFinalTranscript : copy.retentionDays(brief.audioRetentionDays) }
+    ],
+    showActions: !isTerminal && !isActive
+  } : null;
+
   const reviewPanel = compilation ? (
-    <CompilationReview
-            busy={busy}
-            compilation={compilation}
-            onAnswerClarifications={answerClarifications}
-            onApproveAndCall={() =>
-              runAction(
-                () => approveAndStartCall(callId, {
-                  revision: compilation.revision,
-                  snapshotHash: compilation.snapshotHash
-                }),
-                revealLiveTranscript
-              )
-            }
-            onEdit={() => setEditingBrief(true)}
-            recipientName={brief.recipientName}
-            callDetails={[
-              {label: designMessages[uiLocale].recipient, value: brief.recipientName},
-              {label: designMessages[uiLocale].phoneNumber, value: brief.phoneNumber},
-              {label: copy.primaryLanguage, value: language?.label ?? brief.locale},
-              {label: copy.assistant, value: brief.agentName},
-              {label: copy.audioRetention, value: brief.audioRetentionDays === 0 ? copy.untilFinalTranscript : copy.retentionDays(brief.audioRetentionDays)}
-            ]}
-            showActions={!isTerminal && !isActive}
-          />
+    <>
+    {snapshot.languageContext && !isTerminal && !isActive && !compilation.approvedAt ? <details className="review-language-settings">
+      <summary>
+        <span>{languageCopy.taskLanguage}: <strong>{getTextLanguageLabel(snapshot.languageContext.taskContentLanguage, uiLocale)}</strong></span>
+        <span className="language-change-label">{languageCopy.change}</span>
+      </summary>
+      <label className="field">
+        <span className="sr-only">{languageCopy.taskLanguage}</span>
+        <select disabled={busy}
+          value={snapshot.languageContext.taskContentLanguage}
+          onChange={async (event) => {
+            const disclosure = event.currentTarget.closest("details");
+            const targetLanguage = event.target.value as TextLanguage;
+            setBusy(true); setActionError(null);
+            try {
+              const languageContext = await updateCallContentLanguage(callId, {
+                targetLanguage, expectedSelectionRevision: snapshot.languageContext!.selectionRevision
+              });
+              setSnapshot((current) => current && current.compilation?.revision === languageContext.compilationRevision &&
+                (current.languageContext?.selectionRevision ?? 0) <= languageContext.selectionRevision ? { ...current, languageContext } : current);
+              if (disclosure) disclosure.open = false;
+            } catch { setActionError(languageCopy.saveError); }
+            finally { setBusy(false); }
+          }}>
+          {TEXT_LANGUAGES.map((value) => <option key={value} value={value}>{getTextLanguageLabel(value, uiLocale)}</option>)}
+        </select>
+      </label>
+    </details> : null}
+    {snapshot.planSource && snapshot.languageContext ? <TranslatedPlanReview
+      key={`${snapshot.planSource.compilationId}:${snapshot.languageContext.selectionRevision}`}
+      {...reviewProps!} callId={callId} userId={userId} source={snapshot.planSource}
+      languageContext={snapshot.languageContext} initialArtifacts={snapshot.textArtifacts}
+    /> : <CompilationReview {...reviewProps!} />}
+    </>
   ) : null;
 
   return (
@@ -486,6 +527,9 @@ export function LiveCall({ callId }: { callId: string }) {
               <p>{copy.recompilePlanHelp}</p>
             </section>
             <CreateCallForm
+              userId={userId}
+              draftId={callId}
+              initialLanguagePreferences={snapshot.languageContext ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage, uiLocaleHint: uiLocale } : undefined}
               heading={copy.updateHeading}
               initialValue={editableInputFromStoredBrief(brief)}
               onCreated={() => undefined}
@@ -495,6 +539,9 @@ export function LiveCall({ callId }: { callId: string }) {
           </>
         ) : compilation && editingBrief ? (
           <CreateCallForm
+            userId={userId}
+            draftId={callId}
+            initialLanguagePreferences={snapshot.languageContext ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage, uiLocaleHint: uiLocale } : undefined}
             heading={copy.updateHeading}
             initialValue={compilation.rawBrief}
             onCancel={() => setEditingBrief(false)}
@@ -640,7 +687,7 @@ export function LiveCall({ callId }: { callId: string }) {
                   <h2>{copy.finalTitle}</h2>
                   <p className="transcript-subtitle">{copy.finalHelp}</p>
                 </div>
-                {finalTranscript?.status === "completed" ? (
+                {finalTranscript?.status === "completed" && !snapshot.finalTranscriptRevision ? (
                   <div className="final-transcript-actions">
                     <button
                       className="transcript-export-button"
@@ -687,7 +734,12 @@ export function LiveCall({ callId }: { callId: string }) {
                 ) : null}
               </div>
 
-              {finalTranscript?.status === "completed" &&
+              {finalTranscript?.status === "completed" && snapshot.finalTranscriptRevision ? <CallResultPanel
+                key={snapshot.finalTranscriptRevision.id}
+                brief={brief} userId={userId} revision={snapshot.finalTranscriptRevision}
+                taskLanguage={snapshot.languageContext?.taskContentLanguage ?? supportedTextLanguage(brief.locale) ?? "en"}
+                initialArtifacts={snapshot.textArtifacts}
+              /> : finalTranscript?.status === "completed" &&
               (finalTranscript.text || finalSegments.length > 0) ? (
                 <div className="final-transcript-body">
 
@@ -912,10 +964,10 @@ export function LiveCall({ callId }: { callId: string }) {
                 </button>
               ) : null}
               <dl>
-                <div><dt>{copy.primaryLanguage}</dt><dd>{brief.locale}</dd></div>
+                <div><dt>{copy.primaryLanguage}</dt><dd>{getCallLanguageLabel(brief.locale, uiLocale)}</dd></div>
                 <div>
                   <dt>{copy.languageSwitching}</dt>
-                  <dd>{brief.allowLanguageSwitch ? brief.fallbackLocale : copy.disabled}</dd>
+                  <dd>{brief.allowLanguageSwitch && brief.fallbackLocale ? getCallLanguageLabel(brief.fallbackLocale, uiLocale) : copy.disabled}</dd>
                 </div>
                 <div>
                   <dt>{copy.voice}</dt>

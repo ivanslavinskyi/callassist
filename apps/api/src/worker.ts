@@ -1,6 +1,8 @@
 import "./config/load-env";
 import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
+import { createTextProcessorFromEnv } from "./text-processing/text-processor";
+import { textCapabilitiesFromEnv } from "./text-processing/text-capabilities";
 import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
 import { validateRuntimeEnvironment } from "./config/runtime-environment";
@@ -21,6 +23,7 @@ const {
   postCallTranscriber
 } = createCallRuntimeDependenciesFromEnv();
 const authRepository = createAuthRepositoryFromEnv();
+const textProcessor = createTextProcessorFromEnv();
 const service = new CallService(
   repository,
   telephonyProvider,
@@ -34,7 +37,8 @@ const service = new CallService(
     durableWorkerEnabled: true,
     durableWorkerKeepAlive: true,
     reportDurableWorkerHeartbeat: true,
-    liveEventMode: "publish"
+    liveEventMode: "publish",
+    textProcessor, textCapabilities: textCapabilitiesFromEnv(textProcessor)
   }
 );
 const accountDeletionService = new AccountDeletionService({

@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { InMemoryCallTextStore } from "./in-memory-call-text-store";
+import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
+import type { CompilationReviewApprovalInput } from "@callassist/contracts";
+import type { TextArtifactProviderOperationRecord } from "./call-repository";
 import {
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
@@ -16,6 +20,9 @@ import {
   describeCallTelemetryEvent,
   durableCallEventSchema,
   normalizeCreateCallBriefInput,
+  resolveTaskLanguage,
+  type CallLanguageContext,
+  type TextLanguage,
   ownerCallFeedbackInputSchema,
   parseSwissDestinationPhone,
   semanticOutcomeForGoalResult,
@@ -73,6 +80,7 @@ import {
   type CompletePostCallTranscriptionProviderOperationInput,
   type CallRepository,
   type CallPreparationPublication,
+  type PreparationLanguageOptions,
   type CallDataDeletionRecord,
   type CreatePromoCodeRepositoryInput,
   type DeleteCallDataInput,
@@ -158,6 +166,7 @@ type StoredWorkerHeartbeat = DurableWorkerHeartbeatInput & {
 };
 
 type StoredCallPreparation = {
+  language?: PreparationLanguageOptions;
   preparation: Omit<CallPreparation, "attemptCount">;
   userId: string | null;
   idempotencyKey: string;
@@ -194,9 +203,26 @@ function callPreparationFailureCode(
 }
 
 export class InMemoryCallRepository implements CallRepository {
+  readonly #callText = new InMemoryCallTextStore({
+    snapshot: id => {
+      if(this.#callDataDeletions.has(id)) throw new CallRepositoryError("CALL_NOT_FOUND");
+      return this.#require(id);
+    },
+    textAllowed: id => !this.#textCancelledUsers.has(this.#owners.get(id)??""),
+    compilations: id => this.#compilations.get(id)??[],
+    attempt: (id,attemptId) => {
+      const recordingId=this.#calls.get(id)?.recording?.id;
+      const sourceAttemptId=attemptId??(recordingId?this.#recordingAttempts.get(recordingId):null);
+      return sourceAttemptId?this.#attempts.get(id)?.find(row=>row.id===sourceAttemptId):this.#attempts.get(id)?.at(-1);
+    },
+    enqueue: input => this.enqueueDurableJob(input),
+    job: id => this.#findDurableJob(id),
+    jobs: () => [...this.#durableJobs.values()]
+  });
   readonly mode = "memory" as const;
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #owners = new Map<string, string | null>();
+  readonly #textCancelledUsers = new Set<string>();
   readonly #creationRequests = new Map<
     string,
     { callId: string; userId: string | null }
@@ -205,6 +231,7 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #providerOperations = new Map<
     string,
     | ProviderOperationRecord
+    | TextArtifactProviderOperationRecord
     | PostCallTranscriptionProviderOperationRecord
     | RealtimeProviderOperationRecord
     | TelephonyProviderOperationRecord
@@ -219,6 +246,7 @@ export class InMemoryCallRepository implements CallRepository {
   >();
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
+  readonly #recordingAttempts = new Map<string,string>();
   readonly #compilations = new Map<
     string,
     Array<{
@@ -416,6 +444,7 @@ export class InMemoryCallRepository implements CallRepository {
     };
 
     this.#calls.set(brief.id, {
+      languageContext: resolveTaskLanguage({ preferences: preparation?.language?.preferences, accountPreference: preparation?.language?.accountPreference, detectedLanguage: compilation.compiledBrief?.sourceLanguage, compilationRevision: compilation.revision }),
       executionPlanSource: "immutable",
       brief,
       compilation: copy(compilation),
@@ -487,6 +516,7 @@ export class InMemoryCallRepository implements CallRepository {
 
     const id = randomUUID();
     const stored: StoredCallPreparation = {
+      language: input.language ? copy(input.language) : undefined,
       preparation: {
         id,
         status: "queued",
@@ -577,6 +607,7 @@ export class InMemoryCallRepository implements CallRepository {
 
     const id = randomUUID();
     const stored: StoredCallPreparation = {
+      language: input.language ? copy(input.language) : undefined,
       preparation: {
         id,
         status: "queued",
@@ -688,6 +719,20 @@ export class InMemoryCallRepository implements CallRepository {
       durableJobId: lease.jobId,
       result: null
     });
+    return true;
+  }
+
+  async reserveTextArtifactProviderRequest(input:TextArtifactProviderReservationInput,lease:DurableJobLease) {
+    const artifact=this.#callText.requireLease(input.artifactId,lease);
+    if(input.durableJobGeneration!==lease.generation) throw new CallRepositoryError("DURABLE_JOB_LEASE_LOST");
+    const existing=this.#providerOperations.get(input.id);
+    if(existing) {
+      if(!("artifactId" in existing)||existing.artifactId!==input.artifactId||existing.durableJobId!==lease.jobId) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+      return true;
+    }
+    if(!this.#callText.reserveRequest(input.artifactId,input.maxRequests,lease)) return false;
+    const {maxRequests:_maxRequests,...operation}=input;
+    this.#providerOperations.set(input.id,{...operation,callBriefId:artifact.callId,durableJobId:lease.jobId,result:null});
     return true;
   }
 
@@ -1008,6 +1053,19 @@ export class InMemoryCallRepository implements CallRepository {
     }
   }
 
+  async cancelUserTextArtifacts(userId:string,now:string) {
+    this.#textCancelledUsers.add(userId);
+    for(const artifact of this.#callText.artifacts.values()) {
+      if(this.#owners.get(artifact.callId)!==userId) continue;
+      artifact.status="cancelled";artifact.updatedAt=now;
+      const job=[...this.#durableJobs.values()].find(row=>row.textArtifactId===artifact.id);
+      if(!job||!["queued","running"].includes(job.status)) continue;
+      if(job.status==="running") this.#durableJobAttempts.push({id:randomUUID(),jobId:job.id,generation:job.generation,
+        attemptNumber:job.attemptCount,workerId:job.leaseOwner!,startedAt:job.leasedAt!,completedAt:now,outcome:"cancelled",errorCode:"account_deletion_requested"});
+      Object.assign(job,{status:"cancelled",leaseOwner:null,leasedAt:null,leaseExpiresAt:null,lastErrorCode:"account_deletion_requested",updatedAt:now,completedAt:now});
+    }
+  }
+
   async isOwnedBy(id: string, userId: string | null) {
     return this.#calls.has(id) &&
       !this.#callDataDeletions.has(id) &&
@@ -1065,7 +1123,9 @@ export class InMemoryCallRepository implements CallRepository {
       allowedFacts: [],
       updatedAt: input.deletedAt
     };
+    this.#callText.redact(input.callId);
     snapshot.compilation = null;
+    snapshot.languageContext = null;
     for (const stored of this.#compilations.get(input.callId) ?? []) {
       stored.compilation = null;
       stored.executionSnapshot = null;
@@ -1441,6 +1501,7 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: now
     };
     snapshot.compilation = copy(compilation);
+    snapshot.languageContext = resolveTaskLanguage({ preferences: preparation?.language?.preferences, accountPreference: preparation?.language?.accountPreference, detectedLanguage: compilation.compiledBrief?.sourceLanguage, compilationRevision: compilation.revision, previous: snapshot.languageContext });
     const history = this.#compilations.get(id) ?? [];
     history.push({
       id: randomUUID(),
@@ -1472,7 +1533,40 @@ export class InMemoryCallRepository implements CallRepository {
   async get(id: string) {
     if (this.#callDataDeletions.has(id)) return null;
     const snapshot = this.#calls.get(id);
-    return snapshot ? copy(snapshot) : null;
+    if(!snapshot) return null;
+    if(!snapshot.languageContext&&snapshot.compilation) snapshot.languageContext=resolveTaskLanguage({detectedLanguage:snapshot.compilation.compiledBrief?.sourceLanguage,compilationRevision:snapshot.compilation.revision});
+    return {...copy(snapshot),planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
+      textArtifacts:this.#callText.listTextArtifacts(id),finalTranscriptRevision:await this.#callText.getCurrentTranscriptRevision(id)};
+  }
+
+  async getPlanSource(...args: Parameters<CallTextRepository["getPlanSource"]>) { return this.#callText.getPlanSource(...args); }
+  async getTextArtifactSourceCompilation(...args: Parameters<CallTextRepository["getTextArtifactSourceCompilation"]>) { return this.#callText.getTextArtifactSourceCompilation(...args); }
+  async getCurrentTranscriptRevision(...args: Parameters<CallTextRepository["getCurrentTranscriptRevision"]>) { return this.#callText.getCurrentTranscriptRevision(...args); }
+  async getTranscriptRevision(...args: Parameters<CallTextRepository["getTranscriptRevision"]>) { return this.#callText.getTranscriptRevision(...args); }
+  async listTextArtifacts(...args: Parameters<CallTextRepository["listTextArtifacts"]>) { return this.#callText.listTextArtifacts(...args); }
+  async getTextArtifact(...args: Parameters<CallTextRepository["getTextArtifact"]>) { return this.#callText.getTextArtifact(...args); }
+  async enqueueTextArtifact(...args: Parameters<CallTextRepository["enqueueTextArtifact"]>) { return this.#callText.enqueueTextArtifact(...args); }
+  async claimTextArtifact(...args: Parameters<CallTextRepository["claimTextArtifact"]>) { return this.#callText.claimTextArtifact(...args); }
+  async getTextArtifactChunks(...args: Parameters<CallTextRepository["getTextArtifactChunks"]>) { return this.#callText.getTextArtifactChunks(...args); }
+  async saveTextArtifactChunk(...args: Parameters<CallTextRepository["saveTextArtifactChunk"]>) { return this.#callText.saveTextArtifactChunk(...args); }
+  async completeTextArtifact(...args: Parameters<CallTextRepository["completeTextArtifact"]>) { return this.#callText.completeTextArtifact(...args); }
+  async failTextArtifact(...args: Parameters<CallTextRepository["failTextArtifact"]>) { return this.#callText.failTextArtifact(...args); }
+  async retryTextArtifact(...args: Parameters<CallTextRepository["retryTextArtifact"]>) { return this.#callText.retryTextArtifact(...args); }
+  async getCurrentReviewReceipt(...args: Parameters<CallTextRepository["getCurrentReviewReceipt"]>) { return this.#callText.getCurrentReviewReceipt(...args); }
+  async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) { return this.#callText.exportCallTextData(...args); }
+
+  async getLanguageContext(id: string) {
+    return (await this.get(id))?.languageContext ?? null;
+  }
+
+  async updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number) {
+    const snapshot = this.#require(id);
+    if (snapshot.compilation?.approvedAt) throw new CallRepositoryError("CALL_LANGUAGE_LOCKED");
+    const previous = snapshot.languageContext;
+    if (!previous || previous.selectionRevision !== expectedSelectionRevision) throw new CallRepositoryError("CALL_LANGUAGE_STALE");
+    const context: CallLanguageContext = { ...previous, taskContentLanguage: targetLanguage, selectionSource: "task", selectionRevision: previous.selectionRevision + 1 };
+    snapshot.languageContext = context;
+    return copy(context);
   }
 
   async appendCallTelemetryEvent(
@@ -2256,11 +2350,11 @@ export class InMemoryCallRepository implements CallRepository {
 
   async approveCompilation(
     id: string,
-    expected?: CompilationApprovalInput
+    expected?: CompilationReviewApprovalInput
   ) {
     const snapshot = this.#require(id);
     if (
-      snapshot.brief.status !== "review_required" ||
+      !["review_required","ready"].includes(snapshot.brief.status) ||
       snapshot.compilation?.policyDecision.status !== "ready_for_review" ||
       !snapshot.compilation.compiledBrief
     ) {
@@ -2275,6 +2369,8 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("CALL_COMPILATION_STALE");
     }
     const now = new Date().toISOString();
+    this.#callText.saveReviewReceipt(id,expected);
+    if(snapshot.brief.status==="ready") return copy(snapshot);
     snapshot.compilation.approvedAt = now;
     const storedCompilation = this.#currentCompilation(id);
     storedCompilation.approvedAt = now;
@@ -2344,6 +2440,8 @@ export class InMemoryCallRepository implements CallRepository {
     }
     const now = new Date().toISOString();
     const currentCompilation = this.#currentCompilation(id);
+    const receipt=this.#callText.getCurrentReviewReceipt(id);
+    if(!receipt) throw new CallRepositoryError("CALL_REVIEW_REQUIRED");
     if (!currentCompilation.executionSnapshot) {
       throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
     }
@@ -2351,6 +2449,8 @@ export class InMemoryCallRepository implements CallRepository {
       id: randomUUID(),
       callBriefId: id,
       compilationId: currentCompilation.id,
+      reviewReceiptId: receipt.id,
+      contentLanguage: snapshot.languageContext?.taskContentLanguage??null,
       provider: input.provider,
       providerCallId: null,
       status: "dialing",
@@ -2711,6 +2811,7 @@ export class InMemoryCallRepository implements CallRepository {
       failureReason: null
     };
     snapshot.recording = recording;
+    this.#recordingAttempts.set(recording.id,attempt.id);
     this.#appendTelemetry(id, {
       callAttemptId: attempt.id,
       idempotencyKey: `attempt:${attempt.id}:consent:granted`,
@@ -2963,7 +3064,8 @@ export class InMemoryCallRepository implements CallRepository {
     recordingId: string,
     text: string,
     segments: FinalTranscriptSegment[],
-    lease?: DurableJobLease
+    lease?: DurableJobLease,
+    options?: {summaryGeneratorVersion?:string}
   ) {
     this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
@@ -2978,6 +3080,7 @@ export class InMemoryCallRepository implements CallRepository {
     finalTranscript.failureReason = null;
     finalTranscript.updatedAt = now.toISOString();
     finalTranscript.completedAt = now.toISOString();
+    await this.#callText.persistRevision(callId,finalTranscript.id,text,segments,now.toISOString(),options?.summaryGeneratorVersion);
     recording.deleteAfter = new Date(
       now.getTime() + snapshot.brief.audioRetentionDays * 86_400_000
     ).toISOString();
@@ -3066,6 +3169,9 @@ export class InMemoryCallRepository implements CallRepository {
     const target = this.#resolveDurableJobTarget(input);
     const key = durableJobKey(input.type, target.targetId);
     const existing = this.#durableJobs.get(key);
+    if(input.type==="text_artifact_generation" && (input.maxAttempts>3 || (input.restartTerminal && existing && existing.generation>=3))) {
+      throw new CallRepositoryError("TEXT_ARTIFACT_LIMIT_REACHED");
+    }
     const now = new Date().toISOString();
     if (!existing) {
       const job: DurableJob = {
@@ -3074,6 +3180,7 @@ export class InMemoryCallRepository implements CallRepository {
         recordingId: input.recordingId ?? null,
         callAttemptId: input.callAttemptId ?? null,
         callPreparationId: input.callPreparationId ?? null,
+        textArtifactId: input.textArtifactId ?? null,
         callId: target.callId,
         status: "queued",
         generation: 1,
@@ -3343,7 +3450,7 @@ export class InMemoryCallRepository implements CallRepository {
   ) {
     const job = this.#findDurableJob(jobId);
     if (!job) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
-    if (job.status !== "dead_letter" || job.type === "brief_compilation") {
+    if (job.status !== "dead_letter" || job.type === "brief_compilation" || job.type === "text_artifact_generation") {
       throw new CallRepositoryError("DURABLE_JOB_NOT_RETRYABLE");
     }
     const boundedReason = requireAdminJobReason(reason);
@@ -3677,7 +3784,7 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   #providerOperationMatchesScope(
-    operation: ProviderOperationRecord | PostCallTranscriptionProviderOperationRecord |
+    operation: ProviderOperationRecord | TextArtifactProviderOperationRecord | PostCallTranscriptionProviderOperationRecord |
       RealtimeProviderOperationRecord | TelephonyProviderOperationRecord,
     callId?: string,
     preparationId?: string
@@ -3754,6 +3861,12 @@ export class InMemoryCallRepository implements CallRepository {
     errorCode: string,
     now: string
   ) {
+    if(job.textArtifactId) {
+      const artifact=this.#callText.artifacts.get(job.textArtifactId);
+      if(artifact&&["queued","processing","failed"].includes(artifact.status)) Object.assign(artifact,{
+        status:deadLetter?"failed":"queued",failureCode:deadLetter?errorCode:null,updatedAt:now
+      });
+    }
     if (!job.callPreparationId) return;
     const preparation = this.#callPreparations.get(job.callPreparationId);
     if (!preparation || preparation.preparation.status === "succeeded") return;
@@ -3767,6 +3880,13 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   #resolveDurableJobTarget(input: EnqueueDurableJobInput) {
+    if(input.type==="text_artifact_generation") {
+      if(!input.textArtifactId||input.recordingId||input.callAttemptId||input.callPreparationId) throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
+      const artifact=this.#callText.artifacts.get(input.textArtifactId);
+      if(!artifact) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");
+      return {callId:artifact.callId,targetId:artifact.id};
+    }
+    if(input.textArtifactId) throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
     if (input.type === "brief_compilation") {
       if (input.recordingId || input.callAttemptId || !input.callPreparationId) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");

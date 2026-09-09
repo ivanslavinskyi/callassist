@@ -28,7 +28,7 @@ const en: OnboardingMessages = {
   agreement: "I agree to the Terms of Use and Acceptable Use Policy.",
   informationHeading: "Before you continue",
   information: [
-    "The recipient is told that an AI assistant is calling, and the call continues only with their consent.",
+    "The assistant identifies itself as AI and asks to record and transcribe the conversation. AI processes the recipient’s answer to recognise their choice. The main conversation and recording start only after consent.",
     "AI conversations and transcripts can contain errors. Check important details.",
     "SHPROHLI is for legitimate, low-risk everyday calls and cannot be used for prohibited purposes."
   ],
@@ -50,7 +50,7 @@ const de: OnboardingMessages = {
   agreement: "Ich stimme den Nutzungsbedingungen und den Regeln zur akzeptablen Nutzung zu.",
   informationHeading: "Bevor Sie fortfahren",
   information: [
-    "Die angerufene Person wird darüber informiert, dass ein KI-Assistent anruft. Der Anruf wird nur mit ihrer Zustimmung fortgesetzt.",
+    "Der Assistent stellt sich als KI vor und fragt, ob das Gespräch aufgezeichnet und transkribiert werden darf. KI verarbeitet die Antwort, um die Entscheidung zu erkennen. Das eigentliche Gespräch und die Aufnahme beginnen erst nach der Zustimmung.",
     "KI-Gespräche und Transkripte können Fehler enthalten. Prüfen Sie wichtige Angaben.",
     "SHPROHLI ist für legitime, risikoarme Alltagstelefonate bestimmt und darf nicht für verbotene Zwecke verwendet werden."
   ],

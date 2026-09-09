@@ -67,16 +67,17 @@ describe("published seed copy", () => {
       .filter(({ locale }) => locale === "en")
       .map((seed) => JSON.stringify(seed))
       .join("\n");
-    expect(english).toContain("asked for consent");
+    expect(english).toContain("start only after consent");
+    expect(english).toContain("answer is processed by AI");
     expect(english).toContain("verbally first");
     expect(english).toContain("confirmation by keypad");
     expect(english).not.toMatch(/press(?:es)? 1/iu);
   });
 
-  it("seeds eight FAQ entries and the intended public navigation", () => {
+  it("seeds nine FAQ entries and the intended public navigation", () => {
     const faq = seededEditorialCollections.find(({ revision }) => revision.key === "faq")!;
     const navigation = seededEditorialCollections.find(({ revision }) => revision.key === "navigation")!;
-    expect(faq.revision.items).toHaveLength(8);
+    expect(faq.revision.items).toHaveLength(9);
     expect(navigation.revision.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ location: "header", destination: "how_it_works" }),
       expect.objectContaining({ location: "footer", destination: "imprint" }),

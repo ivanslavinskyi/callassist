@@ -4,6 +4,7 @@ import type {
 } from "@callassist/contracts";
 import Link from "next/link";
 import { navigationPath } from "@/lib/i18n/content-routing";
+import { contentLanguageDirection } from "@/lib/content-localizations";
 import { AppShell } from "./app-shell";
 import { FaqList } from "./faq-list";
 import { ContentNavigation } from "./content-navigation";
@@ -15,14 +16,14 @@ export function ContentPage({
   page: PublishedContentPage;
   faq?: PublishedFaq | null;
 }) {
-  const locale = page.locale === "de" ? "de-CH" : "en-CH";
+  const locale = page.locale;
   const published = new Intl.DateTimeFormat(locale, {
     dateStyle: "medium"
   }).format(new Date(page.revision.publishedAt));
 
   return (
     <AppShell>
-      <main className="content-page" id="main-content" tabIndex={-1}>
+      <main className="content-page" id="main-content" tabIndex={-1} lang={page.locale} dir={contentLanguageDirection(page.locale)}>
         <ContentNavigation locale={page.locale} current={page.key} />
         <header className="content-heading">
           <h1>{page.title}</h1>
@@ -32,7 +33,7 @@ export function ContentPage({
             {" · "}{page.locale === "de" ? "Gültig ab" : "Effective"} {published}
           </small>
         </header>
-        {page.key === "faq" && faq ? <FaqList items={faq.items} /> : (
+        {page.key === "faq" && faq ? <div lang={faq.locale} dir={contentLanguageDirection(faq.locale)}><FaqList items={faq.items} /></div> : (
         <div className="content-sections">
           {page.sections.map((section) => (
             <section key={section.heading}>

@@ -1,4 +1,4 @@
-import type { CallBrief, CreateCallBriefInput } from "@callassist/contracts";
+import type { CallBrief, CreateCallBriefInput, TaskLanguagePreferences } from "@callassist/contracts";
 
 const storageKey = "callassist.call-preparation-attempt.v2";
 const attemptLifetimeMs = 30 * 60 * 1_000;
@@ -15,9 +15,14 @@ export type CallPreparationAttempt = {
 type SessionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 export async function fingerprintCallPreparation(
-  input: CreateCallBriefInput
+  input: CreateCallBriefInput,
+  languagePreferences?: TaskLanguagePreferences,
+  scope?: string
 ) {
-  const bytes = new TextEncoder().encode(stableJson(input));
+  const intent = languagePreferences
+    ? { requestVersion: 2, brief: input, languagePreferences }
+    : input;
+  const bytes = new TextEncoder().encode(stableJson(scope ? { scope, intent } : intent));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0")
@@ -26,6 +31,8 @@ export async function fingerprintCallPreparation(
 
 export async function prepareCallBriefCreation({
   input,
+  languagePreferences,
+  scope,
   userId,
   current,
   storage,
@@ -36,6 +43,8 @@ export async function prepareCallBriefCreation({
   createIdempotencyKey
 }: {
   input: CreateCallBriefInput;
+  languagePreferences?: TaskLanguagePreferences;
+  scope?: string;
   userId: string;
   current: CallPreparationAttempt | null;
   storage: SessionStorage | undefined;
@@ -45,7 +54,7 @@ export async function prepareCallBriefCreation({
   now?: number;
   createIdempotencyKey?: () => string;
 }) {
-  const fingerprint = await fingerprintCallPreparation(input);
+  const fingerprint = await fingerprintCallPreparation(input, languagePreferences, scope);
   const attempt = resolveCallPreparationAttempt({
     current: readCallPreparationAttempt(storage) ?? current,
     fingerprint,

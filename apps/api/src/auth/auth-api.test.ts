@@ -213,7 +213,9 @@ async function compilationApprovalPayload(
   const compilation = response.json().compilation;
   return {
     revision: compilation.revision as number,
-    snapshotHash: compilation.snapshotHash as string
+    snapshotHash: compilation.snapshotHash as string,
+    review: { mode: "original" as const, language: response.json().brief.locale as string,
+      selectionRevision: response.json().languageContext.selectionRevision as number }
   };
 }
 
@@ -435,7 +437,7 @@ describe("auth API", () => {
     );
     const exported = accountDataExportSchema.parse(response.json());
     expect(exported).toMatchObject({
-      schemaVersion: "1",
+      schemaVersion: "2",
       account: {
         email: registration.email,
         firstName: registration.firstName,
@@ -462,7 +464,7 @@ describe("auth API", () => {
       expect.objectContaining({
         exportId: exported.exportId,
         userId: exported.account.id,
-        schemaVersion: "1",
+        schemaVersion: "2",
         callCount: 1,
         byteCount: expect.any(Number)
       })
@@ -852,7 +854,7 @@ describe("auth API", () => {
           { blockType: "how_it_works" },
           { blockType: "safety_privacy" },
           { blockType: "languages" },
-          { blockType: "faq", itemLimit: 8 },
+          { blockType: "faq", itemLimit: 9 },
           { blockType: "cta" }
         ]
       }

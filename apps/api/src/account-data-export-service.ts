@@ -47,8 +47,9 @@ export class AccountDataExportService {
       activeSessions,
       credits: sanitizeCredits(credits),
       onboardingAcceptances,
-      calls: calls.map(({ snapshot, outcome }) => ({
+      calls: calls.map(({ snapshot, outcome, textData }) => ({
         snapshot: sanitizeSnapshot(snapshot),
+        textData,
         outcome: {
           ...outcome,
           latestOutcome: outcome.latestOutcome ? {
@@ -75,6 +76,7 @@ export class AccountDataExportService {
     const result: Array<{
       snapshot: NonNullable<Awaited<ReturnType<CallRepository["get"]>>>;
       outcome: Awaited<ReturnType<CallRepository["getCallOutcome"]>>;
+      textData: AccountDataExport["calls"][number]["textData"];
     }> = [];
     let cursor: { createdAt: string; id: string } | undefined;
     do {
@@ -88,9 +90,22 @@ export class AccountDataExportService {
         if (!snapshot || !(await this.#callRepository.isOwnedBy(brief.id, userId))) {
           return null;
         }
+        const [outcome, textData, languageContext] = await Promise.all([
+          this.#callRepository.getCallOutcome(brief.id),
+          this.#callRepository.exportCallTextData(brief.id),
+          this.#callRepository.getLanguageContext(brief.id)
+        ]);
+        // Recheck ownership after the associated source and artifact reads.
+        if (!(await this.#callRepository.isOwnedBy(brief.id, userId))) return null;
         return {
           snapshot,
-          outcome: await this.#callRepository.getCallOutcome(brief.id)
+          outcome,
+          textData: {
+            ...textData, languageContext,
+            compilations: textData.compilations.map(({ id, compilation }) => ({
+              id, compilation: { ...compilation, compilerResponseId: null }
+            }))
+          }
         };
       }));
       result.push(...records.filter((record) => record !== null));

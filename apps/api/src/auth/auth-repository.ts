@@ -1,5 +1,6 @@
 import type {
   AccountDeletionRequest,
+  AccountLanguagePreferencesUpdateInput,
   AdministrableUserStatus,
   AdminUserSummary,
   RegistrationInput,
@@ -152,6 +153,10 @@ export interface AuthRepository {
     firstName: string;
     lastName: string;
   }): Promise<AuthUserRecord | null>;
+  updateLanguagePreferences(
+    userId: string,
+    input: AccountLanguagePreferencesUpdateInput
+  ): Promise<AuthUserRecord | null>;
   listUsersForAdmin(
     input: ListAdminUsersInput
   ): Promise<ListAdminUsersResult>;
@@ -333,7 +338,7 @@ export class AuthRepositoryError extends Error {
 
 export function toPublicUser(record: AuthUserRecord): User {
   const { passwordHash: _passwordHash, ...user } = record;
-  return user;
+  return { ...user, preferredContentLanguage: user.preferredContentLanguage ?? null };
 }
 
 export type MutableUserState = {

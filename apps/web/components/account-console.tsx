@@ -2,6 +2,9 @@
 
 import {
   ACCOUNT_DELETION_CONFIRMATION,
+  TEXT_LANGUAGES,
+  supportedTextLanguage,
+  type TextLanguage,
   type AccountDeletionRequest,
   AccountSessionList,
   AccountSessionSummary,
@@ -28,13 +31,15 @@ import {
   confirmEmailChange,
   updateOwnName,
   revokeAllOwnSessions,
-  revokeOwnSession
+  revokeOwnSession,
+  updateLanguagePreferences
 } from "@/lib/api";
 import {
   accountMessages,
   getAccountContactChangeErrorMessage
 } from "@/lib/i18n/account-messages";
 import { normalizePhoneNumber } from "@/lib/phone-number";
+import { getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 
 type AccountData = {
   user: User;
@@ -47,6 +52,10 @@ export function AccountConsole() {
   const router = useRouter();
   const { locale, localizeHref } = useUiLocale();
   const copy = accountMessages[locale];
+  const languageCopy = languageMessages[locale];
+  const [languageBusy, setLanguageBusy] = useState(false);
+  const [languageError, setLanguageError] = useState(false);
+  const [languageSaved, setLanguageSaved] = useState(false);
   const [section, setSection] = useState("profile");
   useEffect(() => {
     const selectFromHash = () => {
@@ -58,6 +67,9 @@ export function AccountConsole() {
     return () => window.removeEventListener("hashchange", selectFromHash);
   }, []);
   const [data, setData] = useState<AccountData | null>(null);
+  const supportedAccountLanguage = supportedTextLanguage(data?.user.preferredContentLanguage);
+  const accountLanguageLabel = supportedAccountLanguage ? getTextLanguageLabel(supportedAccountLanguage, locale)
+    : data?.user.preferredContentLanguage ?? languageCopy.automatic;
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [action, setAction] = useState<"logout" | "revoke-all" | string | null>(null);
@@ -154,6 +166,7 @@ export function AccountConsole() {
     try {
       await revokeOwnSession(selectedSession.id);
       if (selectedSession.current) {
+        window.dispatchEvent(new Event("callassist:session-ended"));
         router.replace(localizeHref("/"));
         router.refresh();
         return;
@@ -456,6 +469,31 @@ export function AccountConsole() {
               </dl>}
               {profileError ? <p className="form-error" role="alert">{copy.nameError}</p> : null}
               {profileSuccess ? <p className="auth-success" role="status">{copy.nameSuccess}</p> : null}
+              <details className="account-language-preference">
+                <summary>{languageCopy.preferenceTitle}: <strong>{accountLanguageLabel}</strong></summary>
+                <label className="field">
+                  <span className="sr-only">{languageCopy.preferenceTitle}</span>
+                  <select disabled={languageBusy} value={data.user.preferredContentLanguage ?? "auto"}
+                    onChange={async (event) => {
+                      const preferredContentLanguage = event.target.value === "auto" ? null : event.target.value as TextLanguage;
+                      setLanguageBusy(true); setLanguageError(false); setLanguageSaved(false);
+                      try {
+                        const { user } = await updateLanguagePreferences({ preferredContentLanguage });
+                        setData((current) => current ? { ...current, user } : current);
+                        setLanguageSaved(true);
+                      } catch { setLanguageError(true); }
+                      finally { setLanguageBusy(false); }
+                    }}>
+                    <option value="auto">{languageCopy.automatic}</option>
+                    {data.user.preferredContentLanguage && !TEXT_LANGUAGES.some((language) => language === data.user.preferredContentLanguage)
+                      ? <option value={data.user.preferredContentLanguage} disabled>{accountLanguageLabel}</option> : null}
+                    {TEXT_LANGUAGES.map((language) => <option value={language} key={language}>{getTextLanguageLabel(language, locale)}</option>)}
+                  </select>
+                  <small>{languageCopy.preferenceHelp}</small>
+                </label>
+              </details>
+              {languageError ? <p className="form-error" role="alert">{languageCopy.saveError}</p> : null}
+              {languageSaved ? <p className="auth-success" role="status">{languageCopy.saved}</p> : null}
               {emailChangeSuccess ? <p className="auth-success" role="status">{copy.emailChangeSuccess}</p> : null}
               {phoneChangeSuccess ? <p className="auth-success" role="status">{copy.phoneChangeSuccess}</p> : null}
             </section>

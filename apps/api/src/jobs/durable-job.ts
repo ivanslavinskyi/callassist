@@ -1,4 +1,5 @@
 export const durableJobTypes = [
+  "text_artifact_generation",
   "brief_compilation",
   "final_transcription",
   "recording_retention",
@@ -21,6 +22,7 @@ export type DurableJob = {
   recordingId: string | null;
   callAttemptId: string | null;
   callPreparationId: string | null;
+  textArtifactId?: string | null;
   callId: string | null;
   status: DurableJobStatus;
   generation: number;
@@ -58,6 +60,8 @@ export type DurableJobLease = {
   jobId: string;
   workerId: string;
   checkedAt: string;
+  generation?: number;
+  attemptNumber?: number;
 };
 
 export type EnqueueDurableJobInput = {
@@ -65,6 +69,7 @@ export type EnqueueDurableJobInput = {
   recordingId?: string;
   callAttemptId?: string;
   callPreparationId?: string;
+  textArtifactId?: string;
   runAfter: string;
   maxAttempts: number;
   force?: boolean;
@@ -79,6 +84,7 @@ export type ClaimDurableJobInput = {
 };
 
 export const durableJobMaxAttempts: Record<DurableJobType, number> = {
+  text_artifact_generation: 3,
   brief_compilation: 3,
   final_transcription: 3,
   recording_retention: 5,

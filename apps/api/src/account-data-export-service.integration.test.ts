@@ -1,4 +1,5 @@
-import { requireTestDatabaseUrl } from "./db/require-test-database";
+import "./config/load-env";
+import { isolatedTestDatabase } from "./db/isolated-test-database";
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
@@ -13,10 +14,10 @@ import { MockVerificationProvider } from "./auth/verification-provider";
 import { DeterministicBriefCompiler } from "./brief-compiler/brief-compiler";
 import { ContentService } from "./content/content-service";
 import { PostgresContentRepository } from "./content/postgres-content-repository";
-import { runMigrations } from "./db/migrate";
 import { PostgresCallRepository } from "./storage/postgres-call-repository";
 
-const databaseUrl = requireTestDatabaseUrl();
+const database = isolatedTestDatabase();
+const databaseUrl = database.url;
 
 
 describe("AccountDataExportService PostgreSQL", () => {
@@ -27,7 +28,7 @@ describe("AccountDataExportService PostgreSQL", () => {
   let inspection: postgres.Sql;
 
   beforeAll(async () => {
-    await runMigrations(databaseUrl);
+    await database.setup();
     authRepository = new PostgresAuthRepository(databaseUrl!);
     callRepository = new PostgresCallRepository(databaseUrl!, encryptionKey);
     contentRepository = new PostgresContentRepository(databaseUrl!);
@@ -42,6 +43,7 @@ describe("AccountDataExportService PostgreSQL", () => {
       contentRepository?.close(),
       inspection?.end()
     ]);
+    await database.teardown();
   });
 
   it("exports decrypted owner fields while retaining encrypted storage", async () => {
@@ -106,6 +108,11 @@ describe("AccountDataExportService PostgreSQL", () => {
       await compiler.compile(normalizeCreateCallBriefInput(input)),
       user.id
     );
+    const source = await callRepository.getPlanSource(brief.id);
+    const queuedTranslation = await callRepository.enqueueTextArtifact({
+      callId: brief.id, kind: "plan_review", compilationId: source.compilationId,
+      sourceHash: source.snapshotHash, targetLanguage: "ru", generatorVersion: "account-export-test-v1"
+    });
     const authService = new AuthService({
       repository: authRepository,
       verificationProvider: new MockVerificationProvider(),
@@ -128,6 +135,7 @@ describe("AccountDataExportService PostgreSQL", () => {
         role: verified.role,
         status: verified.status,
         uiLocale: verified.uiLocale,
+        preferredContentLanguage: verified.preferredContentLanguage,
         createdAt: verified.createdAt,
         lastLoginAt: verified.lastLoginAt
       },
@@ -135,6 +143,15 @@ describe("AccountDataExportService PostgreSQL", () => {
     );
 
     expect(exported.calls).toHaveLength(1);
+    expect(exported.schemaVersion).toBe("2");
+    expect(exported.calls[0]?.textData.compilations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: source.compilationId, compilation: expect.objectContaining({ compilerResponseId: null }) })
+    ]));
+    expect(exported.calls[0]?.textData.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: queuedTranslation.id, targetLanguage: "ru", status: "queued", sourceHash: source.snapshotHash })
+    ]));
+    expect(exported.calls[0]?.textData.transcriptRevisions).toEqual([]);
+    expect(exported.calls[0]?.textData.reviewReceipts).toEqual([]);
     expect(exported.calls[0]?.snapshot.brief).toMatchObject({
       id: brief.id,
       allowedFacts: ["Sensitive member number 7c92"]

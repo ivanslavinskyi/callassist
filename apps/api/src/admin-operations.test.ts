@@ -179,6 +179,18 @@ describe("admin operations overview", () => {
     });
   });
 
+  it("counts translation and summary usage in the same priced provider total", () => {
+    const overview = buildAdminOperationsOverview({ facts: { ...facts, providerUsage: {
+      ...facts.providerUsage, operationCount: 2, usageRecordCount: 2,
+      buckets: ["text_translation", "call_summary"].map((operationType) => providerBucket({
+        operationType, inputTextTokens: 1000, inputTextTokenSamples: 1, outputTextTokens: 100, outputTextTokenSamples: 1
+      }))
+    } }, kind: "7d", from: "2026-08-15T12:00:00.000Z", to: "2026-08-22T12:00:00.000Z", costPolicy: unavailableOperationalCostPolicy });
+    expect(overview.cost.providerUsage).toMatchObject({ calculatedUsdMicros: 12000, components: {
+      textTranslation: { requests: 1, calculatedUsdMicros: 6000 }, callSummary: { requests: 1, calculatedUsdMicros: 6000 }
+    } });
+  });
+
   it("keeps provider-reported actual cost separate and currency-safe", () => {
     const overview = buildAdminOperationsOverview({
       facts: {

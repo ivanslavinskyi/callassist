@@ -81,6 +81,8 @@ const en = {
   providerCostComponent: "Connectivity",
   providerUsageComponents: {
     briefCompilation: "Brief compilation",
+    textTranslation: "Text translation",
+    callSummary: "Call summary",
     realtimeText: "Realtime text",
     realtimeAudio: "Realtime audio",
     realtimeTranscription: "Realtime transcription",
@@ -244,6 +246,7 @@ const en = {
   jobTypes: {
     brief_compilation: "Call brief compilation",
     final_transcription: "Final transcription",
+    text_artifact_generation: "Text translation and call summary",
     recording_retention: "Recording retention",
     provider_call_reconciliation: "Provider call reconciliation",
     provider_call_cost_reconciliation: "Provider call cost reconciliation",
@@ -379,6 +382,8 @@ const de: AdminOperationsCopy = {
   providerCostComponent: "Verbindung",
   providerUsageComponents: {
     briefCompilation: "Brief-Kompilierung",
+    textTranslation: "Textübersetzung",
+    callSummary: "Anrufzusammenfassung",
     realtimeText: "Realtime-Text",
     realtimeAudio: "Realtime-Audio",
     realtimeTranscription: "Realtime-Transkription",
@@ -542,6 +547,7 @@ const de: AdminOperationsCopy = {
   jobTypes: {
     brief_compilation: "Call-Brief-Erstellung",
     final_transcription: "Finale Transkription",
+    text_artifact_generation: "Textübersetzung und Gesprächszusammenfassung",
     recording_retention: "Aufzeichnungsaufbewahrung",
     provider_call_reconciliation: "Anbieterabgleich für Anruf",
     provider_call_cost_reconciliation: "Anbieterkostenabgleich für Anruf",

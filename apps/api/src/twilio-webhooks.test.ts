@@ -1,3 +1,4 @@
+import { originalPlanReview } from "./test-helpers/original-plan-review";
 import twilio from "twilio";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
@@ -62,7 +63,7 @@ async function createBrief(service: CallService) {
     allowLanguageSwitch: false,
     allowedFacts: []
   });
-  await service.approveCompilation(brief.id);
+  await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
   return brief;
 }
 

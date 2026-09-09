@@ -1,3 +1,4 @@
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 import {
   approvedExecutionSnapshotSchema,
   type ApprovedExecutionSnapshot,
@@ -209,7 +210,7 @@ describe("buildInitialResponseInstructions", () => {
 });
 
 describe("buildConsentAnnouncementInstructions", () => {
-  it("keeps assistance reason, persona, retention, and DTMF out of legal consent", () => {
+  it("keeps assistance reason, persona, retention and DTMF out of the short consent announcement", () => {
     const prompt = buildConsentAnnouncementInstructions({
       ...brief,
       locale: "ru-RU",
@@ -221,7 +222,8 @@ describe("buildConsentAnnouncementInstructions", () => {
     expect(prompt).toContain("записать и автоматически расшифровать");
     expect(prompt).not.toContain("нарушения речи");
     expect(prompt).not.toContain(brief.agentName);
-    expect(prompt).not.toContain("7");
+    expect(prompt).not.toContain("7 дней");
+    expect(prompt).not.toContain("ответ будет обработан ИИ");
     expect(prompt).not.toContain("нажмите 1");
     expect(prompt).toContain("Do not begin the call objective");
   });
@@ -433,7 +435,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
-    await service.approveCompilation(created.id);
+    await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
@@ -486,7 +488,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
-    await service.approveCompilation(created.id);
+    await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
@@ -538,7 +540,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
-    await service.approveCompilation(created.id);
+    await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
     await repository.startAttempt(created.id, { provider: "twilio" });
     const getLatestAttempt = repository.getLatestAttempt.bind(repository);
     vi.spyOn(repository, "getLatestAttempt").mockImplementation(async (id) => {
@@ -596,7 +598,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
-    await service.approveCompilation(created.id);
+    await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
@@ -969,7 +971,7 @@ describe("OpenAIRealtimeBridge", () => {
       allowLanguageSwitch: false,
       allowedFacts: brief.allowedFacts
     });
-    await service.approveCompilation(created.id);
+    await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
@@ -1240,7 +1242,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
     allowLanguageSwitch: false,
     allowedFacts: brief.allowedFacts
   });
-  await service.approveCompilation(created.id);
+  await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
   const reserved = await service.repository.startAttempt(created.id, {
     provider: "twilio"
   });

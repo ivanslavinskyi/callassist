@@ -1,6 +1,6 @@
 # Database recovery and secret operations
 
-Updated 2026-09-07 for mainline integration. Rotation/restore share all thirteen ciphertext
+Updated 2026-09-09 for text artifacts. Rotation/restore share all seventeen ciphertext
 families. The current catalog has 61 migrations and 58 public tables. See the
 [remediation evidence](remediation-2026-09-07.md).
 
@@ -125,8 +125,13 @@ The shared inventory includes `call_preparation_requests.input_ciphertext`.
 The queued-old-key regression rotates it, removes the old runtime key, completes
 the preparation and proves a no-op replay. The merged rotation regression also
 verifies immutable plans and attempt snapshots after retiring the old runtime key.
-The current restore drill verified 12 populated families from the 13-family inventory;
-schema parity tests cover all 13 columns. See [merge evidence](merge-verification-2026-09-07.md).
+The 2026-09-07 restore drill verified 12 populated families from the then 13-family inventory;
+its schema parity tests covered those 13 columns. See [merge evidence](merge-verification-2026-09-07.md).
+The current inventory has 17 ciphertext columns, adding final transcript revisions,
+generated text artifacts, persisted artifact chunks and plan review receipts. Updated
+isolated rotation and Docker restore tests verify these payloads after retiring the
+old runtime key, including immutable hashes and privacy-redaction behavior. This local
+evidence does not replace production backup/deletion-replay acceptance.
 Do not retire a key using success evidence from older builds;
 run the updated tool against the target data and preserve the results below.
 
@@ -157,7 +162,7 @@ Use this sequence for every production rotation:
 4. Set `DATA_ENCRYPTION_REENCRYPT_CONFIRM` to the exact active key ID and run
    `pnpm db:reencrypt`. The command applies pending migrations, takes a dedicated
    PostgreSQL advisory lock, commits bounded batches, refuses unverified feedback,
-   and emits only aggregate versioned JSON evidence. It covers all thirteen
+   and emits only aggregate versioned JSON evidence. It covers all seventeen
    enumerated families, including pending preparation input. An interrupted
    run is resumable; rows already using the active key are skipped.
 5. Run `pnpm db:reencrypt` again with the same confirmation. Preserve evidence that

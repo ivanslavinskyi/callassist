@@ -132,6 +132,8 @@ export const adminOperationsOverviewSchema = z.strictObject({
       calculatedUsdMicros: countSchema.nullable(),
       components: z.strictObject({
         briefCompilation: providerUsageCostComponentSchema,
+        textTranslation: providerUsageCostComponentSchema.optional(),
+        callSummary: providerUsageCostComponentSchema.optional(),
         realtimeText: providerUsageCostComponentSchema,
         realtimeAudio: providerUsageCostComponentSchema,
         realtimeTranscription: providerUsageCostComponentSchema,
@@ -174,6 +176,7 @@ export const adminDurableJobTypeSchema = z.enum([
   "recording_retention",
   "provider_call_reconciliation",
   "provider_call_cost_reconciliation",
+  "text_artifact_generation",
   "provider_recording_reconciliation"
 ]);
 export const adminDurableJobStatusSchema = z.enum([

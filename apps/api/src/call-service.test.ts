@@ -1,3 +1,4 @@
+import { originalPlanReview } from "./test-helpers/original-plan-review";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallService } from "./call-service";
 import {
@@ -201,7 +202,7 @@ describe("CallService", () => {
     first.subscribe(brief.id, ({ type }) => localEvents.push(type));
     second.subscribe(brief.id, ({ type }) => remoteEvents.push(type));
 
-    await first.approveCompilation(brief.id);
+    await first.approveCompilation(brief.id, await originalPlanReview(first, brief.id));
 
     await vi.waitFor(() => expect(remoteEvents).toEqual(["call.updated"]));
     expect(localEvents).toEqual(["call.updated"]);
@@ -284,7 +285,7 @@ describe("CallService", () => {
     await expect(service.start(brief.id)).rejects.toMatchObject({
       code: "CALL_NOT_READY"
     });
-    const reviewed = await service.approveCompilation(brief.id);
+    const reviewed = await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     expect(reviewed.brief.status).toBe("ready");
     expect(reviewed.compilation?.approvedAt).not.toBeNull();
     expect(reviewed.transcript).toEqual([]);
@@ -512,7 +513,8 @@ describe("CallService", () => {
 
     await expect(service.approveCompilation(brief.id, {
       revision: replaced.compilation!.revision,
-      snapshotHash: replaced.compilation!.snapshotHash
+      snapshotHash: replaced.compilation!.snapshotHash,
+      review: (await originalPlanReview(service, brief.id)).review
     })).resolves.toMatchObject({ brief: { status: "ready" } });
   });
 
@@ -559,7 +561,7 @@ describe("CallService", () => {
       allowedFacts: []
     };
     const brief = await service.create(input, userId);
-    const approved = await service.approveCompilation(brief.id);
+    const approved = await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     const approvedHash = approved.compilation!.snapshotHash;
     await service.initialize();
 
@@ -656,7 +658,7 @@ describe("CallService", () => {
       allowedFacts: []
     };
     const brief = await service.create(input, userId);
-    const approved = await service.approveCompilation(brief.id);
+    const approved = await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.initialize();
     const preparation = await service.recompile(
       brief.id,
@@ -718,7 +720,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     });
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     const originalGet = repository.get.bind(repository);
     vi.spyOn(repository, "get").mockImplementation(async (id) => {
       const snapshot = await originalGet(id);
@@ -764,7 +766,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     }, userId);
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
 
     await expect(service.start(brief.id, userId)).rejects.toMatchObject({
       code: "TELEPHONY_START_FAILED"
@@ -812,7 +814,7 @@ describe("CallService", () => {
       }
     });
 
-    const started = await service.approveAndStart(brief.id);
+    const started = await service.approveAndStart(brief.id, null, await originalPlanReview(service, brief.id));
     expect(started.brief.status).toBe("dialing");
     expect(started.compilation?.approvedAt).not.toBeNull();
     const attempt = await service.getLatestAttempt(brief.id);
@@ -858,7 +860,7 @@ describe("CallService", () => {
       allowedFacts: []
     });
 
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id);
     const snapshot = await service.stop(brief.id);
 
@@ -911,7 +913,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     }, userId);
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
 
     vi.useFakeTimers();
     try {
@@ -969,7 +971,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     }, userId);
-    await beforeRestart.approveCompilation(brief.id);
+    await beforeRestart.approveCompilation(brief.id, await originalPlanReview(beforeRestart, brief.id));
     await beforeRestart.start(brief.id, userId);
     await beforeRestart.close();
 
@@ -1049,7 +1051,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     }, userId);
-    await beforeRestart.approveCompilation(brief.id);
+    await beforeRestart.approveCompilation(brief.id, await originalPlanReview(beforeRestart, brief.id));
     await beforeRestart.start(brief.id, userId);
     await beforeRestart.startRecordingAfterConsent(brief.id);
     await beforeRestart.close();
@@ -1139,7 +1141,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     }, userId);
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id, userId);
     await service.handleTwilioStatus(
       "CA-cost-reconciliation",
@@ -1223,7 +1225,7 @@ describe("CallService", () => {
       allowedFacts: []
     });
 
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await Promise.allSettled([service.start(brief.id), service.start(brief.id)]);
 
     expect(startCall).toHaveBeenCalledTimes(1);
@@ -1272,7 +1274,7 @@ describe("CallService", () => {
       allowedFacts: []
     });
 
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     const starting = service.start(brief.id);
     await vi.waitFor(() => expect(startCall).toHaveBeenCalledOnce());
     await service.stop(brief.id);
@@ -1343,7 +1345,7 @@ describe("CallService", () => {
       allowedFacts: ["Application sent: 12 July"]
     });
 
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id);
     expect(repository.providerOperationsForTest()).toContainEqual(
       expect.objectContaining({
@@ -1447,7 +1449,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: []
     });
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id);
 
     const starting = service.startRecordingAfterConsent(brief.id);
@@ -1515,7 +1517,7 @@ describe("CallService", () => {
       allowLanguageSwitch: false,
       allowedFacts: ["Private reference 149"]
     }, userId);
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id, userId);
     const recording = await service.startRecordingAfterConsent(brief.id);
     await service.handleTwilioRecordingStatus({

@@ -7,7 +7,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   getCreditUsage,
   getCurrentUser,
-  getPublishedNavigation
+  getPublishedNavigation,
+  updateLanguagePreferences
 } from "@/lib/api";
 import {
   contentPath,
@@ -19,6 +20,9 @@ import { NavigationMenu } from "./navigation-menu";
 import { SiteFooter } from "./site-footer";
 import { designMessages } from "@/lib/i18n/design-messages";
 import { useUiLocale } from "./ui-locale-provider";
+import { uiLocales, type UiLocale } from "@/lib/i18n/messages";
+import { languageMessages } from "@/lib/i18n/language-messages";
+import { rememberUiLocale } from "@/lib/ui-language-preference";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -27,6 +31,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
+  const [changingLocale, setChangingLocale] = useState(false);
+  const [localeError, setLocaleError] = useState(false);
   const [publicNavigation, setPublicNavigation] = useState<
     PublishedNavigation | null
   >(null);
@@ -89,9 +95,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [isAuthenticated, role]);
 
-  function changeLocale(nextLocale: "en" | "de") {
-    document.cookie = `callassist_ui_locale=${nextLocale};path=/;max-age=31536000;samesite=lax`;
-    router.push(switchContentLocale(pathname, nextLocale) ?? pathname.replace(`/${locale}`, `/${nextLocale}`));
+  async function changeLocale(nextLocale: UiLocale) {
+    setChangingLocale(true);
+    setLocaleError(false);
+    try {
+      if (isAuthenticated) await updateLanguagePreferences({ uiLocale: nextLocale });
+      rememberUiLocale(nextLocale, isAuthenticated === false);
+      const nextPath = switchContentLocale(pathname, nextLocale) ?? pathname.replace(`/${locale}`, `/${nextLocale}`);
+      router.push(`${nextPath}${window.location.search}${window.location.hash}`);
+    } catch {
+      setLocaleError(true);
+    } finally {
+      setChangingLocale(false);
+    }
   }
   const copy = designMessages[locale];
   const customer = isAuthenticated === true && role !== "content_editor";
@@ -101,8 +117,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     {id: "support", href: contentPath(locale, "support"), label: messages.app.support}
   ];
   const language = <label className="locale-picker"><span className="sr-only">{messages.app.interfaceLanguage}</span>
-    <select aria-label={messages.app.interfaceLanguage} value={locale} onChange={event => changeLocale(event.target.value as "en" | "de")}>
-      <option value="en">EN</option><option value="de">DE</option>
+    <select aria-label={messages.app.interfaceLanguage} disabled={changingLocale || isAuthenticated === null} value={locale} onChange={event => void changeLocale(event.target.value as UiLocale)}>
+      {uiLocales.map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}
     </select></label>;
   const primary = customer ? <>
     <Link className="topbar-link" aria-current={pathname.endsWith("/app") ? "page" : undefined} href={localizeHref("/app#new-call")}>{messages.app.newCall}</Link>
@@ -137,6 +153,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </NavigationMenu>
       </div>
     </header>
+    {localeError ? <p className="form-error" role="alert">{languageMessages[locale].saveError}</p> : null}
     {children}
     <SiteFooter locale={locale} navigation={publicNavigation} />
   </div>;

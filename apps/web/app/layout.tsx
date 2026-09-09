@@ -3,8 +3,10 @@ import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { isUiLocale } from "@/lib/i18n/messages";
 import { siteOrigin } from "@/lib/site-config";
+import { CallDraftProvider } from "@/components/call-draft-provider";
 import "./globals.css";
 import "./emerald-paper.css";
+import "./language-workflow.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteOrigin),
@@ -27,7 +29,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('callassist_theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch(e){document.documentElement.dataset.theme='light'}})()` }} />
       </head>
-      <body>{children}</body>
+      <body><CallDraftProvider>{children}</CallDraftProvider></body>
     </html>
   );
 }

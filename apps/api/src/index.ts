@@ -11,6 +11,8 @@ import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
 import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
+import { createTextProcessorFromEnv } from "./text-processing/text-processor";
+import { textCapabilitiesFromEnv } from "./text-processing/text-capabilities";
 import { ContentService } from "./content/content-service";
 import { createContentRepositoryFromEnv } from "./content/create-content-repository";
 import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
@@ -47,6 +49,7 @@ const durableWorkerMode = durableWorkerModeFromEnv();
 const contentService = new ContentService(createContentRepositoryFromEnv());
 await contentService.initialize();
 const briefCompiler = createBriefCompilerFromEnv();
+const textProcessor = createTextProcessorFromEnv();
 const service = new CallService(
   repository,
   telephonyProvider,
@@ -57,7 +60,7 @@ const service = new CallService(
   briefCompiler,
   callAdmissionPolicyFromEnv(),
   operationalCostPolicyFromEnv(),
-  { durableWorkerMode }
+  { durableWorkerMode, textProcessor, textCapabilities: textCapabilitiesFromEnv(textProcessor) }
 );
 const authService = new AuthService({
   repository: authRepository,
@@ -109,6 +112,12 @@ const realtimeBridge =
         logger: app.log
       })
     : null;
+if (realtimeBridge) {
+  app.log.info(
+    { agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true" },
+    "Realtime agent hangup configuration"
+  );
+}
 const webhookApp =
   telephonyProvider instanceof TwilioTelephonyProvider && realtimeBridge
     ? buildWebhookApp({

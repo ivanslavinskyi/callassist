@@ -40,7 +40,8 @@ export interface ContentRepository {
   ): Promise<void>;
   getPublishedPage(
     locale: ContentLocale,
-    slug: string
+    slug: string,
+    options?: { allowFallback?: boolean }
   ): Promise<PublishedContentPage | null>;
   listPublishedContentIndex(): Promise<PublishedContentIndex>;
   getPublishedFaq(locale: ContentLocale): Promise<PublishedFaq | null>;
@@ -137,6 +138,9 @@ export class ContentRepositoryError extends Error {
       | "CONTENT_DRAFT_NOT_FOUND"
       | "CONTENT_REVISION_NOT_FOUND"
       | "CONTENT_REACCEPTANCE_INVALID"
+      | "CONTENT_REQUIRED_LOCALE_MISSING"
+      | "CONTENT_LOCALIZATION_SLUG_REQUIRED"
+      | "CONTENT_LOCALIZATION_SLUG_CONFLICT"
       | "EDITORIAL_COLLECTION_NOT_FOUND"
       | "EDITORIAL_DRAFT_EXISTS"
       | "EDITORIAL_DRAFT_NOT_FOUND"

@@ -1,3 +1,4 @@
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { randomUUID } from "node:crypto";
 import { expect, vi } from "vitest";
 import { CallService } from "../call-service";
@@ -30,7 +31,7 @@ export async function verifyAgentHangupRecovery(repository: CallRepository, reop
       objective: "Ask for opening hours and record the answer", assistantProfileId: "sebastian",
       representedPersonFirstName: "Nina", representedPersonLastName: "Keller", locale: "en-GB",
       allowLanguageSwitch: false, allowedFacts: [] });
-    await before.approveCompilation(brief.id);
+    await before.approveCompilation(brief.id, await originalPlanReview(before, brief.id));
     const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
     await repository.attachProviderCall(attempt.id, providerId, "in-progress", new Date(now + 900_000).toISOString());
     await before.recordTelemetry(brief.id, {

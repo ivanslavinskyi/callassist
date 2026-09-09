@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { buildSitemap } from "./seo-sitemap";
 
 describe("published sitemap", () => {
+  it("does not invent home routes when no landing localization is published", () => {
+    expect(buildSitemap({ pages: [], landing: null })).toEqual([]);
+  });
   it("includes only available localizations with canonical alternates", () => {
     const index: PublishedContentIndex = {
       landing: {

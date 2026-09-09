@@ -25,3 +25,11 @@ Design/exploration-2026-09-07/source-desktop*.png
 Design/exploration-2026-09-07/source-mobile.png
 # Generated portable archive duplicates the versioned design package.
 Design/system-2026-09-07/SHPROHLI-design-review.zip
+
+# Local audit captures and generated verification reports are not source assets.
+Design/audit-*/
+Design/verification-*/
+docs/public-content-release-candidate-*.json
+docs/public-content-release-dry-run-*.json
+docs/public-content-stage-result-*.json
+docs/public-content-stage-verification-*.json

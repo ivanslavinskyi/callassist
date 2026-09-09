@@ -4,6 +4,7 @@ import {
   ACCOUNT_DELETION_CONFIRMATION,
   CALL_DATA_DELETION_CONFIRMATION,
   accountDataExportSchema,
+  accountDataExportArchiveSchema,
   accountDeletionInputSchema,
   accountDeletionRequestSchema,
   accountNameUpdateInputSchema,
@@ -302,14 +303,15 @@ describe("registrationInputSchema", () => {
       onboardingAcceptances: [],
       calls: []
     });
-    expect(exported.schemaVersion).toBe("1");
+    expect(exported.schemaVersion).toBe("2");
+    expect(accountDataExportArchiveSchema.safeParse({ ...exported, schemaVersion: "1" }).success).toBe(true);
     expect(accountDataExportSchema.safeParse({
       ...exported,
       tokenHash: "must-not-be-accepted"
     }).success).toBe(false);
     expect(accountDataExportSchema.safeParse({
       ...exported,
-      schemaVersion: "2"
+      schemaVersion: "3"
     }).success).toBe(false);
   });
 

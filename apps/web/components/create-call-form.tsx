@@ -3,7 +3,7 @@
 import {
   ASSISTANT_PROFILES,
   CALL_BRIEF_INPUT_LIMITS,
-  SUPPORTED_CALL_LANGUAGES,
+  SELECTABLE_CALL_LANGUAGES,
   callBriefTaskTextLength,
   formatPersonName,
   getAssistanceDisclosure,
@@ -11,9 +11,10 @@ import {
   type AssistantProfileId,
   type CallBrief,
   type CallLocale,
-  type CreateCallBriefInput
+  type CreateCallBriefInput,
+  type TaskLanguagePreferences
 } from "@callassist/contracts";
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import {
   createCallBrief,
   getCallSnapshot,
@@ -21,14 +22,16 @@ import {
 } from "@/lib/api";
 import {
   getCallPreparationSessionStorage,
-  prepareCallBriefCreation,
-  type CallPreparationAttempt
+  prepareCallBriefCreation
 } from "@/lib/call-preparation-attempt";
 import { useUiLocale } from "./ui-locale-provider";
 import { isE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone-number";
 import { designMessages } from "@/lib/i18n/design-messages";
 import { RecipientCombobox } from "./recipient-combobox";
 import { representedPersonDefaults, type ProfileName } from "@/lib/represented-person-defaults";
+import { getCallLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
+import { useCallDraftStore } from "./call-draft-provider";
+import type { CallDraft } from "@/lib/call-draft-store";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -62,9 +65,12 @@ type CreateCallFormProps = {
   userId?: string;
   profileName?: ProfileName;
   initialValue?: CreateCallBriefInput;
+  draftId?: string;
+  initialLanguagePreferences?: TaskLanguagePreferences;
   saveCallBrief?: (
     input: CreateCallBriefInput,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    languagePreferences?: TaskLanguagePreferences
   ) => Promise<CallBrief>;
   heading?: string;
   headingLevel?: 1 | 2;
@@ -77,6 +83,8 @@ export function CreateCallForm({
   userId,
   profileName,
   initialValue,
+  draftId = "new",
+  initialLanguagePreferences,
   saveCallBrief = createCallBrief,
   heading,
   headingLevel = 2,
@@ -89,22 +97,55 @@ export function CreateCallForm({
   const copy = messages.form.copy;
   const resolvedHeading = heading ?? copy.defaultHeading;
   const resolvedSubmitLabel = submitLabel ?? copy.reviewCall;
-  const [form, setForm] = useState<CreateCallBriefInput>(() => ({
-    ...emptyForm,
-    ...initialValue,
-    ...representedPersonDefaults(initialValue, profileName),
-    allowedFacts: cleanLegacyDemoFacts(initialValue?.allowedFacts),
-    clarificationAnswers: initialValue?.clarificationAnswers ?? []
-  }));
-  const [factsText, setFactsText] = useState(() =>
-    cleanLegacyDemoFacts(initialValue?.allowedFacts).join("\n")
-  );
+  const draftStore = useCallDraftStore();
+  const owner = userId ?? "anonymous";
+  const [draft, setDraft] = useState<CallDraft>(() => {
+    const previous = draftStore.forOwner(owner).get(owner, draftId);
+    if (previous) return previous;
+    const initialForm = {
+      ...emptyForm,
+      ...initialValue,
+      ...representedPersonDefaults(initialValue, profileName),
+      allowedFacts: cleanLegacyDemoFacts(initialValue?.allowedFacts),
+      clarificationAnswers: initialValue?.clarificationAnswers ?? []
+    };
+    // Preserve old snapshots; a newly compiled version uses the current voice choice.
+    if (initialForm.locale === "en-US") initialForm.locale = "en-GB";
+    if (initialForm.fallbackLocale === "en-US") initialForm.fallbackLocale = "en-GB";
+    if (initialForm.fallbackLocale === initialForm.locale) {
+      initialForm.allowLanguageSwitch = false;
+      delete initialForm.fallbackLocale;
+    }
+    return {
+      form: initialForm,
+      factsText: cleanLegacyDemoFacts(initialValue?.allowedFacts).join("\n"),
+      languagePreferences: initialLanguagePreferences ?? { mode: "auto", uiLocaleHint: uiLocale },
+      preparationAttempt: null
+    };
+  });
+  const draftRef = useRef(draft);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const { form, factsText, languagePreferences } = draft;
+  const languageCopy = languageMessages[uiLocale];
+  function updateDraft(patch: Partial<CallDraft>) {
+    const next = { ...draftRef.current, ...patch };
+    draftRef.current = next;
+    draftStore.set(owner, draftId, next);
+    if (mounted.current) setDraft(next);
+  }
+  function setForm(action: SetStateAction<CreateCallBriefInput>) {
+    updateDraft({ form: typeof action === "function" ? action(draftRef.current.form) : action });
+  }
+  function setFactsText(value: string) { updateDraft({ factsText: value }); }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const preparationAttempt = useRef<CallPreparationAttempt | null>(null);
 
   const fallbackLanguages = useMemo(
-    () => SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== form.locale),
+    () => SELECTABLE_CALL_LANGUAGES.filter(({ locale }) => locale !== form.locale),
     [form.locale]
   );
   const disclosurePreview = useMemo(
@@ -155,7 +196,13 @@ export function CreateCallForm({
     field: Value,
     value: CreateCallBriefInput[Value]
   ) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === "locale" && next.fallbackLocale === next.locale) {
+        next.fallbackLocale = SELECTABLE_CALL_LANGUAGES.find(({ locale }) => locale !== next.locale)?.locale;
+      }
+      return next;
+    });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -181,21 +228,29 @@ export function CreateCallForm({
 
     let brief: CallBrief;
     try {
-      if (initialValue || !userId) {
-        brief = await saveCallBrief(input);
+      if (!userId) {
+        brief = await saveCallBrief(input, undefined, languagePreferences);
       } else {
         const storage = getCallPreparationSessionStorage();
         brief = await prepareCallBriefCreation({
           input,
+          languagePreferences,
+          scope: draftId,
           userId,
-          current: preparationAttempt.current,
+          current: draftRef.current.preparationAttempt,
           storage,
           save: (value, idempotencyKey) =>
-            saveCallBrief(value, idempotencyKey),
+            saveCallBrief(value, idempotencyKey, languagePreferences),
           load: async (callBriefId) =>
             (await getCallSnapshot(callBriefId)).brief,
           onAttempt: (attempt) => {
-            preparationAttempt.current = attempt;
+            if (mounted.current) updateDraft({ preparationAttempt: attempt });
+            else {
+              const current = draftStore.get(owner, draftId);
+              if (current?.preparationAttempt?.idempotencyKey === attempt.idempotencyKey) {
+                draftStore.set(owner, draftId, { ...current, preparationAttempt: attempt });
+              }
+            }
           }
         });
       }
@@ -214,7 +269,11 @@ export function CreateCallForm({
     }
 
     try {
-      onCreated(brief);
+      if (initialValue) draftStore.clear(owner, draftId);
+      if (mounted.current) {
+        onCreated(brief);
+        draftStore.clear(owner, draftId);
+      }
     } catch {
       setError(messages.form.navigationError);
     }
@@ -287,10 +346,12 @@ export function CreateCallForm({
             value={form.locale}
             onChange={(event) => update("locale", event.target.value as CallLocale)}
           >
-            {SUPPORTED_CALL_LANGUAGES.map(({ locale, label }) => (
-              <option key={locale} value={locale}>{label}</option>
+            {SELECTABLE_CALL_LANGUAGES.map(({ locale }) => (
+              <option key={locale} value={locale}>{getCallLanguageLabel(locale, uiLocale)}</option>
             ))}
           </select>
+          {initialValue?.locale === "en-US" || initialValue?.fallbackLocale === "en-US"
+            ? <small>{languageCopy.legacyEnglish}</small> : null}
         </label>
 
         <div className="form-section-title">{design.task}</div>
@@ -540,8 +601,8 @@ export function CreateCallForm({
                 value={form.fallbackLocale}
                 onChange={(event) => update("fallbackLocale", event.target.value as CallLocale)}
               >
-                {fallbackLanguages.map(({ locale, label }) => (
-                  <option key={locale} value={locale}>{label}</option>
+                {fallbackLanguages.map(({ locale }) => (
+                  <option key={locale} value={locale}>{getCallLanguageLabel(locale, uiLocale)}</option>
                 ))}
               </select>
             </label>
@@ -604,7 +665,7 @@ export function CreateCallForm({
 
       <div className="form-actions sticky-form-actions">
         {onCancel ? (
-          <button className="secondary-button" onClick={onCancel} type="button">
+          <button className="secondary-button" disabled={submitting} onClick={() => { draftStore.clear(owner, draftId); onCancel(); }} type="button">
             {copy.cancel}
           </button>
         ) : null}

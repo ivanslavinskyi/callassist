@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import { isUiLocale } from "@/lib/i18n/messages";
 import {
   contentAdminRedirect,
   operationalAdminRedirect
@@ -17,10 +18,10 @@ export async function AdminRouteBoundary({
   scope: "content" | "operations";
 }) {
   const user = await getServerCurrentUser();
+  const locale = user && isUiLocale(user.uiLocale) ? user.uiLocale : "en";
   const onboarding = user
-    ? await getServerOnboardingStatus(user.uiLocale)
+    ? await getServerOnboardingStatus(locale)
     : null;
-  const locale = user?.uiLocale ?? "en";
   const destination = scope === "content"
     ? contentAdminRedirect(user, onboarding, locale)
     : operationalAdminRedirect(user, onboarding, locale);

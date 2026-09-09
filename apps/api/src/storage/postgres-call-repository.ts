@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
+import type { CallTextRepository } from "./call-text-repository";
+import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import {
   BRIEF_COMPILER_VERSION,
   CALL_OUTCOME_SCHEMA_VERSION,
@@ -61,6 +64,8 @@ import {
   type TranscriptSegment
 } from "@callassist/contracts";
 import postgres from "postgres";
+import { publishLanguageContext, readLanguageContext, storePreparationLanguage, changeContentLanguage } from "./postgres-language-context";
+import type { TextLanguage } from "@callassist/contracts";
 import {
   dataEncryptionActiveKeyId,
   decryptJson,
@@ -420,6 +425,7 @@ type DurableJobRow = {
   recordingId: string | null;
   callAttemptId: string | null;
   callPreparationId: string | null;
+  textArtifactId?: string | null;
   callId: string | null;
   status: DurableJob["status"];
   generation: number;
@@ -520,6 +526,7 @@ export class PostgresCallRepository implements CallRepository {
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
   readonly #encryptionKey: DataEncryptionMaterial;
+  readonly #callText: PostgresCallTextStore;
 
   constructor(databaseUrl: string, encryptionKey: DataEncryptionMaterial) {
     this.#encryptionKey = encryptionKey;
@@ -527,6 +534,7 @@ export class PostgresCallRepository implements CallRepository {
       max: 10,
       onnotice: () => undefined
     });
+    this.#callText = new PostgresCallTextStore(this.#sql,this.#encryptionKey);
   }
 
   async list(input: ListCallBriefsInput) {
@@ -781,6 +789,7 @@ export class PostgresCallRepository implements CallRepository {
         }
         resolvedId = raced.id;
       }
+      await publishLanguageContext(transaction, resolvedId, compilation, publication?.preparationId);
       if (publication) {
         const updated = await transaction`
           UPDATE call_preparation_requests
@@ -862,6 +871,7 @@ export class PostgresCallRepository implements CallRepository {
           "CALL_PREPARATION_IDEMPOTENCY_CONFLICT"
         );
       }
+      await storePreparationLanguage(transaction, stored.id, input.language);
       await transaction`
         INSERT INTO durable_jobs (
           id, job_type, call_preparation_id, status, max_attempts,
@@ -1008,6 +1018,7 @@ export class PostgresCallRepository implements CallRepository {
         }
         return raced.id;
       }
+      await storePreparationLanguage(transaction, id, input.language);
       await transaction`
         INSERT INTO durable_jobs (
           id, job_type, call_preparation_id, status, max_attempts,
@@ -1725,6 +1736,9 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_DATA_DELETION_NOT_AVAILABLE");
       }
 
+      await redactCallTextData(transaction,input.callId);
+      await transaction`DELETE FROM call_language_contexts WHERE call_brief_id = ${input.callId}`;
+      await transaction`DELETE FROM call_preparation_language_contexts WHERE preparation_id IN (SELECT id FROM call_preparation_requests WHERE call_brief_id = ${input.callId} OR target_call_brief_id = ${input.callId})`;
       await transaction`
         INSERT INTO durable_job_attempts (
           id, job_id, generation, attempt_number, worker_id,
@@ -2466,6 +2480,7 @@ export class PostgresCallRepository implements CallRepository {
           updated_at = ${now}
         WHERE id = ${id}
       `;
+      await publishLanguageContext(transaction, id, compilation, publication?.preparationId);
       await this.#audit(transaction, id, "call.compilation_replaced", {
         previousSnapshotHash: previousCompilation?.snapshotHash ?? "none",
         snapshotHash: compilation.snapshotHash,
@@ -2498,6 +2513,41 @@ export class PostgresCallRepository implements CallRepository {
     });
 
     return this.#require(id);
+  }
+
+  async getPlanSource(...args: Parameters<CallTextRepository["getPlanSource"]>) { return this.#callText.getPlanSource(...args); }
+  async getTextArtifactSourceCompilation(...args: Parameters<CallTextRepository["getTextArtifactSourceCompilation"]>) { return this.#callText.getTextArtifactSourceCompilation(...args); }
+  async getCurrentTranscriptRevision(...args: Parameters<CallTextRepository["getCurrentTranscriptRevision"]>) { return this.#callText.getCurrentTranscriptRevision(...args); }
+  async getTranscriptRevision(...args: Parameters<CallTextRepository["getTranscriptRevision"]>) { return this.#callText.getTranscriptRevision(...args); }
+  async listTextArtifacts(...args: Parameters<CallTextRepository["listTextArtifacts"]>) { return this.#callText.listTextArtifacts(...args); }
+  async getTextArtifact(...args: Parameters<CallTextRepository["getTextArtifact"]>) { return this.#callText.getTextArtifact(...args); }
+  async enqueueTextArtifact(...args: Parameters<CallTextRepository["enqueueTextArtifact"]>) { return this.#callText.enqueueTextArtifact(...args); }
+  async claimTextArtifact(...args: Parameters<CallTextRepository["claimTextArtifact"]>) { return this.#callText.claimTextArtifact(...args); }
+  async getTextArtifactChunks(...args: Parameters<CallTextRepository["getTextArtifactChunks"]>) { return this.#callText.getTextArtifactChunks(...args); }
+  async saveTextArtifactChunk(...args: Parameters<CallTextRepository["saveTextArtifactChunk"]>) { return this.#callText.saveTextArtifactChunk(...args); }
+  async completeTextArtifact(...args: Parameters<CallTextRepository["completeTextArtifact"]>) { return this.#callText.completeTextArtifact(...args); }
+  async failTextArtifact(...args: Parameters<CallTextRepository["failTextArtifact"]>) { return this.#callText.failTextArtifact(...args); }
+  async retryTextArtifact(...args: Parameters<CallTextRepository["retryTextArtifact"]>) { return this.#callText.retryTextArtifact(...args); }
+  async cancelUserTextArtifacts(...args: Parameters<CallTextRepository["cancelUserTextArtifacts"]>) { return this.#callText.cancelUserTextArtifacts(...args); }
+  async reserveTextArtifactProviderRequest(...args: Parameters<CallTextRepository["reserveTextArtifactProviderRequest"]>) { return this.#callText.reserveTextArtifactProviderRequest(...args); }
+  async getCurrentReviewReceipt(...args: Parameters<CallTextRepository["getCurrentReviewReceipt"]>) { return this.#callText.getCurrentReviewReceipt(...args); }
+  async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) { return this.#callText.exportCallTextData(...args); }
+
+  async getLanguageContext(id: string) {
+    const current=await readLanguageContext(this.#sql,id);
+    if(current) return current;
+    await this.#sql.begin(async tx=>{
+      const [row]=await tx<CallBriefRow[]>`${this.#briefSelect(true)} WHERE call_briefs.id=${id} AND data_deleted_at IS NULL FOR UPDATE`;
+      if(!row) return;
+      if(await readLanguageContext(tx,id)) return;
+      const compilation=this.#mapCurrentCompilation(row);
+      if(compilation) await publishLanguageContext(tx,id,compilation);
+    });
+    return readLanguageContext(this.#sql,id);
+  }
+
+  async updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number) {
+    return changeContentLanguage(this.#sql, id, targetLanguage, expectedSelectionRevision);
   }
 
   async get(id: string): Promise<CallSnapshot | null> {
@@ -2560,6 +2610,10 @@ export class PostgresCallRepository implements CallRepository {
       ]);
 
     return {
+      languageContext: await this.getLanguageContext(id),
+      planSource: briefRow.currentCompilationId?await this.#callText.getPlanSource(id):null,
+      textArtifacts: await this.#callText.listTextArtifacts(id),
+      finalTranscriptRevision: await this.#callText.getCurrentTranscriptRevision(id),
       executionPlanSource: briefRow.currentCompilationId
         ? "immutable"
         : briefRow.legacyCompilationDisposition === "archived_terminal"
@@ -3805,7 +3859,7 @@ export class PostgresCallRepository implements CallRepository {
     return callOutcomeMetricsSchema.parse(metrics);
   }
 
-  async approveCompilation(id: string, expected?: CompilationApprovalInput) {
+  async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
       const [row] = await transaction<CallBriefRow[]>`
@@ -3821,7 +3875,7 @@ export class PostgresCallRepository implements CallRepository {
       }
       const compilation = this.#mapCurrentCompilation(row);
       if (
-        row.status !== "review_required" ||
+        !["review_required","ready"].includes(row.status) ||
         compilation?.policyDecision.status !== "ready_for_review" ||
         !compilation.compiledBrief
       ) {
@@ -3836,6 +3890,10 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_COMPILATION_STALE");
       }
       const compilationId = row.currentCompilationId;
+      const [policy]=await transaction<{policy_version:1|2}[]>`SELECT policy_version FROM call_compilation_review_policies WHERE compilation_id=${compilationId}`;
+      await saveReviewReceipt(transaction,this.#encryptionKey,id,{compilationId,revision:compilation.revision,snapshotHash:compilation.snapshotHash,
+        reviewPolicyVersion:policy?.policy_version??2},expected,row.locale);
+      if(row.status==="ready") return;
       compilation.approvedAt = now.toISOString();
       const executionSnapshot = createApprovedExecutionSnapshot({
         brief: this.#mapBrief(row),
@@ -3891,6 +3949,8 @@ export class PostgresCallRepository implements CallRepository {
         id,
         call_brief_id AS "callBriefId",
         compilation_id AS "compilationId",
+        review_receipt_id AS "reviewReceiptId",
+        content_language AS "contentLanguage",
         provider,
         provider_call_id AS "providerCallId",
         status,
@@ -4260,6 +4320,8 @@ export class PostgresCallRepository implements CallRepository {
         id,
         call_brief_id AS "callBriefId",
         compilation_id AS "compilationId",
+        review_receipt_id AS "reviewReceiptId",
+        content_language AS "contentLanguage",
         provider,
         provider_call_id AS "providerCallId",
         status,
@@ -4318,6 +4380,7 @@ export class PostgresCallRepository implements CallRepository {
       }
       assertCompilationIntegrity(compilation);
       const compilationId = call.currentCompilationId;
+      const review=await requireReceiptForStart(transaction,id,compilationId);
       const [approval] = await transaction<{
         approvedAt: DatabaseDate;
         executionSnapshotCiphertext: string | null;
@@ -4458,6 +4521,8 @@ export class PostgresCallRepository implements CallRepository {
           id,
           call_brief_id,
           compilation_id,
+          review_receipt_id,
+          content_language,
           user_id,
           provider,
           provider_call_id,
@@ -4472,6 +4537,8 @@ export class PostgresCallRepository implements CallRepository {
           ${attemptId},
           ${id},
           ${compilationId},
+          ${review.receiptId},
+          ${review.contentLanguage},
           ${userId},
           ${input.provider},
           ${null},
@@ -5507,7 +5574,8 @@ export class PostgresCallRepository implements CallRepository {
     recordingId: string,
     text: string,
     segments: FinalTranscriptSegment[],
-    lease?: DurableJobLease
+    lease?: DurableJobLease,
+    options?: {summaryGeneratorVersion?:string}
   ) {
     const now = new Date();
     const ciphertext = encryptJson(text, this.#encryptionKey);
@@ -5540,6 +5608,8 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE OF call_recordings, final_transcripts
       `;
       if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const available=await transaction`SELECT id FROM call_briefs WHERE id=${row.callId} AND data_deleted_at IS NULL FOR UPDATE`;
+      if(!available.count) throw new CallRepositoryError("CALL_NOT_FOUND");
       await transaction`
         UPDATE final_transcripts
         SET
@@ -5551,6 +5621,8 @@ export class PostgresCallRepository implements CallRepository {
           completed_at = ${now}
         WHERE call_recording_id = ${recordingId}
       `;
+      await persistTranscriptRevision(transaction,this.#encryptionKey,{callId:row.callId,transcriptId:row.transcriptId,callAttemptId:row.callAttemptId,
+        text,segments,createdAt:now.toISOString()},options?.summaryGeneratorVersion);
       await transaction`
         UPDATE call_recordings
         SET
@@ -5703,15 +5775,22 @@ export class PostgresCallRepository implements CallRepository {
       const callTarget = input.type === "provider_call_reconciliation" ||
         input.type === "provider_call_cost_reconciliation";
       const preparationTarget = input.type === "brief_compilation";
-      const recordingTarget = !callTarget && !preparationTarget;
+      const textTarget = input.type === "text_artifact_generation";
+      const recordingTarget = !callTarget && !preparationTarget && !textTarget;
       if (
+        (textTarget && (!input.textArtifactId || input.recordingId || input.callAttemptId || input.callPreparationId)) ||
+        (!textTarget && input.textArtifactId) ||
         (callTarget && (!input.callAttemptId || input.recordingId || input.callPreparationId)) ||
         (preparationTarget && (!input.callPreparationId || input.recordingId || input.callAttemptId)) ||
         (recordingTarget && (!input.recordingId || input.callAttemptId || input.callPreparationId))
       ) {
         throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       }
-      if (callTarget) {
+      if (textTarget) {
+        const artifacts = await transaction`SELECT a.id FROM call_text_artifacts a JOIN call_briefs b ON b.id=a.call_brief_id
+          WHERE a.id=${input.textArtifactId!} AND b.data_deleted_at IS NULL AND a.status NOT IN ('cancelled','stale') FOR UPDATE OF a`;
+        if(!artifacts.count) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");
+      } else if (callTarget) {
         const attempts = await transaction`
           SELECT id FROM call_attempts
           WHERE id = ${input.callAttemptId!}
@@ -5752,6 +5831,7 @@ export class PostgresCallRepository implements CallRepository {
             (${recordingTarget} AND recording_id = ${input.recordingId ?? null})
             OR
             (${preparationTarget} AND call_preparation_id = ${input.callPreparationId ?? null})
+            OR (${textTarget} AND text_artifact_id = ${input.textArtifactId ?? null})
           )
         FOR UPDATE
       `;
@@ -5764,6 +5844,7 @@ export class PostgresCallRepository implements CallRepository {
             recording_id,
             call_attempt_id,
             call_preparation_id,
+            text_artifact_id,
             status,
             max_attempts,
             run_after,
@@ -5776,6 +5857,7 @@ export class PostgresCallRepository implements CallRepository {
             ${input.recordingId ?? null},
             ${input.callAttemptId ?? null},
             ${input.callPreparationId ?? null},
+            ${input.textArtifactId ?? null},
             'queued',
             ${input.maxAttempts},
             ${input.runAfter}::timestamptz,
@@ -6036,6 +6118,9 @@ export class PostgresCallRepository implements CallRepository {
               AND status <> 'succeeded'
           `;
         }
+        if(job.type==="text_artifact_generation") await transaction`UPDATE call_text_artifacts SET status=${deadLetter?"failed":"queued"},
+          failure_code=${deadLetter?"TEXT_WORKER_LEASE_EXPIRED":null},updated_at=${input.now}::timestamptz
+          WHERE id=(SELECT text_artifact_id FROM durable_jobs WHERE id=${job.id}) AND status IN ('queued','processing','failed')`;
       }
 
       const [candidate] = await transaction<{
@@ -6224,6 +6309,9 @@ export class PostgresCallRepository implements CallRepository {
             AND status <> 'succeeded'
         `;
       }
+      if(job.type==="text_artifact_generation") await transaction`UPDATE call_text_artifacts SET status=${deadLetter?"failed":"queued"},
+        failure_code=${deadLetter?errorCode:null},updated_at=${now}::timestamptz
+        WHERE id=(SELECT text_artifact_id FROM durable_jobs WHERE id=${jobId}) AND status IN ('queued','processing','failed')`;
       return true;
     });
     return found ? this.#getDurableJob(jobId) : null;
@@ -6278,7 +6366,7 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!job) throw new CallRepositoryError("DURABLE_JOB_NOT_FOUND");
-      if (job.status !== "dead_letter" || job.type === "brief_compilation") {
+      if (job.status !== "dead_letter" || job.type === "brief_compilation" || job.type === "text_artifact_generation") {
         throw new CallRepositoryError("DURABLE_JOB_NOT_RETRYABLE");
       }
       await transaction`
@@ -6671,11 +6759,13 @@ export class PostgresCallRepository implements CallRepository {
         durable_jobs.recording_id AS "recordingId",
         durable_jobs.call_attempt_id AS "callAttemptId",
         durable_jobs.call_preparation_id AS "callPreparationId",
+        durable_jobs.text_artifact_id AS "textArtifactId",
         COALESCE(
           call_recordings.call_brief_id,
           reconciliation_attempt.call_brief_id,
           call_preparation_requests.call_brief_id,
-          call_preparation_requests.target_call_brief_id
+          call_preparation_requests.target_call_brief_id,
+          call_text_artifacts.call_brief_id
         ) AS "callId",
         durable_jobs.status,
         durable_jobs.generation,
@@ -6697,6 +6787,7 @@ export class PostgresCallRepository implements CallRepository {
         ON reconciliation_attempt.id = durable_jobs.call_attempt_id
       LEFT JOIN call_preparation_requests
         ON call_preparation_requests.id = durable_jobs.call_preparation_id
+      LEFT JOIN call_text_artifacts ON call_text_artifacts.id = durable_jobs.text_artifact_id
     `;
   }
 

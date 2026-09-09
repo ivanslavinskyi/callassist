@@ -5,11 +5,13 @@ import type {
   PublishedLanding,
   PublishedLandingBlock
 } from "@callassist/contracts";
-import { SUPPORTED_CALL_LANGUAGES } from "@callassist/contracts";
+import { SELECTABLE_CALL_LANGUAGES } from "@callassist/contracts";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppShell } from "./app-shell";
-import { designMessages } from "@/lib/i18n/design-messages";
+import { getCallLanguageLabel } from "@/lib/i18n/call-language-labels";
+import { contentLanguageDirection } from "@/lib/content-localizations";
+import { LandingDemo, LandingDemoPreview } from "./landing-demo";
 import { FaqList } from "./faq-list";
 import { useUiLocale } from "./ui-locale-provider";
 
@@ -45,12 +47,12 @@ export function PublicHomeContent({
   registerHref: string;
 }) {
   return (
-    <main className="public-home" id="main-content" tabIndex={-1}>
+    <main className="public-home" id="main-content" tabIndex={-1} lang={landing.locale} dir={contentLanguageDirection(landing.locale)}>
       {previewBanner}
       {landing.blocks.map((block) => (
         <LandingBlockView
           block={block}
-          exampleSteps={landing.blocks.find(item => item.blockType === "how_it_works")?.steps.slice(0, 3) ?? []}
+          exampleAvailable={landing.blocks.some((item) => item.blockType === "example")}
           faq={faq}
           key={block.id}
           locale={landing.locale}
@@ -61,13 +63,14 @@ export function PublicHomeContent({
   );
 }
 
-function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
-  exampleSteps: Array<{ id: string; title: string; text: string }>;
+function LandingBlockView({ block, faq, locale, registerHref, exampleAvailable }: {
+  exampleAvailable: boolean;
   block: PublishedLandingBlock;
   faq: PublishedFaq | null;
   locale: PublishedLanding["locale"];
   registerHref: string;
 }) {
+  const { locale: interfaceLocale } = useUiLocale();
   switch (block.blockType) {
     case "hero":
       return (
@@ -80,17 +83,15 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
           {block.secondaryText ? <p className="public-hero-secondary">{block.secondaryText}</p> : null}
           <div className="public-actions">
             <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
-            <Link className="secondary-button" href="#how-it-works">{block.secondaryCtaLabel}</Link>
+            <Link className="secondary-button" href={exampleAvailable ? "#example" : "#how-it-works"}>
+              {exampleAvailable ? block.secondaryCtaLabel : locale === "de" ? "So funktioniert es" : "See how it works"}
+            </Link>
           </div>
           <ul className="public-badges" aria-label={block.eyebrow}>
             {block.badges.map((badge) => <li key={badge}>{badge}</li>)}
           </ul>
           </div>
-          <aside className="hero-example" aria-label={designMessages[locale].example}>
-            <span className="eyebrow">{designMessages[locale].example}</span>
-            <h3>{designMessages[locale].exampleRecipient}</h3><p>{designMessages[locale].exampleGoal}</p>
-            <ol>{exampleSteps.map(step => <li key={step.id}><div><strong>{step.title}</strong><p>{step.text}</p></div></li>)}</ol>
-          </aside>
+          <div lang={interfaceLocale}><LandingDemoPreview locale={interfaceLocale} /></div>
         </section>
       );
     case "problem":
@@ -143,22 +144,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
         </section>
       );
     case "example":
-      return (
-        <section className="public-section public-example" aria-labelledby={`landing-${block.id}`}>
-          <h2 id={`landing-${block.id}`}>{block.title}</h2>
-          <ol>
-            {block.items.map((item, index) => (
-              <li key={item.title}>
-                <span>{index + 1}</span>
-                <div>
-                  <h3>{item.title}</h3>
-                  <p>{item.text}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      );
+      return <div lang={interfaceLocale}><LandingDemo locale={interfaceLocale} title={block.title} /></div>;
     case "safety_privacy":
       return (
         <section className="public-section public-safety" aria-labelledby={`landing-${block.id}`}>
@@ -178,10 +164,10 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
           <h2>{block.title}</h2>
           <p>{block.text}</p>
           <ul aria-label={locale === "de" ? "Unterstützte Gesprächssprachen" : "Supported call languages"}>
-            {SUPPORTED_CALL_LANGUAGES.map((language) => (
+            {SELECTABLE_CALL_LANGUAGES.map((language) => (
               <li key={language.locale}>
                 <span>{language.shortLabel}</span>
-                {displayLanguageName(language.locale, language.label, locale)}
+                <span lang={interfaceLocale}>{getCallLanguageLabel(language.locale, interfaceLocale)}</span>
               </li>
             ))}
           </ul>
@@ -192,7 +178,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
         <section className="public-section public-faq" aria-labelledby={`landing-${block.id}`}>
           <span className="eyebrow">{block.eyebrow}</span>
           <h2 id={`landing-${block.id}`}>{block.title}</h2>
-          {faq ? <FaqList items={faq.items.slice(0, block.itemLimit)} /> : null}
+          {faq ? <div lang={faq.locale} dir={contentLanguageDirection(faq.locale)}><FaqList items={faq.items.slice(0, block.itemLimit)} /></div> : null}
         </section>
       );
     case "cta":
@@ -208,21 +194,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleSteps }: {
   }
 }
 
-function displayLanguageName(
-  callLocale: string,
-  fallback: string,
-  locale: PublishedLanding["locale"]
-) {
-  try {
-    return new Intl.DisplayNames(locale === "de" ? ["de-CH"] : ["en"], {
-      type: "language"
-    }).of(callLocale) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function HeroTitle({ title, locale }: { title: string; locale: "en" | "de" }) {
+function HeroTitle({ title, locale }: { title: string; locale: string }) {
   const word = locale === "de" ? "Sprechen" : "speaking";
   const index = title.indexOf(word);
   if (index < 0) return title;

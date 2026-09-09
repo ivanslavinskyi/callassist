@@ -1,4 +1,5 @@
-import { localizeLandingBlock } from "@callassist/contracts";
+import { localizeLandingBlock, localizedContentValue, requiredContentLocales, resolvePublishedContentLocale } from "@callassist/contracts";
+import { assertEditorialLocalesReady, commonLegalLocale, editorialAvailableLocales, editorialLocale } from "./content-locales";
 import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
@@ -35,6 +36,7 @@ type Acceptance = {
 };
 
 type RevisionMetadata = {
+  requiredLocales?: string[];
   status: "draft" | "published";
   createdByUserId: string | null;
   createdAt: string;
@@ -118,10 +120,17 @@ export class InMemoryContentRepository implements ContentRepository {
     }
   }
 
-  async getPublishedPage(locale: ContentLocale, slug: string) {
-    const page = this.#latestPublishedPages().find(
+  async getPublishedPage(locale: ContentLocale, slug: string, options?: { allowFallback?: boolean }) {
+    const pages = this.#latestPublishedPages();
+    let page = pages.find(
       (candidate) => candidate.locale === locale && candidate.slug === slug
     );
+    if (!page && options?.allowFallback) {
+      const key = pages.find((candidate) => candidate.slug === slug)?.key;
+      const alternatives = pages.filter((candidate) => candidate.key === key);
+      const fallback = resolvePublishedContentLocale(locale, alternatives.map((candidate) => candidate.locale));
+      page = alternatives.find((candidate) => candidate.locale === fallback);
+    }
     return page ? toPublishedPage(page) : null;
   }
 
@@ -172,6 +181,9 @@ export class InMemoryContentRepository implements ContentRepository {
   async getPublishedFaq(locale: ContentLocale): Promise<PublishedFaq | null> {
     const revision = this.#latestEditorial("faq", "published");
     if (!revision || revision.key !== "faq" || !revision.publishedAt) return null;
+    const selectedLocale = editorialLocale(revision, locale);
+    if (!selectedLocale) return null;
+    locale = selectedLocale;
     return {
       locale,
       revision: {
@@ -184,8 +196,8 @@ export class InMemoryContentRepository implements ContentRepository {
         .sort(bySortOrder)
         .map((item) => ({
           id: item.id,
-          question: item.question[locale],
-          answer: item.answer[locale]
+          question: localizedContentValue(item.question, locale),
+          answer: localizedContentValue(item.answer, locale)
         }))
     };
   }
@@ -199,6 +211,9 @@ export class InMemoryContentRepository implements ContentRepository {
     }
     const hero = revision.items.find(({ blockType }) => blockType === "hero");
     if (!hero || hero.blockType !== "hero") return null;
+    const selectedLocale = editorialLocale(revision, locale);
+    if (!selectedLocale) return null;
+    locale = selectedLocale;
     return {
       locale,
       revision: {
@@ -211,8 +226,8 @@ export class InMemoryContentRepository implements ContentRepository {
         .sort(bySortOrder)
         .map((block) => localizeLandingBlock(block, locale)),
       seo: {
-        title: hero.seoTitle[locale],
-        description: hero.seoDescription[locale]
+        title: localizedContentValue(hero.seoTitle, locale),
+        description: localizedContentValue(hero.seoDescription, locale)
       }
     };
   }
@@ -224,6 +239,11 @@ export class InMemoryContentRepository implements ContentRepository {
     if (!revision || revision.key !== "navigation" || !revision.publishedAt) {
       return null;
     }
+    const available = editorialAvailableLocales(revision).filter((candidate) =>
+      revision.items.every((item) => !item.enabled || this.#navigationHref(item.destination, candidate)));
+    const selectedLocale = resolvePublishedContentLocale(locale, available);
+    if (!selectedLocale) return null;
+    locale = selectedLocale;
     const items = revision.items
       .filter(({ enabled }) => enabled)
       .sort(bySortOrder)
@@ -233,7 +253,7 @@ export class InMemoryContentRepository implements ContentRepository {
           id: item.id,
           location: item.location,
           destination: item.destination,
-          label: item.label[locale],
+          label: localizedContentValue(item.label, locale),
           href
         }] : [];
       });
@@ -252,8 +272,9 @@ export class InMemoryContentRepository implements ContentRepository {
     userId: string,
     locale: ContentLocale
   ): Promise<OnboardingStatus> {
-    const terms = this.#legalPage("terms", locale);
-    const acceptableUse = this.#legalPage("acceptable_use", locale);
+    const legalLocale = this.#commonLegalLocale(locale);
+    const terms = this.#legalPage("terms", legalLocale);
+    const acceptableUse = this.#legalPage("acceptable_use", legalLocale);
     const latestAcceptance = this.#acceptances
       .filter((acceptance) => acceptance.userId === userId)
       .sort((left, right) => right.acceptedAt.localeCompare(left.acceptedAt))[0];
@@ -285,8 +306,9 @@ export class InMemoryContentRepository implements ContentRepository {
     input: OnboardingAcceptanceInput,
     acceptedAt: string
   ) {
-    const terms = this.#legalPage("terms", input.locale);
-    const acceptableUse = this.#legalPage("acceptable_use", input.locale);
+    const legalLocale = this.#commonLegalLocale(input.locale);
+    const terms = this.#legalPage("terms", legalLocale);
+    const acceptableUse = this.#legalPage("acceptable_use", legalLocale);
     if (
       terms.revision.id !== input.termsRevisionId ||
       acceptableUse.revision.id !== input.acceptableUseRevisionId
@@ -302,7 +324,7 @@ export class InMemoryContentRepository implements ContentRepository {
       this.#acceptances.push({
         id: randomUUID(),
         userId,
-        input: structuredClone(input),
+        input: { ...structuredClone(input), locale: this.#commonLegalLocale(input.locale) },
         acceptedAt
       });
     }
@@ -409,8 +431,20 @@ export class InMemoryContentRepository implements ContentRepository {
     updatedAt: string
   ) {
     const draftPages = this.#drafts.filter((page) => page.key === key);
-    const page = draftPages.find(({ locale }) => locale === input.locale);
-    if (!page) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+    let page = draftPages.find(({ locale }) => locale === input.locale);
+    if (!draftPages.length) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+    if (!page) {
+      if (!input.slug) throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_REQUIRED");
+      if ([...this.#pages, ...this.#drafts].some((candidate) => candidate.locale === input.locale && candidate.slug === input.slug && candidate.key !== key)) {
+        throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_CONFLICT");
+      }
+      page = { ...structuredClone(draftPages[0]!), locale: input.locale, slug: input.slug,
+        localizationId: randomUUID(), revisionLocalizationId: randomUUID() };
+      this.#drafts.push(page);
+      draftPages.push(page);
+    } else if (input.slug && input.slug !== page.slug) {
+      throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_CONFLICT");
+    }
     Object.assign(page, {
       title: input.title,
       summary: input.summary,
@@ -425,6 +459,7 @@ export class InMemoryContentRepository implements ContentRepository {
       candidate.revision.requiresReacceptance = input.requiresReacceptance;
     }
     this.#revisionMetadata.get(page.revision.id)!.updatedAt = updatedAt;
+    if (input.requiredLocales) this.#revisionMetadata.get(page.revision.id)!.requiredLocales = [...input.requiredLocales];
     this.#adminEvents.push({
       eventType: "content.draft_updated",
       actorUserId,
@@ -450,6 +485,9 @@ export class InMemoryContentRepository implements ContentRepository {
     }
     const revisionId = draftPages[0]!.revision.id;
     const metadata = this.#revisionMetadata.get(revisionId)!;
+    if (requiredContentLocales(metadata).some((locale) => !draftPages.some((page) => page.locale === locale))) {
+      throw new ContentRepositoryError("CONTENT_REQUIRED_LOCALE_MISSING");
+    }
     metadata.status = "published";
     metadata.updatedAt = publishedAt;
     metadata.publishedAt = publishedAt;
@@ -575,6 +613,7 @@ export class InMemoryContentRepository implements ContentRepository {
       ...current,
       key: input.key,
       items: structuredClone(input.items),
+      ...(input.requiredLocales ? { requiredLocales: [...input.requiredLocales] } : {}),
       updatedAt
     } as AdminEditorialRevision;
     collection.revisions[index] = updated;
@@ -604,6 +643,7 @@ export class InMemoryContentRepository implements ContentRepository {
       throw new ContentRepositoryError("EDITORIAL_DRAFT_NOT_FOUND");
     }
     const draft = collection.revisions[index]!;
+    assertEditorialLocalesReady(draft);
     if (draft.key === "navigation") this.#assertNavigationDestinations(draft);
     const published = {
       ...draft,
@@ -679,15 +719,8 @@ export class InMemoryContentRepository implements ContentRepository {
   async close() {}
 
   #latestPublishedPages() {
-    const latest = new Map<string, SeedContentPage>();
-    for (const page of this.#pages) {
-      const key = `${page.key}:${page.locale}`;
-      const current = latest.get(key);
-      if (!current || page.revision.number > current.revision.number) {
-        latest.set(key, page);
-      }
-    }
-    return [...latest.values()];
+    return [...new Set(this.#pages.map((page) => page.key))]
+      .flatMap((key) => this.#pagesForLatestPublishedRevision(key));
   }
 
   #latestEditorial(
@@ -727,10 +760,10 @@ export class InMemoryContentRepository implements ContentRepository {
         publishedAt: revision.publishedAt
       },
       sourceLocale: "en",
-      localizations: (["en", "de"] as const).map((locale) => ({
+      localizations: editorialAvailableLocales(revision).map((locale) => ({
         locale,
-        seoTitle: hero.seoTitle[locale],
-        seoDescription: hero.seoDescription[locale],
+        seoTitle: localizedContentValue(hero.seoTitle, locale),
+        seoDescription: localizedContentValue(hero.seoDescription, locale),
         translationStale: false
       }))
     };
@@ -740,7 +773,7 @@ export class InMemoryContentRepository implements ContentRepository {
     revision: Extract<AdminEditorialRevision, { key: "navigation" }>
   ) {
     const broken = revision.items.some((item) =>
-      item.enabled && (["en", "de"] as const).some((locale) =>
+      item.enabled && requiredContentLocales(revision).some((locale) =>
         !this.#navigationHref(item.destination, locale)
       )
     );
@@ -764,9 +797,11 @@ export class InMemoryContentRepository implements ContentRepository {
     key: Extract<ContentPageKey, "terms" | "acceptable_use">,
     locale: ContentLocale
   ) {
+    const latestNumber = Math.max(0, ...this.#pages.filter((page) => page.key === key && page.revision.requiresReacceptance).map((page) => page.revision.number));
     const legalPages = this.#pages
       .filter((page) =>
         page.key === key &&
+        page.revision.number === latestNumber &&
         page.locale === locale &&
         page.revision.requiresReacceptance
       )
@@ -774,6 +809,15 @@ export class InMemoryContentRepository implements ContentRepository {
     const page = legalPages[0];
     if (!page) throw new ContentRepositoryError("LEGAL_CONTENT_UNAVAILABLE");
     return page;
+  }
+
+  #commonLegalLocale(requested: string) {
+    const locales = (key: "terms" | "acceptable_use") => {
+      const pages = this.#pages.filter((page) => page.key === key && page.revision.requiresReacceptance);
+      const latest = Math.max(0, ...pages.map((page) => page.revision.number));
+      return pages.filter((page) => page.revision.number === latest).map((page) => page.locale);
+    };
+    return commonLegalLocale(requested, locales("terms"), locales("acceptable_use"));
   }
 
   #copyAsDraft(
@@ -799,6 +843,7 @@ export class InMemoryContentRepository implements ContentRepository {
     }));
     this.#drafts.push(...draft);
     this.#revisionMetadata.set(revisionId, {
+      requiredLocales: [...requiredContentLocales(this.#revisionMetadata.get(source[0]!.revision.id) ?? {})],
       status: "draft",
       createdByUserId: actorUserId,
       createdAt,
@@ -821,6 +866,7 @@ export class InMemoryContentRepository implements ContentRepository {
       id: page.revision.id,
       number: page.revision.number,
       status: metadata.status,
+      requiredLocales: [...requiredContentLocales(metadata)],
       requiresReacceptance: page.revision.requiresReacceptance,
       createdByUserId: metadata.createdByUserId,
       createdAt: metadata.createdAt,
@@ -839,6 +885,7 @@ export class InMemoryContentRepository implements ContentRepository {
         id: page.revision.id,
         number: page.revision.number,
         status: metadata.status,
+        requiredLocales: [...requiredContentLocales(metadata)],
         requiresReacceptance: page.revision.requiresReacceptance,
         sourceRevisionNumber: page.revision.sourceRevisionNumber,
         createdByUserId: metadata.createdByUserId,

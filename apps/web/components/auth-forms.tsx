@@ -12,10 +12,13 @@ import {
   resendPhoneVerification,
   startPasswordRecovery,
   verifyPasswordRecovery,
-  verifyPhone
+  verifyPhone,
+  updateLanguagePreferences
 } from "@/lib/api";
 import { authMessages, getAuthErrorMessage } from "@/lib/i18n/auth-messages";
 import { useUiLocale } from "@/components/ui-locale-provider";
+import { localizePathname } from "@/lib/i18n/routing";
+import { clearExplicitGuestLocale, readExplicitGuestLocale, rememberUiLocale, resolvePostLoginLocale } from "@/lib/ui-language-preference";
 
 function AuthFrame({ children }: { children: ReactNode }) {
   const { locale } = useUiLocale();
@@ -130,8 +133,13 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
     setNotice(null);
     const data = new FormData(event.currentTarget);
     try {
-      await verifyPhone({ email, code: String(data.get("code") ?? "").trim() });
-      router.push(localizeHref("/app"));
+      const { user } = await verifyPhone({ email, code: String(data.get("code") ?? "").trim() });
+      const explicitGuestLocale = readExplicitGuestLocale(document.cookie);
+      if (explicitGuestLocale) await updateLanguagePreferences({ uiLocale: explicitGuestLocale });
+      const nextLocale = resolvePostLoginLocale({ explicitGuestLocale, accountLocale: user.uiLocale, pageLocale: locale });
+      rememberUiLocale(nextLocale);
+      clearExplicitGuestLocale();
+      router.push(localizePathname("/app", nextLocale));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));
@@ -194,8 +202,13 @@ export function LoginForm() {
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") ?? "").trim();
     try {
-      await login({ email, password: String(data.get("password") ?? "") });
-      router.push(localizeHref("/app"));
+      const { user } = await login({ email, password: String(data.get("password") ?? "") });
+      const explicitGuestLocale = readExplicitGuestLocale(document.cookie);
+      if (explicitGuestLocale) await updateLanguagePreferences({ uiLocale: explicitGuestLocale });
+      const nextLocale = resolvePostLoginLocale({ explicitGuestLocale, accountLocale: user.uiLocale, pageLocale: locale });
+      rememberUiLocale(nextLocale);
+      clearExplicitGuestLocale();
+      router.push(localizePathname("/app", nextLocale));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));

@@ -1,6 +1,6 @@
 # SHPROHLI architecture
 
-Reviewed against the integration of `51a61da` and `14abd28` on 2026-09-07. This describes implemented
+Updated for the language workflow and text-artifact implementation on 2026-09-09. This describes implemented
 behavior. Open defects and release decisions live in the [audit](project-audit-2026-09-07.md)
 and [roadmap](mvp-plan.md), rather than being presented as implemented safeguards.
 
@@ -86,7 +86,7 @@ No production deployment manifest currently resolves that topology.
 `external` makes the API enqueue initial preparations and durable call work; the
 standalone worker owns startup recovery, seeding, polling, leases and heartbeats.
 `AccountDeletionService` uses a separate leased request/attempt store in the same
-worker process; it is separate from the six `durable_jobs` types. Production requires external
+worker process; it is separate from the seven `durable_jobs` types. Production requires external
 mode. [Configuration and endpoints](runtime-reference.md) describe the actual inputs.
 
 ## Browser, session and role boundaries
@@ -98,11 +98,21 @@ and preview route groups. Removed localized admin and old call routes have no
 compatibility redirects. See [admin architecture](admin-interface-architecture.md).
 
 The URL selects customer UI locale; middleware negotiates absent locales from a
-browser cookie, `Accept-Language`, then English. `users.ui_locale` is stored at
-registration, but there is no dedicated account-language preference update API.
-Typed feature catalogues translate customer controls; CMS publishes EN/DE editorial
-content independently of the English admin interface. Call locale and fallback locale
-remain explicit brief fields and never change when the interface language changes.
+browser cookie, `Accept-Language`, then English. Account language preferences have
+their own PATCH API. UI, editorial content, call locale and text-processing languages
+use separate registries. EN/DE UI catalogues are enabled today; adding another UI
+catalogue does not add a call voice or enable an untested translation direction.
+CMS supports separately published localizations and identifies the actual fallback
+locale in rendered content. Call-language option names use the UI locale.
+
+Each preparation captures a language context separately from the executable plan:
+detected input language, detection source/confidence, selected task content language,
+selection source and revision. Server resolution uses an explicit task choice, then
+account preference, supported detection, UI hint and English fallback. Changing the
+UI never rewrites an approved plan, translation or result. Unsaved call inputs survive
+UI navigation in an account-scoped in-memory draft store; raw drafts are not put in
+browser persistent storage. The task content language is editable before approval
+and frozen afterwards; result display/translation targets remain independent.
 
 Authentication uses scrypt password hashes and random opaque session tokens. Only
 token hashes are stored; the browser receives an HttpOnly, SameSite=Lax cookie.
@@ -185,6 +195,15 @@ access. Public content reads never expose drafts. Web public-content fetches use
    hash. Append-only compilation/approval rows bind each attempt and stream token to
    that plan. There is no synchronous POST /api/call-briefs create endpoint.
 
+For new and previously unapproved compilations, policy v2 additionally requires a
+server-verified review receipt. It records either the original call-language plan
+or the exact ready translation artifact/hash, together with selection revision.
+The receipt is outside the execution hash and is immutable; each attempt captures
+its ID and default content language. Repository transactions and a database trigger
+enforce the receipt on every start. Migration 0066 grandfathers only exact approvals
+already present at cutover as v1; recompilation creates v2. Displaying another language
+does not modify the existing approval evidence.
+
 The OpenAI compiler produces strict structured output: detected source language,
 localized objective/opening/questions, task classification, allowed-fact translations,
 success/unresolved/stop criteria, assumptions, risk signals and fixed clarification
@@ -198,14 +217,20 @@ canonical hash is revalidated at reads, approvals and attempt reservation. Realt
 receives an ApprovedExecutionSnapshot projection of the reviewed plan; raw authoring
 fields are excluded. Full runtime text is moderated and protected identifiers must
 be preserved. The legacy mutable reader/dual-write and media adapter are removed.
-Model tool dispatch for request_approval/end_call and deterministic in-call disclosure
-control remain separate acceptance work under R08.
+All user-provided facts in the approved plan are authorized for use when needed
+during the call. The supported scope is information gathering, including availability
+and conditions; it does not authorize booking, payment or other commitments. Additional
+live permission prompts are not the product authorization model. Legacy approval
+storage/routes remain for compatibility; R08 acceptance concerns adherence to the
+preapproved facts and action limits, with adversarial and authorized live evidence.
+Ordinary `end_call` is implemented behind the R21 flag described above.
 
 Profiles are `sebastian`, `daniel`, `martin`, `anna`, `sofia`, `maria`; name/gender
 snapshots are server-derived. Assistance reasons are `none` (default, no disclosure),
 `speech_impairment` and `language_barrier`. Explicit represented-person first/last
-names are required. Supported call locales are `de-CH`, `de-DE`, `fr-CH`, `it-CH`,
-`en-GB`, `en-US`, `ru-RU`; Swiss Standard German does not imply dialect recognition.
+names are required. New calls select `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB` or
+`ru-RU`. Historical `en-US` remains readable but is not a new choice. Swiss Standard
+German does not imply dialect recognition.
 
 ## Consent, audio and transcription
 
@@ -213,7 +238,12 @@ Twilio creates calls with recording disabled and connects a signed Media Stream 
 an attempt-scoped HMAC token bound to the approved snapshot hash. Two OpenAI sockets are opened. The **main audio
 session** speaks the short AI identity/represented-person/recording question. The
 separate text-output session recognizes recipient consent speech with automatic
-response creation disabled. It does not generate the spoken disclosure.
+response creation disabled. It does not generate the spoken disclosure. By the user's
+decision on 2026-09-09, every localized spoken notice uses the previous short text:
+AI identity, the represented person and the request to record and automatically
+transcribe. It does not include the two added sentences about AI recognition of the
+reply and audio retention. Public privacy/FAQ/onboarding copy still describes actual
+processing and retention. Zero-day retention involves temporary recording after consent.
 
 After the disclosure playback mark, recipient media can enter only the consent
 recognizer. A deterministic locale-aware classifier returns affirmative, negative or
@@ -251,6 +281,31 @@ result; partial output is not published as completed. Legacy alignment utilities
 historical `unknown` segments remain readable but are not the production ASR path.
 See [transcription](post-call-transcription-plan.md) and [channel decision](channel-aware-final-transcription-plan.md).
 
+## Plan translations and result artifacts
+
+`text_artifact_generation` runs in a separate durable worker loop, so translation
+does not occupy the telephony/retention worker slot. Typed artifacts cover plan review,
+clarification review, transcript translation and call summary. Dedupe binds call,
+kind, immutable source identity/hash, target language and generator/model version.
+Original final transcripts have encrypted immutable revisions and stable segment IDs.
+Unsegmented historical text is split without losing characters; speaker/timing remain
+unknown. Source ASR processing/failure does not expose an older revision as current.
+
+Translations retain source segment IDs and times. Summaries use the original final
+transcript plus the exact executed compilation; answers, next steps and unresolved
+items cite source segments. They do not change technical call status or user feedback.
+The UI identifies generated text, links evidence to the original and keeps the original
+readable when processing fails or a direction is disabled. Original and translated
+TXT/PDF downloads are distinguished. Automatic summary enqueue is atomic with final
+transcript completion when that direction is enabled; it never delays audio retention.
+
+Validated chunks persist across retries. Storage caps each artifact at 24 provider
+requests across at most three job generations; the processor additionally bounds
+input chunks. Current-source checks and job ID/worker/generation/attempt leases fence
+every publication. Owner deletion requests cancel text jobs and reject new provider
+reservations or late completions before eventual content redaction. Feature and
+direction switches stop new generation without removing retained ready results.
+
 Audio retention is 0, 7 (default) or 30 days. The deletion deadline is assigned from
 successful final-transcript completion, not the call-start timestamp; regeneration
 updates that deadline. Zero-day audio becomes eligible immediately then. Failed
@@ -285,9 +340,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog is **62 migrations**, `0001` through
-`0062_agent_hangup_telemetry.sql`, producing **58 public tables** including
-`schema_migrations`. The catalog is contiguous/checksummed; advisory locking and
+The current catalog has **67 migrations**, `0001` through
+`0067_extensible_content_locales.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases
@@ -303,16 +357,18 @@ migration runner enforces the gate; see the [rollout sequence](approved-call-pla
 | Attempts, recordings | Immutable approved execution snapshot/hash; provider IDs/status, consent/time/duration/channels/deadline; audio held at Twilio |
 | Live transcript and approvals | Relational plaintext transcript and proposed disclosure text, access-controlled |
 | Final transcript | Encrypted text/segments and resumable encrypted transcription chunks; model/status/error/usage metadata |
+| Text results and review evidence | Encrypted immutable transcript revisions, generated payloads/chunks and review receipts; source hashes, language and lease/accounting metadata are separate |
+| Language preferences and task context | Account UI/content preferences and captured preparation/call selection metadata, outside the execution hash |
 | Provider accounting | Deduplicated operations, request results, raw usage and reported costs; versioned calculated rates separate from actual/fallback/unknown |
 | Feedback/outcomes | Encrypted optional comment; immutable categorical ratings/outcomes and provenance |
 | Credits/promos/suppression | Immutable ledger/redemptions, code HMACs, retained safety evidence; suppression phone/reason remain personal data |
 | Content/editorial/onboarding | Private drafts, immutable publications/audit, localized slugs, legal revision acceptances |
-| Jobs/operations/audit | Six durable call-job types, separate deletion requests, leases/attempts/heartbeats, bounded technical and action events |
+| Jobs/operations/audit | Seven durable call-job types, separate deletion requests, leases/attempts/heartbeats, bounded technical and action events |
 
 AES-256-GCM `v2` envelopes authenticate key ID as additional data; the keyring supports
 an active write key, up to four decrypt-only previous keys and an explicit legacy `v1`
-mapping. Rotation and restore verification share an inventory of all thirteen ciphertext
-families, including `call_preparation_requests.input_ciphertext`. An integration test
+mapping. Rotation and restore verification share an inventory of seventeen ciphertext
+columns, including preparation inputs and all four new text payload families. An integration test
 checks the inventory against the migrated schema and completes a queued preparation
 after rotating and removing the old runtime key. See the [recovery runbook](database-recovery-and-secrets.md).
 
@@ -326,7 +382,7 @@ and deletion replay are separate deployment obligations.
 
 `brief_compilation`, `final_transcription`, `recording_retention`,
 `provider_call_reconciliation`, `provider_call_cost_reconciliation`,
-`provider_recording_reconciliation` are the six call
+`provider_recording_reconciliation` and `text_artifact_generation` are the seven call
 job types. Transactions enqueue; expiring leases, renewal and fencing prevent stale
 workers from publishing; retries/backoff/dead letters retain immutable attempt
 evidence. Provider operations may repeat after a crash. External execution is not

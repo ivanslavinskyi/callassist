@@ -13,6 +13,7 @@ export type EndpointRateLimitPolicy = {
   promoRedemption: EndpointRateLimitRule;
   recordingDownload: EndpointRateLimitRule;
   transcriptionRetry: EndpointRateLimitRule;
+  textArtifactGeneration: EndpointRateLimitRule;
   dataExport: EndpointRateLimitRule;
   callDataDeletion: EndpointRateLimitRule;
   accountDeletion: EndpointRateLimitRule;
@@ -26,6 +27,7 @@ export const defaultEndpointRateLimitPolicy: EndpointRateLimitPolicy = {
   promoRedemption: rule(10, hour),
   recordingDownload: rule(30, hour),
   transcriptionRetry: rule(5, day),
+  textArtifactGeneration: rule(30, hour),
   dataExport: rule(2, day),
   callDataDeletion: rule(5, day),
   accountDeletion: rule(3, day)
@@ -60,6 +62,11 @@ export function endpointRateLimitPolicyFromEnv(
       "API_RATE_LIMIT_TRANSCRIPTION_RETRY_PER_DAY",
       defaultEndpointRateLimitPolicy.transcriptionRetry.userLimit
     ), day),
+    textArtifactGeneration: rule(positiveInteger(
+      environment.API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR,
+      "API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR",
+      defaultEndpointRateLimitPolicy.textArtifactGeneration.userLimit
+    ), hour),
     dataExport: rule(positiveInteger(
       environment.API_RATE_LIMIT_DATA_EXPORT_PER_DAY,
       "API_RATE_LIMIT_DATA_EXPORT_PER_DAY",

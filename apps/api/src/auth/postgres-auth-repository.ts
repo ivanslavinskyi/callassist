@@ -1,4 +1,5 @@
 import type {
+  AccountLanguagePreferencesUpdateInput,
   AdminUserSummary,
   UserRole,
   UserStatus
@@ -35,7 +36,8 @@ type UserRow = {
   lastName: string;
   role: UserRole;
   status: UserStatus;
-  uiLocale: "en" | "de";
+  uiLocale: string;
+  preferredContentLanguage: string | null;
   createdAt: DatabaseDate;
   lastLoginAt: DatabaseDate | null;
 };
@@ -206,6 +208,30 @@ export class PostgresAuthRepository implements AuthRepository {
       UPDATE users
       SET first_name = ${input.firstName}, last_name = ${input.lastName}
       WHERE id = ${input.userId}
+        AND status = 'active'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM account_deletion_requests
+          WHERE user_id = users.id AND status <> 'completed'
+        )
+      RETURNING ${this.#userColumns()}
+    `;
+    return row ? this.#mapUser(row) : null;
+  }
+
+  async updateLanguagePreferences(
+    userId: string,
+    input: AccountLanguagePreferencesUpdateInput
+  ) {
+    const [row] = await this.#sql<UserRow[]>`
+      UPDATE users
+      SET ui_locale = COALESCE(${input.uiLocale ?? null}, ui_locale),
+          preferred_content_language = CASE
+            WHEN ${input.preferredContentLanguage !== undefined}
+              THEN ${input.preferredContentLanguage ?? null}
+            ELSE preferred_content_language
+          END
+      WHERE id = ${userId}
         AND status = 'active'
         AND NOT EXISTS (
           SELECT 1
@@ -1761,6 +1787,7 @@ export class PostgresAuthRepository implements AuthRepository {
       role AS "role",
       status AS "status",
       ui_locale AS "uiLocale",
+      preferred_content_language AS "preferredContentLanguage",
       created_at AS "createdAt",
       last_login_at AS "lastLoginAt"
     `;
@@ -1778,6 +1805,7 @@ export class PostgresAuthRepository implements AuthRepository {
       users.role AS "role",
       users.status AS "status",
       users.ui_locale AS "uiLocale",
+      users.preferred_content_language AS "preferredContentLanguage",
       users.created_at AS "createdAt",
       users.last_login_at AS "lastLoginAt"
     `;
@@ -1819,6 +1847,7 @@ export class PostgresAuthRepository implements AuthRepository {
   #mapUser(row: UserRow): AuthUserRecord {
     return {
       ...row,
+      preferredContentLanguage: row.preferredContentLanguage ?? null,
       phoneVerifiedAt: row.phoneVerifiedAt ? toIso(row.phoneVerifiedAt) : null,
       createdAt: toIso(row.createdAt),
       lastLoginAt: row.lastLoginAt ? toIso(row.lastLoginAt) : null

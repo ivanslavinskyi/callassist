@@ -37,6 +37,52 @@ describe("PostgresContentRepository", () => {
     ]);
   });
 
+  it("stores a third page localization and its readiness without rewriting earlier published content", async () => {
+    const suffix = randomUUID();
+    const editor = await authRepository.createUser({
+      email: `content-languages.${suffix}@example.com`, passwordHash: "test-hash",
+      phoneE164: phoneFromUuid(suffix), firstName: "Test", lastName: "Editor", uiLocale: "en"
+    });
+    const source = (await contentRepository.getAdminRevision("support", "en", { status: "published" }))!;
+    const now = new Date().toISOString();
+    await contentRepository.createDraft(editor.id, "support", now);
+    await contentRepository.updateDraft(editor.id, "support", {
+      locale: "en", title: source.title, summary: source.summary, sections: source.sections,
+      seoTitle: source.seoTitle, seoDescription: source.seoDescription,
+      sourceRevisionNumber: source.revision.sourceRevisionNumber,
+      requiresReacceptance: false, requiredLocales: ["en", "de", "pl"]
+    }, now);
+    await expect(contentRepository.publishDraft(editor.id, "support", "Missing required test locale", now))
+      .rejects.toMatchObject({ code: "CONTENT_REQUIRED_LOCALE_MISSING" });
+    await contentRepository.updateDraft(editor.id, "support", {
+      locale: "pl", slug: "pomoc", title: "TEST Pomoc", summary: source.summary, sections: source.sections,
+      seoTitle: "TEST Pomoc", seoDescription: source.seoDescription,
+      sourceRevisionNumber: source.revision.sourceRevisionNumber, requiresReacceptance: false
+    }, now);
+    await contentRepository.publishDraft(editor.id, "support", "Publish test locale", now);
+    expect(await contentRepository.getPublishedPage("pl", "pomoc")).toMatchObject({ locale: "pl", title: "TEST Pomoc" });
+    const preserved = await contentRepository.getAdminRevision("support", "en", { revisionNumber: source.revision.number });
+    expect(preserved).toEqual(source);
+    const rollback = await contentRepository.createRollbackDraft(editor.id, "support", source.revision.number, "Restore source fixture", now);
+    expect(rollback.requiredLocales).toEqual(source.revision.requiredLocales);
+    // The optional Polish route still exists. Its absent translation must not
+    // block a release whose own requiredLocales are only EN/DE.
+    await contentRepository.publishDraft(editor.id, "support", "Restore existing required locales", now);
+    expect(await contentRepository.getPublishedPage("pl", "pomoc")).toBeNull();
+    expect(await contentRepository.getPublishedPage("pl", source.slug, { allowFallback: true }))
+      .toMatchObject({ locale: "en", title: source.title });
+
+    const status = await contentRepository.getOnboardingStatus(editor.id, "pl");
+    expect(status.current.terms.locale).toBe("en");
+    expect(status.current.acceptableUse.locale).toBe("en");
+    await contentRepository.acceptOnboarding(editor.id, {
+      locale: "pl", termsRevisionId: status.current.terms.id, acceptableUseRevisionId: status.current.acceptableUse.id,
+      acceptTerms: true, acceptAcceptableUse: true, acknowledgeConsent: true,
+      acknowledgeRetention: true, acknowledgeUseLimits: true, acknowledgeCredits: true
+    }, now);
+    expect(await contentRepository.listOnboardingAcceptances(editor.id)).toMatchObject([{ acceptedLocale: "en" }]);
+  });
+
   it("stores immutable acceptance evidence and requires a newly published legal revision", async () => {
     const suffix = randomUUID();
     const user = await authRepository.createUser({

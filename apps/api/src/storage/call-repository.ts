@@ -1,3 +1,5 @@
+import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
+import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -27,6 +29,7 @@ import type {
   PromoCodeSummary,
   RecipientSuggestionList,
   TranscriptSegment
+  , CallLanguageContext, TaskLanguagePreferences, TextLanguage
 } from "@callassist/contracts";
 import type {
   ClaimDurableJobInput,
@@ -82,6 +85,8 @@ export type CallAttemptRecord = {
   compilationRevision: number | null;
   compilationSnapshotHash: string | null;
   executionSnapshot: ApprovedExecutionSnapshot | null;
+  reviewReceiptId?: string | null;
+  contentLanguage?: TextLanguage | null;
 };
 
 export type StartAttemptInput = Pick<
@@ -186,11 +191,17 @@ export type ListRecipientSuggestionsInput = {
 };
 
 export type EnqueueCallPreparationRepositoryInput = {
+  language?: PreparationLanguageOptions;
   userId: string;
   idempotencyKey: string;
   inputFingerprint: string;
   input: CreateCallBriefInput;
   now: string;
+};
+
+export type PreparationLanguageOptions = {
+  preferences?: TaskLanguagePreferences;
+  accountPreference?: TextLanguage | null;
 };
 
 export type EnqueueCallRecompilationRepositoryInput =
@@ -280,6 +291,10 @@ export type CompleteProviderOperationInput = {
   durationMs: number;
   errorCode: string | null;
   usage: ProviderTextTokenUsage | null;
+};
+
+export type TextArtifactProviderOperationRecord = Omit<TextArtifactProviderReservationInput,"maxRequests"> & {
+  callBriefId:string; durableJobId:string; result:Omit<CompleteProviderOperationInput,"operationId">|null;
 };
 
 export type ProviderOperationRecord = Omit<
@@ -716,7 +731,9 @@ export type FinalTranscriptMutationResult = {
   snapshot: CallSnapshot;
 };
 
-export interface CallRepository {
+export interface CallRepository extends CallTextRepository {
+  getLanguageContext(id: string): Promise<CallLanguageContext | null>;
+  updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number): Promise<CallLanguageContext>;
   readonly mode: "memory" | "postgres";
   list(input: ListCallBriefsInput): Promise<ListCallBriefsResult>;
   listRecipientSuggestions(
@@ -863,7 +880,7 @@ export interface CallRepository {
   getCallOutcomeMetrics(): Promise<CallOutcomeMetrics>;
   approveCompilation(
     id: string,
-    expected?: CompilationApprovalInput
+    expected?: CompilationReviewApprovalInput
   ): Promise<CallSnapshot>;
   getAttempt(id: string, attemptId: string): Promise<CallAttemptRecord | null>;
   getLatestAttempt(id: string): Promise<CallAttemptRecord | null>;
@@ -926,7 +943,8 @@ export interface CallRepository {
     recordingId: string,
     text: string,
     segments: FinalTranscriptSegment[],
-    lease?: DurableJobLease
+    lease?: DurableJobLease,
+    options?: { summaryGeneratorVersion?: string }
   ): Promise<FinalTranscriptMutationResult>;
   failFinalTranscript(
     recordingId: string,
@@ -978,6 +996,17 @@ export class CallRepositoryError extends Error {
   constructor(
     readonly code:
       | "CALL_NOT_FOUND"
+      | "TEXT_ARTIFACT_NOT_FOUND"
+      | "TEXT_ARTIFACT_STALE"
+      | "TEXT_ARTIFACT_NOT_RETRYABLE"
+      | "TEXT_ARTIFACT_LIMIT_REACHED"
+      | "TEXT_ARTIFACT_INVALID"
+      | "CALL_REVIEW_REQUIRED"
+      | "CALL_REVIEW_STALE"
+      | "CALL_REVIEW_CONFLICT"
+      | "CALL_LANGUAGE_LOCKED"
+      | "CALL_LANGUAGE_STALE"
+      | "CALL_LANGUAGE_NOT_SELECTABLE"
       | "APPROVAL_NOT_FOUND"
       | "CALL_NOT_READY"
       | "CALL_BRIEF_NOT_REVIEWABLE"

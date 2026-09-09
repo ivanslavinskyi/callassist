@@ -102,6 +102,7 @@ export class AccountDeletionService {
       now: this.#now().toISOString(),
       maxAttempts: 5
     });
+    await this.#callService.repository.cancelUserTextArtifacts(userId, this.#now().toISOString());
     this.wake();
     return toPublicAccountDeletion(request);
   }
@@ -161,6 +162,7 @@ export class AccountDeletionService {
     }, Math.max(1_000, Math.floor(this.#leaseDurationMs / 3)));
     heartbeat.unref();
     try {
+      await this.#callService.repository.cancelUserTextArtifacts(request.userId, this.#now().toISOString());
       await this.#callService.repository.cancelCallPreparations(
         request.userId,
         this.#now().toISOString()

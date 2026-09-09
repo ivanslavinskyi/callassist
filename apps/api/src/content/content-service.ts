@@ -29,8 +29,8 @@ export class ContentService {
     );
   }
 
-  async getPublishedPage(locale: ContentLocale, slug: string) {
-    return this.repository.getPublishedPage(locale, slug);
+  async getPublishedPage(locale: ContentLocale, slug: string, options?: { allowFallback?: boolean }) {
+    return this.repository.getPublishedPage(locale, slug, options);
   }
 
   async listPublishedContentIndex() {

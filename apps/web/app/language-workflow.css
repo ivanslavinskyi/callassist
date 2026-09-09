@@ -1,0 +1,31 @@
+.review-language-settings { margin: 18px 0; max-width: 36rem; color: var(--muted); }
+.review-language-settings > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; cursor: pointer; list-style: none; }
+.review-language-settings > summary::-webkit-details-marker { display: none; }
+.review-language-settings strong { color: var(--ink); }
+.language-change-label { text-decoration: underline; text-underline-offset: 3px; }
+.review-language-settings > .field { max-width: 18rem; margin-top: 12px; }
+.account-language-preference { margin-top: 20px; }
+.account-language-preference > summary { cursor: pointer; color: var(--muted); }
+.account-language-preference > summary strong { color: var(--ink); }
+.account-language-preference > .field { margin-top: 14px; }
+.review-language-settings > summary:focus-visible,
+.account-language-preference > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 4px; }
+.call-result-panel { display: grid; gap: 28px; min-width: 0; }
+.call-result-summary { border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+.call-result-panel .final-transcript-heading { flex-wrap: wrap; gap: 12px; }
+.call-result-panel .final-transcript-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.call-result-panel .final-transcript-actions > button { white-space: normal; }
+.call-summary-presentation dl { display: grid; gap: 18px; margin: 16px 0; }
+.call-summary-presentation dd { margin: 4px 0 0; }
+.call-summary-presentation dd p { margin: 4px 0; }
+.call-summary-presentation small { color: var(--muted); }
+.summary-sources { display: inline-flex; flex-wrap: wrap; gap: 10px; margin-inline-start: 12px; }
+.summary-sources a { text-decoration: underline; }
+.call-summary-presentation section { margin-top: 20px; }
+.call-summary-presentation h3 { margin: 0 0 8px; }
+.call-result-panel .final-transcript-line:target { background: var(--tint); border-radius: var(--radius); }
+.call-result-panel .final-transcript-line:focus { outline: 2px solid var(--focus); outline-offset: 4px; }
+@media (max-width: 520px) {
+  .call-result-panel .final-transcript-actions > button { flex: 1 1 9rem; }
+  .summary-sources { display: flex; margin: 8px 0 0; }
+}

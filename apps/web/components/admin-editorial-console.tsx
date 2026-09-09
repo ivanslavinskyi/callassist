@@ -11,6 +11,7 @@ import type {
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { normalizeLocalizedList, normalizeLocalizedText } from "@/lib/content-localizations";
 import {
   createAdminEditorialDraft,
   getAdminEditorialCollection,
@@ -410,10 +411,8 @@ function FaqEditor({ copy, index, item, onChange, onMove, onRemove }: {
     <fieldset className="admin-section-editor editorial-item">
       <legend>{copy.item} {index + 1}</legend>
       <ItemControls copy={copy} enabled={item.enabled} index={index} onEnabled={(enabled) => onChange({ ...item, enabled })} onMove={onMove} onRemove={onRemove} />
-      <TextInput label={`${copy.question} · EN`} maxLength={4000} value={item.question.en} onChange={(en) => onChange({ ...item, question: { ...item.question, en } })} />
-      <TextArea label={`${copy.answer} · EN`} maxLength={4000} rows={5} value={item.answer.en} onChange={(en) => onChange({ ...item, answer: { ...item.answer, en } })} />
-      <TextInput label={`${copy.question} · DE`} maxLength={4000} value={item.question.de} onChange={(de) => onChange({ ...item, question: { ...item.question, de } })} />
-      <TextArea label={`${copy.answer} · DE`} maxLength={4000} rows={5} value={item.answer.de} onChange={(de) => onChange({ ...item, answer: { ...item.answer, de } })} />
+      <LocalizedInput label={copy.question} maxLength={4000} value={item.question} onChange={(question) => onChange({ ...item, question })} />
+      <LocalizedArea label={copy.answer} maxLength={4000} rows={5} value={item.answer} onChange={(answer) => onChange({ ...item, answer })} />
     </fieldset>
   );
 }
@@ -445,8 +444,7 @@ function NavigationEditor({ copy, index, item, onChange, onMove, onRemove }: {
           </select>
         </label>
       </div>
-      <TextInput label={`${copy.label} · EN`} maxLength={80} value={item.label.en} onChange={(en) => onChange({ ...item, label: { ...item.label, en } })} />
-      <TextInput label={`${copy.label} · DE`} maxLength={80} value={item.label.de} onChange={(de) => onChange({ ...item, label: { ...item.label, de } })} />
+      <LocalizedInput label={copy.label} maxLength={80} value={item.label} onChange={(label) => onChange({ ...item, label })} />
     </fieldset>
   );
 }
@@ -592,28 +590,28 @@ function LandingContentItemsEditor({ copy, items, onChange }: {
 function LocalizedInput({ label, maxLength, onChange, value }: {
   label: string;
   maxLength: number;
-  onChange: (value: { en: string; de: string }) => void;
-  value: { en: string; de: string };
+  onChange: (value: Record<string, string>) => void;
+  value: Record<string, string>;
 }) {
-  return <div className="editorial-localized-fields"><TextInput label={`${label} · EN`} maxLength={maxLength} onChange={(en) => onChange({ ...value, en })} value={value.en} /><TextInput label={`${label} · DE`} maxLength={maxLength} onChange={(de) => onChange({ ...value, de })} value={value.de} /></div>;
+  return <div className="editorial-localized-fields">{Object.entries(value).map(([locale, text]) => <TextInput key={locale} label={`${label} · ${locale.toUpperCase()}`} maxLength={maxLength} onChange={(text) => onChange({ ...value, [locale]: text })} value={text} />)}</div>;
 }
 
 function LocalizedArea({ label, maxLength, onChange, rows, value }: {
   label: string;
   maxLength: number;
-  onChange: (value: { en: string; de: string }) => void;
+  onChange: (value: Record<string, string>) => void;
   rows: number;
-  value: { en: string; de: string };
+  value: Record<string, string>;
 }) {
-  return <div className="editorial-localized-fields"><TextArea label={`${label} · EN`} maxLength={maxLength} onChange={(en) => onChange({ ...value, en })} rows={rows} value={value.en} /><TextArea label={`${label} · DE`} maxLength={maxLength} onChange={(de) => onChange({ ...value, de })} rows={rows} value={value.de} /></div>;
+  return <div className="editorial-localized-fields">{Object.entries(value).map(([locale, text]) => <TextArea key={locale} label={`${label} · ${locale.toUpperCase()}`} maxLength={maxLength} onChange={(text) => onChange({ ...value, [locale]: text })} rows={rows} value={text} />)}</div>;
 }
 
 function LocalizedList({ label, onChange, value }: {
   label: string;
-  onChange: (value: { en: string[]; de: string[] }) => void;
-  value: { en: string[]; de: string[] };
+  onChange: (value: Record<string, string[]>) => void;
+  value: Record<string, string[]>;
 }) {
-  return <div className="editorial-localized-fields"><TextArea label={`${label} · EN`} maxLength={2400} onChange={(en) => onChange({ ...value, en: en.split("\n") })} rows={5} value={value.en.join("\n")} /><TextArea label={`${label} · DE`} maxLength={2400} onChange={(de) => onChange({ ...value, de: de.split("\n") })} rows={5} value={value.de.join("\n")} /></div>;
+  return <div className="editorial-localized-fields">{Object.entries(value).map(([locale, items]) => <TextArea key={locale} label={`${label} · ${locale.toUpperCase()}`} maxLength={2400} onChange={(text) => onChange({ ...value, [locale]: text.split("\n") })} rows={5} value={items.join("\n")} />)}</div>;
 }
 
 function ItemControls({ copy, enabled, index, onEnabled, onMove, onRemove }: {
@@ -681,8 +679,8 @@ function normaliseFaq(items: FaqItem[]) {
   return items.map((item, sortOrder) => ({
     ...item,
     sortOrder,
-    question: { en: item.question.en.trim(), de: item.question.de.trim() },
-    answer: { en: item.answer.en.trim(), de: item.answer.de.trim() }
+    question: normalizeLocalizedText(item.question),
+    answer: normalizeLocalizedText(item.answer)
   }));
 }
 
@@ -690,7 +688,7 @@ function normaliseNavigation(items: NavigationItem[]) {
   return items.map((item, sortOrder) => ({
     ...item,
     sortOrder,
-    label: { en: item.label.en.trim(), de: item.label.de.trim() }
+    label: normalizeLocalizedText(item.label)
   }));
 }
 
@@ -730,18 +728,15 @@ function normaliseLanding(items: LandingBlock[]): LandingBlock[] {
   });
 }
 
-function normaliseLocalizedList(value: { en: string[]; de: string[] }) {
-  return {
-    en: value.en.map((item) => item.trim()).filter(Boolean),
-    de: value.de.map((item) => item.trim()).filter(Boolean)
-  };
+function normaliseLocalizedList(value: Record<string, string[]>) {
+  return normalizeLocalizedList(value);
 }
 
 function normaliseLandingContentItems(items: LandingContentItem[]) {
   return items.map((item) => ({
     ...item,
-    title: { en: item.title.en.trim(), de: item.title.de.trim() },
-    text: { en: item.text.en.trim(), de: item.text.de.trim() }
+    title: normalizeLocalizedText(item.title),
+    text: normalizeLocalizedText(item.text)
   }));
 }
 

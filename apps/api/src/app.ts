@@ -1,3 +1,4 @@
+import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, SELECTABLE_CALL_LANGUAGES, TEXT_LANGUAGES } from "@callassist/contracts";
 import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
@@ -17,7 +18,9 @@ import {
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
-  compilationApprovalInputSchema,
+  compilationReviewApprovalInputSchema,
+  planReviewRequestSchema,
+  transcriptArtifactRequestSchema,
   contentAdminActionInputSchema,
   contentDraftUpdateInputSchema,
   editorialCollectionKeySchema,
@@ -66,6 +69,7 @@ import {
   type RateLimiter
 } from "./auth/rate-limiter";
 import { AccountDataExportService } from "./account-data-export-service";
+import { TextArtifactServiceError } from "./text-processing/text-artifact-service";
 import {
   AccountDeletionService,
   AccountDeletionServiceError
@@ -864,6 +868,17 @@ export function buildApp({
       } catch (error) {
         return sendAuthError(reply, error);
       }
+    });
+
+    app.patch("/api/account/language-preferences", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      const authenticated = await authService.authenticateSession(sessionTokenFromHeaders(request.headers, secureCookies));
+      if (!authenticated) return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      const parsed = accountLanguagePreferencesUpdateInputSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_LANGUAGE_PREFERENCES" });
+      try {
+        return reply.header("Cache-Control", "private, no-store").send(await authService.updateLanguagePreferences(authenticated.user.id, parsed.data));
+      } catch (error) { return sendAuthError(reply, error); }
     });
 
     app.patch("/api/account/profile/name", async (request, reply) => {
@@ -1966,19 +1981,104 @@ export function buildApp({
       .send(recipientSuggestionListSchema.parse(result));
   });
 
+  app.get("/api/language-capabilities", async () => ({
+    textLanguages: TEXT_LANGUAGES,
+    textGenerationEnabled: service.textArtifacts.capabilities.enabled,
+    operations: service.textArtifacts.capabilities.enabled ? service.textArtifacts.capabilities.directions : [],
+    processorMode: service.textArtifacts.processor.driver,
+    selectableCallLanguages: SELECTABLE_CALL_LANGUAGES.map(({ locale }) => locale)
+  }));
+
+  app.get<{ Params: { id: string } }>("/api/call-briefs/:id/language-context", async (request, reply) => {
+    if (!await authorizeCallAccess(request, reply, { callId: request.params.id })) return;
+    return reply.header("Cache-Control", "private, no-store").send(await service.repository.getLanguageContext(request.params.id));
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/call-briefs/:id/content-language", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
+    if (!access) return;
+    const parsed = contentLanguageUpdateSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "INVALID_CONTENT_LANGUAGE" });
+    // Selecting a language can enqueue the same paid plan translation as POST /plan-review.
+    if (!await enforceEndpointRateLimit(request, reply, access.userId, "text-artifact-generation", endpointRateLimitPolicy.textArtifactGeneration)) return;
+    try {
+      const result = await service.repository.updateContentLanguage(request.params.id, parsed.data.targetLanguage, parsed.data.expectedSelectionRevision);
+      await service.preparePlanReview(request.params.id);
+      return reply.header("Cache-Control", "private, no-store").send(result);
+    } catch (error) { return sendRepositoryError(reply, error); }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/call-briefs/:id/text-artifacts", async (request, reply) => {
+    if (!await authorizeCallAccess(request, reply, { callId: request.params.id })) return;
+    return reply.header("Cache-Control", "private, no-store").send({ items: await service.repository.listTextArtifacts(request.params.id) });
+  });
+
+  app.get<{ Params: { id: string; artifactId: string } }>("/api/call-briefs/:id/text-artifacts/:artifactId", async (request, reply) => {
+    if (!await authorizeCallAccess(request, reply, { callId: request.params.id })) return;
+    const artifact = isUuid(request.params.artifactId) ? await service.repository.getTextArtifact(request.params.id, request.params.artifactId) : null;
+    if (!artifact) return reply.status(404).send({ error: "TEXT_ARTIFACT_NOT_FOUND" });
+    return reply.header("Cache-Control", "private, no-store").send(artifact);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/call-briefs/:id/plan-review", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
+    if (!access) return;
+    const parsed = planReviewRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(422).send({ error: "INVALID_PLAN_REVIEW_REQUEST" });
+    if (!await enforceEndpointRateLimit(request, reply, access.userId, "text-artifact-generation", endpointRateLimitPolicy.textArtifactGeneration)) return;
+    try {
+      const artifact = await service.textArtifacts.requestPlanReview(request.params.id, parsed.data);
+      service.wakeTextJobs();
+      return reply.header("Cache-Control", "private, no-store").status(artifact.status === "ready" ? 200 : 202).send(artifact);
+    } catch (error) { return sendRepositoryError(reply, error); }
+  });
+
+  for (const [path, kind] of [["final-transcript/translations", "transcript_translation"], ["summaries", "call_summary"]] as const) {
+    app.post<{ Params: { id: string } }>(`/api/call-briefs/:id/${path}`, async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
+      if (!access) return;
+      const parsed = transcriptArtifactRequestSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(422).send({ error: "INVALID_TRANSCRIPT_ARTIFACT_REQUEST" });
+      if (!await enforceEndpointRateLimit(request, reply, access.userId, "text-artifact-generation", endpointRateLimitPolicy.textArtifactGeneration)) return;
+      try {
+        const artifact = await service.textArtifacts.requestTranscriptArtifact(request.params.id, kind, parsed.data);
+        service.wakeTextJobs();
+        return reply.header("Cache-Control", "private, no-store").status(artifact.status === "ready" ? 200 : 202).send(artifact);
+      } catch (error) { return sendRepositoryError(reply, error); }
+    });
+  }
+
+  app.post<{ Params: { id: string; artifactId: string } }>("/api/call-briefs/:id/text-artifacts/:artifactId/retry", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
+    if (!access) return;
+    if (!isUuid(request.params.artifactId)) return reply.status(404).send({ error: "TEXT_ARTIFACT_NOT_FOUND" });
+    if (!await enforceEndpointRateLimit(request, reply, access.userId, "text-artifact-generation", endpointRateLimitPolicy.textArtifactGeneration)) return;
+    try {
+      const artifact = await service.textArtifacts.retry(request.params.id, request.params.artifactId);
+      service.wakeTextJobs();
+      return reply.header("Cache-Control", "private, no-store").status(artifact.status === "ready" ? 200 : 202).send(artifact);
+    } catch (error) { return sendRepositoryError(reply, error); }
+  });
+
   app.post("/api/call-preparations", async (request, reply) => {
     const access = await authorizeCallAccess(request, reply, { mutation: true });
     if (!access) return;
     if (!access.userId) {
       return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
     }
-    const parsed = createCallBriefInputSchema.safeParse(request.body);
+    const parsed = safeParseCallPreparationRequest(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
         error: "INVALID_CALL_BRIEF",
         issues: parsed.error.flatten()
       });
     }
+    const briefInput = "requestVersion" in parsed.data ? parsed.data.brief : parsed.data;
+    if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") return reply.status(422).send({ error: "CALL_LANGUAGE_NOT_SELECTABLE" });
+    const language = "requestVersion" in parsed.data ? {
+      preferences: parsed.data.languagePreferences,
+      accountPreference: supportedTextLanguage(access.user?.preferredContentLanguage)
+    } : undefined;
     const idempotencyHeader = request.headers["idempotency-key"];
     if (
       typeof idempotencyHeader !== "string" ||
@@ -1988,9 +2088,10 @@ export function buildApp({
     }
     try {
       const existing = await service.findPreparationByRequest(
-        parsed.data,
+        briefInput,
         access.userId,
-        idempotencyHeader
+        idempotencyHeader,
+        language
       );
       if (existing) {
         return reply
@@ -2011,9 +2112,10 @@ export function buildApp({
     ))) return;
     try {
       const preparation = await service.prepare(
-        parsed.data,
+        briefInput,
         access.userId,
-        idempotencyHeader
+        idempotencyHeader,
+        language
       );
       return reply
         .header("Location", `/api/call-preparations/${preparation.id}`)
@@ -2110,13 +2212,24 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
-      const parsed = createCallBriefInputSchema.safeParse(request.body);
+      const parsed = safeParseCallPreparationRequest(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
           error: "INVALID_CALL_BRIEF",
           issues: parsed.error.flatten()
         });
       }
+      const briefInput = "requestVersion" in parsed.data ? parsed.data.brief : parsed.data;
+      if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") {
+        const previous = await service.get(request.params.id);
+        if ((briefInput.locale === "en-US" && previous?.brief.locale !== "en-US") || (briefInput.fallbackLocale === "en-US" && previous?.brief.fallbackLocale !== "en-US")) {
+          return reply.status(422).send({ error: "CALL_LANGUAGE_NOT_SELECTABLE" });
+        }
+      }
+      const language = "requestVersion" in parsed.data ? {
+        preferences: parsed.data.languagePreferences,
+        accountPreference: supportedTextLanguage(access.user?.preferredContentLanguage)
+      } : undefined;
       const idempotencyHeader = request.headers["idempotency-key"];
       if (
         typeof idempotencyHeader !== "string" ||
@@ -2127,9 +2240,10 @@ export function buildApp({
       try {
         const existing = await service.findRecompilationByRequest(
           request.params.id,
-          parsed.data,
+          briefInput,
           access.userId,
-          idempotencyHeader
+          idempotencyHeader,
+          language
         );
         if (existing) {
           return reply
@@ -2151,9 +2265,10 @@ export function buildApp({
       try {
         const preparation = await service.recompile(
           request.params.id,
-          parsed.data,
+          briefInput,
           access.userId,
-          idempotencyHeader
+          idempotencyHeader,
+          language
         );
         return reply
           .header("Location", `/api/call-preparations/${preparation.id}`)
@@ -2293,7 +2408,7 @@ export function buildApp({
         mutation: true
       });
       if (!access) return;
-      const parsed = compilationApprovalInputSchema.safeParse(request.body);
+      const parsed = compilationReviewApprovalInputSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_COMPILATION_APPROVAL" });
       }
@@ -2320,7 +2435,7 @@ export function buildApp({
         "call-start",
         endpointRateLimitPolicy.callStart
       ))) return;
-      const parsed = compilationApprovalInputSchema.safeParse(request.body);
+      const parsed = compilationReviewApprovalInputSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_COMPILATION_APPROVAL" });
       }
@@ -2980,6 +3095,9 @@ function sendRepositoryError(
   reply: { status(code: number): { send(payload: unknown): unknown } },
   error: unknown
 ) {
+  if (error instanceof TextArtifactServiceError) {
+    return reply.status(error.code === "TEXT_GENERATION_DISABLED" ? 503 : 422).send({ error: error.code });
+  }
   if (error instanceof CallServiceError) {
     const status =
       error.code === "SWISS_DESTINATION_REQUIRED"
@@ -2996,6 +3114,7 @@ function sendRepositoryError(
     const status = [
       "CALL_NOT_FOUND",
       "CALL_PREPARATION_NOT_FOUND",
+      "TEXT_ARTIFACT_NOT_FOUND",
       "DURABLE_JOB_NOT_FOUND"
     ]
       .includes(error.code)
@@ -3016,7 +3135,8 @@ function sendRepositoryError(
           : [
               "HOURLY_CALL_LIMIT",
               "DAILY_CALL_LIMIT",
-              "RECIPIENT_REPEAT_LIMIT"
+              "RECIPIENT_REPEAT_LIMIT",
+              "TEXT_ARTIFACT_LIMIT_REACHED"
             ].includes(error.code)
             ? 429
             : 409;

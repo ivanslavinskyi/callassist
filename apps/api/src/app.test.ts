@@ -1,3 +1,4 @@
+import { originalPlanReview } from "./test-helpers/original-plan-review";
 import type { AddressInfo } from "node:net";
 import type { CreateCallBriefInput } from "@callassist/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -129,7 +130,8 @@ describe("call API", () => {
       url: `/api/call-briefs/${created.id}/approve`,
       payload: {
         revision: getResponse.json().compilation.revision,
-        snapshotHash: getResponse.json().compilation.snapshotHash
+        snapshotHash: getResponse.json().compilation.snapshotHash,
+        review: { mode: "original", language: getResponse.json().brief.locale, selectionRevision: getResponse.json().languageContext.selectionRevision }
       }
     });
     expect(approveResponse.statusCode).toBe(200);
@@ -275,7 +277,8 @@ describe("call API", () => {
       url: `/api/call-briefs/${id}/approve-and-start`,
       payload: {
         revision: recompiled.compilation!.revision,
-        snapshotHash: recompiled.compilation!.snapshotHash
+        snapshotHash: recompiled.compilation!.snapshotHash,
+        review: { mode: "original", language: recompiled.brief.locale, selectionRevision: recompiled.languageContext!.selectionRevision }
       }
     });
     expect(started.statusCode).toBe(200);
@@ -512,7 +515,7 @@ describe("call API", () => {
       allowedFacts: []
     });
 
-    await service.approveCompilation(brief.id);
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     const response = await app.inject({
       method: "POST",
       url: `/api/call-briefs/${brief.id}/start`
@@ -536,6 +539,7 @@ describe("call API", () => {
       promoRedemption: oneRequest,
       recordingDownload: oneRequest,
       transcriptionRetry: oneRequest,
+      textArtifactGeneration: oneRequest,
       dataExport: oneRequest,
       callDataDeletion: oneRequest,
       accountDeletion: oneRequest
@@ -569,7 +573,8 @@ describe("call API", () => {
       url: `/api/call-briefs/${callId}/approve`,
       payload: {
         revision: 1,
-        snapshotHash: (await service.get(callId))!.compilation!.snapshotHash
+        snapshotHash: (await service.get(callId))!.compilation!.snapshotHash,
+        review: (await originalPlanReview(service, callId)).review
       }
     })).statusCode).toBe(200);
     expect((await app.inject({

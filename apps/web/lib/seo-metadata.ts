@@ -1,31 +1,39 @@
 import type {
   PublishedContentIndexPage,
   PublishedContentPage,
-  PublishedLanding
+  PublishedLanding,
+  PublishedLandingIndex
 } from "@callassist/contracts";
 import type { Metadata } from "next";
-import type { UiLocale } from "./i18n/messages";
+import { isUiLocale, type UiLocale } from "./i18n/messages";
 import { homeSeo } from "./site-config";
 
 export function homeMetadata(
   locale: UiLocale,
-  landing?: PublishedLanding | null
+  landing?: PublishedLanding | null,
+  publishedIndex?: PublishedLandingIndex | null
 ): Metadata {
   const seo = landing?.seo ?? homeSeo[locale];
-  const canonical = `/${locale}`;
+  const actualLocale = landing?.locale ?? locale;
+  const canonical = `/${actualLocale}`;
+  const available = publishedIndex?.localizations.map(({ locale }) => locale) ?? (landing ? [actualLocale] : []);
+  const defaultLocale = publishedIndex?.sourceLocale && available.includes(publishedIndex.sourceLocale)
+    ? publishedIndex.sourceLocale : available[0];
+  const languages = Object.fromEntries(available.map((locale) => [locale, `/${locale}`]));
+  if (defaultLocale) languages["x-default"] = `/${defaultLocale}`;
   return {
     title: seo.title,
     description: seo.description,
     alternates: {
       canonical,
-      languages: { en: "/en", de: "/de", "x-default": "/en" }
+      languages
     },
-    robots: { index: true, follow: true },
+    robots: { index: Boolean(landing) && actualLocale === locale, follow: true },
     openGraph: {
       type: "website",
       siteName: "SHPROHLI",
-      locale: locale === "de" ? "de_CH" : "en_CH",
-      alternateLocale: [locale === "de" ? "en_CH" : "de_CH"],
+      locale: openGraphLocale(actualLocale),
+      alternateLocale: available.filter((locale) => locale !== actualLocale).map(openGraphLocale),
       url: canonical,
       title: seo.title,
       description: seo.description,
@@ -61,7 +69,7 @@ export function contentPageMetadata(
   }
   const alternateLocales = (indexPage?.localizations ?? [])
     .filter(({ locale }) => locale !== page.locale)
-    .map(({ locale }) => locale === "de" ? "de_CH" : "en_CH");
+    .map(({ locale }) => openGraphLocale(locale));
   return {
     title: page.seoTitle,
     description: page.seoDescription,
@@ -70,7 +78,7 @@ export function contentPageMetadata(
     openGraph: {
       type: "website",
       siteName: "SHPROHLI",
-      locale: page.locale === "de" ? "de_CH" : "en_CH",
+      locale: openGraphLocale(page.locale),
       alternateLocale: alternateLocales,
       url: canonical,
       title: page.seoTitle,
@@ -81,16 +89,23 @@ export function contentPageMetadata(
       card: "summary_large_image",
       title: page.seoTitle,
       description: page.seoDescription,
-      images: [`/${page.locale}/opengraph-image`]
+      images: [socialImage(page.locale, page.title).url]
     }
   };
 }
 
-function socialImage(locale: UiLocale, title: string) {
+function socialImage(locale: string, title: string) {
+  const imageLocale = isUiLocale(locale) ? locale : "en";
   return {
-    url: `/${locale}/opengraph-image`,
+    url: `/${imageLocale}/opengraph-image`,
     width: 1200,
     height: 630,
     alt: `${title} — SHPROHLI`
   };
+}
+
+function openGraphLocale(locale: string) {
+  if (locale === "en" || locale === "de") return `${locale}_CH`;
+  const tag = new Intl.Locale(locale).maximize();
+  return `${tag.language}_${tag.region}`;
 }

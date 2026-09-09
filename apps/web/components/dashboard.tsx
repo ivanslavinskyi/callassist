@@ -9,6 +9,7 @@ import { listCallBriefs } from "@/lib/api";
 import { useUiLocale } from "./ui-locale-provider";
 import { formatCallTime } from "@/lib/call-time";
 import type { ProfileName } from "@/lib/represented-person-defaults";
+import { getCallLanguageLabel } from "@/lib/i18n/call-language-labels";
 
 const callStatuses = [
   "review_required", "needs_clarification", "blocked", "ready", "dialing",
@@ -188,6 +189,7 @@ export function Dashboard({ userId, profileName }: { userId: string; profileName
                     <span className="brief-avatar">{brief.recipientName.slice(0, 1)}</span>
                     <span className="brief-copy">
                       <strong>{brief.recipientName}</strong>
+                      <small>{getCallLanguageLabel(brief.locale, locale)}</small>
                       <small className={`history-status status-${brief.status}`}>{copy.status[brief.status]}</small>
                       {(() => {
                         const time = formatCallTime(brief.createdAt, locale);

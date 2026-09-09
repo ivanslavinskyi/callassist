@@ -1,3 +1,4 @@
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
@@ -44,7 +45,7 @@ async function repositoryWithAvailableRecording() {
     normalizeCreateCallBriefInput(input)
   );
   const brief = await repository.create(input, compilation, randomUUID());
-  await repository.approveCompilation(brief.id);
+  await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
   const attempt = await repository.startAttempt(brief.id, {
     provider: "twilio"
   });

@@ -2,7 +2,7 @@
 
 Status: implemented application baseline through checkpoint 6F3b. This document is a technical lifecycle policy, not a substitute for the final Swiss legal/privacy review or production backup evidence.
 
-Updated 2026-09-07 for the remediation working tree. R05 removes email/phone-change
+Updated 2026-09-09 for text artifacts, language context and review receipts. R05 removes email/phone-change
 challenge contacts in the same transaction as account anonymization, under the user
 lock. The deletion worker also purges challenges older than 30 days and legacy
 deleted-user challenges on startup and hourly, even without new user traffic.
@@ -27,6 +27,10 @@ deleted-user challenges on startup and hourly, even without new user traffic.
 | Pending call preparations | Unchanged | Cancel queued/running work and erase encrypted source input before publication | Prevent creation of new calls after deletion request |
 | Call brief recipient/person/objective/context/facts/compilation/disability or language-assistance text | Redact; hide call from owner reads | Redact every owned call | User-provided personal content |
 | Realtime and final transcript text/segments | Delete or null | Delete or null for every owned call | Conversation content |
+| Immutable final transcript revisions | Null encrypted payloads; retain source identity/hash and minimized references | Same for every owned call | Historical source text is personal content too |
+| Plan/clarification translations, transcript translations, summaries and persisted chunks | Cancel jobs and null all encrypted payloads | Cancel at request time; redact with each call | No late worker result may recreate content |
+| Plan review receipts | Null encrypted evidence; retain immutable revision/hash/language references | Same for every owned call | Preserve minimized approval linkage without retained review content |
+| Preparation/call language contexts | Delete affected contexts | Delete owned contexts and reset account preferences during anonymization | User-specific selection and detection metadata |
 | Approval title/reason/proposed speech | Delete | Delete for every owned call | May contain sensitive proposed disclosures |
 | Feedback comment | Null only; retain categorical scores | Null only; retain categorical scores | Remove free text while preserving product-quality evidence |
 | Provider recording | Delete at Twilio first; treat provider 404 as already absent | Delete all owned recordings before final account anonymization | Audio is the most sensitive provider-held artifact |
@@ -50,13 +54,22 @@ Account-wide deletion reuses the provider-first call primitive through a durable
 
 While a request is open, browser call mutations are rejected with `ACCOUNT_DELETION_PENDING`. A dialing, connected, or approval-paused call changes the request to `waiting_for_calls` without consuming its bounded provider-failure budget. Inactive pre-call drafts are safely stopped, and terminal calls are processed in bounded batches through the 6F3a provider-first primitive. Provider failures use exponential backoff and immutable attempt evidence; the fifth failed attempt enters `needs_support`. Admin or superadmin recovery requires an operational reason, creates a new retry generation, and does not restore content already removed by an earlier attempt.
 
+Text generation is cancelled immediately when account deletion is requested, including
+while deletion waits for an active call. Enqueue, retry, provider reservation and result
+publication lock/check the owner and pending deletion state, then validate the current
+source and durable lease. Reads needed by the deletion workflow remain available until
+call redaction. Late provider responses may finish bounded usage accounting but cannot
+restore artifact or chunk payloads. Removing audio on its retention deadline is separate:
+it does not delete retained original text, translations or summaries.
+
 Only after no visible owned call remains does finalization tombstone the primary user
 email, phone, first/last name and password, clear verification/last-login time, mark
 the user `deleted`, revoke sessions and record completion atomically. PostgreSQL
 rejects finalization if an undeleted call raced into the account. Global recipient
 suppressions are never selected or mutated. The current finalization transaction
-does not remove secondary email/phone challenge contact values; `completed` therefore
-does not prove complete contact erasure across all tables.
+removes secondary email/phone challenge contacts and resets language preferences.
+Immutable minimized evidence and backup retention remain separate from primary-store
+content erasure.
 
 ## Backups and support
 

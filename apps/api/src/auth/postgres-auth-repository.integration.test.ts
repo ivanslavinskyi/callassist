@@ -178,6 +178,51 @@ describe("PostgresAuthRepository", () => {
     ).toBeNull();
   });
 
+  it("persists independent language preferences without losing concurrent field updates", async () => {
+    const suffix = randomUUID();
+    const user = await repository.createUser({
+      email: `language.${suffix}@example.com`,
+      passwordHash: "test-password-hash",
+      phoneE164: phoneFromUuid(suffix, "78"),
+      firstName: "Nina",
+      lastName: "Keller",
+      uiLocale: "de"
+    });
+    expect(user.preferredContentLanguage).toBeNull();
+    await Promise.all([
+      repository.updateLanguagePreferences(user.id, { uiLocale: "en" }),
+      repository.updateLanguagePreferences(user.id, { preferredContentLanguage: "ru" })
+    ]);
+    expect(await repository.findUserByEmail(user.email)).toMatchObject({
+      uiLocale: "en", preferredContentLanguage: "ru"
+    });
+    await expect(repository.updateLanguagePreferences(user.id, {
+      preferredContentLanguage: null
+    })).resolves.toMatchObject({
+      uiLocale: "en", preferredContentLanguage: null
+    });
+
+    // Storage accepts future locale tags independently from currently enabled UI.
+    await inspection`
+      UPDATE users SET ui_locale = 'uk', preferred_content_language = 'fr-CH'
+      WHERE id = ${user.id}
+    `;
+    expect(await repository.findUserByEmail(user.email)).toMatchObject({
+      uiLocale: "uk", preferredContentLanguage: "fr-CH"
+    });
+    await expect(inspection`
+      UPDATE users SET ui_locale = 'bad_locale' WHERE id = ${user.id}
+    `).rejects.toMatchObject({ code: "23514" });
+    await expect(inspection`
+      UPDATE users SET preferred_content_language = '' WHERE id = ${user.id}
+    `).rejects.toMatchObject({ code: "23514" });
+
+    await inspection`UPDATE users SET status = 'suspended' WHERE id = ${user.id}`;
+    await expect(repository.updateLanguagePreferences(user.id, {
+      uiLocale: "en"
+    })).resolves.toBeNull();
+  });
+
   it("atomically audits account suspension and revokes every session", async () => {
     const actorSuffix = randomUUID();
     const targetSuffix = randomUUID();

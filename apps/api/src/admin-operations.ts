@@ -186,6 +186,8 @@ function buildProviderUsageCost(
 ) {
   const components = {
     briefCompilation: emptyProviderUsageCostComponent(),
+    textTranslation: emptyProviderUsageCostComponent(),
+    callSummary: emptyProviderUsageCostComponent(),
     realtimeText: emptyProviderUsageCostComponent(),
     realtimeAudio: emptyProviderUsageCostComponent(),
     realtimeTranscription: emptyProviderUsageCostComponent(),
@@ -244,6 +246,10 @@ function buildProviderUsageCost(
 }
 
 function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
+  if (bucket.operationType === "text_translation" || bucket.operationType === "call_summary") {
+    return [{ name: bucket.operationType === "text_translation" ? "textTranslation" as const : "callSummary" as const,
+      cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.calculatedUsdMicros }];
+  }
   if (bucket.operationType === "telephony_leg") {
     return [{
       name: "telephony" as const,

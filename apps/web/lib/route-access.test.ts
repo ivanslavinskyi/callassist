@@ -18,6 +18,7 @@ const user: User = {
   role: "user",
   status: "active",
   uiLocale: "de",
+  preferredContentLanguage: null,
   createdAt: "2026-08-19T09:00:00.000Z",
   lastLoginAt: "2026-08-19T10:00:00.000Z"
 };

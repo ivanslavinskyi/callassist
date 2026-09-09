@@ -25,12 +25,14 @@ import type {
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
+  CallLanguageContext,
+  CallTextArtifact,
+  CompilationReviewApprovalInput,
   CallPreparation,
   CallDataDeletionInput,
   CallDataDeletionResult,
   CallOutcomeView,
   CallSnapshot,
-  CompilationApprovalInput,
   ContentLocale,
   ContentDraftUpdateInput,
   ContentPageKey,
@@ -43,6 +45,9 @@ import type {
   EmailChangeStartInput,
   EmailChangeStartResponse,
   CreateCallBriefInput,
+  TaskLanguagePreferences,
+  TextLanguage,
+  TextArtifactKind,
   LoginInput,
   OnboardingAcceptanceInput,
   OnboardingStatus,
@@ -110,6 +115,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("callassist:session-ended"));
+    }
     throw await apiErrorFromResponse(response);
   }
 
@@ -195,6 +203,68 @@ export async function confirmPhoneChange(input: PhoneChangeConfirmInput) {
 
 export async function getCurrentUser() {
   return apiRequest<{ user: User }>("/api/auth/me");
+}
+
+export async function updateLanguagePreferences(input: {
+  uiLocale?: string;
+  preferredContentLanguage?: TextLanguage | null;
+}) {
+  return apiRequest<{ user: User }>("/api/account/language-preferences", {
+    method: "PATCH", body: JSON.stringify(input)
+  });
+}
+
+export async function updateCallContentLanguage(id: string, input: {
+  targetLanguage: TextLanguage;
+  expectedSelectionRevision: number;
+}) {
+  return apiRequest<CallLanguageContext>(`/api/call-briefs/${id}/content-language`, {
+    method: "PATCH", body: JSON.stringify(input)
+  });
+}
+
+export async function requestPlanReview(id: string, input: {
+  compilationId: string; revision: number; snapshotHash: string; targetLanguage: TextLanguage;
+}) {
+  return apiRequest<CallTextArtifact>(`/api/call-briefs/${id}/plan-review`, {
+    method: "POST", body: JSON.stringify(input)
+  });
+}
+
+export type LanguageCapabilities = {
+  textLanguages: TextLanguage[];
+  selectableCallLanguages: string[];
+  textGenerationEnabled: boolean;
+  operations: Array<{ kind: TextArtifactKind; sourceLanguage: string; targetLanguage: TextLanguage }>;
+  processorMode: "mock" | "openai";
+};
+
+export async function getLanguageCapabilities() {
+  return apiRequest<LanguageCapabilities>("/api/language-capabilities");
+}
+
+export async function listCallTextArtifacts(id: string) {
+  return apiRequest<{ items: CallTextArtifact[] }>(`/api/call-briefs/${id}/text-artifacts`);
+}
+
+export async function getCallTextArtifact(id: string, artifactId: string) {
+  return apiRequest<CallTextArtifact>(`/api/call-briefs/${id}/text-artifacts/${artifactId}`);
+}
+
+export async function requestTranscriptTranslation(id: string, input: { sourceRevisionId: string; targetLanguage: TextLanguage }) {
+  return apiRequest<CallTextArtifact>(`/api/call-briefs/${id}/final-transcript/translations`, {
+    method: "POST", body: JSON.stringify(input)
+  });
+}
+
+export async function requestCallSummary(id: string, input: { sourceRevisionId: string; targetLanguage: TextLanguage }) {
+  return apiRequest<CallTextArtifact>(`/api/call-briefs/${id}/summaries`, {
+    method: "POST", body: JSON.stringify(input)
+  });
+}
+
+export async function retryCallTextArtifact(id: string, artifactId: string) {
+  return apiRequest<CallTextArtifact>(`/api/call-briefs/${id}/text-artifacts/${artifactId}/retry`, { method: "POST" });
 }
 
 export async function startEmailChange(input: EmailChangeStartInput) {
@@ -536,11 +606,13 @@ export async function grantCreditsAsAdmin(input: AdminCreditGrantInput) {
 }
 
 export async function logout() {
-  return apiRequest<void>("/api/auth/logout", { method: "POST" });
+  await apiRequest<void>("/api/auth/logout", { method: "POST" });
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("callassist:session-ended"));
 }
 
 export async function revokeAllOwnSessions() {
-  return apiRequest<void>("/api/auth/sessions/revoke", { method: "POST" });
+  await apiRequest<void>("/api/auth/sessions/revoke", { method: "POST" });
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("callassist:session-ended"));
 }
 
 export async function listOwnSessions() {
@@ -682,12 +754,15 @@ export async function listRecipientSuggestions(options: {
 
 export async function createCallBrief(
   input: CreateCallBriefInput,
-  idempotencyKey = crypto.randomUUID()
+  idempotencyKey = crypto.randomUUID(),
+  languagePreferences?: TaskLanguagePreferences
 ) {
   const request = () => apiRequest<CallPreparation>("/api/call-preparations", {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify(input)
+    body: JSON.stringify(languagePreferences
+      ? { requestVersion: 2, brief: input, languagePreferences }
+      : input)
   });
 
   let preparation: CallPreparation;
@@ -749,12 +824,15 @@ export async function submitCallFeedback(
 export async function recompileCallBrief(
   id: string,
   input: CreateCallBriefInput,
-  idempotencyKey = crypto.randomUUID()
+  idempotencyKey = crypto.randomUUID(),
+  languagePreferences?: TaskLanguagePreferences
 ) {
   const request = () => apiRequest<CallPreparation>(`/api/call-briefs/${id}`, {
     method: "PUT",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify(input)
+    body: JSON.stringify(languagePreferences
+      ? { requestVersion: 2, brief: input, languagePreferences }
+      : input)
   });
 
   let preparation: CallPreparation;
@@ -798,7 +876,7 @@ export async function startCall(id: string) {
 
 export async function approveCallBrief(
   id: string,
-  approval: CompilationApprovalInput
+  approval: CompilationReviewApprovalInput
 ) {
   return apiRequest<CallSnapshot>(`/api/call-briefs/${id}/approve`, {
     method: "POST",
@@ -808,7 +886,7 @@ export async function approveCallBrief(
 
 export async function approveAndStartCall(
   id: string,
-  approval: CompilationApprovalInput
+  approval: CompilationReviewApprovalInput
 ) {
   const snapshot = await apiRequest<CallSnapshot>(
     `/api/call-briefs/${id}/approve-and-start`,

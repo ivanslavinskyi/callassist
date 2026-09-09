@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AccountLanguagePreferencesUpdateInput } from "@callassist/contracts";
 import type {
   AccountAdminInput,
   AccountDeletionLeaseInput,
@@ -166,6 +167,7 @@ export class InMemoryAuthRepository implements AuthRepository {
       role: "user",
       status: "active",
       uiLocale: input.uiLocale,
+      preferredContentLanguage: null,
       createdAt: now,
       lastLoginAt: null
     };
@@ -193,6 +195,23 @@ export class InMemoryAuthRepository implements AuthRepository {
     ) return null;
     user.firstName = input.firstName;
     user.lastName = input.lastName;
+    return structuredClone(user);
+  }
+
+  async updateLanguagePreferences(
+    userId: string,
+    input: AccountLanguagePreferencesUpdateInput
+  ) {
+    const user = this.#users.get(userId);
+    if (
+      !user ||
+      user.status !== "active" ||
+      this.#hasPendingAccountDeletion(userId)
+    ) return null;
+    if (input.uiLocale !== undefined) user.uiLocale = input.uiLocale;
+    if (input.preferredContentLanguage !== undefined) {
+      user.preferredContentLanguage = input.preferredContentLanguage;
+    }
     return structuredClone(user);
   }
 

@@ -1,7 +1,14 @@
 import { z } from "zod";
-import { callSnapshotSchema, personNamePartSchema } from "./call-brief";
+import { callCompilationSchema, callSnapshotSchema, personNamePartSchema } from "./call-brief";
 import { callOutcomeViewSchema } from "./call-outcome";
 import { contentLocaleSchema } from "./content";
+import { callTextArtifactSchema, finalTranscriptRevisionSchema, reviewEvidenceSchema } from "./call-text-artifact";
+import {
+  languageTagSchema,
+  preferredContentLanguageSchema,
+  supportedUiLocaleSchema,
+  callLanguageContextSchema
+} from "./languages";
 
 export const userRoleSchema = z.enum([
   "user",
@@ -46,7 +53,7 @@ export const registrationInputSchema = z.object({
   phoneE164: accountPhoneSchema,
   firstName: personNamePartSchema,
   lastName: personNamePartSchema,
-  uiLocale: z.enum(["en", "de"])
+  uiLocale: supportedUiLocaleSchema
 });
 export type RegistrationInput = z.infer<typeof registrationInputSchema>;
 
@@ -124,7 +131,8 @@ export const userSchema = z.object({
   lastName: personNamePartSchema,
   role: userRoleSchema,
   status: userStatusSchema,
-  uiLocale: z.enum(["en", "de"]),
+  uiLocale: languageTagSchema,
+  preferredContentLanguage: languageTagSchema.nullable().default(null),
   createdAt: z.iso.datetime(),
   lastLoginAt: z.iso.datetime().nullable()
 });
@@ -144,6 +152,26 @@ export const accountNameUpdateResponseSchema = z.strictObject({
 });
 export type AccountNameUpdateResponse = z.infer<
   typeof accountNameUpdateResponseSchema
+>;
+
+export const accountLanguagePreferencesUpdateInputSchema = z.strictObject({
+  uiLocale: supportedUiLocaleSchema.optional(),
+  preferredContentLanguage: preferredContentLanguageSchema.optional()
+}).refine(
+  (input) => input.uiLocale !== undefined ||
+    input.preferredContentLanguage !== undefined,
+  { message: "Choose a language preference to update" }
+);
+export type AccountLanguagePreferencesUpdateInput = z.infer<
+  typeof accountLanguagePreferencesUpdateInputSchema
+>;
+
+export const accountLanguagePreferencesUpdateResponseSchema = z.strictObject({
+  status: z.literal("language_preferences_updated"),
+  user: userSchema
+});
+export type AccountLanguagePreferencesUpdateResponse = z.infer<
+  typeof accountLanguagePreferencesUpdateResponseSchema
 >;
 
 export const emailChangeStartInputSchema = z.strictObject({
@@ -298,7 +326,7 @@ export const creditUsageSchema = z.object({
 });
 export type CreditUsage = z.infer<typeof creditUsageSchema>;
 
-export const ACCOUNT_DATA_EXPORT_SCHEMA_VERSION = "1" as const;
+export const ACCOUNT_DATA_EXPORT_SCHEMA_VERSION = "2" as const;
 
 export const onboardingAcceptanceRecordSchema = z.strictObject({
   id: z.uuid(),
@@ -317,9 +345,25 @@ export type OnboardingAcceptanceRecord = z.infer<
   typeof onboardingAcceptanceRecordSchema
 >;
 
-export const accountDataExportCallSchema = z.strictObject({
+export const accountExportReviewReceiptSchema = z.strictObject({
+  id: z.uuid(), callId: z.uuid(), compilationId: z.uuid(), snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  revision: z.number().int().positive(), evidence: reviewEvidenceSchema, createdAt: z.iso.datetime()
+});
+
+export const accountExportCallTextDataSchema = z.strictObject({
+  languageContext: callLanguageContextSchema.nullable(),
+  compilations: z.array(z.strictObject({ id: z.uuid(), compilation: callCompilationSchema })),
+  transcriptRevisions: z.array(finalTranscriptRevisionSchema),
+  artifacts: z.array(callTextArtifactSchema),
+  reviewReceipts: z.array(accountExportReviewReceiptSchema)
+});
+
+const legacyAccountDataExportCallSchema = z.strictObject({
   snapshot: callSnapshotSchema,
   outcome: callOutcomeViewSchema
+});
+export const accountDataExportCallSchema = legacyAccountDataExportCallSchema.extend({
+  textData: accountExportCallTextDataSchema
 });
 export type AccountDataExportCall = z.infer<
   typeof accountDataExportCallSchema
@@ -336,6 +380,12 @@ export const accountDataExportSchema = z.strictObject({
   calls: z.array(accountDataExportCallSchema)
 });
 export type AccountDataExport = z.infer<typeof accountDataExportSchema>;
+
+/** Previously downloaded v1 archives remain readable; new exports are always complete v2. */
+export const legacyAccountDataExportSchema = accountDataExportSchema.extend({
+  schemaVersion: z.literal("1"), calls: z.array(legacyAccountDataExportCallSchema)
+});
+export const accountDataExportArchiveSchema = z.union([accountDataExportSchema, legacyAccountDataExportSchema]);
 
 export const CALL_DATA_DELETION_CONFIRMATION = "DELETE" as const;
 

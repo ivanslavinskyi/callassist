@@ -1,7 +1,11 @@
 import {
   adminEditorialRevisionSchema,
-  localizeLandingBlock
+  localizeLandingBlock,
+  localizedContentValue,
+  requiredContentLocales,
+  resolvePublishedContentLocale
 } from "@callassist/contracts";
+import { assertEditorialLocalesReady, commonLegalLocale, editorialAvailableLocales, editorialLocale } from "./content-locales";
 import type {
   AdminContentLocalizedRevision,
   AdminContentPageSummary,
@@ -66,6 +70,7 @@ type AcceptanceExportRow = Omit<OnboardingAcceptanceRecord, "acceptedAt"> & {
 };
 
 type RevisionSummaryRow = {
+  requiredLocales: string[];
   id: string;
   number: number;
   status: "draft" | "published";
@@ -88,6 +93,7 @@ type AdminRevisionRow = Omit<
   AdminContentLocalizedRevision,
   "sections" | "revision"
 > & {
+  requiredLocales: string[];
   sections: AdminContentLocalizedRevision["sections"] | string;
   revisionId: string;
   revisionNumber: number;
@@ -132,6 +138,7 @@ type ContentAdminEventType =
   | "content.rollback_draft_created";
 
 type EditorialRevisionRow = {
+  requiredLocales: string[];
   key: EditorialCollectionKey;
   id: string;
   number: number;
@@ -152,9 +159,18 @@ type EditorialAdminEventType =
 export class PostgresContentRepository implements ContentRepository {
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
+  readonly #ownsConnection: boolean;
 
-  constructor(databaseUrl: string) {
-    this.#sql = postgres(databaseUrl, { max: 5, onnotice: () => undefined });
+  constructor(databaseUrl: string, transaction?: postgres.TransactionSql) {
+    this.#ownsConnection = !transaction;
+    // A compound draft operation can reuse the normal service/repository methods
+    // within its outer transaction. Nested begin calls stay in that same unit.
+    this.#sql = transaction ? new Proxy(transaction, {
+      get(target, property, receiver) {
+        if (property === "begin") return async (work: (sql: postgres.TransactionSql) => Promise<unknown>) => work(transaction);
+        return Reflect.get(target, property, receiver);
+      }
+    }) as unknown as postgres.Sql : postgres(databaseUrl, { max: 5, onnotice: () => undefined });
   }
 
   async initializeSeedContent(pages: SeedContentPage[]) {
@@ -243,13 +259,13 @@ export class PostgresContentRepository implements ContentRepository {
         await transaction`
           INSERT INTO content_editorial_revisions (
             id, collection_id, revision_number, status, snapshot,
-            created_by_user_id, created_at, updated_at, published_at
+            created_by_user_id, created_at, updated_at, published_at, required_locales
           ) SELECT
             ${revision.id}, ${collection.collectionId},
             COALESCE(max(revision_number), 0) + 1,
             'published', ${transaction.json(revision.items)}, ${null},
             ${createdAt}, ${new Date(revision.updatedAt)},
-            ${new Date(revision.publishedAt!)}
+            ${new Date(revision.publishedAt!)}, ${transaction.json(requiredContentLocales(revision))}
           FROM content_editorial_revisions
           WHERE collection_id = ${collection.collectionId}
           ON CONFLICT DO NOTHING
@@ -258,7 +274,7 @@ export class PostgresContentRepository implements ContentRepository {
     });
   }
 
-  async getPublishedPage(locale: ContentLocale, slug: string) {
+  async getPublishedPage(locale: ContentLocale, slug: string, options?: { allowFallback?: boolean }): Promise<PublishedContentPage | null> {
     const [row] = await this.#sql<PublishedPageRow[]>`
       SELECT
         page.key AS "key",
@@ -290,7 +306,14 @@ export class PostgresContentRepository implements ContentRepository {
       WHERE localization.locale = ${locale} AND localization.slug = ${slug}
       LIMIT 1
     `;
-    return row ? mapPublishedPage(row) : null;
+    if (row) return mapPublishedPage(row);
+    if (!options?.allowFallback) return null;
+    const index = await this.listPublishedContentIndex();
+    const page = index.pages.find((candidate) => candidate.localizations.some((localized) => localized.slug === slug));
+    if (!page) return null;
+    const fallback = resolvePublishedContentLocale(locale, page.localizations.map((localized) => localized.locale));
+    const route = page.localizations.find((localized) => localized.locale === fallback);
+    return route ? this.getPublishedPage(route.locale, route.slug) : null;
   }
 
   async listPublishedContentIndex(): Promise<PublishedContentIndex> {
@@ -371,6 +394,9 @@ export class PostgresContentRepository implements ContentRepository {
       status: "published"
     });
     if (!revision || revision.key !== "faq" || !revision.publishedAt) return null;
+    const selectedLocale = editorialLocale(revision, locale);
+    if (!selectedLocale) return null;
+    locale = selectedLocale;
     return {
       locale,
       revision: {
@@ -383,8 +409,8 @@ export class PostgresContentRepository implements ContentRepository {
         .sort(byEditorialSortOrder)
         .map((item) => ({
           id: item.id,
-          question: item.question[locale],
-          answer: item.answer[locale]
+          question: localizedContentValue(item.question, locale),
+          answer: localizedContentValue(item.answer, locale)
         }))
     };
   }
@@ -400,6 +426,9 @@ export class PostgresContentRepository implements ContentRepository {
     }
     const hero = revision.items.find(({ blockType }) => blockType === "hero");
     if (!hero || hero.blockType !== "hero") return null;
+    const selectedLocale = editorialLocale(revision, locale);
+    if (!selectedLocale) return null;
+    locale = selectedLocale;
     return {
       locale,
       revision: {
@@ -412,8 +441,8 @@ export class PostgresContentRepository implements ContentRepository {
         .sort(byEditorialSortOrder)
         .map((block) => localizeLandingBlock(block, locale)),
       seo: {
-        title: hero.seoTitle[locale],
-        description: hero.seoDescription[locale]
+        title: localizedContentValue(hero.seoTitle, locale),
+        description: localizedContentValue(hero.seoDescription, locale)
       }
     };
   }
@@ -428,6 +457,11 @@ export class PostgresContentRepository implements ContentRepository {
     if (
       !revision || revision.key !== "navigation" || !revision.publishedAt
     ) return null;
+    const available = editorialAvailableLocales(revision).filter((candidate) =>
+      revision.items.every((item) => !item.enabled || navigationHref(item.destination, candidate, index)));
+    const selectedLocale = resolvePublishedContentLocale(locale, available);
+    if (!selectedLocale) return null;
+    locale = selectedLocale;
     return {
       locale,
       revision: {
@@ -444,7 +478,7 @@ export class PostgresContentRepository implements ContentRepository {
             id: item.id,
             location: item.location,
             destination: item.destination,
-            label: item.label[locale],
+            label: localizedContentValue(item.label, locale),
             href
           }] : [];
         })
@@ -518,7 +552,7 @@ export class PostgresContentRepository implements ContentRepository {
             acknowledged_use_limits, acknowledged_credits, accepted_at
           ) VALUES (
             ${randomUUID()}, ${userId}, ${input.termsRevisionId},
-            ${input.acceptableUseRevisionId}, ${input.locale},
+            ${input.acceptableUseRevisionId}, ${references.terms.locale},
             ${input.acceptTerms}, ${input.acceptAcceptableUse},
             ${input.acknowledgeConsent}, ${input.acknowledgeRetention},
             ${input.acknowledgeUseLimits}, ${input.acknowledgeCredits},
@@ -621,6 +655,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "revisionId",
         revision.revision_number AS "revisionNumber",
         revision.status AS "revisionStatus",
+        revision.required_locales AS "requiredLocales",
         revision.requires_reacceptance AS "requiresReacceptance",
         revision_localization.source_revision_number AS "sourceRevisionNumber",
         revision.created_by_user_id AS "createdByUserId",
@@ -650,6 +685,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "id",
         revision.revision_number AS "number",
         revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
         revision.requires_reacceptance AS "requiresReacceptance",
         revision.created_by_user_id AS "createdByUserId",
         revision.created_at AS "createdAt",
@@ -742,6 +778,7 @@ export class PostgresContentRepository implements ContentRepository {
       await transaction`
         UPDATE content_page_revisions
         SET requires_reacceptance = ${input.requiresReacceptance},
+            required_locales = COALESCE(${input.requiredLocales ? transaction.json(input.requiredLocales) : null}::jsonb, required_locales),
             updated_at = ${new Date(updatedAt)}
         WHERE id = ${draft.id}
       `;
@@ -758,7 +795,36 @@ export class PostgresContentRepository implements ContentRepository {
         RETURNING id
       `;
       if (!updated.count) {
-        throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+        const [route] = await transaction<{ slug: string }[]>`
+          SELECT slug FROM content_page_localizations WHERE page_id = ${draft.pageId} AND locale = ${input.locale}
+        `;
+        if (!route && !input.slug) throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_REQUIRED");
+        if (route && input.slug && input.slug !== route.slug) throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_CONFLICT");
+        if (!route) {
+          const [conflict] = await transaction<{ id: string }[]>`
+            SELECT id FROM content_page_localizations WHERE locale = ${input.locale} AND slug = ${input.slug!}
+          `;
+          if (conflict) throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_CONFLICT");
+          await transaction`
+            INSERT INTO content_page_localizations (id, page_id, locale, slug, created_at, updated_at)
+            VALUES (${randomUUID()}, ${draft.pageId}, ${input.locale}, ${input.slug!}, ${new Date(updatedAt)}, ${new Date(updatedAt)})
+          `;
+        }
+        await transaction`
+          INSERT INTO content_page_revision_localizations (
+            id, revision_id, locale, title, summary, sections, seo_title, seo_description,
+            source_revision_number, created_at, updated_at
+          ) VALUES (
+            ${randomUUID()}, ${draft.id}, ${input.locale}, ${input.title}, ${input.summary},
+            ${transaction.json(input.sections)}, ${input.seoTitle}, ${input.seoDescription},
+            ${sourceRevisionNumber}, ${new Date(updatedAt)}, ${new Date(updatedAt)}
+          )
+        `;
+      } else if (input.slug) {
+        const [route] = await transaction<{ slug: string }[]>`
+          SELECT slug FROM content_page_localizations WHERE page_id = ${draft.pageId} AND locale = ${input.locale}
+        `;
+        if (route?.slug !== input.slug) throw new ContentRepositoryError("CONTENT_LOCALIZATION_SLUG_CONFLICT");
       }
       await this.#insertAdminEvent(transaction, {
         eventType: "content.draft_updated",
@@ -786,15 +852,14 @@ export class PostgresContentRepository implements ContentRepository {
       const [draft] = await transaction<{
         id: string;
         pageId: string;
-        expectedLocales: number;
-        actualLocales: number;
+        requiredLocales: string[];
+        actualLocales: string[];
       }[]>`
         SELECT
           revision.id,
           revision.page_id AS "pageId",
-          (SELECT count(*)::integer FROM content_page_localizations route
-            WHERE route.page_id = revision.page_id) AS "expectedLocales",
-          (SELECT count(*)::integer FROM content_page_revision_localizations content
+          revision.required_locales AS "requiredLocales",
+          ARRAY(SELECT locale FROM content_page_revision_localizations content
             WHERE content.revision_id = revision.id) AS "actualLocales"
         FROM content_page_revisions revision
         JOIN content_pages page ON page.id = revision.page_id
@@ -802,8 +867,8 @@ export class PostgresContentRepository implements ContentRepository {
         FOR UPDATE OF revision
       `;
       if (!draft) throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
-      if (draft.actualLocales !== draft.expectedLocales) {
-        throw new ContentRepositoryError("CONTENT_DRAFT_NOT_FOUND");
+      if (draft.requiredLocales.some((locale) => !draft.actualLocales.includes(locale))) {
+        throw new ContentRepositoryError("CONTENT_REQUIRED_LOCALE_MISSING");
       }
       await transaction`
         UPDATE content_page_revisions
@@ -890,6 +955,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "id",
         revision.revision_number AS "number",
         revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
         revision.snapshot AS "snapshot",
         revision.created_by_user_id AS "createdByUserId",
         revision.created_at AS "createdAt",
@@ -979,6 +1045,7 @@ export class PostgresContentRepository implements ContentRepository {
       await transaction`
         UPDATE content_editorial_revisions
         SET snapshot = ${transaction.json(input.items)},
+            required_locales = COALESCE(${input.requiredLocales ? transaction.json(input.requiredLocales) : null}::jsonb, required_locales),
             updated_at = ${new Date(updatedAt)}
         WHERE id = ${draft.id}
       `;
@@ -1013,6 +1080,7 @@ export class PostgresContentRepository implements ContentRepository {
           revision.id AS "id",
           revision.revision_number AS "number",
           revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
           revision.snapshot AS "snapshot",
           revision.created_by_user_id AS "createdByUserId",
           revision.created_at AS "createdAt",
@@ -1026,6 +1094,7 @@ export class PostgresContentRepository implements ContentRepository {
       `;
       if (!row) throw new ContentRepositoryError("EDITORIAL_DRAFT_NOT_FOUND");
       const revision = mapEditorialRevision(row);
+      assertEditorialLocalesReady(revision);
       if (revision.key === "navigation") {
         await this.#assertNavigationDestinations(transaction, revision);
       }
@@ -1106,7 +1175,7 @@ export class PostgresContentRepository implements ContentRepository {
   }
 
   async close() {
-    await this.#sql.end({ timeout: 5 });
+    if (this.#ownsConnection) await this.#sql.end({ timeout: 5 });
   }
 
   async #getEditorialRevision(
@@ -1122,6 +1191,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "id",
         revision.revision_number AS "number",
         revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
         revision.snapshot AS "snapshot",
         revision.created_by_user_id AS "createdByUserId",
         revision.created_at AS "createdAt",
@@ -1147,6 +1217,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "id",
         revision.revision_number AS "number",
         revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
         revision.snapshot AS "snapshot",
         revision.created_by_user_id AS "createdByUserId",
         revision.created_at AS "createdAt",
@@ -1182,11 +1253,12 @@ export class PostgresContentRepository implements ContentRepository {
     await transaction`
       INSERT INTO content_editorial_revisions (
         id, collection_id, revision_number, status, snapshot,
-        created_by_user_id, created_at, updated_at, published_at
+        created_by_user_id, created_at, updated_at, published_at, required_locales
       ) VALUES (
         ${revisionId}, ${input.collectionId}, ${input.revisionNumber}, 'draft',
         ${transaction.json(input.snapshot)}, ${input.actorUserId}, ${createdAt},
-        ${createdAt}, ${null}
+        ${createdAt}, ${null},
+        (SELECT required_locales FROM content_editorial_revisions WHERE id = ${input.sourceRevisionId})
       )
     `;
     await this.#insertEditorialAdminEvent(transaction, {
@@ -1243,6 +1315,13 @@ export class PostgresContentRepository implements ContentRepository {
       FROM content_pages page
       JOIN content_page_localizations localization
         ON localization.page_id = page.id
+      JOIN LATERAL (
+        SELECT id FROM content_page_revisions candidate
+        WHERE candidate.page_id = page.id AND candidate.status = 'published'
+        ORDER BY candidate.revision_number DESC LIMIT 1
+      ) revision ON true
+      JOIN content_page_revision_localizations translation
+        ON translation.revision_id = revision.id AND translation.locale = localization.locale
     `;
     const available = new Set(routes.map(({ key, locale }) => `${key}:${locale}`));
     const broken = revision.items.some((item) =>
@@ -1250,7 +1329,7 @@ export class PostgresContentRepository implements ContentRepository {
       item.destination !== "home" &&
       item.destination !== "how_it_works" &&
       item.destination !== "opt_out" &&
-      (["en", "de"] as const).some((locale) =>
+      requiredContentLocales(revision).some((locale) =>
         !available.has(`${item.destination}:${locale}`)
       )
     );
@@ -1296,11 +1375,12 @@ export class PostgresContentRepository implements ContentRepository {
     await transaction`
       INSERT INTO content_page_revisions (
         id, page_id, revision_number, status, requires_reacceptance,
-        created_by_user_id, created_at, updated_at, published_at
+        created_by_user_id, created_at, updated_at, published_at, required_locales
       ) VALUES (
         ${revisionId}, ${input.pageId}, ${input.revisionNumber}, 'draft',
         ${input.requiresReacceptance}, ${input.actorUserId}, ${createdAt},
-        ${createdAt}, ${null}
+        ${createdAt}, ${null},
+        (SELECT required_locales FROM content_page_revisions WHERE id = ${input.sourceRevisionId})
       )
     `;
     for (const localization of localizations) {
@@ -1369,6 +1449,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "id",
         revision.revision_number AS "number",
         revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
         revision.requires_reacceptance AS "requiresReacceptance",
         revision.created_by_user_id AS "createdByUserId",
         revision.created_at AS "createdAt",
@@ -1394,6 +1475,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.id AS "id",
         revision.revision_number AS "number",
         revision.status AS "status",
+        revision.required_locales AS "requiredLocales",
         revision.requires_reacceptance AS "requiresReacceptance",
         revision.created_by_user_id AS "createdByUserId",
         revision.created_at AS "createdAt",
@@ -1426,7 +1508,7 @@ export class PostgresContentRepository implements ContentRepository {
         revision.published_at AS "publishedAt"
       FROM content_pages page
       JOIN content_page_localizations localization
-        ON localization.page_id = page.id AND localization.locale = ${locale}
+        ON localization.page_id = page.id
       JOIN LATERAL (
         SELECT * FROM content_page_revisions candidate
         WHERE candidate.page_id = page.id
@@ -1440,8 +1522,11 @@ export class PostgresContentRepository implements ContentRepository {
         AND revision_localization.locale = localization.locale
       WHERE page.key IN ('terms', 'acceptable_use')
     `;
-    const terms = rows.find(({ key }) => key === "terms");
-    const acceptableUse = rows.find(({ key }) => key === "acceptable_use");
+    const selectedLocale = commonLegalLocale(locale,
+      rows.filter(({ key }) => key === "terms").map(({ locale }) => locale),
+      rows.filter(({ key }) => key === "acceptable_use").map(({ locale }) => locale));
+    const terms = rows.find(({ key, locale }) => key === "terms" && locale === selectedLocale);
+    const acceptableUse = rows.find(({ key, locale }) => key === "acceptable_use" && locale === selectedLocale);
     if (!terms || !acceptableUse) {
       throw new ContentRepositoryError("LEGAL_CONTENT_UNAVAILABLE");
     }
@@ -1494,6 +1579,7 @@ function mapAdminRevision(row: AdminRevisionRow): AdminContentLocalizedRevision 
       id: row.revisionId,
       number: row.revisionNumber,
       status: row.revisionStatus,
+      requiredLocales: row.requiredLocales,
       requiresReacceptance: row.requiresReacceptance,
       sourceRevisionNumber: row.sourceRevisionNumber,
       createdByUserId: row.createdByUserId,
@@ -1519,6 +1605,7 @@ function mapEditorialRevision(row: EditorialRevisionRow): AdminEditorialRevision
     id: row.id,
     number: row.number,
     status: row.status,
+    requiredLocales: row.requiredLocales,
     items: parseJsonArray(row.snapshot),
     createdByUserId: row.createdByUserId,
     createdAt: toIso(row.createdAt),
@@ -1573,10 +1660,10 @@ function landingIndex(
       publishedAt: revision.publishedAt
     },
     sourceLocale: "en",
-    localizations: (["en", "de"] as const).map((locale) => ({
+    localizations: editorialAvailableLocales(revision).map((locale) => ({
       locale,
-      seoTitle: hero.seoTitle[locale],
-      seoDescription: hero.seoDescription[locale],
+      seoTitle: localizedContentValue(hero.seoTitle, locale),
+      seoDescription: localizedContentValue(hero.seoDescription, locale),
       translationStale: false
     }))
   };

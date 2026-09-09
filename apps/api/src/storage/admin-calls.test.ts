@@ -1,3 +1,4 @@
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
@@ -33,7 +34,7 @@ async function createReadyCall(
     normalizeCreateCallBriefInput(callInput)
   );
   const brief = await repository.create(callInput, compilation, ownerUserId);
-  await repository.approveCompilation(brief.id);
+  await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
   return brief;
 }
 

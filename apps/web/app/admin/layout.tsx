@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { AdminSessionProvider } from "@/components/admin-session-provider";
 import { adminAreaRedirect } from "@/lib/route-access";
+import { isUiLocale } from "@/lib/i18n/messages";
 import {
   getServerCurrentUser,
   getServerOnboardingStatus
@@ -17,8 +18,9 @@ export default async function AdminLayout({ children }: {
 }) {
   const user = await getServerCurrentUser();
   if (!user) redirect("/en/login");
-  const onboarding = await getServerOnboardingStatus(user.uiLocale);
-  const destination = adminAreaRedirect(user, onboarding, user.uiLocale);
+  const locale = isUiLocale(user.uiLocale) ? user.uiLocale : "en";
+  const onboarding = await getServerOnboardingStatus(locale);
+  const destination = adminAreaRedirect(user, onboarding, locale);
   if (destination) redirect(destination);
   return <AdminSessionProvider user={user}>{children}</AdminSessionProvider>;
 }

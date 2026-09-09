@@ -1,7 +1,37 @@
 import { z } from "zod";
+import { languageTagSchema, normalizeLanguageTag } from "./languages";
 
-export const contentLocaleSchema = z.enum(["en", "de"]);
+export const contentLocaleSchema = languageTagSchema;
 export type ContentLocale = z.infer<typeof contentLocaleSchema>;
+export const LEGACY_REQUIRED_CONTENT_LOCALES = ["en", "de"] as const;
+export const requiredContentLocalesSchema = z.array(contentLocaleSchema).min(1).max(30)
+  .refine((locales) => new Set(locales).size === locales.length, "Content locales must be unique");
+
+const contentLanguageKeySchema = z.string().refine(
+  (value) => normalizeLanguageTag(value) === value,
+  "Content language keys must be canonical language tags"
+);
+function localizedContentSchema<T extends z.ZodType>(value: T) {
+  return z.record(contentLanguageKeySchema, value).superRefine((translations, context) => {
+    const count = Object.keys(translations).length;
+    if (count < 1 || count > 30) context.addIssue({ code: "custom", message: "Provide between 1 and 30 content localizations" });
+  });
+}
+
+export function localizedContentValue<T>(values: Record<string, T>, locale: string): T {
+  const value = values[locale];
+  if (value === undefined) throw new Error("CONTENT_LOCALIZATION_UNAVAILABLE");
+  return value;
+}
+
+export function requiredContentLocales(value: { requiredLocales?: string[] }): string[] {
+  return value.requiredLocales ?? [...LEGACY_REQUIRED_CONTENT_LOCALES];
+}
+
+/** One selected language for the whole document/collection; never per-field fallback. */
+export function resolvePublishedContentLocale(requested: string, available: string[], fallback = "en"): string | null {
+  return [requested, fallback, ...available].find((locale) => available.includes(locale)) ?? null;
+}
 
 export const contentPageKeySchema = z.enum([
   "privacy",
@@ -37,10 +67,7 @@ export type NavigationDestination = z.infer<
   typeof navigationDestinationSchema
 >;
 
-const localizedEditorialTextSchema = z.object({
-  en: z.string().trim().min(1).max(4000),
-  de: z.string().trim().min(1).max(4000)
-});
+const localizedEditorialTextSchema = localizedContentSchema(z.string().trim().min(1).max(4000));
 
 export const faqItemSchema = z.object({
   id: z.uuid(),
@@ -57,27 +84,15 @@ export const navigationItemSchema = z.object({
   enabled: z.boolean(),
   location: z.enum(["header", "footer"]),
   destination: navigationDestinationSchema,
-  label: z.object({
-    en: z.string().trim().min(1).max(80),
-    de: z.string().trim().min(1).max(80)
-  })
+  label: localizedContentSchema(z.string().trim().min(1).max(80))
 });
 export type NavigationItem = z.infer<typeof navigationItemSchema>;
 
-const localizedLandingShortTextSchema = z.object({
-  en: z.string().trim().min(1).max(180),
-  de: z.string().trim().min(1).max(180)
-});
+const localizedLandingShortTextSchema = localizedContentSchema(z.string().trim().min(1).max(180));
 
-const localizedLandingLongTextSchema = z.object({
-  en: z.string().trim().min(1).max(1200),
-  de: z.string().trim().min(1).max(1200)
-});
+const localizedLandingLongTextSchema = localizedContentSchema(z.string().trim().min(1).max(1200));
 
-const localizedLandingListSchema = z.object({
-  en: z.array(z.string().trim().min(1).max(240)).min(1).max(12),
-  de: z.array(z.string().trim().min(1).max(240)).min(1).max(12)
-});
+const localizedLandingListSchema = localizedContentSchema(z.array(z.string().trim().min(1).max(240)).min(1).max(12));
 
 const landingContentItemSchema = z.object({
   id: z.uuid(),
@@ -194,6 +209,7 @@ export const landingBlocksSchema = z.array(landingBlockSchema)
   });
 
 export const editorialRevisionSummarySchema = z.object({
+  requiredLocales: requiredContentLocalesSchema.optional(),
   id: z.uuid(),
   number: z.number().int().positive(),
   status: z.enum(["draft", "published"]),
@@ -229,13 +245,15 @@ export type AdminEditorialRevision = z.infer<
 >;
 
 export const editorialDraftUpdateInputSchema = z.discriminatedUnion("key", [
-  z.object({ key: z.literal("faq"), items: z.array(faqItemSchema).max(80) }),
+  z.object({ key: z.literal("faq"), items: z.array(faqItemSchema).max(80), requiredLocales: requiredContentLocalesSchema.optional() }),
   z.object({
     key: z.literal("navigation"),
+    requiredLocales: requiredContentLocalesSchema.optional(),
     items: z.array(navigationItemSchema).max(40)
   }),
   z.object({
     key: z.literal("landing"),
+    requiredLocales: requiredContentLocalesSchema.optional(),
     items: landingBlocksSchema
   })
 ]);
@@ -357,96 +375,96 @@ export function localizeLandingBlock(
       return {
         ...base,
         blockType: block.blockType,
-        eyebrow: block.eyebrow[locale],
-        title: block.title[locale],
+        eyebrow: localizedContentValue(block.eyebrow, locale),
+        title: localizedContentValue(block.title, locale),
         supportingTitle: block.supportingTitle?.[locale],
-        lead: block.lead[locale],
+        lead: localizedContentValue(block.lead, locale),
         secondaryText: block.secondaryText?.[locale],
-        badges: block.badges[locale],
-        primaryCtaLabel: block.primaryCtaLabel[locale],
-        secondaryCtaLabel: block.secondaryCtaLabel[locale],
-        seoTitle: block.seoTitle[locale],
-        seoDescription: block.seoDescription[locale]
+        badges: localizedContentValue(block.badges, locale),
+        primaryCtaLabel: localizedContentValue(block.primaryCtaLabel, locale),
+        secondaryCtaLabel: localizedContentValue(block.secondaryCtaLabel, locale),
+        seoTitle: localizedContentValue(block.seoTitle, locale),
+        seoDescription: localizedContentValue(block.seoDescription, locale)
       };
     case "problem":
       return {
         ...base,
         blockType: block.blockType,
-        eyebrow: block.eyebrow[locale],
-        title: block.title[locale],
+        eyebrow: localizedContentValue(block.eyebrow, locale),
+        title: localizedContentValue(block.title, locale),
         items: block.items.map((item) => ({
-          title: item.title[locale],
-          text: item.text[locale]
+          title: localizedContentValue(item.title, locale),
+          text: localizedContentValue(item.text, locale)
         }))
       };
     case "how_it_works":
       return {
         ...base,
         blockType: block.blockType,
-        eyebrow: block.eyebrow[locale],
-        title: block.title[locale],
+        eyebrow: localizedContentValue(block.eyebrow, locale),
+        title: localizedContentValue(block.title, locale),
         steps: block.steps.map((step) => ({
           id: step.id,
-          title: step.title[locale],
-          text: step.text[locale]
+          title: localizedContentValue(step.title, locale),
+          text: localizedContentValue(step.text, locale)
         }))
       };
     case "use_cases":
       return {
         ...base,
         blockType: block.blockType,
-        eyebrow: block.eyebrow[locale],
-        title: block.title[locale],
-        text: block.text[locale],
+        eyebrow: localizedContentValue(block.eyebrow, locale),
+        title: localizedContentValue(block.title, locale),
+        text: localizedContentValue(block.text, locale),
         items: Array.isArray(block.items)
           ? block.items.map((item) => ({
-              title: item.title[locale],
-              text: item.text[locale]
+              title: localizedContentValue(item.title, locale),
+              text: localizedContentValue(item.text, locale)
             }))
-          : block.items[locale].map((title) => ({ title, text: "" }))
+          : localizedContentValue(block.items, locale).map((title) => ({ title, text: "" }))
       };
     case "example":
       return {
         ...base,
         blockType: block.blockType,
-        title: block.title[locale],
+        title: localizedContentValue(block.title, locale),
         items: block.items.map((item) => ({
-          title: item.title[locale],
-          text: item.text[locale]
+          title: localizedContentValue(item.title, locale),
+          text: localizedContentValue(item.text, locale)
         }))
       };
     case "safety_privacy":
       return {
         ...base,
         blockType: block.blockType,
-        eyebrow: block.eyebrow[locale],
-        title: block.title[locale],
-        text: block.text[locale],
-        limitsTitle: block.limitsTitle[locale],
-        limits: block.limits[locale]
+        eyebrow: localizedContentValue(block.eyebrow, locale),
+        title: localizedContentValue(block.title, locale),
+        text: localizedContentValue(block.text, locale),
+        limitsTitle: localizedContentValue(block.limitsTitle, locale),
+        limits: localizedContentValue(block.limits, locale)
       };
     case "languages":
       return {
         ...base,
         blockType: block.blockType,
-        title: block.title[locale],
-        text: block.text[locale]
+        title: localizedContentValue(block.title, locale),
+        text: localizedContentValue(block.text, locale)
       };
     case "faq":
       return {
         ...base,
         blockType: block.blockType,
-        eyebrow: block.eyebrow[locale],
-        title: block.title[locale],
+        eyebrow: localizedContentValue(block.eyebrow, locale),
+        title: localizedContentValue(block.title, locale),
         itemLimit: block.itemLimit
       };
     case "cta":
       return {
         ...base,
         blockType: block.blockType,
-        title: block.title[locale],
-        text: block.text[locale],
-        primaryCtaLabel: block.primaryCtaLabel[locale]
+        title: localizedContentValue(block.title, locale),
+        text: localizedContentValue(block.text, locale),
+        primaryCtaLabel: localizedContentValue(block.primaryCtaLabel, locale)
       };
   }
 }
@@ -478,7 +496,7 @@ export const publishedLandingIndexSchema = z.object({
     seoTitle: z.string().trim().min(1).max(180),
     seoDescription: z.string().trim().min(1).max(1200),
     translationStale: z.boolean()
-  })).length(2)
+  })).min(1).max(30)
 });
 export type PublishedLandingIndex = z.infer<
   typeof publishedLandingIndexSchema
@@ -553,7 +571,7 @@ export const publishedContentIndexPageSchema = z.object({
     number: z.number().int().positive(),
     publishedAt: z.iso.datetime()
   }),
-  localizations: z.array(publishedContentIndexLocalizationSchema).min(1).max(2)
+  localizations: z.array(publishedContentIndexLocalizationSchema).min(1).max(30)
 });
 export type PublishedContentIndexPage = z.infer<
   typeof publishedContentIndexPageSchema
@@ -571,6 +589,7 @@ export const contentRevisionStatusSchema = z.enum(["draft", "published"]);
 export type ContentRevisionStatus = z.infer<typeof contentRevisionStatusSchema>;
 
 export const adminContentRevisionSummarySchema = z.object({
+  requiredLocales: requiredContentLocalesSchema.optional(),
   id: z.uuid(),
   number: z.number().int().positive(),
   status: contentRevisionStatusSchema,
@@ -579,7 +598,7 @@ export const adminContentRevisionSummarySchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   publishedAt: z.iso.datetime().nullable(),
-  locales: z.array(contentLocaleSchema).min(1).max(2)
+  locales: z.array(contentLocaleSchema).min(1).max(30)
 });
 export type AdminContentRevisionSummary = z.infer<
   typeof adminContentRevisionSummarySchema
@@ -592,7 +611,7 @@ export const adminContentPageSummarySchema = z.object({
   localizations: z.array(z.object({
     locale: contentLocaleSchema,
     slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-  })).min(1).max(2),
+  })).min(1).max(30),
   publishedRevision: adminContentRevisionSummarySchema.nullable(),
   draftRevision: adminContentRevisionSummarySchema.nullable()
 });
@@ -620,6 +639,8 @@ export type AdminContentLocalizedRevision = z.infer<
 >;
 
 export const contentDraftUpdateInputSchema = z.object({
+  requiredLocales: requiredContentLocalesSchema.optional(),
+  slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(180).optional(),
   locale: contentLocaleSchema,
   title: z.string().trim().min(1).max(180),
   summary: z.string().trim().min(1).max(1000),

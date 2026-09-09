@@ -41,14 +41,21 @@ describe("database recovery drill", () => {
   });
 
   it("requires every critical application table", () => {
-    expect(() => validateCriticalTables([
+    const tables = [
       "audit_events",
       "call_briefs",
       "call_compilations",
       "call_compilation_approvals",
+      "call_compilation_review_policies",
       "call_events",
+      "call_language_contexts",
+      "call_preparation_language_contexts",
+      "call_plan_review_receipts",
+      "call_text_artifacts",
+      "call_text_artifact_chunks",
       "credit_transactions",
       "durable_jobs",
+      "final_transcript_revisions",
       "provider_operation_results",
       "provider_operations",
       "provider_cost_records",
@@ -56,7 +63,12 @@ describe("database recovery drill", () => {
       "post_call_transcription_chunks",
       "sessions",
       "users"
-    ])).not.toThrow();
+    ];
+    expect(() => validateCriticalTables(tables)).not.toThrow();
+    for (const table of ["call_text_artifacts", "call_text_artifact_chunks", "final_transcript_revisions", "call_plan_review_receipts"]) {
+      expect(() => validateCriticalTables(tables.filter((name) => name !== table)))
+        .toThrow(`Restored critical tables are missing: ${table}`);
+    }
     expect(() => validateCriticalTables(["users"]))
       .toThrow("Restored critical tables are missing");
   });

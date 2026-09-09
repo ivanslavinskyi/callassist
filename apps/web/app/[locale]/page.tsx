@@ -5,7 +5,8 @@ import { isUiLocale } from "@/lib/i18n/messages";
 import { homeMetadata } from "@/lib/seo-metadata";
 import {
   getPublishedFaq,
-  getPublishedLanding
+  getPublishedLanding,
+  getPublishedContentIndex
 } from "@/lib/server-content";
 
 export async function generateMetadata({ params }: {
@@ -13,8 +14,8 @@ export async function generateMetadata({ params }: {
 }): Promise<Metadata> {
   const { locale } = await params;
   if (!isUiLocale(locale)) return {};
-  const landing = await getPublishedLanding(locale);
-  return homeMetadata(locale, landing);
+  const [landing, index] = await Promise.all([getPublishedLanding(locale), getPublishedContentIndex()]);
+  return homeMetadata(locale, landing, index.landing);
 }
 
 export default async function HomePage({ params }: {

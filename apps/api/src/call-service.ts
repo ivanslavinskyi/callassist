@@ -16,7 +16,7 @@ import {
   type CallOutcomeView,
   type CallSnapshot,
   type CallTelemetryEventInput,
-  type CompilationApprovalInput,
+  type CompilationReviewApprovalInput,
   type CreateCallBriefInput,
   type OwnerCallFeedbackInput,
   type TranscriptSegment
@@ -40,6 +40,7 @@ import {
   type AdminCallCursor,
   type CallAdmissionPolicy,
   type CallRepository,
+  type PreparationLanguageOptions,
   type AdminWebhookDeliveryFacts,
   type CallChangeSignal,
   type ProviderWebhookDeliveryInput,
@@ -74,6 +75,10 @@ import {
 import { DurableJobWorker } from "./jobs/durable-job-worker";
 import { evaluateOperationalAlerts } from "./operations/operational-alerts";
 import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
+import { TextArtifactService } from "./text-processing/text-artifact-service";
+import { MockTextProcessor } from "./text-processing/mock-text-processor";
+import { allTextDirections, textDirectionEnabled, type TextCapabilities } from "./text-processing/text-capabilities";
+import type { TextProcessor } from "./text-processing/text-processor";
 
 type Subscriber = (event: CallEvent) => void;
 type LiveEventMode = "disabled" | "publish" | "subscribe" | "both";
@@ -125,6 +130,8 @@ export class CallService {
   readonly #admissionPolicy: CallAdmissionPolicy;
   readonly #operationalCostPolicy: OperationalCostPolicy;
   readonly #durableJobWorker: DurableJobWorker;
+  readonly #textJobWorker: DurableJobWorker;
+  readonly textArtifacts: TextArtifactService;
   readonly #durableWorkerConfigured: boolean;
   readonly #durableWorkerMode: DurableWorkerMode;
   readonly #liveEventMode: LiveEventMode;
@@ -149,6 +156,8 @@ export class CallService {
       durableWorkerEnabled?: boolean;
       reportDurableWorkerHeartbeat?: boolean;
       liveEventMode?: LiveEventMode;
+      textProcessor?: TextProcessor;
+      textCapabilities?: TextCapabilities;
     } = {}
   ) {
     this.#onBackgroundError = onBackgroundError;
@@ -161,6 +170,17 @@ export class CallService {
     const durableWorkerEnabled = runtime.durableWorkerEnabled ??
       this.#durableWorkerMode === "embedded";
     this.#durableWorkerConfigured = durableWorkerEnabled;
+    this.textArtifacts = new TextArtifactService(repository, runtime.textProcessor ?? new MockTextProcessor(),
+      runtime.textCapabilities ?? { enabled: true, directions: allTextDirections() });
+    this.#textJobWorker = new DurableJobWorker(repository, {
+      text_artifact_generation: async (job, lease) => {
+        await this.textArtifacts.process(job, lease);
+        if (job.callId) {
+          const snapshot = await repository.get(job.callId);
+          if (snapshot) this.#publish(job.callId, { type: "call.updated", brief: snapshot.brief });
+        }
+      }
+    }, onBackgroundError, { enabled: durableWorkerEnabled, keepAlive: runtime.durableWorkerKeepAlive });
     this.#durableJobWorker = new DurableJobWorker(
       repository,
       {
@@ -231,6 +251,7 @@ export class CallService {
     const recoveredCalls = await this.repository.recoverInterruptedCalls();
     await this.repository.seedDurableJobs(new Date().toISOString());
     this.#durableJobWorker.start();
+    this.#textJobWorker.start();
     return recoveredCalls;
   }
 
@@ -400,7 +421,7 @@ export class CallService {
       outboundCalls: facts.outboundCalls,
       runtime: {
         uptimeSeconds: Math.max(0, Math.floor(process.uptime())),
-        backgroundTasks: this.#durableJobWorker.runningCount,
+        backgroundTasks: this.#durableJobWorker.runningCount + this.#textJobWorker.runningCount,
         processingRecordings: this.#processingRecordings.size,
         durableWorkerEnabled: this.#durableJobWorker.enabled,
         durableWorkerMode: this.#durableWorkerMode,
@@ -501,15 +522,17 @@ export class CallService {
   async prepare(
     input: CreateCallBriefInput,
     userId: string,
-    idempotencyKey: string = randomUUID()
+    idempotencyKey: string = randomUUID(),
+    language?: PreparationLanguageOptions
   ) {
     const normalized = normalizeCreateCallBriefInput(input);
-    const inputFingerprint = callPreparationFingerprint(normalized);
+    const inputFingerprint = callPreparationFingerprint(normalized, language);
     const preparation = await this.repository.enqueueCallPreparation({
       userId,
       idempotencyKey,
       inputFingerprint,
       input: normalized,
+      language,
       now: new Date().toISOString()
     });
     this.#durableJobWorker.wake();
@@ -519,12 +542,13 @@ export class CallService {
   findPreparationByRequest(
     input: CreateCallBriefInput,
     userId: string,
-    idempotencyKey: string
+    idempotencyKey: string,
+    language?: PreparationLanguageOptions
   ) {
     return this.repository.findCallPreparationByRequest(
       userId,
       idempotencyKey,
-      callPreparationFingerprint(normalizeCreateCallBriefInput(input))
+      callPreparationFingerprint(normalizeCreateCallBriefInput(input), language)
     );
   }
 
@@ -532,12 +556,13 @@ export class CallService {
     id: string,
     input: CreateCallBriefInput,
     userId: string | null,
-    idempotencyKey: string
+    idempotencyKey: string,
+    language?: PreparationLanguageOptions
   ) {
     return this.repository.findCallPreparationByRequest(
       userId,
       idempotencyKey,
-      callPreparationFingerprint(normalizeCreateCallBriefInput(input)),
+      callPreparationFingerprint(normalizeCreateCallBriefInput(input), language),
       id
     );
   }
@@ -569,15 +594,17 @@ export class CallService {
     id: string,
     input: CreateCallBriefInput,
     userId: string | null,
-    idempotencyKey: string = randomUUID()
+    idempotencyKey: string = randomUUID(),
+    language?: PreparationLanguageOptions
   ) {
     const normalized = normalizeCreateCallBriefInput(input);
     const preparation = await this.repository.enqueueCallRecompilation({
       callBriefId: id,
       userId,
       idempotencyKey,
-      inputFingerprint: callPreparationFingerprint(normalized),
+      inputFingerprint: callPreparationFingerprint(normalized, language),
       input: normalized,
+      language,
       now: new Date().toISOString()
     });
     this.#durableJobWorker.wake();
@@ -586,6 +613,13 @@ export class CallService {
 
   get(id: string) {
     return this.repository.get(id);
+  }
+
+  wakeTextJobs() { this.#textJobWorker.wake(); }
+
+  async preparePlanReview(id: string) {
+    await this.textArtifacts.ensureAutomaticPlan(id);
+    this.wakeTextJobs();
   }
 
   getLatestAttempt(id: string) {
@@ -604,7 +638,7 @@ export class CallService {
     return this.repository.completeProviderOperation(input);
   }
 
-  async approveCompilation(id: string, expected?: CompilationApprovalInput) {
+  async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {
     const snapshot = await this.repository.approveCompilation(id, expected);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
@@ -613,7 +647,7 @@ export class CallService {
   async approveAndStart(
     id: string,
     userId: string | null = null,
-    expected?: CompilationApprovalInput
+    expected?: CompilationReviewApprovalInput
   ) {
     const current = await this.#require(id);
     if (
@@ -1099,7 +1133,7 @@ export class CallService {
 
   async #close() {
     for (const id of this.#timers.keys()) this.#clearTimers(id);
-    await this.#durableJobWorker.close();
+    await Promise.all([this.#durableJobWorker.close(), this.#textJobWorker.close()]);
     await Promise.allSettled([...this.#pendingCallChangePublications]);
     await this.#unsubscribeCallChanges?.();
     this.#unsubscribeCallChanges = null;
@@ -1203,8 +1237,12 @@ export class CallService {
         recordingId,
         result.text,
         result.segments,
-        currentLease(lease)
+        currentLease(lease),
+        textDirectionEnabled(this.textArtifacts.capabilities, "call_summary", "*",
+          claimed.snapshot.languageContext?.taskContentLanguage ?? "en")
+          ? { summaryGeneratorVersion: this.textArtifacts.processor.generatorVersion } : undefined
       );
+      this.wakeTextJobs();
       this.#publish(completed.callId, {
         type: "final_transcript.updated",
         finalTranscript: completed.finalTranscript
@@ -1248,7 +1286,10 @@ export class CallService {
       job.callPreparationId,
       currentLease(lease)
     );
-    if (work.preparation.status === "succeeded") return;
+    if (work.preparation.status === "succeeded") {
+      if (work.preparation.callBriefId) await this.preparePlanReview(work.preparation.callBriefId);
+      return;
+    }
     if (!work.input) {
       throw new DurableJobExecutionError("BRIEF_COMPILATION_FAILED", {
         retryable: false
@@ -1310,14 +1351,16 @@ export class CallService {
           type: "call.updated",
           brief: snapshot.brief
         });
+        await this.preparePlanReview(work.targetCallBriefId);
       } else {
-        await this.repository.create(
+        const snapshot = await this.repository.create(
           work.input,
           compilation,
           work.userId,
           work.idempotencyKey,
           publication
         );
+        await this.preparePlanReview(snapshot.id);
       }
     } catch (error) {
       if (error instanceof BriefCompilerError) {
@@ -1787,8 +1830,9 @@ function adminWebhookDeliveryView(
   };
 }
 
-function callPreparationFingerprint(input: CreateCallBriefInput) {
-  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+function callPreparationFingerprint(input: CreateCallBriefInput, language?: PreparationLanguageOptions) {
+  const payload = language ? { requestVersion: 2, brief: input, languagePreferences: language.preferences ?? { mode: "auto" } } : input;
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
 function mapBriefCompilerError(error: BriefCompilerError) {

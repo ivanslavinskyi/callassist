@@ -27,7 +27,8 @@ export const contentSlugs: Record<
 };
 
 export function contentPath(locale: ContentLocale, key: ContentPageKey) {
-  return `/${locale}/${contentSlugs[locale][key]}`;
+  const actualLocale = Object.hasOwn(contentSlugs, locale) ? locale : "en";
+  return `/${actualLocale}/${contentSlugs[actualLocale][key]}`;
 }
 
 export function navigationPath(
@@ -47,7 +48,7 @@ export function switchContentLocale(
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length !== 2) return null;
   const [currentLocale, currentSlug] = segments;
-  if (currentLocale !== "en" && currentLocale !== "de") return null;
+  if (!currentLocale || !Object.hasOwn(contentSlugs, currentLocale)) return null;
   const key = (Object.keys(contentSlugs[currentLocale]) as ContentPageKey[])
     .find((candidate) => contentSlugs[currentLocale][candidate] === currentSlug);
   return key ? contentPath(nextLocale, key) : null;

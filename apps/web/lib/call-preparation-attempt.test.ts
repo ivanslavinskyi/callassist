@@ -38,6 +38,13 @@ const briefOne = "00000000-0000-4000-8000-000000000201";
 const briefTwo = "00000000-0000-4000-8000-000000000202";
 
 describe("call preparation attempts", () => {
+  it("includes language intent in idempotency without deriving it from a later UI change", async () => {
+    const russian = { mode: "manual" as const, targetLanguage: "ru" as const, uiLocaleHint: "en" };
+    expect(await fingerprintCallPreparation(input, russian)).not.toBe(await fingerprintCallPreparation(input));
+    expect(await fingerprintCallPreparation(input, russian)).not.toBe(await fingerprintCallPreparation(input, { ...russian, targetLanguage: "uk" }));
+    expect(await fingerprintCallPreparation(input, russian)).toBe(await fingerprintCallPreparation({ ...input }, { ...russian }));
+    expect(await fingerprintCallPreparation(input, russian, "new")).not.toBe(await fingerprintCallPreparation(input, russian, "existing-call"));
+  });
   it("fingerprints the normalized content deterministically", async () => {
     const reordered = Object.fromEntries(
       Object.entries(input).reverse()

@@ -1,3 +1,4 @@
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { requireTestDatabaseUrl } from "../db/require-test-database";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -225,7 +226,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     await repository.addTranscript(
       brief.id,
       "recipient",
@@ -240,6 +241,7 @@ describe("PostgresCallRepository", () => {
       comment: "Private feedback comment"
     });
     const attemptId = randomUUID();
+    const reviewReceipt = await repository.getCurrentReviewReceipt(brief.id);
     const jobId = randomUUID();
     const [attemptPlan] = await inspection<{
       compilationId: string;
@@ -264,13 +266,13 @@ describe("PostgresCallRepository", () => {
       INSERT INTO call_attempts (
         id, call_brief_id, user_id, provider, provider_call_id,
         status, provider_status, compilation_id, compilation_revision,
-        compilation_snapshot_hash, execution_snapshot_ciphertext,
+        compilation_snapshot_hash, execution_snapshot_ciphertext, review_receipt_id, content_language,
         started_at, ended_at, created_at
       ) VALUES (
         ${attemptId}, ${brief.id}, ${ownerA}, 'twilio', 'CA-private-delete',
         'completed', 'completed', ${attemptPlan!.compilationId},
         ${attemptPlan!.revision}, ${attemptPlan!.snapshotHash},
-        ${attemptPlan!.executionSnapshotCiphertext}, now(), now(), now()
+        ${attemptPlan!.executionSnapshotCiphertext}, ${reviewReceipt!.id}, ${reviewReceipt!.evidence.language}, now(), now(), now()
       )
     `;
     await inspection`
@@ -447,7 +449,7 @@ describe("PostgresCallRepository", () => {
         await compiler.compile(normalizeCreateCallBriefInput(input)),
         creditOwner
       );
-      await repository.approveCompilation(brief.id);
+      await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
       return brief;
     };
     const first = await createReady("Credit concurrency A");
@@ -758,7 +760,7 @@ describe("PostgresCallRepository", () => {
         await compiler.compile(normalizeCreateCallBriefInput(input)),
         safetyOwner
       );
-      await repository.approveCompilation(brief.id);
+      await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
       return brief;
     };
     const suppressedBrief = await createReady("Suppressed recipient", phoneE164);
@@ -928,7 +930,8 @@ describe("PostgresCallRepository", () => {
     })).rejects.toMatchObject({ code: "CALL_COMPILATION_STALE" });
     const approved = await repository.approveCompilation(brief.id, {
       revision: revisedCompilation.revision,
-      snapshotHash: revisedCompilation.snapshotHash
+      snapshotHash: revisedCompilation.snapshotHash,
+      review: (await originalPlanReview(repository, brief.id)).review
     });
     expect(approved.brief.status).toBe("ready");
 
@@ -1151,7 +1154,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const attempt = await repository.startAttempt(brief.id, {
       provider: "twilio"
     });
@@ -1317,7 +1320,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const attempt = await repository.startAttempt(brief.id, {
       provider: "twilio"
     });
@@ -1598,7 +1601,7 @@ describe("PostgresCallRepository", () => {
     expect(facts.firstAudioLatencyMs.total).toBeGreaterThanOrEqual(275);
 
     await repository.grantSignupCredits(ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const started = await repository.startAttempt(brief.id, {
       provider: "twilio",
       userId: ownerA,
@@ -2007,7 +2010,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const attempt = await repository.startAttempt(brief.id, {
       provider: "twilio"
     });
@@ -2344,7 +2347,7 @@ describe("PostgresCallRepository", () => {
       await compiler.compile(normalizeCreateCallBriefInput(input)),
       ownerA
     );
-    const approved = await repository.approveCompilation(brief.id);
+    const approved = await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const approvedHash = approved.compilation!.snapshotHash;
     const changed = {
       ...input,
@@ -2573,7 +2576,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const { attempt } = await repository.startAttempt(brief.id, {
       provider: "twilio",
       userId: ownerA,
@@ -2763,7 +2766,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const { attempt } = await repository.startAttempt(brief.id, {
       provider: "twilio"
     });
@@ -2968,7 +2971,7 @@ describe("PostgresCallRepository", () => {
       normalizeCreateCallBriefInput(input)
     );
     const brief = await repository.create(input, compilation, ownerA);
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const attempt = await repository.startAttempt(brief.id, {
       provider: "twilio"
     });

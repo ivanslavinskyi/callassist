@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Source: integration of `51a61da` and `14abd28`, reviewed 2026-09-07. Configuration values here describe
+Updated for the language workflow and text-artifact runtime on 2026-09-09. Configuration values here describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
 
@@ -25,6 +25,31 @@ CREATEDB on the test role. API test workers are capped at four.
 The API/worker factory defaults to memory storage if `STORAGE_DRIVER` is absent;
 `.env.example` explicitly selects PostgreSQL. Merely building or running `node dist`
 does not activate the API production validator: it checks `NODE_ENV` exactly.
+
+### Preserving the local test runtime when restarting
+
+The accepted R21 test originally enabled ordinary-call hangup only on a temporary
+QA process. On 2026-09-09 the main local `.env` was explicitly updated with
+`REALTIME_AGENT_HANGUP_ENABLED=true`; keep this setting when restarting that local
+runtime. Do not reconstruct its settings from `.env.example`, whose repository
+default remains `false`, or rely on flags from a previous shell session.
+
+Before replacing the API process, check that no calls/attempts are active and no
+preparation is processing. Preserve the current text-provider driver, enabled
+directions, mock SMS choice and public tunnel URL. Only the API needs restarting
+for this flag; its bridge captures the value at startup. Existing process variables
+override `.env`, so an explicit inherited `false` must not override the intended
+local value. From `apps/api`, this read-only check prints only the effective flag:
+
+```powershell
+node --import tsx --import ./src/config/load-env.ts -e "console.log(process.env.REALTIME_AGENT_HANGUP_ENABLED === 'true')"
+```
+
+Expect `true` for this local test setup, then restart the API with the preserved
+settings and verify main API readiness plus the Twilio gateway. A later authorized
+call should emit `conversation.hangup` and end after the farewell playback mark;
+do not place a verification call merely as part of restarting. Implementation and
+configuration evidence: [hangup restoration](hangup-runtime-restoration-2026-09-09.md).
 
 ## Storage, identity and network settings
 
@@ -75,6 +100,12 @@ before treating the direct-peer IP as the individual caller's address (R09).
 | `OPENAI_BRIEF_COMPILER_MODEL` | `gpt-5.6` |
 | `OPENAI_BRIEF_COMPILER_TIMEOUT_MS` | `90000` total compiler timeout |
 | `OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS` | `25000` per compiler request |
+| `TEXT_PROCESSOR_DRIVER` | Falls back to `BRIEF_COMPILER_DRIVER`, then `mock`; production generation requires `openai` |
+| `TEXT_PROCESSOR_MODEL` | `gpt-5.6`; model identity is part of the artifact generator version |
+| `TEXT_PROCESSOR_TIMEOUT_MS` | `45000` bounded text-processing request timeout |
+| `TEXT_ARTIFACT_GENERATION_ENABLED` | Explicit `true`/`false`; absent means enabled for mock and disabled for OpenAI. Disabling generation preserves reads of retained artifacts |
+| `TEXT_ARTIFACT_DIRECTIONS` | Comma-separated `kind:source:target`, e.g. `plan_review:de:ru,transcript_translation:*:ru,call_summary:*:ru`. Real provider has no enabled directions when empty. Final transcripts can contain mixed/unknown languages, so transcript translation and summary use source `*`; do not infer it from the call locale |
+| `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-2.1` |
 | `OPENAI_TRANSCRIPTION_MODEL` | `gpt-realtime-whisper` for live/consent recognition |
 | `OPENAI_TRANSCRIPTION_DELAY` | `high`; accepts minimal/low/medium/high/xhigh |
@@ -89,10 +120,41 @@ instance; ASR can make four concurrent utterance requests inside that job. Defau
 poll interval is one second, lease duration 120 seconds and worker heartbeat interval
 five seconds. These are code options, not documented environment variables.
 
-The six job types include delayed provider_call_cost_reconciliation. Compiler
+The seven job types include delayed provider_call_cost_reconciliation and a separate
+text_artifact_generation worker loop. Text artifact jobs persist successful chunks,
+cap provider requests at 24 across at most three retry generations, and fence source
+revision plus worker/generation/attempt. Compiler
 requests share a cumulative preparation budget; transcription retries reuse persisted
 successful chunks. Provider usage, reported costs and versioned calculated rates are
 separate from configured minute-based fallback estimates.
+
+## Language and generated-text endpoints
+
+Language preferences are separate from UI routing and the immutable executable plan.
+Mutations use the existing session/origin/ownership/deletion boundaries; artifact
+reads are private and never authorize access by artifact UUID alone. Cached ready
+results return `200`; queued generation returns `202`. Original transcript and retained
+ready artifacts remain readable when a direction is disabled.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| PATCH | `/api/account/language-preferences` | Account UI/content-language preferences |
+| GET | `/api/language-capabilities` | Enabled text operations/directions and selectable call locales |
+| GET | `/api/call-briefs/:id/language-context` | Captured task language resolution and selection revision |
+| PATCH | `/api/call-briefs/:id/content-language` | Pre-approval task choice with expected selection revision |
+| POST | `/api/call-briefs/:id/plan-review` | Translate the exact compilation ID/revision/hash |
+| GET | `/api/call-briefs/:id/text-artifacts` | Owner's generated-text states/results |
+| GET | `/api/call-briefs/:id/text-artifacts/:artifactId` | One owner-scoped artifact |
+| POST | `/api/call-briefs/:id/final-transcript/translations` | Translate the current immutable transcript revision |
+| POST | `/api/call-briefs/:id/summaries` | Evidence-linked summary from original transcript and executed plan |
+| POST | `/api/call-briefs/:id/text-artifacts/:artifactId/retry` | Bounded retry of a current failed artifact |
+
+New approval requests include exact revision/hash and original/translated review
+evidence. A translated review names the ready artifact ID/hash, language and selection
+revision. Legacy v1 applies only to exact pre-cutover approved compilations; new or
+unapproved plans require v2 receipts. New call choices use British English (`en-GB`);
+historical `en-US` remains readable. See [architecture](architecture.md) for source
+identity and lifecycle details.
 
 ## Admission and endpoint budgets
 
@@ -128,7 +190,7 @@ The last is a read-only gate required before migration 0061; follow the
 | `ADMIN_COST_TELEPHONY_USD_MICROS_PER_MINUTE` | Optional nonnegative integer connected-minute estimate |
 | `ADMIN_COST_REALTIME_USD_MICROS_PER_MINUTE` | Optional nonnegative integer connected-minute estimate |
 | `ADMIN_COST_TRANSCRIPTION_USD_MICROS_PER_MINUTE` | Optional nonnegative integer recorded-minute estimate |
-| `DATA_ENCRYPTION_REENCRYPT_CONFIRM` | Must equal active key ID; rotation verifies all thirteen ciphertext families |
+| `DATA_ENCRYPTION_REENCRYPT_CONFIRM` | Must equal active key ID; rotation verifies all seventeen ciphertext columns |
 | `DATA_ENCRYPTION_REENCRYPT_BATCH_SIZE` | 1–500; default 100 |
 | `RECOVERY_SOURCE_DATABASE_URL` | Overrides DATABASE_URL for the local recovery drill |
 | `RECOVERY_POSTGRES_CONTAINER` | Explicit Docker PostgreSQL container, otherwise discovered through Compose |

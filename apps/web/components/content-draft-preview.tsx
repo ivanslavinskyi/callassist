@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AppShell } from "./app-shell";
 import { ContentNavigation } from "./content-navigation";
 import { navigationPath } from "@/lib/i18n/content-routing";
+import { contentLanguageDirection } from "@/lib/content-localizations";
 
 export function ContentDraftPreview({
   page,
@@ -19,8 +20,8 @@ export function ContentDraftPreview({
 
   return (
     <AppShell>
-      <main className="content-page content-draft-preview" id="main-content" tabIndex={-1}>
-        <div className="content-preview-banner" role="status">
+      <main className="content-page content-draft-preview" id="main-content" tabIndex={-1} lang={page.locale} dir={contentLanguageDirection(page.locale)}>
+        <div className="content-preview-banner" role="status" lang={interfaceLocale}>
           <div>
             <strong>{isGerman ? "Private Entwurfsvorschau" : "Private draft preview"}</strong>
             <span>{isGerman ? "Nicht öffentlich sichtbar" : "Not visible to the public"}</span>

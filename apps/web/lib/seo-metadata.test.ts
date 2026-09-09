@@ -75,13 +75,23 @@ describe("public SEO metadata", () => {
   });
 
   it("gives both localized home pages canonical alternates", () => {
-    expect(homeMetadata("de", landing)).toMatchObject({
+    expect(homeMetadata("de", landing, {
+      revision: landing.revision, sourceLocale: "en",
+      localizations: ["en", "de"].map((locale) => ({ locale, seoTitle: "Title", seoDescription: "Description", translationStale: false }))
+    })).toMatchObject({
       title: landing.seo.title,
       description: landing.seo.description,
       alternates: {
         canonical: "/de",
         languages: { en: "/en", de: "/de", "x-default": "/en" }
       }
+    });
+  });
+
+  it("does not advertise a missing translation or index a fallback as translated", () => {
+    expect(homeMetadata("de", { ...landing, locale: "en" })).toMatchObject({
+      alternates: { canonical: "/en", languages: { en: "/en", "x-default": "/en" } },
+      robots: { index: false, follow: true }
     });
   });
 });

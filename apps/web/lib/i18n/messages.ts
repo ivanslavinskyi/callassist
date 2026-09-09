@@ -1,5 +1,5 @@
-export const uiLocales = ["en", "de"] as const;
-export type UiLocale = (typeof uiLocales)[number];
+import { uiLocales, type UiLocale } from "./registry";
+export { uiLocales, type UiLocale } from "./registry";
 
 const enFormCopy = {
   newBrief: "New call plan",

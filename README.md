@@ -2,9 +2,10 @@
 
 SHPROHLI helps people make everyday phone calls when speaking or the local language
 is a barrier. Users prepare a plan, review and approve it, follow a live transcript,
-and receive a recording-based final transcript.
+and receive a recording-based final transcript with optional translation and an
+evidence-linked summary.
 
-**Repository status, 2026-09-07:** implemented supervised MVP with substantial beta
+**Repository status, 2026-09-09:** implemented supervised MVP with substantial beta
 infrastructure. Public-beta launch readiness has **not** been established. See the
 [audit](docs/project-audit-2026-09-07.md) and [release roadmap](docs/mvp-plan.md).
 The public product copy uses “public beta”; that wording is not deployment evidence.
@@ -15,6 +16,10 @@ The public product copy uses “public beta”; that wording is not deployment e
   changes, session management, export, call deletion and queued account anonymization.
 - Durable, retry-safe initial call preparation; multilingual compilation, moderation,
   deterministic policy checks, editing/recompilation, review and approve-and-call.
+- Separate UI, call and task-content languages; account preferences, captured language
+  resolution and exact original/translated plan approval receipts. All facts in the
+  approved plan may be used as needed for information gathering; bookings, payments
+  and other commitments remain outside the supported scope.
 - Swiss-number outbound calls via Twilio and speech conversation via OpenAI Realtime.
 - Six server-owned assistant profiles. Assistance reason defaults to `none`;
   `speech_impairment` and `language_barrier` add an optional controlled disclosure.
@@ -26,6 +31,10 @@ The public product copy uses “public beta”; that wording is not deployment e
   mono/unsupported audio falls back to a whole-recording plain-text transcript.
 - Live SSE transcript, recording playback proxy, clipboard/PDF export, feedback,
   retention choices of 0/7/30 days and manual recording deletion.
+- Immutable original transcript revisions, optional translations and summaries with
+  source links, resumable bounded jobs and owner-scoped TXT/PDF exports. Enabled
+  generation directions are configured independently from interface languages;
+  zero-day audio deletion happens after the final transcript and does not erase text.
 - Three signup credits, transactional reserve/charge/refund, quotas, recipient
   suppression, SMS-verified opt-out and an audited outbound-call kill switch.
 - English-only `/admin` for content, SEO, users, calls, credits, safety and system
@@ -33,8 +42,10 @@ The public product copy uses “public beta”; that wording is not deployment e
 - Versioned EN/DE public pages, Landing/FAQ/Navigation collections, drafts, previews,
   publication/history/rollback and Terms/AUP re-acceptance.
 
-Call locales: `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB`, `en-US`, `ru-RU`.
-`de-CH` means Swiss Standard German. UI locale and call language are independent.
+New call locales: `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB`, `ru-RU`.
+Historical `en-US` remains readable. `de-CH` means Swiss Standard German. UI locale,
+task content language and call language are independent; call-language labels follow
+the interface locale.
 
 ## Architecture
 
@@ -142,7 +153,7 @@ Production requires external workers, durable storage, managed secrets, TLS, a
 same-host web/API cookie topology, restricted Twilio geographic permissions and
 completed operational/privacy gates. Both API and worker require explicit
 `BRIEF_COMPILER_DRIVER=openai` in production; missing or mock drivers fail startup.
-Rotation and restore verification cover all thirteen ciphertext families. See the
+Rotation and restore verification cover all seventeen ciphertext columns. See the
 [remediation evidence](docs/remediation-2026-09-07.md) and [recovery runbook](docs/database-recovery-and-secrets.md).
 
 ## Documentation

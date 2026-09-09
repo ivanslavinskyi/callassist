@@ -1,5 +1,16 @@
 export type EmailLocale = "en" | "de";
 
+// Email templates have their own readiness boundary, independent of UI and
+// task content languages. Regional variants use their supported base language.
+export function resolveEmailLocale(uiLocale: string | null | undefined): EmailLocale {
+  try {
+    if (uiLocale && new Intl.Locale(uiLocale).language === "de") return "de";
+  } catch {
+    // Old or invalid preferences also receive the supported default template.
+  }
+  return "en";
+}
+
 export interface EmailProvider {
   readonly mode: "mock" | "resend";
   sendEmailChangeVerification(input: {

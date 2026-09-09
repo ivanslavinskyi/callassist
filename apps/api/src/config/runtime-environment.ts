@@ -25,6 +25,13 @@ export function validateRuntimeEnvironment(
   requireExact(environment, "TELEPHONY_DRIVER", "twilio", issues);
   requireExact(environment, "DURABLE_WORKER_MODE", "external", issues);
   requireExact(environment, "BRIEF_COMPILER_DRIVER", "openai", issues);
+  const textProcessorDriver = environment.TEXT_PROCESSOR_DRIVER?.trim() ||
+    environment.BRIEF_COMPILER_DRIVER?.trim() || "mock";
+  const textGenerationFlag = environment.TEXT_ARTIFACT_GENERATION_ENABLED?.trim();
+  const textGenerationEnabled = textGenerationFlag ? textGenerationFlag === "true" : textProcessorDriver === "mock";
+  if (textGenerationEnabled && textProcessorDriver !== "openai") {
+    issues.push("Enabled text artifact generation requires TEXT_PROCESSOR_DRIVER=openai");
+  }
   requirePostgresUrl(environment.DATABASE_URL, issues);
   let dataEncryptionMaterial: DataEncryptionMaterial | undefined;
   try {

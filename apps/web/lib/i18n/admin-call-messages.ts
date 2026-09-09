@@ -86,6 +86,8 @@ const en = {
   providerUsageDuration: "Measured duration",
   costComponents: {
     briefCompilation: "Brief compilation",
+    textTranslation: "Text translation",
+    callSummary: "Call summary",
     realtimeText: "Realtime text",
     realtimeAudio: "Realtime audio",
     realtimeTranscription: "Realtime transcription",
@@ -201,6 +203,8 @@ type AdminCallMessages = {
   languages: Record<CallLocale, string>;
   costComponents: Record<
     | "briefCompilation"
+    | "textTranslation"
+    | "callSummary"
     | "realtimeText"
     | "realtimeAudio"
     | "realtimeTranscription"
@@ -288,6 +292,8 @@ const de: AdminCallMessages = {
   providerUsageDuration: "Gemessene Dauer",
   costComponents: {
     briefCompilation: "Brief-Kompilierung",
+    textTranslation: "Textübersetzung",
+    callSummary: "Anrufzusammenfassung",
     realtimeText: "Realtime-Text",
     realtimeAudio: "Realtime-Audio",
     realtimeTranscription: "Realtime-Transkription",

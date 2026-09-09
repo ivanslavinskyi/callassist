@@ -1,3 +1,4 @@
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
@@ -36,7 +37,7 @@ describe("admin operational read models", () => {
       compilation,
       ownerUserId
     );
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const started = await repository.startAttempt(brief.id, {
       provider: "twilio",
       userId: ownerUserId
@@ -86,7 +87,7 @@ describe("admin operational read models", () => {
       compilation,
       ownerUserId
     );
-    await repository.approveCompilation(brief.id);
+    await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
     const started = await repository.startAttempt(brief.id, {
       provider: "twilio",
       userId: ownerUserId

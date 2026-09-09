@@ -37,6 +37,21 @@ function productionEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe("production runtime configuration", () => {
+  it.each([undefined, "", "  ", "true"])("rejects enabled mock text transformations with flag %s", (flag) => {
+    for (const runtime of ["api", "worker"] as const) {
+      expect(() => validateRuntimeEnvironment({ ...productionEnvironment(),
+        TEXT_ARTIFACT_GENERATION_ENABLED: flag, TEXT_PROCESSOR_DRIVER: "mock" }, runtime))
+        .toThrow("TEXT_PROCESSOR_DRIVER=openai");
+    }
+  });
+  it("allows an explicitly disabled mock while inheriting the real compiler for enabled generation", () => {
+    for (const runtime of ["api", "worker"] as const) {
+      expect(() => validateRuntimeEnvironment({ ...productionEnvironment(),
+        TEXT_ARTIFACT_GENERATION_ENABLED: "false", TEXT_PROCESSOR_DRIVER: "mock" }, runtime)).not.toThrow();
+      expect(() => validateRuntimeEnvironment({ ...productionEnvironment(),
+        TEXT_ARTIFACT_GENERATION_ENABLED: "true" }, runtime)).not.toThrow();
+    }
+  });
   it.each(["mock", "", undefined])("rejects worker compiler driver %s", (driver) => {
     const environment = productionEnvironment();
     environment.BRIEF_COMPILER_DRIVER = driver;

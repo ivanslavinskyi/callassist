@@ -3,12 +3,11 @@ import type { MetadataRoute } from "next";
 import { absoluteSiteUrl } from "./site-config";
 
 export function buildSitemap(index: PublishedContentIndex): MetadataRoute.Sitemap {
-  const homeAlternates = {
-    en: absoluteSiteUrl("/en"),
-    de: absoluteSiteUrl("/de"),
-    "x-default": absoluteSiteUrl("/en")
-  };
-  const routes: MetadataRoute.Sitemap = ["en", "de"].map((locale) => ({
+  const homeLocales = index.landing?.localizations.map(({ locale }) => locale) ?? [];
+  const defaultLocale = homeLocales.find((locale) => locale === index.landing?.sourceLocale) ?? homeLocales[0];
+  const homeAlternates = Object.fromEntries(homeLocales.map((locale) => [locale, absoluteSiteUrl(`/${locale}`)]));
+  if (defaultLocale) homeAlternates["x-default"] = absoluteSiteUrl(`/${defaultLocale}`);
+  const routes: MetadataRoute.Sitemap = homeLocales.map((locale) => ({
     url: absoluteSiteUrl(`/${locale}`),
     lastModified: index.landing?.revision.publishedAt,
     changeFrequency: "weekly",

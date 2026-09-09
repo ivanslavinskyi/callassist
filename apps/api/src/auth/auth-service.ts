@@ -4,6 +4,7 @@ import type {
   AccountSessionPlatform,
   AdministrableUserStatus,
   AccountNameUpdateInput,
+  AccountLanguagePreferencesUpdateInput,
   EmailChangeConfirmInput,
   EmailChangeStartInput,
   LoginInput,
@@ -42,6 +43,7 @@ import {
 import type { VerificationProvider } from "./verification-provider";
 import {
   MockEmailProvider,
+  resolveEmailLocale,
   type EmailProvider
 } from "./email-provider";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
@@ -437,6 +439,18 @@ export class AuthService {
     return { status: "profile_updated" as const, user: toPublicUser(updated) };
   }
 
+  async updateLanguagePreferences(
+    userId: string,
+    input: AccountLanguagePreferencesUpdateInput
+  ) {
+    const updated = await this.repository.updateLanguagePreferences(userId, input);
+    if (!updated) throw new AuthServiceError("PROFILE_UPDATE_NOT_AVAILABLE");
+    return {
+      status: "language_preferences_updated" as const,
+      user: toPublicUser(updated)
+    };
+  }
+
   async startEmailChange(
     user: User,
     sessionId: string,
@@ -477,12 +491,12 @@ export class AuthService {
           to: input.newEmail,
           code,
           expiresInMinutes: emailChangeChallengeTtlMs / minute,
-          locale: user.uiLocale
+          locale: resolveEmailLocale(user.uiLocale)
         }),
         this.emailProvider.sendEmailChangeNotice({
           to: user.email,
           proposedEmail: input.newEmail,
-          locale: user.uiLocale
+          locale: resolveEmailLocale(user.uiLocale)
         })
       ]);
     } catch (error) {

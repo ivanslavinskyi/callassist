@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { swissDestinationPhoneSchema } from "./phone";
+import { callLanguageContextSchema } from "./languages";
+import { callTextArtifactSchema, finalTranscriptRevisionSchema, planSourceSchema } from "./call-text-artifact";
 
 export const CALL_BRIEF_INPUT_LIMITS = {
   recipientName: 160,
@@ -69,6 +71,12 @@ export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
 
 export const callLocaleSchema = z.enum(SUPPORTED_CALL_LOCALES);
 export type CallLocale = z.infer<typeof callLocaleSchema>;
+
+/** Availability for newly prepared calls; persisted schemas intentionally keep en-US. */
+export const SELECTABLE_CALL_LANGUAGES = SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== "en-US");
+export function isSelectableCallLocale(locale: CallLocale): boolean {
+  return locale !== "en-US";
+}
 
 export const callVoiceGenderSchema = z.enum(["male", "female"]);
 export type CallVoiceGender = z.infer<typeof callVoiceGenderSchema>;
@@ -741,6 +749,10 @@ export const approvalRequestSchema = z.object({
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const callSnapshotSchema = z.object({
+  finalTranscriptRevision: finalTranscriptRevisionSchema.nullable().optional(),
+  textArtifacts: z.array(callTextArtifactSchema).optional(),
+  languageContext: callLanguageContextSchema.nullable().optional(),
+  planSource: planSourceSchema.nullable().optional(),
   executionPlanSource: z.enum([
     "immutable",
     "legacy",

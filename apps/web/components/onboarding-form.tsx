@@ -25,7 +25,7 @@ export function OnboardingForm({ initialStatus }: {
     setError(null);
     try {
       await acceptOnboarding({
-        locale,
+        locale: initialStatus.current.terms.locale,
         termsRevisionId: initialStatus.current.terms.id,
         acceptableUseRevisionId: initialStatus.current.acceptableUse.id,
         acceptTerms: true,
@@ -71,11 +71,11 @@ export function OnboardingForm({ initialStatus }: {
           <h1>{copy.title}</h1>
           <p>{copy.intro}</p>
           <div className="onboarding-documents">
-            <Link href={`/${locale}/${initialStatus.current.terms.slug}`} rel="noreferrer" target="_blank">
+            <Link href={`/${initialStatus.current.terms.locale}/${initialStatus.current.terms.slug}`} rel="noreferrer" target="_blank">
               <strong>{copy.terms}</strong>
               <span aria-hidden="true">↗</span>
             </Link>
-            <Link href={`/${locale}/${initialStatus.current.acceptableUse.slug}`} rel="noreferrer" target="_blank">
+            <Link href={`/${initialStatus.current.acceptableUse.locale}/${initialStatus.current.acceptableUse.slug}`} rel="noreferrer" target="_blank">
               <strong>{copy.acceptableUse}</strong>
               <span aria-hidden="true">↗</span>
             </Link>

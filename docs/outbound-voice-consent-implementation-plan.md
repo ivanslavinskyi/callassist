@@ -1,7 +1,7 @@
 # Outbound voice consent implementation plan
 
 Status: core implementation present, including the subsequent consent-audio fix;
-reviewed 2026-09-07 against `96229ea`. Stages below are a delivery record, not the
+updated 2026-09-09 for the product decision to restore the previous short spoken consent. Stages below are a delivery record, not the
 next backlog. Current release follow-ups are R06/R07/R08/R14 in the [roadmap](mvp-plan.md).
 
 **R18 implemented:** full-phrase affirmative matching replaces prefix acceptance.
@@ -29,6 +29,16 @@ explicit consent has been durably recorded.
   media to the main session. Assistance reason defaults to `none`; optional reason
   disclosure occurs after consent. Provider-side consent recognition already processes
   speech before consent; “no processing before consent” is not the implemented contract.
+- By the user's decision on 2026-09-09, the spoken notice is restored verbatim to
+  the previous text in every call locale: AI identity, the represented person and
+  the request to record and automatically transcribe. The two added sentences about
+  AI recognition of the reply and audio retention are removed from the spoken notice.
+  Public privacy/FAQ/onboarding copy retains the description of actual AI processing
+  and retention. Audio retention remains deletion after the final transcript, 7 days
+  or 30 days; the first option involves temporary recording after consent.
+- Approved facts may be used as needed during the ensuing information-gathering call.
+  Additional live permission prompts are outside the supported product workflow;
+  booking, payment and commitments remain prohibited actions.
 
 ## Implemented stages
 
@@ -71,6 +81,8 @@ explicit consent has been durably recorded.
 - Full `test`, `typecheck`, `lint`, and `build` suites before merge.
 
 The 2026-09-07 audit ran the automated contract/classifier/bridge/repository suite;
-no real recipient call was placed. Current live-provider, multilingual quality and
-notice acceptance remain open. Historical branch/merge instructions are superseded
+no real recipient call was placed. The 2026-09-09 copy/bridge checks must retain the
+short spoken script without retention, persona, assistance reason or DTMF additions.
+Consent recognition and recording/playback gates remain unchanged. Current live-provider,
+multilingual quality and notice acceptance remain open. Historical branch/merge instructions are superseded
 by the current release roadmap.
