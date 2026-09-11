@@ -1,0 +1,149 @@
+{
+  "rawBrief": {
+    "recipientName": "Testpraxis",
+    "phoneNumber": "+41710000000",
+    "objective": "Запиши меня в Testpraxis на профилактический осмотр зубов 16 сентября 2026 года. Начало с 14:00 до 17:00 Europe/Zurich. Согласен на первое предложенное подходящее время. Только одна запись, без оплаты, депозита или новых финансовых условий.",
+    "assistantProfileId": "sebastian",
+    "assistanceReason": "none",
+    "context": "Fictional test scenario. No call will be placed.",
+    "locale": "de-CH",
+    "audioRetentionDays": 7,
+    "allowLanguageSwitch": false,
+    "allowedFacts": [],
+    "representedPersonFirstName": "Alex",
+    "representedPersonLastName": "Example",
+    "resultHandling": "capture_in_callassist",
+    "addressingMode": "formal",
+    "tonePreference": "auto",
+    "voicemailPolicy": "do_not_leave_details",
+    "deliveryInstruction": "",
+    "clarificationAnswers": [],
+    "representedPerson": "Alex Example"
+  },
+  "compiledBrief": {
+    "schemaVersion": "4",
+    "callLocale": "de-CH",
+    "sourceLanguage": "ru",
+    "taskType": "appointment_coordination",
+    "tone": "neutral",
+    "addressingStyle": "formal",
+    "resultHandling": "capture_in_callassist",
+    "voicemailAction": "hang_up",
+    "refusalBehavior": "respect_and_end",
+    "localizedObjective": "Bei Testpraxis für Alex Example genau einen Termin für eine prophylaktische Zahnkontrolle am 16 сентября 2026 года mit Beginn zwischen 14:00 und 17:00 Uhr (Europe/Zurich) buchen. Den ersten passenden Termin annehmen, ohne Zahlung, Depot oder neue finanzielle Bedingungen.",
+    "opening": {
+      "recipientAddress": "Ich spreche mit Testpraxis.",
+      "purposeStatement": "Ich rufe im Auftrag von Alex Example an, um einen Termin für eine prophylaktische Zahnkontrolle zu vereinbaren. Ich habe dazu eine kurze Frage zur Verfügbarkeit.",
+      "readinessQuestion": "Passt es Ihnen, wenn wir das jetzt kurz besprechen?"
+    },
+    "backgroundSummary": "Gewünscht ist genau ein Termin bei Testpraxis am 16 сентября 2026 года. Der Termin muss zwischen 14:00 und 17:00 Uhr Europe/Zurich beginnen; das erste passende Angebot darf angenommen werden. Zahlungen, Depots oder neue finanzielle Bedingungen sind nicht erlaubt.",
+    "orderedQuestions": [
+      {
+        "text": "Welcher ist der erste verfügbare Termin für eine prophylaktische Zahnkontrolle am 16 сентября 2026 года mit Beginn zwischen 14:00 und 17:00 Uhr?",
+        "purpose": "Den ersten Termin innerhalb des genehmigten Zeitfensters ermitteln und buchen.",
+        "required": true
+      },
+      {
+        "text": "Ist der Termin jetzt bestätigt? Bitte nennen Sie nochmals Datum, Uhrzeit, Leistung und Anbieter.",
+        "purpose": "Die ausdrückliche Bestätigung und die genauen Termindaten festhalten",
+        "required": true
+      }
+    ],
+    "conditionalFollowUps": [
+      {
+        "condition": "Der angebotene Termin beginnt ausserhalb des Zeitfensters von 14:00 bis 17:00 Uhr oder liegt an einem anderen Datum.",
+        "question": "Gibt es stattdessen einen Termin am 16 сентября 2026 года, der zwischen 14:00 und 17:00 Uhr beginnt?"
+      },
+      {
+        "condition": "Für die Buchung wird eine Zahlung, ein Depot oder die Zustimmung zu neuen finanziellen Bedingungen verlangt.",
+        "question": "Ist eine Buchung ohne Zahlung, Depot und neue finanzielle Bedingungen möglich?"
+      }
+    ],
+    "successCriteria": [
+      "Testpraxis bestätigt ausdrücklich genau einen Termin für Alex Example für eine prophylaktische Zahnkontrolle am 16.09.2026 mit Beginn zwischen 14:00 und 17:00 Uhr Europe/Zurich.",
+      "Es handelt sich um den ersten angebotenen passenden Termin.",
+      "Die Buchung erfordert keine Zahlung, kein Depot und keine neuen finanziellen Bedingungen.",
+      "Die Termindetails werden vollständig erfasst.",
+      "Die angerufene Person bestätigt den freigegebenen Termin ausdrücklich"
+    ],
+    "unresolvedCriteria": [
+      "Es wird nur eine unverbindliche oder vorläufige Verfügbarkeit genannt.",
+      "Kein Termin innerhalb des genehmigten Zeitfensters ist verfügbar.",
+      "Die ausdrückliche Buchungsbestätigung oder wesentliche Termindetails fehlen.",
+      "Die Buchung ist nur mit Zahlung, Depot oder neuen finanziellen Bedingungen möglich.",
+      "Der Termin ist unverbindlich oder kein freigegebenes Zeitfenster ist verfügbar"
+    ],
+    "stopConditions": [
+      "Testpraxis lehnt die Anfrage ab oder möchte das Gespräch nicht fortsetzen.",
+      "Es ist kein passender Termin innerhalb des genehmigten Zeitfensters verfügbar.",
+      "Die Buchung setzt eine Zahlung, ein Depot oder neue finanzielle Bedingungen voraus.",
+      "Es soll mehr als ein Termin gebucht oder ein Termin ausserhalb der genehmigten Grenzen vereinbart werden.",
+      "Keine Zusage ausserhalb der freigegebenen Startzeiten, bei einem anderen Anbieter oder zu neuen finanziellen Bedingungen"
+    ],
+    "approvedFacts": [],
+    "prohibitedActions": [
+      "Mehr als einen Termin buchen.",
+      "Einen Termin ausserhalb des 16.09.2026 mit Beginn zwischen 14:00 und 17:00 Uhr Europe/Zurich buchen.",
+      "Bei einer anderen Praxis oder einem anderen Anbieter buchen.",
+      "Zahlungen, Depots, neue Stornogebühren oder sonstige neue finanzielle Bedingungen akzeptieren.",
+      "Einen bestehenden Termin stornieren oder verschieben.",
+      "Medizinische Beratung, Diagnose oder Behandlungsentscheidungen verlangen oder geben."
+    ],
+    "namedEntities": [
+      {
+        "type": "organisation",
+        "value": "Testpraxis"
+      },
+      {
+        "type": "person",
+        "value": "Alex Example"
+      },
+      {
+        "type": "date",
+        "value": "16 сентября 2026 года"
+      },
+      {
+        "type": "other",
+        "value": "Europe/Zurich"
+      }
+    ],
+    "riskCategories": [],
+    "assumptions": [
+      "respect_refusal_and_end",
+      "spoken_answers_saved_in_callassist",
+      "tone_inferred",
+      "no_detailed_voicemail"
+    ],
+    "blockingIssues": [],
+    "appointmentAuthorization": {
+      "operation": "book",
+      "serviceDescription": "prophylaktische Zahnkontrolle",
+      "providerScope": "called_recipient",
+      "timeZone": "Europe/Zurich",
+      "windows": [
+        {
+          "date": "2026-09-16",
+          "startTime": "14:00",
+          "endTime": "17:00"
+        }
+      ],
+      "selection": "first_matching",
+      "maxAppointments": 1,
+      "financialPolicy": "no_new_financial_terms"
+    }
+  },
+  "policyDecision": {
+    "policyVersion": "callassist-policy-3",
+    "status": "ready_for_review",
+    "riskLevel": "low",
+    "reasonCodes": [],
+    "clarificationQuestions": []
+  },
+  "compilerModel": "synthetic-fixture",
+  "compilerVersion": "brief-compiler-4",
+  "compilerResponseId": null,
+  "revision": 1,
+  "compiledAt": "2026-09-10T08:00:00.000Z",
+  "approvedAt": "2026-09-10T08:01:00.000Z",
+  "snapshotHash": "7357776669a0aa201d960dc597276d8c3e4531eae7489779eec7797a15e4225d"
+}

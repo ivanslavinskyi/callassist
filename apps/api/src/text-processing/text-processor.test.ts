@@ -1,7 +1,7 @@
 import type { SourceSegment } from "@callassist/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { MockTextProcessor } from "./mock-text-processor";
-import { OpenAITextProcessor } from "./openai-text-processor";
+import { OpenAITextProcessor, parseTextRetryAfter } from "./openai-text-processor";
 import {
   createTextProcessorFromEnv,
   type TextProcessingInput,
@@ -21,9 +21,11 @@ const segments: SourceSegment[] = [
   { id: "segment.1", role: "recipient", text: "We are open until 17:00.", startSeconds: 4, endSeconds: 6 }
 ];
 const translation: TextProcessingInput = { kind: "transcript_translation", targetLanguage: "uk", segments };
-const summary: TextProcessingInput = { kind: "call_summary", targetLanguage: "de", segments, questions: ["When does the office close?"] };
+const context = { objective: "Check office hours", taskType: "information_request", recipient: "Office", representedPerson: "Anna" };
+const summary: TextProcessingInput = { kind: "call_summary", targetLanguage: "de", segments, checks: [{ id: "question.0", text: "When does the office close?" }], context };
 const summaryOutput = {
-  answers: [{ questionId: "question.0", question: "Wann schliesst das Büro?", answer: "Laut Auskunft um 17:00.", certainty: "reported", sourceSegmentIds: ["segment.1"] }],
+  schemaVersion: 2, overview: [],
+  findings: [{ id: "question.0", label: "Wann schliesst das Büro?", text: "Laut Auskunft um 17:00.", certainty: "reported", sourceSegmentIds: ["segment.1"] }],
   nextSteps: [], unresolved: []
 };
 
@@ -119,28 +121,28 @@ describe("OpenAI text transformations", () => {
     }
   });
 
-  it("requires real source references for known answers and permits explicit unknowns", async () => {
+  it("requires real source references for known findings and permits explicit unknowns", async () => {
     const known = setup(summaryOutput);
     await expect(known.processor.process(summary, known.options)).resolves.toMatchObject({
-      answers: [{ question: "Wann schliesst das Büro?", sourceSegmentIds: ["segment.1"] }]
+      findings: [{ label: "Wann schliesst das Büro?", sourceSegmentIds: ["segment.1"] }]
     });
     expect(known.before).toHaveBeenCalledWith(expect.objectContaining({ operationType: "call_summary" }));
-    const unknown = setup({ answers: [{
-      questionId: "question.0", question: "Wann schliesst das Büro?",
-      answer: "Die Schliesszeit wurde nicht geklärt.", certainty: "unknown", sourceSegmentIds: []
+    const unknown = setup({ schemaVersion: 2, overview: [], findings: [{
+      id: "question.0", label: "Wann schliesst das Büro?",
+      text: "Die Schliesszeit wurde nicht geklärt.", certainty: "unknown", sourceSegmentIds: []
     }], nextSteps: [], unresolved: ["Schliesszeit nicht bestätigt"] });
-    await expect(unknown.processor.process(summary)).resolves.toMatchObject({ answers: [{ certainty: "unknown", sourceSegmentIds: [] }] });
+    await expect(unknown.processor.process(summary)).resolves.toMatchObject({ findings: [{ certainty: "unknown", sourceSegmentIds: [] }] });
   });
 
   it("rejects changed amounts even when a summary cites an existing segment", async () => {
     const input: TextProcessingInput = { kind: "call_summary", targetLanguage: "ru",
-      questions: ["What is the price?"], segments: [{ ...segments[1]!, text: "It costs CHF 25." }] };
-    const output = { answers: [{ questionId: "question.0", question: "Какова цена?", answer: "Стоимость — CHF 250.", certainty: "reported", sourceSegmentIds: ["segment.1"] }], nextSteps: [], unresolved: [] };
+      context, checks: [{ id: "question.0", text: "What is the price?" }], segments: [{ ...segments[1]!, text: "It costs CHF 25." }] };
+    const output = { schemaVersion: 2, overview: [], findings: [{ id: "question.0", label: "Какова цена?", text: "Стоимость — CHF 250.", certainty: "reported", sourceSegmentIds: ["segment.1"] }], nextSteps: [], unresolved: [] };
     const invalid = setup(output);
     await expect(invalid.processor.process(input, invalid.options)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
     expect(invalid.completed[0]?.outcome).toBe("invalid_response");
-    const valid = setup({ ...output, answers: [{ ...output.answers[0], answer: "Стоимость — CHF 25." }] });
-    await expect(valid.processor.process(input)).resolves.toMatchObject({ answers: [{ answer: "Стоимость — CHF 25." }] });
+    const valid = setup({ ...output, findings: [{ ...output.findings[0], text: "Стоимость — CHF 25." }] });
+    await expect(valid.processor.process(input)).resolves.toMatchObject({ findings: [{ text: "Стоимость — CHF 25." }] });
   });
 
   it("preserves numeric facts in both directions of a translation", async () => {
@@ -154,11 +156,11 @@ describe("OpenAI text transformations", () => {
   });
 
   it.each([
-    { ...summaryOutput, answers: [{ ...summaryOutput.answers[0], sourceSegmentIds: [] }] },
-    { ...summaryOutput, answers: [{ ...summaryOutput.answers[0], sourceSegmentIds: ["foreign"] }] },
-    { ...summaryOutput, answers: [{ ...summaryOutput.answers[0], sourceSegmentIds: ["segment.1", "segment.1"] }] },
-    { ...summaryOutput, answers: [{ ...summaryOutput.answers[0], questionId: "question.9" }] },
-    { ...summaryOutput, answers: [] },
+    { ...summaryOutput, findings: [{ ...summaryOutput.findings[0], sourceSegmentIds: [] }] },
+    { ...summaryOutput, findings: [{ ...summaryOutput.findings[0], sourceSegmentIds: ["foreign"] }] },
+    { ...summaryOutput, findings: [{ ...summaryOutput.findings[0], sourceSegmentIds: ["segment.1", "segment.1"] }] },
+    { ...summaryOutput, findings: [{ ...summaryOutput.findings[0], id: "question.9" }] },
+    { ...summaryOutput, findings: [] },
     { ...summaryOutput, nextSteps: [{ text: "Pay now", sourceSegmentIds: [] }] },
     { ...summaryOutput, nextSteps: [{ text: "Pay now", sourceSegmentIds: ["foreign"] }] }
   ])("rejects incomplete or unsupported summary evidence", async (invalid) => {
@@ -175,14 +177,85 @@ describe("OpenAI text transformations", () => {
     expect(fixture.completed).toEqual([]);
   });
 
+  it("requires complete checks, validates overview links, and rejects ungrounded shortened claims", async () => {
+    for (const change of [
+      { overview: [{ label: "Hours", text: "Until 17:00.", findingIds: ["foreign"] }] },
+      { overview: [{ label: null, text: "Until 18:00.", findingIds: ["question.0"] }] },
+      { overview: [{ label: null, text: "Until 17:00.", findingIds: ["question.0", "question.0"] }] },
+      { schemaVersion: 1 },
+      { answers: [] }
+    ]) {
+      const fixture = setup({ ...summaryOutput, ...change });
+      await expect(fixture.processor.process(summary)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
+    }
+    const fixture = setup({ ...summaryOutput, overview: [{ label: "Hours", text: "Until 17:00.", findingIds: ["question.0"] }] });
+    await expect(fixture.processor.process(summary)).resolves.toHaveProperty("schemaVersion", 2);
+  });
+
+  it("does not treat planned numbers as evidence for a claimed result", async () => {
+    const input = { ...summary, checks: [{ id: "question.0", text: "Is it open until 18:00?" }] };
+    const fixture = setup({ ...summaryOutput, findings: [{ ...summaryOutput.findings[0], text: "Open until 18:00." }] });
+    await expect(fixture.processor.process(input)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
+  });
+
+  it("allows compaction only when detailed certainty, sources and actions stay unchanged", async () => {
+    const extraction = await setup(summaryOutput).processor.process(summary);
+    if (!("findings" in extraction)) throw new Error("Unexpected payload");
+    const input = { ...summary, extraction };
+    for (const change of [
+      { findings: [{ ...extraction.findings[0], certainty: "conditional" }] },
+      { nextSteps: [{ text: "Call again", sourceSegmentIds: ["segment.1"] }] },
+      { unresolved: ["A new warning"] }
+    ]) {
+      await expect(setup({ ...extraction, ...change }).processor.process(input)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
+    }
+    await expect(setup({ ...extraction, overview: [{ label: null, text: "Open until 17:00.", findingIds: ["question.0"] }] }).processor.process(input)).resolves.toHaveProperty("overview");
+  });
+
   it("accounts for network errors and HTTP errors without retrying internally", async () => {
     const fixture = setup(translatedPlan);
     fixture.fetchImplementation.mockRejectedValueOnce(new Error("network failure"));
     await expect(fixture.processor.process(plan, fixture.options)).rejects.toMatchObject({ code: "TEXT_REQUEST_FAILED" });
     fixture.fetchImplementation.mockResolvedValueOnce(new Response("Unavailable", { status: 503 }));
-    await expect(fixture.processor.process(plan, fixture.options)).rejects.toMatchObject({ code: "TEXT_REQUEST_FAILED" });
+    await expect(fixture.processor.process(plan, fixture.options)).rejects.toMatchObject({ code: "TEXT_PROVIDER_UNAVAILABLE", retryable: true });
     expect(fixture.completed.map((result) => result.outcome)).toEqual(["network_error", "provider_error"]);
     expect(fixture.fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([429, 503, 408, 400, 401, 403])("classifies HTTP %s and preserves bounded Retry-After for scheduling", async status => {
+    const fixture = setup(translatedPlan);
+    fixture.fetchImplementation.mockResolvedValueOnce(new Response("Unavailable", { status, headers: { "retry-after": "120" } }));
+    await expect(fixture.processor.process(plan, fixture.options)).rejects.toMatchObject({
+      retryable: status === 429 || status === 503 || status === 408, retryAfterMs: 120_000
+    });
+    expect(fixture.completed[0]?.errorCode).toBe(status === 429 ? "TEXT_RATE_LIMITED" : status === 503 ? "TEXT_PROVIDER_UNAVAILABLE" : status === 408 ? "TEXT_REQUEST_TIMEOUT" : "TEXT_REQUEST_REJECTED");
+  });
+
+  it("bounds provider backoff and accepts seconds or an HTTP date", () => {
+    const now = Date.parse("2026-09-11T00:00:00Z");
+    expect(parseTextRetryAfter("120", now)).toBe(120_000);
+    expect(parseTextRetryAfter("Fri, 11 Sep 2026 00:02:00 GMT", now)).toBe(120_000);
+    expect(parseTextRetryAfter("999999999", now)).toBe(900_000);
+    expect(parseTextRetryAfter("invalid", now)).toBeUndefined();
+    expect(parseTextRetryAfter(null, now)).toBeUndefined();
+  });
+
+  it("distinguishes timeout and caller cancellation, with a separate summary deadline", async () => {
+    const timeouts: number[] = [];
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => { timeouts.push(ms); return originalTimeout(1); });
+    const fetchImplementation = vi.fn<typeof fetch>(async (_url, init) => new Promise((_resolve, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+    }));
+    try {
+      const processor = new OpenAITextProcessor({ apiKey: "fixture", fetchImplementation });
+      await expect(processor.process(plan)).rejects.toMatchObject({ code: "TEXT_REQUEST_TIMEOUT", retryable: true });
+      await expect(processor.process(summary)).rejects.toMatchObject({ code: "TEXT_REQUEST_TIMEOUT", retryable: true });
+      expect(timeouts).toEqual([45_000, 90_000]);
+      const controller = new AbortController(); controller.abort();
+      await expect(processor.process(summary, { signal: controller.signal })).rejects.toMatchObject({ code: "TEXT_REQUEST_CANCELLED", retryable: false });
+      expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    } finally { spy.mockRestore(); }
   });
 
   it.each([
@@ -221,7 +294,7 @@ describe("OpenAI text transformations", () => {
     expect(fixture.fetchImplementation).not.toHaveBeenCalled();
     const controller = new AbortController();
     controller.abort();
-    await expect(fixture.processor.process(plan, { signal: controller.signal })).rejects.toMatchObject({ code: "TEXT_REQUEST_FAILED" });
+    await expect(fixture.processor.process(plan, { signal: controller.signal })).rejects.toMatchObject({ code: "TEXT_REQUEST_CANCELLED" });
     expect(fixture.fetchImplementation).not.toHaveBeenCalled();
   });
 });
@@ -232,8 +305,8 @@ describe("mock and configuration", () => {
     await expect(processor.process(plan)).resolves.toMatchObject({ fields: [{
       id: "objective", text: "[MOCK ru: untranslated source] Ask about opening hours."
     }, expect.anything()] });
-    await expect(processor.process(summary)).resolves.toMatchObject({ answers: [{
-      certainty: "unknown", answer: "[MOCK: no factual summary has been generated]", sourceSegmentIds: []
+    await expect(processor.process(summary)).resolves.toMatchObject({ findings: [{
+      certainty: "unknown", text: "[MOCK: no factual summary has been generated]", sourceSegmentIds: []
     }], nextSteps: [] });
     await expect(new MockTextProcessor({ fixture: () => translatedPlan }).process(plan)).resolves.toEqual(translatedPlan);
   });

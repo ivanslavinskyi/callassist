@@ -90,7 +90,7 @@ describe("call API", () => {
     const created = await service.create({
         recipientName: "Cabinet Medical Geneve",
         phoneNumber: "+41225550123",
-        objective: "Prendre un rendez-vous de controle la semaine prochaine",
+        objective: "Demander les disponibilités pour un contrôle la semaine prochaine",
         assistantProfileId: "anna",
         representedPersonFirstName: "Nina",
         representedPersonLastName: "Keller",

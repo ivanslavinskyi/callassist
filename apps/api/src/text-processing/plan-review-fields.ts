@@ -1,4 +1,4 @@
-import type { CallCompilation } from "@callassist/contracts";
+import { getAppointmentAuthorization, type CallCompilation } from "@callassist/contracts";
 
 /** Execution controls, source facts, IDs and policy codes are never rewritten by translation. */
 export function planReviewFields(compilation: CallCompilation) {
@@ -20,6 +20,8 @@ export function planReviewFields(compilation: CallCompilation) {
     }
     compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText));
     compiled.blockingIssues.forEach((issue, index) => add(`blockingIssues.${index}.question`, issue.question));
+    const authorization = getAppointmentAuthorization(compiled);
+    if (authorization) add("appointmentAuthorization.serviceDescription", authorization.serviceDescription);
   }
   compilation.policyDecision.clarificationQuestions.forEach((text, index) => add(`policyDecision.clarificationQuestions.${index}`, text));
   return fields;

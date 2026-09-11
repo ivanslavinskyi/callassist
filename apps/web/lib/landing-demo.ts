@@ -36,9 +36,14 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
     outcomeLabel: "What you could learn",
     outcome: ["The form arrived.", "A copy of the passport is still missing.", "The municipal office says the copy can be submitted by email."],
     summary: {
-      answers: [
-        { question: "Did the form arrive?", answer: "The municipal office confirmed receipt.", certainty: "reported", sourceSegmentIds: ["demo-1"] },
-        { question: "What is missing?", answer: "A copy of the passport.", certainty: "reported", sourceSegmentIds: ["demo-1"] }
+      schemaVersion: 2,
+      overview: [
+        { label: "Form", text: "Received by the municipal office.", findingIds: ["goal"] },
+        { label: "Missing document", text: "A copy of the passport.", findingIds: ["question.0"] }
+      ],
+      findings: [
+        { id: "goal", label: "Form status", text: "The municipal office confirmed receipt.", certainty: "reported", sourceSegmentIds: ["demo-1"] },
+        { id: "question.0", label: "Missing document", text: "A copy of the passport.", certainty: "reported", sourceSegmentIds: ["demo-1"] }
       ],
       nextSteps: [{ text: "The office says the missing copy can be submitted by email.", sourceSegmentIds: ["demo-3"] }],
       unresolved: ["The email address was not specified in this excerpt."]
@@ -85,9 +90,14 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
     outcomeLabel: "Was Sie erfahren könnten",
     outcome: ["Das Formular ist angekommen.", "Eine Passkopie fehlt noch.", "Die Gemeinde sagt, dass die Kopie per E-Mail eingereicht werden kann."],
     summary: {
-      answers: [
-        { question: "Ist das Formular angekommen?", answer: "Die Gemeinde hat den Eingang bestätigt.", certainty: "reported", sourceSegmentIds: ["demo-1"] },
-        { question: "Was fehlt noch?", answer: "Eine Kopie des Passes.", certainty: "reported", sourceSegmentIds: ["demo-1"] }
+      schemaVersion: 2,
+      overview: [
+        { label: "Formular", text: "Bei der Gemeinde eingegangen.", findingIds: ["goal"] },
+        { label: "Fehlende Unterlage", text: "Eine Kopie des Passes.", findingIds: ["question.0"] }
+      ],
+      findings: [
+        { id: "goal", label: "Stand des Formulars", text: "Die Gemeinde hat den Eingang bestätigt.", certainty: "reported", sourceSegmentIds: ["demo-1"] },
+        { id: "question.0", label: "Fehlende Unterlage", text: "Eine Kopie des Passes.", certainty: "reported", sourceSegmentIds: ["demo-1"] }
       ],
       nextSteps: [{ text: "Laut Gemeinde kann die fehlende Kopie per E-Mail eingereicht werden.", sourceSegmentIds: ["demo-3"] }],
       unresolved: ["Die E-Mail-Adresse wurde in diesem Ausschnitt nicht genannt."]

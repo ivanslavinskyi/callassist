@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  BRIEF_COMPILER_VERSION,
+  isSupportedBriefCompilerVersion,
   callCompilationSchema,
   compiledCallBriefSchema,
   createCallBriefInputSchema,
@@ -46,7 +46,7 @@ export function hasValidCompilationSnapshotHash(
   try {
     const parsed = callCompilationSchema.parse(compilation);
     return (
-      parsed.compilerVersion === BRIEF_COMPILER_VERSION &&
+      isSupportedBriefCompilerVersion(parsed.compilerVersion) &&
       parsed.snapshotHash === createCompilationSnapshotHash(parsed)
     );
   } catch {

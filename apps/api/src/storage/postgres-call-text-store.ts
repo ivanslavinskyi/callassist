@@ -7,11 +7,11 @@ import {
   type FinalTranscriptSegment, type TextLanguage, type PlanSource
 } from "@callassist/contracts";
 import { encryptJson, decryptJson, type DataEncryptionMaterial } from "../security/encryption";
-import type { DurableJobLease } from "../jobs/durable-job";
+import type { DurableJob, DurableJobLease } from "../jobs/durable-job";
 import { CallRepositoryError } from "./call-repository";
 import {
   createTranscriptRevision, textPayloadHash, textArtifactMaximumRequests, textArtifactMaximumTargets,
-  textArtifactMaximumGenerations, textArtifactMaximumChunks,
+  textArtifactMaximumGenerations, textArtifactMaximumChunks, projectTextArtifactProgress,
   type EnqueueTextArtifactInput, type TextArtifactProviderReservationInput, type CallPlanReviewReceipt
 } from "./call-text-repository";
 
@@ -20,7 +20,8 @@ type ArtifactRow = {
   id: string; call_brief_id: string; kind: CallTextArtifact["kind"]; compilation_id: string | null;
   transcript_revision_id: string | null; source_hash: string; target_language: TextLanguage;
   generator_version: string; status: CallTextArtifact["status"]; payload_ciphertext: string | null;
-  payload_hash: string | null; failure_code: string | null; created_at: Date; updated_at: Date;
+  payload_hash: string | null; failure_code: string | null; created_at: Date; updated_at: Date; provider_request_count: number;
+  job_status?: DurableJob["status"] | null; job_generation?: number; job_error_code?: string | null; job_updated_at?: Date;
 };
 
 export class PostgresCallTextStore {
@@ -67,20 +68,24 @@ export class PostgresCallTextStore {
 
   async listTextArtifacts(callId:string) {
     await requireAvailableCall(this.sql,callId);
-    const rows = await this.sql<ArtifactRow[]>`SELECT * FROM call_text_artifacts WHERE call_brief_id=${callId} ORDER BY created_at,id`;
+    const rows = await this.sql<ArtifactRow[]>`SELECT a.*,j.status AS job_status,j.generation AS job_generation,j.last_error_code AS job_error_code,j.updated_at AS job_updated_at
+      FROM call_text_artifacts a LEFT JOIN durable_jobs j ON j.text_artifact_id=a.id WHERE a.call_brief_id=${callId} ORDER BY a.created_at,a.id`;
     return Promise.all(rows.map(row=>this.mapCurrent(row)));
   }
 
   async getTextArtifact(callId:string,artifactId:string) {
     await requireAvailableCall(this.sql,callId);
-    const [row] = await this.sql<ArtifactRow[]>`SELECT * FROM call_text_artifacts WHERE id=${artifactId} AND call_brief_id=${callId}`;
+    const [row] = await this.sql<ArtifactRow[]>`SELECT a.*,j.status AS job_status,j.generation AS job_generation,j.last_error_code AS job_error_code,j.updated_at AS job_updated_at
+      FROM call_text_artifacts a LEFT JOIN durable_jobs j ON j.text_artifact_id=a.id WHERE a.id=${artifactId} AND a.call_brief_id=${callId}`;
     return row ? this.mapCurrent(row) : null;
   }
 
   async mapCurrent(row:ArtifactRow) {
     const artifact = mapArtifact(row,this.key);
     if (artifact.status !== "cancelled" && !await sourceIsCurrent(this.sql,row)) artifact.status="stale";
-    return artifact;
+    // Both records come from one SQL snapshot: completion cannot appear as a failed stale artifact.
+    return projectTextArtifactProgress(artifact, row.job_status ? { status:row.job_status,generation:row.job_generation!,
+      lastErrorCode:row.job_error_code??null,updatedAt:row.job_updated_at!.toISOString() } : null, row.provider_request_count);
   }
 
   async enqueueTextArtifact(input:EnqueueTextArtifactInput) {
@@ -148,14 +153,15 @@ export class PostgresCallTextStore {
       const [row]=await tx<ArtifactRow[]>`SELECT * FROM call_text_artifacts WHERE id=${id} AND call_brief_id=${callId} FOR UPDATE`;
       if(!row) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");
       if(!await sourceIsCurrent(tx,row)) throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
-      if(row.status==="ready"||row.status==="queued"||row.status==="processing") return mapArtifact(row,this.key);
-      if(row.status!=="failed") throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
+      const projected=projectTextArtifactProgress(mapArtifact(row,this.key),await readArtifactJob(tx,id),row.provider_request_count);
+      if(["ready","queued","processing"].includes(projected.status)) return projected;
+      if(!projected.retryable) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
       const updated=await tx`UPDATE durable_jobs SET status='queued',generation=generation+1,attempt_count=0,run_after=now(),
         lease_owner=NULL,leased_at=NULL,lease_expires_at=NULL,last_error_code=NULL,completed_at=NULL,updated_at=now()
-        WHERE text_artifact_id=${id} AND status IN ('dead_letter','succeeded') AND generation<${textArtifactMaximumGenerations}`;
+        WHERE text_artifact_id=${id} AND status='dead_letter' AND generation<${textArtifactMaximumGenerations}`;
       if(updated.count!==1) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
-      await tx`UPDATE call_text_artifacts SET status='queued',failure_code=NULL,updated_at=now() WHERE id=${id}`;
-      return {...mapArtifact(row,this.key),status:"queued" as const,failureCode:null};
+      const [queued]=await tx<ArtifactRow[]>`UPDATE call_text_artifacts SET status='queued',failure_code=NULL,updated_at=now() WHERE id=${id} RETURNING *`;
+      return mapArtifact(queued!,this.key);
     });
   }
 
@@ -299,11 +305,17 @@ async function requireTextLease(tx:postgres.TransactionSql,id:string,lease:Durab
   return row;
 }
 
+async function readArtifactJob(sql:Sql,id:string) {
+  const [job]=await sql<{status:DurableJob["status"];generation:number;lastErrorCode:string|null;updatedAt:Date}[]>`
+    SELECT status,generation,last_error_code AS "lastErrorCode",updated_at AS "updatedAt" FROM durable_jobs WHERE text_artifact_id=${id}`;
+  return job ? {...job,updatedAt:job.updatedAt.toISOString()} : null;
+}
+
 function mapArtifact(row:ArtifactRow,key:DataEncryptionMaterial) {
   return callTextArtifactSchema.parse({id:row.id,callId:row.call_brief_id,kind:row.kind,compilationId:row.compilation_id,
     transcriptRevisionId:row.transcript_revision_id,sourceHash:row.source_hash,targetLanguage:row.target_language,generatorVersion:row.generator_version,
     status:row.status,payload:row.payload_ciphertext?decryptJson(row.payload_ciphertext,key):null,payloadHash:row.payload_hash,
-    failureCode:row.failure_code,createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString()});
+    failureCode:row.failure_code,retryable:false,createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString()});
 }
 
 export function parseArtifactPayload(kind:CallTextArtifact["kind"],payload:unknown) {

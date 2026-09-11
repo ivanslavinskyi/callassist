@@ -232,6 +232,7 @@ export function CreateCallForm({
         brief = await saveCallBrief(input, undefined, languagePreferences);
       } else {
         const storage = getCallPreparationSessionStorage();
+        let activeAttemptKey = draftRef.current.preparationAttempt?.idempotencyKey;
         brief = await prepareCallBriefCreation({
           input,
           languagePreferences,
@@ -247,10 +248,12 @@ export function CreateCallForm({
             if (mounted.current) updateDraft({ preparationAttempt: attempt });
             else {
               const current = draftStore.get(owner, draftId);
-              if (current?.preparationAttempt?.idempotencyKey === attempt.idempotencyKey) {
+              if (current && (current.preparationAttempt?.idempotencyKey === activeAttemptKey ||
+                current.preparationAttempt?.idempotencyKey === attempt.idempotencyKey)) {
                 draftStore.set(owner, draftId, { ...current, preparationAttempt: attempt });
               }
             }
+            activeAttemptKey = attempt.idempotencyKey;
           }
         });
       }
@@ -258,6 +261,7 @@ export function CreateCallForm({
       setError(getCallPreparationErrorMessage(error, {
         generic: messages.form.preparationError,
         unavailable: messages.form.preparationUnavailable,
+        pending: messages.form.preparationPending,
         invalid: messages.form.preparationInvalid,
         notFound: messages.form.preparationNotFound,
         notEditable: messages.form.preparationNotEditable,

@@ -47,11 +47,15 @@ export function validateTextProcessingInput(input: TextProcessingInput): void {
     }
     characterCount = input.segments.reduce((sum, segment) => sum + segment.id.length + segment.text.length, 0);
     if (input.kind === "call_summary") {
-      if (!Array.isArray(input.questions) || input.questions.length > 30 ||
-        input.questions.some((question) => !nonempty(question, 4000))) {
+      if (!Array.isArray(input.checks) || input.checks.length > 30 || !input.checks.length ||
+        input.checks.some(check => !nonempty(check.id, 160) || !nonempty(check.text, 12000)) ||
+        new Set(input.checks.map(check => check.id)).size !== input.checks.length ||
+        !input.context || [input.context.objective, input.context.taskType, input.context.recipient, input.context.representedPerson].some(value => !nonempty(value, 12000)) ||
+        (input.extraction && !callSummaryPayloadSchema.safeParse(input.extraction).success)) {
         throw new TextProcessingError("TEXT_INPUT_INVALID");
       }
-      characterCount += input.questions.reduce((sum, question) => sum + question.length, 0);
+      characterCount += input.checks.reduce((sum, check) => sum + check.id.length + check.text.length, 0) +
+        JSON.stringify(input.context).length + (input.extraction ? JSON.stringify(input.extraction).length : 0);
     }
   } else {
     throw new TextProcessingError("TEXT_INPUT_INVALID");
@@ -79,46 +83,33 @@ export function validateTextProcessingOutput(
     return transcriptTranslationPayloadSchema.parse({ segments, text: segments.map((segment) => segment.text).join("\n") });
   }
   if (input.kind !== "call_summary") invalid();
-  keys(payload, ["answers", "nextSteps", "unresolved"]);
-  if (!Array.isArray(payload.answers) || payload.answers.length !== input.questions.length ||
-    !Array.isArray(payload.nextSteps) || payload.nextSteps.length > 30 ||
-    !Array.isArray(payload.unresolved) || payload.unresolved.length > 30 ||
-    payload.unresolved.some((item) => !nonempty(item, 4000))) invalid();
+  const parsed = callSummaryPayloadSchema.safeParse(payload);
+  if (!parsed.success || parsed.data.findings.length !== input.checks.length) invalid();
+  const summary = parsed.data;
+  if (input.extraction && ["findings", "nextSteps", "unresolved"].some(key =>
+    JSON.stringify(summary[key as keyof typeof summary]) !== JSON.stringify(input.extraction![key as keyof typeof summary]))) invalid();
   const sourceIds = new Set(input.segments.map((segment) => segment.id));
   const sourceTexts = new Map(input.segments.map((segment) => [segment.id, segment.text]));
-  const references = (value: unknown, required: boolean): string[] => {
-    if (!Array.isArray(value) || value.length > 30 || (required && value.length === 0) ||
-      value.some((id) => typeof id !== "string" || !sourceIds.has(id)) ||
-      new Set(value).size !== value.length) invalid();
-    return value as string[];
+  const evidence = (ids: string[]) => {
+    if (ids.some(id => !sourceIds.has(id))) invalid();
+    return ids.map(id => sourceTexts.get(id)!).join("\n");
   };
-  const answers = payload.answers.map((entry, index) => {
-    const answer = record(entry);
-    keys(answer, ["questionId", "question", "answer", "certainty", "sourceSegmentIds"]);
-    if (answer.questionId !== `question.${index}` || !nonempty(answer.question, 4000) ||
-      !nonempty(answer.answer, 8000) ||
-      !["reported", "conditional", "unknown"].includes(String(answer.certainty))) invalid();
-    const citedIds = references(answer.sourceSegmentIds, answer.certainty !== "unknown");
-    assertGroundedIdentifiers(answer.question as string, input.questions[index]!);
-    assertGroundedIdentifiers(answer.answer as string, [input.questions[index]!, ...citedIds.map((id) => sourceTexts.get(id)!)].join("\n"));
-    return {
-      question: answer.question as string,
-      answer: answer.answer as string,
-      certainty: answer.certainty as "reported" | "conditional" | "unknown",
-      sourceSegmentIds: citedIds
-    };
-  });
-  const nextSteps = payload.nextSteps.map((entry) => {
-    const step = record(entry);
-    keys(step, ["text", "sourceSegmentIds"]);
-    if (!nonempty(step.text, 4000)) invalid();
-    const citedIds = references(step.sourceSegmentIds, true);
-    assertGroundedIdentifiers(step.text as string, citedIds.map((id) => sourceTexts.get(id)!).join("\n"));
-    return { text: step.text as string, sourceSegmentIds: citedIds };
-  });
-  const fullSource = [...input.questions, ...input.segments.map((segment) => segment.text)].join("\n");
-  for (const item of payload.unresolved) assertGroundedIdentifiers(item as string, fullSource);
-  return callSummaryPayloadSchema.parse({ answers, nextSteps, unresolved: payload.unresolved });
+  for (const [index, finding] of summary.findings.entries()) {
+    if (finding.id !== input.checks[index]!.id) invalid();
+    const cited = evidence(finding.sourceSegmentIds);
+    const unknownContext = finding.certainty === "unknown" ? input.checks[index]!.text : "";
+    assertGroundedIdentifiers(`${finding.label}\n${finding.text}`, `${cited}\n${unknownContext}`);
+  }
+  for (const item of summary.overview) {
+    const findings = summary.findings.filter(finding => item.findingIds.includes(finding.id));
+    const cited = evidence([...new Set(findings.flatMap(finding => finding.sourceSegmentIds))]);
+    // A shortened result must retain the same evidence boundary as its detailed findings.
+    assertGroundedIdentifiers(`${item.label ?? ""}\n${item.text}`, cited);
+  }
+  for (const step of summary.nextSteps) assertGroundedIdentifiers(step.text, evidence(step.sourceSegmentIds));
+  const fullSource = [...input.checks.map(check => check.text), ...input.segments.map(segment => segment.text)].join("\n");
+  for (const item of summary.unresolved) assertGroundedIdentifiers(item, fullSource);
+  return summary;
 }
 
 function orderedTranslations(value: unknown, source: Array<{ id: string; text: string }>) {
@@ -155,8 +146,10 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
   if (input.kind === "plan_review" || input.kind === "clarification_review") return object({ fields: translatedItems });
   if (input.kind === "transcript_translation") return object({ segments: translatedItems });
   return object({
-    answers: { type: "array", items: object({
-      questionId: text, question: text, answer: text,
+    schemaVersion: { type: "integer", enum: [2] },
+    overview: { type: "array", items: object({ label: { type: ["string", "null"] }, text, findingIds: stringList }) },
+    findings: { type: "array", items: object({
+      id: text, label: text, text,
       certainty: { type: "string", enum: ["reported", "conditional", "unknown"] },
       sourceSegmentIds: stringList
     }) },
@@ -166,6 +159,5 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
 }
 
 export function providerTextInput(input: TextProcessingInput) {
-  if (input.kind !== "call_summary") return input;
-  return { ...input, questions: input.questions.map((text, index) => ({ id: `question.${index}`, text })) };
+  return input;
 }

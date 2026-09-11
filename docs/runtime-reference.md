@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated for the language workflow and text-artifact runtime on 2026-09-09. Configuration values here describe
+Updated for the language workflow and preparation retry deadlines on 2026-09-10. Configuration values here describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
 
@@ -98,11 +98,12 @@ before treating the direct-peer IP as the individual caller's address (R09).
 | `OPENAI_API_KEY` | Required for real Realtime/ASR and OpenAI compiler |
 | `BRIEF_COMPILER_DRIVER` | Example `mock`; factory infers `openai` when key exists if unset. API and worker production validation both require explicit `openai`; missing/mock is rejected |
 | `OPENAI_BRIEF_COMPILER_MODEL` | `gpt-5.6` |
-| `OPENAI_BRIEF_COMPILER_TIMEOUT_MS` | `90000` total compiler timeout |
-| `OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS` | `25000` per compiler request |
+| `OPENAI_BRIEF_COMPILER_TIMEOUT_MS` | `120000` total compiler timeout per worker attempt; generation leaves up to 25 seconds for final moderation |
+| `OPENAI_BRIEF_COMPILER_REQUEST_TIMEOUT_MS` | Unset: `60000` for plan generation, `25000` for moderation. Explicit values override both stages; every request and response-body read also obeys the remaining deadline |
 | `TEXT_PROCESSOR_DRIVER` | Falls back to `BRIEF_COMPILER_DRIVER`, then `mock`; production generation requires `openai` |
 | `TEXT_PROCESSOR_MODEL` | `gpt-5.6`; model identity is part of the artifact generator version |
-| `TEXT_PROCESSOR_TIMEOUT_MS` | `45000` bounded text-processing request timeout |
+| `TEXT_PROCESSOR_TIMEOUT_MS` | `45000` bounded translation/review request timeout (1–120000 ms) |
+| `TEXT_SUMMARY_TIMEOUT_MS` | `90000` bounded summary request timeout (1–120000 ms); independent of UI and call languages |
 | `TEXT_ARTIFACT_GENERATION_ENABLED` | Explicit `true`/`false`; absent means enabled for mock and disabled for OpenAI. Disabling generation preserves reads of retained artifacts |
 | `TEXT_ARTIFACT_DIRECTIONS` | Comma-separated `kind:source:target`, e.g. `plan_review:de:ru,transcript_translation:*:ru,call_summary:*:ru`. Real provider has no enabled directions when empty. Final transcripts can contain mixed/unknown languages, so transcript translation and summary use source `*`; do not infer it from the call locale |
 | `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
@@ -127,6 +128,16 @@ revision plus worker/generation/attempt. Compiler
 requests share a cumulative preparation budget; transcription retries reuse persisted
 successful chunks. Provider usage, reported costs and versioned calculated rates are
 separate from configured minute-based fallback estimates.
+
+Plan preparation distinguishes a provider failure from a policy rejection. The
+browser polls each explicit submission for up to two minutes between responses;
+reaching that deadline leaves the server operation running and shows a pending
+message. Retrying unchanged input reuses its operation key. Only a server-confirmed
+terminal failure retires that key. An explicit resubmit of an older uncertain
+operation may create one replacement after confirming failure; a failed fresh
+operation stops. Creation, editing and clarification answers use this recovery
+rule. No retry approves a plan or starts a call. Existing configured timeout values
+remain overrides; updating code alone does not replace an explicit 25-second value.
 
 ## Language and generated-text endpoints
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  CallPreparationFailedError,
   acceptOnboarding,
   accessAdminCallSensitiveContent,
   approveAndStartCall,
@@ -72,6 +73,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("API client headers", () => {
@@ -1193,6 +1195,66 @@ describe("API client headers", () => {
     });
   });
 
+  it.each(["create", "recompile"] as const)("preserves a deferred %s preparation failure from the polling response", async (operation) => {
+    vi.useFakeTimers();
+    const preparation = {
+      id: "preparation-id", status: "processing", callBriefId: null, failureCode: null
+    };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(preparation), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...preparation, status: "failed", failureCode: "BRIEF_COMPILER_UNAVAILABLE"
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      recipientName: "Elena", phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most", assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina", representedPersonLastName: "Keller",
+      locale: "de-CH" as const, allowLanguageSwitch: false, allowedFacts: []
+    };
+    const result = (operation === "create"
+      ? createCallBrief(input, "operation-id")
+      : recompileCallBrief("call-id", input, "operation-id")).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(500);
+    const error = await result;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toBeInstanceOf(CallPreparationFailedError);
+    expect(error).toMatchObject({ code: "BRIEF_COMPILER_UNAVAILABLE" });
+    expect(getCallPreparationErrorMessage(error, { unavailable: "Vorübergehend nicht verfügbar" }))
+      .toBe("Vorübergehend nicht verfügbar");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe(operation === "create" ? "POST" : "PUT");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/call-preparations/preparation-id");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
+  });
+
+  it("reports a still-processing preparation as pending at the browser deadline without creating another operation", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      id: "preparation-id", status: "processing", callBriefId: null, failureCode: null
+    }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = createCallBrief({
+      recipientName: "Elena", phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most", assistantProfileId: "sebastian",
+      representedPersonFirstName: "Nina", representedPersonLastName: "Keller",
+      locale: "de-CH", allowLanguageSwitch: false, allowedFacts: []
+    }, "operation-id").catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(120_500);
+    const error = await result;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).not.toBeInstanceOf(CallPreparationFailedError);
+    expect(error).toMatchObject({ code: "CALL_PREPARATION_TIMEOUT" });
+    expect(getCallPreparationErrorMessage(error, { pending: "Vorbereitung läuft noch" }))
+      .toBe("Vorbereitung läuft noch");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(fetchMock.mock.calls.slice(1).every(([url, init]) =>
+      String(url).endsWith("/api/call-preparations/preparation-id") && init?.method === undefined
+    )).toBe(true);
+  });
+
   it("preserves typed API errors and maps call-planner failures to actionable copy", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -1229,8 +1291,11 @@ describe("API client headers", () => {
       status: 502
     });
     expect(getCallPreparationErrorMessage(caught)).toBe(
-      "SHPROHLI could not prepare this request safely. Edit the request and try again."
+      "The call plan could not be prepared. Your entries are preserved. Try again."
     );
+    expect(getCallPreparationErrorMessage(caught, { generic: "Lokalisierter Vorbereitungsfehler" }))
+      .toBe("Lokalisierter Vorbereitungsfehler");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("explains the Swiss-only policy for a legacy start rejection", () => {

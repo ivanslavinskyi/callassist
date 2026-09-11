@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CallRepository } from "../storage/call-repository";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import {
+  DurableJobExecutionError,
   durableJobErrorCode,
   durableJobErrorIsRetryable,
   durableJobRetryDelayMs,
@@ -212,7 +213,7 @@ export class DurableJobWorker {
         durableJobErrorCode(error),
         now.toISOString(),
         new Date(
-          now.getTime() + durableJobRetryDelayMs(job.attemptCount)
+          now.getTime() + Math.max(durableJobRetryDelayMs(job.attemptCount), error instanceof DurableJobExecutionError ? error.retryAfterMs : 0)
         ).toISOString(),
         durableJobErrorIsRetryable(error)
       );

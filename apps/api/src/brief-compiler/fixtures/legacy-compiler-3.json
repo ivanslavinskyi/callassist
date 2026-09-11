@@ -1,0 +1,86 @@
+{
+  "rawBrief": {
+    "recipientName": "Municipal Office",
+    "phoneNumber": "+41525550123",
+    "objective": "Ask whether the submitted form was received",
+    "assistantProfileId": "sebastian",
+    "assistanceReason": "none",
+    "context": "",
+    "locale": "en-GB",
+    "audioRetentionDays": 7,
+    "allowLanguageSwitch": false,
+    "allowedFacts": [],
+    "representedPersonFirstName": "QA",
+    "representedPersonLastName": "Tester",
+    "resultHandling": "capture_in_callassist",
+    "addressingMode": "formal",
+    "tonePreference": "auto",
+    "voicemailPolicy": "do_not_leave_details",
+    "deliveryInstruction": "",
+    "clarificationAnswers": [],
+    "representedPerson": "QA Tester"
+  },
+  "compiledBrief": {
+    "schemaVersion": "3",
+    "callLocale": "en-GB",
+    "sourceLanguage": "und",
+    "taskType": "information_request",
+    "tone": "neutral",
+    "addressingStyle": "formal",
+    "resultHandling": "capture_in_callassist",
+    "voicemailAction": "hang_up",
+    "refusalBehavior": "respect_and_end",
+    "localizedObjective": "Ask whether the submitted form was received",
+    "opening": {
+      "recipientAddress": "Thank you, Municipal Office.",
+      "purposeStatement": "I am calling on behalf of QA Tester to briefly discuss the following: Ask whether the submitted form was received",
+      "readinessQuestion": "Is now a convenient time to talk about it briefly?"
+    },
+    "backgroundSummary": "",
+    "orderedQuestions": [
+      {
+        "text": "Ask whether the submitted form was received",
+        "purpose": "Complete the operator's stated objective",
+        "required": true
+      }
+    ],
+    "conditionalFollowUps": [],
+    "successCriteria": [
+      "The recipient provides a clear answer to the question"
+    ],
+    "unresolvedCriteria": [
+      "The recipient cannot provide a clear answer"
+    ],
+    "stopConditions": [
+      "The objective is resolved",
+      "The recipient asks to end the call"
+    ],
+    "approvedFacts": [],
+    "prohibitedActions": [
+      "Do not invent facts or make commitments outside the approved brief"
+    ],
+    "namedEntities": [],
+    "riskCategories": [],
+    "assumptions": [
+      "respect_refusal_and_end",
+      "spoken_answers_saved_in_callassist",
+      "tone_inferred",
+      "no_detailed_voicemail"
+    ],
+    "blockingIssues": []
+  },
+  "policyDecision": {
+    "policyVersion": "callassist-policy-2",
+    "status": "ready_for_review",
+    "riskLevel": "low",
+    "reasonCodes": [],
+    "clarificationQuestions": []
+  },
+  "compilerModel": "deterministic-dev",
+  "compilerResponseId": null,
+  "revision": 1,
+  "compilerVersion": "brief-compiler-3",
+  "compiledAt": "2026-09-09T10:00:00.000Z",
+  "approvedAt": "2026-09-09T10:01:00.000Z",
+  "snapshotHash": "4484e8501f8e3ce4aeedf24269d85bafc87f1ad45a0ced76efdd4c484712585e"
+}

@@ -38,6 +38,10 @@ export function projectPlanReview(compilation: CallCompilation, source: PlanSour
     }
     compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText, (text) => { fact.callLanguageText = text; }));
     compiled.blockingIssues.forEach((issue, index) => add(`blockingIssues.${index}.question`, issue.question, (text) => { issue.question = text; }));
+    const authorization = "appointmentAuthorization" in compiled ? compiled.appointmentAuthorization : null;
+    if (authorization) add("appointmentAuthorization.serviceDescription", authorization.serviceDescription, (text) => {
+      authorization.serviceDescription = text;
+    });
   }
   projected.policyDecision.clarificationQuestions.forEach((question, index) => add(`policyDecision.clarificationQuestions.${index}`, question, (text) => {
     projected.policyDecision.clarificationQuestions[index] = text;

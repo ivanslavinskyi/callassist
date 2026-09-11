@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { appointmentAuthorizationSchema } from "./appointment";
 import { swissDestinationPhoneSchema } from "./phone";
 import { callLanguageContextSchema } from "./languages";
 import { callTextArtifactSchema, finalTranscriptRevisionSchema, planSourceSchema } from "./call-text-artifact";
@@ -372,9 +373,14 @@ export type NormalizedCallBriefInput = ReturnType<
   typeof normalizeCreateCallBriefInput
 >;
 
-export const CALL_BRIEF_SCHEMA_VERSION = "3" as const;
-export const BRIEF_COMPILER_VERSION = "brief-compiler-3" as const;
-export const CALL_POLICY_VERSION = "callassist-policy-2" as const;
+export const CALL_BRIEF_SCHEMA_VERSION = "4" as const;
+export const BRIEF_COMPILER_VERSION = "brief-compiler-5" as const;
+export const PREVIOUS_BRIEF_COMPILER_VERSION = "brief-compiler-4" as const;
+export const CALL_POLICY_VERSION = "callassist-policy-3" as const;
+export const LEGACY_BRIEF_COMPILER_VERSION = "brief-compiler-3" as const;
+export function isSupportedBriefCompilerVersion(value: unknown) {
+  return value === BRIEF_COMPILER_VERSION || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === LEGACY_BRIEF_COMPILER_VERSION;
+}
 
 export const callTaskTypeSchema = z.enum([
   "information_request",
@@ -461,8 +467,8 @@ export const callBlockingIssueSchema = z.object({
 });
 export type CallBlockingIssue = z.infer<typeof callBlockingIssueSchema>;
 
-export const compiledCallBriefSchema = z.object({
-  schemaVersion: z.literal(CALL_BRIEF_SCHEMA_VERSION),
+export const legacyCompiledCallBriefSchema = z.object({
+  schemaVersion: z.literal("3"),
   callLocale: callLocaleSchema,
   sourceLanguage: z.string().trim().min(2).max(35),
   taskType: callTaskTypeSchema,
@@ -486,16 +492,22 @@ export const compiledCallBriefSchema = z.object({
   assumptions: z.array(callPlanAssumptionCodeSchema).max(6),
   blockingIssues: z.array(callBlockingIssueSchema).max(6)
 });
+export const currentCompiledCallBriefSchema = legacyCompiledCallBriefSchema.extend({
+  schemaVersion: z.literal(CALL_BRIEF_SCHEMA_VERSION),
+  appointmentAuthorization: appointmentAuthorizationSchema.nullable()
+});
+export const compiledCallBriefSchema = z.discriminatedUnion("schemaVersion", [legacyCompiledCallBriefSchema, currentCompiledCallBriefSchema]);
 export type CompiledCallBrief = z.infer<typeof compiledCallBriefSchema>;
+export type CurrentCompiledCallBrief = z.infer<typeof currentCompiledCallBriefSchema>;
 
-export const APPROVED_EXECUTION_SNAPSHOT_VERSION = 1 as const;
+export const APPROVED_EXECUTION_SNAPSHOT_VERSION = 2 as const;
 
 /**
  * The task-specific contract accepted by Realtime after preparation approval.
  * Audit-only compiler fields (including fact sourceText) and raw form fields are
  * deliberately excluded so they cannot be interpolated into runtime prompts.
  */
-export const approvedExecutionPlanSchema = z.object({
+export const legacyApprovedExecutionPlanSchema = z.object({
   callLocale: callLocaleSchema,
   taskType: callTaskTypeSchema,
   tone: z.enum(["formal", "neutral", "friendly"]),
@@ -514,6 +526,10 @@ export const approvedExecutionPlanSchema = z.object({
   approvedFacts: z.array(z.string().trim().min(1).max(400)).max(40),
   prohibitedActions: z.array(z.string().trim().min(2).max(400)).min(1).max(12)
 }).strict();
+export const currentApprovedExecutionPlanSchema = legacyApprovedExecutionPlanSchema.extend({
+  appointmentAuthorization: appointmentAuthorizationSchema.nullable()
+}).strict();
+export const approvedExecutionPlanSchema = z.union([currentApprovedExecutionPlanSchema, legacyApprovedExecutionPlanSchema]);
 export type ApprovedExecutionPlan = z.infer<
   typeof approvedExecutionPlanSchema
 >;
@@ -530,15 +546,22 @@ export type ApprovedExecutionRuntime = z.infer<
   typeof approvedExecutionRuntimeSchema
 >;
 
-export const approvedExecutionSnapshotSchema = z.object({
-  version: z.literal(APPROVED_EXECUTION_SNAPSHOT_VERSION),
+export const legacyApprovedExecutionSnapshotSchema = z.object({
+  version: z.literal(1),
   callBriefId: z.string().uuid(),
   compilationRevision: z.number().int().positive(),
   compilationSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
   approvedAt: z.string().datetime(),
-  plan: approvedExecutionPlanSchema,
+  plan: legacyApprovedExecutionPlanSchema,
   runtime: approvedExecutionRuntimeSchema
-}).strict().superRefine((snapshot, context) => {
+}).strict();
+export const currentApprovedExecutionSnapshotSchema = legacyApprovedExecutionSnapshotSchema.extend({
+  version: z.literal(APPROVED_EXECUTION_SNAPSHOT_VERSION),
+  plan: currentApprovedExecutionPlanSchema
+}).strict();
+export const approvedExecutionSnapshotSchema = z.discriminatedUnion("version", [
+  legacyApprovedExecutionSnapshotSchema, currentApprovedExecutionSnapshotSchema
+]).superRefine((snapshot, context) => {
   const { allowLanguageSwitch, fallbackLocale } = snapshot.runtime;
   if (allowLanguageSwitch && !fallbackLocale) {
     context.addIssue({
@@ -588,7 +611,8 @@ export function createApprovedExecutionPlan(
     approvedFacts: compiled.approvedFacts.map(
       ({ callLanguageText }) => callLanguageText
     ),
-    prohibitedActions: compiled.prohibitedActions
+    prohibitedActions: compiled.prohibitedActions,
+    ...(compiled.schemaVersion === "4" ? { appointmentAuthorization: compiled.appointmentAuthorization } : {})
   });
 }
 
@@ -613,13 +637,15 @@ export const policyReasonCodeSchema = z.enum([
 ]);
 export type PolicyReasonCode = z.infer<typeof policyReasonCodeSchema>;
 
-export const policyDecisionSchema = z.object({
-  policyVersion: z.literal(CALL_POLICY_VERSION),
+export const legacyPolicyDecisionSchema = z.object({
+  policyVersion: z.literal("callassist-policy-2"),
   status: policyDecisionStatusSchema,
   riskLevel: z.enum(["low", "high"]),
   reasonCodes: z.array(policyReasonCodeSchema).max(6),
   clarificationQuestions: z.array(z.string().trim().min(2).max(500)).max(10)
 });
+export const currentPolicyDecisionSchema = legacyPolicyDecisionSchema.extend({ policyVersion: z.literal(CALL_POLICY_VERSION) });
+export const policyDecisionSchema = z.discriminatedUnion("policyVersion", [legacyPolicyDecisionSchema, currentPolicyDecisionSchema]);
 export type PolicyDecision = z.infer<typeof policyDecisionSchema>;
 
 export const callCompilationSchema = z.object({
@@ -627,12 +653,18 @@ export const callCompilationSchema = z.object({
   compiledBrief: compiledCallBriefSchema.nullable(),
   policyDecision: policyDecisionSchema,
   compilerModel: z.string().trim().min(1).max(120),
-  compilerVersion: z.literal(BRIEF_COMPILER_VERSION),
+  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, PREVIOUS_BRIEF_COMPILER_VERSION, BRIEF_COMPILER_VERSION]),
   compilerResponseId: z.string().trim().min(1).max(160).nullable(),
   revision: z.number().int().positive(),
   compiledAt: z.string().datetime(),
   approvedAt: z.string().datetime().nullable(),
   snapshotHash: z.string().regex(/^[a-f0-9]{64}$/)
+}).superRefine((compilation, context) => {
+  const legacy = compilation.compilerVersion === LEGACY_BRIEF_COMPILER_VERSION;
+  if ((compilation.compiledBrief && compilation.compiledBrief.schemaVersion !== (legacy ? "3" : "4")) ||
+    compilation.policyDecision.policyVersion !== (legacy ? "callassist-policy-2" : CALL_POLICY_VERSION)) {
+    context.addIssue({ code: "custom", message: "Compilation versions must belong to the same supported format" });
+  }
 });
 export type CallCompilation = z.infer<typeof callCompilationSchema>;
 
@@ -785,7 +817,7 @@ export function createApprovedExecutionSnapshot(
   }
 
   return approvedExecutionSnapshotSchema.parse({
-    version: APPROVED_EXECUTION_SNAPSHOT_VERSION,
+    version: compiled.schemaVersion === "3" ? 1 : APPROVED_EXECUTION_SNAPSHOT_VERSION,
     callBriefId: snapshot.brief.id,
     compilationRevision: compilation.revision,
     compilationSnapshotHash: compilation.snapshotHash,

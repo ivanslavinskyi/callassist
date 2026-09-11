@@ -10,14 +10,17 @@ import type { OpenAITextTokenUsage } from "../brief-compiler/brief-compiler";
 import { MockTextProcessor } from "./mock-text-processor";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
-export const TEXT_PROCESSOR_VERSION = "text-processing-v1";
+export const TEXT_PROCESSOR_VERSION = "text-processing-v2";
+export const SUMMARY_PROCESSOR_VERSION = "summary-v2";
 export const MAX_TEXT_PROCESSING_SOURCE_CHARACTERS = 60_000;
 
 export type TextProcessingInput = (
   | { kind: "plan_review"; fields: Array<{ id: string; text: string }> }
   | { kind: "clarification_review"; fields: Array<{ id: string; text: string }> }
   | { kind: "transcript_translation"; segments: SourceSegment[] }
-  | { kind: "call_summary"; segments: SourceSegment[]; questions: string[] }
+  | { kind: "call_summary"; segments: SourceSegment[]; checks: Array<{ id: string; text: string }>;
+      context: { objective: string; taskType: string; recipient: string; representedPerson: string };
+      extraction?: CallSummaryPayload }
 ) & { targetLanguage: TextLanguage };
 
 export type TextProcessingPayload = PlanReviewPayload | TranscriptTranslationPayload | CallSummaryPayload;
@@ -40,6 +43,7 @@ export type TextProcessingProviderRequestResult = {
   completedAt: string;
   durationMs: number;
   usage: OpenAITextTokenUsage | null;
+  errorCode?: TextProcessingError["code"] | null;
 };
 export type TextProcessingRunOptions = {
   maxProviderRequests?: number;
@@ -55,18 +59,33 @@ export interface TextProcessor {
   process(input: TextProcessingInput, options?: TextProcessingRunOptions): Promise<TextProcessingPayload>;
 }
 
+/** Summary changes must not invalidate queued translations or their reusable chunks. */
+export function textGeneratorVersion(processor: Pick<TextProcessor, "generatorVersion">, kind: TextArtifactKind) {
+  return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:${processor.generatorVersion}` : processor.generatorVersion;
+}
+
 export class TextProcessingError extends Error {
+  readonly retryAfterMs?: number;
+  get retryable() {
+    return ["TEXT_REQUEST_FAILED", "TEXT_REQUEST_TIMEOUT", "TEXT_PROVIDER_UNAVAILABLE", "TEXT_RATE_LIMITED", "TEXT_RESPONSE_INVALID"].includes(this.code);
+  }
   constructor(
     readonly code:
       | "TEXT_INPUT_INVALID"
       | "TEXT_INPUT_TOO_LARGE"
       | "TEXT_REQUEST_BUDGET_EXHAUSTED"
       | "TEXT_REQUEST_FAILED"
+      | "TEXT_REQUEST_TIMEOUT"
+      | "TEXT_REQUEST_CANCELLED"
+      | "TEXT_PROVIDER_UNAVAILABLE"
+      | "TEXT_RATE_LIMITED"
+      | "TEXT_REQUEST_REJECTED"
       | "TEXT_RESPONSE_INVALID",
-    options?: { cause?: unknown }
+    options?: { cause?: unknown; retryAfterMs?: number }
   ) {
     super(code, options);
     this.name = "TextProcessingError";
+    this.retryAfterMs = options?.retryAfterMs;
   }
 }
 
@@ -87,6 +106,7 @@ export function createTextProcessorFromEnv(
   return new OpenAITextProcessor({
     apiKey,
     model: environment.TEXT_PROCESSOR_MODEL?.trim() || environment.OPENAI_BRIEF_COMPILER_MODEL,
-    timeoutMs
+    timeoutMs,
+    summaryTimeoutMs: environment.TEXT_SUMMARY_TIMEOUT_MS?.trim() ? Number(environment.TEXT_SUMMARY_TIMEOUT_MS) : undefined
   });
 }

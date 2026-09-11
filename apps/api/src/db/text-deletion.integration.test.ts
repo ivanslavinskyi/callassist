@@ -78,8 +78,13 @@ it.each(["pending", "completed"] as const)("does not restore translated payload 
     const brief = await repository.create(input, compilation, userId);
     const source = await repository.getPlanSource(brief.id);
     const artifact = await callService.textArtifacts.requestPlanReview(brief.id, { ...source, targetLanguage: "ru" });
-    const job = await repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: "deletion-test",
-      now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+    // DB now() has sub-millisecond precision; the first application timestamp can be just earlier.
+    const job = await vi.waitFor(async () => {
+      const claimed = await repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: "deletion-test",
+        now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+      expect(claimed).not.toBeNull();
+      return claimed;
+    });
     expect(job?.textArtifactId).toBe(artifact.id);
     // The adapter records its outgoing request before entering this locally mocked, deferred fetch.
     const processing = callService.textArtifacts.process(job!, { jobId: job!.id, workerId: "deletion-test",

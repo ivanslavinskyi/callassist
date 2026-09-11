@@ -1,6 +1,7 @@
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 import {
   approvedExecutionSnapshotSchema,
+  type AppointmentAuthorization,
   type ApprovedExecutionSnapshot,
   type CallBrief
 } from "@callassist/contracts";
@@ -8,6 +9,8 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { CallService } from "../call-service";
+import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import {
   OpenAIRealtimeBridge,
@@ -1226,9 +1229,21 @@ describe("OpenAIRealtimeBridge", () => {
   });
 });
 
-async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale, agentHangupEnabled = false) {
+async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale, agentHangupEnabled = false, appointmentAuthorization?: AppointmentAuthorization) {
   const repository = new InMemoryCallRepository();
-  const service = new CallService(repository);
+  const compiler = new DeterministicBriefCompiler();
+  if (appointmentAuthorization) {
+    const compile = compiler.compile.bind(compiler);
+    vi.spyOn(compiler, "compile").mockImplementation(async (input, revision) => {
+      const compilation = await compile(input, revision);
+      if (!compilation.compiledBrief) throw new Error("Expected a ready plan fixture");
+      compilation.compiledBrief = { ...compilation.compiledBrief, schemaVersion: "4",
+        taskType: "appointment_coordination", appointmentAuthorization };
+      compilation.snapshotHash = createCompilationSnapshotHash(compilation);
+      return compilation;
+    });
+  }
+  const service = new CallService(repository, undefined, undefined, undefined, compiler);
   const created = await service.create({
     recipientName: brief.recipientName,
     phoneNumber: brief.phoneNumber,
@@ -1311,6 +1326,182 @@ function emitJson(socket: FakeSocket, payload: object) {
   socket.emit("message", Buffer.from(JSON.stringify(payload)));
 }
 
+describe("appointment authorization integration", () => {
+  const authorization: AppointmentAuthorization = {
+    operation: "book", serviceDescription: "Routine dental check-up", providerScope: "called_recipient",
+    timeZone: "Europe/Zurich", windows: [{ date: "2099-09-16", startTime: "14:00", endTime: "17:00" }],
+    selection: "first_matching", maxAppointments: 1, financialPolicy: "no_new_financial_terms"
+  };
+  const proposal = {
+    operation: "book", date: "2099-09-16", startTime: "15:00", timeZone: "Europe/Zurich",
+    serviceMatches: true, recipientMatches: true, requiresPaymentOrNewTerms: false, detailsConfirmed: true
+  };
+  type Harness = Awaited<ReturnType<typeof createConsentHarness>>;
+  async function activeHarness(auth = authorization, hangup = true) {
+    const h = await createConsentHarness(false, "en-GB", hangup, auth);
+    completeConsentPlayback(h);
+    emitJson(h.consentSocket, { type: "conversation.item.input_audio_transcription.completed", transcript: "Yes" });
+    await new Promise(resolve => setImmediate(resolve));
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "opening" } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "opening", status: "completed" } });
+    emitJson(h.twilioSocket, { event: "mark", mark: { name: "callassist-opening-complete" } });
+    return h;
+  }
+  function request(h: Harness, args: object, id: string, name = "check_appointment", status = "completed") {
+    emitJson(h.openAISocket, { type: "response.created", response: { id } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id, status,
+      output: [{ type: "function_call", name, call_id: id, arguments: JSON.stringify(args) }] } });
+  }
+  function result(h: Harness) {
+    const output = h.openAISocket.sent.filter(event => (event.item as { type?: string })?.type === "function_call_output").at(-1)!;
+    return JSON.parse((output.item as { output: string }).output);
+  }
+  async function close(h: Harness) { h.twilioSocket.close(); await h.service.close(); }
+
+  it("exposes the appointment tool only after consent and opening, independently of farewell flag", async () => {
+    const before = await createConsentHarness(false, "en-GB", false, authorization);
+    expect(before.openAISocket.sent.some(event => (event.session as { tools?: unknown[] })?.tools?.length)).toBe(false);
+    await close(before);
+    const h = await activeHarness(authorization, false);
+    const tools = h.openAISocket.sent.flatMap(event => (event.session as { tools?: { name: string }[] })?.tools ?? []);
+    expect(tools.map(tool => tool.name)).toEqual(["check_appointment"]);
+    request(h, proposal, "permission");
+    expect(result(h)).toMatchObject({ ok: true, proposal, startsAt: "2099-09-16T13:00:00.000Z" });
+    const followUp = h.openAISocket.sent.filter(event => event.type === "response.create").at(-1)!;
+    const instructions = (followUp.response as { instructions: string }).instructions;
+    expect(instructions).toContain(JSON.stringify(authorization));
+    expect(instructions).toContain("Routine dental check-up");
+    expect(instructions).toContain("Never invent or infer missing facts");
+    await close(h);
+  });
+
+  it("rejects an out-of-window or paid slot without consuming the single appointment permission", async () => {
+    const h = await activeHarness();
+    request(h, { ...proposal, startTime: "18:00" }, "outside");
+    expect(result(h)).toEqual({ ok: false, reason: "outside_authorized_window" });
+    request(h, { ...proposal, requiresPaymentOrNewTerms: true }, "paid");
+    expect(result(h)).toEqual({ ok: false, reason: "financial_terms_not_allowed" });
+    request(h, proposal, "allowed");
+    expect(result(h).ok).toBe(true);
+    request(h, { ...proposal, startTime: "16:00" }, "second");
+    expect(result(h)).toMatchObject({ ok: false, reason: "appointment_already_authorized" });
+    await new Promise(resolve => setImmediate(resolve));
+    const outcomes = (await h.service.listTelemetry(h.created.id)).flatMap(event => event.payload.name === "conversation.tool_result" && event.payload.metadata.tool === "check_appointment" ? [event.payload.metadata] : []);
+    expect(outcomes.map(item => item.reason)).toEqual(["outside_authorized_window", "financial_terms_not_allowed", "within_authorization", "appointment_already_authorized"]);
+    expect(outcomes[2]).toMatchObject({ outcome: "accepted", snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/), proposalFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(outcomes.every(item => !("date" in item) && !("startTime" in item) && !("arguments" in item))).toBe(true);
+    await close(h);
+  });
+
+  it("does not replay a completed tool response or grant twice under a reused tool call id", async () => {
+    const h = await activeHarness();
+    request(h, proposal, "allowed");
+    const count = h.openAISocket.sent.length;
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "allowed", status: "completed",
+      output: [{ type: "function_call", name: "check_appointment", call_id: "allowed", arguments: JSON.stringify(proposal) }] } });
+    expect(h.openAISocket.sent).toHaveLength(count);
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "replay" } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "replay", status: "completed",
+      output: [{ type: "function_call", name: "check_appointment", call_id: "allowed", arguments: JSON.stringify(proposal) }] } });
+    expect(result(h)).toMatchObject({ ok: false, reason: "already_processed" });
+    await close(h);
+  });
+
+  it("rejects cancelled or stale checks and still permits a fresh valid request", async () => {
+    const h = await activeHarness();
+    request(h, proposal, "cancelled", "check_appointment", "cancelled");
+    expect(result(h).ok).toBe(false);
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "stale" } });
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_stopped" });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "stale", status: "completed",
+      output: [{ type: "function_call", name: "check_appointment", call_id: "stale", arguments: JSON.stringify(proposal) }] } });
+    request(h, proposal, "fresh");
+    expect(result(h).ok).toBe(true);
+    await close(h);
+  });
+
+  it("rejects parallel appointment requests rather than granting multiple actions", async () => {
+    const h = await activeHarness();
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "parallel" } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "parallel", status: "completed",
+      output: ["one", "two"].map(call_id => ({ type: "function_call", name: "check_appointment", call_id, arguments: JSON.stringify(proposal) })) } });
+    expect(result(h).ok).toBe(false);
+    request(h, proposal, "single");
+    expect(result(h).ok).toBe(true);
+    await close(h);
+  });
+
+  it("requires a checked slot and subsequent recipient speech before closing as resolved", async () => {
+    const h = await activeHarness();
+    request(h, { reason: "objective_resolved" }, "too-early", "end_call");
+    expect(result(h).accepted).toBe(false);
+    request(h, proposal, "allowed");
+    request(h, { reason: "objective_resolved" }, "before-reply", "end_call");
+    expect(result(h).accepted).toBe(false);
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_stopped" });
+    request(h, { reason: "objective_resolved" }, "after-reply", "end_call");
+    expect(result(h).accepted).toBe(true);
+    await close(h);
+  });
+
+  it("can finish unresolved without creating an appointment", async () => {
+    const h = await activeHarness();
+    request(h, { reason: "cannot_proceed" }, "unresolved", "end_call");
+    expect(result(h).accepted).toBe(true);
+    await close(h);
+  });
+
+  it("accepts keypad input as a subsequent recipient answer", async () => {
+    const h = await activeHarness();
+    request(h, proposal, "allowed");
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "request-audio" } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "request-audio", status: "completed" } });
+    emitJson(h.twilioSocket, { event: "dtmf", dtmf: { digit: "1" } });
+    request(h, { reason: "objective_resolved" }, "after-keypad", "end_call");
+    expect(result(h).accepted).toBe(true);
+    await close(h);
+  });
+
+  it("answers a keypad interruption of a pending check without granting the stale proposal", async () => {
+    const h = await activeHarness();
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "checking" } });
+    emitJson(h.twilioSocket, { event: "dtmf", dtmf: { digit: "2" } });
+    const before = h.openAISocket.sent.filter(event => event.type === "response.create").length;
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "checking", status: "cancelled",
+      output: [{ type: "function_call", name: "check_appointment", call_id: "checking", arguments: JSON.stringify(proposal) }] } });
+    expect(result(h).ok).toBe(false);
+    expect(h.openAISocket.sent.filter(event => event.type === "response.create")).toHaveLength(before + 1);
+    request(h, proposal, "fresh-after-keypad");
+    expect(result(h).ok).toBe(true);
+    await close(h);
+  });
+
+  it("allows attendance confirmation but rejects a new booking under that authorization", async () => {
+    const h = await activeHarness({ ...authorization, operation: "confirm_existing",
+      windows: [{ date: "2099-09-16", startTime: "15:00", endTime: "15:00" }] });
+    request(h, proposal, "book");
+    expect(result(h)).toMatchObject({ ok: false, reason: "operation_mismatch" });
+    request(h, { ...proposal, operation: "confirm_existing" }, "confirm");
+    expect(result(h).ok).toBe(true);
+    await close(h);
+  });
+
+  it("does not grant appointment authority to a regular approved plan", async () => {
+    const h = await createConsentHarness(false, "en-GB", false);
+    completeConsentPlayback(h);
+    emitJson(h.consentSocket, { type: "conversation.item.input_audio_transcription.completed", transcript: "Yes" });
+    await new Promise(resolve => setImmediate(resolve));
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "opening" } });
+    emitJson(h.openAISocket, { type: "response.done", response: { id: "opening", status: "completed" } });
+    emitJson(h.twilioSocket, { event: "mark", mark: { name: "callassist-opening-complete" } });
+    request(h, proposal, "unauthorized");
+    expect(result(h)).toEqual({ ok: false, reason: "missing_authorization" });
+    await close(h);
+  });
+});
+
 describe("agent farewell integration", () => {
   async function activeHarness(enabled = true) {
     const harness = await createConsentHarness(false, "en-GB", enabled);
@@ -1323,6 +1514,47 @@ describe("agent farewell integration", () => {
     return harness;
   }
   type Harness = Awaited<ReturnType<typeof activeHarness>>;
+  it("clears failed or cancelled partials and ignores their late text", async () => {
+    const h = await activeHarness();
+    const events: Array<{type:string;key?:string}> = [];
+    const unsubscribe = h.service.subscribe(h.created.id, event=>events.push(event));
+    try {
+      emitJson(h.openAISocket,{type:"response.created",response:{id:"cancelled"}});
+      emitJson(h.openAISocket,{type:"response.output_audio_transcript.delta",response_id:"cancelled",item_id:"old",delta:"Unfinished"});
+      emitJson(h.openAISocket,{type:"response.done",response:{id:"cancelled",status:"cancelled"}});
+      emitJson(h.openAISocket,{type:"response.output_audio_transcript.delta",response_id:"cancelled",item_id:"old",delta:" late"});
+      emitJson(h.openAISocket,{type:"response.output_audio_transcript.done",response_id:"cancelled",item_id:"old",transcript:"Unfinished late"});
+      emitJson(h.openAISocket,{type:"conversation.item.input_audio_transcription.delta",item_id:"recipient-failed",delta:"Unclear"});
+      emitJson(h.openAISocket,{type:"conversation.item.input_audio_transcription.failed",item_id:"recipient-failed"});
+      await new Promise(resolve=>setImmediate(resolve));
+      const deltas=events.filter(event=>event.type==="transcript.delta");
+      expect(deltas).toHaveLength(2);
+      const discarded=new Set(events.filter(event=>event.type==="transcript.discarded").map(event=>event.key));
+      expect(deltas.every(event=>discarded.has(event.key))).toBe(true);
+      expect((await h.repository.get(h.created.id))!.transcript.some(segment=>segment.text==="Unfinished late")).toBe(false);
+    } finally {unsubscribe();h.twilioSocket.close();await h.service.close();}
+  });
+  it("stores every output item and content part once, with identical live/final identities", async () => {
+    const h = await activeHarness();
+    const events: Array<{type:string;key?:string}> = [];
+    const unsubscribe = h.service.subscribe(h.created.id, event => events.push(event));
+    try {
+      for (const [item, output, content, text] of [["first",0,0,"First answer."],["second",1,0,"Second answer."],["second",1,1,"A separate content part."]] as const) {
+        const identity = { response_id: "same-response", item_id: item, output_index: output, content_index: content };
+        emitJson(h.openAISocket, { type: "response.output_audio_transcript.delta", ...identity, delta: text });
+        emitJson(h.openAISocket, { type: "response.output_audio_transcript.done", ...identity, transcript: text });
+        emitJson(h.openAISocket, { type: "response.output_audio_transcript.done", ...identity, transcript: text });
+      }
+      await vi.waitFor(async () => {
+        const snapshot = await h.repository.get(h.created.id);
+        expect(snapshot!.transcript.filter(segment => ["First answer.","Second answer.","A separate content part."].includes(segment.text))).toHaveLength(3);
+      });
+      const deltas = events.filter(event=>event.type==="transcript.delta").map(event=>event.key);
+      const finals = events.filter(event=>event.type==="transcript.added" && deltas.includes(event.key)).map(event=>event.key);
+      expect(new Set(deltas).size).toBe(3);
+      expect(finals).toEqual(deltas);
+    } finally { unsubscribe(); h.twilioSocket.close(); await h.service.close(); }
+  });
   function request(h: Harness, args = '{"reason":"objective_resolved"}', id = "tool-response", callId = "end-call-1", status = "completed") {
     emitJson(h.openAISocket, { type: "response.created", response: { id } });
     emitJson(h.openAISocket, { type: "response.done", response: { id, status,
@@ -1339,6 +1571,16 @@ describe("agent farewell integration", () => {
     return (mark.mark as { name: string }).name;
   }
   const flush = () => new Promise(resolve => setImmediate(resolve));
+
+  function route(h: Harness, action: string, id = "routing-response") {
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_stopped" });
+    emitJson(h.openAISocket, { type: "input_audio_buffer.committed", item_id: "new-turn" });
+    const request = h.openAISocket.sent.filter(event => event.type === "response.create").at(-1)!;
+    const response = request.response as { metadata: { closing_route: string }; output_modalities: string[]; conversation: string };
+    expect(response).toMatchObject({ conversation: "none", output_modalities: ["text"] });
+    emitJson(h.openAISocket, { type: "response.created", response: { id, metadata: response.metadata } });
+    return { id, metadata: response.metadata, status: "completed", output: [{ type: "function_call", name: "route_interrupted_closing", arguments: JSON.stringify({ action }) }] };
+  }
 
   it("persists the attempt recovery before closing, without the user's stopped transition", async () => {
     const h = await activeHarness();
@@ -1371,13 +1613,59 @@ describe("agent farewell integration", () => {
     emitJson(h.twilioSocket, { event: "mark", mark: { name: oldMark } });
     expect(prepare).not.toHaveBeenCalled();
     expect(h.openAISocket.sent.some(event => event.type === "conversation.item.truncate")).toBe(true);
-    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_stopped" });
-    request(h, '{"reason":"recipient_requested_end"}', "new-tool-response", "end-call-2");
+    emitJson(h.openAISocket, { type: "response.done", response: route(h, "end") });
     const mark = farewell(h, 2);
     emitJson(h.twilioSocket, { event: "mark", mark: { name: mark } });
     await flush();
     expect(prepare).toHaveBeenCalledTimes(1);
     await h.service.close();
+  });
+
+  it.each(["answer", "clarify", "wait"])("routes an interrupted farewell to %s without disconnecting or sending control audio", async action => {
+    const h = await activeHarness();
+    const prepare = vi.spyOn(h.service, "prepareAgentHangup");
+    request(h); farewell(h);
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started", item_id: "new-turn" });
+    const result = route(h, action);
+    const count = h.twilioSocket.sent.filter(event => event.event === "media").length;
+    emitJson(h.openAISocket, { type: "response.output_audio.delta", response_id: result.id, delta: Buffer.alloc(800).toString("base64") });
+    expect(h.twilioSocket.sent.filter(event => event.event === "media")).toHaveLength(count);
+    emitJson(h.openAISocket, { type: "response.done", response: result });
+    const latest = h.openAISocket.sent.filter(event => event.type === "response.create").at(-1)!;
+    expect(JSON.stringify(latest)).toContain(action === "wait" ? "route_interrupted_closing" : "previous farewell was cancelled");
+    expect(prepare).not.toHaveBeenCalled();
+    h.twilioSocket.close(); await h.service.close();
+  });
+
+  it("rejects an old closing decision after the recipient starts another question", async () => {
+    const h = await activeHarness();
+    const prepare = vi.spyOn(h.service, "prepareAgentHangup");
+    request(h); farewell(h);
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+    const stale = route(h, "end");
+    emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started", item_id: "later-turn" });
+    emitJson(h.openAISocket, { type: "response.done", response: stale });
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "late-route", metadata: stale.metadata } });
+    expect(h.openAISocket.sent).toContainEqual({ type: "response.cancel", response_id: "late-route" });
+    expect(prepare).not.toHaveBeenCalled();
+    h.twilioSocket.close(); await h.service.close();
+  });
+
+  it("bounds routing failure with one clarification, never a hangup", async () => {
+    const h = await activeHarness();
+    const prepare = vi.spyOn(h.service, "prepareAgentHangup");
+    request(h); farewell(h);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      emitJson(h.openAISocket, { type: "input_audio_buffer.speech_started" });
+      const late = route(h, "end");
+      await vi.advanceTimersByTimeAsync(8_000);
+      const creates = h.openAISocket.sent.filter(event => event.type === "response.create").length;
+      emitJson(h.openAISocket, { type: "response.done", response: late });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(h.openAISocket.sent.filter(event => event.type === "response.create")).toHaveLength(creates);
+      expect(prepare).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); h.twilioSocket.close(); await h.service.close(); }
   });
 
   it("ignores a late response.created for an interrupted farewell", async () => {

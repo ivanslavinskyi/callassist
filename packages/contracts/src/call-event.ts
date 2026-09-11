@@ -15,7 +15,12 @@ export const callEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("transcript.added"),
+    key: z.string().min(1).optional(),
     segment: transcriptSegmentSchema
+  }),
+  z.object({
+    type: z.literal("transcript.discarded"),
+    key: z.string().min(1)
   }),
   z.object({
     type: z.literal("transcript.delta"),

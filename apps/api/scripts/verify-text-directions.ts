@@ -11,9 +11,7 @@ if (process.argv.includes("--validate-recorded")) {
     if (!fixture.schemaPassed) throw new Error(`Recorded fixture failed: ${fixture.id}`);
     const output = fixture.input.kind === "transcript_translation"
       ? { segments: fixture.output.segments.map(({ id, text }: { id: string; text: string }) => ({ id, text })) }
-      : fixture.input.kind === "call_summary"
-        ? { ...fixture.output, answers: fixture.output.answers.map((answer: object, index: number) => ({ questionId: `question.${index}`, ...answer })) }
-        : fixture.output;
+      : fixture.output;
     validateTextProcessingOutput(fixture.input, output);
   }
   recorded.revalidatedAt = new Date().toISOString();
@@ -53,7 +51,8 @@ const fixtures: Array<{ id: string; input: TextProcessingInput }> = [
 for (const [language, source] of [["ru", fixtures[3]!.input], ["uk", fixtures[4]!.input]] as const) {
   if (source.kind !== "transcript_translation") throw new Error("Invalid evaluation fixture");
   fixtures.push({ id: `summary-${language}`, input: { kind: "call_summary", targetLanguage: language, segments: source.segments,
-    questions: language === "ru" ? ["Ist Freitag möglich?", "Ist Montag bestätigt?", "Wie viel kostet es?"] : ["Est-ce possible vendredi ?", "Le lundi est-il confirmé ?", "Quel est le prix ?"] } });
+    context: { objective: "Check availability", taskType: "information_request", recipient: "Office", representedPerson: "Nina" },
+    checks: (language === "ru" ? ["Ist Freitag möglich?", "Ist Montag bestätigt?", "Wie viel kostet es?"] : ["Est-ce possible vendredi ?", "Le lundi est-il confirmé ?", "Quel est le prix ?"]).map((text, index) => ({ id: `question.${index}`, text })) } });
 }
 const results: unknown[] = [];
 for (const fixture of fixtures) {

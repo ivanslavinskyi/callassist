@@ -35,8 +35,8 @@ const processor = new MockTextProcessor({ fixture: (input) => {
   }
   const evidence = input.segments.find((segment) => segment.role === "recipient");
   return {
-    answers: input.questions.map((question, index) => ({ questionId: `question.${index}`, question: mark + question,
-      answer: evidence ? mark + "The office reported receipt of the form." : mark + "No answer is known.",
+    schemaVersion: 2, overview: [], findings: input.checks.map(check => ({ id: check.id, label: mark + "Result",
+      text: evidence ? mark + "The office reported receipt of the form." : mark + "No answer is known.",
       certainty: evidence ? "reported" : "unknown", sourceSegmentIds: evidence ? [evidence.id] : [] })),
     nextSteps: [], unresolved: [mark + "No further steps were agreed in this fictional excerpt."]
   };

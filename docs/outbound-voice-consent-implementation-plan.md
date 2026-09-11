@@ -36,9 +36,12 @@ explicit consent has been durably recorded.
   Public privacy/FAQ/onboarding copy retains the description of actual AI processing
   and retention. Audio retention remains deletion after the final transcript, 7 days
   or 30 days; the first option involves temporary recording after consent.
-- Approved facts may be used as needed during the ensuing information-gathering call.
-  Additional live permission prompts are outside the supported product workflow;
-  booking, payment and commitments remain prohibited actions.
+- Approved facts may be used as needed during the ensuing call. Additional live
+  permission prompts are outside the supported product workflow. The separate
+  [appointment extension](unified-implementation-plan-2026-09-09.md#10-расширение-от-10092026--одна-запись-по-предварительному-разрешению)
+  requires explicit preapproval to book or confirm one bounded appointment; facts
+  alone confer no such permission. Payment, deposits, new financial terms,
+  rescheduling and cancellation remain excluded. This does not change consent.
 
 ## Implemented stages
 

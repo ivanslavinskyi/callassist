@@ -1,4 +1,4 @@
-import type { CallCompilation, CallTextArtifact, PlanSource } from "@callassist/contracts";
+import { getAppointmentAuthorization, type AppointmentAuthorization, type CallCompilation, type CallTextArtifact, type PlanSource } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
 import { currentPlanReviewArtifact, projectPlanReview } from "./plan-review-projection";
 
@@ -8,6 +8,7 @@ const compilation = {
   rawBrief: { allowedFacts: ["A-17"], objective: "Is the application received?" },
   policyDecision: { status: "needs_clarification", clarificationQuestions: ["Which application?"], reasonCodes: [] },
   compiledBrief: {
+    schemaVersion: "3",
     localizedObjective: "Eingang bestätigen", backgroundSummary: "", callLocale: "de-CH", sourceLanguage: "ru",
     taskType: "receipt_confirmation", tone: "formal", addressingStyle: "formal", resultHandling: "capture_in_callassist",
     opening: { recipientAddress: "Guten Tag", purposeStatement: "Ich rufe wegen A-17 an", readinessQuestion: "Haben Sie kurz Zeit?" },
@@ -25,8 +26,60 @@ function artifact(): CallTextArtifact {
     payloadHash: "b".repeat(64), targetLanguage: "ru", payload: { fields: ids.map((id) => ({ id, text: `Перевод ${id}` })) }
   } as CallTextArtifact;
 }
+const appointmentAuthorization: AppointmentAuthorization = {
+  operation: "book", serviceDescription: "Anmeldung im Gemeindeamt", providerScope: "called_recipient", timeZone: "Europe/Zurich",
+  windows: [{ date: "2026-09-18", startTime: "09:00", endTime: "12:00" }, { date: "2026-09-19", startTime: "10:30", endTime: "10:30" }],
+  selection: "first_matching", maxAppointments: 1, financialPolicy: "no_new_financial_terms"
+};
+function withAuthorization(authorization: AppointmentAuthorization | null): CallCompilation {
+  return { ...structuredClone(compilation), compiledBrief: { ...structuredClone(compilation.compiledBrief!), schemaVersion: "4", appointmentAuthorization: authorization } };
+}
+function appointmentArtifact(): CallTextArtifact {
+  const ready = artifact();
+  const fields = (ready.payload as { fields: Array<{ id: string; text: string }> }).fields;
+  return { ...ready, payload: { fields: [...fields, { id: "appointmentAuthorization.serviceDescription", text: "Регистрация в муниципалитете" }] } };
+}
 
 describe("translated plan projection", () => {
+  it("translates only the appointment service while preserving the exact original authorization and approval binding", () => {
+    for (const operation of ["book", "confirm_existing"] as const) {
+      const authorization = { ...structuredClone(appointmentAuthorization), operation,
+        windows: operation === "confirm_existing" ? [structuredClone(appointmentAuthorization.windows[1]!)] : structuredClone(appointmentAuthorization.windows) };
+      const original = withAuthorization(authorization);
+      const before = structuredClone(original);
+      const ready = appointmentArtifact();
+      const display = projectPlanReview(original, source, ready);
+      expect(display).not.toBeNull();
+      expect(getAppointmentAuthorization(display!.compiledBrief!)).toEqual({ ...authorization, serviceDescription: "Регистрация в муниципалитете" });
+      expect(display?.snapshotHash).toBe(original.snapshotHash);
+      expect(display?.revision).toBe(original.revision);
+      expect(display?.rawBrief).toEqual(original.rawBrief);
+      expect(display?.policyDecision.status).toBe(original.policyDecision.status);
+      expect(display?.policyDecision.reasonCodes).toEqual(original.policyDecision.reasonCodes);
+      expect(original).toEqual(before);
+      expect(currentPlanReviewArtifact([ready], original, source, "ru", "plan_review")).toBe(ready);
+      expect(projectPlanReview(original, { ...source, snapshotHash: "c".repeat(64) }, ready)).toBeNull();
+    }
+  });
+  it("rejects omitted appointment descriptions and any attempted translation of permission fields", () => {
+    const original = withAuthorization(structuredClone(appointmentAuthorization));
+    const ready = appointmentArtifact();
+    const fields = (ready.payload as { fields: Array<{ id: string; text: string }> }).fields;
+    expect(projectPlanReview(original, source, artifact())).toBeNull();
+    for (const id of ["operation", "providerScope", "timeZone", "windows.0.date", "windows.0.startTime", "windows.0.endTime", "selection", "maxAppointments", "financialPolicy"]) {
+      expect(projectPlanReview(original, source, { ...ready, payload: { fields: [...fields, { id: `appointmentAuthorization.${id}`, text: "changed" }] } })).toBeNull();
+    }
+  });
+  it("leaves legacy and explicitly absent appointment authority unchanged", () => {
+    for (const original of [compilation, withAuthorization(null)]) {
+      const display = projectPlanReview(original, source, artifact());
+      expect(display).not.toBeNull();
+      expect(getAppointmentAuthorization(display!.compiledBrief!)).toBeNull();
+      expect(projectPlanReview(original, source, appointmentArtifact())).toBeNull();
+    }
+    expect(projectPlanReview(compilation, source, artifact())?.compiledBrief).not.toHaveProperty("appointmentAuthorization");
+    expect(projectPlanReview(withAuthorization(null), source, artifact())?.compiledBrief).toHaveProperty("appointmentAuthorization", null);
+  });
   it("retains a valid saved reader and its approval hash when a newer generator fails for the same source", () => {
     const saved = { ...artifact(), createdAt: "2026-09-09T12:00:00Z" };
     const failed = { ...saved, id: "failed-new-generator", status: "failed" as const, payload: null, payloadHash: null,

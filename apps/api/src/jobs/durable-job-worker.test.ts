@@ -75,6 +75,18 @@ async function repositoryWithAvailableRecording() {
 }
 
 describe("durable job worker", () => {
+  it("schedules Retry-After without occupying a worker or retrying early", async () => {
+    const { repository } = await repositoryWithAvailableRecording();
+    let now = new Date("2099-02-01T00:00:00.000Z");
+    const handler = vi.fn().mockRejectedValueOnce(new DurableJobExecutionError("TEXT_RATE_LIMITED", { retryAfterMs: 120_000 })).mockResolvedValue(undefined);
+    const worker = new DurableJobWorker(repository, { final_transcription: handler }, vi.fn(), { workerId: "backoff-worker", now: () => now });
+    await worker.runOnce();
+    expect((await repository.listDurableJobs()).find(job=>job.type==="final_transcription")).toMatchObject({ status: "queued", runAfter: "2099-02-01T00:02:00.000Z" });
+    now = new Date("2099-02-01T00:00:10.000Z"); await worker.runOnce();
+    expect(handler).toHaveBeenCalledTimes(1);
+    now = new Date("2099-02-01T00:02:00.000Z"); await worker.runOnce();
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
   it("publishes exactly one brief when a worker crashes after publication", async () => {
     const repository = new InMemoryCallRepository();
     const userId = randomUUID();

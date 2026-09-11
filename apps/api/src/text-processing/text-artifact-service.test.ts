@@ -25,12 +25,18 @@ describe("text artifact orchestration boundaries", () => {
     });
   });
 
-  it("keeps contradictory chunk answers unresolved without inferring a successful commitment", () => {
-    const summary = (answer: string): CallSummaryPayload => ({ answers: [{ question: "Is Friday possible?", answer, certainty: "reported", sourceSegmentIds: [answer] }], nextSteps: [], unresolved: [] });
+  it("keeps contradictory chunk findings unresolved without inferring a successful commitment", () => {
+    const summary = (text: string): CallSummaryPayload => ({ schemaVersion: 2, overview: [], findings: [{ id: "goal", label: "Availability", text, certainty: "reported", sourceSegmentIds: [text] }], nextSteps: [], unresolved: [] });
     const result = combinePayloads("call_summary", [summary("Yes"), summary("No")], "ru") as CallSummaryPayload;
-    expect(result.answers[0]).toMatchObject({ certainty: "unknown", sourceSegmentIds: ["Yes", "No"] });
-    expect(result.answers[0]!.answer).toContain("оригинала");
+    expect(result.findings[0]).toMatchObject({ certainty: "unknown", sourceSegmentIds: ["Yes", "No"] });
+    expect(result.findings[0]!.text).toContain("оригинала");
     expect(result.nextSteps).toEqual([]);
+  });
+  it("retains references from all unclear chunks instead of dropping later uncertainty", () => {
+    const part = (text: string, id: string): CallSummaryPayload => ({ schemaVersion: 2, overview: [], findings: [{ id: "goal", label: "Status", text, certainty: "unknown", sourceSegmentIds: [id] }], nextSteps: [], unresolved: [] });
+    const merged = combinePayloads("call_summary", [part("Not clear", "first"), part("Contradictory details", "later")], "en") as CallSummaryPayload;
+    expect(merged.findings[0]).toMatchObject({ certainty: "unknown", sourceSegmentIds: ["first", "later"] });
+    expect(merged.findings[0]?.text).toContain("Review the cited");
   });
 
   it("enables real operation/direction independently from UI and voice locales", () => {
@@ -47,8 +53,8 @@ describe("text artifact orchestration boundaries", () => {
   });
 
   it("preserves cited next steps from compatible chunks and deduplicates their evidence", () => {
-    const first: CallSummaryPayload = { answers: [], nextSteps: [{ text: "Send the form.", sourceSegmentIds: ["segment.1"] }], unresolved: [] };
-    const second: CallSummaryPayload = { answers: [], nextSteps: [
+    const first: CallSummaryPayload = { schemaVersion: 2, overview: [], findings: [], nextSteps: [{ text: "Send the form.", sourceSegmentIds: ["segment.1"] }], unresolved: [] };
+    const second: CallSummaryPayload = { schemaVersion: 2, overview: [], findings: [], nextSteps: [
       { text: "Send the form.", sourceSegmentIds: ["segment.2"] },
       { text: "Call again after receiving a reply.", sourceSegmentIds: ["segment.3"] }
     ], unresolved: [] };

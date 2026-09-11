@@ -6,8 +6,8 @@ import type {
 import type { DurableJob, DurableJobLease, EnqueueDurableJobInput } from "../jobs/durable-job";
 import { CallRepositoryError, type CallAttemptRecord } from "./call-repository";
 import {
-  createTranscriptRevision, textPayloadHash, textArtifactMaximumRequests, textArtifactMaximumChunks,
-  textArtifactMaximumTargets, textArtifactMaximumGenerations, type EnqueueTextArtifactInput,
+  createTranscriptRevision, textPayloadHash, textArtifactMaximumRequests, textArtifactMaximumChunks, projectTextArtifactProgress,
+  textArtifactMaximumTargets, type EnqueueTextArtifactInput,
   type TextArtifactChunk, type CallPlanReviewReceipt
 } from "./call-text-repository";
 import { parseArtifactPayload } from "./postgres-call-text-store";
@@ -74,7 +74,8 @@ export class InMemoryCallTextStore {
     return artifact?.callId===callId?this.project(artifact):null;
   }
   project(artifact:CallTextArtifact) {
-    return structuredClone({...artifact,status:artifact.status!=="cancelled"&&!this.current(artifact)?"stale" as const:artifact.status});
+    const current = {...artifact,status:artifact.status!=="cancelled"&&!this.current(artifact)?"stale" as const:artifact.status};
+    return structuredClone(projectTextArtifactProgress(current, this.hooks.jobs().find(j=>j.textArtifactId===artifact.id), this.requests.get(artifact.id)??0));
   }
   current(artifact:CallTextArtifact) {
     const snapshot=this.hooks.snapshot(artifact.callId);
@@ -95,7 +96,7 @@ export class InMemoryCallTextStore {
     const now=new Date().toISOString();
     const artifact:CallTextArtifact={id:randomUUID(),callId:input.callId,kind:input.kind,compilationId:input.compilationId??null,
       transcriptRevisionId:input.transcriptRevisionId??null,sourceHash:input.sourceHash,targetLanguage:input.targetLanguage,generatorVersion:input.generatorVersion,
-      status:"queued",payload:null,payloadHash:null,failureCode:null,createdAt:now,updatedAt:now};
+      status:"queued",payload:null,payloadHash:null,failureCode:null,retryable:false,createdAt:now,updatedAt:now};
     if(!this.current(artifact)) throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
     const same=[...this.artifacts.values()].find(a=>a.callId===artifact.callId&&a.kind===artifact.kind&&a.compilationId===artifact.compilationId&&
       a.transcriptRevisionId===artifact.transcriptRevisionId&&a.sourceHash===artifact.sourceHash&&a.targetLanguage===artifact.targetLanguage&&a.generatorVersion===artifact.generatorVersion);
@@ -153,9 +154,9 @@ export class InMemoryCallTextStore {
     if(!artifact||artifact.callId!==callId) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");
     if(!this.hooks.textAllowed(callId)) throw new CallRepositoryError("CALL_NOT_FOUND");
     if(!this.current(artifact)) throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
-    if(["ready","queued","processing"].includes(artifact.status)) return structuredClone(artifact);
-    const job=this.hooks.jobs().find(j=>j.textArtifactId===id);
-    if(artifact.status!=="failed"||!job||!["dead_letter","succeeded"].includes(job.status)||job.generation>=textArtifactMaximumGenerations) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
+    const projected = this.project(artifact);
+    if(["ready","queued","processing"].includes(projected.status)) return projected;
+    if(!projected.retryable) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
     await this.hooks.enqueue({type:"text_artifact_generation",textArtifactId:id,runAfter:new Date().toISOString(),maxAttempts:3,restartTerminal:true});
     Object.assign(artifact,{status:"queued",failureCode:null,updatedAt:new Date().toISOString()});
     return structuredClone(artifact);

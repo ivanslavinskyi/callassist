@@ -53,9 +53,10 @@ export async function buildPublicContentReleaseCandidate(service: ContentService
   }
 
   return {
+    // Stable identifier expected by the bounded staging workflow, not a copy timestamp.
     release: "public-copy-2026-09-09",
     status: "candidate_not_applied" as const,
-    reason: "Align pre-call disclosure, information-only appointment enquiries, consent recognition, audio retention and connection-based promotional credits with implementation.",
+    reason: "Align pre-call disclosure and explicit permission to book or confirm one bounded appointment, recipient-confirmed results, consent recognition, audio retention and connection-based promotional credits with implementation.",
     reacceptanceDecision: "New Terms and Acceptable Use revisions require renewed acceptance because supported use and processing disclosures change. Existing acceptance records remain unchanged.",
     publication: "Review all changes against the captured source revisions. Create new drafts through ContentService/admin API only when the source still matches and no draft exists. Never overwrite an existing draft. Resolve any conflict separately. Review previews, then publish through the existing workflow and record new revision IDs.",
     pages,

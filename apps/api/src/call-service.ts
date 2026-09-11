@@ -78,7 +78,7 @@ import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
 import { TextArtifactService } from "./text-processing/text-artifact-service";
 import { MockTextProcessor } from "./text-processing/mock-text-processor";
 import { allTextDirections, textDirectionEnabled, type TextCapabilities } from "./text-processing/text-capabilities";
-import type { TextProcessor } from "./text-processing/text-processor";
+import { textGeneratorVersion, type TextProcessor } from "./text-processing/text-processor";
 
 type Subscriber = (event: CallEvent) => void;
 type LiveEventMode = "disabled" | "publish" | "subscribe" | "both";
@@ -891,11 +891,12 @@ export class CallService {
   async addTranscript(
     id: string,
     role: TranscriptSegment["role"],
-    text: string
+    text: string,
+    sourceKey?: string
   ) {
     const normalized = text.trim();
     if (!normalized) return this.#require(id);
-    return this.#addTranscript(id, role, normalized);
+    return this.#addTranscript(id, role, normalized, sourceKey);
   }
 
   async startRecordingAfterConsent(
@@ -1034,6 +1035,10 @@ export class CallService {
   ) {
     if (!delta) return;
     this.#publish(id, { type: "transcript.delta", key, role, delta, locale });
+  }
+
+  discardTranscriptPartial(id: string, key: string) {
+    this.#publish(id, { type: "transcript.discarded", key });
   }
 
   async resolveApproval(
@@ -1240,7 +1245,7 @@ export class CallService {
         currentLease(lease),
         textDirectionEnabled(this.textArtifacts.capabilities, "call_summary", "*",
           claimed.snapshot.languageContext?.taskContentLanguage ?? "en")
-          ? { summaryGeneratorVersion: this.textArtifacts.processor.generatorVersion } : undefined
+          ? { summaryGeneratorVersion: textGeneratorVersion(this.textArtifacts.processor, "call_summary") } : undefined
       );
       this.wakeTextJobs();
       this.#publish(completed.callId, {
@@ -1626,7 +1631,8 @@ export class CallService {
   async #addTranscript(
     id: string,
     role: TranscriptSegment["role"],
-    text: string
+    text: string,
+    sourceKey?: string
   ) {
     const snapshot = await this.#require(id);
     const result = await this.repository.addTranscript(
@@ -1635,7 +1641,7 @@ export class CallService {
       text,
       snapshot.brief.locale
     );
-    this.#publish(id, { type: "transcript.added", segment: result.segment });
+    this.#publish(id, { type: "transcript.added", segment: result.segment, ...(sourceKey ? { key: sourceKey } : {}) });
     return result.snapshot;
   }
 

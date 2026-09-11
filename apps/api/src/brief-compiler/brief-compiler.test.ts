@@ -32,6 +32,8 @@ const rawInput: CreateCallBriefInput = {
 };
 
 const modelOutput = {
+  schedulingInterpretation: { intent: "none", authorityEvidence: null, schedule: null },
+  appointmentAuthorization: null,
   sourceLanguage: "ru",
   taskType: "receipt_confirmation",
   tone: "formal",
@@ -88,6 +90,64 @@ function compiled(overrides: Partial<CompiledCallBrief> = {}) {
     ...overrides
   } as CompiledCallBrief;
 }
+
+describe("bounded semantic repair", () => {
+  function provider(outputs: unknown[]) {
+    let attempts = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (url) => {
+      if (String(url).endsWith("moderations")) return new Response(JSON.stringify({ results: [{ flagged: false }] }));
+      const output = outputs[Math.min(attempts++, outputs.length - 1)];
+      return new Response(JSON.stringify({ id: `response_${attempts}`, output_text: JSON.stringify(output) }));
+    });
+    return { fetchImplementation, attempts: () => attempts };
+  }
+
+  it.each(["fact", "settings"])("repairs a recoverable %s integrity failure once and accounts for every request", async (kind) => {
+    const invalid = kind === "fact" ? { ...modelOutput, backgroundSummary: "Invented case SECRET-777-XYZ" }
+      : { ...modelOutput, voicemailAction: "leave_neutral_message" };
+    const mock = provider([invalid, modelOutput]);
+    const beforeProviderRequest = vi.fn(async () => true);
+    const afterProviderRequest = vi.fn(async () => undefined);
+    const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation: mock.fetchImplementation })
+      .compile(normalizeCreateCallBriefInput(rawInput), 1, { beforeProviderRequest, afterProviderRequest });
+    expect(result.policyDecision.status).toBe("ready_for_review");
+    expect(mock.attempts()).toBe(2);
+    expect(result.compilerResponseId).toBe("response_2");
+    expect(beforeProviderRequest).toHaveBeenCalledTimes(4);
+    expect(afterProviderRequest).toHaveBeenCalledTimes(4);
+    const retry = mock.fetchImplementation.mock.calls.filter(([url]) => String(url).endsWith("responses"))[1]!;
+    const feedback = JSON.parse(String(retry[1]?.body)).input[0].content;
+    expect(feedback).toContain("previous output failed local validation");
+    expect(feedback).not.toContain("SECRET-777-XYZ");
+  });
+
+  it("stops after the second integrity failure instead of creating a paid retry loop", async () => {
+    const mock = provider([{ ...modelOutput, backgroundSummary: "Invented case SECRET-777-XYZ" }]);
+    const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation: mock.fetchImplementation })
+      .compile(normalizeCreateCallBriefInput(rawInput));
+    expect(result.policyDecision).toMatchObject({ status: "blocked", reasonCodes: ["fact_integrity_failure"] });
+    expect(mock.attempts()).toBe(2);
+    expect(mock.fetchImplementation).toHaveBeenCalledTimes(4);
+  });
+
+  it.each(["risk", "unsupported"])("does not regenerate a genuine %s denial even if its text also fails integrity", async (kind) => {
+    const mock = provider([{ ...modelOutput, backgroundSummary: "Invented case SECRET-777-XYZ",
+      ...(kind === "risk" ? { riskCategories: ["high_stakes_medical"] } : { taskType: "unsupported" }) }]);
+    const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation: mock.fetchImplementation })
+      .compile(normalizeCreateCallBriefInput(rawInput));
+    expect(result.policyDecision.status).toBe("blocked");
+    expect(mock.attempts()).toBe(1);
+  });
+
+  it("charges the repair against the same request budget", async () => {
+    const mock = provider([{ ...modelOutput, backgroundSummary: "Invented case SECRET-777-XYZ" }, modelOutput]);
+    await expect(new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation: mock.fetchImplementation })
+      .compile(normalizeCreateCallBriefInput(rawInput), 1, { maxProviderRequests: 2 }))
+      .rejects.toMatchObject({ code: "OPENAI_REQUEST_BUDGET_EXHAUSTED", stage: "compilation" });
+    expect(mock.fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(mock.attempts()).toBe(1);
+  });
+});
 
 describe("deterministic brief policy", () => {
   it("creates a reviewable immutable development compilation", async () => {

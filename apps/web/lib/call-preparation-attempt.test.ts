@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CallBrief, CreateCallBriefInput } from "@callassist/contracts";
+import { ApiError, CallPreparationFailedError } from "./api";
 import {
   consumeCallPreparationAttempt,
   fingerprintCallPreparation,
@@ -9,6 +10,7 @@ import {
   resolveCallPreparationAttempt,
   writeCallPreparationAttempt
 } from "./call-preparation-attempt";
+import type { CallPreparationAttempt } from "./call-preparation-attempt";
 
 const input: CreateCallBriefInput = {
   recipientName: "Praxis Beispiel",
@@ -149,6 +151,190 @@ describe("call preparation attempts", () => {
     await expect(submit()).resolves.toMatchObject({ id: briefOne });
     expect(insertions).toBe(1);
     expect(serverRequests.size).toBe(1);
+  });
+
+  it("retires a newly failed operation only for the next explicit submit, preserving the input", async () => {
+    const storage = memoryStorage();
+    const original = structuredClone(input);
+    const keys: string[] = [];
+    let current: CallPreparationAttempt | null = null;
+    const submit = () => prepareCallBriefCreation({
+      input, userId: userOne, current, storage,
+      createIdempotencyKey: () => keys.length ? operationTwo : operationOne,
+      onAttempt: (attempt) => { current = attempt; },
+      load: async (id) => brief(id),
+      save: async (value, key) => {
+        expect(value).toEqual(original);
+        keys.push(key);
+        if (keys.length === 1) throw new CallPreparationFailedError("BRIEF_COMPILER_UNAVAILABLE");
+        return brief(briefOne);
+      }
+    });
+
+    await expect(submit()).rejects.toBeInstanceOf(CallPreparationFailedError);
+    expect(keys).toEqual([operationOne]);
+    expect(readCallPreparationAttempt(storage)).toMatchObject({ failed: true, idempotencyKey: operationOne });
+    current = null; // A locale switch/remount must keep the failure marker.
+    await expect(submit()).resolves.toMatchObject({ id: briefOne });
+    expect(keys).toEqual([operationOne, operationTwo]);
+    expect(input).toEqual(original);
+  });
+
+  it.each([false, true])("recovers an old uncertain key once during explicit retry; fresh failure=%s stops", async (freshFailure) => {
+    const storage = memoryStorage();
+    const keys: string[] = [];
+    let current: CallPreparationAttempt | null = null;
+    const submit = () => prepareCallBriefCreation({
+      input, userId: userOne, current, storage,
+      createIdempotencyKey: () => keys.length ? operationTwo : operationOne,
+      onAttempt: (attempt) => { current = attempt; },
+      load: async (id) => brief(id),
+      save: async (value, key) => {
+        expect(value).toEqual(input);
+        keys.push(key);
+        if (keys.length === 1) throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
+        if (key === operationOne || freshFailure) throw new CallPreparationFailedError("BRIEF_COMPILER_UNAVAILABLE");
+        return brief(briefOne);
+      }
+    });
+
+    await expect(submit()).rejects.toMatchObject({ code: "CALL_PREPARATION_TIMEOUT" });
+    expect(readCallPreparationAttempt(storage)?.failed).toBeUndefined();
+    current = null;
+    if (freshFailure) await expect(submit()).rejects.toBeInstanceOf(CallPreparationFailedError);
+    else await expect(submit()).resolves.toMatchObject({ id: briefOne });
+    expect(keys).toEqual([operationOne, operationOne, operationTwo]);
+    expect(readCallPreparationAttempt(storage)).toMatchObject(freshFailure
+      ? { idempotencyKey: operationTwo, failed: true }
+      : { idempotencyKey: operationTwo, callBriefId: briefOne });
+  });
+
+  it("keeps a timed-out operation key when the server has not confirmed a terminal failure", async () => {
+    const storage = memoryStorage();
+    const keys: string[] = [];
+    let current: CallPreparationAttempt | null = null;
+    const submit = () => prepareCallBriefCreation({
+      input, userId: userOne, current, storage,
+      createIdempotencyKey: () => keys.length ? operationTwo : operationOne,
+      onAttempt: (attempt) => { current = attempt; },
+      load: async (id) => brief(id),
+      save: async (_value, key) => {
+        keys.push(key);
+        if (keys.length === 1) throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
+        return brief(briefOne);
+      }
+    });
+
+    await expect(submit()).rejects.toMatchObject({ code: "CALL_PREPARATION_TIMEOUT" });
+    current = null;
+    await expect(submit()).resolves.toMatchObject({ id: briefOne });
+    expect(keys).toEqual([operationOne, operationOne]);
+  });
+
+  it("keeps the current failure marker when storage can read an old key but cannot write", async () => {
+    const backing = memoryStorage();
+    let rejectWrites = false;
+    const storage = {
+      ...backing,
+      setItem: (key: string, value: string) => {
+        if (rejectWrites) throw new Error("quota exceeded");
+        backing.setItem(key, value);
+      }
+    };
+    const keys: string[] = [];
+    let current: CallPreparationAttempt | null = null;
+    const submit = () => prepareCallBriefCreation({
+      input, userId: userOne, current, storage,
+      createIdempotencyKey: () => keys.length ? operationTwo : operationOne,
+      onAttempt: (attempt) => { current = attempt; },
+      load: async (id) => brief(id),
+      save: async (_value, key) => {
+        keys.push(key);
+        rejectWrites = true;
+        if (keys.length === 1) throw new CallPreparationFailedError("BRIEF_COMPILER_UNAVAILABLE");
+        return brief(briefOne);
+      }
+    });
+
+    await expect(submit()).rejects.toBeInstanceOf(CallPreparationFailedError);
+    expect(readCallPreparationAttempt(storage)?.failed).toBeUndefined();
+    await expect(submit()).resolves.toMatchObject({ id: briefOne });
+    expect(keys).toEqual([operationOne, operationTwo]);
+  });
+
+  it("resumes the current draft even when session storage contains another draft", async () => {
+    const current = resolveCallPreparationAttempt({
+      current: null, fingerprint: await fingerprintCallPreparation(input, undefined, "draft-a"),
+      userId: userOne, createIdempotencyKey: () => operationOne
+    });
+    const storage = memoryStorage();
+    writeCallPreparationAttempt(storage, { ...current, fingerprint: "b".repeat(64), idempotencyKey: operationTwo });
+    const keys: string[] = [];
+    await prepareCallBriefCreation({
+      input, scope: "draft-a", userId: userOne, current, storage,
+      createIdempotencyKey: () => operationTwo,
+      onAttempt: () => undefined,
+      load: async (id) => brief(id),
+      save: async (_value, key) => { keys.push(key); return brief(briefOne); }
+    });
+    expect(keys).toEqual([operationOne]);
+  });
+
+  it("resumes a newer replacement saved after the current locale subtree mounted", async () => {
+    const current = resolveCallPreparationAttempt({
+      current: null, fingerprint: await fingerprintCallPreparation(input),
+      userId: userOne, now: 1_000, createIdempotencyKey: () => operationOne
+    });
+    const storage = memoryStorage();
+    writeCallPreparationAttempt(storage, { ...current, idempotencyKey: operationTwo, createdAt: 2_000 });
+    const keys: string[] = [];
+    await prepareCallBriefCreation({
+      input, userId: userOne, current, storage, now: 3_000,
+      createIdempotencyKey: () => operationOne,
+      onAttempt: () => undefined,
+      load: async (id) => brief(id),
+      save: async (_value, key) => { keys.push(key); return brief(briefOne); }
+    });
+    expect(keys).toEqual([operationTwo]);
+  });
+
+  it("deduplicates clarification retries but starts a new preparation for changed answers or source revision", async () => {
+    const storage = memoryStorage();
+    const serverOperations = new Set<string>();
+    const requests: string[] = [];
+    const generatedKeys = [operationOne, operationTwo, "00000000-0000-4000-8000-000000000103"];
+    const languagePreferences = { mode: "manual" as const, targetLanguage: "ru" as const };
+    let current: CallPreparationAttempt | null = null;
+    let revision = 1;
+    let answer = "Tuesday after 10:00";
+    const submit = () => prepareCallBriefCreation({
+      input: { ...input, clarificationAnswers: [{ issueCode: "missing_scheduling_constraints", answer }] },
+      languagePreferences,
+      scope: `clarifications:${briefOne}:${revision}:source-hash-${revision}`,
+      userId: userOne, current, storage,
+      createIdempotencyKey: () => generatedKeys.shift()!,
+      onAttempt: (attempt) => { current = attempt; },
+      load: async (id) => brief(id),
+      save: async (_value, key) => {
+        requests.push(key);
+        serverOperations.add(key);
+        if (requests.length <= 2) throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
+        return brief(briefOne);
+      }
+    });
+
+    await expect(submit()).rejects.toMatchObject({ code: "CALL_PREPARATION_TIMEOUT" });
+    current = null; // A remount must resume the same work, including its language intent.
+    await expect(submit()).rejects.toMatchObject({ code: "CALL_PREPARATION_TIMEOUT" });
+    expect(requests).toEqual([operationOne, operationOne]);
+    expect(serverOperations.size).toBe(1);
+    answer = "Wednesday after 11:00";
+    await submit();
+    expect(requests.at(-1)).toBe(operationTwo);
+    revision = 2;
+    await submit();
+    expect(serverOperations.size).toBe(3);
+    expect(requests).toHaveLength(4);
   });
 
   it("opens a confirmed brief again without another POST until navigation mounts", async () => {

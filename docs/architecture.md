@@ -218,9 +218,35 @@ receives an ApprovedExecutionSnapshot projection of the reviewed plan; raw autho
 fields are excluded. Full runtime text is moderated and protected identifiers must
 be preserved. The legacy mutable reader/dual-write and media adapter are removed.
 All user-provided facts in the approved plan are authorized for use when needed
-during the call. The supported scope is information gathering, including availability
-and conditions; it does not authorize booking, payment or other commitments. Additional
-live permission prompts are not the product authorization model. Legacy approval
+during the call. Those facts alone do not authorize an appointment action. The
+2026-09-10 extension adds explicit, versioned permission to either book or confirm
+one appointment or personal meeting with the called recipient, for the approved purpose/service and inclusive
+local start-time windows. Confirmation of an existing appointment requires exactly
+one date and start time; only new bookings allow flexible windows. New bookings use the first offered matching slot, without
+an earliest-available guarantee. Rescheduling, cancellation, payment, deposits and
+new financial/cancellation terms remain outside that permission.
+Compiler 5 interprets scheduling intent semantically and requires a quoted source
+from the objective or a clarification answer for proposed authority. Context alone
+does not grant it. A compiler-only calendar interpretation describes concrete dates,
+ranges, relative days or the next calendar week, weekday/date exclusions and start
+intervals. The server expands it against one trusted clock in the specified IANA
+zone; the resulting windows are the persisted, reviewable authority. Calendar
+explanations may reference excluded dates derived from that same finite domain;
+this does not make those dates bookable. Other protected identifiers retain their
+source checks. This is a model interpretation followed by user approval, not a
+deterministic proof of natural-language meaning. Compiler 3 and 4 snapshots remain
+readable with their original hashes; schema 4, policy 3 and execution 2 do not change.
+One bounded regeneration can repair a malformed or inconsistent model plan. Genuine
+missing constraints require clarification; an unrepaired integrity failure is shown
+as a preparation error with a retry of the saved request.
+The pure server `check_appointment` validator rejects mismatched or unconfirmed
+details, invalid/past dates and nonexistent or ambiguous local times. Its success
+permits an action; only the recipient's subsequent confirmation supports a booked
+result. For a personal meeting this means the intended person's explicit agreement,
+without requiring a provider or a calendar entry. Model assertions about service and recipient are not calendar verification;
+there is no calendar API. Runtime integration and live acceptance remain separate
+checks in [the implementation plan](unified-implementation-plan-2026-09-09.md#10-расширение-от-10092026--одна-запись-по-предварительному-разрешению).
+Additional live permission prompts are not the product authorization model. Legacy approval
 storage/routes remain for compatibility; R08 acceptance concerns adherence to the
 preapproved facts and action limits, with adversarial and authorized live evidence.
 Ordinary `end_call` is implemented behind the R21 flag described above.

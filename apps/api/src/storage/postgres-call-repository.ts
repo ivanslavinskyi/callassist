@@ -3,7 +3,7 @@ import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, re
 import type { CallTextRepository } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import {
-  BRIEF_COMPILER_VERSION,
+  isSupportedBriefCompilerVersion,
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
   adminCallInspectorSchema,
@@ -4044,7 +4044,7 @@ export class PostgresCallRepository implements CallRepository {
             : null;
         if (
           typeof storedCompilerVersion === "string" &&
-          storedCompilerVersion !== BRIEF_COMPILER_VERSION
+          !isSupportedBriefCompilerVersion(storedCompilerVersion)
         ) {
           invalidCandidates += 1;
           unsupportedCompilerVersions += 1;

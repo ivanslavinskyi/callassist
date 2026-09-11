@@ -177,6 +177,18 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     })
   }),
   z.strictObject({
+    name: z.literal("conversation.tool_result"),
+    metadata: z.strictObject({
+      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing"]),
+      outcome: z.enum(["accepted", "rejected"]),
+      reason: safeTokenSchema,
+      requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      snapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      proposalFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      generation: z.number().int().nonnegative()
+    })
+  }),
+  z.strictObject({
     name: z.literal("transcription.started"),
     metadata: z.strictObject({ model: safeTokenSchema, retry: z.boolean() })
   }),
@@ -327,6 +339,7 @@ export function describeCallTelemetryEvent(
     case "conversation.first_audio":
     case "conversation.ended":
     case "conversation.hangup":
+    case "conversation.tool_result":
       return { source: "realtime", stage: "conversation", severity: "info" };
     case "transcription.started":
     case "transcription.completed":

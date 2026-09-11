@@ -61,7 +61,7 @@ const enFormCopy = {
   shareableInformation: "Information the assistant may share",
   shareableInformationHelp: "Optional. Enter actual verified facts, one per line. Examples are never prefilled.",
   approvedInformation: "Approved information",
-  approvedInformationPlaceholder: "Full name: John Doe\nRequest sent: 12 July 2026",
+  approvedInformationPlaceholder: "Full name: John Doe\nPhone: +41 79 000 00 00\nAddress: Example Street 12, 8000 Zurich",
   cancel: "Cancel",
   preparing: "Preparing…",
   reviewCall: "Review call"
@@ -73,6 +73,7 @@ type ReviewCopy = {
   preview: string; ready: string; clarificationNeeded: string; changesNeeded: string;
   whatWillDo: string; callSettings: string; opening: string; questions: string;
   addMissingDetail: string; clarificationHelp: string; blockedReason: string;
+  preparationFailed: string; preparationFailedHelp: string; retryPreparation: string; retryingPreparation: string;
   edit: string; starting: string; approveAndCall: string; successMeans: string;
   approvedInformation: string; none: string; guardrails: string;
   updating: string; continue: string;
@@ -166,6 +167,7 @@ export type Messages = {
     factsTooLong: string;
     rateLimited: string;
     preparationError: string;
+    preparationPending: string;
     preparationUnavailable: string;
     preparationInvalid: string;
     preparationNotFound: string;
@@ -252,6 +254,9 @@ const enReview: ReviewCopy = {
   addMissingDetail: "Add the missing detail here",
   clarificationHelp: "Your existing call plan will be updated. You will not need to fill it in again.",
   blockedReason: "What needs to change", edit: "Edit", starting: "Starting…",
+  preparationFailed: "Plan preparation failed",
+  preparationFailedHelp: "SHPROHLI could not prepare a reliable plan. Your request is saved. Try preparing it again.",
+  retryPreparation: "Retry preparation", retryingPreparation: "Preparing…",
   approveAndCall: "Approve & call", successMeans: "A successful result",
   approvedInformation: "Approved information", none: "None", guardrails: "Safety rules", updating: "Updating…",
   continue: "Continue",
@@ -272,8 +277,8 @@ const enReview: ReviewCopy = {
     prohibited_content: "This request is outside the supported low-risk uses. Edit it before trying again.",
     material_ambiguity: "The request is unclear in a way that could change the call. Add the missing detail.",
     required_information_missing: "Required information is missing.",
-    fact_integrity_failure: "SHPROHLI could not preserve the approved information reliably. Edit the request and try again.",
-    plan_constraint_failure: "SHPROHLI could not apply one of the selected call settings. Review the request and try again.",
+    fact_integrity_failure: "SHPROHLI could not preserve your information reliably while preparing the plan. Try preparing it again.",
+    plan_constraint_failure: "SHPROHLI could not prepare a plan that follows your settings. Try preparing it again.",
     unsupported_task: "This type of call is not currently supported."
   }
 };
@@ -285,6 +290,9 @@ const deReview: ReviewCopy = {
   addMissingDetail: "Fehlende Angabe ergänzen",
   clarificationHelp: "Ihr bestehender Anrufplan wird aktualisiert. Sie müssen ihn nicht erneut ausfüllen.",
   blockedReason: "Was geändert werden muss", edit: "Bearbeiten",
+  preparationFailed: "Plan konnte nicht erstellt werden",
+  preparationFailedHelp: "SHPROHLI konnte keinen zuverlässigen Plan erstellen. Ihre Anfrage ist gespeichert. Versuchen Sie die Vorbereitung erneut.",
+  retryPreparation: "Vorbereitung wiederholen", retryingPreparation: "Wird vorbereitet…",
   starting: "Wird gestartet…", approveAndCall: "Genehmigen und anrufen",
   successMeans: "Ein erfolgreiches Ergebnis", approvedInformation: "Freigegebene Informationen",
   none: "Keine", guardrails: "Sicherheitsregeln", updating: "Wird aktualisiert…", continue: "Weiter",
@@ -305,8 +313,8 @@ const deReview: ReviewCopy = {
     prohibited_content: "Diese Anfrage liegt ausserhalb der unterstützten risikoarmen Nutzung. Bearbeiten Sie sie und versuchen Sie es erneut.",
     material_ambiguity: "Die Anfrage ist an einer entscheidenden Stelle unklar. Ergänzen Sie die fehlende Angabe.",
     required_information_missing: "Erforderliche Informationen fehlen.",
-    fact_integrity_failure: "SHPROHLI konnte die freigegebenen Angaben nicht zuverlässig übernehmen. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
-    plan_constraint_failure: "SHPROHLI konnte eine gewählte Anrufeinstellung nicht übernehmen. Prüfen Sie die Anfrage und versuchen Sie es erneut.",
+    fact_integrity_failure: "SHPROHLI konnte Ihre Angaben bei der Planvorbereitung nicht zuverlässig übernehmen. Versuchen Sie die Vorbereitung erneut.",
+    plan_constraint_failure: "SHPROHLI konnte keinen Plan erstellen, der Ihre Einstellungen einhält. Versuchen Sie die Vorbereitung erneut.",
     unsupported_task: "Diese Art von Anruf wird derzeit nicht unterstützt."
   }
 };
@@ -399,8 +407,9 @@ const en: Messages = {
     taskTextTooLong: "Shorten the objective, context, approved information, delivery instruction, or clarification answers before preparing this call.",
     factsTooLong: "Use no more than 40 approved facts and keep each fact within 300 characters.",
     rateLimited: "Too many call-planning requests. Wait a moment and try again.",
-    preparationError: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
+    preparationError: "The call plan could not be prepared. Your entries are preserved. Try again.",
     preparationUnavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
+    preparationPending: "Plan preparation is taking longer than expected. Your entries are preserved. Try again to check its progress.",
     preparationInvalid: "Some call details need attention. Check your entries and try again.",
     preparationNotFound: "This call plan no longer exists. Return to your calls and create a new one.",
     preparationNotEditable: "This call plan can no longer be edited.",
@@ -610,8 +619,9 @@ const de: Messages = {
     taskTextTooLong: "Kürzen Sie Ziel, Kontext, freigegebene Informationen, Zustellungsanweisung oder Klärungsantworten, bevor Sie diesen Anruf vorbereiten.",
     factsTooLong: "Verwenden Sie höchstens 40 freigegebene Fakten mit jeweils maximal 300 Zeichen.",
     rateLimited: "Zu viele Anfragen zur Anrufplanung. Warten Sie kurz und versuchen Sie es erneut.",
-    preparationError: "SHPROHLI konnte diese Anfrage nicht sicher vorbereiten. Bearbeiten Sie die Anfrage und versuchen Sie es erneut.",
+    preparationError: "Der Anrufplan konnte nicht erstellt werden. Ihre Eingaben bleiben erhalten. Versuchen Sie es erneut.",
     preparationUnavailable: "Die Anrufvorbereitung ist vorübergehend nicht verfügbar. Ihre Eingaben bleiben erhalten. Versuchen Sie es später erneut.",
+    preparationPending: "Die Planvorbereitung dauert länger als erwartet. Ihre Eingaben bleiben erhalten. Versuchen Sie es erneut, um den Fortschritt zu prüfen.",
     preparationInvalid: "Einige Anrufangaben müssen geprüft werden. Korrigieren Sie Ihre Eingaben und versuchen Sie es erneut.",
     preparationNotFound: "Dieser Anrufplan ist nicht mehr vorhanden. Kehren Sie zu Ihren Anrufen zurück und erstellen Sie einen neuen.",
     preparationNotEditable: "Dieser Anrufplan kann nicht mehr bearbeitet werden.",
@@ -677,7 +687,7 @@ const de: Messages = {
       shareableInformation: "Informationen, die der Assistent teilen darf",
       shareableInformationHelp: "Optional. Geben Sie bestätigte Fakten zeilenweise ein. Beispiele werden nie vorausgefüllt.",
       approvedInformation: "Freigegebene Informationen",
-      approvedInformationPlaceholder: "Vollständiger Name: Max Mustermann\nAnfrage gesendet: 12. Juli 2026",
+      approvedInformationPlaceholder: "Vollständiger Name: Max Mustermann\nTelefon: +41 79 000 00 00\nAdresse: Musterstrasse 12, 8000 Zürich",
       cancel: "Abbrechen",
       preparing: "Wird vorbereitet…",
       reviewCall: "Anruf prüfen"

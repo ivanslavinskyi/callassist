@@ -4,10 +4,13 @@ import {
   type PlanReviewPayload, type CallSummaryPayload
 } from "@callassist/contracts";
 import { CallRepositoryError, type CallRepository } from "../storage/call-repository";
+import { textArtifactMaximumRequests } from "../storage/call-text-repository";
 import { DurableJobExecutionError, type DurableJob, type DurableJobLease } from "../jobs/durable-job";
 import { planReviewFields } from "./plan-review-fields";
 import { textDirectionEnabled, type TextCapabilities } from "./text-capabilities";
-import { TextProcessingError, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
+import { TextProcessingError, textGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
+import { summaryInput } from "./summary-input";
+import { validateTextProcessingInput, validateTextProcessingOutput } from "./text-validation";
 
 export class TextArtifactServiceError extends Error {
   constructor(readonly code: "TEXT_GENERATION_DISABLED" | "TEXT_DIRECTION_UNSUPPORTED") { super(code); }
@@ -27,7 +30,7 @@ export class TextArtifactService {
     if (existing) return existing;
     this.#assertDirection(kind, reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage), input.targetLanguage);
     return this.repository.enqueueTextArtifact({ callId, kind, compilationId: source.compilationId, sourceHash: source.snapshotHash,
-      targetLanguage: input.targetLanguage, generatorVersion: this.processor.generatorVersion });
+      targetLanguage: input.targetLanguage, generatorVersion: textGeneratorVersion(this.processor, kind) });
   }
 
   async requestTranscriptArtifact(callId: string, kind: "transcript_translation" | "call_summary", input: { sourceRevisionId: string; targetLanguage: TextLanguage }) {
@@ -40,7 +43,7 @@ export class TextArtifactService {
     if (existing) return existing;
     this.#assertDirection(kind, "*", input.targetLanguage);
     return this.repository.enqueueTextArtifact({ callId, kind, ...(compilationId ? { compilationId } : {}), transcriptRevisionId: source.id,
-      sourceHash: source.sourceHash, targetLanguage: input.targetLanguage, generatorVersion: this.processor.generatorVersion });
+      sourceHash: source.sourceHash, targetLanguage: input.targetLanguage, generatorVersion: textGeneratorVersion(this.processor, kind) });
   }
 
   async ensureAutomaticPlan(callId: string) {
@@ -65,7 +68,7 @@ export class TextArtifactService {
     const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
       ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
     this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
-    if (artifact.generatorVersion !== this.processor.generatorVersion) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
+    if (artifact.generatorVersion !== textGeneratorVersion(this.processor, artifact.kind)) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
     return this.repository.retryTextArtifact(callId, artifactId);
   }
 
@@ -80,14 +83,17 @@ export class TextArtifactService {
       const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
         ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
       this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
-      if (artifact.generatorVersion !== this.processor.generatorVersion) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
+      if (artifact.generatorVersion !== textGeneratorVersion(this.processor, artifact.kind)) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
       const inputs = await this.#inputs(artifact);
       const completed = new Map((await this.repository.getTextArtifactChunks(artifact.id, lease())).map((chunk) => [chunk.index, chunk.payload]));
       const outputs: TextProcessingPayload[] = [];
-      for (const [index, input] of inputs.entries()) {
+      const needsCompaction = artifact.kind === "call_summary" && inputs.length > 1;
+      // Job attempts bound each generation; this budget bounds all generations together.
+      const requestLimit = textArtifactMaximumRequests;
+      const runInput = async (input: TextProcessingInput, index: number, maximumRequests: number) => {
         if (completed.has(index)) {
-          outputs.push(parsePayload(input.kind, completed.get(index)));
-          continue;
+          const cached = parsePayload(input.kind, completed.get(index));
+          return input.kind === "call_summary" ? validateTextProcessingOutput(input, cached) : cached;
         }
         this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
         const output = await this.processor.process(input, {
@@ -97,25 +103,44 @@ export class TextArtifactService {
             return this.repository.reserveTextArtifactProviderRequest({
             id: request.clientRequestId, artifactId: artifact.id, provider: request.provider, operationType: request.operationType,
             stage: `${artifact.kind}.${index}`, requestedModel: request.model, clientRequestId: request.clientRequestId,
-            startedAt: request.startedAt, maxRequests: Math.min(24, inputs.length * 3), durableJobGeneration: job.generation
+            startedAt: request.startedAt, maxRequests: maximumRequests, durableJobGeneration: job.generation
             }, lease());
           },
           afterProviderRequest: (result) => this.repository.completeProviderOperation({
             operationId: result.clientRequestId, outcome: result.outcome, providerRequestId: result.providerRequestId,
             providerResponseId: result.providerResponseId, providerModel: result.providerModel, statusCode: result.statusCode,
             completedAt: result.completedAt, durationMs: result.durationMs, usage: result.usage,
-            errorCode: result.outcome === "succeeded" ? null : "TEXT_PROVIDER_REQUEST_FAILED"
+            errorCode: result.outcome === "succeeded" ? null : result.errorCode ?? "TEXT_PROVIDER_REQUEST_FAILED"
           })
         });
         await this.repository.saveTextArtifactChunk(artifact.id, index, output, lease());
-        outputs.push(output);
+        return output;
+      };
+      for (const [index, input] of inputs.entries()) {
+        outputs.push(await runInput(input, index, requestLimit));
       }
-      const payload = combinePayloads(artifact.kind, outputs, artifact.targetLanguage);
+      let payload = combinePayloads(artifact.kind, outputs, artifact.targetLanguage);
+      if (needsCompaction && inputs[0]?.kind === "call_summary") {
+        const extraction = callSummaryPayloadSchema.parse(payload);
+        const evidenceIds = new Set([...extraction.findings, ...extraction.nextSteps].flatMap(item => item.sourceSegmentIds));
+        const allSegments = inputs.flatMap(input => input.kind === "call_summary" ? input.segments : []);
+        const compactInput: TextProcessingInput = { ...inputs[0], extraction, segments: allSegments.filter(segment => evidenceIds.has(segment.id)) };
+        try {
+          validateTextProcessingInput(compactInput);
+          payload = await runInput(compactInput, inputs.length, requestLimit);
+        } catch (error) {
+          // A compact view is optional. Keep the evidenced current-format details on a bounded provider failure.
+          if (!(error instanceof TextProcessingError)) throw error;
+          payload = extraction;
+          await this.repository.saveTextArtifactChunk(artifact.id, inputs.length, extraction, lease());
+        }
+      }
       await this.repository.completeTextArtifact(artifact.id, payload, lease());
     } catch (error) {
       const code = error instanceof TextProcessingError || error instanceof DurableJobExecutionError || error instanceof CallRepositoryError || error instanceof TextArtifactServiceError ? error.code : "TEXT_ARTIFACT_GENERATION_FAILED";
       await this.repository.failTextArtifact(artifact.id, code, lease()).catch(() => undefined);
-      throw new DurableJobExecutionError(code, { cause: error, retryable: error instanceof TextProcessingError ? error.code === "TEXT_REQUEST_FAILED" || error.code === "TEXT_RESPONSE_INVALID" :
+      throw new DurableJobExecutionError(code, { cause: error, retryAfterMs: error instanceof TextProcessingError ? error.retryAfterMs : undefined,
+        retryable: error instanceof TextProcessingError ? error.retryable :
         error instanceof DurableJobExecutionError ? error.retryable : !(error instanceof CallRepositoryError) && !(error instanceof TextArtifactServiceError) });
     }
   }
@@ -133,13 +158,12 @@ export class TextArtifactService {
     if (artifact.kind === "transcript_translation") return chunkBySize(source.segments).map((segments) => ({ kind: "transcript_translation", targetLanguage: artifact.targetLanguage, segments }));
     const compilation = artifact.compilationId ? await this.repository.getTextArtifactSourceCompilation(artifact.callId, artifact.compilationId) : null;
     if (!compilation?.compiledBrief) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
-    const questions = compilation.compiledBrief.orderedQuestions.map((question) => question.text);
-    return chunkBySize(source.segments).map((segments) => ({ kind: "call_summary", targetLanguage: artifact.targetLanguage, segments, questions }));
+    return chunkBySize(source.segments).map(segments => summaryInput(compilation, segments, artifact.targetLanguage));
   }
 
   async #find(callId: string, kind: TextArtifactKind, compilationId: string | null, transcriptRevisionId: string | null, sourceHash: string, targetLanguage: TextLanguage) {
     return (await this.repository.listTextArtifacts(callId)).find((item) => item.kind === kind && item.compilationId === compilationId &&
-      item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && item.generatorVersion === this.processor.generatorVersion && !["stale", "cancelled"].includes(item.status));
+      item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && item.generatorVersion === textGeneratorVersion(this.processor, kind) && !["stale", "cancelled"].includes(item.status));
   }
   #assertDirection(kind: TextArtifactKind, sourceLanguage: string, targetLanguage: TextLanguage) {
     if (!this.capabilities.enabled) throw new TextArtifactServiceError("TEXT_GENERATION_DISABLED");
@@ -181,26 +205,32 @@ export function combinePayloads(kind: TextArtifactKind, outputs: TextProcessingP
     return { segments, text: segments.map((segment) => segment.text).join("\n") };
   }
   const summaries = outputs.map((output) => callSummaryPayloadSchema.parse(output));
+  if (!summaries.length || summaries.some(summary => summary.findings.length !== summaries[0]!.findings.length)) throw new TextProcessingError("TEXT_RESPONSE_INVALID");
   if (summaries.length === 1) return summaries[0]!;
-  const answers = summaries[0]!.answers.map((first, index) => {
-    const candidates = summaries.map((summary) => summary.answers[index]!);
-    const reported = candidates.filter((answer) => answer.certainty !== "unknown");
-    const unique = new Set(reported.map((answer) => `${answer.certainty}:${answer.answer.trim()}`));
-    if (unique.size === 1 && !candidates.some((answer) => answer.certainty === "unknown" && answer.sourceSegmentIds.length)) {
+  const findings = summaries[0]!.findings.map((first, index) => {
+    const candidates = summaries.map(summary => summary.findings[index]);
+    if (candidates.some(finding => !finding || finding.id !== first.id)) throw new TextProcessingError("TEXT_RESPONSE_INVALID");
+    const present = candidates as CallSummaryPayload["findings"];
+    const reported = present.filter(finding => finding.certainty !== "unknown");
+    const unique = new Set(reported.map(finding => `${finding.certainty}:${finding.text.trim()}`));
+    if (unique.size === 1 && !present.some(finding => finding.certainty === "unknown" && finding.sourceSegmentIds.length)) {
       return { ...reported[0]!, sourceSegmentIds: [...new Set(reported.flatMap((answer) => answer.sourceSegmentIds))].slice(0, 30) };
     }
-    if (unique.size === 0) return first;
-    return { ...first, answer: multiPartUncertainty[language], certainty: "unknown" as const,
-      sourceSegmentIds: [...new Set(candidates.flatMap((answer) => answer.sourceSegmentIds))].slice(0, 30) };
+    if (unique.size === 0) {
+      const sourceSegmentIds = [...new Set(present.flatMap(finding => finding.sourceSegmentIds))].slice(0, 30);
+      return { ...first, text: sourceSegmentIds.length && new Set(present.map(finding => finding.text)).size > 1 ? multiPartUncertainty[language] : first.text, sourceSegmentIds };
+    }
+    return { ...first, text: multiPartUncertainty[language], certainty: "unknown" as const,
+      sourceSegmentIds: [...new Set(present.flatMap(finding => finding.sourceSegmentIds))].slice(0, 30) };
   });
-  const unresolvedAnswers = answers.some((answer, index) => answer.certainty === "unknown" && summaries.some((summary) => summary.answers[index]?.certainty !== "unknown"));
+  const unresolvedAnswers = findings.some((finding, index) => finding.certainty === "unknown" && summaries.some(summary => summary.findings[index]?.certainty !== "unknown"));
   const mergedSteps = new Map<string, CallSummaryPayload["nextSteps"][number]>();
   for (const step of summaries.flatMap((summary) => summary.nextSteps)) {
     const prior = mergedSteps.get(step.text.trim());
     mergedSteps.set(step.text.trim(), { text: step.text, sourceSegmentIds: [...new Set([...(prior?.sourceSegmentIds ?? []), ...step.sourceSegmentIds])].slice(0, 30) });
   }
   // Keep cited steps where the chunk answers agree; conflicting evidence stays explicitly unresolved.
-  return { answers, nextSteps: unresolvedAnswers ? [] : [...mergedSteps.values()].slice(0, 30),
+  return { schemaVersion: 2, overview: [], findings, nextSteps: unresolvedAnswers ? [] : [...mergedSteps.values()].slice(0, 30),
     unresolved: [...new Set([...summaries.flatMap((summary) => summary.unresolved), ...(unresolvedAnswers ? [multiPartUncertainty[language]] : [])])].slice(0, 30) } satisfies CallSummaryPayload;
 }
 

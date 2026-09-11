@@ -205,6 +205,14 @@ export async function getCurrentUser() {
   return apiRequest<{ user: User }>("/api/auth/me");
 }
 
+/** A server-confirmed terminal preparation failure may be retried with a new operation key. */
+export class CallPreparationFailedError extends ApiError {
+  constructor(code: string) {
+    super(code, 502);
+    this.name = "CallPreparationFailedError";
+  }
+}
+
 export async function updateLanguagePreferences(input: {
   uiLocale?: string;
   preferredContentLanguage?: TextLanguage | null;
@@ -665,6 +673,7 @@ export function getCallPreparationErrorMessage(
   options: Partial<{
     generic: string;
     unavailable: string;
+    pending: string;
     invalid: string;
     notFound: string;
     notEditable: string;
@@ -673,8 +682,9 @@ export function getCallPreparationErrorMessage(
   }> = {}
 ) {
   const copy = {
-    generic: "SHPROHLI could not prepare this request safely. Edit the request and try again.",
+    generic: "The call plan could not be prepared. Your entries are preserved. Try again.",
     unavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
+    pending: "Plan preparation is taking longer than expected. Your entries are preserved. Try again to check its progress.",
     invalid: "Some call details need attention. Check your entries and try again.",
     notFound: "This call plan no longer exists. Return to your calls and create a new one.",
     notEditable: "This call plan can no longer be edited.",
@@ -688,6 +698,9 @@ export function getCallPreparationErrorMessage(
 
   if (error.code === "BRIEF_COMPILER_UNAVAILABLE") {
     return copy.unavailable;
+  }
+  if (error.code === "CALL_PREPARATION_TIMEOUT") {
+    return copy.pending;
   }
   if (error.code === "BRIEF_COMPILER_RESPONSE_INVALID") {
     return copy.generic;
@@ -777,10 +790,7 @@ export async function createCallBrief(
   const deadline = Date.now() + 120_000;
   while (preparation.status !== "succeeded") {
     if (preparation.status === "failed") {
-      throw new ApiError(
-        preparation.failureCode ?? "BRIEF_COMPILATION_FAILED",
-        502
-      );
+      throw new CallPreparationFailedError(preparation.failureCode ?? "BRIEF_COMPILATION_FAILED");
     }
     if (preparation.status === "cancelled") {
       throw new ApiError("CALL_PREPARATION_CANCELLED", 409);
@@ -847,10 +857,7 @@ export async function recompileCallBrief(
   const deadline = Date.now() + 120_000;
   while (preparation.status !== "succeeded") {
     if (preparation.status === "failed") {
-      throw new ApiError(
-        preparation.failureCode ?? "BRIEF_COMPILATION_FAILED",
-        502
-      );
+      throw new CallPreparationFailedError(preparation.failureCode ?? "BRIEF_COMPILATION_FAILED");
     }
     if (preparation.status === "cancelled") {
       throw new ApiError("CALL_PREPARATION_CANCELLED", 409);

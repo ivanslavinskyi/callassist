@@ -1,7 +1,7 @@
 import { callSummaryPayloadSchema, transcriptTranslationPayloadSchema, type CallTextArtifact, type FinalTranscriptRevision, type TextLanguage } from "@callassist/contracts";
 
 export function currentResultArtifact(items: CallTextArtifact[], revision: FinalTranscriptRevision, kind: "transcript_translation" | "call_summary", language: TextLanguage) {
-  const candidates = items.filter((item) => item.kind === kind && item.transcriptRevisionId === revision.id && item.sourceHash === revision.sourceHash && item.targetLanguage === language)
+  const candidates = items.filter((item) => !["cancelled", "stale"].includes(item.status) && item.kind === kind && item.transcriptRevisionId === revision.id && item.sourceHash === revision.sourceHash && item.targetLanguage === language)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return candidates.find((item) => kind === "transcript_translation"
     ? translatedTranscript(item, revision) !== null : evidencedSummary(item, revision) !== null) ?? candidates[0];
@@ -34,7 +34,7 @@ export function evidencedSummary(artifact: CallTextArtifact | undefined, revisio
   const parsed = callSummaryPayloadSchema.safeParse(artifact.payload);
   if (!parsed.success) return null;
   const ids = new Set(revision.segments.map((segment) => segment.id));
-  for (const item of [...parsed.data.answers, ...parsed.data.nextSteps]) {
+  for (const item of [...parsed.data.findings, ...parsed.data.nextSteps]) {
     if (item.sourceSegmentIds.some((id) => !ids.has(id))) return null;
     if ("certainty" in item && item.certainty !== "unknown" && !item.sourceSegmentIds.length) return null;
   }

@@ -17,14 +17,32 @@ export const sourceSegmentSchema = z.object({
   text: z.string().min(1), startSeconds: z.number().nonnegative().nullable(), endSeconds: z.number().nonnegative().nullable()
 });
 export const transcriptTranslationPayloadSchema = z.object({ segments: z.array(sourceSegmentSchema), text: z.string() });
-export const summaryItemSchema = z.object({
-  question: z.string(), answer: z.string(), certainty: z.enum(["reported", "conditional", "unknown"]),
-  sourceSegmentIds: z.array(z.string()).max(30)
+export const summaryItemSchema = z.strictObject({
+  id: z.string().min(1).max(160), label: z.string().trim().min(1).max(160), text: z.string().trim().min(1).max(4000),
+  certainty: z.enum(["reported", "conditional", "unknown"]),
+  sourceSegmentIds: z.array(z.string().min(1)).max(30)
 });
-export const callSummaryPayloadSchema = z.object({
-  answers: z.array(summaryItemSchema).max(30),
-  nextSteps: z.array(z.object({ text: z.string(), sourceSegmentIds: z.array(z.string()).min(1).max(30) })).max(30),
-  unresolved: z.array(z.string()).max(30)
+export const callSummaryPayloadSchema = z.strictObject({
+  schemaVersion: z.literal(2),
+  overview: z.array(z.strictObject({
+    label: z.string().trim().min(1).max(160).nullable(), text: z.string().trim().min(1).max(1200),
+    findingIds: z.array(z.string().min(1)).min(1).max(30)
+  })).max(4),
+  findings: z.array(summaryItemSchema).max(30),
+  nextSteps: z.array(z.strictObject({ text: z.string().trim().min(1).max(2000), sourceSegmentIds: z.array(z.string().min(1)).min(1).max(30) })).max(30),
+  unresolved: z.array(z.string().trim().min(1).max(4000)).max(30)
+}).superRefine((value, context) => {
+  const ids = new Set(value.findings.map(item => item.id));
+  if (ids.size !== value.findings.length) context.addIssue({ code: "custom", message: "Duplicate finding id", path: ["findings"] });
+  for (const [index, item] of value.overview.entries()) {
+    if (new Set(item.findingIds).size !== item.findingIds.length || item.findingIds.some(id => !ids.has(id)))
+      context.addIssue({ code: "custom", message: "Invalid overview references", path: ["overview", index, "findingIds"] });
+  }
+  for (const [index, item] of [...value.findings, ...value.nextSteps].entries()) {
+    if (new Set(item.sourceSegmentIds).size !== item.sourceSegmentIds.length ||
+      ("certainty" in item && item.certainty !== "unknown" && !item.sourceSegmentIds.length))
+      context.addIssue({ code: "custom", message: "Missing or duplicate evidence", path: ["evidence", index] });
+  }
 });
 export const textArtifactPayloadSchema = z.union([planReviewPayloadSchema, transcriptTranslationPayloadSchema, callSummaryPayloadSchema]);
 export type PlanReviewPayload = z.infer<typeof planReviewPayloadSchema>;
@@ -36,7 +54,7 @@ export const callTextArtifactSchema = z.object({
   compilationId: z.string().uuid().nullable(), transcriptRevisionId: z.string().uuid().nullable(),
   sourceHash: hashSchema, targetLanguage: textLanguageSchema, generatorVersion: z.string(),
   status: textArtifactStatusSchema, payload: textArtifactPayloadSchema.nullable(), payloadHash: hashSchema.nullable(),
-  failureCode: z.string().nullable(), createdAt: z.string().datetime(), updatedAt: z.string().datetime()
+  failureCode: z.string().nullable(), retryable: z.boolean(), createdAt: z.string().datetime(), updatedAt: z.string().datetime()
 });
 export type CallTextArtifact = z.infer<typeof callTextArtifactSchema>;
 export const finalTranscriptRevisionSchema = z.object({

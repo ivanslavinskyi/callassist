@@ -10,6 +10,8 @@ import { useState, type FormEvent } from "react";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUiLocale } from "./ui-locale-provider";
 import { designMessages } from "@/lib/i18n/design-messages";
+import { CallPlanPresentation } from "./call-plan-presentation";
+import { isPlanPreparationFailure } from "@/lib/plan-preparation-failure";
 
 export function CompilationReview({
   busy,
@@ -17,6 +19,7 @@ export function CompilationReview({
   onAnswerClarifications,
   onApproveAndCall,
   onEdit,
+  onRetryPreparation,
   recipientName,
   showActions = true,
   callDetails = []
@@ -26,6 +29,7 @@ export function CompilationReview({
   onAnswerClarifications: (answers: ClarificationAnswer[]) => Promise<void>;
   onApproveAndCall: () => void;
   onEdit: () => void;
+  onRetryPreparation?: () => void;
   recipientName: string;
   showActions?: boolean;
   callDetails?: Array<{ label: string; value: string }>;
@@ -38,7 +42,8 @@ export function CompilationReview({
   const decision = compilation.policyDecision;
   const blockingIssues = compiled?.blockingIssues ?? [];
   const isReady = decision.status === "ready_for_review";
-  const stateLabel = isReady
+  const preparationFailed = isPlanPreparationFailure(decision);
+  const stateLabel = preparationFailed ? copy.preparationFailed : isReady
     ? copy.ready
     : decision.status === "needs_clarification"
       ? copy.clarificationNeeded
@@ -50,74 +55,11 @@ export function CompilationReview({
       <div className="compilation-review-heading">
         <div>
           <span className="eyebrow">{copy.preview}</span>
-          <h2>{showActions && !isReady ? stateLabel : copy.whatWillDo}</h2>
+          <h2>{preparationFailed || (showActions && !isReady) ? stateLabel : copy.whatWillDo}</h2>
         </div>
       </div>
 
-      {compiled ? (
-        <>
-          <p className="call-plan-lead">{compiled.localizedObjective}</p>
-          <div className="review-questions review-success-criteria">
-            <ul>
-              {compiled.successCriteria.map((criterion) => (
-                <li key={criterion}>{criterion}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="review-questions">
-            <h2>{copy.callSettings}</h2>
-          </div>
-          <div className="plan-setting-chips" aria-label={copy.callSettings}>
-            <span>{copy.tone[compiled.tone]}</span>
-            <span>{copy.addressing[compiled.addressingStyle ?? "formal"]}</span>
-            <span>
-              {copy.result[
-                compiled.resultHandling ?? "capture_in_callassist"
-              ]}
-            </span>
-          </div>
-
-          {compiled.opening ? (
-            <div className="review-opening">
-              <h2>{copy.opening}</h2>
-              <p>
-                {compiled.opening.recipientAddress}{" "}
-                {compiled.opening.purposeStatement}{" "}
-                {compiled.opening.readinessQuestion}
-              </p>
-            </div>
-          ) : null}
-
-          <div className="review-questions">
-            <h2>{copy.questions}</h2>
-            <ol>
-              {compiled.orderedQuestions.map((question, index) => (
-                <li key={`${index}-${question.text}`}>{question.text}</li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="compiled-plan-grid">
-            <div>
-              <h2>{copy.approvedInformation}</h2>
-              {compiled.approvedFacts.length > 0 ? (
-                <ul>
-                  {compiled.approvedFacts.map((fact) => (
-                    <li key={fact.sourceText}>{fact.callLanguageText}</li>
-                  ))}
-                </ul>
-              ) : <p>{copy.none}</p>}
-            </div>
-            <div>
-              <h2>{copy.guardrails}</h2>
-              <ul>
-                {compiled.prohibitedActions.map((action) => <li key={action}>{action}</li>)}
-              </ul>
-            </div>
-          </div>
-        </>
-      ) : null}
+      {compiled && !preparationFailed ? <CallPlanPresentation plan={compiled} uiLocale={locale} /> : null}
 
       {decision.status === "needs_clarification" ? (
         <div className="clarification-panel">
@@ -142,19 +84,22 @@ export function CompilationReview({
 
       {decision.status === "blocked" ? (
         <div className="policy-reasons">
+          {preparationFailed ? <p role="alert">{copy.preparationFailedHelp}</p> : <>
           <strong>{copy.blockedReason}</strong>
           <ul>
             {decision.reasonCodes.map((code) => (
               <li key={code}>{copy.reason[code]}</li>
             ))}
           </ul>
+          </>}
         </div>
       ) : null}
 
       </div>
       {showActions ? <aside className="review-sidebar">
         {callDetails.length ? <section><h2>{design.callDetails}</h2><dl>{callDetails.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></section> : null}
-        <section><h2>{design.yourApproval}</h2><p>{design.approvalHelp}</p>
+        <section><h2>{preparationFailed ? copy.retryPreparation : design.yourApproval}</h2>
+        {!preparationFailed ? <p>{design.approvalHelp}</p> : null}
         <div className="review-actions">
         <button
           className="secondary-button"
@@ -174,6 +119,10 @@ export function CompilationReview({
             {busy ? copy.starting : copy.approveAndCall}
           </button>
         ) : null}
+        {preparationFailed && onRetryPreparation ? <button className="primary-button compact-button"
+          disabled={busy} onClick={onRetryPreparation} type="button">
+          {busy ? copy.retryingPreparation : copy.retryPreparation}
+        </button> : null}
         </div></section>
       </aside> : null}
 

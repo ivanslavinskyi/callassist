@@ -1,4 +1,5 @@
 export * from "./account";
+export * from "./appointment";
 export * from "./admin-users";
 export * from "./admin-calls";
 export * from "./admin-operations";

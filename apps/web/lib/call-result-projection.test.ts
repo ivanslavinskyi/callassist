@@ -41,9 +41,13 @@ describe("revision-bound call results", () => {
   });
   it("keeps an existing evidenced summary readable after a newer attempt fails", () => {
     const saved: CallTextArtifact = { ...translation, kind: "call_summary",
-      payload: { answers: [{ question: "Получено?", answer: "Нет", certainty: "reported", sourceSegmentIds: ["segment-1"] }], nextSteps: [], unresolved: [] } };
+      payload: { schemaVersion: 2 as const, overview: [], findings: [{ id: "goal", label: "Получение", text: "Нет", certainty: "reported", sourceSegmentIds: ["segment-1"] }], nextSteps: [], unresolved: [] } };
     const failed: CallTextArtifact = { ...saved, id: "new-summary", status: "failed", payload: null, createdAt: "2026-09-09T13:00:00Z" };
     expect(currentResultArtifact([failed, saved], revision, "call_summary", "ru")).toBe(saved);
+  });
+  it("does not offer cancelled cutover metadata as a result to retry", () => {
+    const retired: CallTextArtifact = { ...translation, kind: "call_summary", status: "cancelled", payload: null };
+    expect(currentResultArtifact([retired], revision, "call_summary", "ru")).toBeUndefined();
   });
   it("keeps a saved translation readable when a newer generator is pending, failed or invalid", () => {
     for (const candidate of [
@@ -70,11 +74,11 @@ describe("revision-bound call results", () => {
   });
   it("rejects a claimed answer with no evidence or a foreign evidence reference", () => {
     const summary = { ...translation, kind: "call_summary" as const,
-      payload: { answers: [{ question: "Получено?", answer: "Нет", certainty: "reported" as const, sourceSegmentIds: ["segment-1"] }], nextSteps: [], unresolved: [] }
+      payload: { schemaVersion: 2 as const, overview: [], findings: [{ id: "goal", label: "Получение", text: "Нет", certainty: "reported" as const, sourceSegmentIds: ["segment-1"] }], nextSteps: [], unresolved: [] }
     };
-    expect(evidencedSummary(summary, revision)?.answers[0]?.answer).toBe("Нет");
+    expect(evidencedSummary(summary, revision)?.findings[0]?.text).toBe("Нет");
     for (const sourceSegmentIds of [[], ["unknown-source"]]) {
-      expect(evidencedSummary({ ...summary, payload: { ...summary.payload, answers: [{ ...summary.payload.answers[0]!, sourceSegmentIds }] } }, revision)).toBeNull();
+      expect(evidencedSummary({ ...summary, payload: { ...summary.payload, findings: [{ ...summary.payload.findings[0]!, sourceSegmentIds }] } }, revision)).toBeNull();
     }
   });
   it("exports the displayed Unicode translation with its language and source identity without invented time", () => {

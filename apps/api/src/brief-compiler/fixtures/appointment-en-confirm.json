@@ -1,0 +1,127 @@
+{
+  "rawBrief": {
+    "recipientName": "Testpraxis",
+    "phoneNumber": "+41710000000",
+    "objective": "Confirm my attendance at the existing routine dental check-up at Testpraxis on 18 September 2026 at 15:00 Europe/Zurich. Do not book a new appointment and do not agree to new financial terms.",
+    "assistantProfileId": "sebastian",
+    "assistanceReason": "none",
+    "context": "Fictional test scenario. No call will be placed.",
+    "locale": "de-CH",
+    "audioRetentionDays": 7,
+    "allowLanguageSwitch": false,
+    "allowedFacts": [],
+    "representedPersonFirstName": "Alex",
+    "representedPersonLastName": "Example",
+    "resultHandling": "capture_in_callassist",
+    "addressingMode": "formal",
+    "tonePreference": "auto",
+    "voicemailPolicy": "do_not_leave_details",
+    "deliveryInstruction": "",
+    "clarificationAnswers": [],
+    "representedPerson": "Alex Example"
+  },
+  "compiledBrief": {
+    "schemaVersion": "4",
+    "callLocale": "de-CH",
+    "sourceLanguage": "en",
+    "taskType": "appointment_coordination",
+    "tone": "neutral",
+    "addressingStyle": "formal",
+    "resultHandling": "capture_in_callassist",
+    "voicemailAction": "hang_up",
+    "refusalBehavior": "respect_and_end",
+    "localizedObjective": "Die Teilnahme von Alex Example am bereits vereinbarten routinemässigen zahnärztlichen Kontrolltermin bei Testpraxis am 18 September 2026 um 15:00 Uhr, Europe/Zurich, bestätigen. Keinen neuen Termin buchen und keinen neuen finanziellen Bedingungen zustimmen.",
+    "opening": {
+      "recipientAddress": "Besten Dank, Testpraxis.",
+      "purposeStatement": "Ich rufe im Namen von Alex Example an, um die Teilnahme am bereits vereinbarten routinemässigen zahnärztlichen Kontrolltermin am 18 September 2026 um 15:00 Uhr zu bestätigen.",
+      "readinessQuestion": "Ist es für Sie passend, kurz fortzufahren?"
+    },
+    "backgroundSummary": "Dies ist ein fiktives Testszenario. Bestätigt werden darf ausschliesslich der bestehende Termin bei Testpraxis am 18 September 2026 um 15:00 Uhr in der Zeitzone Europe/Zurich.",
+    "orderedQuestions": [
+      {
+        "text": "Können Sie ausdrücklich bestätigen, dass die Teilnahme von Alex Example am bestehenden routinemässigen zahnärztlichen Kontrolltermin am 18 September 2026 um 15:00 Uhr als bestätigt vermerkt ist?",
+        "purpose": "Eine ausdrückliche Bestätigung des bestehenden Termins erhalten.",
+        "required": true
+      },
+      {
+        "text": "Ist der Termin jetzt bestätigt? Bitte nennen Sie nochmals Datum, Uhrzeit, Leistung und Anbieter.",
+        "purpose": "Die ausdrückliche Bestätigung und die genauen Termindaten festhalten",
+        "required": true
+      }
+    ],
+    "conditionalFollowUps": [
+      {
+        "condition": "Die Praxis kann den genannten bestehenden Termin nicht eindeutig zuordnen oder bestätigen.",
+        "question": "Können Sie bitte sagen, ob der bestehende Termin weiterhin unverändert eingetragen ist?"
+      }
+    ],
+    "successCriteria": [
+      "Testpraxis bestätigt ausdrücklich die Teilnahme von Alex Example am bestehenden Termin am 18 September 2026 um 15:00 Uhr.",
+      "Es wird kein neuer Termin gebucht.",
+      "Es werden keine neuen finanziellen Bedingungen vereinbart.",
+      "Die angerufene Person bestätigt den freigegebenen Termin ausdrücklich"
+    ],
+    "unresolvedCriteria": [
+      "Testpraxis nennt nur eine vorläufige oder unsichere Auskunft.",
+      "Der bestehende Termin kann nicht eindeutig zugeordnet werden.",
+      "Testpraxis schlägt stattdessen einen neuen oder geänderten Termin vor.",
+      "Der Termin ist unverbindlich oder kein freigegebenes Zeitfenster ist verfügbar"
+    ],
+    "stopConditions": [
+      "Testpraxis lehnt das Gespräch ab oder möchte nicht fortfahren.",
+      "Zur Bestätigung wäre eine neue Buchung, Umbuchung oder Terminänderung erforderlich.",
+      "Zur Bestätigung wäre die Zustimmung zu einer Zahlung, Kaution, neuen Stornogebühr oder anderen neuen finanziellen Bedingung erforderlich.",
+      "Keine Zusage ausserhalb der freigegebenen Startzeiten, bei einem anderen Anbieter oder zu neuen finanziellen Bedingungen"
+    ],
+    "approvedFacts": [],
+    "prohibitedActions": [
+      "Keinen neuen Termin buchen.",
+      "Den bestehenden Termin nicht stornieren, verschieben oder ändern.",
+      "Keinen anderen Anbieter kontaktieren oder auswählen.",
+      "Keiner Zahlung, Kaution, neuen Stornogebühr oder anderen neuen finanziellen Bedingung zustimmen.",
+      "Keine medizinische Beratung einholen oder erteilen."
+    ],
+    "namedEntities": [
+      {
+        "type": "organisation",
+        "value": "Testpraxis"
+      },
+      {
+        "type": "person",
+        "value": "Alex Example"
+      },
+      {
+        "type": "date",
+        "value": "18 September 2026"
+      },
+      {
+        "type": "other",
+        "value": "15:00 Europe/Zurich"
+      }
+    ],
+    "riskCategories": [],
+    "assumptions": [
+      "respect_refusal_and_end",
+      "spoken_answers_saved_in_callassist",
+      "tone_inferred",
+      "no_detailed_voicemail"
+    ],
+    "blockingIssues": [],
+    "appointmentAuthorization": {
+      "operation": "confirm_existing",
+      "serviceDescription": "bestehende routinemässige zahnärztliche Kontrolluntersuchung",
+      "providerScope": "called_recipient",
+      "timeZone": "Europe/Zurich",
+      "windows": [
+        {
+          "date": "2026-09-18",
+          "startTime": "15:00",
+          "endTime": "15:00"
+        }
+      ],
+      "selection": "first_matching",
+      "maxAppointments": 1,
+      "financialPolicy": "no_new_financial_terms"
+    }
+  }
+}

@@ -317,7 +317,10 @@ describe("CallService", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         id: "resp_compiler_usage",
         model: "gpt-5.6-2026-08-01",
-        output_text: JSON.stringify(modelOutput),
+        output_text: JSON.stringify({
+          ...modelOutput,
+          schedulingInterpretation: { intent: "none", authorityEvidence: null, schedule: null }
+        }),
         usage: {
           input_tokens: 250,
           input_tokens_details: { cached_tokens: 50 },

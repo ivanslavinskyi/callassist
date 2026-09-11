@@ -3,7 +3,7 @@ import type {
   CallTextArtifact, FinalTranscriptRevision, FinalTranscriptSegment, PlanSource,
   TextArtifactKind, TextLanguage, ReviewEvidence, CallCompilation
 } from "@callassist/contracts";
-import type { DurableJobLease } from "../jobs/durable-job";
+import type { DurableJob, DurableJobLease } from "../jobs/durable-job";
 
 export type EnqueueTextArtifactInput = {
   callId: string; kind: TextArtifactKind; compilationId?: string; transcriptRevisionId?: string;
@@ -47,6 +47,26 @@ export const textArtifactMaximumRequests = 24;
 export const textArtifactMaximumChunks = 24;
 export const textArtifactMaximumGenerations = 3;
 export const textArtifactMaximumTargets = 6;
+
+/** Public progress follows the durable job, including backoff and expired leases. */
+export function projectTextArtifactProgress(
+  artifact: CallTextArtifact,
+  job: Pick<DurableJob, "status" | "generation" | "lastErrorCode" | "updatedAt"> | null | undefined,
+  requestCount: number
+): CallTextArtifact {
+  if (["ready", "stale", "cancelled"].includes(artifact.status)) return { ...artifact, retryable: false };
+  const status = job?.status === "queued" ? "queued" : job?.status === "running" ? "processing"
+    : job?.status === "cancelled" ? "cancelled" : "failed";
+  const failureCode = status === "failed" ? job?.lastErrorCode ?? artifact.failureCode : null;
+  const permanent = new Set([
+    "TEXT_INPUT_INVALID", "TEXT_INPUT_TOO_LARGE", "TEXT_REQUEST_REJECTED", "TEXT_GENERATOR_UNAVAILABLE",
+    "TEXT_GENERATION_DISABLED", "TEXT_DIRECTION_UNSUPPORTED", "TEXT_ARTIFACT_STALE", "TEXT_ARTIFACT_INVALID", "CALL_NOT_FOUND"
+  ]);
+  return { ...artifact, status, failureCode,
+    updatedAt: job && job.updatedAt > artifact.updatedAt ? job.updatedAt : artifact.updatedAt,
+    retryable: status === "failed" && job?.status === "dead_letter" && job.generation < textArtifactMaximumGenerations &&
+      requestCount < textArtifactMaximumRequests && !permanent.has(failureCode ?? "") };
+}
 
 export function textPayloadHash(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");

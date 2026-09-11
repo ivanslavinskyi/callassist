@@ -29,9 +29,11 @@ import { useUiLocale } from "./ui-locale-provider";
 import { useCallDraftStore } from "./call-draft-provider";
 import { getCallLanguageLabel, getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 import { isTerminalCallStatus } from "@/lib/call-status";
-import { isNearTranscriptBottom } from "@/lib/transcript-scroll";
+import { useTranscriptFollowing } from "./use-transcript-following";
+import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments } from "@/lib/live-transcript-state";
 import { currentCallSnapshot } from "@/lib/current-call-snapshot";
 import { compilationApprovalInput } from "@/lib/compilation-approval";
+import { isPlanPreparationFailure } from "@/lib/plan-preparation-failure";
 import {
   callRecordingUrl,
   callEventsUrl,
@@ -56,7 +58,9 @@ import {
 } from "@/lib/final-transcript-export";
 import {
   consumeCallPreparationAttempt,
-  getCallPreparationSessionStorage
+  getCallPreparationSessionStorage,
+  prepareCallBriefCreation,
+  type CallPreparationAttempt
 } from "@/lib/call-preparation-attempt";
 
 const activeStatuses = new Set<CallBriefStatus>([
@@ -114,35 +118,41 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
   const [connectionStatus, setConnectionStatus] = useState<
     "connecting" | "connected" | "reconnecting"
   >("connecting");
-  const [followLiveTranscript, setFollowLiveTranscript] = useState(true);
+  const { following: followLiveTranscript, listRef: transcriptListRef, follow: followTranscript } = useTranscriptFollowing();
   const [showFullObjective, setShowFullObjective] = useState(false);
   const [transcriptView, setTranscriptView] = useState<"final" | "provisional">("final");
-  const transcriptListRef = useRef<HTMLDivElement>(null);
   const transcriptCardRef = useRef<HTMLElement>(null);
   const deletionRequestIdRef = useRef<string | null>(null);
+  const clarificationAttemptRef = useRef<CallPreparationAttempt | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
     "idle"
   );
   const [pdfStatus, setPdfStatus] = useState<"idle" | "exporting" | "failed">(
     "idle"
   );
-  const [partialTranscript, setPartialTranscript] = useState<
-    Record<
-      string,
-      { role: "assistant" | "recipient"; text: string; locale: string }
-    >
-  >({});
+  const [liveTranscript, setLiveTranscript] = useState(emptyLiveTranscript);
+  const partialTranscript = liveTranscript.partials;
+  const eventSegments = useRef<CallSnapshot["transcript"]>([]);
+  const readVersion = useRef(0);
 
   const refresh = useCallback(async (reportError = true) => {
+    const version = ++readVersion.current;
     try {
       const nextSnapshot = await getCallSnapshot(callId);
+      if (version !== readVersion.current) return;
+      if (nextSnapshot.compilation) {
+        nextSnapshot.transcript = mergeTranscriptSegments(nextSnapshot.transcript, eventSegments.current);
+      } else {
+        eventSegments.current = [];
+      }
       setSnapshot((current) => currentCallSnapshot(current, nextSnapshot));
+      if (!activeStatuses.has(nextSnapshot.brief.status)) setLiveTranscript(current => ({ ...current, partials: {} }));
       consumeCallPreparationAttempt(getCallPreparationSessionStorage(), callId);
       setLoadError(null);
     } catch {
-      if (reportError) setLoadError(messages.live.loadError);
+      if (version === readVersion.current && reportError) setLoadError(messages.live.loadError);
     } finally {
-      setLoading(false);
+      if (version === readVersion.current) setLoading(false);
     }
   }, [callId, messages.live.loadError]);
 
@@ -151,7 +161,12 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
     const events = new EventSource(callEventsUrl(callId), {
       withCredentials: true
     });
-    events.onopen = () => { setConnectionStatus("connected"); void refresh(false); };
+    events.onopen = () => {
+      setConnectionStatus("connected");
+      // SSE resumes with a fresh snapshot; partial text from the lost stream is not authoritative.
+      setLiveTranscript(current => ({ ...current, partials: {} }));
+      void refresh(false);
+    };
     events.onmessage = (message) => {
       let event: CallEvent;
       try {
@@ -160,42 +175,21 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
         return;
       }
 
-      if (event.type === "transcript.delta") {
-        setPartialTranscript((current) => ({
-          ...current,
-          [event.key]: {
-            role: event.role,
-            locale: event.locale,
-            text: `${current[event.key]?.text ?? ""}${event.delta}`
-          }
-        }));
+      if (event.type === "transcript.delta" || event.type === "transcript.discarded") {
+        setLiveTranscript(current => applyLiveTranscriptEvent(current, event));
         return;
       }
 
       if (event.type === "transcript.added") {
-        setPartialTranscript((current) =>
-          Object.fromEntries(
-            Object.entries(current).filter(
-              ([, partial]) => partial.role !== event.segment.role
-            )
-          )
-        );
+        setLiveTranscript(current => applyLiveTranscriptEvent(current, event));
+        eventSegments.current = mergeTranscriptSegments(eventSegments.current, [event.segment]);
+        setSnapshot(current => current ? { ...current, transcript: mergeTranscriptSegments(current.transcript, [event.segment]) } : current);
       }
       void refresh(false);
     };
     events.onerror = () => setConnectionStatus("reconnecting");
-    return () => events.close();
+    return () => { events.close(); readVersion.current += 1; };
   }, [callId, refresh]);
-
-  const transcriptVersion = `${snapshot?.transcript.length ?? 0}:${Object.values(
-    partialTranscript
-  ).map(({ text }) => text.length).join(",")}`;
-
-  useEffect(() => {
-    const list = transcriptListRef.current;
-    if (!list || !followLiveTranscript) return;
-    list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
-  }, [followLiveTranscript, transcriptVersion]);
 
   useEffect(() => {
     if (copyStatus === "idle") return;
@@ -286,18 +280,42 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
     try {
       const previousAnswers = snapshot.compilation.rawBrief.clarificationAnswers ?? [];
       const answerCodes = new Set(answers.map(({ issueCode }) => issueCode));
-      const updated = await recompileCallBrief(callId, {
+      const input = {
         ...snapshot.compilation.rawBrief,
         clarificationAnswers: [
           ...previousAnswers.filter(({ issueCode }) => !answerCodes.has(issueCode)),
           ...answers
         ]
-      }, undefined, snapshot.languageContext
-        ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage, uiLocaleHint: uiLocale }
-        : { mode: "auto", uiLocaleHint: uiLocale });
-      setSnapshot((current) => currentCallSnapshot(current, updated));
+      };
+      const languagePreferences: TaskLanguagePreferences = snapshot.languageContext
+        ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage }
+        : { mode: "auto" };
+      const acceptSnapshot = (updated: CallSnapshot) => {
+        setSnapshot((current) => currentCallSnapshot(current, updated));
+        return updated.brief;
+      };
+      await prepareCallBriefCreation({
+        input,
+        languagePreferences,
+        scope: `clarifications:${callId}:${snapshot.compilation.revision}:${snapshot.compilation.snapshotHash}`,
+        userId,
+        current: clarificationAttemptRef.current,
+        storage: getCallPreparationSessionStorage(),
+        onAttempt: (attempt) => { clarificationAttemptRef.current = attempt; },
+        save: async (value, idempotencyKey) => acceptSnapshot(
+          await recompileCallBrief(callId, value, idempotencyKey, languagePreferences)
+        ),
+        load: async (id) => acceptSnapshot(await getCallSnapshot(id))
+      });
     } catch (error) {
       setActionError(getCallPreparationErrorMessage(error, {
+        generic: messages.form.preparationError,
+        unavailable: messages.form.preparationUnavailable,
+        pending: messages.form.preparationPending,
+        invalid: messages.form.preparationInvalid,
+        notFound: messages.form.preparationNotFound,
+        notEditable: messages.form.preparationNotEditable,
+        swissDestinationRequired: messages.form.phoneInvalid,
         rateLimited: messages.live.rateLimited
       }));
     } finally {
@@ -401,6 +419,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
   const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
   const isTerminal = isTerminalCallStatus(brief.status);
+  const preparationFailed = compilation ? isPlanPreparationFailure(compilation.policyDecision) : false;
   const hasImmutableExecutionPlan =
     snapshot.executionPlanSource === "immutable";
 
@@ -410,6 +429,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
       void runAction(() => approveAndStartCall(callId, compilationApprovalInput(compilation, review)), revealLiveTranscript);
     },
     onEdit: () => setEditingBrief(true), recipientName: brief.recipientName,
+    onRetryPreparation: () => { void answerClarifications([]); },
     callDetails: [
       { label: designMessages[uiLocale].recipient, value: brief.recipientName },
       { label: designMessages[uiLocale].phoneNumber, value: brief.phoneNumber },
@@ -449,7 +469,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
         </select>
       </label>
     </details> : null}
-    {snapshot.planSource && snapshot.languageContext ? <TranslatedPlanReview
+    {snapshot.planSource && snapshot.languageContext && !preparationFailed ? <TranslatedPlanReview
       key={`${snapshot.planSource.compilationId}:${snapshot.languageContext.selectionRevision}`}
       {...reviewProps!} callId={callId} userId={userId} source={snapshot.planSource}
       languageContext={snapshot.languageContext} initialArtifacts={snapshot.textArtifacts}
@@ -485,7 +505,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
 
           <div className="call-actions">
           <span className={`status-pill status-${brief.status}`}>
-            <span aria-hidden="true" /> {copy.status[brief.status]}
+            <span aria-hidden="true" /> {brief.status === "blocked" && preparationFailed ? messages.review.preparationFailed : copy.status[brief.status]}
           </span>
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
@@ -595,10 +615,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
             <div
               className="transcript-list"
               aria-live="polite"
-              onScroll={(event) => {
-                const list = event.currentTarget;
-                setFollowLiveTranscript(isNearTranscriptBottom(list));
-              }}
+              tabIndex={0}
               ref={transcriptListRef}
             >
               {transcript.length === 0 &&
@@ -664,13 +681,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
             (transcript.length > 0 || Object.keys(partialTranscript).length > 0) ? (
               <button
                 className="jump-to-latest"
-                onClick={() => {
-                  setFollowLiveTranscript(true);
-                  const list = transcriptListRef.current;
-                  if (list) {
-                    list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
-                  }
-                }}
+                onClick={followTranscript}
                 type="button"
               >
                 ↓ {messages.live.jumpToLatest}

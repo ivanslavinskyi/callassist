@@ -3,6 +3,7 @@
 import { type CallCompilation, type CallLanguageContext, type CallTextArtifact, type ClarificationAnswer, type PlanSource, type ReviewEvidence } from "@callassist/contracts";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, requestPlanReview, retryCallTextArtifact } from "@/lib/api";
+import { canRequestTextArtifact } from "@/lib/text-artifact-retry";
 import { currentPlanReviewArtifact, projectPlanReview } from "@/lib/plan-review-projection";
 import { planReviewLanguage } from "@/lib/plan-review-language";
 import { getCallLanguageLabel, getTextLanguageLabel } from "@/lib/i18n/language-messages";
@@ -18,7 +19,7 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
   languageContext: CallLanguageContext; initialArtifacts?: CallTextArtifact[];
   busy: boolean; recipientName: string; showActions?: boolean; callDetails?: Array<{ label: string; value: string }>;
   onAnswerClarifications: (answers: ClarificationAnswer[]) => Promise<void>;
-  onApproveAndCall: (review: ReviewEvidence) => void; onEdit: () => void;
+  onApproveAndCall: (review: ReviewEvidence) => void; onEdit: () => void; onRetryPreparation?: () => void;
 }) {
   const { locale } = useUiLocale();
   const copy = textArtifactMessages[locale];
@@ -75,9 +76,9 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
         : availabilityStatus === "error" ? copy.availabilityError
         : capabilities?.textGenerationEnabled === false ? copy.generationDisabled
         : !canGenerate && !artifact ? copy.unsupported
-        : artifact?.status === "failed" || artifact?.status === "cancelled" ? copy.failed : pollingPaused ? copy.pending : copy.loading)}</p>
+        : artifact?.status === "failed" || artifact?.status === "cancelled" ? (artifact.retryable ? copy.failed : copy.reviewRetryUnavailable) : pollingPaused ? copy.pending : copy.loading)}</p>
       {availabilityStatus === "error" ? <button type="button" className="secondary-button" onClick={() => void refreshCapabilities()}>{copy.refresh}</button> : null}
-      {canGenerate && (error || ["failed", "stale", "cancelled"].includes(artifact?.status ?? "")) ? <button type="button" className="secondary-button" disabled={requesting} onClick={() => void request(artifact?.status === "failed")}>{copy.retry}</button> : null}
+      {canGenerate && canRequestTextArtifact(artifact) && (error || artifact?.status === "failed") ? <button type="button" className="secondary-button" disabled={requesting} onClick={() => void request(artifact?.status === "failed")}>{copy.retry}</button> : null}
       {pollingPaused ? <button type="button" className="secondary-button" onClick={() => void refresh().catch(() => setError(copy.failed))}>{copy.refresh}</button> : null}
     </div> : <div lang={view === "original" ? callLocale : languageContext.taskContentLanguage}>
       <CompilationReview {...reviewProps} compilation={view === "translated" ? projection! : compilation}

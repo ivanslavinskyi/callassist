@@ -81,11 +81,11 @@ export function callTextRepositorySuite(makeRepository:()=>CallRepository,owner:
     const second=await repository.getCurrentTranscriptRevision(brief.id);
     expect(second?.id).not.toBe(first?.id);
     expect((await repository.getTranscriptRevision(brief.id,first!.id))?.text).toBe("The form arrived.");
-    await expect(repository.completeTextArtifact(summaryJob!.textArtifactId!,{answers:[],nextSteps:[],unresolved:[]},lease(summaryJob!))).rejects.toMatchObject({code:"TEXT_ARTIFACT_STALE"});
+    await expect(repository.completeTextArtifact(summaryJob!.textArtifactId!,{schemaVersion:2,overview:[],findings:[],nextSteps:[],unresolved:[]},lease(summaryJob!))).rejects.toMatchObject({code:"TEXT_ARTIFACT_STALE"});
     await repository.applyProviderStatus(providerCallId,"completed","completed",brief.id);
     await repository.deleteCallData({callId:brief.id,userId:owner(),requestId:randomUUID(),providerRecordingDisposition:"deleted",deletedAt:new Date().toISOString()});
     await expect(repository.getTranscriptRevision(brief.id,first!.id)).rejects.toMatchObject({code:"CALL_NOT_FOUND"});
-    await expect(repository.completeTextArtifact(summaryJob!.textArtifactId!,{answers:[],nextSteps:[],unresolved:[]},lease(summaryJob!))).rejects.toMatchObject({code:"CALL_NOT_FOUND"});
+    await expect(repository.completeTextArtifact(summaryJob!.textArtifactId!,{schemaVersion:2,overview:[],findings:[],nextSteps:[],unresolved:[]},lease(summaryJob!))).rejects.toMatchObject({code:"CALL_NOT_FOUND"});
     expect((await repository.listDurableJobAttempts(summaryJob!.id)).at(-1)?.outcome).toBe("cancelled");
   });
 
@@ -140,10 +140,53 @@ export function callTextRepositorySuite(makeRepository:()=>CallRepository,owner:
       if(generation===3) expect(await repository.reserveTextArtifactProviderRequest({id:randomUUID(),artifactId:artifact.id,provider:"openai",operationType:"text_translation",
         stage:"text.translation.exhausted",requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),maxRequests:100,durableJobGeneration:3},currentLease)).toBe(false);
       await repository.failTextArtifact(artifact.id,"provider_unavailable",currentLease);
+      expect(await repository.getTextArtifact(brief.id,artifact.id)).toMatchObject({status:"processing",retryable:false,failureCode:null});
       await repository.failDurableJob(job.id,job.leaseOwner!,"provider_unavailable",new Date().toISOString(),new Date().toISOString(),false);
+      expect(await repository.getTextArtifact(brief.id,artifact.id)).toMatchObject({status:"failed",retryable:generation<3});
       previousLease=currentLease;
       if(generation<3) expect((await repository.retryTextArtifact(brief.id,artifact.id)).status).toBe("queued");
     }
     await expect(repository.retryTextArtifact(brief.id,artifact.id)).rejects.toMatchObject({code:"TEXT_ARTIFACT_NOT_RETRYABLE"});
+  });
+
+  it.each(["TEXT_REQUEST_REJECTED", "TEXT_INPUT_TOO_LARGE", "TEXT_GENERATOR_UNAVAILABLE", "TEXT_REQUEST_BUDGET_EXHAUSTED"])("does not offer an impossible retry after %s",async(code)=>{
+    const {repository,brief}=await create();
+    const source=await repository.getPlanSource(brief.id);
+    const artifact=await repository.enqueueTextArtifact({callId:brief.id,kind:"plan_review",compilationId:source.compilationId,
+      sourceHash:source.snapshotHash,targetLanguage:"ru",generatorVersion:"test-v1"});
+    const job=(await claim(repository))!;
+    const currentLease=lease(job);
+    await repository.claimTextArtifact(artifact.id,currentLease);
+    if(code==="TEXT_REQUEST_BUDGET_EXHAUSTED") for(let index=0;index<24;index++) {
+      await repository.reserveTextArtifactProviderRequest({id:randomUUID(),artifactId:artifact.id,provider:"openai",operationType:"text_translation",
+        stage:`text.${index}`,requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),maxRequests:24,durableJobGeneration:job.generation},currentLease);
+    }
+    // A worker can die after claiming the artifact, without writing failTextArtifact.
+    await repository.failDurableJob(job.id,job.leaseOwner!,code,new Date().toISOString(),new Date().toISOString(),false);
+    expect(await repository.getTextArtifact(brief.id,artifact.id)).toMatchObject({status:"failed",failureCode:code,retryable:false});
+    await expect(repository.retryTextArtifact(brief.id,artifact.id)).rejects.toMatchObject({code:"TEXT_ARTIFACT_NOT_RETRYABLE"});
+  });
+
+  it("keeps processing visible across automatic retries and allows one concurrent manual restart",async()=>{
+    const {repository,brief}=await create();
+    const source=await repository.getPlanSource(brief.id);
+    const artifact=await repository.enqueueTextArtifact({callId:brief.id,kind:"clarification_review",compilationId:source.compilationId,
+      sourceHash:source.snapshotHash,targetLanguage:"uk",generatorVersion:"test-v1"});
+    for(let attempt=1;attempt<=3;attempt++) {
+      const job=(await claim(repository))!;
+      await repository.claimTextArtifact(artifact.id,lease(job));
+      await repository.failTextArtifact(artifact.id,"TEXT_PROVIDER_UNAVAILABLE",lease(job));
+      await repository.failDurableJob(job.id,job.leaseOwner!,"TEXT_PROVIDER_UNAVAILABLE",new Date().toISOString(),new Date().toISOString(),true);
+      expect(await repository.getTextArtifact(brief.id,artifact.id)).toMatchObject({status:attempt<3?"queued":"failed",retryable:attempt===3});
+    }
+    const failed=(await repository.getTextArtifact(brief.id,artifact.id))!;
+    const restarted=await Promise.all([repository.retryTextArtifact(brief.id,artifact.id),repository.retryTextArtifact(brief.id,artifact.id)]);
+    expect(restarted.map(item=>item.status)).toEqual(["queued","queued"]);
+    expect(restarted.every(item=>item.updatedAt>=failed.updatedAt)).toBe(true);
+    const job=(await claim(repository))!;
+    expect(job.generation).toBe(2);
+    await repository.claimTextArtifact(artifact.id,lease(job));
+    await repository.completeTextArtifact(artifact.id,{fields:[{id:"question",text:"Які години роботи?"}]},lease(job));
+    expect(await repository.getTextArtifact(brief.id,artifact.id)).toMatchObject({status:"ready",retryable:false});
   });
 }

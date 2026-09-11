@@ -239,6 +239,7 @@ function buildCompiledBrief(
 ): CompiledCallBrief {
   return compiledCallBriefSchema.parse({
     schemaVersion: CALL_BRIEF_SCHEMA_VERSION,
+    appointmentAuthorization: null,
     callLocale: raw.locale,
     sourceLanguage: testCase.sourceLanguage,
     taskType: testCase.taskType ?? "information_request",

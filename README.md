@@ -18,8 +18,9 @@ The public product copy uses “public beta”; that wording is not deployment e
   deterministic policy checks, editing/recompilation, review and approve-and-call.
 - Separate UI, call and task-content languages; account preferences, captured language
   resolution and exact original/translated plan approval receipts. All facts in the
-  approved plan may be used as needed for information gathering; bookings, payments
-  and other commitments remain outside the supported scope.
+  approved plan may be used as needed. Appointment actions require a separate,
+  explicit permission in that plan; the bounded booking extension and its pending
+  acceptance are tracked in [the implementation plan](docs/unified-implementation-plan-2026-09-09.md#10-расширение-от-10092026--одна-запись-по-предварительному-разрешению).
 - Swiss-number outbound calls via Twilio and speech conversation via OpenAI Realtime.
 - Six server-owned assistant profiles. Assistance reason defaults to `none`;
   `speech_impairment` and `language_barrier` add an optional controlled disclosure.

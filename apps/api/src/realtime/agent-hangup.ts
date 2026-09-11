@@ -7,7 +7,7 @@ export type HangupTrigger = "playback_complete" | "generation_timeout" | "playba
 export const endCallTool = {
   type: "function",
   name: "end_call",
-  description: "Finish this call when the approved objective is resolved, the recipient declines or asks to end, or an approved stop condition applies. Call BEFORE saying goodbye: the server plays the farewell. Never call for a pause, hold/transfer, an unanswered question, a quoted goodbye or an intermediate thank-you.",
+  description: "Finish this call when the approved objective is resolved, the recipient declines or asks to end, or an approved stop condition applies. Call silently BEFORE saying goodbye; the farewell follows automatically. Never explain the tool or disconnection process. Never call for a pause, hold/transfer, an unanswered question, a quoted goodbye or an intermediate thank-you.",
   parameters: {
     type: "object",
     properties: { reason: { type: "string", enum: endCallReasons } },

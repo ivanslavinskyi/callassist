@@ -13,6 +13,7 @@ import { useCallTextArtifacts } from "./use-call-text-artifacts";
 import { useUiLocale } from "./ui-locale-provider";
 import { useCallDraftStore } from "./call-draft-provider";
 import { canGenerateText, useTextCapabilities } from "./use-text-capabilities";
+import { canRequestTextArtifact } from "@/lib/text-artifact-retry";
 
 export function CallResultPanel({ brief, userId, revision, taskLanguage, initialArtifacts }: {
   brief: CallBrief; userId: string; revision: FinalTranscriptRevision; taskLanguage: TextLanguage;
@@ -33,7 +34,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, initial
   const summary = evidencedSummary(summaryArtifact, revision);
   const { translation, transcript: displayed, view: displayedView } = displayedResultTranscript(revision, translationArtifact, view);
   const waitingTranslation = busy === "translation" || translationArtifact?.status === "queued" || translationArtifact?.status === "processing";
-  const waitingSummary = summaryArtifact?.status === "queued" || summaryArtifact?.status === "processing";
+  const waitingSummary = busy === "summary" || summaryArtifact?.status === "queued" || summaryArtifact?.status === "processing";
   // A transcript may contain several spoken languages, regardless of the selected voice locale.
   const canTranslate = availabilityStatus === "ready" && canGenerateText(capabilities, "transcript_translation", "*", taskLanguage);
   const canSummarize = availabilityStatus === "ready" && canGenerateText(capabilities, "call_summary", "*", taskLanguage);
@@ -42,7 +43,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, initial
     : capabilities?.textGenerationEnabled === false ? copy.generationDisabled : null;
   const translationStatusMessage = waitingTranslation ? (pollingPaused ? copy.pending : copy.loading)
     : translationArtifact?.status === "stale" ? copy.stale
-    : translationArtifact ? copy.translationUnavailable
+    : translationArtifact ? (translationArtifact.status === "failed" && !translationArtifact.retryable ? copy.retryUnavailable : copy.translationUnavailable)
     : availabilityMessage ?? (!canTranslate ? copy.unsupported : null);
 
   useEffect(() => { setExportStatus("idle"); }, [displayedView, taskLanguage, revision.id]);
@@ -92,8 +93,8 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, initial
       </div>
       {summary ? <div lang={taskLanguage}><CallSummaryPresentation summary={summary} uiLocale={locale}
         sourceHref={(id) => `#${sourceSegmentAnchor(revision.id, id)}`} onSource={revealSource} /></div>
-        : <div role="status"><p>{availabilityMessage ?? (waitingSummary ? (pollingPaused ? copy.pending : copy.summaryLoading) : summaryArtifact ? copy.summaryFailed : !canSummarize ? copy.unsupported : copy.summaryMissing)}</p>
-          {!waitingSummary && canSummarize ? <button type="button" className="secondary-button" disabled={busy !== null}
+        : <div role="status"><p>{availabilityMessage ?? (waitingSummary ? (pollingPaused ? copy.pending : copy.summaryLoading) : summaryArtifact ? (summaryArtifact.retryable ? copy.summaryFailed : copy.summaryRetryUnavailable) : !canSummarize ? copy.unsupported : copy.summaryMissing)}</p>
+          {!waitingSummary && canSummarize && canRequestTextArtifact(summaryArtifact) ? <button type="button" className="secondary-button" disabled={busy !== null}
             onClick={() => void generate("summary", summaryArtifact?.status === "failed")}>{summaryArtifact ? copy.retry : copy.createSummary}</button> : null}
         </div>}
     </section>
@@ -104,7 +105,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, initial
         <button type="button" aria-pressed={displayedView === "translated"} onClick={() => chooseView("translated")}>{getTextLanguageLabel(taskLanguage, locale)}</button>
       </div> : null}
       <div className="final-transcript-actions">
-        {!translation && !waitingTranslation && canTranslate ? <button type="button" className="secondary-button" disabled={busy !== null}
+        {!translation && !waitingTranslation && canTranslate && canRequestTextArtifact(translationArtifact) ? <button type="button" className="secondary-button" disabled={busy !== null}
           onClick={() => void generate("translation", translationArtifact?.status === "failed")}>{translationArtifact?.status === "failed" ? copy.retry : `${copy.translateTo} ${getTextLanguageLabel(taskLanguage, locale)}`}</button> : null}
         <button type="button" className="transcript-export-button" onClick={() => void copyText()}>{exportStatus === "copied" ? copy.copied : copy.copy}</button>
         <button type="button" className="transcript-export-button" disabled={exportStatus === "exporting"} onClick={() => void exportPdf()}>{exportStatus === "exporting" ? copy.exporting : copy.exportPdf}</button>

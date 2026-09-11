@@ -1,4 +1,5 @@
 import type { CallBrief, CreateCallBriefInput, TaskLanguagePreferences } from "@callassist/contracts";
+import { CallPreparationFailedError } from "./api";
 
 const storageKey = "callassist.call-preparation-attempt.v2";
 const attemptLifetimeMs = 30 * 60 * 1_000;
@@ -10,6 +11,7 @@ export type CallPreparationAttempt = {
   idempotencyKey: string;
   callBriefId?: string;
   createdAt: number;
+  failed?: true;
 };
 
 type SessionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -55,23 +57,58 @@ export async function prepareCallBriefCreation({
   createIdempotencyKey?: () => string;
 }) {
   const fingerprint = await fingerprintCallPreparation(input, languagePreferences, scope);
+  const timestamp = now ?? Date.now();
+  const stored = readCallPreparationAttempt(storage);
+  // The mounted draft can be newer than storage when a storage write failed.
+  let previous = matchesAttempt(current, fingerprint, userId, timestamp) ? current : stored;
+  if (previous === current && current && matchesAttempt(stored, fingerprint, userId, timestamp) &&
+    stored.createdAt > current.createdAt) previous = stored;
+  if (previous === current && stored?.idempotencyKey === current?.idempotencyKey &&
+    !current?.failed && !current?.callBriefId && (stored?.failed || stored?.callBriefId)) {
+    previous = stored;
+  }
   const attempt = resolveCallPreparationAttempt({
-    current: readCallPreparationAttempt(storage) ?? current,
+    current: previous,
     fingerprint,
     userId,
-    ...(now === undefined ? {} : { now }),
+    now: timestamp,
     ...(createIdempotencyKey === undefined ? {} : { createIdempotencyKey })
   });
-  onAttempt(attempt);
-  writeCallPreparationAttempt(storage, attempt);
+  return prepare(attempt, attempt === previous);
 
-  if (attempt.callBriefId) return load(attempt.callBriefId);
+  async function prepare(activeAttempt: CallPreparationAttempt, resuming: boolean): Promise<CallBrief> {
+    onAttempt(activeAttempt);
+    writeCallPreparationAttempt(storage, activeAttempt);
+    if (activeAttempt.callBriefId) return load(activeAttempt.callBriefId);
 
-  const brief = await save(input, attempt.idempotencyKey);
-  const completedAttempt = markCallPreparationCreated(attempt, brief.id);
-  onAttempt(completedAttempt);
-  writeCallPreparationAttempt(storage, completedAttempt);
-  return brief;
+    let brief: CallBrief;
+    try {
+      brief = await save(input, activeAttempt.idempotencyKey);
+    } catch (error) {
+      // Pending and lost responses retain their key: they may still succeed.
+      if (error instanceof CallPreparationFailedError) {
+        const failedAttempt = { ...activeAttempt, failed: true as const };
+        onAttempt(failedAttempt);
+        writeCallPreparationAttempt(storage, failedAttempt);
+        if (resuming) {
+          // This explicit retry first checked the old operation. Once it is known
+          // to have failed, prepare once with a new key; never loop on a fresh failure.
+          return prepare(resolveCallPreparationAttempt({
+            current: failedAttempt,
+            fingerprint,
+            userId,
+            ...(now === undefined ? {} : { now }),
+            ...(createIdempotencyKey === undefined ? {} : { createIdempotencyKey })
+          }), false);
+        }
+      }
+      throw error;
+    }
+    const completedAttempt = markCallPreparationCreated(activeAttempt, brief.id);
+    onAttempt(completedAttempt);
+    writeCallPreparationAttempt(storage, completedAttempt);
+    return brief;
+  }
 }
 
 export function readCallPreparationAttempt(
@@ -99,12 +136,7 @@ export function resolveCallPreparationAttempt({
   now?: number;
   createIdempotencyKey?: () => string;
 }): CallPreparationAttempt {
-  if (
-    current?.fingerprint === fingerprint &&
-    current.userId === userId &&
-    now >= current.createdAt &&
-    now - current.createdAt < attemptLifetimeMs
-  ) {
+  if (matchesAttempt(current, fingerprint, userId, now) && !current.failed) {
     return current;
   }
 
@@ -115,6 +147,16 @@ export function resolveCallPreparationAttempt({
     idempotencyKey: createIdempotencyKey(),
     createdAt: now
   };
+}
+
+function matchesAttempt(
+  attempt: CallPreparationAttempt | null,
+  fingerprint: string,
+  userId: string,
+  now: number
+): attempt is CallPreparationAttempt {
+  return attempt?.fingerprint === fingerprint && attempt.userId === userId &&
+    now >= attempt.createdAt && now - attempt.createdAt < attemptLifetimeMs;
 }
 
 export function writeCallPreparationAttempt(
@@ -183,6 +225,7 @@ function isCallPreparationAttempt(value: unknown): value is CallPreparationAttem
     isUuid(attempt.idempotencyKey) &&
     typeof attempt.createdAt === "number" &&
     Number.isFinite(attempt.createdAt) &&
+    (attempt.failed === undefined || attempt.failed === true) &&
     (attempt.callBriefId === undefined || isUuid(attempt.callBriefId));
 }
 

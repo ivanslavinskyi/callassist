@@ -5,6 +5,13 @@ source revisions and five available targets: Privacy, Terms, FAQ page,
 Imprint and FAQ collection. Existing AUP and Landing drafts are preserved. They require
 editorial reconciliation in the normal admin workflow.
 
+On 2026-09-10 the source copy was extended from appointment enquiries to explicit
+permission to book or confirm one bounded appointment. Generate a fresh candidate
+for that change. The drafts created below describe the earlier source state and
+must be reconciled in the admin workflow before publication; this documentation
+update neither modifies nor publishes them. Appointment runtime acceptance is
+tracked separately in the unified implementation plan.
+
 At the user's request, generated manifests and results containing account and CMS
 identifiers were removed from the repository. The completed checks are recorded
 below; new candidate and result files must remain local under the ignored
