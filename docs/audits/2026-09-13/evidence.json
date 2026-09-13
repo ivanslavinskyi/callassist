@@ -1,0 +1,650 @@
+{
+  "date": "2026-09-13",
+  "commit": "ef36cfa8cd17e740395a4e120be6bbc23f347b4e",
+  "scope": "Local code and read-only local PostgreSQL; browser and HTTP mutations only in isolated memory fixture with mock providers. No real calls, SMS or email sent.",
+  "checks": {
+    "fullSuiteFreshDatabase": {
+      "files": 138,
+      "passed": 1098,
+      "skipped": 0,
+      "api": 817,
+      "web": 189,
+      "contracts": 92
+    },
+    "lint": "pass",
+    "typecheck": "pass",
+    "build": "pass",
+    "copyCheck": {
+      "result": "pass",
+      "files": 557
+    },
+    "migrationCatalog": {
+      "count": 68,
+      "latest": "0068"
+    },
+    "productionDependencies": {
+      "critical": 2,
+      "high": 1,
+      "next": "15.5.21",
+      "sharpOverride": "0.35.0"
+    }
+  },
+  "localMigrationState": {
+    "DATABASE_URL": {
+      "count": 69,
+      "mismatches": []
+    },
+    "TEST_DATABASE_URL": {
+      "count": 67,
+      "mismatches": [
+        "0065_text_artifacts_and_jobs.sql"
+      ]
+    }
+  },
+  "localEnvironmentPresence": {
+    "VERIFICATION_DRIVER": "missing",
+    "TWILIO_VERIFY_SERVICE_SID": "missing",
+    "EMAIL_DRIVER": "missing",
+    "RESEND_API_KEY": "missing",
+    "EMAIL_FROM": "missing",
+    "EMAIL_VERIFICATION_HASH_KEY": "missing",
+    "DURABLE_WORKER_MODE": "missing",
+    "NEXT_PUBLIC_SITE_URL": "missing",
+    "INTERNAL_API_URL": "missing"
+  },
+  "cms": [
+    {
+      "key": "acceptable_use",
+      "published": 4,
+      "draft": 2
+    },
+    {
+      "key": "faq",
+      "published": 3,
+      "draft": 4
+    },
+    {
+      "key": "imprint",
+      "published": 1,
+      "draft": 2
+    },
+    {
+      "key": "privacy",
+      "published": 3,
+      "draft": 4
+    },
+    {
+      "key": "support",
+      "published": 4,
+      "draft": 2
+    },
+    {
+      "key": "terms",
+      "published": 3,
+      "draft": 4
+    }
+  ],
+  "editorial": [
+    {
+      "key": "landing",
+      "published": 5,
+      "draft": 3
+    },
+    {
+      "key": "faq",
+      "published": 4,
+      "draft": 5
+    },
+    {
+      "key": "navigation",
+      "published": 2,
+      "draft": null
+    }
+  ],
+  "systemReproduction": [
+    {
+      "mode": "memory",
+      "valid": false,
+      "error": "ZodError",
+      "issueCount": 1,
+      "firstIssue": {
+        "code": "unrecognized_keys",
+        "keys": [
+          "textArtifactId"
+        ],
+        "path": [
+          "jobs",
+          "recent",
+          0
+        ],
+        "message": "Unrecognized key: \"textArtifactId\""
+      }
+    },
+    {
+      "mode": "postgres-read-only",
+      "valid": false,
+      "error": "ZodError",
+      "issueCount": 20,
+      "firstIssue": {
+        "code": "unrecognized_keys",
+        "keys": [
+          "textArtifactId"
+        ],
+        "path": [
+          "jobs",
+          "recent",
+          0
+        ],
+        "message": "Unrecognized key: \"textArtifactId\""
+      }
+    }
+  ],
+  "httpChecks": [
+    {
+      "role": "anonymous",
+      "path": "/api/admin/users",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/admin/calls",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/admin/system",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/admin/operations/overview",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/admin/call-outcome-metrics",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/admin/content/pages",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/admin/content/editorial/landing",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/users",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/calls",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/system",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/operations/overview",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/call-outcome-metrics",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/content/pages",
+      "method": "GET",
+      "status": 403,
+      "error": "CONTENT_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/content/editorial/landing",
+      "method": "GET",
+      "status": 403,
+      "error": "CONTENT_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/users",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/calls",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/system",
+      "method": "GET",
+      "status": 500,
+      "error": "Internal Server Error"
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/operations/overview",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/call-outcome-metrics",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/content/pages",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/content/editorial/landing",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/users",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/calls",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/system",
+      "method": "GET",
+      "status": 500,
+      "error": "Internal Server Error"
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/operations/overview",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/call-outcome-metrics",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/content/pages",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/content/editorial/landing",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/users",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/calls",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/system",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/operations/overview",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/call-outcome-metrics",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/content/pages",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/content/editorial/landing",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/users",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/calls",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/system",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/operations/overview",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/call-outcome-metrics",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/content/pages",
+      "method": "GET",
+      "status": 403,
+      "error": "CONTENT_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/content/editorial/landing",
+      "method": "GET",
+      "status": 403,
+      "error": "CONTENT_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/users/[fixture-id]/credits",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/users/[fixture-id]/credits",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/users/[fixture-id]/credits",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/admin/users/[fixture-id]/credits",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/admin/users/[fixture-id]/credits",
+      "method": "GET",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/system/outbound-calls",
+      "method": "PUT",
+      "status": 403,
+      "error": "OUTBOUND_CALL_ENABLE_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/admin/credit-grants",
+      "method": "POST",
+      "status": 403,
+      "error": "ADMIN_ACTION_FORBIDDEN"
+    },
+    {
+      "role": "user",
+      "path": "/api/call-preparations",
+      "method": "POST",
+      "status": 202,
+      "error": null
+    },
+    {
+      "role": "user",
+      "path": "/api/call-preparations/[fixture-id]",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "user",
+      "path": "/api/call-briefs/[fixture-id]",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/call-briefs/[fixture-id]",
+      "method": "GET",
+      "status": 404,
+      "error": "CALL_NOT_FOUND"
+    },
+    {
+      "role": "content_editor",
+      "path": "/api/call-briefs/[fixture-id]",
+      "method": "GET",
+      "status": 403,
+      "error": "CALL_ACCESS_FORBIDDEN"
+    },
+    {
+      "role": "support",
+      "path": "/api/call-briefs/[fixture-id]",
+      "method": "GET",
+      "status": 404,
+      "error": "CALL_NOT_FOUND"
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/call-briefs/[fixture-id]",
+      "method": "GET",
+      "status": 401,
+      "error": "AUTHENTICATION_REQUIRED"
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/calls/[fixture-id]",
+      "method": "GET",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/calls/[fixture-id]/sensitive-access",
+      "method": "POST",
+      "status": 403,
+      "error": "SENSITIVE_CALL_ACCESS_FORBIDDEN"
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/calls/[fixture-id]/sensitive-access",
+      "method": "POST",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/credit-grants",
+      "method": "POST",
+      "status": 403,
+      "error": "CREDIT_SELF_GRANT_FORBIDDEN"
+    },
+    {
+      "role": "superadmin",
+      "path": "/api/admin/credit-grants",
+      "method": "POST",
+      "status": 403,
+      "error": "CREDIT_SELF_GRANT_FORBIDDEN"
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/credit-grants",
+      "method": "POST",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "admin",
+      "path": "/api/admin/credit-grants",
+      "method": "POST",
+      "status": 200,
+      "error": null
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/auth/register",
+      "method": "POST",
+      "status": 202,
+      "error": null
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/auth/register",
+      "method": "POST",
+      "status": 202,
+      "error": null
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/auth/register",
+      "method": "POST",
+      "status": 202,
+      "error": null
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/auth/register",
+      "method": "POST",
+      "status": 202,
+      "error": null
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/auth/register",
+      "method": "POST",
+      "status": 202,
+      "error": null
+    },
+    {
+      "role": "anonymous",
+      "path": "/api/auth/register",
+      "method": "POST",
+      "status": 429,
+      "error": "RATE_LIMITED"
+    }
+  ],
+  "screenshots": [
+    "01-landing-source-desktop.png",
+    "03-register.png",
+    "04-dashboard.png",
+    "06-admin-overview.png",
+    "07-admin-safety.png",
+    "08-admin-credits.png",
+    "09-admin-user-ledger.png",
+    "10-admin-system-error.png",
+    "11-admin-calls.png",
+    "12-admin-inspector.png",
+    "13-admin-editorial.png",
+    "14-admin-seo.png",
+    "15-landing-de-mobile.png",
+    "17-account-email-form-320.png",
+    "18-admin-pages.png"
+  ],
+  "limitations": [
+    "No production environment inspection",
+    "No real provider acceptance or load test",
+    "No complete assistive-technology/cross-browser matrix",
+    "Browser uses source-seeded memory CMS, not the local PostgreSQL publication"
+  ]
+}

@@ -1,5 +1,25 @@
 # Real-provider drills
 
+Reviewed 2026-09-12 against `ef36cfa`. For a new plan, use the signed-in UI to prepare,
+review the original or ready translation, and approve/start. The UI supplies the
+review evidence required by policy v2. The CLI below still sends only revision/hash
+to approve-and-start; without an existing receipt, the server rejects it with
+`CALL_REVIEW_REQUIRED`. Its old non-billable harness does not cover this contract.
+Updating the CLI and its integrated acceptance is remaining R06 work, not delivered
+functionality. Do not bypass review policy to run the drill.
+
+Current UI procedure: start API/worker and the Twilio-only tunnel; verify readiness,
+the intended model/directions and hangup flag; prepare a new task, inspect the exact
+plan and consent to its original/translated view; obtain recipient authorization and
+start from the UI. For an outage test, arrange the worker stop after preparation and
+before the authorized start. Inspect terminal status, audio/ASR, credits and retained
+jobs afterwards. A fresh test plan is needed to exercise changed compiler wording.
+
+The [2026-09-11 call audit](call-result-live-audit-2026-09-11.md) records a confirmed
+personal meeting. [Subsequent fixes](call-result-live-fixes-2026-09-11.md) record result
+recovery, text fixtures and browser following; no additional voice call was placed
+during those fixes. The complete current-code voice/outage matrix remains open.
+
 ## R21 supervised hangup acceptance — 2026-09-08
 
 One recipient-authorized Russian call passed through the signed-in web preparation,
@@ -23,7 +43,11 @@ destination and an existing controlled, verified account. The runner never regis
 an account, sends a verification SMS, or automatically accepts Terms/AUP. Keep account
 credentials, recipient/provider identifiers, audio and transcripts out of committed evidence.
 
-## Prepare, review, then start
+## CLI prepare/start protocol — incomplete for new review-policy-v2 plans
+
+The commands below document the existing runner, not an end-to-end recommendation
+for a new plan. Preparation is asynchronous and usable; the start stage needs the
+review-receipt update described above. Prefer the current UI procedure until then.
 
 1. Start the API, external worker and scoped Twilio ingress tunnel. The worker must
    be available for preparation. Keep application/auth routes private.
@@ -86,8 +110,10 @@ Record only minimized outcomes, application version and configuration references
 run-real-call-drill.test.mjs verifies schema-valid enqueue, stable UUID header,
 queued/processing/success polling, the prepare-before-start boundary, resume without
 compilation, failed/cancelled/absent-worker behavior, existing-account-only identity,
-policy acceptance and explicit dial authorization. These are harness results, not
-provider or recipient approval. Current live acceptance remains open in R06.
+policy acceptance and explicit dial authorization as represented by its fake server.
+It does not validate current review receipts against the real API/repository. These
+are harness results, not current end-to-end evidence or recipient approval. R06
+requires that missing contract coverage plus the authorized provider drill.
 
 ## Evidence — 2026-08-22
 

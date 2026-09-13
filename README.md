@@ -5,22 +5,29 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-09:** implemented supervised MVP with substantial beta
-infrastructure. Public-beta launch readiness has **not** been established. See the
-[audit](docs/project-audit-2026-09-07.md) and [release roadmap](docs/mvp-plan.md).
+**Repository status, 2026-09-13, working tree based on `ef36cfa`:** implemented supervised MVP with substantial beta
+infrastructure. **B01/B02 are remediated locally:** production dependency audit is clean;
+Admin System supports nonempty jobs and independent outbound-call control.
+**NO-GO for public testing** remains while email/SMS, deployment and acceptance gates are open.
+The full suite passes on a fresh isolated database (1,102 tests).
+See the [remediation evidence and browser-check boundary](docs/b01-b02-remediation-2026-09-13.md),
+[original audit](docs/public-testing-audit-2026-09-13.md),
+[single release roadmap](docs/mvp-plan.md) and [documentation index](docs/README.md).
 The public product copy uses “public beta”; that wording is not deployment evidence.
 
 ## Implemented product
 
 - Authenticated EN/DE customer application, account recovery, verified phone/email
   changes, session management, export, call deletion and queued account anonymization.
-- Durable, retry-safe initial call preparation; multilingual compilation, moderation,
+- Durable, retry-safe creation, editing and clarification of call plans; multilingual compilation, moderation,
   deterministic policy checks, editing/recompilation, review and approve-and-call.
 - Separate UI, call and task-content languages; account preferences, captured language
   resolution and exact original/translated plan approval receipts. All facts in the
   approved plan may be used as needed. Appointment actions require a separate,
-  explicit permission in that plan; the bounded booking extension and its pending
-  acceptance are tracked in [the implementation plan](docs/unified-implementation-plan-2026-09-09.md#10-расширение-от-10092026--одна-запись-по-предварительному-разрешению).
+  explicit permission in that plan. Booking or confirming one appointment/personal
+  meeting is implemented with approved date/time windows and a server permission
+  check. Recipient confirmation establishes the result; there is no calendar integration,
+  rescheduling, cancellation or permission to accept new financial terms.
 - Swiss-number outbound calls via Twilio and speech conversation via OpenAI Realtime.
 - Six server-owned assistant profiles. Assistance reason defaults to `none`;
   `speech_impairment` and `language_barrier` add an optional controlled disclosure.
@@ -32,8 +39,12 @@ The public product copy uses “public beta”; that wording is not deployment e
   mono/unsupported audio falls back to a whole-recording plain-text transcript.
 - Live SSE transcript, recording playback proxy, clipboard/PDF export, feedback,
   retention choices of 0/7/30 days and manual recording deletion.
+- Playback-aware agent hangup behind `REALTIME_AGENT_HANGUP_ENABLED`; interrupted
+  farewells are explicitly resolved before answering, waiting or ending again.
+  Live transcript following survives streaming/reconnect and pauses for manual reading.
 - Immutable original transcript revisions, optional translations and summaries with
-  source links, resumable bounded jobs and owner-scoped TXT/PDF exports. Enabled
+  compact findings and source links, resumable bounded jobs, clipboard copy and
+  branded PDF export of the displayed transcript. Enabled
   generation directions are configured independently from interface languages;
   zero-day audio deletion happens after the final transcript and does not erase text.
 - Three signup credits, transactional reserve/charge/refund, quotas, recipient
@@ -48,6 +59,13 @@ Historical `en-US` remains readable. `de-CH` means Swiss Standard German. UI loc
 task content language and call language are independent; call-language labels follow
 the interface locale.
 
+New tasks use the detected input language for plan/result text, with a compact
+correction before approval. The account preference is a fallback. Results use that
+saved task language; transcript translation is on demand, with original/translation
+views. The UI has no separate result-language menus. Text languages are currently
+`en`, `de`, `fr`, `it`, `ru`, `uk`; UI dictionaries remain EN/DE. Enabling another UI
+dictionary does not change call contracts or enable a text-provider direction.
+
 ## Architecture
 
 ```text
@@ -57,7 +75,7 @@ Twilio-only ingress (same process) |       durable work + invalidation
               |                   |                |
      Twilio Media Stream <--> Realtime bridge   standalone worker
               |                   |                |
-       consented recording     OpenAI          compiler / ASR /
+       consented recording     OpenAI          compiler / ASR / text artifacts /
                                             retention / reconciliation
 ```
 
@@ -108,8 +126,9 @@ corepack pnpm --filter @callassist/api worker
 ```
 
 Both processes must use the same database/keyring and compiler configuration.
-The API enqueues initial preparation and the worker compiles it. If the worker is
-stopped, a newly submitted preparation will remain queued.
+The API enqueues preparation and the worker compiles it. Separate worker loops handle
+text artifacts and account deletion. If the worker is stopped, creation, recompilation
+and text generation remain queued.
 
 ## Quality checks
 
@@ -132,10 +151,13 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-Merged verification: **609 tests passed** (425 API, 111 web, 73 contracts).
-The schema now contains 61 migrations and 58 public tables. The original audit and
-541-test remediation reports remain historical; current integration checks are in
-[merge verification](docs/merge-verification-2026-09-07.md).
+The migration catalog contains **68 migrations**, through
+`0068_conversation_tool_results.sql`. Latest implementation checks and their limits
+are recorded in [call/result verification, 2026-09-11](docs/call-result-live-fixes-2026-09-11.md).
+That record distinguishes a full-suite run from subsequent targeted checks; it is
+not a claim of a fresh full-suite run on every commit. Older test counts are dated
+evidence, not the current suite size. See [documentation reconciliation](docs/documentation-sync-2026-09-12.md)
+for the source checks performed during this documentation update.
 
 ## Real providers and deployment
 
@@ -145,10 +167,13 @@ reachable signed webhook/Media Stream listener. `pnpm tunnel:twilio` exposes onl
 the development Twilio gateway at `127.0.0.1:4001`; Quick Tunnel is development-only.
 Model IDs and voice settings are listed in [runtime reference](docs/runtime-reference.md).
 
-The two-stage drill prepares before dialling and requires an existing verified
-account. Start is bound to the reviewed compilation revision/hash and explicit
-recipient authorization. See [real-provider drills](docs/real-provider-drills.md).
-No provider calls are made by automated verification.
+Use the signed-in UI for current supervised calls: it captures exact review evidence
+before starting. The two-stage CLI prepares before dialling and uses an existing
+verified account, but its start stage still lacks the v2 review evidence for a new
+plan. See [real-provider drills](docs/real-provider-drills.md) and remaining R06 work.
+Default unit/integration tests use mock providers. Explicit opt-in verification
+scripts such as `verify-general-call-results.ts --run-provider` make paid text-model
+requests using fictional fixtures; they do not place telephone calls.
 
 Production requires external workers, durable storage, managed secrets, TLS, a
 same-host web/API cookie topology, restricted Twilio geographic permissions and

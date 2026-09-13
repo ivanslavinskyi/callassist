@@ -1,5 +1,8 @@
 # R21 verification — 2026-09-08
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 Implementation: [plan](small-improvements-implementation-plan-2026-09-08.md).
 Status: implemented locally; signed-in browser checks and one authorized Russian
 live hangup drill passed. Production rollout and the broader voice matrix remain separate.

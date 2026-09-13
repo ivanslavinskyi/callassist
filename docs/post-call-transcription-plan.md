@@ -1,8 +1,8 @@
 # Consent-Based Recording and Post-Call Transcription Plan
 
-Status: implemented decision, reviewed 2026-09-07 against `96229ea`.
-Current release evidence and outstanding quality work are in the
-[audit](project-audit-2026-09-07.md) and [roadmap](mvp-plan.md).
+Status: implemented decision, reviewed 2026-09-12 against `ef36cfa`.
+Dated verification and outstanding quality work are in the
+[index](README.md) and [roadmap](mvp-plan.md).
 
 ## Objective
 
@@ -78,7 +78,8 @@ not the separate consent orchestration stages.
   selected value is not a hard deadline measured from call start.
 - Recording metadata contains provider IDs, channel count, duration, lifecycle
   timestamps, deletion deadline, and non-sensitive failure codes.
-- The application never stores Twilio credentials or an authenticated recording URL.
+- Recording rows never store Twilio credentials or an authenticated media URL;
+  the server reads provider credentials from its runtime configuration.
 - The final transcript stores model ID, encrypted text, status, processing timestamps,
   and a non-sensitive failure code.
 - Realtime transcript segments are never overwritten by the post-call result.
@@ -86,6 +87,11 @@ not the separate consent orchestration stages.
   owner check. Recording URLs and credentials stay server-side.
 - Live transcript rows are plaintext in PostgreSQL; final text/segments are encrypted.
   Access controls and deployment storage encryption are separate boundaries.
+- Each completed final transcript also has an encrypted immutable source revision
+  with stable segment IDs. Summary schema 2 and on-demand translations derive from
+  that original. Replacing the source makes previous derivatives stale; neither text
+  generation nor reading extends audio retention. See [text artifacts](architecture.md#plan-translations-and-result-artifacts)
+  for source identity, retries, presentation and deletion.
 
 ## Stable transcription decision
 

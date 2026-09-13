@@ -1,5 +1,8 @@
 # Dark theme of selected combined design
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 User requested dark-theme visual only and explicitly deferred implementation. Output selected-emerald-paper-dark.png generated with built-in Image Gen, using selected-emerald-paper.png as layout-preserving edit target and source-logo.png for exact logo geometry reference. No application source or original SVG changes.
 
 Intended dark theme palette: canvas #171C1A; header #1C221F; history #1B231E; input surface #222B26; borders #3A463E; main text #EDF3EF; muted text #A7B6AC; emerald accent #39B878; small accent text #6ACE9A. The logo lettering becomes off-white for contrast, only the portal remains emerald. Layout remains desktop top navigation, history left, grouped form right; mobile top tabs and form-first. These are target palette tokens rather than measured output pixels.

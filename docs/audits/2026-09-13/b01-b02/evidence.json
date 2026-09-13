@@ -1,0 +1,147 @@
+{
+  "date": "2026-09-13",
+  "baselineCommit": "ef36cfa8cd17e740395a4e120be6bbc23f347b4e",
+  "state": "uncommitted working tree with B01/B02 remediation",
+  "releaseDecision": "NO-GO; B01 and B02 closed locally, other gates open",
+  "deployed": false,
+  "dependencies": {
+    "next": "15.5.25",
+    "eslintConfigNext": "15.5.25",
+    "sharp": "0.35.4",
+    "lockfileSha256": "c4f8017bb237f699f59d366fd398ac3ec1b19d757df76f9e89db9982807092b0",
+    "frozenInstall": "PASS",
+    "productionAudit": {
+      "command": "corepack pnpm security:audit",
+      "result": "No known vulnerabilities found",
+      "exitCode": 0
+    }
+  },
+  "fullTestRun": {
+    "exitCode": 0,
+    "dedicatedFreshDatabase": true,
+    "completedAt": "2026-09-13T11:57:54.376Z",
+    "files": 139,
+    "tests": 1102,
+    "skipped": 0,
+    "packages": {
+      "api": {
+        "files": 82,
+        "tests": 821
+      },
+      "web": {
+        "files": 42,
+        "tests": 189
+      },
+      "contracts": {
+        "files": 15,
+        "tests": 92
+      }
+    }
+  },
+  "checks": {
+    "lint": "PASS; full API/contracts and final clean web follow-up",
+    "typecheck": "PASS 3/3",
+    "productionBuild": "PASS 3/3, Next.js 15.5.25",
+    "copy": "PASS 564 files",
+    "databaseMigrations": "Unchanged; catalog through 0068"
+  },
+  "systemDto": [
+    {
+      "mode": "memory",
+      "valid": true,
+      "recentJobs": 1
+    },
+    {
+      "mode": "postgres-read-only",
+      "valid": true,
+      "recentJobs": 20
+    }
+  ],
+  "systemRegressionTests": {
+    "added": 4,
+    "drivers": [
+      "memory",
+      "postgres"
+    ],
+    "cases": [
+      "queued brief, running text and dead-letter text jobs produce strict minimized system response",
+      "stop succeeds despite failed diagnostics and control GET; service.start rejects; superadmin resume; role/input restrictions"
+    ],
+    "result": "PASS"
+  },
+  "browser": {
+    "fixture": "isolated local memory API, mock providers, fictional admin",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "verified": [
+      "System loads with a nonempty queue",
+      "brief job is visible",
+      "control form remains visible and allows disable while diagnostics and control GET both fail"
+    ],
+    "mutation": "NOT COMPLETED: browser tool could not handle native confirmation dialog; API mutation validated by memory/PostgreSQL integration tests",
+    "remaining": "Operator confirmation/disable/resume smoke on staging before external calls (B12)",
+    "screenshots": [
+      "01-system-restored.png",
+      "02-system-jobs.png",
+      "03-diagnostics-and-read-failure.png"
+    ]
+  },
+  "boundaries": {
+    "realProviderTraffic": false,
+    "existingLocalPostgres": "read-only verification",
+    "existingTestDatabase": "checksum mismatch 0065 preserved; full suite used fresh isolated DB",
+    "apiCompatibility": "GET added; PUT now returns only {outboundCalls}; coordinate web/API rollout",
+    "outboundControl": "blocks new calls; does not terminate active conversations",
+    "cleanup": "temporary fixture servers stopped, fault flags removed, viewport reset, temporary TS paths restored"
+  },
+  "localLogDigests": [
+    {
+      "file": "b01-dependencies.log",
+      "sha256": "62154780afb053a61e9d44cf07eb4a9e1097f9561321ced50045df60fb07da1a"
+    },
+    {
+      "file": "b01-frozen-install-repair.log",
+      "sha256": "7d81656101cc4c0aa678b86eb713020737dcb9663cd2bf94363ac4ffa83bb2f3"
+    },
+    {
+      "file": "b01-b02-full-tests.log",
+      "sha256": "d77988e1d78312f53ad461f24fc0960e0187f0cdb210b75a1b0baa51fd4023cc"
+    },
+    {
+      "file": "b01-b02-test-exit.json",
+      "sha256": "0d535a58c557261b2d0453e350a8022e6f9834c189f5b0e480e5c6c123051f9a"
+    },
+    {
+      "file": "b01-b02-lint.log",
+      "sha256": "b6e65416ddbd8ed1374a2710aaa12566c44ce59913f0bf14a99e5346a194bb38"
+    },
+    {
+      "file": "b02-web-lint.log",
+      "sha256": "e91cf79f522595a99b62b986c2ff5b0618ea6f0bd01ffb39bca54275aadfe304"
+    },
+    {
+      "file": "b01-b02-typecheck.log",
+      "sha256": "6c8c963dcc0077fe598418228ecd11629fd5e95f26ca1658e40570ef4d999a30"
+    },
+    {
+      "file": "b01-b02-build.log",
+      "sha256": "4a1059b39201f6b8648b44ebb3b9d06338997e04e70d0f2727261620a8c3501b"
+    },
+    {
+      "file": "b02-system-verification.json",
+      "sha256": "1377b39ca2f4300ec5dcd5eb6487c3f7a12606674f88c35958cff77fb2f1d9e0"
+    },
+    {
+      "file": "b01-b02-doc-check.json",
+      "sha256": "a7ec1e53916f49f5cc6432a1b39c6d9cfc4f6cacb2a550c46211727fe45445ba"
+    }
+  ],
+  "documentation": {
+    "documents": 57,
+    "links": 624,
+    "errors": [],
+    "missingConfigKeys": []
+  }
+}

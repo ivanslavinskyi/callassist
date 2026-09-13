@@ -1,5 +1,8 @@
 # Project audit — 2026-09-07
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 > Historical baseline at `96229ea`. Subsequent changes close R01-R05/R18/R19 and
 > repair the R06 runner; see [remediation evidence](remediation-2026-09-07.md) and the
 > [current roadmap](mvp-plan.md). Findings and counts below preserve the original
@@ -340,6 +343,6 @@ open until implemented and re-verified. The audit inspected repository behavior 
 ran meaningful local checks; it is not a penetration test, exhaustive proof of every
 race, professional legal review, or a review of inaccessible production state.
 
-Follow [R18/R19 and R01–R08](mvp-plan.md#milestone-1--repository-release-blockers) first. Preserve
+Follow [R18/R19 and R01–R08](release-roadmap-history-2026-09-12.md#milestone-1--repository-release-blockers) first. Preserve
 current-commit evidence after fixes, then close production ownership/operations and
 privacy gates before expanding beyond supervised use.

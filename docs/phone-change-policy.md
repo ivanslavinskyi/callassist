@@ -5,8 +5,8 @@ self-service flow for an active, signed-in user who still knows the current pass
 and controls the replacement phone. It is not a support override for loss of both
 password and verified-phone access.
 
-Reviewed 2026-09-07 against `96229ea`; current implementation/release status is in
-the [audit](project-audit-2026-09-07.md) and [roadmap](mvp-plan.md).
+Reviewed 2026-09-12 against `ef36cfa`; current implementation/release status is in
+the [architecture](architecture.md) and [roadmap](mvp-plan.md).
 
 ## Security invariants
 

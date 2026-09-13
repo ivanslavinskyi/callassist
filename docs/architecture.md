@@ -1,8 +1,9 @@
 # SHPROHLI architecture
 
-Updated for the language workflow and text-artifact implementation on 2026-09-09. This describes implemented
-behavior. Open defects and release decisions live in the [audit](project-audit-2026-09-07.md)
-and [roadmap](mvp-plan.md), rather than being presented as implemented safeguards.
+Reviewed 2026-09-12 against code baseline `ef36cfa`. This describes implemented
+behavior, including appointments, compact results and live-transcript recovery.
+Remaining work and release decisions live in the [roadmap](mvp-plan.md);
+[dated audits and verification](README.md) retain the evidence available at their dates.
 
 The immutable-plan, provider-cost and staged database-cutover implementation is
 recorded in [the delivery roadmap](approved-call-plan-cost-security-roadmap.md).
@@ -10,7 +11,7 @@ This architecture includes the integration of that mainline work with the audit 
 
 ## Runtime and repository boundaries
 
-### R21 additions — 2026-09-08
+### Profile defaults and controlled call completion
 
 New call forms receive only the current account's ID and first/last names from the
 server. Names remain directly editable for this call; stored plan inputs take precedence
@@ -24,7 +25,13 @@ consent and opening playback. The function's validated reason requests a separat
 farewell audio response. A controller correlates response IDs, speech epochs and
 playback generations: a completed generation is not itself proof of playback.
 Only its matching Twilio mark causes normal hangup. Speech invalidates the pending
-mark before `clear`, truncates the model audio history and permits a fresh response.
+mark before `clear` and truncates the model audio history. An interrupted-closing
+context invalidates the old end request. After the new recipient turn, a text-only
+structured decision in the same Realtime session selects `end`, `answer`, `wait`
+or `clarify`; its result is fenced to the current speech epoch/generation.
+New questions receive a response, a reciprocal farewell requests a fresh closing,
+and a request to wait does not authorize hangup. This is model interpretation with
+deterministic lifecycle guards, not a guarantee of understanding every utterance.
 Late, duplicated or cancelled responses cannot finish a different turn.
 
 Before closing the stream (which continues existing TwiML to Hangup), the service
@@ -44,7 +51,15 @@ after 10 seconds. `conversation.hangup` records bounded phase/reason/trigger fac
 with normal or fallback reasons in `conversation.ended`. Feature flag rollback
 requires an API restart and leaves consent/error paths and queued recovery intact.
 
-Local implementation evidence is in [R21 verification](r21-verification-2026-09-08.md).
+Migration 0068 adds `conversation.tool_result`: bounded tool/phase/decision metadata,
+without spoken text or tool arguments. Runtime instructions separate silent control
+operations from speech: no server/tool narration or invented reasons for constraints.
+The approved opening introduces the caller and purpose once; new compiler instructions
+do not rewrite an already approved opening. Recipient-first hangup is a normal outcome.
+
+Initial evidence is in [R21 verification](r21-verification-2026-09-08.md);
+later changes and acceptance limits are in [conversation stabilization](call-conversation-result-stabilization-plan-2026-09-10.md)
+and [the 2026-09-11 verification](call-result-live-fixes-2026-09-11.md).
 Live-provider acceptance is recorded separately and this addition does not close R08.
 
 The pnpm/Turbo monorepo has three packages:
@@ -64,7 +79,7 @@ Next.js SSR -- forwarded Cookie ----> private main-API origin
                              |                        |
                      LISTEN / NOTIFY          dedicated worker
                      invalidation only        compilation / transcription
-                             |                retention / reconciliation
+                             |                retention / reconciliation / text artifacts
                          API instances        account-deletion loop
 
 Twilio PSTN <--> Media Stream <--> Twilio listener (127.0.0.1:4001)
@@ -83,7 +98,7 @@ bind; a separate container cannot reach it through another container's loopback.
 No production deployment manifest currently resolves that topology.
 
 `DURABLE_WORKER_MODE=embedded` runs workers inside the API for development.
-`external` makes the API enqueue initial preparations and durable call work; the
+`external` makes the API enqueue creation/recompilation preparations and durable call work; the
 standalone worker owns startup recovery, seeding, polling, leases and heartbeats.
 `AccountDeletionService` uses a separate leased request/attempt store in the same
 worker process; it is separate from the seven `durable_jobs` types. Production requires external
@@ -106,13 +121,19 @@ CMS supports separately published localizations and identifies the actual fallba
 locale in rendered content. Call-language option names use the UI locale.
 
 Each preparation captures a language context separately from the executable plan:
-detected input language, detection source/confidence, selected task content language,
-selection source and revision. Server resolution uses an explicit task choice, then
-account preference, supported detection, UI hint and English fallback. Changing the
+detected input language, detection status (`detected`, `mixed`, `undetermined`), selected
+task content language, selection source and revision. There is no numeric confidence
+field. An explicit task choice wins; otherwise an existing context is preserved.
+For a new automatic task, resolution is supported detection, account fallback,
+supported UI hint, then English. Changing the
 UI never rewrites an approved plan, translation or result. Unsaved call inputs survive
 UI navigation in an account-scoped in-memory draft store; raw drafts are not put in
 browser persistent storage. The task content language is editable before approval
-and frozen afterwards; result display/translation targets remain independent.
+and frozen afterwards. The form selects only the call language; a collapsed correction
+beside the plan changes the task language before approval. Summary and transcript
+translation use the saved task language, without separate target selectors. The
+API still models artifact target language separately; the simplified UI does not
+collapse these domain concepts. Original and translated views remain available.
 
 Authentication uses scrypt password hashes and random opaque session tokens. Only
 token hashes are stored; the browser receives an HttpOnly, SameSite=Lax cookie.
@@ -244,8 +265,9 @@ details, invalid/past dates and nonexistent or ambiguous local times. Its succes
 permits an action; only the recipient's subsequent confirmation supports a booked
 result. For a personal meeting this means the intended person's explicit agreement,
 without requiring a provider or a calendar entry. Model assertions about service and recipient are not calendar verification;
-there is no calendar API. Runtime integration and live acceptance remain separate
-checks in [the implementation plan](unified-implementation-plan-2026-09-09.md#10-расширение-от-10092026--одна-запись-по-предварительному-разрешению).
+there is no calendar API. Runtime integration is implemented; a supervised personal
+meeting was confirmed in the [2026-09-11 audit](call-result-live-audit-2026-09-11.md).
+This does not close the broader multilingual/adversarial voice acceptance in R08/R14.
 Additional live permission prompts are not the product authorization model. Legacy approval
 storage/routes remain for compatibility; R08 acceptance concerns adherence to the
 preapproved facts and action limits, with adversarial and authorized live evidence.
@@ -257,6 +279,11 @@ snapshots are server-derived. Assistance reasons are `none` (default, no disclos
 names are required. New calls select `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB` or
 `ru-RU`. Historical `en-US` remains readable but is not a new choice. Swiss Standard
 German does not imply dialect recognition.
+
+`allowLanguageSwitch` permits one explicitly selected `fallbackLocale` different
+from the primary call locale. That choice is captured in the execution snapshot and
+constrains the Realtime prompt; it is not an independent detector or hard validator
+of the spoken language. Unrestricted automatic language selection is not implemented.
 
 ## Consent, audio and transcription
 
@@ -318,16 +345,43 @@ Unsegmented historical text is split without losing characters; speaker/timing r
 unknown. Source ASR processing/failure does not expose an older revision as current.
 
 Translations retain source segment IDs and times. Summaries use the original final
-transcript plus the exact executed compilation; answers, next steps and unresolved
-items cite source segments. They do not change technical call status or user feedback.
-The UI identifies generated text, links evidence to the original and keeps the original
-readable when processing fails or a direction is disabled. Original and translated
-TXT/PDF downloads are distinguished. Automatic summary enqueue is atomic with final
+transcript plus the exact executed compilation (objective, success criteria and
+questions). The only supported summary payload is strict `schemaVersion: 2`:
+
+- `overview`: up to four compact material points, each referencing `findings` IDs;
+- `findings`: neutral labels and results for the caller, with `reported`, `conditional`
+  or `unknown` certainty and references to original source segments;
+- `nextSteps`: concrete actions supported by source segments, omitted when none exist;
+- `unresolved`: remaining limitations as text, not a separate source-bearing object.
+
+The validator requires evidence for non-unknown findings and all next steps; it
+checks references, not truth independently of the recording. Negative, partial,
+conditional and conflicting answers are valid outcomes. The compact view has
+expandable detail/evidence; if compaction is unavailable it shows validated findings.
+Summary generation uses its own `summary-v2` namespace, separate from the
+`text-processing-v2` translation/review generator; it does not retain a v1 summary
+reader. Plan/approval/ciphertext version compatibility is a separate concern.
+
+Results do not change technical call status or user feedback. The UI identifies
+generated text, links evidence to the original and keeps the original readable when
+processing fails or a direction is disabled. Clipboard copy and branded PDF download
+use the displayed original/translated transcript with distinct labels and metadata;
+there is no separate TXT download endpoint. Automatic summary enqueue is atomic with final
 transcript completion when that direction is enabled; it never delays audio retention.
 
 Validated chunks persist across retries. Storage caps each artifact at 24 provider
-requests across at most three job generations; the processor additionally bounds
-input chunks. Current-source checks and job ID/worker/generation/attempt leases fence
+requests across at most three job generations (initial plus two manual retries),
+with at most three automatic attempts in each generation. Summary input is bounded
+to eight source chunks; optional final compaction may fail without discarding the
+validated detailed result. Request accounting spans generations and never resets on
+manual retry. `queued`/`processing` derive from the durable job, including retry backoff;
+PostgreSQL reads artifact and job progress in one snapshot. The public `retryable`
+flag and retry command share budget/generation/permanent-error rules, with current
+source and enabled-direction checks on mutation. Provider 429, timeout, 5xx, permanent
+rejection and cancellation have distinct safe diagnostics; bounded `Retry-After`
+schedules the job instead of occupying a worker. Summary requests default to 90 seconds,
+translation/review to 45 seconds; see [configuration](runtime-reference.md).
+Current-source checks and job ID/worker/generation/attempt leases fence
 every publication. Owner deletion requests cancel text jobs and reject new provider
 reservations or late completions before eventual content redaction. Feature and
 direction switches stop new generation without removing retained ready results.
@@ -366,8 +420,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog has **67 migrations**, `0001` through
-`0067_extensible_content_locales.sql`. The catalog is contiguous/checksummed; advisory locking and
+The current catalog has **68 migrations**, `0001` through
+`0068_conversation_tool_results.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases
@@ -432,6 +486,19 @@ separate. Default Admin Calls omits recipient identity, call text and private co
 Technical completion never implies semantic success: user feedback supplies goal
 result and transcript-quality ratings with independent provenance.
 
+Live transcript parts use session, role, response, item, output and content indices
+as identity. Matching delta/final events replace only their own part; duplicate finals
+and late deltas are ignored. `transcript.discarded` clears cancelled/empty/failed-ASR
+partials. SSE finals enter the client immediately; an older HTTP snapshot cannot
+remove them. Reconnect clears stale partials and refreshes canonical state; deletion
+clears client text. Draft deltas are ephemeral, not a cross-instance replay log.
+
+The browser follower separates user intent from scroll geometry. Frame-coalesced,
+instant updates follow streaming text; wheel/key/touch/scrollbar interaction allows
+reading history. Returning to the bottom or using the resume button restores following.
+Resize/reflow and visibility changes are observed. The [11-check browser fixture](call-result-live-fixes-2026-09-11.md)
+exercises the production controller; it does not replace full live/device acceptance.
+
 Admin overview exposes 24-hour/7-day/30-day creation cohorts with explicit denominators,
 sample counts and null/unavailable semantics. Optional versioned micro-dollar rates
 produce bounded estimates, excluding compilation/consent-session request accounting
@@ -454,15 +521,16 @@ Public-rate assumptions live in the versioned provider-pricing-policy module.
 
 ## Verification and limits
 
-The [dated audit](project-audit-2026-09-07.md) records actual test/build/migration/restore
-results, runtime defects and dependency findings. The [remediation record](remediation-2026-09-07.md)
-records fixes and fresh verification. Turbo declares env/cache inputs, database tests
+The [verification index](README.md) separates dated test/build/migration/restore
+evidence from current behavior. Latest call/result checks are in the
+[2026-09-11 record](call-result-live-fixes-2026-09-11.md); no single old test count is
+the current release gate. Turbo declares env/cache inputs, database tests
 fail on missing configuration, and both production runtimes require the OpenAI compiler.
 
 A clean build is not proof of browser accessibility, live provider
 quality, secure deployment or legal readiness.
 
 Deferred: browser softphone/native apps, teams, payments, external CRM/calendar/RAG,
-automatic language switching, model-session reconnect, transcript click-to-seek and
+unrestricted automatic language selection, model-session reconnect, transcript click-to-seek and
 operator-corrected revisions, media CMS and indefinite audio retention. High-risk,
 bulk/marketing/emergency calls are outside the current product boundary.

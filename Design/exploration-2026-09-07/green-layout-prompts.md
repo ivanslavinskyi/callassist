@@ -1,5 +1,8 @@
 # Additional green layout exploration
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Generated with built-in Image Gen. No application source or original SVG changed.
 
 Latest three-image set, displayed order: 1 emerald-rail.png; 2 olive-paper.png; 3 pine-studio.png. Earlier four images belong to prior ideation sets.

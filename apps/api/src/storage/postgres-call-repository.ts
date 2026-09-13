@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
 import type { CallTextRepository } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
@@ -2301,6 +2302,21 @@ export class PostgresCallRepository implements CallRepository {
     return changed;
   }
 
+  async getOutboundCallControl() {
+    const [row] = await this.#sql<{
+      enabled: boolean; reason: string; updatedAt: Date | null;
+    }[]>`
+      SELECT enabled, reason, updated_at AS "updatedAt"
+      FROM system_controls WHERE key = 'outbound_calls'
+    `;
+    if (!row) throw new Error("Outbound-call system control is missing");
+    return {
+      enabled: row.enabled,
+      reason: row.reason,
+      updatedAt: row.updatedAt ? toIso(row.updatedAt) : null
+    };
+  }
+
   async setOutboundCallsEnabled(
     enabled: boolean,
     input: SafetyControlInput
@@ -2330,6 +2346,7 @@ export class PostgresCallRepository implements CallRepository {
         reason
       });
     });
+    return { enabled, reason, updatedAt: now.toISOString() };
   }
 
   async recompile(
@@ -3478,16 +3495,7 @@ export class PostgresCallRepository implements CallRepository {
         retentionQueued: row.retentionQueued,
         providerReconciliationQueued: row.providerReconciliationQueued,
         oldestDueAt: row.oldestJobDueAt ? toIso(row.oldestJobDueAt) : null,
-        recent: recentJobs.map(mapDurableJobRow).map(({
-          recordingId: _recordingId,
-          callAttemptId: _callAttemptId,
-          forceRequested: _force,
-          leaseOwner: _owner,
-          leasedAt: _leasedAt,
-          createdAt: _createdAt,
-          completedAt: _completedAt,
-          ...job
-        }) => job)
+        recent: recentJobs.map(mapDurableJobRow).map(toAdminDurableJob)
       }
     };
   }

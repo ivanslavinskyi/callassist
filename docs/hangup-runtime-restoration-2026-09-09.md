@@ -1,5 +1,8 @@
 # Local agent hangup restoration — 2026-09-09
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 The latest local API launch omitted `REALTIME_AGENT_HANGUP_ENABLED`. The main
 `.env` also lacked it. `index.ts` enables the bridge only when the value is exactly
 `true`; the bridge default is `false`. The R21 acceptance report records that its

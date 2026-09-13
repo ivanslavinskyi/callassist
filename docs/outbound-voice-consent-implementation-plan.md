@@ -1,7 +1,7 @@
 # Outbound voice consent implementation plan
 
 Status: core implementation present, including the subsequent consent-audio fix;
-updated 2026-09-09 for the product decision to restore the previous short spoken consent. Stages below are a delivery record, not the
+reviewed 2026-09-12 against `ef36cfa`, retaining the 2026-09-09 decision to restore the previous short spoken consent. Stages below are a delivery record, not the
 next backlog. Current release follow-ups are R06/R07/R08/R14 in the [roadmap](mvp-plan.md).
 
 **R18 implemented:** full-phrase affirmative matching replaces prefix acceptance.

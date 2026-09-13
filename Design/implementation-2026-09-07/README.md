@@ -1,5 +1,8 @@
 ﻿# Emerald Paper application review
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 The approved design is implemented in `apps/web`. This directory contains evidence and a disposable review backend; it is not imported by the application.
 
 - [Coverage and route/state map](COVERAGE.md)
@@ -12,14 +15,11 @@ The approved design is implemented in `apps/web`. This directory contains eviden
 
 The review uses the actual Next application and API `buildApp`, with in-memory repositories, synthetic identities and mock verification/telephony providers. The recording is a generated 66-second silent WAV. No provider call, production database mutation or CMS publication is part of this review.
 
-Open http://localhost:3000/en. Sign in with either:
-
-| Role | Email | Password |
-| --- | --- | --- |
-| Customer | customer@review.example | EmeraldReview2026! |
-| Superadmin | admin@review.example | EmeraldReview2026! |
-
-These credentials belong only to this disposable local server. Customer history includes a completed call with final/provisional transcripts and a recording. Additional calls/drafts may exist from interaction tests. `fixtures.json` records IDs generated on startup. Restarting the review backend resets everything and creates fresh IDs.
+The historical fixture identities are defined by the disposable review backend;
+credentials and generated IDs are not documented here. Restarting that backend
+resets its in-memory data. The launch recipe below belongs to the dated design
+review and has not been revalidated against later call/review contracts. Use the
+root README for normal application startup.
 
 To reproduce from the repository, run the review API from `apps/api`:
 

@@ -1,5 +1,8 @@
 # Transcript PDF layout restoration — 2026-09-09
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 The revision-aware export had introduced a second, minimal PDF renderer. It put
 source UUIDs beside each turn and lost the typography, speaker colors, metadata
 rows and page footer of the earlier transcript export.

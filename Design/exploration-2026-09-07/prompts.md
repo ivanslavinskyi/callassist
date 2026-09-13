@@ -1,5 +1,8 @@
 # SHPROHLI responsive design exploration
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Generated with the built-in Image Gen tool. Visual concepts only; application source was not modified.
 
 Grounding: live localhost /en/app captured on 2026-09-07; apps/web/components/dashboard.tsx, create-call-form.tsx, brand.tsx, apps/web/app/globals.css, README.md; exact rasterization of Design/shprohli.svg.

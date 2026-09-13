@@ -8,6 +8,7 @@ import type {
   AdminCallList,
   AdminCallListFilters,
   AdminCallSensitiveContent,
+  AdminOutboundCallControl,
    CallBrief,
   CallPreparation,
   CallCompilation,
@@ -825,10 +826,11 @@ export interface CallRepository extends CallTextRepository {
     phoneE164: string,
     input: SafetyControlInput
   ): Promise<boolean>;
+  getOutboundCallControl(): Promise<AdminOutboundCallControl>;
   setOutboundCallsEnabled(
     enabled: boolean,
     input: SafetyControlInput
-  ): Promise<void>;
+  ): Promise<AdminOutboundCallControl>;
   recompile(
     id: string,
     input: CreateCallBriefInput,

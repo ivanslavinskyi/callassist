@@ -4,12 +4,25 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Updated 2026-09-07. Repository blockers R01-R05/R18/R19 are implemented with
-[remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
-is repaired, but R06 remains partial pending an authorized live drill. Review the
+Reviewed 2026-09-13 against the working tree based on `ef36cfa`. B01/B02 are remediated locally with
+[current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
+[historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
+has async preparation, but its start stage still needs the v2 review-receipt contract
+update (R06); current supervised starts use the UI. Dated calls are recorded, but the complete current-commit
+provider/outage acceptance remains partial. Review the
 [roadmap](mvp-plan.md) for remaining provider, privacy, safety and deployment gates.
 
 ## Health contract
+
+B02 remediation (2026-09-13): Admin System uses a minimized job projection for
+nonempty queues. The outbound-call panel has independent `GET`/`PUT`
+`/api/admin/system/outbound-calls` responses containing only `{ outboundCalls }`.
+Failure of diagnostics/queue aggregation does not hide the panel or turn a committed
+control change into a failed diagnostic response. If the state cannot be confirmed,
+the UI offers explicit disable and refresh; only superadmin may resume calls.
+The control stops **new** calls, not active conversations. Both HTTP operations still
+require the API, authorization and database; the existing `calls:disable` CLI remains
+the operator fallback when the web/API path is unavailable.
 
 R21 adds `REALTIME_AGENT_HANGUP_ENABLED` (default false). Apply migration 0062 before
 enabling it and restart the API with the new setting. Observe `conversation.hangup`
@@ -122,8 +135,11 @@ to grow.
 
 ### `durable-job-failure` and `durable-job-backlog`
 
-The queue includes initial `brief_compilation` as well as transcription, retention
-and both provider reconciliation types. Failed preparations erase source input and
+The seven durable job types are creation/recompilation `brief_compilation`,
+`final_transcription`, `recording_retention`, `provider_call_reconciliation`,
+`provider_call_cost_reconciliation`, `provider_recording_reconciliation` and
+`text_artifact_generation`. Text generation has a separate consumer loop.
+Failed preparations erase source input and
 cannot use the generic superadmin retry; ask the owner to submit a new preparation.
 Account anonymization has a separate leased request/attempt store and recovery action.
 
@@ -132,6 +148,42 @@ Determine whether an external side effect may already have occurred. Fix the pro
 configuration, capacity, or database cause first. A superadmin may retry dead-letter
 work with a specific incident reason; never bulk retry uncertain provider operations.
 Verify the immutable attempt history and final canonical call state.
+
+### Result generation failure
+
+Inspect the artifact and its durable job together: source revision/hash, kind,
+status, generation, attempt count, provider-request count, run-after and controlled
+failure code. `queued` during backoff is not terminal failure. `processing` is an
+active lease; source replacement or deletion may make an artifact stale/cancelled.
+
+The owner text-artifact retry route is bounded to three generations total and 24
+provider requests across them, with three automatic attempts per generation. Retry
+only when `retryable` is true and the current source/direction still permits it.
+Timeout, 429 and provider 5xx are distinct from permanent request rejection. Provider
+`Retry-After` is scheduled, capped at 15 minutes; summary timeout defaults to 90 seconds
+and review/translation to 45 seconds. Completed chunks and request accounting survive
+retry. A failed optional compacting pass can still produce a ready detailed result.
+
+Keep the original transcript available. Do not reset counters or rewrite hashes to
+make the button available. The [2026-09-11 local repair](call-result-live-fixes-2026-09-11.md)
+was a specifically authorized correction of a budget bug, not the general retry
+procedure. Provider resend of real call content is a separate operation from
+inspecting these minimized diagnostics.
+
+### Live transcript stops following
+
+First distinguish a stopped event stream from a paused follower. Manual scrolling
+pauses following; the resume button or returning to the bottom restores it. Check
+for new finalized segments, reconnect state and canonical snapshot freshness.
+Cancellation/ASR failure should emit `transcript.discarded` for the affected partial;
+one speaker's final must not erase another part. An older HTTP response must not
+remove an SSE final. A Realtime model disconnect ends the call; SSE recovery cannot
+resume that voice session.
+
+Use `node apps/web/scripts/serve-transcript-following-check.mjs` and its local fixture
+to reproduce streaming, reflow, hide/reveal and manual reading without dialling.
+Record viewport, interaction and controlled events, keeping private speech out of
+shared logs. The fixture exercises the production follower, not provider delivery.
 
 ### `retention-overdue`
 

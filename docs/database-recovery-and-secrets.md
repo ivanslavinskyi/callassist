@@ -1,8 +1,10 @@
 # Database recovery and secret operations
 
-Updated 2026-09-09 for text artifacts. Rotation/restore share all seventeen ciphertext
-families. The current catalog has 61 migrations and 58 public tables. See the
-[remediation evidence](remediation-2026-09-07.md).
+Reviewed 2026-09-12 against `ef36cfa`. Rotation/restore share the inventory of seventeen
+ciphertext columns. The catalog has 68 migrations through
+`0068_conversation_tool_results.sql`; schema inventory is checked by integration tests.
+See [text-data verification](verification-text-data-2026-09-09.md) for dated local
+rotation/restore/deletion evidence; it is not production recovery evidence.
 
 This document defines the repository-owned recovery contract. The executable drill
 proves local backup and restore mechanics; it does not claim that managed production

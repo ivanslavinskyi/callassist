@@ -9,14 +9,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   getAdminSystemStatus,
-  retryAdminDurableJob,
-  setAdminOutboundCalls
+  retryAdminDurableJob
 } from "@/lib/api";
 import {
   adminOperationsMessages,
   type AdminOperationsCopy
 } from "@/lib/i18n/admin-operations-messages";
 import { useAdminSession } from "./admin-session-provider";
+import { AdminOutboundControl } from "./admin-outbound-control";
 
 export function AdminSystemConsole() {
   const locale = "en" as const;
@@ -25,10 +25,8 @@ export function AdminSystemConsole() {
   const role: UserRole = user.role;
   const [status, setStatus] = useState<AdminSystemView | null>(null);
   const [loading, setLoading] = useState(true);
-  const [controlLoading, setControlLoading] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [controlError, setControlError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -45,45 +43,20 @@ export function AdminSystemConsole() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  async function changeControl(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!status) return;
-    const enabled = !status.outboundCalls.enabled;
-    const reason = String(new FormData(event.currentTarget).get("reason") ?? "")
-      .trim();
-    if (reason.length < 3) {
-      setControlError(copy.controlError);
-      return;
-    }
-    const confirmed = window.confirm(
-      enabled ? copy.confirmEnable : copy.confirmDisable
-    );
-    if (!confirmed) return;
-    setControlLoading(true);
-    setControlError(null);
-    try {
-      setStatus(await setAdminOutboundCalls({ enabled, reason }));
-      event.currentTarget.reset();
-    } catch {
-      setControlError(copy.controlError);
-    } finally {
-      setControlLoading(false);
-    }
-  }
-
   async function retryJob(
     event: FormEvent<HTMLFormElement>,
     jobId: string
   ) {
     event.preventDefault();
-    const reason = String(new FormData(event.currentTarget).get("reason") ?? "")
+    const form = event.currentTarget;
+    const reason = String(new FormData(form).get("reason") ?? "")
       .trim();
     if (reason.length < 3 || !window.confirm(copy.retryJobConfirm)) return;
     setRetryingJobId(jobId);
     setJobError(null);
     try {
       setStatus(await retryAdminDurableJob(jobId, { reason }));
-      event.currentTarget.reset();
+      form.reset();
     } catch {
       setJobError(copy.retryJobError);
     } finally {
@@ -111,6 +84,8 @@ export function AdminSystemConsole() {
         </nav>
         {loading && !status ? <p role="status">{copy.loading}</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
+
+        <AdminOutboundControl role={role} />
 
         {status ? (
           <div className="admin-system-content" aria-busy={loading}>
@@ -358,39 +333,6 @@ export function AdminSystemConsole() {
                 ))}
               </div>
               {jobError ? <p className="form-error" role="alert">{jobError}</p> : null}
-            </section>
-
-            <section className="admin-outbound-control" id="outbound-control" data-enabled={status.outboundCalls.enabled}>
-              <div>
-                <span className="admin-control-state">
-                  {status.outboundCalls.enabled ? copy.outboundEnabled : copy.outboundDisabled}
-                </span>
-                <h2>{copy.outboundTitle}</h2>
-                <p>{copy.controlHelp}</p>
-                <dl className="admin-operations-list">
-                  <Fact label={copy.outboundReason} value={status.outboundCalls.reason} />
-                  <Fact label={copy.outboundUpdated} value={status.outboundCalls.updatedAt ? formatDate(status.outboundCalls.updatedAt, locale) : copy.notAvailable} />
-                </dl>
-              </div>
-              <form onSubmit={changeControl}>
-                <label className="field">
-                  <span>{copy.controlReason}</span>
-                  <textarea maxLength={500} minLength={3} name="reason" placeholder={copy.controlReasonPlaceholder} required rows={3} />
-                </label>
-                <button
-                  className={status.outboundCalls.enabled ? "danger-button" : "primary-button"}
-                  disabled={controlLoading || (!status.outboundCalls.enabled && role !== "superadmin")}
-                  type="submit"
-                >
-                  {controlLoading
-                    ? copy.applyingControl
-                    : status.outboundCalls.enabled
-                      ? copy.disableCalls
-                      : copy.enableCalls}
-                </button>
-                {!status.outboundCalls.enabled && role !== "superadmin" ? <small>{copy.enableRestricted}</small> : null}
-                {controlError ? <p className="form-error" role="alert">{controlError}</p> : null}
-              </form>
             </section>
           </div>
         ) : null}

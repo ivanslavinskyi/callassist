@@ -1,5 +1,8 @@
 # Проверка дизайн-комплекта
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 7 сентября 2026 · результат: комплект готов к дизайн-ревью. Проверка относится к автономным макетам, а не к работе production API или итоговому соответствию WCAG.
 
 

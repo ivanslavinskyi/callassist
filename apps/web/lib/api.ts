@@ -21,6 +21,7 @@ import type {
   AdminOperationsWindow,
   AdminOutboundCallControlInput,
   AdminSystemView,
+  AdminOutboundCallControlView,
   AdminEditorialRevision,
   AdminUserCreditLedger,
   AdminUserList,
@@ -532,10 +533,14 @@ export async function getAdminSystemStatus() {
   return apiRequest<AdminSystemView>("/api/admin/system");
 }
 
+export async function getAdminOutboundCalls() {
+  return apiRequest<AdminOutboundCallControlView>("/api/admin/system/outbound-calls");
+}
+
 export async function setAdminOutboundCalls(
   input: AdminOutboundCallControlInput
 ) {
-  return apiRequest<AdminSystemView>(
+  return apiRequest<AdminOutboundCallControlView>(
     "/api/admin/system/outbound-calls",
     { method: "PUT", body: JSON.stringify(input) }
   );

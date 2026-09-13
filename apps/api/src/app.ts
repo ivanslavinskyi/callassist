@@ -14,6 +14,7 @@ import {
   adminDurableJobRetryInputSchema,
   adminOperationsWindowSchema,
   adminOutboundCallControlInputSchema,
+  adminOutboundCallControlViewSchema,
   adminUserSearchSchema,
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
@@ -1506,6 +1507,16 @@ export function buildApp({
         .send(await getAdminSystemView());
     });
 
+    app.get("/api/admin/system/outbound-calls", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .send(adminOutboundCallControlViewSchema.parse({
+          outboundCalls: await service.repository.getOutboundCallControl()
+        }));
+    });
+
     app.put("/api/admin/system/outbound-calls", async (request, reply) => {
       const actor = await authorizeAdminMutation(request, reply);
       if (!actor) return;
@@ -1522,13 +1533,13 @@ export function buildApp({
           error: "OUTBOUND_CALL_ENABLE_FORBIDDEN"
         });
       }
-      await service.repository.setOutboundCallsEnabled(parsed.data.enabled, {
+      const outboundCalls = await service.repository.setOutboundCallsEnabled(parsed.data.enabled, {
         actorUserId: actor.id,
         reason: parsed.data.reason
       });
       return reply
         .header("Cache-Control", "private, no-store")
-        .send(await getAdminSystemView());
+        .send(adminOutboundCallControlViewSchema.parse({ outboundCalls }));
     });
 
     app.post<{ Params: { jobId: string } }>(

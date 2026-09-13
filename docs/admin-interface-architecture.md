@@ -1,7 +1,17 @@
 # Admin interface architecture
 
-Status: implemented; reviewed against `96229ea` on 2026-09-07. The original design
-was accepted on 2026-08-27. Remaining admin workflows are roadmap R16.
+Status: implemented; updated for B02 remediation on 2026-09-13 (working tree based
+on `ef36cfa`). The original design was accepted on 2026-08-27. Remaining admin
+workflows are tracked under B08 in the [current roadmap](mvp-plan.md).
+
+System diagnostics project an explicit public durable-job DTO shared by memory and
+PostgreSQL; internal targets such as `textArtifactId` and lease-owner data are not
+included. The outbound control is rendered and loaded independently of diagnostics.
+`GET` and `PUT /api/admin/system/outbound-calls` return only `{ outboundCalls }`.
+The write commits its audit event and returns the written state without rebuilding
+the system dashboard. Both routes remain private/no-store and role-protected;
+only superadmin can enable calls. Unknown state offers disable only. This switch
+prevents new calls; it does not terminate calls already in progress.
 
 ## Decision
 
@@ -16,7 +26,8 @@ under `/admin`.
   `/de/*`.
 - German remains a supported content locale inside the English admin UI. The
   interface language and the locale of edited or previewed content are separate
-  concepts.
+  concepts. Content locale syntax/storage is extensible (0067); EN/DE remain the
+  enabled customer UI dictionaries. Publishing a localization does not enable a UI.
 - The customer shell contains at most one role-gated entry point to `/admin`;
   individual admin functions are shown only inside the admin shell.
 

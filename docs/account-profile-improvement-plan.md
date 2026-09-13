@@ -2,8 +2,8 @@
 
 Status: core implementation complete; final multi-browser/device acceptance remains.
 
-Reviewed 2026-09-07 against `96229ea`. The dated checkpoint counts below are historical;
-the [current audit](project-audit-2026-09-07.md) ran 503 automated tests. These tests
+Reviewed 2026-09-12 against `ef36cfa`. The dated checkpoint counts below are historical;
+latest verification records are in the [documentation index](README.md). Automated tests
 do not prove real password-manager or screen-reader behavior. R05 contact-challenge
 erasure/cleanup is now implemented; see [remediation](remediation-2026-09-07.md).
 R13 browser acceptance and R15 durable notifications remain open.
@@ -36,13 +36,20 @@ R13 browser acceptance and R15 durable notifications remain open.
 ## Current operational limits
 
 Email-change codes are HMAC-hashed and challenge records contain the proposed email
-in plaintext until cleanup. Both email/phone challenge tables currently purge old
-rows only when a new challenge is created; account anonymization does not erase them.
-This is an open lifecycle defect, not completed anonymization. Verification mail to
+in plaintext until cleanup. Account anonymization deletes both email/phone challenge
+tables' rows for that user atomically. The deletion worker removes challenges older
+than 30 days and legacy deleted-user challenges on startup and hourly, in addition
+to challenge-creation cleanup. R05 is implemented; see the [lifecycle policy](data-deletion-policy.md).
+Verification mail to
 the new address and a notice to the old address are sent concurrently during challenge
 creation. Either delivery failure invalidates the challenge and returns
 `EMAIL_DELIVERY_UNAVAILABLE`. There is no durable retry/outbox or separate completion
-notification. See audit A05 and roadmap R15.
+notification; this remaining work is R15.
+
+Account UI/content-language preferences are implemented. The content-language setting
+is a fallback when a new task's input language cannot be resolved, not an override of
+supported detection. Current account names also initialize editable represented-person
+fields on new calls. Existing tasks and approved plans retain their captured values.
 
 ## Acceptance criteria
 

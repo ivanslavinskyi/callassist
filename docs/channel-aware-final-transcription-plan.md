@@ -1,9 +1,9 @@
 # Channel-aware final transcription
 
-Status: implemented in the current runtime; reviewed 2026-09-07 against `96229ea`.
+Status: implemented in the current runtime; reviewed 2026-09-12 against `ef36cfa`.
 The problem and experiments below describe the earlier alignment implementation.
 See [current transcription behavior](post-call-transcription-plan.md) and
-[current release evidence](project-audit-2026-09-07.md).
+[dated verification records](README.md).
 
 ## Problem
 

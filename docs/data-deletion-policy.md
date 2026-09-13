@@ -2,7 +2,7 @@
 
 Status: implemented application baseline through checkpoint 6F3b. This document is a technical lifecycle policy, not a substitute for the final Swiss legal/privacy review or production backup evidence.
 
-Updated 2026-09-09 for text artifacts, language context and review receipts. R05 removes email/phone-change
+Reviewed 2026-09-12 against `ef36cfa`, including text artifacts, language context and review receipts. R05 removes email/phone-change
 challenge contacts in the same transaction as account anonymization, under the user
 lock. The deletion worker also purges challenges older than 30 days and legacy
 deleted-user challenges on startup and hourly, even without new user traffic.

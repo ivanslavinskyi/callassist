@@ -1,5 +1,8 @@
 # Language workflow: frontend and export verification
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 Date: 9 September 2026. Local development build, `http://localhost:3000`.
 
 ## Automated checks

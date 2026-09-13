@@ -1,5 +1,11 @@
 # Public content draft staging
 
+Procedure reviewed against `ef36cfa` on 2026-09-12. Draft/publication statements below
+are the dated 2026-09-09 staging evidence and 2026-09-10 source-copy follow-up, not a
+fresh database inspection. No CMS content was created or published during this
+documentation update. Runtime features now include bounded booking/confirmation;
+the remaining editorial/publication work is R07 in the [roadmap](mvp-plan.md).
+
 The reviewed release candidate and local dry-run recorded matching published
 source revisions and five available targets: Privacy, Terms, FAQ page,
 Imprint and FAQ collection. Existing AUP and Landing drafts are preserved. They require

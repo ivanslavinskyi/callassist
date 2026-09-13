@@ -1,5 +1,8 @@
 # Проверка языкового workflow и результатов — 9 сентября 2026
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 База изменений: `7b86d3a`. Проверяется рабочее дерево, а не новый commit: изменения не закоммичены. Исходное изменение `apps/web/tsconfig.json` сохранено. Основной scope и фактические отметки: [единый план](unified-implementation-plan-2026-09-09.md).
 
 ## Реализовано

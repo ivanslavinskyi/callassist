@@ -1,5 +1,8 @@
 # Проверка хранения текстовых данных — 2026-09-09
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 Проверены миграции 0063–0067, ротация ключа, восстановление резервной копии и удаление аккаунта при работающем текстовом провайдере. Команды выполнялись из `apps/api` на локальном PostgreSQL. URL и ключи в отчёте не сохраняются.
 
 ## Выполненные проверки

@@ -1,5 +1,8 @@
 # Repository blocker remediation — 2026-09-07
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 Scope: the working tree based on `96229ea`, following the
 [original audit](project-audit-2026-09-07.md). Changes are not committed or deployed.
 This record supersedes the original defect status for R01-R05/R18/R19; historical

@@ -1,5 +1,8 @@
 # Emerald Paper rev02 — application design QA
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 final result: passed
 
 Date: 2026-09-07. Design integration and final production smoke checks are complete. Evidence is consolidated; the visual findings below were fixed and recaptured.

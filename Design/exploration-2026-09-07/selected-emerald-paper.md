@@ -1,5 +1,8 @@
 # Selected combined visual direction
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 User selected the layout of option 2 (olive-paper.png) and accent color of option 1 (emerald-rail.png) from the latest three-image set. Combined visual: selected-emerald-paper.png, generated using built-in Image Gen. Application code and original logo SVG remain unchanged.
 
 Layout: horizontal desktop navigation, history at left, grouped call form at right; mobile top tabs and single-column form. Brand: dark custom wordmark, emerald portal only. Intended accent #138553, stronger green #09643B, pale tint #E9F5EF. Actual production logo should use original SVG paths rather than generated raster lettering.

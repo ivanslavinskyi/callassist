@@ -1,5 +1,8 @@
 # Route and state implementation map
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Approved baseline: Emerald Paper revision 02. All 33 atlas entries / 162 states are mapped in [route-state-map.json](route-state-map.json). The two system reference entries do not create new product routes.
 
 The browser column lists observed states only. Remaining states are mapped to existing handlers and shared presentation; fault injection, provider behavior and full accessibility acceptance remain in R13/R06/R14.

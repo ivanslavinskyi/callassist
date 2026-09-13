@@ -1,5 +1,8 @@
 # SHPROHLI · Emerald Paper
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Полный дизайн-гайдлайн · версия 1.0 для согласования · 7 сентября 2026
 
 [Открыть атлас](index.html) · [Реестр страниц и состояний](coverage.html) · [Спецификации страниц](PAGE-SPECS.md) · [Токены JSON](tokens.json) · [Токены CSS](tokens.css)

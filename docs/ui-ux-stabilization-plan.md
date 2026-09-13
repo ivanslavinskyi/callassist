@@ -1,5 +1,8 @@
 # UI/UX Stabilization Plan
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 Status: **historical design checklist; substantially implemented, acceptance incomplete**
 Reviewed against `96229ea` on 2026-09-07. Source: earlier UI/UX audit of the operator console.
 Original scope: 45 findings across navigation, forms, feedback, visual hierarchy,

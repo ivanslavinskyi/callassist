@@ -1,5 +1,8 @@
 # SHPROHLI — спецификации страниц
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Редакция для дизайн-ревью · 7 сентября 2026. Основание: текущий репозиторий `3676030e48b0b618cb4d02813fe18a233076d076`, его компоненты и сохранённые снимки существующих экранов. Геометрия и палитра развивают утверждённые светлый и тёмный варианты. Новые страницы в этом комплекте пока не утверждены.
 
 ## 1. Как читать комплект

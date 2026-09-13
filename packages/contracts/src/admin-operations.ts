@@ -241,6 +241,18 @@ const operationalAlertSchema = z.strictObject({
   ])
 });
 
+export const adminOutboundCallControlSchema = z.strictObject({
+  enabled: z.boolean(),
+  reason: z.string().trim().min(1).max(500),
+  updatedAt: z.iso.datetime().nullable()
+});
+export type AdminOutboundCallControl = z.infer<typeof adminOutboundCallControlSchema>;
+
+export const adminOutboundCallControlViewSchema = z.strictObject({
+  outboundCalls: adminOutboundCallControlSchema
+});
+export type AdminOutboundCallControlView = z.infer<typeof adminOutboundCallControlViewSchema>;
+
 export const adminSystemStatusSchema = z.strictObject({
   generatedAt: z.iso.datetime(),
   components: z.strictObject({
@@ -260,11 +272,7 @@ export const adminSystemStatusSchema = z.strictObject({
       upstreamChecked: z.literal(false)
     })
   }),
-  outboundCalls: z.strictObject({
-    enabled: z.boolean(),
-    reason: z.string().trim().min(1).max(500),
-    updatedAt: z.iso.datetime().nullable()
-  }),
+  outboundCalls: adminOutboundCallControlSchema,
   runtime: z.strictObject({
     uptimeSeconds: secondsSchema,
     backgroundTasks: countSchema,

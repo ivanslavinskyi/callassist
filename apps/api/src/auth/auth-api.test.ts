@@ -1795,7 +1795,8 @@ describe("auth API", () => {
 
     for (const url of [
       "/api/admin/operations/overview",
-      "/api/admin/system"
+      "/api/admin/system",
+      "/api/admin/system/outbound-calls"
     ]) {
       const forbidden = await app.inject({
         method: "GET",
@@ -1840,21 +1841,6 @@ describe("auth API", () => {
       outboundCalls: {
         enabled: false,
         reason: "Investigating elevated provider failures"
-      },
-      rateLimits: {
-        state: "healthy",
-        mode: "memory",
-        shared: false,
-        activeBuckets: expect.any(Number),
-        allowed: expect.any(Number),
-        denied: expect.any(Number),
-        topDeniedScopes: expect.any(Array)
-      },
-      jobs: {
-        queued: 0,
-        running: 0,
-        deadLetter: 0,
-        recent: []
       }
     });
 

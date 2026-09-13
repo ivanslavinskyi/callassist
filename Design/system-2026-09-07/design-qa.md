@@ -1,5 +1,8 @@
 # Design QA — Emerald Paper
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Final result: pass for design review of the standalone atlas. This is not approval of the new pages by the user and not a production integration certification.
 
 Source visual truth: assets/approved-light.png and assets/approved-dark.png, copied from the user's selected exploration boards. Both are 1640×959 px and contain a desktop region approximately 1300×959 plus a mobile region. Implementation: screens/new-call-comparison-light.png and screens/new-call-comparison-dark.png, empty new-call state, EN, 1300×960 CSS viewport. Browser captures are 1285×949 px; comparison.html displays them normalized to the source desktop region. No pixel-accuracy score is claimed. No simulated device frame was used.

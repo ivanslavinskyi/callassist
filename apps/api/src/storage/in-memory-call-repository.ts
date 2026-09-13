@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { InMemoryCallTextStore } from "./in-memory-call-text-store";
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
@@ -1403,6 +1404,14 @@ export class InMemoryCallRepository implements CallRepository {
     return false;
   }
 
+  async getOutboundCallControl() {
+    return {
+      enabled: this.#outboundCallsEnabled,
+      reason: this.#outboundCallsReason,
+      updatedAt: this.#outboundCallsUpdatedAt
+    };
+  }
+
   async setOutboundCallsEnabled(
     enabled: boolean,
     input: SafetyControlInput
@@ -1417,6 +1426,7 @@ export class InMemoryCallRepository implements CallRepository {
       phoneE164: null,
       reason
     });
+    return { enabled, reason, updatedAt: this.#outboundCallsUpdatedAt };
   }
 
   safetyEventsForTest() {
@@ -2113,10 +2123,7 @@ export class InMemoryCallRepository implements CallRepository {
             right.id.localeCompare(left.id)
           )
           .slice(0, 20)
-          .map(({ recordingId: _recordingId, callAttemptId: _callAttemptId,
-            forceRequested: _force,
-            leaseOwner: _owner, leasedAt: _leasedAt, createdAt: _createdAt,
-            completedAt: _completedAt, ...job }) => copy(job))
+          .map(toAdminDurableJob)
       }
     };
   }

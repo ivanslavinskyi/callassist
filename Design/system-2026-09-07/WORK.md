@@ -1,5 +1,8 @@
 # SHPROHLI — полный дизайн до переноса
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Основа: утверждённые selected-emerald-paper.png и selected-emerald-paper-dark.png.
 Пользователь подтвердил включение всей админки. Дата: 7 сентября 2026.
 Репозиторий: 3676030e48b0b618cb4d02813fe18a233076d076.

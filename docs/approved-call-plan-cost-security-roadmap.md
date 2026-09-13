@@ -1,5 +1,8 @@
 # Approved call plan, cost, and security roadmap
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 ## Status
 
 - Owner: engineering

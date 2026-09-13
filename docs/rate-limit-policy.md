@@ -4,7 +4,7 @@ Status: implemented repository baseline in checkpoint 6F5. PostgreSQL is the
 authoritative rate-limit store whenever `STORAGE_DRIVER=postgres`; the bounded
 in-memory implementation exists for local tests and single-process development only.
 
-Reviewed 2026-09-07 against `96229ea`. Email-change start/confirm and account name
+Reviewed 2026-09-12 against `ef36cfa`. Email-change start/confirm and account name
 editing also use shared limits. Production keys must be independent of the email
 verification HMAC key as well as promo/data keys. Proxy/IP trust is a separate R09
 deployment decision; `request.ip` currently uses the direct connection peer.
@@ -53,6 +53,7 @@ charging a new preparation budget.
 | Promo redemption | 10 / hour |
 | Recording download | 30 / hour |
 | Final transcription retry | 5 / day |
+| Plan/clarification review, content-language correction, transcript translation, summary and text-artifact retry | 30 / hour (shared text-generation scope) |
 | Account data export | 2 / day |
 | Call-data deletion | 5 / day |
 | Account deletion request | 3 / day |
@@ -60,6 +61,12 @@ charging a new preparation budget.
 The configurable `API_RATE_LIMIT_*` names are in the [runtime reference](runtime-reference.md).
 Call admission's rolling-hour/UTC-day quotas and one-active-call invariant are
 additional constraints, independent from these fixed-window request budgets.
+
+Text-artifact provider budgets are separate from endpoint rate limits: 24 requests
+per artifact across three generations, up to three automatic attempts per generation.
+The owner retry button uses the server's `retryable` flag; changing generation or
+retrying never resets request accounting. Reading existing artifacts makes no model
+request. Automatic enqueue still obeys artifact budgets and capability switches.
 
 ## Metrics and retention
 

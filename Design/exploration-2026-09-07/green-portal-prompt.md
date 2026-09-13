@@ -1,5 +1,8 @@
 # Green Portal
 
+> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](../../docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
+
+
 Additional light concept requested by the user: dark logo lettering, green portal, green interface accent. Generated with built-in Image Gen. Output: green-portal.png. This is the fourth displayed concept in the conversation, following the initial three. Application code and source SVG remain unchanged.
 
 ## Prompt

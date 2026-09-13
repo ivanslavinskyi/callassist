@@ -1,5 +1,8 @@
 # Mainline merge verification — 2026-09-07
 
+> **Dated record.** Observations, plans and verification below apply to the version/date stated in this document. Use [architecture](architecture.md) for current behavior, [roadmap](mvp-plan.md) for remaining work and the [index](README.md) for later evidence.
+
+
 This record covers the integration of audit/remediation commit `51a61da` with
 mainline commit `14abd28`. The earlier [audit](project-audit-2026-09-07.md) and
 [remediation evidence](remediation-2026-09-07.md) describe their respective source
