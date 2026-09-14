@@ -3,7 +3,8 @@
 import {
   ASSISTANT_PROFILES,
   CALL_BRIEF_INPUT_LIMITS,
-  SELECTABLE_CALL_LANGUAGES,
+  selectableCallLanguagesForRole,
+  isCallLanguageAvailable,
   callBriefTaskTextLength,
   formatPersonName,
   getAssistanceDisclosure,
@@ -12,7 +13,8 @@ import {
   type CallBrief,
   type CallLocale,
   type CreateCallBriefInput,
-  type TaskLanguagePreferences
+  type TaskLanguagePreferences,
+  type UserRole
 } from "@callassist/contracts";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import {
@@ -63,6 +65,7 @@ const legacyDemoFacts = [
 type CreateCallFormProps = {
   onCreated: (brief: CallBrief) => void;
   userId?: string;
+  userRole?: UserRole;
   profileName?: ProfileName;
   initialValue?: CreateCallBriefInput;
   draftId?: string;
@@ -81,6 +84,7 @@ type CreateCallFormProps = {
 export function CreateCallForm({
   onCreated,
   userId,
+  userRole = "user",
   profileName,
   initialValue,
   draftId = "new",
@@ -131,6 +135,10 @@ export function CreateCallForm({
   }, []);
   const { form, factsText, languagePreferences } = draft;
   const languageCopy = languageMessages[uiLocale];
+  const selectableLanguages = useMemo(() => selectableCallLanguagesForRole(userRole), [userRole]);
+  const primaryLanguageForbidden = !isCallLanguageAvailable(form.locale, userRole);
+  const fallbackLanguageForbidden = Boolean(form.fallbackLocale && !isCallLanguageAvailable(form.fallbackLocale, userRole));
+  const callLanguageForbidden = primaryLanguageForbidden || fallbackLanguageForbidden;
   function updateDraft(patch: Partial<CallDraft>) {
     const next = { ...draftRef.current, ...patch };
     draftRef.current = next;
@@ -145,8 +153,8 @@ export function CreateCallForm({
   const [error, setError] = useState<string | null>(null);
 
   const fallbackLanguages = useMemo(
-    () => SELECTABLE_CALL_LANGUAGES.filter(({ locale }) => locale !== form.locale),
-    [form.locale]
+    () => selectableLanguages.filter(({ locale }) => locale !== form.locale),
+    [form.locale, selectableLanguages]
   );
   const disclosurePreview = useMemo(
     () =>
@@ -199,7 +207,7 @@ export function CreateCallForm({
     setForm((current) => {
       const next = { ...current, [field]: value };
       if (field === "locale" && next.fallbackLocale === next.locale) {
-        next.fallbackLocale = SELECTABLE_CALL_LANGUAGES.find(({ locale }) => locale !== next.locale)?.locale;
+        next.fallbackLocale = selectableLanguages.find(({ locale }) => locale !== next.locale)?.locale;
       }
       return next;
     });
@@ -207,6 +215,10 @@ export function CreateCallForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (callLanguageForbidden) {
+      setError(languageCopy.callLanguageForbidden);
+      return;
+    }
     setSubmitting(true);
     setError(null);
 
@@ -260,6 +272,7 @@ export function CreateCallForm({
     } catch (error) {
       setError(getCallPreparationErrorMessage(error, {
         generic: messages.form.preparationError,
+        callLanguageForbidden: languageCopy.callLanguageForbidden,
         unavailable: messages.form.preparationUnavailable,
         pending: messages.form.preparationPending,
         invalid: messages.form.preparationInvalid,
@@ -348,12 +361,15 @@ export function CreateCallForm({
           <span>{copy.callLanguage}</span>
           <select
             value={form.locale}
+            aria-invalid={primaryLanguageForbidden || undefined}
             onChange={(event) => update("locale", event.target.value as CallLocale)}
           >
-            {SELECTABLE_CALL_LANGUAGES.map(({ locale }) => (
+            {primaryLanguageForbidden ? <option value={form.locale} disabled>{getCallLanguageLabel(form.locale, uiLocale)}</option> : null}
+            {selectableLanguages.map(({ locale }) => (
               <option key={locale} value={locale}>{getCallLanguageLabel(locale, uiLocale)}</option>
             ))}
           </select>
+          {callLanguageForbidden ? <small className="field-invalid" role="alert">{languageCopy.callLanguageForbidden}</small> : null}
           {initialValue?.locale === "en-US" || initialValue?.fallbackLocale === "en-US"
             ? <small>{languageCopy.legacyEnglish}</small> : null}
         </label>
@@ -603,8 +619,10 @@ export function CreateCallForm({
               <span>{copy.fallbackLanguage}</span>
               <select
                 value={form.fallbackLocale}
+                aria-invalid={fallbackLanguageForbidden || undefined}
                 onChange={(event) => update("fallbackLocale", event.target.value as CallLocale)}
               >
+                {fallbackLanguageForbidden && form.fallbackLocale ? <option value={form.fallbackLocale} disabled>{getCallLanguageLabel(form.fallbackLocale, uiLocale)}</option> : null}
                 {fallbackLanguages.map(({ locale }) => (
                   <option key={locale} value={locale}>{getCallLanguageLabel(locale, uiLocale)}</option>
                 ))}
@@ -677,6 +695,7 @@ export function CreateCallForm({
           className="primary-button"
           disabled={
             submitting ||
+            callLanguageForbidden ||
             requiredRemaining > 0 ||
             taskTextOverLimit ||
             factsInvalid

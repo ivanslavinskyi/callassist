@@ -5,6 +5,7 @@ import { emailVerificationMessages } from "@/lib/i18n/email-verification-message
 import {
   ASSISTANT_PROFILES,
   TEXT_LANGUAGES,
+  isCallLanguageAvailable,
   supportedTextLanguage,
   type CallBrief,
   type CallEvent,
@@ -14,7 +15,8 @@ import {
   type CreateCallBriefInput,
   type TaskLanguagePreferences,
   type TextLanguage,
-  type ReviewEvidence
+  type ReviewEvidence,
+  type UserRole
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -98,7 +100,7 @@ function editableInputFromStoredBrief(brief: CallBrief): CreateCallBriefInput {
   };
 }
 
-export function LiveCall({ callId, userId }: { callId: string; userId: string }) {
+export function LiveCall({ callId, userId, userRole }: { callId: string; userId: string; userRole: UserRole }) {
   const router = useRouter();
   const { locale: uiLocale, localizeHref, messages } = useUiLocale();
   const copy = messages.live;
@@ -242,7 +244,9 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
     } catch (error) {
       setActionError(
         betaErrorMessage(error, uiLocale) ?? (
-        error instanceof ApiError && error.code === "EMAIL_VERIFICATION_REQUIRED"
+        error instanceof ApiError && error.code === "CALL_LANGUAGE_FORBIDDEN"
+          ? languageCopy.callLanguageForbidden
+          : error instanceof ApiError && error.code === "EMAIL_VERIFICATION_REQUIRED"
           ? emailVerificationMessages[uiLocale].banner
           : error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS"
           ? messages.live.insufficientCredits
@@ -315,6 +319,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
     } catch (error) {
       setActionError(getCallPreparationErrorMessage(error, {
         generic: messages.form.preparationError,
+        callLanguageForbidden: languageCopy.callLanguageForbidden,
         unavailable: messages.form.preparationUnavailable,
         pending: messages.form.preparationPending,
         invalid: messages.form.preparationInvalid,
@@ -424,12 +429,14 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
   const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
   const isTerminal = isTerminalCallStatus(brief.status);
+  const callLanguageForbidden = !isCallLanguageAvailable(brief.locale, userRole) ||
+    Boolean(brief.fallbackLocale && !isCallLanguageAvailable(brief.fallbackLocale, userRole));
   const preparationFailed = compilation ? isPlanPreparationFailure(compilation.policyDecision) : false;
   const hasImmutableExecutionPlan =
     snapshot.executionPlanSource === "immutable";
 
   const reviewProps = compilation ? {
-    busy, compilation, onAnswerClarifications: answerClarifications,
+    busy: busy || callLanguageForbidden, compilation, onAnswerClarifications: answerClarifications,
     onApproveAndCall: (review?: ReviewEvidence) => {
       void runAction(() => approveAndStartCall(callId, compilationApprovalInput(compilation, review)), revealLiveTranscript);
     },
@@ -515,7 +522,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
                 className="primary-button compact-button"
-                disabled={busy}
+                disabled={busy || callLanguageForbidden}
                 onClick={() => runAction(() => startCall(callId), revealLiveTranscript)}
                 type="button"
               >
@@ -537,6 +544,12 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
         </section>
 
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
+        {callLanguageForbidden && !isTerminal && !isActive ? (
+          <div className="inline-notice" role="alert">
+            <p>{languageCopy.callLanguageForbidden}</p>
+            <button className="secondary-button" type="button" disabled={busy} onClick={() => setEditingBrief(true)}>{copy.updatePlan}</button>
+          </div>
+        ) : null}
 
         {snapshot.executionPlanSource === "archived" ? (
           <section className="compilation-review decision-blocked">
@@ -553,6 +566,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
             </section>
             <CreateCallForm
               userId={userId}
+              userRole={userRole}
               draftId={callId}
               initialLanguagePreferences={snapshot.languageContext ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage, uiLocaleHint: uiLocale } : undefined}
               heading={copy.updateHeading}
@@ -565,6 +579,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
         ) : compilation && editingBrief ? (
           <CreateCallForm
             userId={userId}
+            userRole={userRole}
             draftId={callId}
             initialLanguagePreferences={snapshot.languageContext ? { mode: "manual", targetLanguage: snapshot.languageContext.taskContentLanguage, uiLocaleHint: uiLocale } : undefined}
             heading={copy.updateHeading}

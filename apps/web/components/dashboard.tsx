@@ -1,6 +1,6 @@
 "use client";
 
-import type { CallBrief } from "@callassist/contracts";
+import type { CallBrief, UserRole } from "@callassist/contracts";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "./app-shell";
@@ -16,7 +16,7 @@ const callStatuses = [
   "in_progress", "awaiting_approval", "completed", "stopped", "failed"
 ] as const satisfies readonly CallBrief["status"][];
 
-export function Dashboard({ userId, profileName }: { userId: string; profileName: ProfileName }) {
+export function Dashboard({ userId, userRole, profileName }: { userId: string; userRole: UserRole; profileName: ProfileName }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -112,7 +112,7 @@ export function Dashboard({ userId, profileName }: { userId: string; profileName
         </nav>
         <div className="dashboard-grid">
           <div id="new-call">
-            <CreateCallForm key={userId} headingLevel={1} onCreated={openBrief} userId={userId} profileName={profileName} />
+            <CreateCallForm key={userId} headingLevel={1} onCreated={openBrief} userId={userId} userRole={userRole} profileName={profileName} />
           </div>
 
           <aside className="activity-panel" id="history">

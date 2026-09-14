@@ -67,7 +67,7 @@ The public product copy uses “public beta”; that wording is not deployment e
 - Versioned EN/DE public pages, Landing/FAQ/Navigation collections, drafts, previews,
   publication/history/rollback and Terms/AUP re-acceptance.
 
-New call locales: `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB`, `ru-RU`.
+Public call locales: `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB`. Russian (`ru-RU`) is available only to superadmins, as either the primary or fallback call language. The API checks the current role on preparation, recompilation, approval and start; historical calls and Russian text translations remain readable.
 Historical `en-US` remains readable. `de-CH` means Swiss Standard German. UI locale,
 task content language and call language are independent; call-language labels follow
 the interface locale.

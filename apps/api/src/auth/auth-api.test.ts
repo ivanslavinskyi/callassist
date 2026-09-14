@@ -238,6 +238,56 @@ const callBrief = {
 } satisfies CreateCallBriefInput;
 
 describe("auth API", () => {
+  it.each(["user", "admin", "support"] as const)("restricts Russian call preparation and fallback for %s", async (role) => {
+    const { app, repository } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+    const userId = (await app.inject({ url: "/api/auth/me", headers: { cookie } })).json().user.id;
+    await repository.setUserRoleForTest(userId, role);
+    const capabilities = await app.inject({ url: "/api/language-capabilities", headers: { cookie } });
+    expect(capabilities.json().selectableCallLanguages).not.toContain("ru-RU");
+    expect(capabilities.json().textLanguages).toContain("ru");
+    expect(capabilities.headers["cache-control"]).toBe("private, no-store");
+    for (const language of [{ locale: "ru-RU" }, { allowLanguageSwitch: true, fallbackLocale: "ru-RU" }]) {
+      const response = await app.inject({ method: "POST", url: "/api/call-preparations",
+        headers: { cookie, "idempotency-key": randomUUID() }, payload: { ...callBrief, ...language } });
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error).toBe("CALL_LANGUAGE_FORBIDDEN");
+    }
+    const available = await createPreparedCall(app, cookie);
+    expect(available.json().locale).toBe("de-CH");
+  });
+
+  it.each(["primary", "fallback"] as const)("allows superadmin Russian %s calls and rejects saved plans after role demotion", async (language) => {
+    const { app, repository } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+    const userId = (await app.inject({ url: "/api/auth/me", headers: { cookie } })).json().user.id;
+    await repository.setUserRoleForTest(userId, "superadmin");
+    const input: CreateCallBriefInput = language === "primary" ? { ...callBrief, locale: "ru-RU" }
+      : { ...callBrief, allowLanguageSwitch: true, fallbackLocale: "ru-RU" };
+    const capabilities = await app.inject({ url: "/api/language-capabilities", headers: { cookie } });
+    expect(capabilities.json().selectableCallLanguages).toContain("ru-RU");
+    expect((await app.inject({ url: "/api/language-capabilities" })).json().selectableCallLanguages).not.toContain("ru-RU");
+    const brief = (await createPreparedCall(app, cookie, input)).json();
+    const approval = await compilationApprovalPayload(app, cookie, brief.id);
+    await repository.setUserRoleForTest(userId, "admin");
+    for (const action of ["approve", "start", "approve-and-start"]) {
+      const response = await app.inject({ method: "POST", url: `/api/call-briefs/${brief.id}/${action}`,
+        headers: { cookie }, payload: approval });
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error).toBe("CALL_LANGUAGE_FORBIDDEN");
+    }
+    const recompile = await app.inject({ method: "PUT", url: `/api/call-briefs/${brief.id}`,
+      headers: { cookie, "idempotency-key": randomUUID() }, payload: input });
+    expect(recompile.statusCode).toBe(403);
+    expect(recompile.json().error).toBe("CALL_LANGUAGE_FORBIDDEN");
+    expect((await app.inject({ url: `/api/call-briefs/${brief.id}`, headers: { cookie } })).statusCode).toBe(200);
+    await repository.setUserRoleForTest(userId, "superadmin");
+    const started = await app.inject({ method: "POST", url: `/api/call-briefs/${brief.id}/approve-and-start`,
+      headers: { cookie }, payload: approval });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().brief.status).toBe("dialing");
+  });
+
   it("fails closed before registration when the shared limiter is unavailable", async () => {
     const { app, repository } = createAuthApp(undefined, {
       rateLimiter: unavailableRateLimiter()

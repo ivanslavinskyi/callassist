@@ -5,7 +5,7 @@ import type {
   PublishedLanding,
   PublishedLandingBlock
 } from "@callassist/contracts";
-import { SELECTABLE_CALL_LANGUAGES } from "@callassist/contracts";
+import { selectableCallLanguagesForRole } from "@callassist/contracts";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { AppShell } from "./app-shell";
@@ -178,7 +178,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, hero
           <h2>{block.title}</h2>
           <p>{block.text}</p>
           <ul aria-label={locale === "de" ? "Unterstützte Gesprächssprachen" : "Supported call languages"}>
-            {SELECTABLE_CALL_LANGUAGES.map((language) => (
+            {selectableCallLanguagesForRole().map((language) => (
               <li key={language.locale}>
                 <span>{language.shortLabel}</span>
                 <span lang={interfaceLocale}>{getCallLanguageLabel(language.locale, interfaceLocale)}</span>

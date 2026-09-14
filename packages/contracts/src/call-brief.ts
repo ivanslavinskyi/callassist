@@ -75,8 +75,17 @@ export type CallLocale = z.infer<typeof callLocaleSchema>;
 
 /** Availability for newly prepared calls; persisted schemas intentionally keep en-US. */
 export const SELECTABLE_CALL_LANGUAGES = SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== "en-US");
-export function isSelectableCallLocale(locale: CallLocale): boolean {
-  return locale !== "en-US";
+/** Call availability only; reading historical calls and text languages is unaffected. */
+export function isCallLanguageAvailable(locale: CallLocale, role?: string | null): boolean {
+  return locale !== "ru-RU" || role === "superadmin";
+}
+
+export function selectableCallLanguagesForRole(role?: string | null) {
+  return SELECTABLE_CALL_LANGUAGES.filter(({ locale }) => isCallLanguageAvailable(locale, role));
+}
+
+export function isSelectableCallLocale(locale: CallLocale, role?: string | null): boolean {
+  return locale !== "en-US" && isCallLanguageAvailable(locale, role);
 }
 
 export const callVoiceGenderSchema = z.enum(["male", "female"]);

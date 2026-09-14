@@ -718,6 +718,7 @@ export function getCallPreparationErrorMessage(
     notFound: string;
     notEditable: string;
     swissDestinationRequired: string;
+    callLanguageForbidden: string;
     rateLimited: string;
   }> = {}
 ) {
@@ -729,6 +730,7 @@ export function getCallPreparationErrorMessage(
     notFound: "This call plan no longer exists. Return to your calls and create a new one.",
     notEditable: "This call plan can no longer be edited.",
     swissDestinationRequired: "During the public beta SHPROHLI can only call Swiss phone numbers.",
+    callLanguageForbidden: "This call language is not available for your account. Choose another language and prepare the plan again.",
     rateLimited: "Too many requests. Wait a moment and try again.",
     ...options
   };
@@ -747,6 +749,9 @@ export function getCallPreparationErrorMessage(
   }
   if (error.code === "INVALID_CALL_BRIEF") {
     return copy.invalid;
+  }
+  if (error.code === "CALL_LANGUAGE_FORBIDDEN") {
+    return copy.callLanguageForbidden;
   }
   if (error.code === "CALL_NOT_FOUND") {
     return copy.notFound;

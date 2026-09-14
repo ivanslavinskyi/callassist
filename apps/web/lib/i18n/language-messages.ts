@@ -30,6 +30,7 @@ export function getTextLanguageLabel(language: TextLanguage, uiLocale: UiLocale)
 export const languageMessages = {
   en: {
     taskLanguage: "Plan and result",
+    callLanguageForbidden: "This call language is not available for your account. Choose another language and prepare the plan again.",
     automatic: "Interface language",
     preferenceTitle: "Fallback text language",
     preferenceHelp: "Plans and results use the language of your request. This fallback is used only when that language cannot be identified or is not supported. Existing calls keep their language.",
@@ -41,6 +42,7 @@ export const languageMessages = {
   },
   de: {
     taskLanguage: "Plan und Ergebnis",
+    callLanguageForbidden: "Diese Anrufsprache ist für Ihr Konto nicht verfügbar. Wählen Sie eine andere Sprache und erstellen Sie den Plan erneut.",
     automatic: "Sprache der Oberfläche",
     preferenceTitle: "Ersatzsprache für Texte",
     preferenceHelp: "Pläne und Ergebnisse verwenden die Sprache Ihrer Anfrage. Diese Ersatzsprache wird nur genutzt, wenn die Sprache nicht erkannt oder nicht unterstützt wird. Bestehende Anrufe behalten ihre Sprache.",

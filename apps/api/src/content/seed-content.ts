@@ -73,7 +73,7 @@ const definitions: SeedDefinition[] = [
         seoTitle: "Privacy Notice | SHPROHLI",
         seoDescription: "How SHPROHLI handles account, recipient, call, recording and transcript data.",
         sections: [
-          section("1. Who is responsible", "SHPROHLI is operated by Ivan Slavinskyi, Weiernstrasse 12, 8355 Aadorf, Switzerland. Questions about privacy or personal data can be sent to privacy@shprohli.ch.", [], [{ kind: "email", label: "Contact SHPROHLI about privacy", address: "privacy@shprohli.ch" }]),
+          section("1. Who is responsible", "SHPROHLI is operated by Ivan Slavinskyi, [on request], 8355 Aadorf, Switzerland. Questions about privacy or personal data can be sent to privacy@shprohli.ch.", [], [{ kind: "email", label: "Contact SHPROHLI about privacy", address: "privacy@shprohli.ch" }]),
           section("2. Account data", "We process the information needed to create and protect your account, including your name, email address, verified mobile number, account settings, active sessions and credit history."),
           section("3. Preparing and making a call", "To prepare and place a call, we process the recipient's name and phone number, your call objective, the information you approve, the selected language, assistance reason and call settings. SHPROHLI uses this information to prepare a call plan for your review and to carry out the call after you approve it."),
           section("4. Recipient data and consent", `${publicReleaseCopy.en.consent} The assistant says who it represents. Consent is requested verbally first. If the answer cannot be understood reliably, the assistant may offer confirmation by keypad. If the recipient does not consent, the conversation ends.`),
@@ -94,7 +94,7 @@ const definitions: SeedDefinition[] = [
         seoTitle: "Datenschutzhinweise | SHPROHLI",
         seoDescription: "Wie SHPROHLI Konto-, Empfänger-, Anruf-, Aufnahme- und Transkriptdaten verarbeitet.",
         sections: [
-          section("1. Verantwortliche Person", "SHPROHLI wird von Ivan Slavinskyi, Weiernstrasse 12, 8355 Aadorf, Schweiz, betrieben. Fragen zum Datenschutz oder zu Personendaten können Sie an privacy@shprohli.ch senden.", [], [{ kind: "email", label: "SHPROHLI zum Datenschutz kontaktieren", address: "privacy@shprohli.ch" }]),
+          section("1. Verantwortliche Person", "SHPROHLI wird von Ivan Slavinskyi, [auf Anfrage], 8355 Aadorf, Schweiz, betrieben. Fragen zum Datenschutz oder zu Personendaten können Sie an privacy@shprohli.ch senden.", [], [{ kind: "email", label: "SHPROHLI zum Datenschutz kontaktieren", address: "privacy@shprohli.ch" }]),
           section("2. Kontodaten", "Wir verarbeiten die Angaben, die zur Erstellung und zum Schutz Ihres Kontos erforderlich sind. Dazu gehören Name, E-Mail-Adresse, bestätigte Mobilnummer, Kontoeinstellungen, aktive Sitzungen und Guthabenverlauf."),
           section("3. Vorbereitung und Durchführung eines Anrufs", "Für einen Anruf verarbeiten wir Name und Telefonnummer der angerufenen Person, Ihr Anrufziel, die von Ihnen freigegebenen Angaben, die gewählte Sprache, den Unterstützungsgrund und die Anrufeinstellungen. Daraus erstellt SHPROHLI einen Anrufplan, den Sie vor dem Anruf prüfen und freigeben."),
           section("4. Daten der angerufenen Person und Zustimmung", `${publicReleaseCopy.de.consent} Der Assistent nennt die Person, in deren Auftrag er anruft. SHPROHLI fragt zuerst mündlich. Kann die Antwort nicht zuverlässig verstanden werden, kann der Assistent eine Bestätigung über die Telefontastatur anbieten. Ohne Zustimmung wird das Gespräch beendet.`),
@@ -279,7 +279,7 @@ const definitions: SeedDefinition[] = [
         seoTitle: "Imprint | SHPROHLI",
         seoDescription: "Operator, address and contact information for SHPROHLI in Switzerland.",
         sections: [
-          section("Operator and service provider", "SHPROHLI\nIvan Slavinskyi\nWeiernstrasse 12\n8355 Aadorf\nSwitzerland", [], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("Operator and service provider", "SHPROHLI\nIvan Slavinskyi\n[on request]\n8355 Aadorf\nSwitzerland", [], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
           section("Person responsible for the service", "Ivan Slavinskyi"),
           section("About the project", "SHPROHLI is an independent Swiss project created by Ivan Slavinskyi. It grew from the idea that a routine phone call should not become an obstacle because speaking is difficult or the local language is unfamiliar. SHPROHLI helps people prepare and make low-risk everyday calls while keeping them in control of the information shared. The project is in beta; access and calling availability may be limited during testing.")
         ]
@@ -291,7 +291,7 @@ const definitions: SeedDefinition[] = [
         seoTitle: "Impressum | SHPROHLI",
         seoDescription: "Betreiber, Adresse und Kontaktangaben von SHPROHLI in der Schweiz.",
         sections: [
-          section("Betreiber und Dienstanbieter", "SHPROHLI\nIvan Slavinskyi\nWeiernstrasse 12\n8355 Aadorf\nSchweiz", [], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
+          section("Betreiber und Dienstanbieter", "SHPROHLI\nIvan Slavinskyi\n[auf Anfrage]\n8355 Aadorf\nSchweiz", [], [{ kind: "email", label: "support@shprohli.ch", address: "support@shprohli.ch" }]),
           section("Für den Dienst verantwortliche Person", "Ivan Slavinskyi"),
           section("Über das Projekt", "SHPROHLI ist ein unabhängiges Schweizer Projekt von Ivan Slavinskyi. Ausgangspunkt war die Idee, dass ein alltäglicher Telefonanruf nicht zur Hürde werden sollte, nur weil das Sprechen schwerfällt oder die lokale Sprache noch ungewohnt ist. SHPROHLI hilft Menschen, risikoarme Alltagstelefonate vorzubereiten und zu führen, während sie die Kontrolle über die weitergegebenen Angaben behalten. Das Projekt ist in der Beta; Zugang und Anrufverfügbarkeit können während der Erprobung eingeschränkt sein.")
         ]

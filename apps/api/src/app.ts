@@ -1,4 +1,4 @@
-import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, SELECTABLE_CALL_LANGUAGES, TEXT_LANGUAGES } from "@callassist/contracts";
+import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, selectableCallLanguagesForRole, isCallLanguageAvailable, TEXT_LANGUAGES, type CallLocale } from "@callassist/contracts";
 import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
 import { betaControlsViewSchema, betaSettingsUpdateSchema, betaInvitationCreateSchema } from "@callassist/contracts";
 import { BetaControlError } from "./beta/beta-controls";
@@ -211,7 +211,7 @@ export function buildApp({
   async function authorizeCallAccess(
     request: FastifyRequest,
     reply: FastifyReply,
-    options: { callId?: string; mutation?: boolean; requireVerifiedEmail?: boolean } = {}
+    options: { callId?: string; mutation?: boolean; requireVerifiedEmail?: boolean; requireAvailableCallLanguage?: boolean } = {}
   ): Promise<{ userId: string | null; user: User | null } | null> {
     if (
       options.mutation &&
@@ -266,7 +266,24 @@ export function buildApp({
       await reply.status(403).send({ error: "EMAIL_VERIFICATION_REQUIRED" });
       return null;
     }
+    if (options.callId && options.requireAvailableCallLanguage) {
+      const snapshot = await service.get(options.callId);
+      if (snapshot && !authorizeCallLanguages(reply, snapshot.brief, user)) return null;
+    }
     return { userId, user };
+  }
+
+  function authorizeCallLanguages(
+    reply: FastifyReply,
+    brief: { locale: CallLocale; fallbackLocale?: CallLocale },
+    user: User | null
+  ) {
+    if (!isCallLanguageAvailable(brief.locale, user?.role) ||
+      (brief.fallbackLocale && !isCallLanguageAvailable(brief.fallbackLocale, user?.role))) {
+      void reply.status(403).send({ error: "CALL_LANGUAGE_FORBIDDEN" });
+      return false;
+    }
+    return true;
   }
 
   async function authorizeAdminMutation(
@@ -2084,13 +2101,16 @@ export function buildApp({
       .send(recipientSuggestionListSchema.parse(result));
   });
 
-  app.get("/api/language-capabilities", async () => ({
-    textLanguages: TEXT_LANGUAGES,
-    textGenerationEnabled: service.textArtifacts.capabilities.enabled,
-    operations: service.textArtifacts.capabilities.enabled ? service.textArtifacts.capabilities.directions : [],
-    processorMode: service.textArtifacts.processor.driver,
-    selectableCallLanguages: SELECTABLE_CALL_LANGUAGES.map(({ locale }) => locale)
-  }));
+  app.get("/api/language-capabilities", async (request, reply) => {
+    const user = await authService?.authenticate(sessionTokenFromHeaders(request.headers, secureCookies));
+    return reply.header("Cache-Control", "private, no-store").send({
+      textLanguages: TEXT_LANGUAGES,
+      textGenerationEnabled: service.textArtifacts.capabilities.enabled,
+      operations: service.textArtifacts.capabilities.enabled ? service.textArtifacts.capabilities.directions : [],
+      processorMode: service.textArtifacts.processor.driver,
+      selectableCallLanguages: selectableCallLanguagesForRole(user?.role).map(({ locale }) => locale)
+    });
+  });
 
   app.get<{ Params: { id: string } }>("/api/call-briefs/:id/language-context", async (request, reply) => {
     if (!await authorizeCallAccess(request, reply, { callId: request.params.id })) return;
@@ -2177,6 +2197,7 @@ export function buildApp({
       });
     }
     const briefInput = "requestVersion" in parsed.data ? parsed.data.brief : parsed.data;
+    if (!authorizeCallLanguages(reply, briefInput, access.user)) return;
     if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") return reply.status(422).send({ error: "CALL_LANGUAGE_NOT_SELECTABLE" });
     const language = "requestVersion" in parsed.data ? {
       preferences: parsed.data.languagePreferences,
@@ -2323,6 +2344,7 @@ export function buildApp({
         });
       }
       const briefInput = "requestVersion" in parsed.data ? parsed.data.brief : parsed.data;
+      if (!authorizeCallLanguages(reply, briefInput, access.user)) return;
       if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") {
         const previous = await service.get(request.params.id);
         if ((briefInput.locale === "en-US" && previous?.brief.locale !== "en-US") || (briefInput.fallbackLocale === "en-US" && previous?.brief.fallbackLocale !== "en-US")) {
@@ -2508,7 +2530,8 @@ export function buildApp({
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
         callId: request.params.id,
-        mutation: true
+        mutation: true,
+        requireAvailableCallLanguage: true
       });
       if (!access) return;
       const parsed = compilationReviewApprovalInputSchema.safeParse(request.body);
@@ -2529,7 +2552,8 @@ export function buildApp({
       const access = await authorizeCallAccess(request, reply, {
         callId: request.params.id,
         mutation: true,
-        requireVerifiedEmail: true
+        requireVerifiedEmail: true,
+        requireAvailableCallLanguage: true
       });
       if (!access) return;
       if (!(await enforceEndpointRateLimit(
@@ -2561,7 +2585,8 @@ export function buildApp({
       const access = await authorizeCallAccess(request, reply, {
         callId: request.params.id,
         mutation: true,
-        requireVerifiedEmail: true
+        requireVerifiedEmail: true,
+        requireAvailableCallLanguage: true
       });
       if (!access) return;
       if (!(await enforceEndpointRateLimit(
