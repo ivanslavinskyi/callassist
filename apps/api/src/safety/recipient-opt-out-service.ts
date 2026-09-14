@@ -1,3 +1,4 @@
+import { VerificationSendError } from "../auth/bounded-verification-provider";
 import type {
   RecipientOptOutConfirmation,
   RecipientOptOutRequest
@@ -56,8 +57,12 @@ export class RecipientOptOutService {
       this.#rateLimitPolicy.verificationSend
     );
     try {
-      await this.#verificationProvider.send(input.phoneE164);
+      await this.#verificationProvider.send(input.phoneE164, input.uiLocale);
     } catch (error) {
+      if (error instanceof VerificationSendError && error.code === "RATE_LIMITED") {
+        throw new RecipientOptOutServiceError("RATE_LIMITED", { retryAfterSeconds: error.retryAfterSeconds });
+      }
+      writePiiSafeOperationalError("opt_out_sms_provider_failed");
       throw new RecipientOptOutServiceError("VERIFICATION_UNAVAILABLE", {
         cause: error
       });

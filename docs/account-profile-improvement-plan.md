@@ -2,11 +2,16 @@
 
 Status: core implementation complete; final multi-browser/device acceptance remains.
 
-Reviewed 2026-09-12 against `ef36cfa`. The dated checkpoint counts below are historical;
+Reviewed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. The dated checkpoint counts below are historical;
 latest verification records are in the [documentation index](README.md). Automated tests
 do not prove real password-manager or screen-reader behavior. R05 contact-challenge
 erasure/cleanup is now implemented; see [remediation](remediation-2026-09-07.md).
 R13 browser acceptance and R15 durable notifications remain open.
+Current B03/B04 add initial email proof before call start, localized security notices,
+CH/UA account phones, password-protected signup-phone correction and occupied-number
+preflight. Valid SMS proof followed by a contact conflict no longer appears as an
+incorrect code. See the [current implementation/acceptance](email-sms-implementation-2026-09-14.md);
+R/W checkpoint labels below are historical, not separate backlog items.
 
 ## Goals
 
@@ -40,11 +45,13 @@ in plaintext until cleanup. Account anonymization deletes both email/phone chall
 tables' rows for that user atomically. The deletion worker removes challenges older
 than 30 days and legacy deleted-user challenges on startup and hourly, in addition
 to challenge-creation cleanup. R05 is implemented; see the [lifecycle policy](data-deletion-policy.md).
-Verification mail to
-the new address and a notice to the old address are sent concurrently during challenge
-creation. Either delivery failure invalidates the challenge and returns
-`EMAIL_DELIVERY_UNAVAILABLE`. There is no durable retry/outbox or separate completion
-notification; this remaining work is R15.
+As of 2026-09-14, failure to send the new-address OTP invalidates the challenge and
+returns `EMAIL_DELIVERY_UNAVAILABLE`. The notice to a verified old address is best
+effort. Email/phone changes and password recovery now send completion security
+notices to verified addresses; their failure does not reverse the committed change.
+Durable retry/outbox remains absent, so notices can be lost on a crash or final
+provider failure. Current implementation and acceptance belong to B03/B04 in the
+[roadmap](mvp-plan.md); see [email/SMS details](email-sms-implementation-2026-09-14.md).
 
 Account UI/content-language preferences are implemented. The content-language setting
 is a fallback when a new task's input language cannot be resolved, not an override of

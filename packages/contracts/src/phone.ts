@@ -1,8 +1,16 @@
-import { parsePhoneNumberFromString } from "libphonenumber-js/max";
+import { getCountries, parsePhoneNumberFromString } from "libphonenumber-js/max";
 import { z } from "zod";
 
 export const SWISS_DESTINATION_ONLY_MESSAGE =
   "During the public beta SHPROHLI can only call Swiss phone numbers.";
+
+export function verificationPhoneCountry(value: string): string | null {
+  const phone = parsePhoneNumberFromString(value);
+  return phone?.isValid() ? phone.country ?? null : null;
+}
+export function isPhoneCountryCode(value: string): boolean {
+  return (getCountries() as string[]).includes(value);
+}
 
 function preparePhoneInput(value: string) {
   const trimmed = value.trim();
@@ -11,6 +19,13 @@ function preparePhoneInput(value: string) {
     return `+${trimmed}`;
   }
   return trimmed;
+}
+
+// Account contacts use international numbers; unprefixed local input defaults to CH.
+// SMS destination permissions are enforced separately by the verification provider.
+export function normalizeAccountPhoneNumber(value: string) {
+  const phone = parsePhoneNumberFromString(preparePhoneInput(value), "CH");
+  return phone?.isValid() ? phone.number : value.trim();
 }
 
 export function parseSwissDestinationPhone(value: string) {

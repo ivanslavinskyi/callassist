@@ -12,7 +12,7 @@ const en = {
     email: "Email address",
     phone: "Mobile phone",
     phonePlaceholder: "+41791234567",
-    phoneHelp: "Use international format. We will send an SMS verification code.",
+    phoneHelp: "Swiss (+41) or Ukrainian (+380) mobile number. Spaces are accepted. We will send an SMS verification code.",
     password: "Password",
     passwordHelp: "Use at least 12 characters.",
     submit: "Create account",
@@ -31,6 +31,13 @@ const en = {
     resend: "Send a new code",
     resending: "Sending…",
     resent: "If the account can receive a code, a new SMS has been sent.",
+    wait: "You can request another SMS in {seconds} seconds.",
+    expiry: "The code is valid for 10 minutes. An expired code can be requested again.",
+    correctPhone: "Wrong phone number? Correct it",
+    correctionHelp: "Use the email and password you registered with. Enter a Swiss (+41) or Ukrainian (+380) mobile number, then verify it by SMS.",
+    newPhone: "Correct mobile number",
+    password: "Registration password",
+    cancelCorrection: "Back to the SMS code",
     back: "Back to registration"
   },
   login: {
@@ -71,6 +78,8 @@ const en = {
     back: "Back to sign in"
   },
   errors: {
+    phoneCorrection: "Check your account details and phone number. This is only available before phone verification; otherwise sign in to change your number.",
+    smsDestination: "This phone number is not supported for SMS verification in the current beta. Use a supported mobile number or contact support.",
     generic: "Something went wrong. Please try again.",
     invalidRegistration: "Check all fields. First name and last name are both required, and the password must have at least 12 characters.",
     invalidCredentials: "The email address or password is incorrect.",
@@ -104,7 +113,7 @@ const de: AuthMessages = {
     email: "E-Mail-Adresse",
     phone: "Mobiltelefon",
     phonePlaceholder: "+41791234567",
-    phoneHelp: "Im internationalen Format eingeben. Wir senden einen SMS-Bestätigungscode.",
+    phoneHelp: "Schweizer (+41) oder ukrainische (+380) Mobilnummer. Leerzeichen sind erlaubt. Wir senden einen SMS-Bestätigungscode.",
     password: "Passwort",
     passwordHelp: "Mindestens 12 Zeichen verwenden.",
     submit: "Konto erstellen",
@@ -123,6 +132,13 @@ const de: AuthMessages = {
     resend: "Neuen Code senden",
     resending: "Wird gesendet…",
     resent: "Falls das Konto einen Code empfangen kann, wurde eine neue SMS gesendet.",
+    wait: "In {seconds} Sekunden können Sie erneut eine SMS anfordern.",
+    expiry: "Der Code ist 10 Minuten gültig. Nach Ablauf können Sie ihn erneut anfordern.",
+    correctPhone: "Falsche Telefonnummer? Korrigieren",
+    correctionHelp: "Verwenden Sie E-Mail und Passwort Ihrer Registrierung. Geben Sie eine Schweizer (+41) oder ukrainische (+380) Mobilnummer ein und bestätigen Sie sie per SMS.",
+    newPhone: "Korrekte Mobilnummer",
+    password: "Passwort der Registrierung",
+    cancelCorrection: "Zurück zum SMS-Code",
     back: "Zurück zur Registrierung"
   },
   login: {
@@ -163,6 +179,8 @@ const de: AuthMessages = {
     back: "Zurück zur Anmeldung"
   },
   errors: {
+    phoneCorrection: "Prüfen Sie Ihre Kontodaten und Telefonnummer. Dies ist nur vor der Telefonbestätigung möglich; melden Sie sich sonst an, um die Nummer zu ändern.",
+    smsDestination: "Diese Telefonnummer wird in der aktuellen Beta nicht für die SMS-Bestätigung unterstützt. Verwenden Sie eine unterstützte Mobilnummer oder kontaktieren Sie den Support.",
     generic: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
     invalidRegistration: "Prüfen Sie alle Felder. Vorname und Nachname sind erforderlich, das Passwort muss mindestens 12 Zeichen haben.",
     invalidCredentials: "E-Mail-Adresse oder Passwort ist falsch.",
@@ -183,6 +201,10 @@ export function getAuthErrorMessage(error: unknown, locale: UiLocale) {
   const copy = authMessages[locale].errors;
   if (!(error instanceof ApiError)) return copy.generic;
   switch (error.code) {
+    case "PHONE_CORRECTION_NOT_AVAILABLE":
+      return copy.phoneCorrection;
+    case "SMS_DESTINATION_NOT_ALLOWED":
+      return copy.smsDestination;
     case "INVALID_REGISTRATION":
       return copy.invalidRegistration;
     case "INVALID_LOGIN":

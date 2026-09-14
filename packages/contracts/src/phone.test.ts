@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { accountPhoneSchema } from "./account";
 import {
   isSwissDestinationPhone,
   normalizeSwissDestinationPhone,
@@ -26,5 +27,21 @@ describe("Swiss destination phone policy", () => {
   ])("rejects non-Swiss or invalid destination %s", (input) => {
     expect(isSwissDestinationPhone(input)).toBe(false);
     expect(swissDestinationPhoneSchema.safeParse(input).success).toBe(false);
+  });
+});
+
+describe("account phone normalization", () => {
+  it.each([
+    ["+380671234567", "+380671234567"],
+    ["+380 (67) 123-45-67", "+380671234567"],
+    ["00380 67 123 45 67", "+380671234567"],
+    ["079 123 45 67", "+41791234567"]
+  ])("normalizes account contact %s", (input, expected) => {
+    expect(accountPhoneSchema.parse(input)).toBe(expected);
+  });
+
+  it("keeps Ukrainian account contacts separate from call destinations", () => {
+    expect(accountPhoneSchema.safeParse("+380671234567").success).toBe(true);
+    expect(swissDestinationPhoneSchema.safeParse("+380671234567").success).toBe(false);
   });
 });

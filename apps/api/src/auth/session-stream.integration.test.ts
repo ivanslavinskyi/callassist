@@ -73,7 +73,7 @@ describe("durable SSE authorization across API instances", () => {
           const expiresAt = new Date(now.getTime() + 60_000).toISOString();
           await writer.createPasswordRecoveryChallenge({ id: recoveryId, userId: user.id, now: now.toISOString(), expiresAt });
           await writer.createPasswordRecoveryGrant({ id: randomUUID(), recoveryId, userId: user.id, tokenHash: grantHash, now: now.toISOString(), expiresAt });
-          expect(await writer.resetPasswordWithRecoveryGrant({ tokenHash: grantHash, passwordHash: "changed", now: now.toISOString() })).toBe(true);
+          expect(await writer.resetPasswordWithRecoveryGrant({ tokenHash: grantHash, passwordHash: "changed", now: now.toISOString() })).toBeTruthy();
         } else await writer.revokeUserSessions(user.id, now.toISOString());
         expect((await app.inject({ method: "GET", url: `/api/call-briefs/${brief.id}`, headers: { cookie } })).statusCode).toBe(401);
         if (action !== "idle-revocation") {

@@ -28,6 +28,10 @@ import {
   editorialDraftUpdateInputSchema,
   emailChangeConfirmInputSchema,
   emailChangeStartInputSchema,
+  emailVerificationStartInputSchema,
+  emailVerificationConfirmInputSchema,
+  emailVerificationStartResponseSchema,
+  emailVerificationConfirmResponseSchema,
   createCallBriefInputSchema,
   loginInputSchema,
   contentLocaleSchema,
@@ -40,6 +44,7 @@ import {
   phoneChangeConfirmInputSchema,
   phoneChangeStartInputSchema,
   phoneVerificationInputSchema,
+  unverifiedPhoneCorrectionInputSchema,
   promoCodeCreateInputSchema,
   promoRedemptionInputSchema,
   recipientOptOutConfirmationSchema,
@@ -200,7 +205,7 @@ export function buildApp({
   async function authorizeCallAccess(
     request: FastifyRequest,
     reply: FastifyReply,
-    options: { callId?: string; mutation?: boolean } = {}
+    options: { callId?: string; mutation?: boolean; requireVerifiedEmail?: boolean } = {}
   ): Promise<{ userId: string | null; user: User | null } | null> {
     if (
       options.mutation &&
@@ -250,6 +255,10 @@ export function buildApp({
         await sendRepositoryError(reply, error);
         return null;
       }
+    }
+    if (options.requireVerifiedEmail && user && !user.emailVerifiedAt) {
+      await reply.status(403).send({ error: "EMAIL_VERIFICATION_REQUIRED" });
+      return null;
     }
     return { userId, user };
   }
@@ -575,6 +584,16 @@ export function buildApp({
       }
     });
 
+    app.post("/api/auth/verification/phone", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      const parsed = unverifiedPhoneCorrectionInputSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_VERIFICATION_REQUEST" });
+      try {
+        return reply.header("Cache-Control", "private, no-store").status(202)
+          .send(await authService.correctUnverifiedPhone(parsed.data, authContext(request)));
+      } catch (error) { return sendAuthError(reply, error); }
+    });
+
     app.post("/api/auth/verify-phone", async (request, reply) => {
       if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
         return reply.status(403).send({ error: "INVALID_ORIGIN" });
@@ -812,6 +831,32 @@ export function buildApp({
       return reply
         .header("Cache-Control", "private, no-store")
         .send({ user });
+    });
+
+    app.post("/api/auth/email-verification/start", async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      const authenticated = await authService.authenticateSession(sessionTokenFromHeaders(request.headers, secureCookies));
+      if (!authenticated) return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      const parsed = emailVerificationStartInputSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_EMAIL_VERIFICATION" });
+      try {
+        const result = await authService.startEmailVerification(authenticated.user, authenticated.sessionId, parsed.data, authContext(request));
+        return reply.status(202).send(emailVerificationStartResponseSchema.parse(result));
+      } catch (error) { return sendAuthError(reply, error); }
+    });
+
+    app.post("/api/auth/email-verification/confirm", async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      const authenticated = await authService.authenticateSession(sessionTokenFromHeaders(request.headers, secureCookies));
+      if (!authenticated) return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      const parsed = emailVerificationConfirmInputSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_EMAIL_VERIFICATION" });
+      try {
+        const result = await authService.confirmEmailVerification(authenticated.user, authenticated.sessionId, parsed.data, authContext(request));
+        return reply.send(emailVerificationConfirmResponseSchema.parse(result));
+      } catch (error) { return sendAuthError(reply, error); }
     });
 
     app.post("/api/auth/email-change/start", async (request, reply) => {
@@ -2436,7 +2481,8 @@ export function buildApp({
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
         callId: request.params.id,
-        mutation: true
+        mutation: true,
+        requireVerifiedEmail: true
       });
       if (!access) return;
       if (!(await enforceEndpointRateLimit(
@@ -2467,7 +2513,8 @@ export function buildApp({
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
         callId: request.params.id,
-        mutation: true
+        mutation: true,
+        requireVerifiedEmail: true
       });
       if (!access) return;
       if (!(await enforceEndpointRateLimit(
@@ -2701,6 +2748,7 @@ function sendAuthError(
             "ACCOUNT_STATUS_TRANSITION_INVALID",
             "PHONE_CHANGE_NOT_AVAILABLE",
             "EMAIL_CHANGE_NOT_AVAILABLE",
+            "EMAIL_ALREADY_VERIFIED",
             "PROFILE_UPDATE_NOT_AVAILABLE"
           ].includes(error.code)
           ? 409

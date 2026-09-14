@@ -5,11 +5,14 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-13, working tree based on `ef36cfa`:** implemented supervised MVP with substantial beta
+**Repository status, 2026-09-14, email/SMS checkpoint following `f172a1a`:** implemented supervised MVP with substantial beta
 infrastructure. **B01/B02 are remediated locally:** production dependency audit is clean;
 Admin System supports nonempty jobs and independent outbound-call control.
-**NO-GO for public testing** remains while email/SMS, deployment and acceptance gates are open.
-The full suite passes on a fresh isolated database (1,102 tests).
+Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
+The user confirmed EN email delivery in Gmail and SMS from SHPROHLI to a Swiss number.
+**NO-GO for public testing** remains: remaining delivery scenarios, admission, deployment
+and operational acceptance are open. Current test results and the unresolved recompile
+deadlock are recorded in the [email/SMS checkpoint](docs/email-sms-implementation-2026-09-14.md).
 See the [remediation evidence and browser-check boundary](docs/b01-b02-remediation-2026-09-13.md),
 [original audit](docs/public-testing-audit-2026-09-13.md),
 [single release roadmap](docs/mvp-plan.md) and [documentation index](docs/README.md).
@@ -19,6 +22,9 @@ The public product copy uses “public beta”; that wording is not deployment e
 
 - Authenticated EN/DE customer application, account recovery, verified phone/email
   changes, session management, export, call deletion and queued account anonymization.
+- Initial email proof before starting calls; branded HTML/plain-text verification and
+  security notices, explicit communication locales and shared SMS budgets. Account
+  phone verification supports CH/UA; outbound calls and recipient opt-out remain CH.
 - Durable, retry-safe creation, editing and clarification of call plans; multilingual compilation, moderation,
   deterministic policy checks, editing/recompilation, review and approve-and-call.
 - Separate UI, call and task-content languages; account preferences, captured language
@@ -151,8 +157,10 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog contains **68 migrations**, through
-`0068_conversation_tool_results.sql`. Latest implementation checks and their limits
+The migration catalog contains **69 migrations**, through
+`0069_email_verification.sql`. The current [email/SMS implementation and remaining
+provider setup](docs/email-sms-implementation-2026-09-14.md) covers the new contact flows.
+Latest implementation checks and their limits
 are recorded in [call/result verification, 2026-09-11](docs/call-result-live-fixes-2026-09-11.md).
 That record distinguishes a full-suite run from subsequent targeted checks; it is
 not a claim of a fresh full-suite run on every commit. Older test counts are dated

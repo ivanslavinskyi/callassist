@@ -56,7 +56,8 @@ const en = {
   changeRateLimited: "Too many attempts. Wait a moment before trying again.",
   changeDeliveryUnavailable: "The verification service is temporarily unavailable. Try again later.",
   emailChangeUnavailable: "This email address cannot be used.",
-  phoneChangeUnavailable: "This mobile number cannot be used.",
+  phoneChangeUnavailable: "This number cannot be linked to your account. It may already belong to another account. Use a different number or contact support.",
+  phoneDestinationUnavailable: "SMS verification is not available for this number's country.",
   phone: "Verified mobile",
   phoneChangeTitle: "Change verified mobile",
   phoneChangeAction: "Change",
@@ -66,7 +67,7 @@ const en = {
   phoneChangeSecurity: "After verification, other sessions are signed out and recovery links created for the old number stop working.",
   phoneChangeCurrentPassword: "Current password",
   phoneChangeNewPhone: "New mobile in international format",
-  phoneChangeFormatHint: "Swiss mobile number; spaces and local 07x format are accepted.",
+  phoneChangeFormatHint: "Swiss (+41) or Ukrainian (+380) mobile number. Spaces are accepted; local 07x format is supported for Swiss numbers.",
   phoneChangeSent: "We sent a verification code to",
   phoneChangeSend: "Send verification code",
   phoneChangeSending: "Sending code…",
@@ -253,7 +254,8 @@ const de: AccountMessages = {
   changeRateLimited: "Zu viele Versuche. Warten Sie einen Moment und versuchen Sie es erneut.",
   changeDeliveryUnavailable: "Der Bestätigungsdienst ist vorübergehend nicht verfügbar. Versuchen Sie es später erneut.",
   emailChangeUnavailable: "Diese E-Mail-Adresse kann nicht verwendet werden.",
-  phoneChangeUnavailable: "Diese Mobilnummer kann nicht verwendet werden.",
+  phoneChangeUnavailable: "Diese Nummer kann nicht mit deinem Konto verknüpft werden. Sie gehört möglicherweise bereits zu einem anderen Konto. Verwende eine andere Nummer oder kontaktiere den Support.",
+  phoneDestinationUnavailable: "Für das Land dieser Nummer ist keine SMS-Verifizierung verfügbar.",
   phone: "Bestätigtes Mobiltelefon",
   phoneChangeTitle: "Bestätigte Mobilnummer ändern",
   phoneChangeAction: "Ändern",
@@ -263,7 +265,7 @@ const de: AccountMessages = {
   phoneChangeSecurity: "Nach der Bestätigung werden andere Sitzungen abgemeldet und Wiederherstellungslinks für die alte Nummer ungültig.",
   phoneChangeCurrentPassword: "Aktuelles Passwort",
   phoneChangeNewPhone: "Neue Mobilnummer im internationalen Format",
-  phoneChangeFormatHint: "Schweizer Mobilnummer; Leerzeichen und das lokale 07x-Format werden akzeptiert.",
+  phoneChangeFormatHint: "Schweizer (+41) oder ukrainische (+380) Mobilnummer. Leerzeichen sind erlaubt; für Schweizer Nummern auch das lokale 07x-Format.",
   phoneChangeSent: "Wir haben einen Bestätigungscode gesendet an",
   phoneChangeSend: "Bestätigungscode senden",
   phoneChangeSending: "Code wird gesendet…",
@@ -398,6 +400,8 @@ export function getAccountContactChangeErrorMessage(
       return copy.changeInvalidCode;
     case "EMAIL_CHANGE_NOT_AVAILABLE":
       return copy.emailChangeUnavailable;
+    case "SMS_DESTINATION_NOT_ALLOWED":
+      return copy.phoneDestinationUnavailable;
     case "PHONE_CHANGE_NOT_AVAILABLE":
       return copy.phoneChangeUnavailable;
     case "RATE_LIMITED":

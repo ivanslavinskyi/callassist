@@ -107,6 +107,7 @@ type PhoneChangeEvent = {
 };
 
 type EmailChangeChallenge = {
+  purpose: "change" | "verify";
   id: string;
   userId: string;
   initiatingSessionId: string;
@@ -162,6 +163,7 @@ export class InMemoryAuthRepository implements AuthRepository {
       passwordHash: input.passwordHash,
       phoneE164: input.phoneE164,
       phoneVerifiedAt: null,
+      emailVerifiedAt: null,
       firstName: input.firstName,
       lastName: input.lastName,
       role: "user",
@@ -256,8 +258,19 @@ export class InMemoryAuthRepository implements AuthRepository {
     return toAdminUserSummary(target);
   }
 
-  async markPhoneVerified(userId: string, verifiedAt: string) {
+  async correctUnverifiedPhone(input: { userId: string; expectedPasswordHash: string; newPhoneE164: string }) {
+    const user = this.#users.get(input.userId);
+    if (!user || user.status !== "active" || user.phoneVerifiedAt || user.passwordHash !== input.expectedPasswordHash ||
+      [...this.#users.values()].some((other) => other.id !== user.id && other.phoneE164 === input.newPhoneE164)) return null;
+    user.phoneE164 = input.newPhoneE164;
+    return structuredClone(user);
+  }
+
+  async markPhoneVerified(userId: string, verifiedAt: string, expectedPhoneE164?: string) {
     const user = this.#requireUser(userId);
+    if (expectedPhoneE164 !== undefined && (user.status !== "active" || user.phoneVerifiedAt || user.phoneE164 !== expectedPhoneE164)) {
+      throw new AuthRepositoryError("PHONE_VERIFICATION_CHANGED");
+    }
     user.phoneVerifiedAt ??= verifiedAt;
     return structuredClone(user);
   }
@@ -554,6 +567,7 @@ export class InMemoryAuthRepository implements AuthRepository {
     user.lastName = "Account";
     user.passwordHash = `deleted:${randomUUID()}`;
     user.phoneVerifiedAt = null;
+    user.emailVerifiedAt = null;
     user.lastLoginAt = null;
     user.status = "deleted";
     for (const [id, challenge] of this.#phoneChangeChallenges) {
@@ -721,13 +735,13 @@ export class InMemoryAuthRepository implements AuthRepository {
     if (
       !grant || grant.consumedAt || grant.invalidatedAt ||
       grant.expiresAt <= input.now
-    ) return false;
+    ) return null;
     const user = this.#users.get(grant.userId);
     if (
       user?.status !== "active" ||
       !user.phoneVerifiedAt ||
       this.#hasPendingAccountDeletion(user.id)
-    ) return false;
+    ) return null;
     user.passwordHash = input.passwordHash;
     user.lastLoginAt = null;
     let revokedSessionCount = 0;
@@ -757,7 +771,7 @@ export class InMemoryAuthRepository implements AuthRepository {
       revokedSessionCount,
       createdAt: input.now
     });
-    return true;
+    return structuredClone(user);
   }
 
   async createPhoneChangeChallenge(input: {
@@ -784,6 +798,9 @@ export class InMemoryAuthRepository implements AuthRepository {
       this.#hasPendingAccountDeletion(input.userId) ||
       user.phoneE164 === input.newPhoneE164
     ) return false;
+    if ([...this.#users.values()].some((candidate) =>
+      candidate.id !== input.userId && candidate.phoneE164 === input.newPhoneE164
+    )) return false;
     for (const challenge of this.#phoneChangeChallenges.values()) {
       if (
         challenge.userId === input.userId &&
@@ -948,6 +965,7 @@ export class InMemoryAuthRepository implements AuthRepository {
   }
 
   async createEmailChangeChallenge(input: {
+    purpose?: "change" | "verify";
     id: string;
     userId: string;
     initiatingSessionId: string;
@@ -970,7 +988,9 @@ export class InMemoryAuthRepository implements AuthRepository {
       user.passwordHash !== input.expectedPasswordHash ||
       !session ||
       this.#hasPendingAccountDeletion(input.userId) ||
-      user.email === input.newEmail ||
+      ((input.purpose ?? "change") === "verify"
+        ? user.email !== input.newEmail || Boolean(user.emailVerifiedAt)
+        : user.email === input.newEmail) ||
       [...this.#users.values()].some((candidate) =>
         candidate.id !== input.userId && candidate.email === input.newEmail
       )
@@ -983,6 +1003,7 @@ export class InMemoryAuthRepository implements AuthRepository {
       ) challenge.invalidatedAt = input.now;
     }
     this.#emailChangeChallenges.set(input.id, {
+      purpose: input.purpose ?? "change",
       id: input.id,
       userId: input.userId,
       initiatingSessionId: input.initiatingSessionId,
@@ -1012,12 +1033,14 @@ export class InMemoryAuthRepository implements AuthRepository {
   }
 
   async consumeEmailChangeChallengeAttempt(input: {
+    purpose?: "change" | "verify";
     emailChangeId: string;
     userId: string;
     sessionId: string;
     now: string;
   }) {
     const challenge = this.#emailChangeChallenges.get(input.emailChangeId);
+    if (challenge?.purpose !== (input.purpose ?? "change")) return null;
     const user = this.#users.get(input.userId);
     const session = [...this.#sessions.values()].find((candidate) =>
       candidate.id === input.sessionId &&
@@ -1045,6 +1068,7 @@ export class InMemoryAuthRepository implements AuthRepository {
       userId: challenge.userId,
       initiatingSessionId: challenge.initiatingSessionId,
       newEmail: challenge.newEmail,
+      purpose: challenge.purpose,
       codeHash: challenge.codeHash,
       attemptCount: challenge.attemptCount,
       expiresAt: challenge.expiresAt,
@@ -1053,6 +1077,7 @@ export class InMemoryAuthRepository implements AuthRepository {
   }
 
   async completeEmailChange(input: {
+    purpose?: "change" | "verify";
     emailChangeId: string;
     userId: string;
     sessionId: string;
@@ -1083,8 +1108,11 @@ export class InMemoryAuthRepository implements AuthRepository {
       )
     ) return null;
 
+    if (challenge.purpose !== (input.purpose ?? "change") ||
+      (challenge.purpose === "verify" && (user.email !== challenge.newEmail || user.emailVerifiedAt))) return null;
     const previousEmail = user.email;
     user.email = challenge.newEmail;
+    user.emailVerifiedAt = input.now;
     challenge.completedAt = input.now;
     let revokedSessionCount = 0;
     for (const candidate of this.#sessions.values()) {
@@ -1139,6 +1167,10 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   async setUserStatusForTest(userId: string, status: AuthUserRecord["status"]) {
     this.#requireUser(userId).status = status;
+  }
+
+  async setEmailVerifiedForTest(userId: string, at = new Date().toISOString()) {
+    this.#requireUser(userId).emailVerifiedAt = at;
   }
 
   async setUserRoleForTest(userId: string, role: AuthUserRecord["role"]) {

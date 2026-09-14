@@ -489,12 +489,12 @@ describe("PostgresAuthRepository", () => {
       tokenHash,
       passwordHash: "new-password-hash",
       now: completedAt
-    })).resolves.toBe(true);
+    })).resolves.toMatchObject({ id: user.id });
     await expect(repository.resetPasswordWithRecoveryGrant({
       tokenHash,
       passwordHash: "replayed-password-hash",
       now: completedAt
-    })).resolves.toBe(false);
+    })).resolves.toBeNull();
     await expect(repository.findUserBySessionTokenHash(
       sessionTokenHash,
       completedAt
@@ -646,7 +646,7 @@ describe("PostgresAuthRepository", () => {
       tokenHash: recoveryTokenHash,
       passwordHash: "must-not-apply",
       now: completedAt
-    })).resolves.toBe(false);
+    })).resolves.toBeNull();
 
     const exhaustedPhoneChangeId = randomUUID();
     await expect(repository.createPhoneChangeChallenge({

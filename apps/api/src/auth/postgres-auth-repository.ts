@@ -32,6 +32,7 @@ type UserRow = {
   passwordHash: string;
   phoneE164: string;
   phoneVerifiedAt: DatabaseDate | null;
+  emailVerifiedAt: DatabaseDate | null;
   firstName: string;
   lastName: string;
   role: UserRole;
@@ -124,6 +125,7 @@ type PhoneChangeChallengeRow = {
 };
 
 type EmailChangeChallengeRow = {
+  purpose: "change" | "verify";
   id: string;
   userId: string;
   initiatingSessionId: string;
@@ -305,14 +307,31 @@ export class PostgresAuthRepository implements AuthRepository {
     });
   }
 
-  async markPhoneVerified(userId: string, verifiedAt: string) {
+  async correctUnverifiedPhone(input: { userId: string; expectedPasswordHash: string; newPhoneE164: string }) {
+    try {
+      const [row] = await this.#sql<UserRow[]>`
+        UPDATE users SET phone_e164 = ${input.newPhoneE164}
+        WHERE id = ${input.userId} AND password_hash = ${input.expectedPasswordHash}
+          AND status = 'active' AND phone_verified_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM account_deletion_requests WHERE user_id = users.id AND status <> 'completed')
+        RETURNING ${this.#userColumns()}
+      `;
+      return row ? this.#mapUser(row) : null;
+    } catch (error) { if (isUniqueViolation(error)) return null; throw error; }
+  }
+
+  async markPhoneVerified(userId: string, verifiedAt: string, expectedPhoneE164?: string) {
     const [row] = await this.#sql<UserRow[]>`
       UPDATE users
       SET phone_verified_at = COALESCE(phone_verified_at, ${new Date(verifiedAt)})
       WHERE id = ${userId}
+        AND (${expectedPhoneE164 ?? null}::text IS NULL OR (
+          phone_e164 = ${expectedPhoneE164 ?? null} AND phone_verified_at IS NULL AND status = 'active'
+          AND NOT EXISTS (SELECT 1 FROM account_deletion_requests WHERE user_id = users.id AND status <> 'completed')
+        ))
       RETURNING ${this.#userColumns()}
     `;
-    if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
+    if (!row) throw new AuthRepositoryError("PHONE_VERIFICATION_CHANGED");
     return this.#mapUser(row);
   }
 
@@ -827,6 +846,7 @@ export class PostgresAuthRepository implements AuthRepository {
           last_name = 'Account',
           password_hash = ${`deleted:${randomUUID()}`},
           phone_verified_at = NULL,
+          email_verified_at = NULL,
           last_login_at = NULL,
           status = 'deleted'
         WHERE id = ${request.userId}
@@ -1087,9 +1107,9 @@ export class PostgresAuthRepository implements AuthRepository {
       if (
         !candidate || candidate.consumedAt || candidate.invalidatedAt ||
         toIso(candidate.expiresAt) <= input.now
-      ) return false;
-      const [user] = await transaction<AdminUserRow[]>`
-        SELECT id, role, status
+      ) return null;
+      const [user] = await transaction<UserRow[]>`
+        SELECT ${this.#userColumns()}
         FROM users
         WHERE id = ${candidate.userId}
           AND status = 'active'
@@ -1101,7 +1121,7 @@ export class PostgresAuthRepository implements AuthRepository {
           )
         FOR UPDATE
       `;
-      if (!user) return false;
+      if (!user) return null;
       const [grant] = await transaction<PasswordRecoveryGrantRow[]>`
         SELECT
           id,
@@ -1117,7 +1137,7 @@ export class PostgresAuthRepository implements AuthRepository {
       if (
         !grant || grant.userId !== user.id || grant.consumedAt ||
         grant.invalidatedAt || toIso(grant.expiresAt) <= input.now
-      ) return false;
+      ) return null;
       const now = new Date(input.now);
       await transaction`
         UPDATE users
@@ -1154,7 +1174,7 @@ export class PostgresAuthRepository implements AuthRepository {
           ${revokedSessions.length}, ${now}
         )
       `;
-      return true;
+      return this.#mapUser({ ...user, passwordHash: input.passwordHash, lastLoginAt: null });
     });
   }
 
@@ -1194,6 +1214,12 @@ export class PostgresAuthRepository implements AuthRepository {
         FOR UPDATE
       `;
       if (!session) return false;
+      const [occupied] = await transaction<{ id: string }[]>`
+        SELECT id FROM users
+        WHERE phone_e164 = ${input.newPhoneE164} AND id <> ${input.userId}
+        LIMIT 1
+      `;
+      if (occupied) return false;
       await transaction`
         DELETE FROM phone_change_challenges
         WHERE created_at < ${new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000)}
@@ -1411,6 +1437,7 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async createEmailChangeChallenge(input: {
+    purpose?: "change" | "verify";
     id: string;
     userId: string;
     initiatingSessionId: string;
@@ -1429,7 +1456,9 @@ export class PostgresAuthRepository implements AuthRepository {
           AND password_hash = ${input.expectedPasswordHash}
           AND status = 'active'
           AND phone_verified_at IS NOT NULL
-          AND lower(email) <> ${input.newEmail}
+          AND (CASE WHEN ${input.purpose ?? "change"} = 'verify'
+            THEN lower(email) = ${input.newEmail} AND email_verified_at IS NULL
+            ELSE lower(email) <> ${input.newEmail} END)
           AND NOT EXISTS (
             SELECT 1 FROM users candidate
             WHERE candidate.id <> users.id
@@ -1466,11 +1495,11 @@ export class PostgresAuthRepository implements AuthRepository {
       `;
       await transaction`
         INSERT INTO email_change_challenges (
-          id, user_id, initiating_session_id, new_email, code_hash,
+          id, user_id, initiating_session_id, new_email, code_hash, purpose,
           attempt_count, expires_at, created_at
         ) VALUES (
           ${input.id}, ${input.userId}, ${input.initiatingSessionId},
-          ${input.newEmail}, ${input.codeHash}, 0,
+          ${input.newEmail}, ${input.codeHash}, ${input.purpose ?? "change"}, 0,
           ${new Date(input.expiresAt)}, ${now}
         )
       `;
@@ -1493,6 +1522,7 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async consumeEmailChangeChallengeAttempt(input: {
+    purpose?: "change" | "verify";
     emailChangeId: string;
     userId: string;
     sessionId: string;
@@ -1527,6 +1557,7 @@ export class PostgresAuthRepository implements AuthRepository {
         UPDATE email_change_challenges
         SET attempt_count = attempt_count + 1, last_attempt_at = ${now}
         WHERE id = ${input.emailChangeId}
+          AND purpose = ${input.purpose ?? "change"}
           AND user_id = ${input.userId}
           AND initiating_session_id = ${input.sessionId}
           AND completed_at IS NULL
@@ -1539,6 +1570,7 @@ export class PostgresAuthRepository implements AuthRepository {
           initiating_session_id AS "initiatingSessionId",
           new_email AS "newEmail",
           code_hash AS "codeHash",
+          purpose,
           attempt_count AS "attemptCount",
           expires_at AS "expiresAt",
           created_at AS "createdAt"
@@ -1548,6 +1580,7 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async completeEmailChange(input: {
+    purpose?: "change" | "verify";
     emailChangeId: string;
     userId: string;
     sessionId: string;
@@ -1585,11 +1618,13 @@ export class PostgresAuthRepository implements AuthRepository {
           initiating_session_id AS "initiatingSessionId",
           new_email AS "newEmail",
           code_hash AS "codeHash",
+          purpose,
           attempt_count AS "attemptCount",
           expires_at AS "expiresAt",
           created_at AS "createdAt"
         FROM email_change_challenges
         WHERE id = ${input.emailChangeId}
+          AND purpose = ${input.purpose ?? "change"}
           AND user_id = ${input.userId}
           AND initiating_session_id = ${input.sessionId}
           AND completed_at IS NULL
@@ -1598,10 +1633,11 @@ export class PostgresAuthRepository implements AuthRepository {
           AND attempt_count > 0
         FOR UPDATE
       `;
-      if (!challenge) return null;
+      if (!challenge || (challenge.purpose === "verify" &&
+        (user.email !== challenge.newEmail || user.emailVerifiedAt))) return null;
       const [updated] = await transaction<UserRow[]>`
         UPDATE users
-        SET email = ${challenge.newEmail}
+        SET email = ${challenge.newEmail}, email_verified_at = ${now}
         WHERE id = ${input.userId}
         RETURNING ${this.#userColumns()}
       `;
@@ -1644,11 +1680,11 @@ export class PostgresAuthRepository implements AuthRepository {
       `;
       await transaction`
         INSERT INTO email_change_events (
-          id, user_id, challenge_id, revoked_session_count,
+          id, user_id, challenge_id, purpose, revoked_session_count,
           invalidated_recovery_challenge_count,
           invalidated_recovery_grant_count, created_at
         ) VALUES (
-          ${randomUUID()}, ${input.userId}, ${input.emailChangeId},
+          ${randomUUID()}, ${input.userId}, ${input.emailChangeId}, ${challenge.purpose},
           ${revokedSessions.length}, ${invalidatedRecoveryChallenges.length},
           ${invalidatedRecoveryGrants.length}, ${now}
         )
@@ -1782,6 +1818,7 @@ export class PostgresAuthRepository implements AuthRepository {
       password_hash AS "passwordHash",
       phone_e164 AS "phoneE164",
       phone_verified_at AS "phoneVerifiedAt",
+      email_verified_at AS "emailVerifiedAt",
       first_name AS "firstName",
       last_name AS "lastName",
       role AS "role",
@@ -1800,6 +1837,7 @@ export class PostgresAuthRepository implements AuthRepository {
       users.password_hash AS "passwordHash",
       users.phone_e164 AS "phoneE164",
       users.phone_verified_at AS "phoneVerifiedAt",
+      users.email_verified_at AS "emailVerifiedAt",
       users.first_name AS "firstName",
       users.last_name AS "lastName",
       users.role AS "role",
@@ -1849,6 +1887,7 @@ export class PostgresAuthRepository implements AuthRepository {
       ...row,
       preferredContentLanguage: row.preferredContentLanguage ?? null,
       phoneVerifiedAt: row.phoneVerifiedAt ? toIso(row.phoneVerifiedAt) : null,
+      emailVerifiedAt: row.emailVerifiedAt ? toIso(row.emailVerifiedAt) : null,
       createdAt: toIso(row.createdAt),
       lastLoginAt: row.lastLoginAt ? toIso(row.lastLoginAt) : null
     };

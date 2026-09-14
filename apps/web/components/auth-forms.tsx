@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { designMessages } from "@/lib/i18n/design-messages";
 import { AppShell } from "@/components/app-shell";
 import {
+  ApiError,
+  correctUnverifiedPhone,
   completePasswordRecovery,
   login,
   registerAccount,
@@ -20,7 +22,7 @@ import { useUiLocale } from "@/components/ui-locale-provider";
 import { localizePathname } from "@/lib/i18n/routing";
 import { clearExplicitGuestLocale, readExplicitGuestLocale, rememberUiLocale, resolvePostLoginLocale } from "@/lib/ui-language-preference";
 
-function AuthFrame({ children }: { children: ReactNode }) {
+export function AuthFrame({ children }: { children: ReactNode }) {
   const { locale } = useUiLocale();
   const design = designMessages[locale];
   return (
@@ -100,7 +102,7 @@ export function RegistrationForm() {
         </label>
         <label className="field">
           <span>{copy.register.phone}</span>
-          <input autoComplete="tel" inputMode="tel" name="phoneE164" pattern="\+[1-9][0-9]{7,14}" placeholder={copy.register.phonePlaceholder} required type="tel" />
+          <input autoComplete="tel" inputMode="tel" name="phoneE164" maxLength={40} placeholder={copy.register.phonePlaceholder} required type="tel" />
           <small>{copy.register.phoneHelp}</small>
         </label>
         <label className="field">
@@ -125,6 +127,14 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [email, setEmail] = useState(initialEmail);
+  const [resendSeconds, setResendSeconds] = useState(0);
+  const [correctingPhone, setCorrectingPhone] = useState(false);
+  const [newPhone, setNewPhone] = useState("");
+  const [registrationPassword, setRegistrationPassword] = useState("");
+  useEffect(() => {
+    const timer = window.setInterval(() => setResendSeconds((seconds) => Math.max(0, seconds - 1)), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,13 +143,18 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
     setNotice(null);
     const data = new FormData(event.currentTarget);
     try {
+      if (correctingPhone) {
+        await correctUnverifiedPhone({ email, currentPassword: registrationPassword, newPhoneE164: newPhone.trim(), uiLocale: locale });
+        setRegistrationPassword(""); setCorrectingPhone(false); setResendSeconds(60); setNotice(copy.verify.resent); setBusy(false);
+        return;
+      }
       const { user } = await verifyPhone({ email, code: String(data.get("code") ?? "").trim() });
       const explicitGuestLocale = readExplicitGuestLocale(document.cookie);
       if (explicitGuestLocale) await updateLanguagePreferences({ uiLocale: explicitGuestLocale });
       const nextLocale = resolvePostLoginLocale({ explicitGuestLocale, accountLocale: user.uiLocale, pageLocale: locale });
       rememberUiLocale(nextLocale);
       clearExplicitGuestLocale();
-      router.push(localizePathname("/app", nextLocale));
+      router.push(localizePathname(user.emailVerifiedAt ? "/app" : "/verify-email", nextLocale));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));
@@ -148,13 +163,16 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
   }
 
   async function resend() {
+    if (resending || resendSeconds > 0) return;
     setResending(true);
     setError(null);
     setNotice(null);
     try {
-      await resendPhoneVerification({ email });
+      await resendPhoneVerification({ email, uiLocale: locale });
+      setResendSeconds(60);
       setNotice(copy.verify.resent);
     } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "RATE_LIMITED") setResendSeconds(caught.retryAfterSeconds ?? 60);
       setError(getAuthErrorMessage(caught, locale));
     } finally {
       setResending(false);
@@ -164,22 +182,28 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
   return (
     <AuthFrame>
       <h1>{copy.verify.title}</h1>
-      <p className="auth-intro">{copy.verify.intro}</p>
+      <p className="auth-intro">{correctingPhone ? copy.verify.correctionHelp : copy.verify.intro}</p>
       <form className="auth-form" onSubmit={submit}>
         <label className="field">
           <span>{copy.verify.email}</span>
           <input autoComplete="email" maxLength={320} onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
         </label>
-        <label className="field">
+        {correctingPhone ? <>
+          <label className="field"><span>{copy.verify.newPhone}</span><input autoComplete="tel" inputMode="tel" type="tel" maxLength={40} required value={newPhone} onChange={(event) => setNewPhone(event.target.value)} /></label>
+          <label className="field"><span>{copy.verify.password}</span><input autoComplete="current-password" type="password" required maxLength={128} value={registrationPassword} onChange={(event) => setRegistrationPassword(event.target.value)} /></label>
+        </> : <label className="field">
           <span>{copy.verify.code}</span>
           <input autoComplete="one-time-code" inputMode="numeric" maxLength={10} minLength={4} name="code" pattern="[0-9]{4,10}" placeholder={copy.verify.codePlaceholder} required />
-        </label>
+        </label>}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {notice ? <p className="auth-success" role="status">{notice}</p> : null}
-        <SubmitButton busy={busy} busyLabel={copy.verify.submitting} label={copy.verify.submit} />
-        <button className="text-button auth-text-button" disabled={busy || resending || !email} onClick={resend} type="button">
+        <SubmitButton busy={busy} busyLabel={correctingPhone ? copy.verify.resending : copy.verify.submitting} label={correctingPhone ? copy.verify.resend : copy.verify.submit} />
+        <small>{copy.verify.expiry}</small>
+        {resendSeconds > 0 ? <p>{copy.verify.wait.replace("{seconds}", String(resendSeconds))}</p> : null}
+        {!correctingPhone ? <button className="text-button auth-text-button" disabled={busy || resending || resendSeconds > 0 || !email} onClick={resend} type="button">
           {resending ? copy.verify.resending : copy.verify.resend}
-        </button>
+        </button> : null}
+        <button className="text-button auth-text-button" disabled={busy || resending} type="button" onClick={() => { setCorrectingPhone(!correctingPhone); setRegistrationPassword(""); setError(null); setNotice(null); }}>{correctingPhone ? copy.verify.cancelCorrection : copy.verify.correctPhone}</button>
       </form>
       <p className="auth-alternative"><Link href={localizeHref("/register")}>{copy.verify.back}</Link></p>
     </AuthFrame>
@@ -208,7 +232,7 @@ export function LoginForm() {
       const nextLocale = resolvePostLoginLocale({ explicitGuestLocale, accountLocale: user.uiLocale, pageLocale: locale });
       rememberUiLocale(nextLocale);
       clearExplicitGuestLocale();
-      router.push(localizePathname("/app", nextLocale));
+      router.push(localizePathname(user.emailVerifiedAt ? "/app" : "/verify-email", nextLocale));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));
@@ -260,7 +284,7 @@ export function PasswordRecoveryForm() {
     const data = new FormData(event.currentTarget);
     try {
       const result = await startPasswordRecovery({
-        email: String(data.get("email") ?? "").trim()
+        email: String(data.get("email") ?? "").trim(), uiLocale: locale
       });
       setRecoveryId(result.recoveryId);
       setStage("verify");

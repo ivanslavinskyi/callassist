@@ -41,6 +41,11 @@ The durable challenge counter and the broader IP/email/phone/token budgets survi
 
 ## Remaining boundaries
 
+2026-09-14: a completed reset sends a localized security notice only when the email
+is verified. Failure to deliver the notice does not undo the reset or session
+revocation. SMS uses the requested UI locale (otherwise the saved account locale)
+and shared cross-flow limits. [Email/SMS implementation](email-sms-implementation-2026-09-14.md).
+
 - WAF/infrastructure limits, mass-account correlation, production monitoring thresholds, and external alert routing remain deployment work. The shared application-store policy is documented in `docs/rate-limit-policy.md`.
 - Successful self-service phone change invalidates every unused challenge and grant issued for the old phone. A user who lost both password and verified-phone control still needs a separately reviewed support/identity-proofing policy; staff cannot bypass either verification flow today.
 - Expired unused challenge/grant retention and cleanup must be included in the final production retention schedule. Recovery events are intentionally immutable security evidence and follow that schedule rather than containing recoverable credentials.

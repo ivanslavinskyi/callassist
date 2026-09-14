@@ -125,7 +125,7 @@ describe("account language preferences", () => {
 describe("email template locale", () => {
   it.each([
     ["de", "de"], ["de-CH", "de"], ["DE-at", "de"],
-    ["en-GB", "en"], ["uk", "en"], ["ru", "en"],
+    ["en-GB", "en"], ["uk", "uk"], ["ru", "ru"],
     ["invalid_locale", "en"], [null, "en"], [undefined, "en"]
   ] as const)("resolves %s to a ready %s template", (input, expected) => {
     expect(resolveEmailLocale(input)).toBe(expected);

@@ -25,6 +25,7 @@ import {
 import { MockEmailProvider, type EmailProvider } from "./email-provider";
 
 const apps: ReturnType<typeof buildApp>[] = [];
+const fixtureRepositories = new WeakMap<ReturnType<typeof buildApp>, InMemoryAuthRepository>();
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
@@ -74,6 +75,7 @@ function createAuthApp(
     secureCookies: options.secureCookies ?? false,
     endpointRateLimiter: options.endpointRateLimiter ?? options.rateLimiter
   });
+  fixtureRepositories.set(app, repository);
   apps.push(app);
   return {
     app,
@@ -123,6 +125,9 @@ async function registerAndVerify(
     payload: { email: input.email, code: "123456" }
   });
   expect(verified.statusCode).toBe(200);
+  // Existing feature tests assume an account whose contacts are already verified.
+  // The actual email challenge lifecycle is exercised in email-verification.integration.test.ts.
+  await fixtureRepositories.get(app)!.setEmailVerifiedForTest(verified.json().user.id);
   return String(verified.headers["set-cookie"]);
 }
 
@@ -579,11 +584,12 @@ describe("auth API", () => {
       url: "/api/auth/verify-phone",
       payload: { email: registration.email, code: "123456" }
     });
-    expect(verifiedAgain.statusCode).toBe(200);
+    expect(verifiedAgain.statusCode).toBe(401);
+    expect(verifiedAgain.headers["set-cookie"]).toBeUndefined();
     const usageAfterRetry = await app.inject({
       method: "GET",
       url: "/api/usage",
-      headers: { cookie: verifiedAgain.headers["set-cookie"] }
+      headers: { cookie }
     });
     expect(usageAfterRetry.json()).toMatchObject({ balance: 3 });
     expect(usageAfterRetry.json<{ transactions: unknown[] }>().transactions)
@@ -2246,19 +2252,9 @@ describe("auth API", () => {
         currentPassword: registration.password
       }
     });
-    expect(occupied.statusCode).toBe(202);
-    const occupiedConfirmation = await app.inject({
-      method: "POST",
-      url: "/api/auth/phone-change/confirm",
-      headers: { cookie: ownerCookie },
-      payload: {
-        phoneChangeId: occupied.json().phoneChangeId,
-        code: "123456"
-      }
-    });
-    expect(occupiedConfirmation.statusCode).toBe(401);
-    expect(occupiedConfirmation.json()).toEqual({
-      error: "INVALID_PHONE_CHANGE"
+    expect(occupied.statusCode).toBe(409);
+    expect(occupied.json()).toEqual({
+      error: "PHONE_CHANGE_NOT_AVAILABLE"
     });
 
     const wrongPassword = await app.inject({

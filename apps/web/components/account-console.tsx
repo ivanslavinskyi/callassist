@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 import { AppShell } from "./app-shell";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUiLocale } from "./ui-locale-provider";
@@ -38,7 +39,7 @@ import {
   accountMessages,
   getAccountContactChangeErrorMessage
 } from "@/lib/i18n/account-messages";
-import { normalizePhoneNumber } from "@/lib/phone-number";
+import { normalizeAccountPhoneNumber } from "@callassist/contracts";
 import { getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 
 type AccountData = {
@@ -236,7 +237,7 @@ export function AccountConsole() {
     setPhoneChangeSuccess(false);
     try {
       const result = await startPhoneChange({
-        newPhoneE164: normalizePhoneNumber(newPhoneE164),
+        newPhoneE164: normalizeAccountPhoneNumber(newPhoneE164),
         currentPassword: phoneChangePassword
       });
       setPhoneChangeId(result.phoneChangeId);
@@ -469,6 +470,8 @@ export function AccountConsole() {
               </dl>}
               {profileError ? <p className="form-error" role="alert">{copy.nameError}</p> : null}
               {profileSuccess ? <p className="auth-success" role="status">{copy.nameSuccess}</p> : null}
+              <p role="status">{data.user.emailVerifiedAt ? emailVerificationMessages[locale].verified : emailVerificationMessages[locale].unverified}</p>
+              {!data.user.emailVerifiedAt ? <Link className="secondary-button" href={localizeHref("/verify-email")}>{emailVerificationMessages[locale].title}</Link> : null}
               <details className="account-language-preference">
                 <summary>{languageCopy.preferenceTitle}: <strong>{accountLanguageLabel}</strong></summary>
                 <label className="field">
@@ -550,7 +553,7 @@ export function AccountConsole() {
               {phoneChangeId ? (
                 <form onSubmit={finishPhoneChange}>
                   <p className="account-change-destination">
-                    {copy.phoneChangeSent} <strong>{maskPhone(normalizePhoneNumber(newPhoneE164))}</strong>
+                    {copy.phoneChangeSent} <strong>{maskPhone(normalizeAccountPhoneNumber(newPhoneE164))}</strong>
                   </p>
                   <div className="account-phone-change-fields">
                     <label>

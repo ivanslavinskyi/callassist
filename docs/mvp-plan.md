@@ -1,6 +1,6 @@
 ﻿# SHPROHLI — минимальный roadmap публичного тестирования
 
-Актуально на **13 сентября 2026**, рабочая копия на базе `ef36cfa` с исправлениями B01/B02. **Текущий статус: NO-GO; B01 и B02 закрыты локально.**
+Актуально на **14 сентября 2026**, снимок email/SMS после `f172a1a`. **Текущий статус: NO-GO; B01/B02 закрыты локально; B03/B04 реализованы, EN email и CH SMS подтверждены пользователем, остальная приёмка открыта.**
 Это **единственный текущий backlog и список условий запуска**. Факты, причины, исходники и снимки — в [полном аудите](public-testing-audit-2026-09-13.md). Предыдущий текст с R01–R21 сохранён в [историческом снимке](release-roadmap-history-2026-09-12.md).
 
 ## 1. Цель ближайшего релиза
@@ -16,11 +16,13 @@
 | Состояние | Что входит |
 | --- | --- |
 | Реализовано | EN/DE app, auth/phone recovery, смена email/phone, сессии, immutable plan/review, CH telephony, consent, кредиты, suppression, результаты/переводы/PDF, feedback, export/delete, CMS/RBAC, очереди/ротация |
-| Свежая локальная проверка | **1 102 теста / 139 файлов**, без skips на свежей изолированной БД; lint/typecheck/build/copy проходят; миграции не изменены |
+| Свежая локальная проверка | 14.09, 12:39: **1 151 passed / 0 failed**, 141 файл, без skips на свежей изолированной БД. Ранее найденный deadlock в `language-workflow.integration.test.ts` не исправлен; новый прогон содержит фоновые error-события, причина ещё открыта в B12. Lint/typecheck/build — по 3/3 пакета, copy — 579 файлов; migration 0069 применена локально. [Результаты и границы](email-sms-implementation-2026-09-14.md) |
 | Исправлено после аудита | B01: Next 15.5.25 / sharp 0.35.4, production audit без известных уязвимостей. B02: System с jobs возвращает 200; управление новыми звонками независимо от diagnostics. [Доказательства и границы проверки](b01-b02-remediation-2026-09-13.md) |
 | Оставшиеся подтверждённые дефекты | CMS example items не влияют на demo; source/publication/copy drift |
-| Недостающая реализация | Первичная email verification; минимальная надёжность/видимость транзакционной доставки; bounded admission; часть staff/safety workflow |
-| Настройка/внешняя приёмка | Twilio Verify, Resend sender, DNS/TLS/deploy/proxy IP, API/worker parity, реальные языки/провайдеры, расходы/alerts/support, production restore |
+| Реализовано 14.09 | Первичная email verification, correction/status/gate, HTML/text security notices, bounded retry/idempotency; явные локали email/SMS, общие SMS budgets/страны. [Отчёт B03/B04](email-sms-implementation-2026-09-14.md) |
+| Недостающая реализация | Bounded admission; часть staff/safety workflow |
+| Настроено и проверено пользователем | Resend key/domain/SPF/DKIM и Verify Service подключены; EN verification доставлен в Gmail, CH SMS пришёл от SHPROHLI. Логотип/фон/футер email обновлены после этого теста |
+| Настройка/внешняя приёмка | Новое оформление email и остальные EN/DE сценарии; UA Telegram-маршрут/sender; geo/fraud/alerts; DNS/TLS/deploy/proxy IP, API/worker parity, реальные языки/провайдеры, расходы/support, production restore |
 
 Зелёные тесты не отменяют найденных дефектов. Старая локальная test DB имеет checksum mismatch 0065 и не исправлялась в ходе аудита; для повторных проверок использовать fresh DB. Основная локальная БД не имеет этого mismatch.
 
@@ -38,10 +40,10 @@
 | --- | --- | --- | --- | --- |
 | **B01 Dependencies** | P0 · закрыт локально 13.09 | Next / eslint-config-next 15.5.25, sharp override 0.35.4; lockfile обновлён | Frozen install и production audit проходят; lint/typecheck/1 102 tests/build проходят. Повторить audit на release candidate в B12 | Web/platform |
 | **B02 Admin System** | P0 · закрыт локально 13.09 | Явный whitelist jobs DTO; отдельный GET/PUT управления и независимая UI-панель; unknown state допускает только disable | Memory/PostgreSQL regressions проходят с brief/text/dead-letter jobs; stop работает при отказе diagnostics и control GET; browser подтвердил jobs и доступность формы при сбое. Нативное подтверждение и staging stop drill остаются проверкой B12 | Backend/web |
-| **B03 Transactional email** | P0 · частично реализовано | Первичная email verification и статус, resend/expiry/error/correction; довести смену email; уведомления о смене доступа; таймауты, ограниченный retry/idempotency, диагностика; Resend sender | EN/DE письма реально доставлены; старый/чужой/повторный код отвергается; typo исправим; смена email отзывает другие сессии; bounce/outage виден; определена миграция неподтверждённых адресов | Backend/web + владелец домена |
-| **B04 SMS Verify** | P0 · код есть, настройка/приёмка открыты | Verify Service SID и env; страны signup; geo/fraud/rate/cost controls; таймауты; понятные resend/recovery/errors | Реальные verify/resend/recovery/phone change/opt-out проходят; ошибки/истечение/повторы приняты; потеря телефона имеет безопасный support-путь | Backend + Twilio operator |
+| **B03 Transactional email** | P0 · EN verification в Gmail подтверждён пользователем; остальная приёмка открыта | Код/status/correction/gate, уведомления и bounded delivery готовы; migration 0069 применена. Resend/DNS настроены, пользователь подтвердил работу email. Обновлены логотип, прозрачный фон и компактный футер Impressum/Support; принять новый вид и остальные EN/DE сценарии | EN/DE письма реально доставлены; новое оформление проверено в почтовых клиентах; bounce/outage виден оператору по ID; принято поведение при потере best-effort security notice | Backend/web + владелец домена |
+| **B04 SMS Verify** | P0 · CH SMS/sender подтверждены пользователем; остальная приёмка открыта | Verify/SID подключены; локали, CH/UA allow-list, общие лимиты, исправление телефона и защита от гонки готовы. После исправления пользователь подтвердил работу и SMS от SHPROHLI на CH, текст EN. Два UA-кода приняты Twilio; выяснить попадание сообщений в Telegram и sender на UA; завершить EN/DE сценарии, geo/fraud/cost controls и безопасный support | Реальные verify/resend/recovery/phone correction/change/opt-out проходят; на телефоне sender SHPROHLI; ошибки/истечение/повторы приняты; потеря телефона имеет безопасный support-путь | Backend + Twilio operator |
 
-Следующие работы: B03/B04; их можно выполнять независимо от deployment manifest. B01/B02 закрыты в рабочей копии, [отчёт об исправлениях](b01-b02-remediation-2026-09-13.md) фиксирует приёмку и изменение ответа API. Простые качественные EN/DE письма достаточны: template designer и маркетинговые цепочки не нужны. Диагностика в кабинете провайдера допустима, если сообщения находятся по безопасному ID и ответственный имеет доступ.
+Следующие действия B03/B04 — [конкретный остаток и настройки](email-sms-implementation-2026-09-14.md). B01/B02 закрыты в `f172a1a`, [отчёт об исправлениях](b01-b02-remediation-2026-09-13.md) фиксирует приёмку и изменение ответа API. UI остаётся EN/DE; FR/IT/UK/RU письма подготовлены как кандидаты, RM использует явный EN fallback до вычитки/custom template. Диагностика в кабинете провайдера допустима, если сообщения находятся по безопасному ID и ответственный имеет доступ.
 
 ## 5. Этап 2 — ограниченный внешний контур
 
@@ -65,7 +67,7 @@
 | --- | --- | --- | --- | --- |
 | **B09 Provider drills** | P0 · частичные старые свидетельства | Текущий UI: signup → verification → plan/review → call → consent → result; EN/DE/включённые направления; no answer/busy/no consent/wrong person/voicemail; farewell/Stop; Realtime/worker/ASR/text failures | Есть протокол с commit/config, исходом и стоимостью; нет нарушений consent/authorization, двойных звонков/списаний, ложных подтверждений встречи, неуправляемых зависаний | Voice/backend + QA |
 | **B10 UX / доступность** | P0 · browser smoke есть, приёмка открыта | Полный путь mobile/desktop EN/DE, клавиатура/focus/ошибки/200% zoom; OTP/password manager; screen reader critical flow; доступный Stop | Новый пользователь без объяснений разработчика завершает задачу и восстанавливается после ошибки; ввод не теряется; критические controls доступны | Web/product + QA |
-| **B12 Operations / release** | P0 · открыто | CI на кандидате, миграции/dependencies, защищённая release-ветка; primary/backup support; routed alerts/budget; rollback; review условий/vendor arrangements; release record | Нет незакрытых P0; тревога дошла оператору; stop/rollback отрепетированы; контакты отвечают; scope/пороги/владельцы/evidence записаны | Release owner |
+| **B12 Operations / release** | P0 · открыто | CI на кандидате, миграции/dependencies, защищённая release-ветка; primary/backup support; routed alerts/budget; rollback; review условий/vendor arrangements; release record. Разобрать deadlock при recompile, обнаруженный 14.09 в полном прогоне (подробности в email/SMS отчёте) | Нет незакрытых P0; полный прогон стабилен; тревога дошла оператору; stop/rollback отрепетированы; контакты отвечают; scope/пороги/владельцы/evidence записаны | Release owner |
 
 Подробная матрица B09 — в разделе 7 [аудита](public-testing-audit-2026-09-13.md). Drills выполняются на согласившихся участниках/разрешённых номерах. Этот аудит не включал реальные SMS/email/calls или deployment.
 
@@ -123,14 +125,14 @@
 
 | Поле release record | Сейчас |
 | --- | --- |
-| Решение / дата | **NO-GO / 2026-09-13** |
-| Код | Рабочая копия на базе ef36cfa с B01/B02; перед релизом записать новые commit/artifact IDs web/API/worker |
-| Schema/config | Catalog 0068; production effective configuration ещё не принято |
+| Решение / дата | **NO-GO / 2026-09-14** |
+| Код | Снимок email/SMS от 14.09 после f172a1a; перед deployment записать точные commit/artifact IDs web/API/worker |
+| Schema/config | Catalog 0069, применён локально; production effective configuration ещё не принято |
 | Scope | Ограниченная бета по предложению выше; конкретные cap/budget/languages требуют фиксации |
 | Release owner / оператор / резервный | Не назначены в этом аудите |
-| Evidence | [Исходный аудит](public-testing-audit-2026-09-13.md), [закрытие B01/B02](b01-b02-remediation-2026-09-13.md), [новая локальная сводка](audits/2026-09-13/b01-b02/evidence.json); внешняя приёмка открыта |
+| Evidence | [Исходный аудит](public-testing-audit-2026-09-13.md), [закрытие B01/B02](b01-b02-remediation-2026-09-13.md), [email/SMS и проверки 14.09](email-sms-implementation-2026-09-14.md); внешняя приёмка открыта |
 | Исключения P1 | ID, compensating control, владелец, дата пересмотра |
-| Следующий шаг | B03 transactional email + B04 SMS Verify; подготовить sender/Verify и реализацию первичного email verification |
+| Следующий шаг | Проверить новый email в Gmail и DE/остальные сценарии B03/B04; выяснить UA Telegram-маршрут; затем B05/B06 — ограничение участников/расходов и staging. Параллельный блокер B12 — причина deadlock при recompile |
 
 ## 10. Как не разнести backlog снова
 

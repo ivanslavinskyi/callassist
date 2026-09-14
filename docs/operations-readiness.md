@@ -4,7 +4,7 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Reviewed 2026-09-13 against the working tree based on `ef36cfa`. B01/B02 are remediated locally with
+Reviewed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. B01/B02 are remediated locally with
 [current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
 [historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
 has async preparation, but its start stage still needs the v2 review-receipt contract
@@ -13,6 +13,20 @@ provider/outage acceptance remains partial. Review the
 [roadmap](mvp-plan.md) for remaining provider, privacy, safety and deployment gates.
 
 ## Health contract
+
+B03/B04 implementation (2026-09-14): run `corepack pnpm communications:check`
+for a configuration-only report with no provider traffic or secret values.
+`transactional_email` accepted/failed and `sms_verification_accepted` contain safe
+provider IDs for dashboard diagnosis; accepted does not prove delivery. Security
+notices have bounded immediate retry but no durable outbox. Provider access,
+bounce/outage alert routing and remaining delivery/recovery drills remain release gates.
+The user confirmed EN verification email in Gmail and CH SMS from SHPROHLI. These
+receipts do not close DE, the redesigned email's client acceptance, UA Telegram routing,
+or the complete cross-flow matrix. `deliveryVerified: false` in the configuration-only
+CLI always means that the command does not test delivery; it does not override the
+user's separately recorded delivery evidence.
+See [email/SMS report](email-sms-implementation-2026-09-14.md) for exact limits,
+language fallbacks, migration 0069 and remaining configuration.
 
 B02 remediation (2026-09-13): Admin System uses a minimized job projection for
 nonempty queues. The outbound-call panel has independent `GET`/`PUT`

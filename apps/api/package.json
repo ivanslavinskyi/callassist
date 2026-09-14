@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "communications:check": "tsx src/auth/check-communications.ts",
     "build": "tsup && node scripts/copy-migrations.mjs",
     "calls:disable": "tsx src/db/set-outbound-calls.ts disable",
     "calls:enable": "tsx src/db/set-outbound-calls.ts enable",

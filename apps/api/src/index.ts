@@ -5,7 +5,8 @@ import { AccountDeletionService } from "./auth/account-deletion-service";
 import { createAuthRepositoryFromEnv } from "./auth/create-auth-repository";
 import {
   createEmailProviderFromEnv,
-  emailVerificationHashKeyFromEnv
+  emailVerificationHashKeyFromEnv,
+  mockEmailVerificationCodeFromEnv
 } from "./auth/create-email-provider";
 import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
@@ -64,9 +65,10 @@ const service = new CallService(
 );
 const authService = new AuthService({
   repository: authRepository,
-  verificationProvider: createVerificationProviderFromEnv(),
+  verificationProvider: createVerificationProviderFromEnv(rateLimiter),
   emailProvider: createEmailProviderFromEnv(),
   emailVerificationHashKey: emailVerificationHashKeyFromEnv(),
+  emailVerificationCode: mockEmailVerificationCodeFromEnv(),
   rateLimiter,
   signupCreditGranter: service
 });

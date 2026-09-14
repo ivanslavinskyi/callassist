@@ -5,7 +5,7 @@ self-service flow for an active, signed-in user who still knows the current pass
 and controls the replacement phone. It is not a support override for loss of both
 password and verified-phone access.
 
-Reviewed 2026-09-12 against `ef36cfa`; current implementation/release status is in
+Reviewed 2026-09-14 against the current working copy; implementation/release status is in
 the [architecture](architecture.md) and [roadmap](mvp-plan.md).
 
 ## Security invariants
@@ -16,16 +16,21 @@ the [architecture](architecture.md) and [roadmap](mvp-plan.md).
 2. Start requires the current password. The repository locks the user and initiating
    session and compares the same password hash that the service verified, so a
    concurrent password reset cannot create a stale phone-change challenge.
-3. The normalized replacement number must differ from the current number. Start does
-   not reveal whether another account already uses it and the challenge does not
-   reserve it. Only after OTP proof does the users table's unique constraint make
-   occupied or concurrent completion atomic: at most one account succeeds.
+3. The normalized replacement number must differ from the current number. After
+   password/session proof, start checks whether another account already uses it,
+   including unfinished registrations. An unavailable number returns the generic
+   `PHONE_CHANGE_NOT_AVAILABLE` (409) without sending an SMS or exposing account
+   details. A challenge does not reserve the number. The users table's unique
+   constraint still protects concurrent completion: at most one account succeeds.
 4. A challenge expires after 10 minutes, permits at most eight durable attempts, and
    is invalidated when a newer challenge is created. SMS-provider send failure
    invalidates it before returning a controlled unavailable response.
 5. The current phone remains verified and unchanged until the provider approves an
    OTP sent to the replacement phone. A failed, stale, exhausted, foreign-session, or
-   replayed challenge returns the same `INVALID_PHONE_CHANGE` boundary.
+   replayed challenge returns the same `INVALID_PHONE_CHANGE` boundary. If the
+   provider accepts the code but the repository can no longer complete the change,
+   the challenge is invalidated and `PHONE_CHANGE_NOT_AVAILABLE` is returned;
+   the UI must not describe a valid provider proof as an incorrect code.
 6. Completion locks the user, initiating session, and challenge. In one transaction it
    replaces and verifies the phone, marks the challenge complete, revokes every other
    active session, invalidates every unused password-recovery challenge/grant created
@@ -60,9 +65,20 @@ foreign key that would retain the temporary challenge row.
 
 ## Remaining boundaries
 
+Account contacts support Swiss (+41) and Ukrainian (+380) SMS destinations.
+Registration, correction and replacement normalize international spacing and `00`
+prefixes; unprefixed local numbers use CH. The local SMS allow-list and repository
+default are `CH,UA`. Call destinations and recipient opt-out retain their own policy.
+Twilio Verify Geo Permissions must also permit Ukraine for real delivery.
+
+2026-09-14: completion now sends a localized security notice to the account's
+verified email. Delivery failure does not undo the completed change. All Twilio
+sends also consume shared cross-flow phone/global budgets and the SMS country
+allow-list. [Email/SMS configuration and acceptance](email-sms-implementation-2026-09-14.md).
+
 - A user who no longer controls the verified phone and also cannot sign in must use a
   separately reviewed support/identity-proofing policy. Staff cannot replace a phone
   or bypass this challenge.
-- Suspicious-session detection, notification of security changes, a reusable recent
+- Suspicious-session detection, durable delivery of security notices, a reusable recent
   step-up grant, external alert routing, and an exercised provider/store outage drill
   remain production work.

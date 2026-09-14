@@ -28,7 +28,7 @@ export function RecipientOptOutForm() {
     setBusy(true);
     setError(null);
     try {
-      await requestRecipientOptOut({ phoneE164: phoneE164.trim() });
+      await requestRecipientOptOut({ phoneE164: phoneE164.trim(), uiLocale: locale });
       setStep("verification");
     } catch (caught) {
       setError(getOptOutErrorMessage(caught, locale));

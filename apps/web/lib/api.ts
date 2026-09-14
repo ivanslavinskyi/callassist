@@ -45,6 +45,10 @@ import type {
   EmailChangeConfirmResponse,
   EmailChangeStartInput,
   EmailChangeStartResponse,
+  EmailVerificationStartInput,
+  EmailVerificationStartResponse,
+  EmailVerificationConfirmInput,
+  EmailVerificationConfirmResponse,
   CreateCallBriefInput,
   TaskLanguagePreferences,
   TextLanguage,
@@ -81,7 +85,8 @@ import type {
   User,
   UserRole,
   UserStatus,
-  VerificationResendInput
+  VerificationResendInput,
+  UnverifiedPhoneCorrectionInput
 } from "@callassist/contracts";
 
 export const API_URL =
@@ -96,7 +101,8 @@ export class ApiError extends Error {
   constructor(
     readonly code: string,
     readonly status: number,
-    readonly issues?: ValidationIssues
+    readonly issues?: ValidationIssues,
+    readonly retryAfterSeconds?: number
   ) {
     super(code);
     this.name = "ApiError";
@@ -111,15 +117,17 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
+    signal: init?.signal ?? (path.startsWith("/api/auth/") ? AbortSignal.timeout(30_000) : undefined),
     credentials: "include",
     headers
   });
 
   if (!response.ok) {
-    if (response.status === 401 && typeof window !== "undefined") {
+    const error = await apiErrorFromResponse(response);
+    if (error.code === "AUTHENTICATION_REQUIRED" && typeof window !== "undefined") {
       window.dispatchEvent(new Event("callassist:session-ended"));
     }
-    throw await apiErrorFromResponse(response);
+    throw error;
   }
 
   if (response.status === 204) return undefined as T;
@@ -133,7 +141,8 @@ async function apiErrorFromResponse(response: Response) {
   return new ApiError(
     payload?.error ?? `HTTP_${response.status}`,
     response.status,
-    payload?.issues
+    payload?.issues,
+    Math.min(86_400, Math.max(1, Number(response.headers.get("retry-after")) || 60))
   );
 }
 
@@ -149,6 +158,12 @@ export async function resendPhoneVerification(input: VerificationResendInput) {
     "/api/auth/verification/resend",
     { method: "POST", body: JSON.stringify(input) }
   );
+}
+
+export async function correctUnverifiedPhone(input: UnverifiedPhoneCorrectionInput) {
+  return apiRequest<{ status: "verification_required" }>("/api/auth/verification/phone", {
+    method: "POST", body: JSON.stringify(input)
+  });
 }
 
 export async function verifyPhone(input: PhoneVerificationInput) {
@@ -274,6 +289,13 @@ export async function requestCallSummary(id: string, input: { sourceRevisionId: 
 
 export async function retryCallTextArtifact(id: string, artifactId: string) {
   return apiRequest<CallTextArtifact>(`/api/call-briefs/${id}/text-artifacts/${artifactId}/retry`, { method: "POST" });
+}
+
+export async function startEmailVerification(input: EmailVerificationStartInput) {
+  return apiRequest<EmailVerificationStartResponse>("/api/auth/email-verification/start", { method: "POST", body: JSON.stringify(input) });
+}
+export async function confirmEmailVerification(input: EmailVerificationConfirmInput) {
+  return apiRequest<EmailVerificationConfirmResponse>("/api/auth/email-verification/confirm", { method: "POST", body: JSON.stringify(input) });
 }
 
 export async function startEmailChange(input: EmailChangeStartInput) {

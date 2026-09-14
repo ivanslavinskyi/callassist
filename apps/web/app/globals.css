@@ -308,6 +308,8 @@ main:focus { outline: none; }
 .admin-outbound-control p { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .admin-outbound-control form { display: grid; gap: 11px; }
 .admin-outbound-control textarea { min-height: 86px; resize: vertical; }
+.email-verification-banner { background: var(--surface); border-bottom: 1px solid var(--line); color: var(--muted); padding: 12px 24px; text-align: center; }
+.email-verification-banner a { color: var(--green); font-weight: 600; text-decoration: underline; }
 .admin-outbound-control form button { min-height: 44px; width: 100%; }
 .admin-outbound-control form > small { color: var(--danger); font-size: 9px; line-height: 1.5; }
 

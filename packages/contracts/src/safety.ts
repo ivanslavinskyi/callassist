@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { swissDestinationPhoneSchema } from "./phone";
+import { supportedUiLocaleSchema } from "./languages";
 
 const verificationCodeSchema = z
   .string()
@@ -9,7 +10,8 @@ const verificationCodeSchema = z
 const safetyReasonSchema = z.string().trim().min(3).max(500);
 
 export const recipientOptOutRequestSchema = z.object({
-  phoneE164: swissDestinationPhoneSchema
+  phoneE164: swissDestinationPhoneSchema,
+  uiLocale: supportedUiLocaleSchema.optional()
 });
 export type RecipientOptOutRequest = z.infer<
   typeof recipientOptOutRequestSchema

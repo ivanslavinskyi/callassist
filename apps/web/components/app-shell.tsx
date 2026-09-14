@@ -14,6 +14,7 @@ import {
   contentPath,
   switchContentLocale
 } from "@/lib/i18n/content-routing";
+import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 import { Brand } from "./brand";
 import { ThemeToggle } from "./theme-toggle";
 import { NavigationMenu } from "./navigation-menu";
@@ -30,6 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { locale, localizeHref, messages } = useUiLocale();
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [changingLocale, setChangingLocale] = useState(false);
   const [localeError, setLocaleError] = useState(false);
@@ -57,16 +59,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (active) {
           setIsAuthenticated(true);
           setRole(user.role);
+          setEmailVerified(Boolean(user.emailVerifiedAt));
         }
       })
       .catch(() => {
         if (active) {
           setIsAuthenticated(false);
           setRole(null);
+          setEmailVerified(null);
         }
       });
     return () => { active = false; };
-  }, []);
+  }, [pathname]);
 
   useEffect(() => {
     if (isAuthenticated !== true || role === "content_editor") {
@@ -154,6 +158,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     </header>
     {localeError ? <p className="form-error" role="alert">{languageMessages[locale].saveError}</p> : null}
+    {emailVerified === false && pathname.includes("/app") && !pathname.includes("/app/account") ? <aside className="email-verification-banner">
+      <span>{emailVerificationMessages[locale].banner}</span>{" "}
+      <Link href={localizeHref("/verify-email")}>{emailVerificationMessages[locale].title}</Link>
+    </aside> : null}
     {children}
     <SiteFooter locale={locale} navigation={publicNavigation} />
   </div>;

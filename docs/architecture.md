@@ -1,7 +1,8 @@
 # SHPROHLI architecture
 
-Reviewed 2026-09-12 against code baseline `ef36cfa`. This describes implemented
-behavior, including appointments, compact results and live-transcript recovery.
+Reviewed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. This describes
+implemented behavior, including initial email proof, localized transactional delivery,
+appointments, compact results and live-transcript recovery.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
 [dated audits and verification](README.md) retain the evidence available at their dates.
 
@@ -180,10 +181,25 @@ Phone/email replacement requires the current password and a ten-minute/eight-att
 challenge bound to the initiating session. The new contact remains pending until
 verified; completion preserves that session, revokes others and invalidates unused
 password recovery capabilities. Email uses Resend in production and an independent
-HMAC key for codes. At challenge creation, verification to the new address and a
-notice to the old address are sent together; either delivery failure invalidates
-the challenge and returns a controlled error. There is no durable notification outbox
-or separate completion notice. Name editing is an owner-scoped PATCH.
+HMAC key for codes. Failure to send the new-address OTP invalidates the challenge;
+the old-address notice is best effort and only goes to a verified address. Completion
+of email/phone changes and password recovery sends security notices to verified
+addresses. Notification failure does not reverse a committed account change. There
+is no durable notification outbox, so a crash or final delivery failure can lose a notice.
+Initial email verification sets `email_verified_at`; HTTP call start requires this
+proof. Signup phone typos can be corrected using the registration password before
+phone verification. The eventual OTP result is bound to the unchanged phone number.
+Account phones accept normalized international input; SMS delivery is limited to
+CH/UA by default, independently of Swiss-only call destinations. Replacement checks
+occupied numbers (including unverified registrations) before sending an OTP; a conflict
+after provider approval returns `PHONE_CHANGE_NOT_AVAILABLE`, not a wrong-code error.
+All real SMS sends share phone/global budgets and carry an explicit communication locale.
+Email templates use a bundled CID PNG logo, transparent table layout, and localized
+Impressum/Support links only. `NEXT_PUBLIC_SITE_URL` must also reach the API for footer
+links; production requires a public HTTPS origin. Future email languages use explicitly
+labelled English legal pages until localized pages are published.
+Name editing is an owner-scoped PATCH. See the current
+[email/SMS implementation and acceptance](email-sms-implementation-2026-09-14.md).
 See [recovery](password-recovery-policy.md), [phone change](phone-change-policy.md) and
 [account profile](account-profile-improvement-plan.md).
 
@@ -420,8 +436,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog has **68 migrations**, `0001` through
-`0068_conversation_tool_results.sql`. The catalog is contiguous/checksummed; advisory locking and
+The current catalog has **69 migrations**, `0001` through
+`0069_email_verification.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases

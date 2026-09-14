@@ -1,3 +1,4 @@
+import { VerificationSendError } from "./bounded-verification-provider";
 import type {
   AccountSessionBrowser,
   AccountSessionList,
@@ -7,6 +8,8 @@ import type {
   AccountLanguagePreferencesUpdateInput,
   EmailChangeConfirmInput,
   EmailChangeStartInput,
+  EmailVerificationStartInput,
+  EmailVerificationConfirmInput,
   LoginInput,
   PasswordRecoveryCompleteInput,
   PasswordRecoveryStartInput,
@@ -14,6 +17,7 @@ import type {
   PhoneChangeConfirmInput,
   PhoneChangeStartInput,
   PhoneVerificationInput,
+  UnverifiedPhoneCorrectionInput,
   RegistrationInput,
   User,
   VerificationResendInput
@@ -125,9 +129,9 @@ export class AuthService {
       throw error;
     }
     try {
-      await this.verificationProvider.send(user.phoneE164);
+      await this.verificationProvider.send(user.phoneE164, user.uiLocale);
     } catch (error) {
-      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+      throw verificationServiceError(error);
     }
     return { status: "verification_required" as const };
   }
@@ -146,10 +150,27 @@ export class AuthService {
     }
     await this.#limit("verification-send:phone", user.phoneE164, 3, 60 * minute);
     try {
-      await this.verificationProvider.send(user.phoneE164);
+      await this.verificationProvider.send(user.phoneE164, input.uiLocale ?? user.uiLocale);
     } catch (error) {
-      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+      throw verificationServiceError(error);
     }
+    return { status: "verification_required" as const };
+  }
+
+  async correctUnverifiedPhone(input: UnverifiedPhoneCorrectionInput, context: AuthRequestContext) {
+    await this.#limitMany([
+      limitEntry("phone-correction:ip", context.ip, 10, 60 * minute),
+      limitEntry("phone-correction:email", input.email, 3, 60 * minute)
+    ]);
+    const user = await this.repository.findUserByEmail(input.email);
+    const matches = await verifyPassword(input.currentPassword, user?.passwordHash ?? await dummyPasswordHash);
+    if (!user || !matches || user.status !== "active" || user.phoneVerifiedAt) throw new AuthServiceError("PHONE_CORRECTION_NOT_AVAILABLE");
+    await this.#limit("verification-send:phone", input.newPhoneE164, 3, 60 * minute);
+    const corrected = await this.repository.correctUnverifiedPhone({ userId: user.id, expectedPasswordHash: user.passwordHash, newPhoneE164: input.newPhoneE164 });
+    if (!corrected) throw new AuthServiceError("PHONE_CORRECTION_NOT_AVAILABLE");
+    // The number remains unverified if delivery fails; resend/correction can recover.
+    try { await this.verificationProvider.send(corrected.phoneE164, input.uiLocale ?? corrected.uiLocale); }
+    catch (error) { throw verificationServiceError(error); }
     return { status: "verification_required" as const };
   }
 
@@ -159,7 +180,7 @@ export class AuthService {
       limitEntry("verification-attempt:email", input.email, 8, 15 * minute)
     ]);
     const user = await this.repository.findUserByEmail(input.email);
-    if (!user || user.status !== "active") {
+    if (!user || user.status !== "active" || user.phoneVerifiedAt) {
       throw new AuthServiceError("INVALID_VERIFICATION");
     }
     await this.#limit("verification-attempt:phone", user.phoneE164, 8, 15 * minute);
@@ -167,13 +188,14 @@ export class AuthService {
     try {
       approved = await this.verificationProvider.check(user.phoneE164, input.code);
     } catch (error) {
-      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+      throw verificationServiceError(error);
     }
     if (!approved) throw new AuthServiceError("INVALID_VERIFICATION");
-    const verified = await this.repository.markPhoneVerified(
-      user.id,
-      this.#now().toISOString()
-    );
+    const verified = await this.repository.markPhoneVerified(user.id, this.#now().toISOString(), user.phoneE164)
+      .catch((error) => {
+        if (error instanceof AuthRepositoryError && error.code === "PHONE_VERIFICATION_CHANGED") throw new AuthServiceError("INVALID_VERIFICATION");
+        throw error;
+      });
     await this.#signupCreditGranter.grantSignupCredits(verified.id);
     return this.#createSession(verified, context);
   }
@@ -231,7 +253,7 @@ export class AuthService {
             now.getTime() + passwordRecoveryChallengeTtlMs
           ).toISOString()
         });
-        if (created) await this.verificationProvider.send(user.phoneE164);
+        if (created) await this.verificationProvider.send(user.phoneE164, input.uiLocale ?? user.uiLocale);
       } catch {
         await this.repository.invalidatePasswordRecoveryChallenge(
           recoveryId,
@@ -315,6 +337,7 @@ export class AuthService {
       now: this.#now().toISOString()
     });
     if (!reset) throw new AuthServiceError("INVALID_RECOVERY");
+    await this.#securityNotice(reset, "password_reset", `password-reset/${randomUUID()}`);
     return { status: "password_reset" as const };
   }
 
@@ -355,7 +378,7 @@ export class AuthService {
       throw new AuthServiceError("PHONE_CHANGE_NOT_AVAILABLE");
     }
     try {
-      await this.verificationProvider.send(input.newPhoneE164);
+      await this.verificationProvider.send(input.newPhoneE164, user.uiLocale);
     } catch (error) {
       await this.repository.invalidatePhoneChangeChallenge(
         phoneChangeId,
@@ -363,7 +386,7 @@ export class AuthService {
         this.#now().toISOString()
       ).catch(() => undefined);
       writePiiSafeOperationalError("phone_change_verification_send_failed");
-      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+      throw verificationServiceError(error);
     }
     return { status: "verification_required" as const, phoneChangeId };
   }
@@ -401,7 +424,7 @@ export class AuthService {
       );
     } catch (error) {
       writePiiSafeOperationalError("phone_change_verification_check_failed");
-      throw new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
+      throw verificationServiceError(error);
     }
     if (!approved) throw new AuthServiceError("INVALID_PHONE_CHANGE");
     const completed = await this.repository.completePhoneChange({
@@ -416,8 +439,9 @@ export class AuthService {
         user.id,
         this.#now().toISOString()
       ).catch(() => undefined);
-      throw new AuthServiceError("INVALID_PHONE_CHANGE");
+      throw new AuthServiceError("PHONE_CHANGE_NOT_AVAILABLE");
     }
+    await this.#securityNotice(completed.user, "phone_changed", `phone-changed/${challenge.id}`);
     return {
       status: "phone_changed" as const,
       user: toPublicUser(completed.user),
@@ -451,26 +475,54 @@ export class AuthService {
     };
   }
 
-  async startEmailChange(
+  async startEmailChange(user: User, sessionId: string, input: EmailChangeStartInput, context: AuthRequestContext) {
+    return this.#startEmailChallenge(user, sessionId, input, context, "change");
+  }
+
+  async startEmailVerification(user: User, sessionId: string, input: EmailVerificationStartInput, context: AuthRequestContext) {
+    if (user.emailVerifiedAt) throw new AuthServiceError("EMAIL_ALREADY_VERIFIED");
+    const result = await this.#startEmailChallenge(user, sessionId,
+      { newEmail: user.email, currentPassword: "" }, context, "verify", input.uiLocale ?? user.uiLocale);
+    return { status: "verification_required" as const, verificationId: result.emailChangeId, expiresAt: result.expiresAt };
+  }
+
+  async confirmEmailVerification(user: User, sessionId: string, input: EmailVerificationConfirmInput, context: AuthRequestContext) {
+    const result = await this.#confirmEmail(user, sessionId,
+      { emailChangeId: input.verificationId, code: input.code }, context, "verify");
+    return { status: "email_verified" as const, user: result.user };
+  }
+
+  async confirmEmailChange(user: User, sessionId: string, input: EmailChangeConfirmInput, context: AuthRequestContext) {
+    return this.#confirmEmail(user, sessionId, input, context, "change");
+  }
+
+  async #startEmailChallenge(
     user: User,
     sessionId: string,
     input: EmailChangeStartInput,
-    context: AuthRequestContext
+    context: AuthRequestContext,
+    purpose: "change" | "verify",
+    uiLocale = user.uiLocale
   ) {
     await this.#limitMany([
       limitEntry("email-change-start:ip", context.ip, 10, 60 * minute),
       limitEntry("email-change-start:user", user.id, 3, 60 * minute),
       limitEntry("email-change-start:email", input.newEmail, 3, 60 * minute)
     ]);
-    if (user.email === input.newEmail) {
+    if (purpose === "change" && user.email === input.newEmail) {
       throw new AuthServiceError("EMAIL_CHANGE_NOT_AVAILABLE");
     }
-    const record = await this.confirmOwnPassword(user, input.currentPassword);
+    const record = purpose === "change"
+      ? await this.confirmOwnPassword(user, input.currentPassword)
+      : await this.repository.findUserByEmail(user.email);
+    if (!record || record.id !== user.id) throw new AuthServiceError("EMAIL_CHANGE_NOT_AVAILABLE");
+    await this.#limit("email-send-cooldown:user", user.id, 1, minute);
     const now = this.#now();
     const emailChangeId = randomUUID();
     const code = this.#emailVerificationCode();
     const expiresAt = new Date(now.getTime() + emailChangeChallengeTtlMs);
     const created = await this.repository.createEmailChangeChallenge({
+      purpose,
       id: emailChangeId,
       userId: user.id,
       initiatingSessionId: sessionId,
@@ -486,19 +538,10 @@ export class AuthService {
     });
     if (!created) throw new AuthServiceError("EMAIL_CHANGE_NOT_AVAILABLE");
     try {
-      await Promise.all([
-        this.emailProvider.sendEmailChangeVerification({
-          to: input.newEmail,
-          code,
-          expiresInMinutes: emailChangeChallengeTtlMs / minute,
-          locale: resolveEmailLocale(user.uiLocale)
-        }),
-        this.emailProvider.sendEmailChangeNotice({
-          to: user.email,
-          proposedEmail: input.newEmail,
-          locale: resolveEmailLocale(user.uiLocale)
-        })
-      ]);
+      await this.emailProvider.sendEmailChangeVerification({
+        to: input.newEmail, code, expiresInMinutes: emailChangeChallengeTtlMs / minute,
+        locale: resolveEmailLocale(uiLocale), idempotencyKey: `email-code/${emailChangeId}`
+      });
     } catch (error) {
       await this.repository.invalidateEmailChangeChallenge(
         emailChangeId,
@@ -508,6 +551,12 @@ export class AuthService {
       writePiiSafeOperationalError("email_change_delivery_failed");
       throw new AuthServiceError("EMAIL_DELIVERY_UNAVAILABLE", { cause: error });
     }
+    if (purpose === "change" && user.emailVerifiedAt) {
+      await this.emailProvider.sendEmailChangeNotice({
+        to: user.email, proposedEmail: input.newEmail,
+        locale: resolveEmailLocale(uiLocale), idempotencyKey: `email-request/${emailChangeId}`
+      }).catch(() => writePiiSafeOperationalError("email_change_notice_failed"));
+    }
     return {
       status: "verification_required" as const,
       emailChangeId,
@@ -515,11 +564,12 @@ export class AuthService {
     };
   }
 
-  async confirmEmailChange(
+  async #confirmEmail(
     user: User,
     sessionId: string,
     input: EmailChangeConfirmInput,
-    context: AuthRequestContext
+    context: AuthRequestContext,
+    purpose: "change" | "verify"
   ) {
     await this.#limitMany([
       limitEntry("email-change-confirm:ip", context.ip, 20, 15 * minute),
@@ -528,6 +578,7 @@ export class AuthService {
     ]);
     const now = this.#now();
     const challenge = await this.repository.consumeEmailChangeChallengeAttempt({
+      purpose,
       emailChangeId: input.emailChangeId,
       userId: user.id,
       sessionId,
@@ -545,6 +596,7 @@ export class AuthService {
       throw new AuthServiceError("INVALID_EMAIL_CHANGE");
     }
     const completed = await this.repository.completeEmailChange({
+      purpose,
       emailChangeId: challenge.id,
       userId: user.id,
       sessionId,
@@ -558,11 +610,25 @@ export class AuthService {
       ).catch(() => undefined);
       throw new AuthServiceError("INVALID_EMAIL_CHANGE");
     }
+    if (purpose === "change") {
+      await Promise.all([
+        this.#securityNotice(completed.user, "email_changed", `email-changed/new/${challenge.id}`),
+        this.#securityNotice(user, "email_changed", `email-changed/old/${challenge.id}`)
+      ]);
+    }
     return {
       status: "email_changed" as const,
       user: toPublicUser(completed.user),
       revokedSessionCount: completed.revokedSessionCount
     };
+  }
+
+  async #securityNotice(user: User, kind: "email_changed" | "phone_changed" | "password_reset", idempotencyKey: string) {
+    // Never send account details to an address whose ownership was not proved.
+    if (!user.emailVerifiedAt) return;
+    await this.emailProvider.sendSecurityNotice({
+      to: user.email, locale: resolveEmailLocale(user.uiLocale), kind, idempotencyKey
+    }).catch(() => writePiiSafeOperationalError("account_security_notice_failed"));
   }
 
   async authenticateSession(token: string | undefined) {
@@ -810,14 +876,17 @@ export class AuthServiceError extends Error {
       | "INVALID_VERIFICATION"
       | "INVALID_RECOVERY"
       | "VERIFICATION_UNAVAILABLE"
+      | "SMS_DESTINATION_NOT_ALLOWED"
       | "RATE_LIMITED"
       | "RATE_LIMIT_UNAVAILABLE"
       | "INVALID_PHONE_CHANGE"
       | "PHONE_CHANGE_NOT_AVAILABLE"
+      | "PHONE_CORRECTION_NOT_AVAILABLE"
       | "PROFILE_UPDATE_NOT_AVAILABLE"
       | "INVALID_EMAIL_CHANGE"
       | "EMAIL_CHANGE_NOT_AVAILABLE"
       | "EMAIL_DELIVERY_UNAVAILABLE"
+      | "EMAIL_ALREADY_VERIFIED"
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
       | "USER_NOT_FOUND"
@@ -890,4 +959,11 @@ function mapAdminRepositoryError(error: unknown) {
     default:
       return error;
   }
+}
+
+function verificationServiceError(error: unknown) {
+  if (error instanceof VerificationSendError) return new AuthServiceError(error.code, { retryAfterSeconds: error.retryAfterSeconds });
+  if (error instanceof RateLimiterUnavailableError) return new AuthServiceError("RATE_LIMIT_UNAVAILABLE");
+  writePiiSafeOperationalError("sms_verification_provider_failed");
+  return new AuthServiceError("VERIFICATION_UNAVAILABLE", { cause: error });
 }

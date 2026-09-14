@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeAccountPhoneNumber } from "./phone";
 import { callCompilationSchema, callSnapshotSchema, personNamePartSchema } from "./call-brief";
 import { callOutcomeViewSchema } from "./call-outcome";
 import { contentLocaleSchema } from "./content";
@@ -45,7 +46,9 @@ export type SessionRevocationAction = z.infer<
 export const accountPhoneSchema = z
   .string()
   .trim()
-  .regex(/^\+[1-9]\d{7,14}$/, "Use international phone format");
+  .max(40)
+  .transform(normalizeAccountPhoneNumber)
+  .pipe(z.string().regex(/^\+[1-9]\d{7,14}$/, "Use international phone format"));
 
 export const registrationInputSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
@@ -63,15 +66,25 @@ export const phoneVerificationInputSchema = z.object({
 });
 export type PhoneVerificationInput = z.infer<typeof phoneVerificationInputSchema>;
 
+export const unverifiedPhoneCorrectionInputSchema = z.strictObject({
+  email: z.string().trim().toLowerCase().email().max(320),
+  currentPassword: z.string().min(1).max(128),
+  newPhoneE164: accountPhoneSchema,
+  uiLocale: supportedUiLocaleSchema.optional()
+});
+export type UnverifiedPhoneCorrectionInput = z.infer<typeof unverifiedPhoneCorrectionInputSchema>;
+
 export const verificationResendInputSchema = z.object({
-  email: z.string().trim().toLowerCase().email().max(320)
+  email: z.string().trim().toLowerCase().email().max(320),
+  uiLocale: supportedUiLocaleSchema.optional()
 });
 export type VerificationResendInput = z.infer<
   typeof verificationResendInputSchema
 >;
 
 export const passwordRecoveryStartInputSchema = z.strictObject({
-  email: z.string().trim().toLowerCase().email().max(320)
+  email: z.string().trim().toLowerCase().email().max(320),
+  uiLocale: supportedUiLocaleSchema.optional()
 });
 export type PasswordRecoveryStartInput = z.infer<
   typeof passwordRecoveryStartInputSchema
@@ -127,6 +140,8 @@ export const userSchema = z.object({
   email: z.string().email(),
   phoneE164: z.string(),
   phoneVerifiedAt: z.iso.datetime().nullable(),
+  // Optional on historical exports/clients; current auth responses always emit null or a date.
+  emailVerifiedAt: z.iso.datetime().nullable().optional(),
   firstName: personNamePartSchema,
   lastName: personNamePartSchema,
   role: userRoleSchema,
@@ -190,6 +205,25 @@ export const emailChangeStartResponseSchema = z.strictObject({
 export type EmailChangeStartResponse = z.infer<
   typeof emailChangeStartResponseSchema
 >;
+
+export const emailVerificationStartInputSchema = z.strictObject({
+  uiLocale: supportedUiLocaleSchema.optional()
+});
+export type EmailVerificationStartInput = z.infer<typeof emailVerificationStartInputSchema>;
+export const emailVerificationStartResponseSchema = z.strictObject({
+  status: z.literal("verification_required"),
+  verificationId: z.uuid(),
+  expiresAt: z.iso.datetime()
+});
+export type EmailVerificationStartResponse = z.infer<typeof emailVerificationStartResponseSchema>;
+export const emailVerificationConfirmInputSchema = z.strictObject({
+  verificationId: z.uuid(), code: z.string().trim().regex(/^\d{6}$/)
+});
+export type EmailVerificationConfirmInput = z.infer<typeof emailVerificationConfirmInputSchema>;
+export const emailVerificationConfirmResponseSchema = z.strictObject({
+  status: z.literal("email_verified"), user: userSchema
+});
+export type EmailVerificationConfirmResponse = z.infer<typeof emailVerificationConfirmResponseSchema>;
 
 export const emailChangeConfirmInputSchema = z.strictObject({
   emailChangeId: z.uuid(),

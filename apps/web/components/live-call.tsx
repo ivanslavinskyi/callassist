@@ -1,4 +1,5 @@
 "use client";
+import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 
 import {
   ASSISTANT_PROFILES,
@@ -239,7 +240,9 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
       onSuccess?.();
     } catch (error) {
       setActionError(
-        error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS"
+        error instanceof ApiError && error.code === "EMAIL_VERIFICATION_REQUIRED"
+          ? emailVerificationMessages[uiLocale].banner
+          : error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS"
           ? messages.live.insufficientCredits
           : error instanceof ApiError && error.code === "CONCURRENT_CALL_LIMIT"
             ? messages.live.concurrentCall

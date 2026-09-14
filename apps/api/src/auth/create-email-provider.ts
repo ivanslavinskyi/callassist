@@ -1,5 +1,6 @@
 import { MockEmailProvider } from "./email-provider";
 import { ResendEmailProvider } from "./resend-email-provider";
+import { emailBrandingFromEnv } from "./email-branding";
 
 export function createEmailProviderFromEnv() {
   const driver = process.env.EMAIL_DRIVER?.trim() || "mock";
@@ -12,7 +13,8 @@ export function createEmailProviderFromEnv() {
   if (driver === "resend") {
     return new ResendEmailProvider({
       apiKey: requireEnvironmentValue("RESEND_API_KEY"),
-      from: requireEnvironmentValue("EMAIL_FROM")
+      from: requireEnvironmentValue("EMAIL_FROM"),
+      branding: emailBrandingFromEnv()
     });
   }
   throw new Error(`Unsupported EMAIL_DRIVER: ${driver}`);
@@ -26,6 +28,14 @@ export function emailVerificationHashKeyFromEnv() {
     throw new Error("EMAIL_VERIFICATION_HASH_KEY must be a base64-encoded 32-byte key");
   }
   return decoded;
+}
+
+export function mockEmailVerificationCodeFromEnv() {
+  if ((process.env.EMAIL_DRIVER?.trim() || "mock") !== "mock") return undefined;
+  if (process.env.NODE_ENV === "production") throw new Error("Mock email codes are forbidden in production");
+  const code = process.env.MOCK_EMAIL_VERIFICATION_CODE?.trim() || "000000";
+  if (!/^[0-9]{6}$/.test(code)) throw new Error("MOCK_EMAIL_VERIFICATION_CODE must contain six digits");
+  return () => code;
 }
 
 function requireEnvironmentValue(name: string) {

@@ -110,6 +110,7 @@ export type PhoneChangeCompletionRecord = {
 };
 
 export type EmailChangeChallengeRecord = {
+  purpose: "change" | "verify";
   id: string;
   userId: string;
   initiatingSessionId: string;
@@ -164,7 +165,8 @@ export interface AuthRepository {
     actorUserId: string,
     targetUserId: string
   ): Promise<AdminUserSummary>;
-  markPhoneVerified(userId: string, verifiedAt: string): Promise<AuthUserRecord>;
+  markPhoneVerified(userId: string, verifiedAt: string, expectedPhoneE164?: string): Promise<AuthUserRecord>;
+  correctUnverifiedPhone(input: { userId: string; expectedPasswordHash: string; newPhoneE164: string }): Promise<AuthUserRecord | null>;
   createSession(input: CreateAuthSessionInput): Promise<void>;
   findUserBySessionTokenHash(
     tokenHash: string,
@@ -236,7 +238,7 @@ export interface AuthRepository {
     tokenHash: string;
     passwordHash: string;
     now: string;
-  }): Promise<boolean>;
+  }): Promise<AuthUserRecord | null>;
   createPhoneChangeChallenge(input: {
     id: string;
     userId: string;
@@ -264,6 +266,7 @@ export interface AuthRepository {
     now: string;
   }): Promise<PhoneChangeCompletionRecord | null>;
   createEmailChangeChallenge(input: {
+    purpose?: "change" | "verify";
     id: string;
     userId: string;
     initiatingSessionId: string;
@@ -279,12 +282,14 @@ export interface AuthRepository {
     now: string
   ): Promise<void>;
   consumeEmailChangeChallengeAttempt(input: {
+    purpose?: "change" | "verify";
     emailChangeId: string;
     userId: string;
     sessionId: string;
     now: string;
   }): Promise<EmailChangeChallengeRecord | null>;
   completeEmailChange(input: {
+    purpose?: "change" | "verify";
     emailChangeId: string;
     userId: string;
     sessionId: string;
@@ -321,6 +326,7 @@ export class AuthRepositoryError extends Error {
     readonly code:
       | "USER_ALREADY_EXISTS"
       | "USER_NOT_FOUND"
+      | "PHONE_VERIFICATION_CHANGED"
       | "SESSION_CREATION_DENIED"
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"
@@ -338,7 +344,7 @@ export class AuthRepositoryError extends Error {
 
 export function toPublicUser(record: AuthUserRecord): User {
   const { passwordHash: _passwordHash, ...user } = record;
-  return { ...user, preferredContentLanguage: user.preferredContentLanguage ?? null };
+  return { ...user, emailVerifiedAt: user.emailVerifiedAt ?? null, preferredContentLanguage: user.preferredContentLanguage ?? null };
 }
 
 export type MutableUserState = {
