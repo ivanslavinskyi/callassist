@@ -1,8 +1,9 @@
 import { MockEmailProvider } from "./email-provider";
 import { ResendEmailProvider } from "./resend-email-provider";
 import { emailBrandingFromEnv } from "./email-branding";
+import type { BetaControls } from "../beta/beta-controls";
 
-export function createEmailProviderFromEnv() {
+export function createEmailProviderFromEnv(betaControls?: BetaControls) {
   const driver = process.env.EMAIL_DRIVER?.trim() || "mock";
   if (driver === "mock") {
     if (process.env.NODE_ENV === "production") {
@@ -14,7 +15,7 @@ export function createEmailProviderFromEnv() {
     return new ResendEmailProvider({
       apiKey: requireEnvironmentValue("RESEND_API_KEY"),
       from: requireEnvironmentValue("EMAIL_FROM"),
-      branding: emailBrandingFromEnv()
+      branding: emailBrandingFromEnv(), betaControls
     });
   }
   throw new Error(`Unsupported EMAIL_DRIVER: ${driver}`);

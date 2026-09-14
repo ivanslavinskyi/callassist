@@ -1088,11 +1088,11 @@ describe("CallService", () => {
     expect(getRecordingStatus).toHaveBeenCalledWith(
       "RE-reconcile-completed"
     );
-    expect(usage.balance).toBe(2);
+    expect(usage.balance).toBe(3);
     expect(usage.transactions.filter(({ type }) => type === "call_charge"))
-      .toHaveLength(1);
-    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
       .toHaveLength(0);
+    expect(usage.transactions.filter(({ type }) => type === "call_refund"))
+      .toHaveLength(1);
     expect((await afterRestart.getOutcome(brief.id)).technical.failureStage)
       .toBeNull();
   });

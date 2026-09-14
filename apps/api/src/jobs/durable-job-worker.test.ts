@@ -75,6 +75,23 @@ async function repositoryWithAvailableRecording() {
 }
 
 describe("durable job worker", () => {
+  it("records superseded text work as cancelled without retrying or reporting a background failure", async () => {
+    const repository = new InMemoryCallRepository();
+    const compilation = await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input));
+    const brief = await repository.create(input, compilation, randomUUID());
+    const source = await repository.getPlanSource(brief.id);
+    const artifact = await repository.enqueueTextArtifact({ callId: brief.id, kind: "plan_review",
+      compilationId: source.compilationId, sourceHash: source.snapshotHash, targetLanguage: "uk", generatorVersion: "fixture" });
+    const error = vi.fn(), handler = vi.fn().mockRejectedValue(new DurableJobExecutionError("TEXT_ARTIFACT_STALE", { retryable: false }));
+    const worker = new DurableJobWorker(repository, { text_artifact_generation: handler }, error);
+    await worker.runOnce(); await worker.runOnce(); await worker.close();
+    const job = (await repository.listDurableJobs()).find(j => j.textArtifactId === artifact.id)!;
+    expect(job).toMatchObject({ status: "cancelled", attemptCount: 1, lastErrorCode: "TEXT_ARTIFACT_STALE" });
+    expect(await repository.listDurableJobAttempts(job.id)).toEqual([expect.objectContaining({ outcome: "cancelled", errorCode: "TEXT_ARTIFACT_STALE" })]);
+    expect(await repository.getTextArtifact(brief.id, artifact.id)).toMatchObject({ status: "stale", retryable: false });
+    expect(handler).toHaveBeenCalledTimes(1); expect(error).not.toHaveBeenCalled();
+  });
+
   it("schedules Retry-After without occupying a worker or retrying early", async () => {
     const { repository } = await repositoryWithAvailableRecording();
     let now = new Date("2099-02-01T00:00:00.000Z");

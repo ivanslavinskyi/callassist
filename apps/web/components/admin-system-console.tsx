@@ -17,6 +17,7 @@ import {
 } from "@/lib/i18n/admin-operations-messages";
 import { useAdminSession } from "./admin-session-provider";
 import { AdminOutboundControl } from "./admin-outbound-control";
+import { AdminBetaControls } from "./admin-beta-controls";
 
 export function AdminSystemConsole() {
   const locale = "en" as const;
@@ -86,6 +87,7 @@ export function AdminSystemConsole() {
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
         <AdminOutboundControl role={role} />
+        <AdminBetaControls role={role} />
 
         {status ? (
           <div className="admin-system-content" aria-busy={loading}>

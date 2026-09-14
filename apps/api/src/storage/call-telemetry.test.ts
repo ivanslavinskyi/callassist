@@ -111,7 +111,7 @@ describe("durable call telemetry", () => {
     }
   });
 
-  it("settles a charge once and records the confirmed connection once", async () => {
+  it("refunds a connected call without an answer and records the connection separately", async () => {
     const repository = new InMemoryCallRepository();
     const userId = randomUUID();
     await repository.grantSignupCredits(userId);
@@ -156,7 +156,7 @@ describe("durable call telemetry", () => {
         expect.objectContaining({
           payload: {
             name: "credit.settled",
-            metadata: { settlement: "charge", connected: true }
+            metadata: { settlement: "refund", connected: true }
           }
         })
       ]);

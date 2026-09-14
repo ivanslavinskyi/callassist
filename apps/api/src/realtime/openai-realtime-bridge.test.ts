@@ -6,6 +6,7 @@ import {
   type CallBrief
 } from "@callassist/contracts";
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { CallService } from "../call-service";
@@ -1229,8 +1230,9 @@ describe("OpenAIRealtimeBridge", () => {
   });
 });
 
-async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale, agentHangupEnabled = false, appointmentAuthorization?: AppointmentAuthorization) {
+async function createConsentHarness(failRecording = false, locale: typeof brief.locale = brief.locale, agentHangupEnabled = false, appointmentAuthorization?: AppointmentAuthorization, creditOwner?: string) {
   const repository = new InMemoryCallRepository();
+  if (creditOwner) await repository.grantSignupCredits(creditOwner);
   const compiler = new DeterministicBriefCompiler();
   if (appointmentAuthorization) {
     const compile = compiler.compile.bind(compiler);
@@ -1256,12 +1258,12 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
     locale,
     allowLanguageSwitch: false,
     allowedFacts: brief.allowedFacts
-  });
+  }, creditOwner);
   await service.approveCompilation(created.id, await originalPlanReview(service, created.id));
   const reserved = await service.repository.startAttempt(created.id, {
-    provider: "twilio"
+    provider: "twilio", userId: creditOwner
   });
-  if (agentHangupEnabled) {
+  if (agentHangupEnabled || creditOwner) {
     await repository.attachProviderCall(reserved.attempt.id, "CA-HANGUP", "in-progress");
   }
   const twilioSocket = new FakeSocket();
@@ -1271,6 +1273,10 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
     .spyOn(service, "startRecordingAfterConsent")
     .mockImplementation(async (id) => {
       if (failRecording) throw new Error("recording failed");
+      if (creditOwner) {
+        const begun = await repository.beginRecording(id);
+        await repository.attachProviderRecording(begun.recording.id, "RE-CREDIT", "in-progress");
+      }
       return (await service.get(id))!;
     });
   const bridge = new OpenAIRealtimeBridge({
@@ -1325,6 +1331,57 @@ function completeConsentPlayback(harness: {
 function emitJson(socket: FakeSocket, payload: object) {
   socket.emit("message", Buffer.from(JSON.stringify(payload)));
 }
+
+describe("conversation credit qualification", () => {
+  it.each(["task_answer", "cannot_answer", "referral", "not_substantive", "uncertain"])(
+    "settles only a bound substantive decision (%s) and keeps the classifier silent", async category => {
+      const owner = randomUUID();
+      const h = await createConsentHarness(false, "en-GB", false, undefined, owner);
+      try {
+        const requests = () => h.openAISocket.sent.filter(event => event.type === "response.create" &&
+          !!(event.response as { metadata?: { credit_qualification?: string } })?.metadata?.credit_qualification);
+        emitJson(h.openAISocket, { type: "conversation.item.input_audio_transcription.completed", item_id: "before-consent", transcript: "Yes, arrived." });
+        await new Promise(resolve => setImmediate(resolve));
+        expect(requests()).toHaveLength(0);
+        completeConsentPlayback(h);
+        emitJson(h.consentSocket, { type: "conversation.item.input_audio_transcription.completed", transcript: "Yes" });
+        await vi.waitFor(() => expect(h.startRecording).toHaveBeenCalled());
+        await vi.waitFor(() => expect(h.openAISocket.sent.filter(event => event.type === "response.create")).toHaveLength(2));
+        emitJson(h.openAISocket, { type: "response.created", response: { id: "opening-credit" } });
+        emitJson(h.openAISocket, { type: "response.done", response: { id: "opening-credit", status: "completed" } });
+        emitJson(h.twilioSocket, { event: "mark", mark: { name: "callassist-opening-complete" } });
+        emitJson(h.openAISocket, { type: "response.output_audio_transcript.done", response_id: "question-credit", item_id: "question-credit", transcript: "Has the application arrived?" });
+        const answer = category === "cannot_answer" ? "I do not know." : category === "referral" ? "Please ask the registration department." : category === "not_substantive" ? "I have no time to talk." : "Yes, it arrived yesterday.";
+        emitJson(h.openAISocket, { type: "conversation.item.input_audio_transcription.completed", item_id: "answer-credit", transcript: answer });
+        await vi.waitFor(() => expect(requests()).toHaveLength(1));
+        const request = requests()[0].response as { conversation: string; output_modalities: string[]; metadata: Record<string, string> };
+        expect(request).toMatchObject({ conversation: "none", output_modalities: ["text"] });
+        expect((await h.repository.getCreditUsage(owner)).transactions.some(entry => entry.type === "call_charge")).toBe(false);
+        emitJson(h.openAISocket, { type: "response.created", response: { id: "credit-result", metadata: request.metadata } });
+        const mediaCount = h.twilioSocket.sent.filter(event => event.event === "media").length;
+        emitJson(h.openAISocket, { type: "response.output_audio.delta", response_id: "credit-result", delta: "AAAA" });
+        expect(h.twilioSocket.sent.filter(event => event.event === "media")).toHaveLength(mediaCount);
+        const done = { type: "response.done", response: { id: "credit-result", metadata: request.metadata, status: "completed", output: [{
+          type: "function_call", name: "classify_task_answer", call_id: "credit-check", arguments: JSON.stringify({ category, answerQuote: answer })
+        }] } };
+        emitJson(h.openAISocket, done);
+        emitJson(h.openAISocket, done);
+        const qualifies = !["not_substantive", "uncertain"].includes(category);
+        if (qualifies) await vi.waitFor(async () => {
+          expect((await h.repository.getCreditUsage(owner)).transactions.filter(entry => entry.type === "call_charge")).toHaveLength(1);
+          expect((await h.repository.listCallTelemetryEvents(h.created.id)).filter(event => event.payload.name === "credit.settled")).toHaveLength(1);
+        });
+        await h.repository.applyProviderStatus("CA-HANGUP", "completed", "completed", h.created.id);
+        const usage = await h.repository.getCreditUsage(owner);
+        expect(usage.balance).toBe(qualifies ? 2 : 3);
+        expect(usage.transactions.filter(entry => entry.type === "call_refund")).toHaveLength(qualifies ? 0 : 1);
+      } finally {
+        emitJson(h.twilioSocket, { event: "stop" });
+        await h.service.close();
+      }
+    }
+  );
+});
 
 describe("appointment authorization integration", () => {
   const authorization: AppointmentAuthorization = {

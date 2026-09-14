@@ -84,6 +84,12 @@ function createProvider() {
 describe("TwilioTelephonyProvider", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("enforces the admitted seven-minute duration at the provider even if the API stops", async () => {
+    const { provider, calls } = createProvider();
+    await provider.startCall(brief, { maxDurationSeconds: 420 });
+    expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({ timeLimit: 420, timeout: 30, record: false }));
+  });
+
   it("requires an HTTPS public webhook base URL", () => {
     expect(
       () =>

@@ -413,16 +413,28 @@ atomically; startup/hourly maintenance enforces their 30-day limit. See [data li
 
 ## Credits, admission and abuse
 
-The ledger grants `+3` on verification. Starting reserves `-1`; provider connection
-(`in-progress` or `completed`) settles with a zero-value `call_charge`. A failure
-before connection refunds `+1` once. Refusals after connection can still consume the
-credit. PostgreSQL locks and unique constraints serialize starts, protect balances
+The ledger grants `+3` on verification. Starting reserves `-1`; connection alone
+does not settle it. The first confirmed substantive task answer after recipient
+consent creates a zero-value `call_charge`, backed by transcript segment IDs and
+a classification category. Negative factual answers, lack of knowledge and referrals
+count; greetings, silence, consent alone and immediate refusal do not. Terminal calls
+without confirmed evidence refund `+1` once. Late classification cannot undo a refund.
+See [conversation-credit policy and verification limits](conversation-credit-2026-09-14.md).
+PostgreSQL locks and unique constraints serialize starts, protect balances
 and enforce one active attempt per user. Promo plaintext is stored only as a keyed
 digest; redemption and manual reasoned grants are transactional/idempotent.
 
 Admission checks active user, approved policy, CH number, global switch, recipient
-suppression and quotas before reservation. Defaults: three starts/hour, ten/UTC day,
-two/recipient/UTC day, 900 seconds maximum. Failed/refunded starts still consume abuse
+suppression and quotas before reservation. PostgreSQL beta defaults: three starts/hour,
+ten/UTC day per account, two/recipient/rolling 24 hours across all accounts, 420 seconds
+maximum, one call/account and two globally. Open registration admits 30 accounts plus
+additional one-use admin invitations. Admin System owns the versioned settings and
+the rolling 24-hour USD budget; an unset amount blocks paid provider requests.
+Call admission reserves full permitted duration; text, ASR, SMS and email reserve
+separately against conservative allowances. API and worker serialize reservations
+in PostgreSQL. Unknown provider termination retains the concurrency slot. See
+[beta controls](beta-controls-2026-09-14.md) for accounting and rollout boundaries.
+Memory/test mode retains env-based call policy. Failed/refunded starts still consume abuse
 quotas. Disabling outbound calls blocks new starts and does not stop active calls.
 Admins can disable; only superadmins can resume. SMS-verified public opt-out and
 reasoned staff/complaint suppression/lift are implemented; in-call spoken opt-out and
@@ -436,8 +448,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog has **69 migrations**, `0001` through
-`0069_email_verification.sql`. The catalog is contiguous/checksummed; advisory locking and
+The current catalog has **71 migrations**, `0001` through
+`0071_conversation_credit_evidence.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases

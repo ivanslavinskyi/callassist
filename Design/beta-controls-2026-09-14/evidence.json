@@ -1,0 +1,58 @@
+{
+  "at": "2026-09-14T12:17:11.511Z",
+  "baseCommit": "34a0746",
+  "migration": "0070_beta_controls.sql",
+  "runtime": {
+    "publicAccountLimit": 30,
+    "maxDurationSeconds": 420,
+    "maxConcurrentCalls": 2,
+    "currency": "USD",
+    "rollingDayBudgetMicros": null,
+    "budgetState": "unconfigured",
+    "activeCalls": 0,
+    "publicAccounts": 7,
+    "invitedAccounts": 0
+  },
+  "tests": [
+    {
+      "package": "contracts",
+      "passed": 97
+    },
+    {
+      "package": "web",
+      "passed": 189
+    },
+    {
+      "package": "api",
+      "passed": 877
+    }
+  ],
+  "totalTests": 1163,
+  "failedTests": 0,
+  "testFiles": 143,
+  "isolatedFreshDatabase": true,
+  "unexpectedBackgroundErrorCount": 0,
+  "typecheck": "3/3 passed",
+  "lint": "3/3 passed",
+  "build": {
+    "exitCode": 0,
+    "isolatedNextOutput": ".next-beta-checkpoint",
+    "completedAt": "2026-09-14T12:09:50.677Z"
+  },
+  "copyFiles": 587,
+  "routes": 107,
+  "providerMessagesSent": false,
+  "browser": {
+    "environment": "isolated database and fictional superadmin, mock providers, localhost:3100",
+    "observed": [
+      "authenticated System page",
+      "30 public cap",
+      "7 minutes",
+      "2 global calls",
+      "USD fixed",
+      "blank budget warning",
+      "editable fields and invitation action"
+    ],
+    "saveBoundary": "Native confirm appeared; in-app automation could not acknowledge it. Tab closed. HTTP persistence/RBAC/revision tests passed; browser save not claimed."
+  }
+}

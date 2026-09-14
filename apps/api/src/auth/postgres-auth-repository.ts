@@ -6,6 +6,7 @@ import type {
 } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
+import { admitBetaRegistration } from "../beta/beta-controls";
 import {
   AuthRepositoryError,
   type AccountAdminInput,
@@ -162,7 +163,7 @@ export class PostgresAuthRepository implements AuthRepository {
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
 
-  constructor(databaseUrl: string) {
+  constructor(databaseUrl: string, readonly betaControlsEnabled = false) {
     this.#sql = postgres(databaseUrl, { max: 5, onnotice: () => undefined });
   }
 
@@ -170,7 +171,9 @@ export class PostgresAuthRepository implements AuthRepository {
     const id = randomUUID();
     const now = new Date();
     try {
-      const [row] = await this.#sql<UserRow[]>`
+      return await this.#sql.begin(async tx => {
+      if (this.betaControlsEnabled) await admitBetaRegistration(tx, input.invitationCode);
+      const [row] = await tx<UserRow[]>`
         INSERT INTO users (
           id, email, password_hash, phone_e164, phone_verified_at,
           first_name, last_name, role, status, ui_locale, created_at, last_login_at
@@ -183,6 +186,7 @@ export class PostgresAuthRepository implements AuthRepository {
       `;
       if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
       return this.#mapUser(row);
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new AuthRepositoryError("USER_ALREADY_EXISTS");

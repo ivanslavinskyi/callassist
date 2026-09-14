@@ -1,5 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import type { EmailProvider } from "./email-provider";
+import type { BetaControls } from "../beta/beta-controls";
 import { emailChangeRequestNotice, securityNoticeEmail, verificationEmail, type EmailContent } from "./email-templates";
 import { emailIdentity, type EmailBranding } from "./email-branding";
 
@@ -8,6 +9,7 @@ export class ResendEmailProvider implements EmailProvider {
   constructor(private readonly options: {
     apiKey: string; from: string; timeoutMs?: number; branding?: EmailBranding;
     fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>;
+    betaControls?: BetaControls;
   }) {}
 
   async sendEmailChangeVerification(input: Parameters<EmailProvider["sendEmailChangeVerification"]>[0]) {
@@ -25,6 +27,7 @@ export class ResendEmailProvider implements EmailProvider {
     // Reuse the same key AND payload after uncertain responses. Resend keeps
     // deduplication keys for 24 hours. A new code requires a new key.
     const idempotencyKey = key ?? messageId;
+    await this.options.betaControls?.reserve("email", `email:${messageId}`);
     const body = JSON.stringify({ from: this.options.from, to, reply_to: emailIdentity.supportAddress, ...content });
     const request = this.options.fetch ?? fetch;
     for (let attempt = 1; attempt <= 2; attempt++) {

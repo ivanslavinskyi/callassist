@@ -2,8 +2,9 @@ import { MockVerificationProvider } from "./verification-provider";
 import { TwilioVerificationProvider } from "./twilio-verification-provider";
 import { boundVerificationProvider } from "./bounded-verification-provider";
 import type { RateLimiter } from "./rate-limiter";
+import type { BetaControls } from "../beta/beta-controls";
 
-export function createVerificationProviderFromEnv(rateLimiter?: RateLimiter) {
+export function createVerificationProviderFromEnv(rateLimiter?: RateLimiter, betaControls?: BetaControls) {
   const driver =
     process.env.VERIFICATION_DRIVER?.trim() ||
     (process.env.TELEPHONY_DRIVER?.trim() === "twilio" ? "twilio" : "mock");
@@ -19,7 +20,7 @@ export function createVerificationProviderFromEnv(rateLimiter?: RateLimiter) {
     return boundVerificationProvider(new TwilioVerificationProvider({
       accountSid: requireEnvironmentValue("TWILIO_ACCOUNT_SID"),
       authToken: requireEnvironmentValue("TWILIO_AUTH_TOKEN"),
-      serviceSid: requireEnvironmentValue("TWILIO_VERIFY_SERVICE_SID")
+      serviceSid: requireEnvironmentValue("TWILIO_VERIFY_SERVICE_SID"), betaControls
     }), rateLimiter);
   }
   throw new Error(`Unsupported VERIFICATION_DRIVER: ${driver}`);

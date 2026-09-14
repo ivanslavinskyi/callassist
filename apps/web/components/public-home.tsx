@@ -7,13 +7,14 @@ import type {
 } from "@callassist/contracts";
 import { SELECTABLE_CALL_LANGUAGES } from "@callassist/contracts";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AppShell } from "./app-shell";
 import { getCallLanguageLabel } from "@/lib/i18n/call-language-labels";
 import { contentLanguageDirection } from "@/lib/content-localizations";
-import { LandingDemo, LandingDemoPreview } from "./landing-demo";
+import { InteractiveCallDemo } from "./interactive-call-demo";
 import { FaqList } from "./faq-list";
 import { useUiLocale } from "./ui-locale-provider";
+import { landingMessages } from "@/lib/i18n/landing-messages";
 
 export function PublicHome({
   landing,
@@ -46,13 +47,20 @@ export function PublicHomeContent({
   previewBanner?: ReactNode;
   registerHref: string;
 }) {
+  const [demoRun, setDemoRun] = useState(0);
+  const example = landing.blocks.find((item) => item.blockType === "example");
+  const heroAvailable = landing.blocks.some((item) => item.blockType === "hero");
   return (
     <main className="public-home" id="main-content" tabIndex={-1} lang={landing.locale} dir={contentLanguageDirection(landing.locale)}>
       {previewBanner}
       {landing.blocks.map((block) => (
         <LandingBlockView
           block={block}
-          exampleAvailable={landing.blocks.some((item) => item.blockType === "example")}
+          exampleTitle={example?.title}
+          heroAvailable={heroAvailable}
+          demoRun={demoRun}
+          onDemoStart={() => setDemoRun(value => value + 1)}
+          creditsAvailable={landing.blocks.some((item) => item.blockType === "cta")}
           faq={faq}
           key={block.id}
           locale={landing.locale}
@@ -63,18 +71,22 @@ export function PublicHomeContent({
   );
 }
 
-function LandingBlockView({ block, faq, locale, registerHref, exampleAvailable }: {
-  exampleAvailable: boolean;
+function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, heroAvailable, demoRun, onDemoStart, creditsAvailable }: {
+  exampleTitle?: string;
+  heroAvailable: boolean;
+  demoRun: number;
+  onDemoStart: () => void;
+  creditsAvailable: boolean;
   block: PublishedLandingBlock;
   faq: PublishedFaq | null;
   locale: PublishedLanding["locale"];
   registerHref: string;
 }) {
-  const { locale: interfaceLocale } = useUiLocale();
+  const { locale: interfaceLocale, localizeHref } = useUiLocale();
   switch (block.blockType) {
     case "hero":
       return (
-        <section className="public-hero">
+        <section className={`public-hero${exampleTitle !== undefined ? " public-hero-interactive" : ""}`}>
           <div className="public-hero-copy">
           <span className="eyebrow">{block.eyebrow}</span>
           <h1><HeroTitle title={block.title} locale={locale} /></h1>
@@ -83,15 +95,16 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleAvailable }
           {block.secondaryText ? <p className="public-hero-secondary">{block.secondaryText}</p> : null}
           <div className="public-actions">
             <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
-            <Link className="secondary-button" href={exampleAvailable ? "#example" : "#how-it-works"}>
-              {exampleAvailable ? block.secondaryCtaLabel : locale === "de" ? "So funktioniert es" : "See how it works"}
+            <Link className="secondary-button" href={exampleTitle !== undefined ? "#example" : "#how-it-works"} onClick={exampleTitle !== undefined ? onDemoStart : undefined}>
+              {exampleTitle !== undefined ? block.secondaryCtaLabel : locale === "de" ? "So funktioniert es" : "See how it works"}
             </Link>
           </div>
           <ul className="public-badges" aria-label={block.eyebrow}>
             {block.badges.map((badge) => <li key={badge}>{badge}</li>)}
           </ul>
+          {creditsAvailable ? <p className="public-credit-details"><Link href="#beta-credits" lang={interfaceLocale}>{landingMessages[interfaceLocale].creditDetails}</Link></p> : null}
           </div>
-          <div lang={interfaceLocale}><LandingDemoPreview locale={interfaceLocale} /></div>
+          {exampleTitle !== undefined ? <InteractiveCallDemo key={`${interfaceLocale}:${demoRun}`} locale={interfaceLocale} registerHref={registerHref} title={exampleTitle} autoStart={demoRun > 0} /> : null}
         </section>
       );
     case "problem":
@@ -144,7 +157,8 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleAvailable }
         </section>
       );
     case "example":
-      return <div lang={interfaceLocale}><LandingDemo locale={interfaceLocale} title={block.title} /></div>;
+      // The CMS example block now lives in the hero. Keep a standalone fallback when the hero is disabled.
+      return heroAvailable ? null : <InteractiveCallDemo locale={interfaceLocale} registerHref={registerHref} title={block.title} />;
     case "safety_privacy":
       return (
         <section className="public-section public-safety" aria-labelledby={`landing-${block.id}`}>
@@ -183,12 +197,13 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleAvailable }
       );
     case "cta":
       return (
-        <section className="public-final-cta">
+        <section className="public-final-cta" id="beta-credits" tabIndex={-1}>
           <div>
             <h2>{block.title}</h2>
             <p>{block.text}</p>
           </div>
           <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
+          <Link className="public-credit-details" href={localizeHref("/faq")} lang={interfaceLocale}>{landingMessages[interfaceLocale].creditDetails}</Link>
         </section>
       );
   }

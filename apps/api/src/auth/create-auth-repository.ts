@@ -7,7 +7,7 @@ export function createAuthRepositoryFromEnv() {
   if (driver === "postgres") {
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) throw new Error("DATABASE_URL is required for PostgreSQL auth storage");
-    return new PostgresAuthRepository(databaseUrl);
+    return new PostgresAuthRepository(databaseUrl, true);
   }
   throw new Error(`Unsupported STORAGE_DRIVER: ${driver}`);
 }

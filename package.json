@@ -7,6 +7,7 @@
     "node": ">=22.19"
   },
   "scripts": {
+    "deployment:check": "corepack pnpm --filter @callassist/api deployment:check",
     "communications:check": "corepack pnpm --filter @callassist/api communications:check",
     "build": "turbo build",
     "copy:check": "node scripts/check-public-copy.mjs",

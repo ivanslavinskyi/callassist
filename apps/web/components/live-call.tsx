@@ -1,4 +1,5 @@
 "use client";
+import { betaErrorMessage } from "@/lib/i18n/beta-messages";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 
 import {
@@ -240,6 +241,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
       onSuccess?.();
     } catch (error) {
       setActionError(
+        betaErrorMessage(error, uiLocale) ?? (
         error instanceof ApiError && error.code === "EMAIL_VERIFICATION_REQUIRED"
           ? emailVerificationMessages[uiLocale].banner
           : error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS"
@@ -261,7 +263,7 @@ export function LiveCall({ callId, userId }: { callId: string; userId: string })
                       : error instanceof ApiError &&
                           error.code === "CALL_COMPILATION_RECOMPILE_REQUIRED"
                         ? messages.live.legacyHelp
-                      : messages.live.actionError
+                      : messages.live.actionError)
       );
     } finally {
       setBusy(false);

@@ -8,6 +8,13 @@ import {
 } from "./pii-safe-logger";
 
 describe("PII-safe runtime logging", () => {
+  it("preserves a bounded database cause without logging SQL, parameters or private text", () => {
+    const cause = Object.assign(new Error("private account in query"), { code: "40P01", query: "private SQL", parameters: ["secret"] });
+    const error = Object.assign(new Error("private envelope", { cause }), { code: "BRIEF_COMPILATION_FAILED" });
+    const safe = safeErrorForLog(error);
+    expect(safe).toMatchObject({ code: "BRIEF_COMPILATION_FAILED", cause: { code: "DATABASE_DEADLOCK" } });
+    expect(JSON.stringify(safe)).not.toMatch(/private|secret|parameters/);
+  });
   it("serializes the route template instead of the raw URL", () => {
     expect(safeRequestForLog({
       id: "req-1",

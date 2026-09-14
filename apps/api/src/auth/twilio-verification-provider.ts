@@ -1,5 +1,7 @@
 import twilio from "twilio";
 import type { VerificationProvider } from "./verification-provider";
+import { randomUUID } from "node:crypto";
+import type { BetaControls } from "../beta/beta-controls";
 import { resolveCommunicationLocale } from "./communication-locales";
 
 type TwilioClient = ReturnType<typeof twilio>;
@@ -14,13 +16,16 @@ export class TwilioVerificationProvider implements VerificationProvider {
     authToken: string;
     serviceSid: string;
     client?: TwilioClient;
+    betaControls?: BetaControls;
   }) {
+    this.betaControls = options.betaControls;
     // No automatic SMS retry: an uncertain send may already be billable.
     this.#client = options.client ?? twilio(options.accountSid, options.authToken, { timeout: 8_000, autoRetry: false });
     this.#serviceSid = options.serviceSid;
   }
 
   async send(phoneE164: string, locale?: string) {
+    await this.betaControls?.reserve("sms", `sms:${randomUUID()}`);
     const selected = resolveCommunicationLocale(locale);
     const result = await this.#client.verify.v2
       .services(this.#serviceSid)
@@ -48,4 +53,5 @@ export class TwilioVerificationProvider implements VerificationProvider {
       throw error;
     }
   }
+  private readonly betaControls?: BetaControls;
 }

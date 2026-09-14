@@ -1,91 +1,93 @@
-# Emerald Paper rev02 — application design QA
-
-> **Design record, 2026-09-07.** This is the accepted visual baseline or its exploration/QA history. Route states, fixtures and screenshots predate later language, appointment and result changes. Use the [current documentation](docs/README.md) for implemented behavior and remaining acceptance; this record does not describe a currently running preview.
-
+# Interactive landing demo — design QA, 2026-09-14
 
 final result: passed
 
-Date: 2026-09-07. Design integration and final production smoke checks are complete. Evidence is consolidated; the visual findings below were fixed and recaptured.
+Scope: the reference-inspired demo and four landing product improvements. This is
+local visual/functional acceptance, not release or WCAG certification. The previous
+application-wide record is preserved unchanged in
+[design-qa-original.md](Design/implementation-2026-09-07/design-qa-original.md).
 
-## Findings and comparison history
+## Visual truth and comparison
 
-No unresolved P0/P1/P2 visual finding remains in reviewed screens. The first implementation was not accepted without iteration. Evidence filenames below are relative to `Design/implementation-2026-09-07/`.
+Source: `.codex-remote-attachments/01a09a48-1477-7590-a321-5d5a060cc592/6ddfa790-2999-498c-969c-c30936049234/1-Photo-1.jpg`
+(651 × 1280 px, source CSS size/DPR unknown; window approximately 585 px wide).
+The reference is a visual direction, not a pixel-exact clone.
 
-| Severity | Earlier finding and impact | Correction and post-fix evidence |
-| --- | --- | --- |
-| P1 | Legacy shell/navigation/card treatments changed composition. | Full-width header, source widths, open sections, common footer and licensed icons. `landing-desktop-light.png`, `new-call-desktop-light.png`, `admin-system-desktop-dark.png`. |
-| P2 | Auth spacing and compact field hierarchy differed. | Two-column frame, approved type/field sizing and mobile stacking. `register-mobile-light.png`, `login-desktop-dark.png`. |
-| P1 | Completed-call recording/feedback lacked prominence. | Final/provisional tabs, recording then feedback sidebar, export by transcript heading, collapsed plan. `call-completed-desktop-dark.png`, `call-completed-mobile-light.png`. |
-| P2 | Native player and negative form-action margins overflowed narrow screens. | Constrained audio and corrected sticky action margins. `call-completed-mobile-dark.png`, `new-call-mobile-light.png`, final 320/390/1024 measurements. |
-| P1 | Account displayed all sections at once. | Hash-addressed sections, mounted forms, desktop sidebar/mobile tabs. `account-desktop-light.png`, `account-mobile-light.png`, `account-usage-mobile-dark.png`. |
-| P2 | Account heading wrapped differently; identity actions were displaced/small. | Source letter spacing and centered 16px actions. `account-mobile-light.png`, `account-mobile-dark.png`. |
-| P2 | Articles/onboarding retained boxes and wrong information order. | Article navigation, open sections, information before required agreement. `privacy-desktop-light.png`, `onboarding-mobile-dark.png`. |
-| P1 | Admin tables, credits/safety and editors retained constrained layouts. | Workspace widths, labeled mobile rows, collapsible filters and anchored sections. `admin-credits-mobile-light.png`, `admin-calls-mobile-dark.png`, `admin-content-desktop-light.png`. |
-| P2 | Long overview cost state exceeded 320px. | Explicit minimum-width grid tracks and wrapping state labels. `admin-overview-320-after-dark.png` and final 320px measurements. |
-| P2 | Dark skip link/help and intermediate button colors failed contrast. | Semantic tokens; removed background/color transitions. Final contrast measurements and focus checks. |
-| P2 | Root 404 failed to restore theme. | Saved/system choice restored on mount. `not-found-mobile-dark.png`, `not-found-de-desktop-dark.png`. |
-| P2 | Review headings were small labels; opening boxed and metadata stacked. | Semantic 24px headings, open sections, inline metadata, a mobile title/status row and green ready state. Actual success criteria remain. `call-review-desktop-light.png`, `call-review-desktop-dark.png`, `call-review-mobile-dark.png`. |
-| P2 | Lower landing heading measure and step density differed. | Source 24ch measure, two-digit numbering, compact 16/14px rows. `source-landing-how-desktop-light.png` paired with `landing-how-desktop-light.png`. |
+Implementation: Next application at `http://localhost:3000/en` and `/de`, Landing r8.
+Screenshots: `Design/interactive-demo-2026-09-14/`.
 
-Reference and application images were supplied together in the same comparison input. Revised account, onboarding, article, call, admin and lower-landing captures were compared again after fixes. Chronological measurements retain earlier failures.
-
-## Visual truth, state and density
-
-Source: [atlas](Design/system-2026-09-07/index.html), [specifications](Design/system-2026-09-07/PAGE-SPECS.md), [guidelines](Design/system-2026-09-07/GUIDELINES.md), and `Design/system-2026-09-07/screens/`.
-
-Implementation: actual Next application at `http://localhost:3000`, existing API `buildApp`, disposable repositories/mock providers. [Reproduction and review accounts](Design/implementation-2026-09-07/README.md).
-
-Chosen Codex in-app Chromium was controlled through CUA. Requested CSS widths: 320, 390, 768, 834, 1024 and 1440; mobile height 844, desktop/tablet height 1024. Light/dark, public/customer EN/DE, existing English-only admin were inspected.
-
-Browser reports density approximately 1. Source/application mobile pairs are both 375 × 811 pixels; desktop pairs both 1425 × 1013 pixels. Capture excludes scrollbar/chrome from requested viewport. Equal-sized images were compared without rescaling. Files retain atlas `.png` names although CUA returns JPEG bytes; compression/antialiasing is not treated as font drift. `workspace-empty-desktop-light.png` is a 1024px state capture, not a 1440px comparison.
-
-Role, locale, theme and layout state are matched. Synthetic identities, dates, compiled plans and current CMS/legal copy differ from atlas examples; exact text-length/page-height equivalence is not claimed. Lower landing is aligned by How it works rather than absolute screenshot y-coordinate because preceding CMS content is longer.
-
-Representative full-view pairs share names in source and application directories: `landing-desktop-light`, `register-mobile-light`, `new-call-desktop-light`, `account-mobile-light`, `onboarding-mobile-dark`, `privacy-desktop-light`, `call-completed-desktop-dark`, `admin-system-desktop-dark`, `admin-credits-mobile-light`, `admin-calls-mobile-dark`. Review pairs source `call-desktop-light.png` with application `call-review-desktop-light.png`.
-
-Focused inspection revisited account heading/actions, onboarding agreement, transcript/audio/feedback, table cells and review metadata in these same-scale images. Mobile text/controls are readable; separate enlarged crops were unnecessary. Lower landing has a dedicated section capture pair.
-
-## Five required fidelity surfaces
-
-| Surface | Evaluation |
+| File | Viewport, dimensions and state |
 | --- | --- |
-| Fonts and typography | Embedded Geist matches approved font asset byte-for-byte. Weights, measures, body/label scale, line heights and wrapping compared; account/review drift corrected. Existing system fallbacks cover unavailable glyphs. |
-| Spacing/layout rhythm | Open sections, dividers, restrained radii, content widths and responsive columns follow reference. Tables become labeled rows. No page overflow remains in retained final measurements. |
-| Colors/tokens | Shared light/dark emerald, surface, border, disabled and semantic tokens. Visual comparison plus computed-style text-contrast heuristic; not complete WCAG certification. |
-| Images/assets | Original SVG wordmark/portal geometry and approved variants. Exact licensed Heroicons sun/moon/hamburger/close; provenance in `apps/web/public/brand/`. No generated logo or raster substitute. |
-| Copy/content | Existing EN/DE catalogues, CMS and API data. Legal disclosures, success criteria, validation and technical metadata retained. Landing example labeled; no design-process text in product flows. |
+| `01-hero-en-desktop.png` | 1280 × 1000 CSS px; 1265 × 988 capture; desktop hero. |
+| `03-live-desktop.png` | Same desktop size; paused after first substantive answer. Left hero copy is from the previous publication. |
+| `02-idle-de-mobile.png` | 390 × 1100 CSS px; 375 × 1023 capture; earlier long opening, top of frame cropped by scroll position. |
+| `07-refined-de-mobile.png` | 390 × 1100 CSS px; 375 × 1057 capture; final short opening, window approximately 335 × 844 CSS px. |
+| `05-result-de-mobile.png` | Same mobile viewport; 375 × 1057 capture; generated summary, full result frame and PDF control. |
+| `08-320-light.png` | 320 × 1000 CSS px; 305 × 953 capture; light-theme minimum-width hero. |
+| `09-hero-en-light.png` | 1280 × 1000 CSS px; light-theme final transcript in the hero; native CUA capture confirms the current painted state. |
+| `04-downloaded-pdf.png`, `06-downloaded-pdf-de.png` | Actual downloaded EN/DE A4 PDFs rendered at scale 1.3, 774 × 1095 px. |
 
-## Behavior and gates
+CUA omits scrollbar/chrome and may compress captures. No source DPR is assumed:
+window width is compared proportionally (585 source pixels to ~335 CSS pixels).
+Source and implementation were displayed together in the same image-comparison
+input, first for the initial mobile version, then again after shortening. Desktop
+composition was reviewed alongside the source. The mobile frame is the focused
+comparison for type, controls and spacing; these regions are readable without another
+crop. Both actual PDF pages were opened and visually inspected.
 
-[Coverage](Design/implementation-2026-09-07/COVERAGE.md) maps all 33 atlas entries and 162 named states to actual routes/components. Browser observations are explicitly narrower; this does not claim 162 end-to-end tests.
+## Findings and iteration history
 
-Observed interactions:
+No actionable P0/P1/P2 finding remains within this scope.
 
-- Registration, invalid SMS error, correct mock verification, required agreement, accepted onboarding and empty workspace.
-- Customer/admin login and customer `/admin` redirect. Role navigation and separate sensitive-text gate retained.
-- Filled new-call form survives History/New call and theme changes; the history hash also survives filtering and reload; API preparation creates compiled plan. Explicit confirmation starts a mock call which reaches approval and terminal states.
-- Final/provisional switching, 66-second native recording, feedback save/update and persistence after reload. Copy/PDF/deletion handlers retained; destructive deletion not executed.
-- Account name edit survives section/theme switching and saves via API. Session revocation/sign-out exercised. Contact verification/export/deletion bindings retained.
-- Populated admin calls/consent, user ledger, system sections, private CMS draft save and authorized preview. No publication or sensitive-text authorization submitted.
-- Theme persistence, hamburger open/close, Escape and visible focus returning to trigger. Native confirmation starts at Cancel; Escape returns to its opening button.
+| Earlier finding | Fix and post-fix evidence |
+| --- | --- |
+| P2: unnecessarily tall DE opening/request. | Shorter CMS title “Worum geht es?”, task and helper copy. `02` → `07`; initial window ~952 → ~844 CSS px. |
+| P2: typing shortened the task box and moved controls. | Hidden measuring span reserves the complete task height; final input-to-plan browser pass. |
+| P2: result could retain the paused badge after manual steps. | Final transcript readiness takes precedence. `05` shows “Endtranskript bereit”. |
+| P2: appointment source pointed to an offered slot rather than booking confirmation. | Source changed to explicit recipient confirmation; fixture test and DE transcript/PDF verify it. |
 
-[Chronological measurements](Design/implementation-2026-09-07/route-audit.json) retain iterations. [Final measurements](Design/implementation-2026-09-07/final-route-audit.json) retain latest valid route/width/theme observations, excluding loading, incorrect size/theme and redirects. Checks cover overflow, one common footer, theme and visible-text contrast, supplementing image comparison rather than validating every dynamic state.
+Intentional adaptations: emerald colors replace blue/cyan; the actual brand symbol
+replaces decorative browser dots; five workflow stages replace three. No real phone
+number is shown for fictional contacts. Unsupported live translation/rescheduling
+controls from the reference are omitted. The initials tile is an ordinary text UI
+element as in the reference. No custom logo, icon substitute or raster art was added.
+The richer workflow makes the mobile window taller; content remains scrollable.
 
-26 web test files / 113 tests passed. Public copy check passed for 420 files. ESLint, TypeScript and optimized Next build passed. Fresh production checks found no new browser errors in exercised customer/admin routes. Dev hot reload emitted React `useId` warnings in existing form/dialog components; they did not reproduce after a fresh production build. New menus have explicit stable IDs.
+## Required fidelity surfaces
 
-Reduced-motion CSS is implemented; the loaded stylesheet was inspected for disabled animation/transitions and non-smooth scrolling under the media query. OS-level reduced-motion emulation, actual 200% zoom, screen readers, password managers and cross-browser testing were not executed. R13 remains partial. Native dialog behavior was checked as stated, not certified as an exhaustive keyboard audit.
+| Surface | Assessment |
+| --- | --- |
+| Typography | Existing Geist/fallbacks; 27–29 px demo headings, 14 px task/turn text, smaller secondary labels. Hierarchy, DE wrapping, weights and line spacing reviewed. No essential text is truncated. |
+| Spacing/layout | Single hero demo, responsive minmax grid, 24–28 px outer radius, 20–26 px padding, segmented buttons, recipient tile and task inset. Review/transcript regions scroll independently. No horizontal page overflow at 1280/390/320 px. |
+| Colors/tokens | Paper/emerald/ink treatment works in light and dark themes. Text-to-paper samples: ink 14.1:1, muted 5.8:1, accent 5.0:1; not a full contrast audit. |
+| Images/assets | Actual SVG brand mark and PDF wordmark, sharp vectors. No raster scaling, halos, invented illustration or image approximation. |
+| Copy/content | Supported operations and approved facts only; fictional/no-audio labels. Benefit-led hero, concrete scenarios, short CTA and full credit rules in FAQ. |
 
-## Accepted differences / remaining release work
+## Functional verification and boundaries
 
-- P3: native recording controls differ from illustrative player while providing real browser playback; dimensions fit the layout.
-- P3: real identities, CMS sections, plans and metadata change row heights/page lengths; preserved instead of replaced by examples.
-- P3: minor browser rendering and native disclosure-marker differences. Source brand and theme/menu assets are exact.
-- R13/R06/R14 retain exhaustive fault/reconnect states, assistive technology, browser/password-manager acceptance and live-provider drills. Local design acceptance does not imply deployment or public-beta acceptance.
+- Completed EN documents and DE appointment/repair in browser. Exercised explicit
+  approval, consent, sequential live replies, final transcript, optional summary,
+  pause/resume/manual step, reset/replay and scenario/language selection.
+- Full plan opened with Enter. Summary source selected and focused the exact
+  transcript turn. Native buttons, focus indicators, labelled regions and polite
+  stage announcements present. Reduced-motion manual mode is implemented; an OS-level
+  reduced-motion/screen-reader acceptance session was not performed.
+- Browser-downloaded EN documents and DE appointment PDF files were opened/rendered.
+  DE was verified in a fresh page after repeated downloads in one in-app tab did not
+  save; its download event was unreliable. All six fixtures also rendered locally
+  with final turns and Unicode intact. No real providers called.
+- Console error/warn checks returned empty arrays. Light/dark and 320/390/1280 px
+  checked. Temporary viewport override is reset at handoff.
+- 198 web tests, 9 final demo tests, 8 content-service tests, copy consistency,
+  lint/typecheck and isolated production build pass.
 
 ## Implementation checklist
 
-- [x] Approved tokens/assets and shared responsive shells in actual app.
-- [x] Public/auth/customer/completed-call/admin/preview screens.
-- [x] Full atlas mapping; observed states distinguished from mapped branches.
-- [x] Actionable visual findings fixed, recaptured and re-compared.
-- [x] Final production smoke check, evidence consolidation and R20 local handoff.
+- [x] Four product changes and one interactive hero demo.
+- [x] Shared real plan/summary/PDF presentation with explicit simulated content.
+- [x] EN/DE dictionaries and complete scenarios tied to UiLocale.
+- [x] CMS r8 with preserved history/backups; roadmap updated.
+- [x] Mobile/desktop, controls, source links, PDF and console checks.
+
+Remaining B10 acceptance: screen reader, 200% text zoom and cross-browser checks on
+the deployed release. Audio narration is outside this text-demo scope.

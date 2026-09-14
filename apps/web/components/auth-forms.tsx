@@ -18,6 +18,7 @@ import {
   updateLanguagePreferences
 } from "@/lib/api";
 import { authMessages, getAuthErrorMessage } from "@/lib/i18n/auth-messages";
+import { betaMessages } from "@/lib/i18n/beta-messages";
 import { useUiLocale } from "@/components/ui-locale-provider";
 import { localizePathname } from "@/lib/i18n/routing";
 import { clearExplicitGuestLocale, readExplicitGuestLocale, rememberUiLocale, resolvePostLoginLocale } from "@/lib/ui-language-preference";
@@ -72,7 +73,8 @@ export function RegistrationForm() {
         email,
         phoneE164: String(data.get("phoneE164") ?? "").trim(),
         password: String(data.get("password") ?? ""),
-        uiLocale: locale
+        uiLocale: locale,
+        ...(String(data.get("invitationCode") ?? "").trim() ? { invitationCode: String(data.get("invitationCode")).trim() } : {})
       });
       router.push(`${localizeHref("/verify")}?email=${encodeURIComponent(email)}`);
     } catch (caught) {
@@ -86,6 +88,11 @@ export function RegistrationForm() {
       <h1>{copy.register.title}</h1>
       <p className="auth-intro">{copy.register.intro}</p>
       <form className="auth-form" onSubmit={submit}>
+        <label className="field">
+          <span>{betaMessages[locale].invitation}</span>
+          <input name="invitationCode" autoComplete="off" maxLength={43} minLength={43} spellCheck={false} aria-describedby="invitation-help" />
+          <small id="invitation-help">{betaMessages[locale].invitationHelp}</small>
+        </label>
         <div className="auth-name-grid">
           <label className="field">
             <span>{copy.register.firstName}</span>

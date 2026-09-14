@@ -13,6 +13,14 @@ the system dashboard. Both routes remain private/no-store and role-protected;
 only superadmin can enable calls. Unknown state offers disable only. This switch
 prevents new calls; it does not terminate calls already in progress.
 
+Since 2026-09-14, **Beta access and spending** is another independent System panel.
+Administrators can read `/api/admin/system/beta`; only superadmins may update settings,
+create additional one-use invitations or revoke them. Updates require a reason and
+matching settings revision. Invitation codes are shown once; only their hashes are
+stored. UI errors do not pretend an uncertain write failed before commit: refresh
+is required to inspect the current state. See [beta controls](beta-controls-2026-09-14.md)
+for public admission, USD budget, call duration/concurrency and stop semantics.
+
 ## Decision
 
 The administrative interface is a separate, English-only application surface

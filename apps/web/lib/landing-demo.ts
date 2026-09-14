@@ -27,7 +27,7 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
     educationalNote: "A fictional example of a call plan and conversation. No call is placed.",
     recipient: "Municipal office · residence form",
     requestLabel: "Your request",
-    request: "Ask my municipal office whether my residence form arrived. If anything is missing, ask what I need to send. You may share my name, Anna Keller, and that I sent the form on 2 September.",
+    request: "Ask my Gemeinde if my residence form arrived and what is missing. You may give my name, Anna Keller, and say I sent it on 2 September.",
     planLabel: "The plan you review",
     questionsLabel: "Questions to ask",
     factsLabel: "Information you approve",
@@ -46,7 +46,7 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
         { id: "question.0", label: "Missing document", text: "A copy of the passport.", certainty: "reported", sourceSegmentIds: ["demo-1"] }
       ],
       nextSteps: [{ text: "The office says the missing copy can be submitted by email.", sourceSegmentIds: ["demo-3"] }],
-      unresolved: ["The email address was not specified in this excerpt."]
+      unresolved: ["The email address was not specified in the conversation."]
     },
     plan: {
       localizedObjective: "Check whether Anna Keller’s residence form arrived and ask which documents, if any, are still needed.",
@@ -81,7 +81,7 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
     educationalNote: "Ein fiktiver Anrufplan und Gesprächsverlauf zur Veranschaulichung. Es wird kein Anruf gestartet.",
     recipient: "Gemeinde · Aufenthaltsformular",
     requestLabel: "Ihre Anfrage",
-    request: "Fragen Sie meine Gemeinde, ob mein Aufenthaltsformular angekommen ist. Falls etwas fehlt, fragen Sie, was ich noch senden muss. Sie dürfen meinen Namen Anna Keller nennen und sagen, dass ich das Formular am 2. September gesendet habe.",
+    request: "Fragen Sie die Gemeinde, ob mein Aufenthaltsformular da ist und was noch fehlt. Sie dürfen meinen Namen Anna Keller und den Versand am 2. September nennen.",
     planLabel: "Der Plan zur Prüfung",
     questionsLabel: "Geplante Fragen",
     factsLabel: "Freigegebene Angaben",
@@ -100,7 +100,7 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
         { id: "question.0", label: "Fehlende Unterlage", text: "Eine Kopie des Passes.", certainty: "reported", sourceSegmentIds: ["demo-1"] }
       ],
       nextSteps: [{ text: "Laut Gemeinde kann die fehlende Kopie per E-Mail eingereicht werden.", sourceSegmentIds: ["demo-3"] }],
-      unresolved: ["Die E-Mail-Adresse wurde in diesem Ausschnitt nicht genannt."]
+      unresolved: ["Die E-Mail-Adresse wurde im Gespräch nicht genannt."]
     },
     plan: {
       localizedObjective: "Klären, ob Anna Kellers Aufenthaltsformular angekommen ist und ob noch Unterlagen fehlen.",

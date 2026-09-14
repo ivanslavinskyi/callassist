@@ -1,4 +1,5 @@
 import { VerificationSendError } from "./bounded-verification-provider";
+import { BetaControlError, type BetaControls } from "../beta/beta-controls";
 import type {
   AccountSessionBrowser,
   AccountSessionList,
@@ -85,11 +86,13 @@ export class AuthService {
   readonly #signupCreditGranter: SignupCreditGranter;
   readonly #emailVerificationHashKey: Buffer;
   readonly #emailVerificationCode: () => string;
+  readonly #betaControls?: BetaControls;
 
   constructor(options: {
     repository: AuthRepository;
     verificationProvider: VerificationProvider;
     emailProvider?: EmailProvider;
+    betaControls?: BetaControls;
     emailVerificationHashKey?: Buffer;
     emailVerificationCode?: () => string;
     rateLimiter?: RateLimiter;
@@ -98,6 +101,7 @@ export class AuthService {
     signupCreditGranter: SignupCreditGranter;
   }) {
     this.repository = options.repository;
+    this.#betaControls = options.betaControls;
     this.verificationProvider = options.verificationProvider;
     this.emailProvider = options.emailProvider ?? new MockEmailProvider();
     this.#rateLimiter = options.rateLimiter ?? new ApplicationRateLimiter();
@@ -117,6 +121,7 @@ export class AuthService {
       limitEntry("register:phone", input.phoneE164, 3, 60 * minute),
       limitEntry("verification-send:phone", input.phoneE164, 3, 60 * minute)
     ]);
+    await this.#betaControls?.assertAvailable("sms");
     const passwordHash = await hashPassword(input.password);
     const { password: _password, ...profile } = input;
     let user: AuthUserRecord;
@@ -962,6 +967,7 @@ function mapAdminRepositoryError(error: unknown) {
 }
 
 function verificationServiceError(error: unknown) {
+  if (error instanceof BetaControlError) return error;
   if (error instanceof VerificationSendError) return new AuthServiceError(error.code, { retryAfterSeconds: error.retryAfterSeconds });
   if (error instanceof RateLimiterUnavailableError) return new AuthServiceError("RATE_LIMIT_UNAVAILABLE");
   writePiiSafeOperationalError("sms_verification_provider_failed");

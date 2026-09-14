@@ -134,7 +134,7 @@ const en = {
     promo_grant: "Promo grant",
     admin_grant: "Admin grant",
     call_reservation: "Call reservation",
-    call_charge: "Connected call charge",
+    call_charge: "Call credit used",
     call_refund: "Call refund",
     adjustment: "Ledger adjustment"
   } satisfies Record<CreditTransactionType, string>
@@ -298,7 +298,7 @@ const de: AdminUserMessages = {
     promo_grant: "Aktionsgutschrift",
     admin_grant: "Admin-Gutschrift",
     call_reservation: "Anrufreservierung",
-    call_charge: "Verbundener Anruf",
+    call_charge: "Anrufguthaben verbraucht",
     call_refund: "Anruferstattung",
     adjustment: "Ledger-Korrektur"
   }

@@ -14,7 +14,8 @@ export function createCallRepositoryFromEnv(): CallRepository {
     }
     return new PostgresCallRepository(
       databaseUrl,
-      parseDataEncryptionKeyring(process.env)
+      parseDataEncryptionKeyring(process.env),
+      true
     );
   }
 

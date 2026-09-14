@@ -854,10 +854,10 @@ describe("auth API", () => {
         revision: { number: 1 },
         blocks: [
           { blockType: "hero" },
-          { blockType: "problem" },
           { blockType: "use_cases" },
-          { blockType: "example" },
           { blockType: "how_it_works" },
+          { blockType: "example" },
+          { blockType: "problem" },
           { blockType: "safety_privacy" },
           { blockType: "languages" },
           { blockType: "faq", itemLimit: 9 },

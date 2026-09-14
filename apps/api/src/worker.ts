@@ -27,7 +27,7 @@ const textProcessor = createTextProcessorFromEnv();
 const service = new CallService(
   repository,
   telephonyProvider,
-  () => writePiiSafeOperationalError("durable_worker_operation_failed"),
+  error => writePiiSafeOperationalError("durable_worker_operation_failed", error),
   postCallTranscriber,
   createBriefCompilerFromEnv(),
   undefined,

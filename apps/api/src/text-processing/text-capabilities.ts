@@ -9,7 +9,7 @@ export function allTextDirections(): TextDirection[] {
 }
 
 /** Real directions are enabled independently after language-quality checks. Reads never depend on this switch. */
-export function textCapabilitiesFromEnv(processor: TextProcessor, environment: NodeJS.ProcessEnv = process.env): TextCapabilities {
+export function textCapabilitiesFromEnv(processor: Pick<TextProcessor, "driver">, environment: NodeJS.ProcessEnv = process.env): TextCapabilities {
   const raw = environment.TEXT_ARTIFACT_GENERATION_ENABLED?.trim();
   if (raw && raw !== "true" && raw !== "false") throw new Error("TEXT_ARTIFACT_GENERATION_ENABLED must be true or false");
   const enabled = raw ? raw === "true" : processor.driver === "mock";

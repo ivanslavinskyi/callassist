@@ -1,4 +1,5 @@
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
+import type { BetaControls } from "../beta/beta-controls";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import type {
   ApprovalDecision,
@@ -73,6 +74,7 @@ export type ApprovalMutationResult = {
 };
 
 export type CallAttemptRecord = {
+  maxDurationSeconds?: number;
   id: string;
   callBriefId: string;
   compilationId: string | null;
@@ -733,6 +735,7 @@ export type FinalTranscriptMutationResult = {
 };
 
 export interface CallRepository extends CallTextRepository {
+  readonly betaControls?: BetaControls;
   getLanguageContext(id: string): Promise<CallLanguageContext | null>;
   updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number): Promise<CallLanguageContext>;
   readonly mode: "memory" | "postgres";
@@ -910,6 +913,11 @@ export interface CallRepository extends CallTextRepository {
     text: string,
     locale: CallLocale
   ): Promise<{ segment: TranscriptSegment; snapshot: CallSnapshot }>;
+  qualifyConversationCredit(
+    id: string,
+    attemptId: string,
+    evidence: import("../credits/conversation-credit").ConversationCreditEvidence
+  ): Promise<boolean>;
   requestApproval(
     id: string,
     draft: ApprovalRequestDraft
@@ -1068,14 +1076,10 @@ export const connectedProviderStatuses = new Set([
 
 export function creditSettlementForStatus(
   callStatus: CallBrief["status"],
-  providerStatus?: string | null
+  _providerStatus?: string | null
 ): Extract<CreditTransaction["type"], "call_charge" | "call_refund"> | null {
-  if (
-    callStatus === "in_progress" ||
-    (providerStatus && connectedProviderStatuses.has(providerStatus))
-  ) {
-    return "call_charge";
-  }
+  // Connection and consent alone never consume a credit. A trusted, persisted
+  // substantive-answer decision settles the reservation independently.
   return terminalStatuses.has(callStatus) ? "call_refund" : null;
 }
 

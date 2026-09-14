@@ -110,7 +110,8 @@ export function safeRequestForLog(request: LogRequest) {
   };
 }
 
-export function safeErrorForLog(error: unknown) {
+type SafeError = { type: string; message: string; stack: string; code?: string; statusCode?: number; cause?: SafeError };
+export function safeErrorForLog(error: unknown, depth = 0): SafeError {
   if (!error || typeof error !== "object") return {
     type: "Error",
     message: "[Redacted]",
@@ -120,12 +121,21 @@ export function safeErrorForLog(error: unknown) {
     name?: unknown;
     code?: unknown;
     statusCode?: unknown;
+    cause?: unknown;
   };
   const type = typeof candidate.name === "string" &&
     safeErrorTypePattern.test(candidate.name)
     ? candidate.name
     : "Error";
-  const code = typeof candidate.code === "string" &&
+  const databaseCodes: Record<string, string> = {
+    "40P01": "DATABASE_DEADLOCK",
+    "40001": "DATABASE_SERIALIZATION_FAILURE",
+    "23503": "DATABASE_FOREIGN_KEY_VIOLATION",
+    "23505": "DATABASE_UNIQUE_VIOLATION"
+  };
+  const code = typeof candidate.code === "string" && Object.hasOwn(databaseCodes, candidate.code)
+    ? databaseCodes[candidate.code]
+    : typeof candidate.code === "string" &&
     safeErrorCodePattern.test(candidate.code)
     ? candidate.code
     : undefined;
@@ -139,15 +149,17 @@ export function safeErrorForLog(error: unknown) {
     message: "[Redacted]",
     stack: "[Redacted]",
     code,
-    statusCode
+    statusCode,
+    ...(depth < 2 && candidate.cause ? { cause: safeErrorForLog(candidate.cause, depth + 1) } : {})
   };
 }
 
-export function writePiiSafeOperationalError(event: string) {
+export function writePiiSafeOperationalError(event: string, error?: unknown) {
   process.stderr.write(`${JSON.stringify({
     level: "error",
     time: new Date().toISOString(),
-    event
+    event,
+    ...(error === undefined ? {} : { error: safeErrorForLog(error) })
   })}\n`);
 }
 import type { FastifyInstance } from "fastify";

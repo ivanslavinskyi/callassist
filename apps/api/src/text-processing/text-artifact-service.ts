@@ -4,6 +4,7 @@ import {
   type PlanReviewPayload, type CallSummaryPayload
 } from "@callassist/contracts";
 import { CallRepositoryError, type CallRepository } from "../storage/call-repository";
+import { BetaControlError } from "../beta/beta-controls";
 import { textArtifactMaximumRequests } from "../storage/call-text-repository";
 import { DurableJobExecutionError, type DurableJob, type DurableJobLease } from "../jobs/durable-job";
 import { planReviewFields } from "./plan-review-fields";
@@ -56,7 +57,11 @@ export class TextArtifactService {
       (kind === "clarification_review" && sourceLanguage.split("-")[0] !== targetLanguage);
     if (!textDirectionEnabled(this.capabilities, kind, sourceLanguage, targetLanguage) || !needsTranslation) return;
     const source = await this.repository.getPlanSource(callId);
-    await this.requestPlanReview(callId, { ...source, targetLanguage });
+    await this.requestPlanReview(callId, { ...source, targetLanguage }).catch(error => {
+      // A newer compilation owns its own automatic review. A superseded snapshot
+      // is an expected race and must not fail an already published preparation.
+      if (!(error instanceof CallRepositoryError && error.code === "TEXT_ARTIFACT_STALE")) throw error;
+    });
   }
 
   async retry(callId: string, artifactId: string) {
@@ -75,9 +80,9 @@ export class TextArtifactService {
   async process(job: DurableJob, baseLease: DurableJobLease) {
     if (!job.textArtifactId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     const lease = () => ({ ...baseLease, generation: job.generation, attemptNumber: job.attemptCount, checkedAt: new Date().toISOString() });
-    const artifact = await this.repository.claimTextArtifact(job.textArtifactId, lease());
-    if (["ready", "stale", "cancelled"].includes(artifact.status)) return;
     try {
+      const artifact = await this.repository.claimTextArtifact(job.textArtifactId, lease());
+      if (["ready", "stale", "cancelled"].includes(artifact.status)) return;
       const snapshot = await this.repository.get(artifact.callId);
       if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
       const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
@@ -137,11 +142,11 @@ export class TextArtifactService {
       }
       await this.repository.completeTextArtifact(artifact.id, payload, lease());
     } catch (error) {
-      const code = error instanceof TextProcessingError || error instanceof DurableJobExecutionError || error instanceof CallRepositoryError || error instanceof TextArtifactServiceError ? error.code : "TEXT_ARTIFACT_GENERATION_FAILED";
-      await this.repository.failTextArtifact(artifact.id, code, lease()).catch(() => undefined);
+      const code = error instanceof TextProcessingError || error instanceof DurableJobExecutionError || error instanceof CallRepositoryError || error instanceof TextArtifactServiceError || error instanceof BetaControlError ? error.code : "TEXT_ARTIFACT_GENERATION_FAILED";
+      await this.repository.failTextArtifact(job.textArtifactId, code, lease()).catch(() => undefined);
       throw new DurableJobExecutionError(code, { cause: error, retryAfterMs: error instanceof TextProcessingError ? error.retryAfterMs : undefined,
         retryable: error instanceof TextProcessingError ? error.retryable :
-        error instanceof DurableJobExecutionError ? error.retryable : !(error instanceof CallRepositoryError) && !(error instanceof TextArtifactServiceError) });
+        error instanceof DurableJobExecutionError ? error.retryable : !(error instanceof CallRepositoryError) && !(error instanceof TextArtifactServiceError) && !(error instanceof BetaControlError) });
     }
   }
 

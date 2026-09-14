@@ -26,6 +26,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     TWILIO_VERIFY_SERVICE_SID: "VA123",
     PUBLIC_BASE_URL: "https://calls.example.test",
     WEB_ORIGIN: "https://www.example.test,https://admin.example.test",
+    TRUSTED_PROXY_CIDRS: "127.0.0.1/32",
     VERIFICATION_DRIVER: "twilio",
     EMAIL_DRIVER: "resend",
     RESEND_API_KEY: "resend-private",
@@ -37,6 +38,9 @@ function productionEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe("production runtime configuration", () => {
+  it.each([undefined, "true", "0.0.0.0/0"])("requires a reviewed proxy policy instead of %s", value => {
+    expect(() => validateRuntimeEnvironment({ ...productionEnvironment(), TRUSTED_PROXY_CIDRS: value }, "api")).toThrow("TRUSTED_PROXY_CIDRS");
+  });
   it.each([undefined, "", "  ", "true"])("rejects enabled mock text transformations with flag %s", (flag) => {
     for (const runtime of ["api", "worker"] as const) {
       expect(() => validateRuntimeEnvironment({ ...productionEnvironment(),

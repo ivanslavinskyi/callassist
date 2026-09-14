@@ -56,7 +56,8 @@ export const registrationInputSchema = z.object({
   phoneE164: accountPhoneSchema,
   firstName: personNamePartSchema,
   lastName: personNamePartSchema,
-  uiLocale: supportedUiLocaleSchema
+  uiLocale: supportedUiLocaleSchema,
+  invitationCode: z.string().trim().regex(/^[A-Za-z0-9_-]{43}$/).optional()
 });
 export type RegistrationInput = z.infer<typeof registrationInputSchema>;
 

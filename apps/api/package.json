@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "deployment:check": "tsx src/config/check-deployment.ts",
+    "deployment:check:prod": "node dist/config/check-deployment.js",
     "communications:check": "tsx src/auth/check-communications.ts",
     "build": "tsup && node scripts/copy-migrations.mjs",
     "calls:disable": "tsx src/db/set-outbound-calls.ts disable",

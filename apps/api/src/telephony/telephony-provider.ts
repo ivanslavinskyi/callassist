@@ -95,7 +95,7 @@ export type ProviderRecordingStatus = {
 
 export interface TelephonyProvider {
   readonly mode: "mock" | "twilio";
-  startCall(brief: CallBrief): Promise<StartTelephonyCallResult>;
+  startCall(brief: CallBrief, options?: { maxDurationSeconds: number }): Promise<StartTelephonyCallResult>;
   stopCall(providerCallId: string): Promise<void>;
   startRecording(
     providerCallId: string,

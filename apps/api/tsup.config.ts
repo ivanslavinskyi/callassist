@@ -3,6 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   clean: true,
   entry: {
+    "config/check-deployment": "src/config/check-deployment.ts",
     index: "src/index.ts",
     worker: "src/worker.ts",
     "db/migrate": "src/db/migrate.ts",

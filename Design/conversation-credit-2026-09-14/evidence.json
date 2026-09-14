@@ -1,0 +1,57 @@
+{
+  "date": "2026-09-14",
+  "fullSuite": {
+    "files": 147,
+    "passed": 1212,
+    "failed": 1,
+    "skipped": 0,
+    "isolatedFreshDatabase": true,
+    "failure": "Existing worker restart recovery test exceeded 15000 ms during concurrent production build"
+  },
+  "targetedRepeatAfterBuild": {
+    "suite": "postgres-call-repository.integration.test.ts",
+    "passed": 22,
+    "failed": 0,
+    "isolatedFreshDatabase": true
+  },
+  "correctedCmsOrderTests": {
+    "passed": 45,
+    "failed": 0
+  },
+  "lint": {
+    "passedPackages": 3
+  },
+  "typecheck": {
+    "passedPackages": 3
+  },
+  "build": {
+    "exitCode": 0,
+    "isolatedNextOutput": ".next-conversation-checkpoint",
+    "completedAt": "2026-09-14T13:29:17.896Z"
+  },
+  "localMigration": "0071_conversation_credit_evidence.sql",
+  "localApiRestarted": true,
+  "activeWorkBeforeRestart": 0,
+  "localCms": {
+    "landing": 6,
+    "faqCollection": 5,
+    "privacy": 4,
+    "terms": 4,
+    "acceptableUse": 5,
+    "faqPage": 4,
+    "locales": [
+      "en",
+      "de"
+    ],
+    "priorDraftsBackedUp": true,
+    "previousPublicationsPreserved": true,
+    "imprintUnchanged": true
+  },
+  "externalCallsOrModelRequests": false,
+  "publicDeployment": false,
+  "semanticModelAcceptance": "Pending real multilingual call drills",
+  "secretScan": {
+    "files": 103,
+    "findings": 0
+  }
+}

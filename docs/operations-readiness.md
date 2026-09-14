@@ -4,7 +4,7 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Reviewed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. B01/B02 are remediated locally with
+Reviewed 2026-09-14 for beta controls following `34a0746`. B01/B02 are remediated locally with
 [current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
 [historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
 has async preparation, but its start stage still needs the v2 review-receipt contract
@@ -13,6 +13,19 @@ provider/outage acceptance remains partial. Review the
 [roadmap](mvp-plan.md) for remaining provider, privacy, safety and deployment gates.
 
 ## Health contract
+
+Beta controls (0070): apply the migration, restart API/worker, then set a rolling
+24-hour USD budget in **Admin System → Beta access and spending**. The default amount
+is unset and fails closed. Admission starts at 30 public accounts plus extra one-use
+invitations, seven-minute calls, one/account and two globally. Settings are shared
+across API/worker. Review the conservative per-operation allocations against actual
+provider costs before launch. `beta_budget_threshold_reached` (80%) and
+`beta_budget_request_blocked` are aggregate log signals, not delivered alerts.
+Route them to the named operator and rehearse exhaustion/pause on staging.
+The broader spending switch stops new paid text/ASR/SMS/email and calls; Stop and
+cleanup stay available. Unknown provider termination occupies its slot until
+reconciliation confirms completion; investigate rather than erasing its attempt.
+Detailed semantics, rollback and evidence: [beta controls](beta-controls-2026-09-14.md).
 
 B03/B04 implementation (2026-09-14): run `corepack pnpm communications:check`
 for a configuration-only report with no provider traffic or secret values.
@@ -78,7 +91,10 @@ stream tokens, OTPs, request/response bodies, phone numbers, email or names, cal
 brief/objective/facts/transcript text, internal call or recording identifiers,
 provider identifiers/payloads, or arbitrary exception bodies. The logger includes
 explicit redaction paths as defense in depth. The standalone worker emits only a
-stable event code on an unhandled operation or shutdown failure.
+stable event code and sanitized error codes on an unhandled operation; shutdown
+failures remain bounded. Database deadlocks retain `DATABASE_DEADLOCK` in a bounded
+cause chain without SQL/parameters/message/stack. Superseded text jobs retain a
+cancelled attempt with `TEXT_ARTIFACT_STALE` instead of a false background failure.
 
 A deployment owner must still configure access control, transport encryption,
 destination retention, deletion, and an automated canary that verifies redaction.
@@ -311,6 +327,10 @@ unprepared database; it does not replace the dry runs, recovery evidence, worker
 drain, or preserved standalone gate output.
 
 Production API and worker processes must pass fail-closed environment validation.
+Use the read-only [deployment preflight](deployment-preflight.md) for the combined
+configuration, then verify the actual processes and proxy externally. The first
+deployment target is `shprohli.ch` with temporary restricted access, after B07 landing
+completion; a separate staging server is not required.
 Never bypass a validation issue by changing `NODE_ENV`. Verify TLS termination before
 trusting HSTS, keep the main and Twilio listener ports separate, and do not reuse the
 data-encryption key as the promo-code HMAC key. If an applied migration checksum

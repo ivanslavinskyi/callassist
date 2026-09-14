@@ -4,6 +4,7 @@ import { InMemoryCallTextStore } from "./in-memory-call-text-store";
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import type { TextArtifactProviderOperationRecord } from "./call-repository";
+import { conversationCreditEvidenceSchema, conversationCreditReason, conversationCreditRefundReason, type ConversationCreditEvidence } from "../credits/conversation-credit";
 import {
   CALL_OUTCOME_SCHEMA_VERSION,
   CALL_TELEMETRY_SCHEMA_VERSION,
@@ -2718,6 +2719,21 @@ export class InMemoryCallRepository implements CallRepository {
     return { segment: copy(segment), snapshot: copy(snapshot) };
   }
 
+  async qualifyConversationCredit(id: string, attemptId: string, input: ConversationCreditEvidence) {
+    const evidence = conversationCreditEvidenceSchema.parse(input);
+    const snapshot = this.#require(id);
+    const attempt = (this.#attempts.get(id) ?? []).find(item => item.id === attemptId);
+    const recording = snapshot.recording;
+    const question = snapshot.transcript.find(item => item.id === evidence.questionSegmentId);
+    const answer = snapshot.transcript.find(item => item.id === evidence.answerSegmentId);
+    if (!attempt || attempt.endedAt || !recording?.startedAt || !recording.providerRecordingId ||
+        this.#recordingAttempts.get(recording.id) !== attemptId ||
+        question?.role !== "assistant" || answer?.role !== "recipient" || !question.final || !answer.final ||
+        !question.text.trim() || !answer.text.trim() || question.createdAt < recording.consentGrantedAt ||
+        question.createdAt < attempt.startedAt || answer.createdAt < question.createdAt) return false;
+    return this.#settleAttempt(id, attempt, "call_charge", evidence) === "call_charge";
+  }
+
   async requestApproval(id: string, draft: ApprovalRequestDraft) {
     const snapshot = this.#require(id);
     const approval: ApprovalRequest = {
@@ -3416,6 +3432,7 @@ export class InMemoryCallRepository implements CallRepository {
     const job = this.#findDurableJob(jobId);
     if (!job || !durableJobLeaseIsValid(job, workerId, now)) return null;
     const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
+    const cancelled = job.type === "text_artifact_generation" && errorCode === "TEXT_ARTIFACT_STALE";
     this.#durableJobAttempts.push({
       id: randomUUID(),
       jobId,
@@ -3424,17 +3441,17 @@ export class InMemoryCallRepository implements CallRepository {
       workerId,
       startedAt: job.leasedAt!,
       completedAt: now,
-      outcome: deadLetter ? "dead_letter" : "retry_scheduled",
+      outcome: cancelled ? "cancelled" : deadLetter ? "dead_letter" : "retry_scheduled",
       errorCode
     });
-    job.status = deadLetter ? "dead_letter" : "queued";
+    job.status = cancelled ? "cancelled" : deadLetter ? "dead_letter" : "queued";
     job.runAfter = deadLetter ? job.runAfter : retryAt;
     job.leaseOwner = null;
     job.leasedAt = null;
     job.leaseExpiresAt = null;
     job.lastErrorCode = errorCode;
     job.updatedAt = now;
-    job.completedAt = deadLetter ? now : null;
+    job.completedAt = cancelled || deadLetter ? now : null;
     this.#settleCallPreparationFailure(job, deadLetter, errorCode, now);
     return copy(job);
   }
@@ -3621,7 +3638,8 @@ export class InMemoryCallRepository implements CallRepository {
         name: "credit.settled",
         metadata: {
           settlement: normalized,
-          connected: settlement === "call_charge"
+          connected: settlement === "call_charge" || (this.#callTelemetryEvents.get(callBriefId) ?? []).some(({ event }) =>
+            event.callAttemptId === callAttemptId && event.payload.name === "connection.confirmed")
         }
       }
     });
@@ -3741,9 +3759,11 @@ export class InMemoryCallRepository implements CallRepository {
   #settleAttempt(
     callBriefId: string,
     attempt: CallAttemptRecord,
-    type: "call_charge" | "call_refund" | null
+    type: "call_charge" | "call_refund" | null,
+    qualification?: ConversationCreditEvidence
   ): "call_charge" | "call_refund" | null {
     if (!type) return null;
+    if (type === "call_charge" && !qualification) return null;
     const userId = this.#owners.get(callBriefId);
     if (!userId) return null;
     const hasReservation = this.#creditTransactions.some(
@@ -3767,8 +3787,8 @@ export class InMemoryCallRepository implements CallRepository {
       adminId: null,
       reason:
         type === "call_refund"
-          ? "Call ended before successful connection"
-          : "Provider connection confirmed",
+          ? conversationCreditRefundReason
+          : conversationCreditReason,
       idempotencyKey: `call:${attempt.id}:${type === "call_refund" ? "refund" : "charge"}`,
       createdAt: new Date().toISOString()
     });
@@ -3871,7 +3891,8 @@ export class InMemoryCallRepository implements CallRepository {
     if(job.textArtifactId) {
       const artifact=this.#callText.artifacts.get(job.textArtifactId);
       if(artifact&&["queued","processing","failed"].includes(artifact.status)) Object.assign(artifact,{
-        status:deadLetter?"failed":"queued",failureCode:deadLetter?errorCode:null,updatedAt:now
+        status:job.status==="cancelled"?"stale":deadLetter?"failed":"queued",
+        failureCode:job.status==="cancelled"||deadLetter?errorCode:null,updatedAt:now
       });
     }
     if (!job.callPreparationId) return;

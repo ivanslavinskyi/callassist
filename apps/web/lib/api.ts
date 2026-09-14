@@ -134,6 +134,19 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export function getBetaControls() {
+  return apiRequest<import("@callassist/contracts").BetaControlsView>("/api/admin/system/beta", { cache: "no-store" });
+}
+export function updateBetaControls(settings: import("@callassist/contracts").BetaSettings, expectedRevision: number, reason: string) {
+  return apiRequest<{ updated: true }>("/api/admin/system/beta", { method: "PUT", body: JSON.stringify({ settings, expectedRevision, reason }) });
+}
+export function createBetaInvitation(reason: string) {
+  return apiRequest<{ id: string; code: string; expiresAt: string }>("/api/admin/system/beta/invitations", { method: "POST", body: JSON.stringify({ reason }) });
+}
+export function revokeBetaInvitation(id: string, reason: string) {
+  return apiRequest<{ revoked: true }>(`/api/admin/system/beta/invitations/${encodeURIComponent(id)}/revoke`, { method: "POST", body: JSON.stringify({ reason }) });
+}
+
 async function apiErrorFromResponse(response: Response) {
   const payload = (await response.json().catch(() => null)) as
     | { error?: string; issues?: ValidationIssues }
@@ -723,7 +736,7 @@ export function getCallPreparationErrorMessage(
     return copy.generic;
   }
 
-  if (error.code === "BRIEF_COMPILER_UNAVAILABLE") {
+  if (error.code === "BRIEF_COMPILER_UNAVAILABLE" || ["BETA_SPENDING_PAUSED", "BETA_BUDGET_UNCONFIGURED", "BETA_BUDGET_EXHAUSTED"].includes(error.code)) {
     return copy.unavailable;
   }
   if (error.code === "CALL_PREPARATION_TIMEOUT") {

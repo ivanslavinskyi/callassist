@@ -1,5 +1,6 @@
 import { ApiError } from "@/lib/api";
 import type { UiLocale } from "./messages";
+import { betaErrorMessage } from "./beta-messages";
 
 const en = {
   register: {
@@ -198,6 +199,8 @@ const de: AuthMessages = {
 export const authMessages: Record<UiLocale, AuthMessages> = { en, de };
 
 export function getAuthErrorMessage(error: unknown, locale: UiLocale) {
+  const beta = betaErrorMessage(error, locale);
+  if (beta) return beta;
   const copy = authMessages[locale].errors;
   if (!(error instanceof ApiError)) return copy.generic;
   switch (error.code) {

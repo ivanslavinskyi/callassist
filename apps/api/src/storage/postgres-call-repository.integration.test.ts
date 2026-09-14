@@ -1,4 +1,5 @@
 import { originalPlanReview } from "../test-helpers/original-plan-review";
+import { conversationCreditFixture } from "../test-helpers/conversation-credit";
 import { requireTestDatabaseUrl } from "../db/require-test-database";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -556,6 +557,12 @@ describe("PostgresCallRepository", () => {
       "in_progress",
       answered.id
     );
+    const creditEvidence = await conversationCreditFixture(repository, answered.id);
+    expect(await repository.qualifyConversationCredit(answered.id, answeredAttempt.attempt.id, creditEvidence)).toBe(true);
+    expect(await repository.qualifyConversationCredit(answered.id, answeredAttempt.attempt.id, creditEvidence)).toBe(false);
+    const [creditProof] = await inspection`SELECT qualification FROM credit_transactions
+      WHERE call_attempt_id = ${answeredAttempt.attempt.id} AND type = 'call_charge'`;
+    expect(creditProof.qualification).toEqual(creditEvidence);
     await repository.applyProviderStatus(
       answeredProviderCallId,
       "in-progress",
@@ -587,14 +594,7 @@ describe("PostgresCallRepository", () => {
     ).toHaveLength(1);
     expect(
       answeredEvents.filter(({ payload }) => payload.name === "credit.settled")
-    ).toEqual([
-      expect.objectContaining({
-        payload: {
-          name: "credit.settled",
-          metadata: { settlement: "charge", connected: true }
-        }
-      })
-    ]);
+    ).toEqual([]); // CallService adds the secondary event after the atomic ledger commit.
     expect(
       answeredEvents.find(
         ({ payload }) =>

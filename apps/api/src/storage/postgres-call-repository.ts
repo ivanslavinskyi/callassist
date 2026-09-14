@@ -1,8 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend } from "../beta/beta-controls";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
 import type { CallTextRepository } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
+import { conversationCreditEvidenceSchema, conversationCreditReason, conversationCreditRefundReason, type ConversationCreditEvidence } from "../credits/conversation-credit";
 import {
   isSupportedBriefCompilerVersion,
   CALL_OUTCOME_SCHEMA_VERSION,
@@ -204,6 +206,7 @@ type ApprovalRow = {
 };
 
 type CallAttemptRow = {
+  maxDurationSeconds: number | null;
   id: string;
   callBriefId: string;
   compilationId: string | null;
@@ -524,18 +527,20 @@ function toIso(value: DatabaseDate) {
 }
 
 export class PostgresCallRepository implements CallRepository {
+  readonly betaControls?: PostgresBetaControls;
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
   readonly #encryptionKey: DataEncryptionMaterial;
   readonly #callText: PostgresCallTextStore;
 
-  constructor(databaseUrl: string, encryptionKey: DataEncryptionMaterial) {
+  constructor(databaseUrl: string, encryptionKey: DataEncryptionMaterial, betaControlsEnabled = false) {
     this.#encryptionKey = encryptionKey;
     this.#sql = postgres(databaseUrl, {
       max: 10,
       onnotice: () => undefined
     });
-    this.#callText = new PostgresCallTextStore(this.#sql,this.#encryptionKey);
+    this.betaControls = betaControlsEnabled ? new PostgresBetaControls(this.#sql) : undefined;
+    this.#callText = new PostgresCallTextStore(this.#sql,this.#encryptionKey,betaControlsEnabled);
   }
 
   async list(input: ListCallBriefsInput) {
@@ -903,6 +908,9 @@ export class PostgresCallRepository implements CallRepository {
       this.#encryptionKey
     );
     const preparationId = await this.#sql.begin(async (transaction) => {
+      // Text mutations and account deletion lock owner -> brief. Acquire the
+      // owner first, including the implicit users FK lock needed by the insert.
+      if (input.userId) await this.#lockActiveUser(transaction, input.userId);
       const [brief] = await transaction<{
         userId: string | null;
         status: CallBrief["status"];
@@ -1113,6 +1121,7 @@ export class PostgresCallRepository implements CallRepository {
     lease: DurableJobLease
   ) {
     return this.#sql.begin(async (transaction) => {
+      if (this.betaControls) await reserveBetaSpend(transaction, "text", `provider:${input.id}`);
       await requirePostgresDurableJobLease(transaction, lease);
       const existing = await transaction`
         SELECT id
@@ -1248,6 +1257,7 @@ export class PostgresCallRepository implements CallRepository {
     lease: DurableJobLease
   ) {
     await this.#sql.begin(async (transaction) => {
+      if (this.betaControls) await reserveBetaSpend(transaction, "transcription", `provider:${input.id}`);
       await requirePostgresDurableJobLease(transaction, lease);
       const [context] = await transaction<{ callAttemptId: string }[]>`
         SELECT call_recordings.call_attempt_id AS "callAttemptId"
@@ -3954,6 +3964,7 @@ export class PostgresCallRepository implements CallRepository {
     if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
     const [row] = await this.#sql<CallAttemptRow[]>`
       SELECT
+        max_duration_seconds AS "maxDurationSeconds",
         id,
         call_brief_id AS "callBriefId",
         compilation_id AS "compilationId",
@@ -4325,6 +4336,7 @@ export class PostgresCallRepository implements CallRepository {
     if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
     const [row] = await this.#sql<CallAttemptRow[]>`
       SELECT
+        max_duration_seconds AS "maxDurationSeconds",
         id,
         call_brief_id AS "callBriefId",
         compilation_id AS "compilationId",
@@ -4351,7 +4363,15 @@ export class PostgresCallRepository implements CallRepository {
     const now = new Date();
     const attemptId = randomUUID();
     const userId = input.userId ?? null;
+    let maxDurationSeconds: number | undefined;
     await this.#sql.begin(async (transaction) => {
+      const beta = this.betaControls ? (await lockBetaControls(transaction)).settings : undefined;
+      const policy = beta ?? input.admissionPolicy ?? defaultCallAdmissionPolicy;
+      maxDurationSeconds = policy.maxDurationSeconds;
+      if (beta) {
+        const [{ active }] = await transaction<{ active: number }[]>`SELECT count(*)::int AS active FROM call_attempts WHERE ${activeBetaCall(transaction)}`;
+        if (active >= beta.maxConcurrentCalls) throw new BetaControlError("BETA_CONCURRENCY_LIMIT");
+      }
       if (userId) {
         await this.#lockCreditAccount(transaction, userId);
         await this.#lockActiveUser(transaction, userId);
@@ -4449,8 +4469,15 @@ export class PostgresCallRepository implements CallRepository {
       if (suppression.count > 0) {
         throw new CallRepositoryError("RECIPIENT_SUPPRESSED");
       }
+      if (beta) {
+        const hashes = this.#betaRecipientHashes(call.phoneNumber);
+        await transaction`DELETE FROM beta_recipient_starts WHERE created_at<=now()-interval '24 hours'`;
+        const [{ starts }] = await transaction<{ starts: number }[]>`SELECT count(*)::int AS starts FROM beta_recipient_starts
+          WHERE recipient_hash=ANY(${hashes}::text[]) AND created_at>now()-interval '24 hours'`;
+        if (starts >= beta.maxStartsPerRecipientPerDay) throw new BetaControlError("BETA_RECIPIENT_LIMIT");
+        await transaction`INSERT INTO beta_recipient_starts(attempt_id,recipient_hash) VALUES(${attemptId},${hashes[0]!})`;
+      }
       if (userId) {
-        const policy = input.admissionPolicy ?? defaultCallAdmissionPolicy;
         const hourStart = new Date(now.getTime() - 60 * 60 * 1_000);
         const dayStart = new Date(Date.UTC(
           now.getUTCFullYear(),
@@ -4468,7 +4495,7 @@ export class PostgresCallRepository implements CallRepository {
           SELECT
             EXISTS(
               SELECT 1 FROM call_attempts
-              WHERE user_id = ${userId} AND ended_at IS NULL
+              WHERE user_id = ${userId} AND ${beta ? activeBetaCall(transaction) : transaction`ended_at IS NULL`}
             ) AS active,
             count(*) FILTER (
               WHERE call_attempts.started_at >= ${hourStart}
@@ -4508,6 +4535,7 @@ export class PostgresCallRepository implements CallRepository {
           throw new CallRepositoryError("RECIPIENT_REPEAT_LIMIT");
         }
       }
+      if (beta && input.provider === "twilio") await reserveBetaSpend(transaction, "call", `call:${attemptId}`, beta);
       const updated = await transaction`
         UPDATE call_briefs
         SET status = 'dialing', updated_at = ${now}
@@ -4559,6 +4587,7 @@ export class PostgresCallRepository implements CallRepository {
           ${now}
         )
       `;
+      if (this.betaControls) await transaction`UPDATE call_attempts SET max_duration_seconds=${maxDurationSeconds!} WHERE id=${attemptId}`;
       if (userId) {
         await transaction`
           INSERT INTO credit_transactions (
@@ -4933,6 +4962,28 @@ export class PostgresCallRepository implements CallRepository {
     });
 
     return { segment, snapshot: await this.#require(id) };
+  }
+
+  async qualifyConversationCredit(id: string, attemptId: string, input: ConversationCreditEvidence) {
+    const evidence = conversationCreditEvidenceSchema.parse(input);
+    return this.#sql.begin(async (transaction) => {
+      // No exclusive lifecycle locks: the immutable ledger's unique settlement
+      // index arbitrates a simultaneous terminal refund. Refunds are never undone.
+      const eligible = await transaction`
+        SELECT a.id FROM call_attempts a
+        JOIN call_recordings r ON r.call_attempt_id = a.id
+        JOIN transcript_segments q ON q.id = ${evidence.questionSegmentId}
+          AND q.call_brief_id = a.call_brief_id AND q.role = 'assistant' AND q.final
+        JOIN transcript_segments s ON s.id = ${evidence.answerSegmentId}
+          AND s.call_brief_id = a.call_brief_id AND s.role = 'recipient' AND s.final
+        WHERE a.id = ${attemptId} AND a.call_brief_id = ${id} AND a.ended_at IS NULL
+          AND r.started_at IS NOT NULL AND r.provider_recording_id IS NOT NULL
+          AND q.created_at >= r.consent_granted_at AND s.created_at >= q.created_at
+          AND q.created_at >= a.started_at AND length(trim(q.text)) > 0 AND length(trim(s.text)) > 0
+      `;
+      if (!eligible.count) return false;
+      return (await this.#settleAttempt(transaction, attemptId, "call_charge", evidence)) === "call_charge";
+    });
   }
 
   async requestApproval(id: string, draft: ApprovalRequestDraft) {
@@ -6277,6 +6328,7 @@ export class PostgresCallRepository implements CallRepository {
       `;
       if (!job) return false;
       const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
+      const cancelled = job.type === "text_artifact_generation" && errorCode === "TEXT_ARTIFACT_STALE";
       await transaction`
         INSERT INTO durable_job_attempts (
           id, job_id, generation, attempt_number, worker_id,
@@ -6284,20 +6336,20 @@ export class PostgresCallRepository implements CallRepository {
         ) VALUES (
           ${randomUUID()}, ${jobId}, ${job.generation}, ${job.attemptCount},
           ${workerId}, ${job.leasedAt}, ${now}::timestamptz,
-          ${deadLetter ? "dead_letter" : "retry_scheduled"}, ${errorCode}
+          ${cancelled ? "cancelled" : deadLetter ? "dead_letter" : "retry_scheduled"}, ${errorCode}
         )
       `;
       await transaction`
         UPDATE durable_jobs
         SET
-          status = ${deadLetter ? "dead_letter" : "queued"},
+          status = ${cancelled ? "cancelled" : deadLetter ? "dead_letter" : "queued"},
           run_after = ${deadLetter ? now : retryAt}::timestamptz,
           lease_owner = NULL,
           leased_at = NULL,
           lease_expires_at = NULL,
           last_error_code = ${errorCode},
           updated_at = ${now}::timestamptz,
-          completed_at = ${deadLetter ? now : null}::timestamptz
+          completed_at = ${cancelled || deadLetter ? now : null}::timestamptz
         WHERE id = ${jobId}
       `;
       if (job.type === "brief_compilation" && job.callPreparationId) {
@@ -6317,7 +6369,7 @@ export class PostgresCallRepository implements CallRepository {
             AND status <> 'succeeded'
         `;
       }
-      if(job.type==="text_artifact_generation") await transaction`UPDATE call_text_artifacts SET status=${deadLetter?"failed":"queued"},
+      if(job.type==="text_artifact_generation") await transaction`UPDATE call_text_artifacts SET status=${cancelled?"stale":deadLetter?"failed":"queued"},
         failure_code=${deadLetter?errorCode:null},updated_at=${now}::timestamptz
         WHERE id=(SELECT text_artifact_id FROM durable_jobs WHERE id=${jobId}) AND status IN ('queued','processing','failed')`;
       return true;
@@ -6687,9 +6739,10 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapAttempt(row: CallAttemptRow): CallAttemptRecord {
-    const { executionSnapshotCiphertext, ...attempt } = row;
+    const { executionSnapshotCiphertext, maxDurationSeconds, ...attempt } = row;
     return {
       ...attempt,
+      ...(maxDurationSeconds === null ? {} : { maxDurationSeconds }),
       startedAt: toIso(row.startedAt),
       endedAt: row.endedAt ? toIso(row.endedAt) : null,
       executionSnapshot: executionSnapshotCiphertext
@@ -7188,20 +7241,24 @@ export class PostgresCallRepository implements CallRepository {
   async #settleAttempt(
     transaction: postgres.TransactionSql,
     attemptId: string,
-    type: "call_charge" | "call_refund" | null
+    type: "call_charge" | "call_refund" | null,
+    qualification?: ConversationCreditEvidence
   ) {
     if (!type) return null;
+    if (type === "call_charge" && !qualification) return null;
     const [attempt] = await transaction<{ userId: string | null }[]>`
       SELECT user_id AS "userId"
       FROM call_attempts
       WHERE id = ${attemptId}
     `;
     if (!attempt?.userId) return null;
-    await this.#lockCreditAccount(transaction, attempt.userId);
+    // Settlements only add 0 (charge) or +1 (refund), never debit. The unique
+    // attempt-settlement index serializes them; an account advisory lock here
+    // would invert startAttempt's credit-before-call lock order.
     const settled = await transaction<{ type: "call_charge" | "call_refund" }[]>`
       INSERT INTO credit_transactions (
         id, user_id, amount, type, call_attempt_id, reason,
-        idempotency_key, created_at
+        idempotency_key, created_at, qualification
       )
       SELECT
         ${randomUUID()},
@@ -7210,10 +7267,11 @@ export class PostgresCallRepository implements CallRepository {
         ${type},
         ${attemptId},
         ${type === "call_refund"
-          ? "Call ended before successful connection"
-          : "Provider connection confirmed"},
+          ? conversationCreditRefundReason
+          : conversationCreditReason},
         ${`call:${attemptId}:${type === "call_refund" ? "refund" : "charge"}`},
-        ${new Date()}
+        ${new Date()},
+        ${qualification ? transaction.json(qualification) : null}
       WHERE NOT EXISTS (
         SELECT 1
         FROM credit_transactions
@@ -7271,6 +7329,13 @@ export class PostgresCallRepository implements CallRepository {
       FOR SHARE
     `;
     if (user.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
+  }
+
+  #betaRecipientHashes(phone: string) {
+    const material = this.#encryptionKey;
+    const keys = Buffer.isBuffer(material) ? [material] :
+      [material.keys.get(material.activeKeyId)!, ...[...material.keys].filter(([id]) => id !== material.activeKeyId).map(([,key]) => key)];
+    return keys.map(key => createHmac("sha256", key).update(`beta-recipient-v1:${phone}`).digest("hex"));
   }
 
   async #lockRecipient(
@@ -7342,6 +7407,9 @@ export class PostgresCallRepository implements CallRepository {
     occurredAt = new Date().toISOString()
   ) {
     const normalized = settlement === "call_charge" ? "charge" : "refund";
+    const [connection] = await transaction<{ connected: boolean }[]>`SELECT EXISTS (
+      SELECT 1 FROM call_events WHERE call_attempt_id = ${callAttemptId} AND event_name = 'connection.confirmed'
+    ) AS connected`;
     await this.#appendTelemetry(transaction, callBriefId, {
       callAttemptId,
       idempotencyKey: `attempt:${callAttemptId}:credit:${normalized}`,
@@ -7350,7 +7418,7 @@ export class PostgresCallRepository implements CallRepository {
         name: "credit.settled",
         metadata: {
           settlement: normalized,
-          connected: settlement === "call_charge"
+          connected: settlement === "call_charge" || connection?.connected === true
         }
       }
     });

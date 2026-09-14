@@ -5,6 +5,8 @@ import {
   type DataEncryptionMaterial
 } from "../security/encryption";
 
+import { trustedProxyPolicy, twilioWebhookHost } from "./proxy-policy";
+
 export type RuntimeProcess = "api" | "worker";
 
 export class RuntimeConfigurationError extends Error {
@@ -48,6 +50,13 @@ export function validateRuntimeEnvironment(
   requireHttpsOrigin(environment.PUBLIC_BASE_URL, "PUBLIC_BASE_URL", issues);
 
   if (runtime === "api") {
+    if (!environment.TRUSTED_PROXY_CIDRS?.trim()) {
+      issues.push("TRUSTED_PROXY_CIDRS is required: explicit proxy IP/CIDR list or none for direct ingress");
+    }
+    try { trustedProxyPolicy(environment.TRUSTED_PROXY_CIDRS); }
+    catch { issues.push("TRUSTED_PROXY_CIDRS must be an explicit IP/CIDR list or none"); }
+    try { twilioWebhookHost(environment); }
+    catch { issues.push("TWILIO_WEBHOOK_HOST must be a literal IP address"); }
     requireExact(environment, "VERIFICATION_DRIVER", "twilio", issues);
     requireExact(environment, "EMAIL_DRIVER", "resend", issues);
     requireSecret(environment, "TWILIO_VERIFY_SERVICE_SID", issues);

@@ -44,7 +44,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       options.client ?? twilio(options.accountSid, options.authToken, { timeout: 10_000 });
   }
 
-  async startCall(brief: CallBrief) {
+  async startCall(brief: CallBrief, options?: { maxDurationSeconds: number }) {
     if (!isSwissDestinationPhone(brief.phoneNumber)) {
       throw new Error("SWISS_DESTINATION_REQUIRED");
     }
@@ -58,6 +58,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
       timeout: 30,
+      timeLimit: options?.maxDurationSeconds ?? 900,
       to: brief.phoneNumber,
       url: this.webhookUrl(
         `/webhooks/twilio/voice?callBriefId=${encodeURIComponent(brief.id)}`

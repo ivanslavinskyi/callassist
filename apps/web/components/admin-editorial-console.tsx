@@ -524,7 +524,7 @@ function LandingEditor({ copy, index, item, onChange, onMove }: {
       </> : null}
       {item.blockType === "example" ? <>
         <LocalizedInput label={copy.titleField} maxLength={180} onChange={(title) => onChange({ ...item, title })} value={item.title} />
-        <LandingContentItemsEditor copy={copy} items={item.items} onChange={(items) => onChange({ ...item, items })} />
+        <p className="muted">{copy.exampleContentNote}</p>
       </> : null}
       {item.blockType === "safety_privacy" ? <>
         <LocalizedInput label={copy.eyebrowField} maxLength={180} onChange={(eyebrow) => onChange({ ...item, eyebrow })} value={item.eyebrow} />
@@ -829,6 +829,7 @@ const en = {
   supportingTitleField: "Supporting headline",
   textField: "Text",
   secondaryTextField: "Secondary sentence",
+  exampleContentNote: "This block enables the interactive demo in the hero, with a call plan, consent, live and final transcripts, linked findings and PDF download. Edit its opening heading here. The scenarios and translations are maintained in the application. Legacy text items and the previous standalone position are not displayed when the hero is enabled.",
   badgesField: "Badges (one per line)",
   itemsField: "Items (one per line)",
   limitsTitle: "Limitations title",
@@ -908,6 +909,7 @@ const de: EditorialMessages = {
   supportingTitleField: "Unterstützende Überschrift",
   textField: "Text",
   secondaryTextField: "Zusätzlicher Satz",
+  exampleContentNote: "Dieser Block aktiviert die interaktive Demo im ersten Seitenbereich: Anrufplan, Zustimmung, Live- und Endtranskript, verknüpfte Ergebnisse und PDF-Download. Hier bearbeiten Sie die erste Überschrift. Szenarien und Übersetzungen werden in der Anwendung gepflegt. Ältere Textelemente und die bisherige separate Position werden bei aktiviertem Hero-Block nicht angezeigt.",
   badgesField: "Badges (einer pro Zeile)",
   itemsField: "Einträge (einer pro Zeile)",
   limitsTitle: "Titel der Einschränkungen",

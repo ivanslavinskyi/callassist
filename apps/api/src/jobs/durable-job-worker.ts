@@ -49,8 +49,8 @@ export class DurableJobWorker {
   constructor(
     readonly repository: CallRepository,
     readonly handlers: Partial<Record<DurableJobType, DurableJobHandler>>,
-    readonly onError: (error: unknown) => void = () =>
-      writePiiSafeOperationalError("durable_worker_operation_failed"),
+    readonly onError: (error: unknown) => void = error =>
+      writePiiSafeOperationalError("durable_worker_operation_failed", error),
     options: DurableJobWorkerOptions = {}
   ) {
     this.#workerId = options.workerId ?? `api-${randomUUID()}`;
@@ -217,7 +217,7 @@ export class DurableJobWorker {
         ).toISOString(),
         durableJobErrorIsRetryable(error)
       );
-      if (failed) this.onError(error);
+      if (failed && failed.status !== "cancelled") this.onError(error);
     } finally {
       clearInterval(heartbeat);
       this.#activeJobs = 0;

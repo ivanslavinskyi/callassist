@@ -75,6 +75,7 @@ import {
 import { DurableJobWorker } from "./jobs/durable-job-worker";
 import { evaluateOperationalAlerts } from "./operations/operational-alerts";
 import { writePiiSafeOperationalError } from "./runtime/pii-safe-logger";
+import { BetaControlError } from "./beta/beta-controls";
 import { TextArtifactService } from "./text-processing/text-artifact-service";
 import { MockTextProcessor } from "./text-processing/mock-text-processor";
 import { allTextDirections, textDirectionEnabled, type TextCapabilities } from "./text-processing/text-capabilities";
@@ -143,8 +144,8 @@ export class CallService {
   constructor(
     readonly repository: CallRepository,
     readonly telephonyProvider: TelephonyProvider = new MockTelephonyProvider(),
-    onBackgroundError: (error: unknown) => void = () =>
-      writePiiSafeOperationalError("background_call_operation_failed"),
+    onBackgroundError: (error: unknown) => void = (error) =>
+      writePiiSafeOperationalError("background_call_operation_failed", error),
     postCallTranscriber?: PostCallTranscriber,
     briefCompiler: BriefCompiler = new DeterministicBriefCompiler(),
     admissionPolicy: CallAdmissionPolicy = defaultCallAdmissionPolicy,
@@ -503,7 +504,14 @@ export class CallService {
       if (existing) return existing;
 
       const compilation = await this.#briefCompiler.compile(
-        normalizeCreateCallBriefInput(input)
+        normalizeCreateCallBriefInput(input), undefined,
+        this.repository.betaControls ? {
+          maxProviderRequests: briefCompilationProviderRequestBudget,
+          beforeProviderRequest: async request => {
+            await this.repository.betaControls!.reserve("text", `text:${request.clientRequestId}`);
+            return true;
+          }
+        } : undefined
       );
       return this.repository.create(
         input,
@@ -527,6 +535,9 @@ export class CallService {
   ) {
     const normalized = normalizeCreateCallBriefInput(input);
     const inputFingerprint = callPreparationFingerprint(normalized, language);
+    const existing = await this.findPreparationByRequest(input, userId, idempotencyKey, language);
+    if (existing) return existing;
+    await this.repository.betaControls?.assertAvailable("text");
     const preparation = await this.repository.enqueueCallPreparation({
       userId,
       idempotencyKey,
@@ -598,6 +609,9 @@ export class CallService {
     language?: PreparationLanguageOptions
   ) {
     const normalized = normalizeCreateCallBriefInput(input);
+    const existing = await this.findRecompilationByRequest(id, input, userId, idempotencyKey, language);
+    if (existing) return existing;
+    await this.repository.betaControls?.assertAvailable("text");
     const preparation = await this.repository.enqueueCallRecompilation({
       callBriefId: id,
       userId,
@@ -694,6 +708,7 @@ export class CallService {
       userId,
       admissionPolicy: this.#admissionPolicy
     });
+    const maxDurationSeconds = reserved.attempt.maxDurationSeconds ?? this.#admissionPolicy.maxDurationSeconds;
     this.#publish(id, {
       type: "call.updated",
       brief: reserved.snapshot.brief
@@ -715,7 +730,7 @@ export class CallService {
           startedAt: reserved.attempt.startedAt
         });
       }
-      started = await this.telephonyProvider.startCall(current.brief);
+      started = await this.telephonyProvider.startCall(current.brief, { maxDurationSeconds });
     } catch (error) {
       await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
       this.#onBackgroundError(error);
@@ -731,7 +746,7 @@ export class CallService {
         reserved.attempt.id,
         started.providerCallId,
         started.providerStatus,
-        this.#providerReconciliationDeadline(60_000)
+        this.#providerReconciliationDeadline(60_000, maxDurationSeconds)
       );
     } catch (error) {
       if (started.providerCallId) {
@@ -752,7 +767,7 @@ export class CallService {
 
     this.#schedule(
       id,
-      this.#admissionPolicy.maxDurationSeconds * 1_000,
+      maxDurationSeconds * 1_000,
       async () => {
         const call = await this.#require(id);
         if (["dialing", "in_progress", "awaiting_approval"].includes(
@@ -897,6 +912,30 @@ export class CallService {
     const normalized = text.trim();
     if (!normalized) return this.#require(id);
     return this.#addTranscript(id, role, normalized, sourceKey);
+  }
+
+  async addRealtimeTranscript(id: string, role: TranscriptSegment["role"], text: string, sourceKey: string) {
+    if (!text.trim()) return null;
+    return (await this.#persistTranscript(id, role, text.trim(), sourceKey)).segment;
+  }
+
+  async qualifyConversationCredit(id: string, attemptId: string, evidence: import("./credits/conversation-credit").ConversationCreditEvidence) {
+    const charged = await this.repository.qualifyConversationCredit(id, attemptId, evidence);
+    if (charged) {
+      // The ledger stores the evidence atomically. Telemetry is a secondary view;
+      // a delivery failure must never undo or repeat the settled transaction.
+      try {
+        await this.recordTelemetry(id, {
+          callAttemptId: attemptId,
+          idempotencyKey: `attempt:${attemptId}:credit:charge`,
+          payload: { name: "credit.settled", metadata: {
+            settlement: "charge", connected: true, basis: "substantive_answer_v1",
+            questionSegmentId: evidence.questionSegmentId, answerSegmentId: evidence.answerSegmentId
+          } }
+        });
+      } catch (error) { this.#onBackgroundError(error); }
+    }
+    return charged;
   }
 
   async startRecordingAfterConsent(
@@ -1378,6 +1417,9 @@ export class CallService {
         );
       }
       if (error instanceof DurableJobExecutionError) throw error;
+      if (error instanceof BetaControlError) {
+        throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { cause: error, retryable: false });
+      }
       if (
         error instanceof CallRepositoryError &&
         [
@@ -1634,6 +1676,10 @@ export class CallService {
     text: string,
     sourceKey?: string
   ) {
+    return (await this.#persistTranscript(id, role, text, sourceKey)).snapshot;
+  }
+
+  async #persistTranscript(id: string, role: TranscriptSegment["role"], text: string, sourceKey?: string) {
     const snapshot = await this.#require(id);
     const result = await this.repository.addTranscript(
       id,
@@ -1642,7 +1688,7 @@ export class CallService {
       snapshot.brief.locale
     );
     this.#publish(id, { type: "transcript.added", segment: result.segment, ...(sourceKey ? { key: sourceKey } : {}) });
-    return result.snapshot;
+    return result;
   }
 
   async #updateStatus(id: string, status: CallBrief["status"]) {
@@ -1691,9 +1737,9 @@ export class CallService {
     this.#timers.delete(id);
   }
 
-  #providerReconciliationDeadline(graceMs: number) {
+  #providerReconciliationDeadline(graceMs: number, maxDurationSeconds = this.#admissionPolicy.maxDurationSeconds) {
     return new Date(
-      Date.now() + this.#admissionPolicy.maxDurationSeconds * 1_000 + graceMs
+      Date.now() + maxDurationSeconds * 1_000 + graceMs
     ).toISOString();
   }
 

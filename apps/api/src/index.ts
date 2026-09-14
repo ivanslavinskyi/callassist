@@ -21,6 +21,7 @@ import { durableWorkerModeFromEnv } from "./config/durable-worker-mode";
 import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
 import { operationalCostPolicyFromEnv } from "./config/operational-cost-policy";
 import { validateRuntimeEnvironment } from "./config/runtime-environment";
+import { twilioWebhookHost } from "./config/proxy-policy";
 import {
   CreditService,
   parsePromoCodeHashKey
@@ -65,8 +66,9 @@ const service = new CallService(
 );
 const authService = new AuthService({
   repository: authRepository,
-  verificationProvider: createVerificationProviderFromEnv(rateLimiter),
-  emailProvider: createEmailProviderFromEnv(),
+  betaControls: repository.betaControls,
+  verificationProvider: createVerificationProviderFromEnv(rateLimiter, repository.betaControls),
+  emailProvider: createEmailProviderFromEnv(repository.betaControls),
   emailVerificationHashKey: emailVerificationHashKeyFromEnv(),
   emailVerificationCode: mockEmailVerificationCodeFromEnv(),
   rateLimiter,
@@ -140,7 +142,7 @@ await app.listen({ host: "0.0.0.0", port });
 
 if (webhookApp) {
   const webhookPort = Number(process.env.TWILIO_WEBHOOK_PORT ?? 4001);
-  await webhookApp.listen({ host: "127.0.0.1", port: webhookPort });
+  await webhookApp.listen({ host: twilioWebhookHost(), port: webhookPort });
   app.log.info(
     { webhookHost: "127.0.0.1", webhookPort },
     "Twilio webhook gateway listening"

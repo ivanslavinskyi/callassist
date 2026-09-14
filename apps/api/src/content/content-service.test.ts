@@ -315,10 +315,10 @@ describe("ContentService", () => {
       locale: "de",
       blocks: [
         { blockType: "hero" },
-        { blockType: "problem" },
         { blockType: "use_cases" },
-        { blockType: "example" },
         { blockType: "how_it_works" },
+        { blockType: "example" },
+        { blockType: "problem" },
         { blockType: "safety_privacy" },
         { blockType: "languages" },
         { blockType: "faq" },
@@ -328,7 +328,7 @@ describe("ContentService", () => {
     await service.createEditorialDraft(actorUserId, "landing");
     const draft = (await service.getAdminEditorialCollection("landing")).draft!;
     if (draft.key !== "landing") throw new Error("Expected Landing draft");
-    const reordered = [...draft.items];
+    const reordered = [...draft.items].sort((left, right) => left.sortOrder - right.sortOrder);
     [reordered[1], reordered[2]] = [reordered[2]!, reordered[1]!];
     await service.updateEditorialDraft(actorUserId, "landing", {
       key: "landing",
@@ -344,7 +344,7 @@ describe("ContentService", () => {
         : { ...block, sortOrder })
     });
     expect((await service.getPublishedLanding("de"))?.blocks[1]?.blockType)
-      .toBe("problem");
+      .toBe("use_cases");
     await service.publishEditorialDraft(
       actorUserId,
       "landing",
@@ -355,7 +355,7 @@ describe("ContentService", () => {
       revision: { number: 2 },
       seo: { title: "SHPROHLI — geprüfte Landing-Revision" }
     });
-    expect(published?.blocks[1]?.blockType).toBe("use_cases");
+    expect(published?.blocks[1]?.blockType).toBe("how_it_works");
     const index = await service.listPublishedContentIndex();
     expect(index.landing).toMatchObject({
       revision: { number: 2 },

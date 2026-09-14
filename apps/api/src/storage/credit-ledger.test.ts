@@ -1,4 +1,5 @@
 import { originalPlanReview } from "../test-helpers/original-plan-review";
+import { conversationCreditFixture } from "../test-helpers/conversation-credit";
 import { randomUUID } from "node:crypto";
 import {
   normalizeCreateCallBriefInput,
@@ -123,7 +124,7 @@ describe("credit ledger", () => {
     }
   );
 
-  it("charges exactly once after the recipient answers", async () => {
+  it("charges exactly once after a persisted substantive answer following consent", async () => {
     const repository = new InMemoryCallRepository();
     const userId = randomUUID();
     await repository.grantSignupCredits(userId);
@@ -139,6 +140,10 @@ describe("credit ledger", () => {
       "in_progress",
       brief.id
     );
+    expect((await repository.getCreditUsage(userId)).transactions.some(entry => entry.type === "call_charge")).toBe(false);
+    const evidence = await conversationCreditFixture(repository, brief.id);
+    expect(await repository.qualifyConversationCredit(brief.id, started.attempt.id, evidence)).toBe(true);
+    expect(await repository.qualifyConversationCredit(brief.id, started.attempt.id, evidence)).toBe(false);
     await repository.applyProviderStatus(
       "CA-answered",
       "in-progress",
@@ -191,6 +196,8 @@ describe("credit ledger", () => {
         `CA-${suffix}`,
         "ringing"
       );
+      const evidence = await conversationCreditFixture(repository, brief.id);
+      expect(await repository.qualifyConversationCredit(brief.id, attempt.attempt.id, evidence)).toBe(true);
       await repository.applyProviderStatus(
         `CA-${suffix}`,
         "completed",
@@ -212,5 +219,21 @@ describe("credit ledger", () => {
       code: "INSUFFICIENT_CREDITS"
     }));
     expect((await repository.getCreditUsage(userId)).balance).toBe(0);
+  });
+
+  it.each([false, true])("refunds a connected call without a qualified answer (consent=%s)", async consent => {
+    const repository = new InMemoryCallRepository();
+    const owner = randomUUID();
+    await repository.grantSignupCredits(owner);
+    const brief = await createReadyCall(repository, owner, "refund");
+    const started = await repository.startAttempt(brief.id, { provider: "twilio", userId: owner });
+    await repository.attachProviderCall(started.attempt.id, "CA-refund", "in-progress");
+    const evidence = consent ? await conversationCreditFixture(repository, brief.id) : null;
+    await repository.applyProviderStatus("CA-refund", "completed", "completed", brief.id);
+    if (evidence) expect(await repository.qualifyConversationCredit(brief.id, started.attempt.id, evidence)).toBe(false);
+    const usage = await repository.getCreditUsage(owner);
+    expect(usage.balance).toBe(3);
+    expect(usage.transactions.filter(entry => entry.type === "call_refund")).toHaveLength(1);
+    expect(usage.transactions.filter(entry => entry.type === "call_charge")).toHaveLength(0);
   });
 });

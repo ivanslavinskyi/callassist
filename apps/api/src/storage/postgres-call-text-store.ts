@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
+import { reserveBetaSpend } from "../beta/beta-controls";
 import {
   callCompilationSchema, callTextArtifactSchema, finalTranscriptRevisionSchema,
   planReviewPayloadSchema, transcriptTranslationPayloadSchema, callSummaryPayloadSchema,
@@ -25,7 +26,7 @@ type ArtifactRow = {
 };
 
 export class PostgresCallTextStore {
-  constructor(readonly sql: postgres.Sql, readonly key: DataEncryptionMaterial) {}
+  constructor(readonly sql: postgres.Sql, readonly key: DataEncryptionMaterial, readonly betaControlsEnabled = false) {}
 
   async getPlanSource(callId: string): Promise<PlanSource> {
     await requireAvailableCall(this.sql, callId);
@@ -167,6 +168,7 @@ export class PostgresCallTextStore {
 
   async reserveTextArtifactProviderRequest(input:TextArtifactProviderReservationInput,lease:DurableJobLease) {
     return this.sql.begin(async tx=>{
+      if (this.betaControlsEnabled) await reserveBetaSpend(tx,"text",`provider:${input.id}`);
       const row=await requireTextLease(tx,input.artifactId,lease);
       if(row.status!=="processing"||input.durableJobGeneration!==lease.generation) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
       const existing=await tx`SELECT id FROM provider_operations WHERE id=${input.id} AND text_artifact_id=${input.artifactId} AND durable_job_id=${lease.jobId}`;
@@ -225,7 +227,9 @@ async function requireTextMutationCall(tx:postgres.TransactionSql,callId:string)
   if(!call) throw new CallRepositoryError("CALL_NOT_FOUND");
   if(call.user_id) {
     // Account deletion takes this same owner lock before creating its request.
-    const [owner]=await tx<{status:string}[]>`SELECT status FROM users WHERE id=${call.user_id} FOR UPDATE`;
+    // SHARE fences status/deletion changes while remaining compatible with the
+    // users FK checks in call telemetry. UPDATE here creates owner/brief cycles.
+    const [owner]=await tx<{status:string}[]>`SELECT status FROM users WHERE id=${call.user_id} FOR SHARE`;
     const pending=await tx`SELECT id FROM account_deletion_requests WHERE user_id=${call.user_id} AND status<>'completed'`;
     if(!owner||owner.status!=="active"||pending.count) throw new CallRepositoryError("CALL_NOT_FOUND");
   }

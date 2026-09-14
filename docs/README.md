@@ -1,6 +1,6 @@
 # Documentation index
 
-Release status refreshed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. Public brand: SHPROHLI;
+Release status refreshed 2026-09-14 for beta controls following `34a0746`. Public brand: SHPROHLI;
 internal package names, cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
@@ -18,11 +18,19 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+The latest local landing is **r8 EN/DE** with an interactive demo; see the
+[implementation and verification record](interactive-landing-2026-09-14.md).
+This closes the four product review changes locally, not the external release gates.
+
 | Document | Purpose |
 | --- | --- |
 | [Project README](../README.md) | Product scope, setup, commands and repository status |
 | [Architecture](architecture.md) | Current languages, appointments, consent, call control, summary schema, live state, privacy and limits |
-| [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and all 103 registered method/path pairs |
+| [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and all 107 registered method/path pairs |
+| [Deployment preflight](deployment-preflight.md) | Proxy/env preparation and first release on shprohli.ch after landing completion; actual VPS deployment remains open |
+| [Landing checkpoint, 2026-09-14](landing-checkpoint-2026-09-14.md) | Before/after screenshots, six EN/DE task groups and local publication results |
+| [Conversation credits, 2026-09-14](conversation-credit-2026-09-14.md) | Substantive-answer policy, atomic settlement, classification limits, migration 0071 and verification |
+| [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Admin cap/invitations, 7-minute calls, concurrency, conservative USD budget and recompile deadlock fix |
 | [Email/SMS implementation, 2026-09-14](email-sms-implementation-2026-09-14.md) | Verification/notifications, seven-language capability matrix, provider configuration and remaining B03/B04 acceptance |
 | [Release roadmap](mvp-plan.md) | Delivered scope, next work and open acceptance/deployment gates; the single current backlog |
 | [Public-testing audit, 2026-09-13](public-testing-audit-2026-09-13.md) | Fresh code/test/browser/local-CMS evidence; email/SMS/admin findings, scenario pool and minimum release boundaries |
@@ -45,7 +53,8 @@ mapped there and are not separate work queues.
 
 | Record | What it establishes |
 | --- | --- |
-| [Email/SMS checkpoint, 2026-09-14](email-sms-implementation-2026-09-14.md) | Current automated results and recompile deadlock boundary; real EN Gmail/CH SMS user evidence; remaining UA, email-client and provider-flow acceptance |
+| [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Current admission/spend implementation and closure of the local recompile defect; external configuration/drills still required |
+| [Email/SMS checkpoint, 2026-09-14](email-sms-implementation-2026-09-14.md) | Historical automated results and original recompile defect; real EN Gmail/CH SMS user evidence; remaining UA, email-client and provider-flow acceptance |
 | [B01/B02 remediation, 2026-09-13](b01-b02-remediation-2026-09-13.md) | Historical checkpoint: 1,102 tests / 139 files on isolated DB; lint/types/build pass; dependency audit clean; System regressions, independent control and browser-check boundary |
 | [Original readiness verification, 2026-09-13](audits/2026-09-13/evidence.json) | Pre-fix snapshot: 1,098 tests / 138 files; dependency audit failed; sanitized HTTP checks and fictional browser captures. B01/B02 superseded by remediation above |
 | [General result/live fixes, 2026-09-11](call-result-live-fixes-2026-09-11.md) | Retry/status/request-budget fixes across task types, live transcript identity/following, six fictional real-text scenarios, browser fixture, authorized local result recovery and remaining voice acceptance |

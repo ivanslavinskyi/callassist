@@ -94,7 +94,10 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     name: z.literal("credit.settled"),
     metadata: z.strictObject({
       settlement: z.enum(["charge", "refund"]),
-      connected: z.boolean()
+      connected: z.boolean(),
+      basis: z.literal("substantive_answer_v1").optional(),
+      questionSegmentId: z.uuid().optional(),
+      answerSegmentId: z.uuid().optional()
     })
   }),
   z.strictObject({

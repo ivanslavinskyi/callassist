@@ -11,15 +11,20 @@ import { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
 const apps: ReturnType<typeof buildWebhookApp>[] = [];
 const services: CallService[] = [];
+const backgroundErrors: unknown[] = [];
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
   await Promise.all(services.splice(0).map((service) => service.close()));
+  expect(backgroundErrors.splice(0)).toEqual([]);
 });
 
 function createHarness() {
   const calls = Object.assign(
-    vi.fn(() => ({ update: vi.fn().mockResolvedValue({ sid: "CA123" }) })),
+    vi.fn(() => ({
+      update: vi.fn().mockResolvedValue({ sid: "CA123" }),
+      fetch: vi.fn().mockResolvedValue({ sid: "CA123", status: "completed", duration: "1", price: "-0.01", priceUnit: "USD" })
+    })),
     {
       create: vi.fn().mockResolvedValue({ sid: "CA123", status: "queued" })
     }
@@ -32,7 +37,7 @@ function createHarness() {
     client: { calls } as unknown as ReturnType<typeof twilio>
   });
   const repository = new InMemoryCallRepository();
-  const service = new CallService(repository, provider);
+  const service = new CallService(repository, provider, error => backgroundErrors.push(error));
   const handleTwilioSocket = vi.fn(
     (socket: { close: () => void; on: (...args: unknown[]) => unknown }) =>
       socket.close()

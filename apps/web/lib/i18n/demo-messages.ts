@@ -1,0 +1,61 @@
+import type { UiLocale } from "./registry";
+
+const en = {
+  label: "Interactive demo", title: "Try a call, from start to finish.",
+  note: "Fictional demo. No real calls, registration or credits.",
+  accelerated: "Accelerated simulation · no audio", ready: "Ready to try", step: "Step",
+  steps: ["Your task", "Call plan", "Consent", "Live call", "Result"],
+  choose: "Choose a demo scenario", recipient: "Calling on your behalf", task: "Your task",
+  start: "Start the demo", typing: "Writing the task…", compile: "Preparing the call plan…",
+  compileSteps: ["Understanding the goal", "Organising questions and approved facts", "Checking the call’s limits"],
+  planTitle: "You decide what we say.", planNote: "Review the plan. A real call only starts after your approval.",
+  questions: "Questions to ask", facts: "Approved information", limits: "Limits", fullPlan: "See the full call plan",
+  approve: "Approve & start demo call", dialing: "Connecting to the recipient…", consentTitle: "Permission comes first.",
+  consentNote: "The AI identifies itself and asks for consent to recording and transcription. The recipient’s reply is processed to recognise their choice.",
+  disclosure: "Hello. I’m an AI assistant calling on behalf of Anna Keller. May this conversation be recorded and transcribed?",
+  consentReply: "Yes, that’s fine.", consentGranted: "Recipient agreed", liveTitle: "Follow the conversation.",
+  live: "Live transcript", assistant: "SHPROHLI assistant", pause: "Pause", resume: "Continue", reset: "Start over",
+  paused: "Demo paused", speaking: "Next reply…", next: "Next step", finalize: "Preparing the final transcript…",
+  finalizeNote: "In SHPROHLI, the final transcript is created from the call recording.", resultTitle: "The call is complete.",
+  resultNote: "Your final transcript is ready. You can also create a summary of the answers and next steps.",
+  transcript: "Final transcript", summary: "Summary", generate: "Create demo summary", generating: "Preparing the summary…",
+  summaryNote: "Summaries are optional in SHPROHLI and are based on the final transcript.", pdf: "Download transcript PDF",
+  exporting: "Preparing PDF…", exportError: "The PDF could not be created. Please try again.", replay: "Replay this demo",
+  tryOwn: "Create an account for your own call", pdfTitle: "Demo call transcript", pdfVariant: "FICTIONAL DEMO",
+  pdfNote: "This is a scripted demonstration, not a record of a real call. All people and organisations are fictional.",
+  pdfSummary: "Example summary", taskLabel: "Task", language: "English", demoContact: "Fictional recipient · Switzerland",
+  saved: "Final transcript ready", progress: "Demo progress", source: "View source in the transcript", credit: "In a real call, the credit is used after consent and a substantive task answer.",
+  introNote: "Prepared example. Enter your own task after signing up."
+};
+type DemoMessages = { [K in keyof typeof en]: typeof en[K] };
+
+export const demoMessages: Record<UiLocale, DemoMessages> = {
+  en,
+  de: {
+    label: "Interaktive Demo", title: "Erleben Sie einen Anruf von Anfang bis Ende.",
+    note: "Fiktive Demo. Kein echter Anruf, kein Konto, kein Guthaben nötig.",
+    accelerated: "Beschleunigte Simulation · ohne Ton", ready: "Bereit zum Ausprobieren", step: "Schritt",
+    steps: ["Ihr Anliegen", "Anrufplan", "Zustimmung", "Gespräch", "Ergebnis"],
+    choose: "Demoszenario wählen", recipient: "Wir rufen für Sie an", task: "Ihr Anliegen",
+    start: "Demo starten", typing: "Das Anliegen wird eingegeben…", compile: "Der Anrufplan entsteht…",
+    compileSteps: ["Das Ziel verstehen", "Fragen und freigegebene Angaben ordnen", "Die Grenzen des Anrufs prüfen"],
+    planTitle: "Sie bestimmen, was wir sagen.", planNote: "Prüfen Sie den Plan. Ein echter Anruf beginnt erst nach Ihrer Freigabe.",
+    questions: "Geplante Fragen", facts: "Freigegebene Angaben", limits: "Grenzen", fullPlan: "Vollständigen Anrufplan ansehen",
+    approve: "Freigeben & Demoanruf starten", dialing: "Die Verbindung wird aufgebaut…", consentTitle: "Zuerst kommt die Zustimmung.",
+    consentNote: "Die KI stellt sich vor und fragt nach Zustimmung zu Aufnahme und Transkription. Sie verarbeitet die Antwort, um die Entscheidung zu erkennen.",
+    disclosure: "Guten Tag. Ich bin ein KI-Assistent und rufe im Auftrag von Anna Keller an. Darf dieses Gespräch aufgezeichnet und transkribiert werden?",
+    consentReply: "Ja, das ist in Ordnung.", consentGranted: "Zustimmung erhalten", liveTitle: "Verfolgen Sie das Gespräch.",
+    live: "Live-Transkript", assistant: "SHPROHLI-Assistent", pause: "Pause", resume: "Fortsetzen", reset: "Von vorn",
+    paused: "Demo pausiert", speaking: "Nächste Antwort…", next: "Weiter", finalize: "Das Endtranskript entsteht…",
+    finalizeNote: "SHPROHLI erstellt das Endtranskript aus der Aufnahme des Anrufs.", resultTitle: "Der Anruf ist abgeschlossen.",
+    resultNote: "Ihr Endtranskript ist bereit. Sie können auch eine Zusammenfassung der Antworten und nächsten Schritte erstellen.",
+    transcript: "Endtranskript", summary: "Zusammenfassung", generate: "Demo-Zusammenfassung erstellen", generating: "Zusammenfassung wird erstellt…",
+    summaryNote: "Zusammenfassungen sind in SHPROHLI optional und basieren auf dem Endtranskript.", pdf: "Transkript als PDF herunterladen",
+    exporting: "PDF wird erstellt…", exportError: "Das PDF konnte nicht erstellt werden. Bitte versuchen Sie es erneut.", replay: "Diese Demo wiederholen",
+    tryOwn: "Konto für einen eigenen Anruf erstellen", pdfTitle: "Transkript des Demoanrufs", pdfVariant: "FIKTIVE DEMO",
+    pdfNote: "Dies ist eine vorbereitete Demonstration, kein echter Anruf. Alle Personen und Organisationen sind frei erfunden.",
+    pdfSummary: "Beispiel-Zusammenfassung", taskLabel: "Anliegen", language: "Deutsch (Schweiz)", demoContact: "Fiktiver Kontakt · Schweiz",
+    saved: "Endtranskript bereit", progress: "Demofortschritt", source: "Quelle im Transkript ansehen", credit: "Bei einem echten Anruf wird das Guthaben nach Zustimmung und einer inhaltlichen Antwort verbraucht.",
+    introNote: "Vorbereitetes Beispiel. Eigene Anliegen sind nach der Registrierung möglich."
+  }
+};

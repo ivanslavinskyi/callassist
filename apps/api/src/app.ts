@@ -1,5 +1,8 @@
 import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, SELECTABLE_CALL_LANGUAGES, TEXT_LANGUAGES } from "@callassist/contracts";
 import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
+import { betaControlsViewSchema, betaSettingsUpdateSchema, betaInvitationCreateSchema } from "@callassist/contracts";
+import { BetaControlError } from "./beta/beta-controls";
+import { trustedProxyPolicy } from "./config/proxy-policy";
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
@@ -135,6 +138,7 @@ type BuildAppOptions = {
   production?: boolean;
   secureCookies?: boolean;
   webOrigin?: string | string[];
+  trustedProxyCidrs?: string;
   endpointRateLimiter?: RateLimiter;
   endpointRateLimitPolicy?: EndpointRateLimitPolicy;
   recipientOptOutService?: RecipientOptOutService;
@@ -161,6 +165,7 @@ export function buildApp({
   production = process.env.NODE_ENV === "production",
   secureCookies = production,
   webOrigin = process.env.WEB_ORIGIN,
+  trustedProxyCidrs = process.env.TRUSTED_PROXY_CIDRS,
   endpointRateLimiter = new ApplicationRateLimiter(),
   endpointRateLimitPolicy = defaultEndpointRateLimitPolicy,
   realtimeConfigured = false,
@@ -187,6 +192,7 @@ export function buildApp({
 }: BuildAppOptions) {
   const webOrigins = resolveWebOrigins(webOrigin);
   const app = Fastify({
+    trustProxy: trustedProxyPolicy(trustedProxyCidrs),
     logger: logger ? piiSafeLoggerOptions : false,
     logController: new LogController({ disableRequestLogging: logger }),
     bodyLimit: mainApiBodyLimitBytes,
@@ -1562,6 +1568,47 @@ export function buildApp({
         }));
     });
 
+    app.get("/api/admin/system/beta", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      return reply.header("Cache-Control", "private, no-store").send(betaControlsViewSchema.parse(await service.repository.betaControls.getView()));
+    });
+    app.put("/api/admin/system/beta", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      const parsed = betaSettingsUpdateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_BETA_SETTINGS" });
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      try {
+        await service.repository.betaControls.update(parsed.data.settings, parsed.data.expectedRevision, actor.id, parsed.data.reason);
+        return reply.header("Cache-Control", "private, no-store").send({ updated: true });
+      } catch (error) { return sendRepositoryError(reply, error); }
+    });
+    app.post("/api/admin/system/beta/invitations", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      const parsed = betaInvitationCreateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_BETA_INVITATION" });
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      const result = await service.repository.betaControls.createInvitation(actor.id, parsed.data.reason);
+      return reply.header("Cache-Control", "private, no-store").status(201).send(result);
+    });
+    app.post<{ Params: { id: string } }>("/api/admin/system/beta/invitations/:id/revoke", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      const parsed = betaInvitationCreateSchema.safeParse(request.body);
+      if (!parsed.success || !isUuid(request.params.id)) return reply.status(400).send({ error: "INVALID_BETA_INVITATION" });
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      try {
+        await service.repository.betaControls.revokeInvitation(request.params.id, actor.id, parsed.data.reason);
+        return reply.header("Cache-Control", "private, no-store").send({ revoked: true });
+      } catch (error) { return sendRepositoryError(reply, error); }
+    });
+
     app.put("/api/admin/system/outbound-calls", async (request, reply) => {
       const actor = await authorizeAdminMutation(request, reply);
       if (!actor) return;
@@ -2723,6 +2770,7 @@ function sendAuthError(
   },
   error: unknown
 ) {
+  if (error instanceof BetaControlError) return sendBetaError(reply, error);
   if (!(error instanceof AuthServiceError)) throw error;
   if (error.code === "RATE_LIMITED") {
     reply.header("Retry-After", String(error.retryAfterSeconds ?? 1));
@@ -3154,6 +3202,7 @@ function sendRepositoryError(
   reply: { status(code: number): { send(payload: unknown): unknown } },
   error: unknown
 ) {
+  if (error instanceof BetaControlError) return sendBetaError(reply, error);
   if (error instanceof TextArtifactServiceError) {
     return reply.status(error.code === "TEXT_GENERATION_DISABLED" ? 503 : 422).send({ error: error.code });
   }
@@ -3203,6 +3252,14 @@ function sendRepositoryError(
   }
 
   throw error;
+}
+
+function sendBetaError(reply: { status(code: number): { send(payload: unknown): unknown } }, error: BetaControlError) {
+  const status = error.code === "BETA_ADMIN_FORBIDDEN" ? 403 :
+    error.code === "BETA_INVITATION_INVALID" ? 400 :
+    error.code === "BETA_SETTINGS_STALE" ? 409 :
+    error.code === "BETA_RECIPIENT_LIMIT" ? 429 : 503;
+  return reply.status(status).send({ error: error.code });
 }
 
 function logCallPreparationError(log: FastifyBaseLogger, error: unknown) {

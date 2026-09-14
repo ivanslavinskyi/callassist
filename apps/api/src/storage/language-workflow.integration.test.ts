@@ -8,6 +8,7 @@ import { PostgresCallRepository } from "./postgres-call-repository";
 
 const database = isolatedTestDatabase();
 let sql: postgres.Sql, repository: PostgresCallRepository, service: CallService;
+const backgroundErrors: unknown[] = [];
 const owner = randomUUID();
 beforeAll(async () => {
   await database.setup();
@@ -15,12 +16,16 @@ beforeAll(async () => {
   await sql`INSERT INTO users(id,email,password_hash,phone_e164,phone_verified_at,first_name,last_name,role,status,ui_locale,created_at)
     VALUES(${owner},${`${owner}@example.com`},'test-only','+41710000209',now(),'Nina','Keller','user','active','en',now())`;
   repository = new PostgresCallRepository(database.url, Buffer.alloc(32, 9));
-  service = new CallService(repository);
+  service = new CallService(repository, undefined, error => backgroundErrors.push(error));
   await service.initialize();
 }, 30000);
-afterAll(async () => { await service?.close(); await sql?.end(); await database.teardown(); });
+afterAll(async () => {
+  await service?.close(); await sql?.end(); await database.teardown();
+  expect(backgroundErrors).toEqual([]);
+});
 
 it("atomically publishes language metadata beside unchanged plans and preserves manual choice", async () => {
+  for (let iteration = 0; iteration < 10; iteration++) {
   const input = {
     recipientName: "Gemeinde", phoneNumber: "+41523686688", objective: "Ask which documents are needed for registration",
     assistantProfileId: "sebastian" as const, representedPersonFirstName: "Nina", representedPersonLastName: "Keller",
@@ -46,5 +51,6 @@ it("atomically publishes language metadata beside unchanged plans and preserves 
   await vi.waitFor(async () => { expect((await service.getPreparation(next.id, owner)).status).toBe("succeeded"); }, { timeout: 8000, interval: 30 });
   expect((await service.get(callId))?.languageContext).toMatchObject({ taskContentLanguage: "uk", selectionRevision: 2, compilationRevision: 2 });
   const [stored] = await sql`SELECT count(*)::int AS count FROM call_preparation_language_contexts`;
-  expect(stored?.count).toBe(2);
-}, 20000);
+  expect(stored?.count).toBe((iteration + 1) * 2);
+  }
+}, 60000);

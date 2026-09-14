@@ -6,8 +6,12 @@ in-memory implementation exists for local tests and single-process development o
 
 Reviewed 2026-09-12 against `ef36cfa`. Email-change start/confirm and account name
 editing also use shared limits. Production keys must be independent of the email
-verification HMAC key as well as promo/data keys. Proxy/IP trust is a separate R09
-deployment decision; `request.ip` currently uses the direct connection peer.
+verification HMAC key as well as promo/data keys. B06 preparation on 2026-09-14 adds
+explicit `TRUSTED_PROXY_CIDRS`: reviewed IPs/CIDRs or `none` for direct ingress.
+Development defaults to the direct peer; production requires an explicit choice.
+Forwarded headers from an untrusted peer cannot change `request.ip`. The actual edge
+must strip incoming spoofed headers and isolate the API port; external acceptance
+remains open. See [deployment preflight](deployment-preflight.md).
 
 ## Invariants
 
@@ -61,6 +65,16 @@ charging a new preparation budget.
 The configurable `API_RATE_LIMIT_*` names are in the [runtime reference](runtime-reference.md).
 Call admission's rolling-hour/UTC-day quotas and one-active-call invariant are
 additional constraints, independent from these fixed-window request budgets.
+
+Migration 0070 adds shared beta admission and conservative monetary reservations:
+30 public registrations plus extra one-use invitations, seven-minute maximum calls,
+one call/account and two globally by default. Recipient abuse is additionally capped
+across accounts at two starts in the last 24 hours; deletion does not reset the
+short-lived HMAC counter. The open-registration count is lifetime intake, not current
+active accounts. Superadmin edits the caps and USD budget in Admin System. Null budget
+or spending pause fails closed before paid provider dispatch. Conservative spend
+reservations remain debited for 24 hours even when delivery is uncertain or fails;
+they are separate from refundable user credits. See [beta controls](beta-controls-2026-09-14.md).
 
 Text-artifact provider budgets are separate from endpoint rate limits: 24 requests
 per artifact across three generations, up to three automatic attempts per generation.

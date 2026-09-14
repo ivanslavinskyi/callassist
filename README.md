@@ -5,14 +5,21 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-14, email/SMS checkpoint following `f172a1a`:** implemented supervised MVP with substantial beta
+**Repository status, 2026-09-14, beta controls following `34a0746`:** implemented supervised MVP with substantial beta
 infrastructure. **B01/B02 are remediated locally:** production dependency audit is clean;
 Admin System supports nonempty jobs and independent outbound-call control.
 Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
 The user confirmed EN email delivery in Gmail and SMS from SHPROHLI to a Swiss number.
-**NO-GO for public testing** remains: remaining delivery scenarios, admission, deployment
-and operational acceptance are open. Current test results and the unresolved recompile
-deadlock are recorded in the [email/SMS checkpoint](docs/email-sms-implementation-2026-09-14.md).
+Open registration now has an admin-controlled cap of 30 plus additional one-use invitations,
+7-minute calls, 1 call/account and 2 globally, with shared conservative USD spending reservations.
+Set the monetary amount in Admin System before real paid requests; its initial value is blank.
+The recompile deadlock is fixed. Call credits are now used only after consent and a
+confirmed substantive task answer; otherwise the reservation is returned at call end.
+The revised EN/DE landing and related policy copy are published locally. See the
+[conversation-credit checkpoint](docs/conversation-credit-2026-09-14.md).
+**NO-GO for public testing** remains: delivery scenarios,
+deployment and operational acceptance are open. See the
+[beta controls and stability report](docs/beta-controls-2026-09-14.md).
 See the [remediation evidence and browser-check boundary](docs/b01-b02-remediation-2026-09-13.md),
 [original audit](docs/public-testing-audit-2026-09-13.md),
 [single release roadmap](docs/mvp-plan.md) and [documentation index](docs/README.md).
