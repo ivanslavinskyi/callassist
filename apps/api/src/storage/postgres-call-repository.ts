@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend } from "../beta/beta-controls";
+import { isFreeProviderOperation } from "../beta/beta-spend-accounting";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
 import type { CallTextRepository } from "./call-text-repository";
@@ -1121,7 +1122,7 @@ export class PostgresCallRepository implements CallRepository {
     lease: DurableJobLease
   ) {
     return this.#sql.begin(async (transaction) => {
-      if (this.betaControls) await reserveBetaSpend(transaction, "text", `provider:${input.id}`);
+      if (this.betaControls && !isFreeProviderOperation(input)) await reserveBetaSpend(transaction, "text", `provider:${input.id}`);
       await requirePostgresDurableJobLease(transaction, lease);
       const existing = await transaction`
         SELECT id

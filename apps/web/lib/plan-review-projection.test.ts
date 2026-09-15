@@ -41,6 +41,16 @@ function appointmentArtifact(): CallTextArtifact {
 }
 
 describe("translated plan projection", () => {
+  it("never presents a saved mock as a translated plan or prefers it to real generation in progress", () => {
+    const mock = { ...artifact(), generatorVersion: "text-processing-v2:mock", createdAt: "2026-09-15T10:00:00Z" };
+    const pending = { ...artifact(), id: "real", generatorVersion: "text-processing-v2:openai:gpt-5.6", status: "processing" as const,
+      payload: null, payloadHash: null, createdAt: "2026-09-15T10:01:00Z" };
+    expect(projectPlanReview(compilation, source, mock)).toBeNull();
+    expect(currentPlanReviewArtifact([mock, pending], compilation, source, "ru", "plan_review")).toBe(pending);
+    const ready = { ...artifact(), ...pending, status: "ready" as const, payload: artifact().payload, payloadHash: artifact().payloadHash };
+    expect(currentPlanReviewArtifact([mock, ready], compilation, source, "ru", "plan_review")).toBe(ready);
+    expect(projectPlanReview(compilation, source, ready)).not.toBeNull();
+  });
   it("translates only the appointment service while preserving the exact original authorization and approval binding", () => {
     for (const operation of ["book", "confirm_existing"] as const) {
       const authorization = { ...structuredClone(appointmentAuthorization), operation,

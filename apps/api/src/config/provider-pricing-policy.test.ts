@@ -71,7 +71,7 @@ describe("provider pricing policy", () => {
     });
   });
 
-  it("marks a known token model partial when a returned metric has no rate", () => {
+  it("includes transcription prompt text as well as audio and output", () => {
     expect(calculateProviderUsageCost(bucket({
       model: "gpt-4o-transcribe",
       operationType: "transcription",
@@ -84,8 +84,8 @@ describe("provider pricing policy", () => {
       outputTextTokenSamples: 1
     }))).toMatchObject({
       matched: true,
-      calculatedUsdMicros: 450,
-      unpricedMetrics: ["input_text_tokens"]
+      calculatedUsdMicros: 475,
+      unpricedMetrics: []
     });
   });
 });

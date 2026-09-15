@@ -21,6 +21,7 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
   return <>
     <p className="call-plan-lead">{plan.localizedObjective}</p>
     <div className="review-questions review-success-criteria">
+      <Heading>{copy.successMeans}</Heading>
       <ul>{plan.successCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
     </div>
     {authorization ? <section className="review-questions appointment-authorization" aria-label={appointmentCopy.title}>

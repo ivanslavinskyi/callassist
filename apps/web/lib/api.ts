@@ -1,3 +1,4 @@
+import { betaMessages } from "./i18n/beta-messages";
 import type {
   AccountDeletionInput,
   AccountDeletionResponse,
@@ -713,6 +714,9 @@ export function getCallPreparationErrorMessage(
   options: Partial<{
     generic: string;
     unavailable: string;
+    spendingPaused: string;
+    budgetUnconfigured: string;
+    budgetExhausted: string;
     pending: string;
     invalid: string;
     notFound: string;
@@ -725,6 +729,9 @@ export function getCallPreparationErrorMessage(
   const copy = {
     generic: "The call plan could not be prepared. Your entries are preserved. Try again.",
     unavailable: "Call preparation is temporarily unavailable. Your entries are preserved. Try again shortly.",
+    spendingPaused: betaMessages.en.spendingPaused,
+    budgetUnconfigured: betaMessages.en.budgetUnconfigured,
+    budgetExhausted: betaMessages.en.budgetExhausted,
     pending: "Plan preparation is taking longer than expected. Your entries are preserved. Try again to check its progress.",
     invalid: "Some call details need attention. Check your entries and try again.",
     notFound: "This call plan no longer exists. Return to your calls and create a new one.",
@@ -738,7 +745,10 @@ export function getCallPreparationErrorMessage(
     return copy.generic;
   }
 
-  if (error.code === "BRIEF_COMPILER_UNAVAILABLE" || ["BETA_SPENDING_PAUSED", "BETA_BUDGET_UNCONFIGURED", "BETA_BUDGET_EXHAUSTED"].includes(error.code)) {
+  if (error.code === "BETA_BUDGET_UNCONFIGURED") return copy.budgetUnconfigured;
+  if (error.code === "BETA_BUDGET_EXHAUSTED") return copy.budgetExhausted;
+  if (error.code === "BETA_SPENDING_PAUSED") return copy.spendingPaused;
+  if (error.code === "BRIEF_COMPILER_UNAVAILABLE") {
     return copy.unavailable;
   }
   if (error.code === "CALL_PREPARATION_TIMEOUT") {
@@ -813,7 +823,8 @@ export async function listRecipientSuggestions(options: {
 export async function createCallBrief(
   input: CreateCallBriefInput,
   idempotencyKey = crypto.randomUUID(),
-  languagePreferences?: TaskLanguagePreferences
+  languagePreferences?: TaskLanguagePreferences,
+  onProgress?: (progress: CallPreparationProgress) => void
 ) {
   const request = () => apiRequest<CallPreparation>("/api/call-preparations", {
     method: "POST",
@@ -823,6 +834,21 @@ export async function createCallBrief(
       : input)
   });
 
+  const preparation = await waitForCallPreparation(request, onProgress);
+  const snapshot = await getCallSnapshot(preparation.callBriefId!);
+  return snapshot.brief;
+}
+
+export type CallPreparationProgress = "queued" | "preparing" | "retrying" | "delayed";
+
+// The worker can take three 120-second attempts, with backoff and queue time.
+// A browser timeout is resumable; it must not turn an active job into a failed attempt.
+const CALL_PREPARATION_WAIT_MS = 8 * 60_000;
+
+async function waitForCallPreparation(
+  request: () => Promise<CallPreparation>,
+  onProgress?: (progress: CallPreparationProgress) => void
+) {
   let preparation: CallPreparation;
   try {
     preparation = await request();
@@ -832,7 +858,9 @@ export async function createCallBrief(
     preparation = await request();
   }
 
-  const deadline = Date.now() + 120_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + CALL_PREPARATION_WAIT_MS;
+  let lastProgress: CallPreparationProgress | undefined;
   while (preparation.status !== "succeeded") {
     if (preparation.status === "failed") {
       throw new CallPreparationFailedError(preparation.failureCode ?? "BRIEF_COMPILATION_FAILED");
@@ -843,13 +871,23 @@ export async function createCallBrief(
     if (Date.now() >= deadline) {
       throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const elapsed = Date.now() - startedAt;
+    const progress: CallPreparationProgress = preparation.status === "retrying" || preparation.attemptCount > 1
+      ? "retrying"
+      : elapsed >= 60_000 ? "delayed"
+      : preparation.status === "queued" ? "queued" : "preparing";
+    if (progress !== lastProgress) {
+      onProgress?.(progress);
+      lastProgress = progress;
+    }
+    await new Promise((resolve) => setTimeout(resolve,
+      Math.min(elapsed < 10_000 ? 500 : 2_000, deadline - Date.now())));
     preparation = await apiRequest<CallPreparation>(
-      `/api/call-preparations/${preparation.id}`
+      `/api/call-preparations/${preparation.id}`,
+      { cache: "no-store", signal: AbortSignal.timeout(30_000) }
     );
   }
-  const snapshot = await getCallSnapshot(preparation.callBriefId!);
-  return snapshot.brief;
+  return preparation;
 }
 
 function isUncertainCallPreparationResponse(error: unknown) {
@@ -880,7 +918,8 @@ export async function recompileCallBrief(
   id: string,
   input: CreateCallBriefInput,
   idempotencyKey = crypto.randomUUID(),
-  languagePreferences?: TaskLanguagePreferences
+  languagePreferences?: TaskLanguagePreferences,
+  onProgress?: (progress: CallPreparationProgress) => void
 ) {
   const request = () => apiRequest<CallPreparation>(`/api/call-briefs/${id}`, {
     method: "PUT",
@@ -890,31 +929,7 @@ export async function recompileCallBrief(
       : input)
   });
 
-  let preparation: CallPreparation;
-  try {
-    preparation = await request();
-  } catch (error) {
-    if (!isUncertainCallPreparationResponse(error)) throw error;
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    preparation = await request();
-  }
-
-  const deadline = Date.now() + 120_000;
-  while (preparation.status !== "succeeded") {
-    if (preparation.status === "failed") {
-      throw new CallPreparationFailedError(preparation.failureCode ?? "BRIEF_COMPILATION_FAILED");
-    }
-    if (preparation.status === "cancelled") {
-      throw new ApiError("CALL_PREPARATION_CANCELLED", 409);
-    }
-    if (Date.now() >= deadline) {
-      throw new ApiError("CALL_PREPARATION_TIMEOUT", 504);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    preparation = await apiRequest<CallPreparation>(
-      `/api/call-preparations/${preparation.id}`
-    );
-  }
+  const preparation = await waitForCallPreparation(request, onProgress);
   return getCallSnapshot(preparation.callBriefId!);
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { betaMessages } from "./i18n/beta-messages";
 import {
   ApiError,
   CallPreparationFailedError,
@@ -1195,6 +1196,31 @@ describe("API client headers", () => {
     });
   });
 
+  it.each((["create", "recompile"] as const).flatMap(operation => [
+    [operation, "BETA_BUDGET_UNCONFIGURED", "budgetUnconfigured"],
+    [operation, "BETA_BUDGET_EXHAUSTED", "budgetExhausted"],
+    [operation, "BETA_SPENDING_PAUSED", "spendingPaused"]
+  ] as const))("reports %s %s accurately without retrying a rejected request", async (operation, code, messageKey) => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ error: code }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      recipientName: "Elena", phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most", assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina", representedPersonLastName: "Keller",
+      locale: "de-CH" as const, allowLanguageSwitch: false, allowedFacts: []
+    };
+    const error = await (operation === "create" ? createCallBrief(input, "operation-id")
+      : recompileCallBrief("call-id", input, "operation-id")).catch(error => error as ApiError);
+    expect(error).toMatchObject({ code, status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    for (const locale of ["en", "de"] as const) {
+      expect(getCallPreparationErrorMessage(error, { ...betaMessages[locale], unavailable: "provider unavailable" }))
+        .toBe(betaMessages[locale][messageKey]);
+    }
+    expect(getCallPreparationErrorMessage(error)).toBe(betaMessages.en[messageKey]);
+  });
+
   it.each(["create", "recompile"] as const)("preserves a deferred %s preparation failure from the polling response", async (operation) => {
     vi.useFakeTimers();
     const preparation = {
@@ -1229,6 +1255,67 @@ describe("API client headers", () => {
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
   });
 
+  it.each([
+    ["create", 155_540, 2],
+    ["recompile", 155_540, 2],
+    ["create", 375_000, 3],
+    ["recompile", 375_000, 3]
+  ] as const)("opens a %s plan automatically after %i ms and %i worker attempts", async (operation, completionTime, attemptCount) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const preparation = {
+      id: "preparation-id", status: "queued", callBriefId: null, failureCode: null, attemptCount: 0
+    };
+    const snapshot = { brief: { id: "call-id", status: "review_required" } };
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+      if (init?.method === "POST" || init?.method === "PUT") {
+        return new Response(JSON.stringify(preparation), { status: 202 });
+      }
+      if (String(url).endsWith("/api/call-preparations/preparation-id")) {
+        const elapsed = Date.now();
+        return new Response(JSON.stringify({
+          ...preparation,
+          status: elapsed >= completionTime ? "succeeded" : elapsed >= 95_000 && elapsed < 100_000 ? "retrying" : "processing",
+          attemptCount: elapsed < 95_000 ? 1 : elapsed < 240_000 ? 2 : attemptCount,
+          callBriefId: elapsed >= completionTime ? "call-id" : null
+        }), { status: 200 });
+      }
+      if (String(url).endsWith("/api/call-briefs/call-id")) {
+        return new Response(JSON.stringify(snapshot), { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      recipientName: "Elena", phoneNumber: "+41710000001",
+      objective: "Ask Elena which book she likes most", assistantProfileId: "sebastian" as const,
+      representedPersonFirstName: "Nina", representedPersonLastName: "Keller",
+      locale: "de-CH" as const, allowLanguageSwitch: false, allowedFacts: []
+    };
+    const onProgress = vi.fn();
+    const settled = vi.fn();
+    const result = (operation === "create"
+      ? createCallBrief(input, "operation-id", undefined, onProgress)
+      : recompileCallBrief("call-id", input, "operation-id", undefined, onProgress))
+      .then(value => { settled(); return value; }, error => { settled(); throw error; });
+    const assertion = expect(result).resolves.toEqual(operation === "create" ? snapshot.brief : snapshot);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(settled).not.toHaveBeenCalled();
+    expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual([
+      "queued", "preparing", "delayed", "retrying"
+    ]);
+    await vi.advanceTimersByTimeAsync(completionTime - 120_000 + 2_000);
+    await assertion;
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST" || init?.method === "PUT"))
+      .toHaveLength(1);
+    expect(fetchMock.mock.calls.slice(1, -1).every(([url, init]) =>
+      String(url).endsWith("/api/call-preparations/preparation-id") && init?.cache === "no-store"
+    )).toBe(true);
+  });
+
   it("reports a still-processing preparation as pending at the browser deadline without creating another operation", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
@@ -1241,7 +1328,7 @@ describe("API client headers", () => {
       representedPersonFirstName: "Nina", representedPersonLastName: "Keller",
       locale: "de-CH", allowLanguageSwitch: false, allowedFacts: []
     }, "operation-id").catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(120_500);
+    await vi.advanceTimersByTimeAsync(8 * 60_000 + 500);
     const error = await result;
 
     expect(error).toBeInstanceOf(ApiError);

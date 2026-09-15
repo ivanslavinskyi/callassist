@@ -34,6 +34,11 @@ export const betaControlsViewSchema = z.strictObject({
   settings: betaSettingsSchema, revision: z.number().int().positive(),
   publicAccounts: z.number().int().nonnegative(), invitedAccounts: z.number().int().nonnegative(),
   activeCalls: z.number().int().nonnegative(), reservedMicros: z.number().int().nonnegative(),
+  reportedCostMicros: z.number().int().nonnegative(),
+  usageCostMicros: z.number().int().nonnegative(),
+  pendingReserveMicros: z.number().int().nonnegative(),
+  unresolvedReservations: z.number().int().nonnegative(),
+  accountingVersion: z.string().min(1),
   budgetState: z.enum(["unconfigured", "paused", "available", "warning", "exhausted"]),
   invitations: z.array(z.strictObject({
     id: z.string().uuid(), createdAt: z.string().datetime(), expiresAt: z.string().datetime(),

@@ -7,7 +7,8 @@ import {
   OpenAIBriefCompiler,
   type BriefCompiler
 } from "./brief-compiler/brief-compiler";
-import { normalizeCreateCallBriefInput } from "@callassist/contracts";
+import { normalizeCreateCallBriefInput, type CallTextArtifact } from "@callassist/contracts";
+import { OpenAITextProcessor } from "./text-processing/openai-text-processor";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import type { TelephonyProvider } from "./telephony/telephony-provider";
 import type { PostCallTranscriber } from "./transcription/openai-post-call-transcriber";
@@ -39,6 +40,20 @@ async function waitForPreparation(
 }
 
 describe("CallService", () => {
+  it("rejects approval based on a saved mock translation in a real translation workflow", async () => {
+    const repository = new InMemoryCallRepository();
+    const service = new CallService(repository, undefined, undefined, undefined, undefined, undefined, undefined, {
+      textProcessor: new OpenAITextProcessor({ apiKey: "test-key" })
+    });
+    services.push(service);
+    vi.spyOn(repository, "getTextArtifact").mockResolvedValue({ generatorVersion: "text-processing-v2:mock" } as CallTextArtifact);
+    const approve = vi.spyOn(repository, "approveCompilation");
+    await expect(service.approveCompilation("call-id", {
+      revision: 1, snapshotHash: "a".repeat(64),
+      review: { mode: "translated", language: "ru", artifactId: "mock-artifact", artifactHash: "b".repeat(64), selectionRevision: 1 }
+    })).rejects.toMatchObject({ code: "CALL_REVIEW_STALE" });
+    expect(approve).not.toHaveBeenCalled();
+  });
   it("durably compiles one brief for repeated preparation requests", async () => {
     const repository = new InMemoryCallRepository();
     const service = new CallService(repository, undefined, () => undefined);

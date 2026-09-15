@@ -26,7 +26,7 @@ Create an overview of 1–4 concise points referring to findingIds: the first st
 Include nextSteps only for concrete actions after the call, relevant to the initiating person, explicitly grounded in cited original segments. Name who will act. Do not turn "wait", a processing pause, a farewell, or merely having agreed to a meeting into a next step. Do not invent recommendations. Keep nextSteps empty when there is no such action. Unresolved contains material unanswered questions or contradictions, not routine procedural comments. If extraction is supplied, it is the already validated detailed result: return its findings, nextSteps and unresolved exactly unchanged, and only create overview. Do not resolve uncertainty or upgrade certainty during this final compaction stage.
 For appointment summaries, an available or offered slot, the assistant's agreement, or an internal permission check is not a confirmed booking. Report a booking or attendance confirmation only when the recipient explicitly confirms it after the request; cite that recipient statement and the agreed details. If the call ends before confirmation, or confirmation depends on a later action or new terms, state that uncertainty or condition. Never turn a proposed, tentative, contradicted or disconnected appointment into a confirmed one.
 Preserve the formatting of all digit sequences, amounts, dates, times, percentages, phone numbers and reference codes exactly. Never convert a written-out number to digits. In summaries, every numeric value or identifier must occur in its cited original evidence. For an unknown finding only, its check can supply what is still unknown. Do not calculate new values. Short labels may omit numbers. Use natural country/local-time wording when grounded in the transcript instead of reciting technical time-zone identifiers.
-Return only the JSON object required by the schema. Do not put roles, timestamps, source instructions or extra keys into the output.`;
+Return only the compact JSON object required by the schema, without indentation or padding. Do not put roles, timestamps, source instructions or extra keys into the output.`;
 
 export class OpenAITextProcessor implements TextProcessor {
   readonly driver = "openai" as const;
@@ -101,7 +101,7 @@ export class OpenAITextProcessor implements TextProcessor {
             { role: "system", content: instructions },
             { role: "user", content: JSON.stringify(providerTextInput(input)) }
           ],
-          text: { format: {
+          text: { verbosity: "low", format: {
             type: "json_schema", name: `callassist_${input.kind}`,
             strict: true, schema: textOutputJsonSchema(input)
           } }

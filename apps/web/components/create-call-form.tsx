@@ -17,10 +17,14 @@ import {
   type UserRole
 } from "@callassist/contracts";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
+import Link from "next/link";
+import { betaMessages } from "@/lib/i18n/beta-messages";
 import {
   createCallBrief,
   getCallSnapshot,
-  getCallPreparationErrorMessage
+  getCallPreparationErrorMessage,
+  ApiError,
+  type CallPreparationProgress
 } from "@/lib/api";
 import {
   getCallPreparationSessionStorage,
@@ -34,6 +38,7 @@ import { representedPersonDefaults, type ProfileName } from "@/lib/represented-p
 import { getCallLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 import { useCallDraftStore } from "./call-draft-provider";
 import type { CallDraft } from "@/lib/call-draft-store";
+import { CallPreparationStatus } from "./call-preparation-status";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -73,7 +78,8 @@ type CreateCallFormProps = {
   saveCallBrief?: (
     input: CreateCallBriefInput,
     idempotencyKey?: string,
-    languagePreferences?: TaskLanguagePreferences
+    languagePreferences?: TaskLanguagePreferences,
+    onProgress?: (progress: CallPreparationProgress) => void
   ) => Promise<CallBrief>;
   heading?: string;
   headingLevel?: 1 | 2;
@@ -150,7 +156,9 @@ export function CreateCallForm({
   }
   function setFactsText(value: string) { updateDraft({ factsText: value }); }
   const [submitting, setSubmitting] = useState(false);
+  const [preparationProgress, setPreparationProgress] = useState<CallPreparationProgress>("preparing");
   const [error, setError] = useState<string | null>(null);
+  const [budgetNeedsSetup, setBudgetNeedsSetup] = useState(false);
 
   const fallbackLanguages = useMemo(
     () => selectableLanguages.filter(({ locale }) => locale !== form.locale),
@@ -215,11 +223,13 @@ export function CreateCallForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setBudgetNeedsSetup(false);
     if (callLanguageForbidden) {
       setError(languageCopy.callLanguageForbidden);
       return;
     }
     setSubmitting(true);
+    setPreparationProgress("preparing");
     setError(null);
 
     const input = {
@@ -239,9 +249,12 @@ export function CreateCallForm({
     }
 
     let brief: CallBrief;
+    const onProgress = (progress: CallPreparationProgress) => {
+      if (mounted.current) setPreparationProgress(progress);
+    };
     try {
       if (!userId) {
-        brief = await saveCallBrief(input, undefined, languagePreferences);
+        brief = await saveCallBrief(input, undefined, languagePreferences, onProgress);
       } else {
         const storage = getCallPreparationSessionStorage();
         let activeAttemptKey = draftRef.current.preparationAttempt?.idempotencyKey;
@@ -253,7 +266,7 @@ export function CreateCallForm({
           current: draftRef.current.preparationAttempt,
           storage,
           save: (value, idempotencyKey) =>
-            saveCallBrief(value, idempotencyKey, languagePreferences),
+            saveCallBrief(value, idempotencyKey, languagePreferences, onProgress),
           load: async (callBriefId) =>
             (await getCallSnapshot(callBriefId)).brief,
           onAttempt: (attempt) => {
@@ -270,7 +283,9 @@ export function CreateCallForm({
         });
       }
     } catch (error) {
+      setBudgetNeedsSetup(error instanceof ApiError && error.code === "BETA_BUDGET_UNCONFIGURED");
       setError(getCallPreparationErrorMessage(error, {
+        ...betaMessages[uiLocale],
         generic: messages.form.preparationError,
         callLanguageForbidden: languageCopy.callLanguageForbidden,
         unavailable: messages.form.preparationUnavailable,
@@ -661,7 +676,10 @@ export function CreateCallForm({
         </div>
       </details>
 
-      {error ? <p className="form-error">{error}</p> : null}
+      {error ? <div className="form-error" role="alert">
+        <p>{error}</p>
+        {budgetNeedsSetup && userRole === "superadmin" ? <Link href="/admin/system#beta-controls">{betaMessages[uiLocale].configureBudget}</Link> : null}
+      </div> : null}
 
       <p
         className={taskTextOverLimit
@@ -676,13 +694,7 @@ export function CreateCallForm({
       </p>
 
       {submitting ? (
-        <div className="compilation-progress" role="status" aria-live="polite">
-          <span className="processing-spinner" aria-hidden="true" />
-          <div>
-            <strong>{messages.form.preparingTitle}</strong>
-            <p>{messages.form.preparingText}</p>
-          </div>
-        </div>
+        <CallPreparationStatus progress={preparationProgress} />
       ) : null}
 
       <div className="form-actions sticky-form-actions">

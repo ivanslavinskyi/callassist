@@ -123,6 +123,7 @@ type OpenAIBriefCompilerOptions = {
 
 type OpenAIResponsePayload = {
   id?: unknown;
+  status?: unknown;
   output_text?: unknown;
   output?: Array<{
     type?: unknown;
@@ -319,7 +320,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       {
         model: this.model,
         store: false,
-        max_output_tokens: 5_000,
+        max_output_tokens: 20_000,
         reasoning: { effort: "low" },
         input: [
           {
@@ -350,6 +351,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           }
         ],
         text: {
+          verbosity: "low",
           format: {
             type: "json_schema",
             name: "callassist_compiled_brief",
@@ -503,7 +505,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         await completeProviderRequest(requestBudget, {
           clientRequestId,
           stage,
-          outcome: "succeeded",
+          outcome: stage === "compilation" && responsePayload.status !== undefined && responsePayload.status !== "completed"
+            ? "invalid_response" : "succeeded",
           providerRequestId: responseId,
           providerResponseId: stringOrNull(responsePayload.id),
           providerModel: stringOrNull(responsePayload.model),
@@ -852,6 +855,14 @@ function parseCompiledBriefResponse(
       validationFeedback: string[];
     } {
   let modelOutput: unknown;
+  if (response.status !== undefined && response.status !== "completed") {
+    return {
+      success: false,
+      cause: new Error("Incomplete compiler response"),
+      validationPaths: ["output"],
+      validationFeedback: ["output: the previous response was incomplete; return one complete compact JSON object without indentation or padding, keeping the plan proportional to the task"]
+    };
+  }
   try {
     modelOutput = JSON.parse(extractOutputText(response));
   } catch (cause) {
@@ -1032,7 +1043,9 @@ Legitimate disclosed representation by an AI assistant is not impersonation. Fla
 
 Every sourceText in approvedFacts must be copied character-for-character, in the same order, from approvedFacts in the input. Put only its faithful call-language rendering in callLanguageText. Use an empty riskCategories array when no category applies. Apply any clarificationAnswers before deciding whether a blocking issue remains. All other human-facing fields must use the requested callLocale.
 
-Always return between 1 and 12 orderedQuestions. For a neutral message, make the message itself the single ordered item. For an unsupported task, include one non-executable summary item; policy enforcement will prevent the call.`;
+Always return between 1 and 12 orderedQuestions. For a neutral message, make the message itself the single ordered item. For an unsupported task, include one non-executable summary item; policy enforcement will prevent the call.
+
+Keep the plan proportional to the task. For one simple question use one ordered question, no speculative follow-ups, and short criteria. Leave backgroundSummary empty when no context was supplied. Return compact JSON without indentation or padding.`;
 
 export const modelCompiledBriefJsonSchema = {
   type: "object",

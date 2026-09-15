@@ -1,5 +1,5 @@
 "use client";
-import { betaErrorMessage } from "@/lib/i18n/beta-messages";
+import { betaErrorMessage, betaMessages } from "@/lib/i18n/beta-messages";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 
 import {
@@ -29,6 +29,7 @@ import { TranslatedPlanReview } from "./translated-plan-review";
 import { CallResultPanel } from "./call-result-panel";
 import { ConfirmDialog } from "./confirm-dialog";
 import { CreateCallForm } from "./create-call-form";
+import { CallPreparationStatus } from "./call-preparation-status";
 import { useUiLocale } from "./ui-locale-provider";
 import { useCallDraftStore } from "./call-draft-provider";
 import { getCallLanguageLabel, getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
@@ -52,7 +53,8 @@ import {
   startCall,
   stopCall,
   updateCallContentLanguage,
-  ApiError
+  ApiError,
+  type CallPreparationProgress
 } from "@/lib/api";
 import {
   buildFinalTranscriptCopyText,
@@ -109,6 +111,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [preparationProgress, setPreparationProgress] = useState<CallPreparationProgress | null>(null);
   const [editingBrief, setEditingBrief] = useState(() => Boolean(draftStore.forOwner(userId).get(userId, callId)));
   const [confirmingAudioDelete, setConfirmingAudioDelete] = useState(false);
   const [deletionPassword, setDeletionPassword] = useState("");
@@ -274,8 +277,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     }
   }
 
-  async function saveEditedBrief(input: CreateCallBriefInput, idempotencyKey?: string, languagePreferences?: TaskLanguagePreferences) {
-    const updated = await recompileCallBrief(callId, input, idempotencyKey, languagePreferences);
+  async function saveEditedBrief(
+    input: CreateCallBriefInput,
+    idempotencyKey?: string,
+    languagePreferences?: TaskLanguagePreferences,
+    onProgress?: (progress: CallPreparationProgress) => void
+  ) {
+    const updated = await recompileCallBrief(callId, input, idempotencyKey, languagePreferences, onProgress);
     setSnapshot((current) => currentCallSnapshot(current, updated));
     setEditingBrief(false);
     setActionError(null);
@@ -285,6 +293,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   async function answerClarifications(answers: ClarificationAnswer[]) {
     if (!snapshot?.compilation) return;
     setBusy(true);
+    setPreparationProgress("preparing");
     setActionError(null);
     try {
       const previousAnswers = snapshot.compilation.rawBrief.clarificationAnswers ?? [];
@@ -312,12 +321,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         storage: getCallPreparationSessionStorage(),
         onAttempt: (attempt) => { clarificationAttemptRef.current = attempt; },
         save: async (value, idempotencyKey) => acceptSnapshot(
-          await recompileCallBrief(callId, value, idempotencyKey, languagePreferences)
+          await recompileCallBrief(callId, value, idempotencyKey, languagePreferences, setPreparationProgress)
         ),
         load: async (id) => acceptSnapshot(await getCallSnapshot(id))
       });
     } catch (error) {
       setActionError(getCallPreparationErrorMessage(error, {
+        ...betaMessages[uiLocale],
         generic: messages.form.preparationError,
         callLanguageForbidden: languageCopy.callLanguageForbidden,
         unavailable: messages.form.preparationUnavailable,
@@ -330,6 +340,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
       }));
     } finally {
       setBusy(false);
+      setPreparationProgress(null);
     }
   }
 
@@ -544,6 +555,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         </section>
 
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
+        {preparationProgress ? <CallPreparationStatus progress={preparationProgress} /> : null}
         {callLanguageForbidden && !isTerminal && !isActive ? (
           <div className="inline-notice" role="alert">
             <p>{languageCopy.callLanguageForbidden}</p>

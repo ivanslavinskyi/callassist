@@ -1,5 +1,9 @@
 import { planReviewPayloadSchema, type CallCompilation, type CallTextArtifact, type PlanSource, type TextLanguage } from "@callassist/contracts";
 
+export function isMockPlanReview(artifact: CallTextArtifact) {
+  return artifact.generatorVersion?.endsWith(":mock") ?? false;
+}
+
 /** A failed newer generator must not hide a validated saved reader for the same source. */
 export function currentPlanReviewArtifact(items: CallTextArtifact[], compilation: CallCompilation, source: PlanSource,
   targetLanguage: TextLanguage, kind: "plan_review" | "clarification_review") {
@@ -11,6 +15,7 @@ export function currentPlanReviewArtifact(items: CallTextArtifact[], compilation
 
 /** Only text leaves can change. IDs, codes, policy, scope and source facts remain authoritative. */
 export function projectPlanReview(compilation: CallCompilation, source: PlanSource, artifact: CallTextArtifact): CallCompilation | null {
+  if (isMockPlanReview(artifact)) return null;
   if (artifact.status !== "ready" || !artifact.payloadHash || artifact.compilationId !== source.compilationId || artifact.sourceHash !== source.snapshotHash ||
     !["plan_review", "clarification_review"].includes(artifact.kind)) return null;
   const parsed = planReviewPayloadSchema.safeParse(artifact.payload);

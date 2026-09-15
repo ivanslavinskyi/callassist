@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import { betaSettingsSchema, type BetaSettings, type BetaControlsView } from "@callassist/contracts";
+import { readBetaSpend } from "./beta-spend-accounting";
 
 export type SpendKind = "call" | "text" | "transcription" | "sms" | "email";
 export class BetaControlError extends Error {
@@ -50,8 +51,7 @@ export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendK
   const amount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros :
     kind === "text" ? policy.textRequestReserveMicros : kind === "transcription" ? policy.transcriptionRequestReserveMicros :
     kind === "sms" ? policy.smsReserveMicros : policy.emailReserveMicros;
-  const [{ total }] = await tx<{ total: number }[]>`SELECT COALESCE(sum(amount_micros),0)::double precision AS total
-    FROM beta_spend_reservations WHERE created_at>now()-interval '24 hours'`;
+  const { reservedMicros: total } = await readBetaSpend(tx);
   if (total + amount > policy.rollingDayBudgetMicros) {
     budgetSignal("beta_budget_request_blocked", total, policy.rollingDayBudgetMicros, policy.currency);
     throw new BetaControlError("BETA_BUDGET_EXHAUSTED");
@@ -64,8 +64,7 @@ export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendK
 function budgetSignal(event: string, reservedMicros: number, limitMicros: number, currency: string) {
   process.stderr.write(`${JSON.stringify({ level: "warn", time: new Date().toISOString(), event, reservedMicros, limitMicros, currency })}\n`);
 }
-// Monetary reservations remain debited for 24 hours, including failures and missing
-// callbacks. Do not release an uncertain provider expense or rely on delayed invoices.
+// Admission counts observed expenses plus reservations for unresolved expenses.
 export class PostgresBetaControls implements BetaControls {
   constructor(readonly sql: postgres.Sql) {}
   async reserve(kind: SpendKind, key: string) {
@@ -82,15 +81,15 @@ export class PostgresBetaControls implements BetaControls {
   async getView(): Promise<BetaControlsView> {
     return this.sql.begin(async tx => {
       const row = await lockBetaControls(tx);
-      const [{ reserved, active }] = await tx<{ reserved: number; active: number }[]>`SELECT
-        (SELECT COALESCE(sum(amount_micros),0)::double precision FROM beta_spend_reservations WHERE created_at>now()-interval '24 hours') AS reserved,
-        (SELECT count(*)::int FROM call_attempts WHERE ${activeBetaCall(tx)}) AS active`;
+      const spending = await readBetaSpend(tx);
+      const reserved = spending.reservedMicros;
+      const [{ active }] = await tx<{ active: number }[]>`SELECT count(*)::int AS active FROM call_attempts WHERE ${activeBetaCall(tx)}`;
       const invitations = await tx<{ id: string; created_at: Date; expires_at: Date; status: BetaControlsView["invitations"][number]["status"] }[]>`
         SELECT id,created_at,expires_at,CASE WHEN consumed_at IS NOT NULL THEN 'used' WHEN revoked_at IS NOT NULL THEN 'revoked'
           WHEN expires_at<=now() THEN 'expired' ELSE 'available' END AS status FROM beta_invitations ORDER BY created_at DESC LIMIT 50`;
       const s = row.settings;
       return { settings: s, revision: row.revision, publicAccounts: row.public_accounts, invitedAccounts: row.invited_accounts,
-        activeCalls: active, reservedMicros: reserved, updatedAt: row.updated_at.toISOString(), reason: row.reason,
+        activeCalls: active, ...spending, updatedAt: row.updated_at.toISOString(), reason: row.reason,
         budgetState: !s.spendingEnabled ? "paused" : s.rollingDayBudgetMicros === null ? "unconfigured" :
           reserved >= s.rollingDayBudgetMicros ? "exhausted" : reserved >= s.rollingDayBudgetMicros * .8 ? "warning" : "available",
         invitations: invitations.map(i => ({ id: i.id, createdAt: i.created_at.toISOString(), expiresAt: i.expires_at.toISOString(), status: i.status })) };

@@ -653,6 +653,10 @@ export class CallService {
   }
 
   async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {
+    if (this.textArtifacts.processor.driver === "openai" && expected?.review?.mode === "translated") {
+      const artifact = await this.repository.getTextArtifact(id, expected.review.artifactId);
+      if (artifact?.generatorVersion.endsWith(":mock")) throw new CallRepositoryError("CALL_REVIEW_STALE");
+    }
     const snapshot = await this.repository.approveCompilation(id, expected);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;

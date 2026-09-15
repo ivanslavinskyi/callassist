@@ -38,6 +38,17 @@ function productionEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe("production runtime configuration", () => {
+  it.each([undefined, "development"])("rejects real preparation with mock translations in %s", NODE_ENV => {
+    for (const runtime of ["api", "worker"] as const) {
+      expect(() => validateRuntimeEnvironment({ NODE_ENV, OPENAI_API_KEY: "test-key" }, runtime))
+        .toThrow("TEXT_PROCESSOR_DRIVER=openai");
+      expect(() => validateRuntimeEnvironment({ NODE_ENV, BRIEF_COMPILER_DRIVER: "openai", TEXT_PROCESSOR_DRIVER: "mock", TEXT_ARTIFACT_GENERATION_ENABLED: "true" }, runtime))
+        .toThrow("TEXT_PROCESSOR_DRIVER=openai");
+      expect(() => validateRuntimeEnvironment({ NODE_ENV, OPENAI_API_KEY: "test-key", TEXT_PROCESSOR_DRIVER: "openai" }, runtime)).not.toThrow();
+      expect(() => validateRuntimeEnvironment({ NODE_ENV, OPENAI_API_KEY: "test-key", BRIEF_COMPILER_DRIVER: "mock" }, runtime)).not.toThrow();
+      expect(() => validateRuntimeEnvironment({ NODE_ENV, OPENAI_API_KEY: "test-key", TEXT_ARTIFACT_GENERATION_ENABLED: "false" }, runtime)).not.toThrow();
+    }
+  });
   it.each([undefined, "true", "0.0.0.0/0"])("requires a reviewed proxy policy instead of %s", value => {
     expect(() => validateRuntimeEnvironment({ ...productionEnvironment(), TRUSTED_PROXY_CIDRS: value }, "api")).toThrow("TRUSTED_PROXY_CIDRS");
   });

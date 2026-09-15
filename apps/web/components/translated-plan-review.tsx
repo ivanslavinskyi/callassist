@@ -4,7 +4,7 @@ import { type CallCompilation, type CallLanguageContext, type CallTextArtifact, 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, requestPlanReview, retryCallTextArtifact } from "@/lib/api";
 import { canRequestTextArtifact } from "@/lib/text-artifact-retry";
-import { currentPlanReviewArtifact, projectPlanReview } from "@/lib/plan-review-projection";
+import { currentPlanReviewArtifact, isMockPlanReview, projectPlanReview } from "@/lib/plan-review-projection";
 import { planReviewLanguage } from "@/lib/plan-review-language";
 import { getCallLanguageLabel, getTextLanguageLabel } from "@/lib/i18n/language-messages";
 import { textArtifactMessages } from "@/lib/i18n/text-artifact-messages";
@@ -78,7 +78,7 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
         : !canGenerate && !artifact ? copy.unsupported
         : artifact?.status === "failed" || artifact?.status === "cancelled" ? (artifact.retryable ? copy.failed : copy.reviewRetryUnavailable) : pollingPaused ? copy.pending : copy.loading)}</p>
       {availabilityStatus === "error" ? <button type="button" className="secondary-button" onClick={() => void refreshCapabilities()}>{copy.refresh}</button> : null}
-      {canGenerate && canRequestTextArtifact(artifact) && (error || artifact?.status === "failed") ? <button type="button" className="secondary-button" disabled={requesting} onClick={() => void request(artifact?.status === "failed")}>{copy.retry}</button> : null}
+      {canGenerate && ((artifact && isMockPlanReview(artifact)) || (canRequestTextArtifact(artifact) && (error || artifact?.status === "failed"))) ? <button type="button" className="secondary-button" disabled={requesting} onClick={() => void request(artifact?.status === "failed")}>{copy.retry}</button> : null}
       {pollingPaused ? <button type="button" className="secondary-button" onClick={() => void refresh().catch(() => setError(copy.failed))}>{copy.refresh}</button> : null}
     </div> : <div lang={view === "original" ? callLocale : languageContext.taskContentLanguage}>
       <CompilationReview {...reviewProps} compilation={view === "translated" ? projection! : compilation}

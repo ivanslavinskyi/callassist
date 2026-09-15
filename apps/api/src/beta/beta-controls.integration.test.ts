@@ -206,3 +206,54 @@ it("fails closed before real SMS/email dispatch when the monetary budget is exha
   await expect(email.sendSecurityNotice({to:"test@example.com",locale:"en",kind:"password_reset",idempotencyKey:randomUUID()})).rejects.toMatchObject({code:"BETA_BUDGET_UNCONFIGURED"});
   expect(request).not.toHaveBeenCalled();
 },30000);
+
+it("reconciles persisted usage before concurrent admission without rewriting reservation history", async () => {
+  const f = await fixture({ rollingDayBudgetMicros: 500_000, textRequestReserveMicros: 150_000 });
+  const owner = await f.owner(), call = await f.ready(owner.id);
+  const id = randomUUID();
+  await f.controls.reserve("text", `provider:${id}`);
+  await f.sql`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,started_at)
+    VALUES(${id},'openai','brief_compilation','compilation','gpt-5.6',${id},${call.id},now())`;
+  expect(await f.controls.getView()).toMatchObject({ pendingReserveMicros: 150_000, usageCostMicros: 0 });
+  await f.sql`INSERT INTO provider_operation_results(operation_id,outcome,provider_model,completed_at,duration_ms)
+    VALUES(${id},'invalid_response','gpt-5.6-sol',now(),1000)`;
+  await f.sql`INSERT INTO provider_usage_records(id,operation_id,schema_version,input_text_tokens,output_text_tokens,total_tokens,raw_usage,observed_at)
+    VALUES(${randomUUID()},${id},1,3000,400,3400,'{}',now())`;
+  const view = await f.controls.getView();
+  expect(betaControlsViewSchema.parse(view)).toMatchObject({ reservedMicros: 20_000, pendingReserveMicros: 0, usageCostMicros: 20_000 });
+  const attempts = await Promise.allSettled(Array.from({ length: 5 }, () => f.controls.reserve("text", randomUUID())));
+  expect(attempts.filter(r => r.status === "fulfilled")).toHaveLength(3);
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 470_000, pendingReserveMicros: 450_000, usageCostMicros: 20_000 });
+  expect((await f.sql`SELECT amount_micros::int amount FROM beta_spend_reservations WHERE reservation_key=${`provider:${id}`}`)[0].amount).toBe(150_000);
+  await f.sql`UPDATE beta_spend_reservations SET created_at=now()-interval '25 hours'`;
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 0 });
+}, 30000);
+
+it("accounts for a terminal call only after its provider cost arrives; late costs can exceed its reserve", async () => {
+  const f = await fixture({ callMinuteReserveMicros: 600_000 });
+  const owner = await f.owner(), brief = await f.ready(owner.id);
+  const { attempt } = await f.repository.startAttempt(brief.id, { provider: "twilio", userId: owner.id });
+  const leg = randomUUID(), session = randomUUID(), response = randomUUID();
+  for (const [id, provider, type, model] of [[leg,"twilio","telephony_leg","programmable_voice"], [session,"openai","realtime_session","gpt-realtime-2.1"], [response,"openai","realtime_response","gpt-realtime-2.1"]]) {
+    await f.sql`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,call_attempt_id,started_at)
+      VALUES(${id},${provider},${type},'conversation',${model},${id},${brief.id},${attempt.id},now())`;
+    await f.sql`INSERT INTO provider_operation_results(operation_id,outcome,completed_at,duration_ms) VALUES(${id},'succeeded',now(),1000)`;
+  }
+  await f.sql`INSERT INTO provider_usage_records(id,operation_id,schema_version,billable_seconds,raw_usage,observed_at) VALUES(${randomUUID()},${leg},1,120,'{}',now())`;
+  await f.sql`INSERT INTO provider_usage_records(id,operation_id,schema_version,input_text_tokens,output_text_tokens,input_audio_tokens,output_audio_tokens,total_tokens,raw_usage,observed_at)
+    VALUES(${randomUUID()},${response},1,1000,100,500,1000,2600,'{}',now())`;
+  await f.sql`UPDATE call_attempts SET ended_at=now(),provider_status='completed' WHERE id=${attempt.id}`;
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 4_200_000 });
+  await f.sql`INSERT INTO provider_cost_records(id,operation_id,provider,provider_cost_id,cost_basis,component,amount_micros,currency,raw_cost,observed_at)
+    VALUES(${randomUUID()},${leg},'twilio',${leg},'provider_reported_actual','connectivity',360400,'USD','{}',now())`;
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 466_800, reportedCostMicros: 360_400, usageCostMicros: 86_400, pendingReserveMicros: 20_000 });
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 466_800 });
+  // A late usage operation is included, even above the original reserve.
+  const late = randomUUID();
+  await f.sql`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_attempt_id,started_at)
+    VALUES(${late},'openai','realtime_response','conversation','gpt-realtime-2.1',${late},${attempt.id},now())`;
+  await f.sql`INSERT INTO provider_operation_results(operation_id,outcome,completed_at,duration_ms) VALUES(${late},'succeeded',now(),1000)`;
+  await f.sql`INSERT INTO provider_usage_records(id,operation_id,schema_version,input_text_tokens,output_text_tokens,input_audio_tokens,output_audio_tokens,total_tokens,raw_usage,observed_at)
+    VALUES(${randomUUID()},${late},1,0,0,0,100000,100000,'{}',now())`;
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 6_866_800 });
+}, 30000);

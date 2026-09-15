@@ -55,11 +55,16 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
         <div><dt>Public intake</dt><dd>{view.publicAccounts} / {view.settings.publicAccountLimit}</dd></div>
         <div><dt>Invited accounts</dt><dd>{view.invitedAccounts} (additional)</dd></div>
         <div><dt>Active calls</dt><dd>{view.activeCalls} / {view.settings.maxConcurrentCalls}</dd></div>
-        <div><dt>Reserved in the last 24 hours</dt><dd>{(view.reservedMicros / 1e6).toFixed(2)} {view.settings.currency}</dd></div>
+        <div><dt>Provider-reported costs / 24 hours</dt><dd>{(view.reportedCostMicros / 1e6).toFixed(3)} USD</dd></div>
+        <div><dt>Cost calculated from usage / 24 hours</dt><dd>{(view.usageCostMicros / 1e6).toFixed(3)} USD</dd></div>
+        <div><dt>Pending reserves and allowances</dt><dd>{(view.pendingReserveMicros / 1e6).toFixed(3)} USD ({view.unresolvedReservations} requests)</dd></div>
+        <div><dt>Total budget occupied / 24 hours</dt><dd>{(view.reservedMicros / 1e6).toFixed(3)} USD</dd></div>
+        <div><dt>Available for new requests</dt><dd>{view.settings.rollingDayBudgetMicros === null ? "Set a budget" : `${(Math.max(0, view.settings.rollingDayBudgetMicros - view.reservedMicros) / 1e6).toFixed(3)} USD`}</dd></div>
+        <div><dt>Reserve for the next maximum-duration call</dt><dd>{(Math.ceil(view.settings.maxDurationSeconds / 60) * view.settings.callMinuteReserveMicros / 1e6).toFixed(2)} USD</dd></div>
         <div><dt>Budget state</dt><dd role="status">{view.budgetState}</dd></div>
       </dl>
       {["unconfigured", "exhausted", "warning", "paused"].includes(view.budgetState) && <p role="alert">{view.budgetState === "unconfigured" ? "Set a budget before sending real messages or making paid requests." :
-        view.budgetState === "warning" ? "At least 80% of the budget is reserved. Review spending before increasing it." :
+        view.budgetState === "warning" ? "Costs and pending reserves occupy at least 80% of the budget. Review spending before increasing it." :
           "New paid requests are stopped when their reservation cannot fit or spending is paused. Existing calls can still be stopped."}</p>}
       <form onSubmit={save} key={view.revision}>
         <fieldset disabled={busy || !editable}>
@@ -77,7 +82,8 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
           <label className="field"><span>Budget for the last 24 hours</span><input type="number" name="budget" min="0.01" max="1000" step="0.01" defaultValue={view.settings.rollingDayBudgetMicros === null ? "" : view.settings.rollingDayBudgetMicros / 1e6} /></label>
           <label><input type="checkbox" name="spendingEnabled" defaultChecked={view.settings.spendingEnabled} /> Allow new paid requests</label>
           <details><summary>Conservative provider reservations</summary>
-            <p>These allocations are in USD, not provider invoices. Calls reserve their full maximum duration up front, including voice, Realtime and recording. Text, final transcription, SMS and email reserve separately. Reservations stay charged for 24 hours even if delivery or a call fails. Review these allowances against actual provider costs before release.</p>
+            <p>Calls reserve their maximum duration up front. As provider data arrives, measured costs replace reservations. OpenAI usage is priced from the published rate card; Twilio connectivity uses its reported USD cost. Free moderation costs zero. Text, final transcription, SMS and email reserve separately. Missing usage, uncertain delivery or an incomplete call keeps its allowance; a failure alone does not mean the request was free.</p>
+            <p>Completed calls retain a small allowance of 0.01 USD per billed minute for Media Streams, recording and storage. Usage calculations and allowances may differ from invoices. Accounting: {view.accountingVersion}.</p>
             {reserves.map(([key, label]) => field(label, key, view.settings[key] / 1e6, .000001, 1000, .000001))}
           </details>
           <label className="field"><span>Reason for this change</span><textarea name="reason" minLength={3} maxLength={500} required rows={2} /></label>

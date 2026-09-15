@@ -156,6 +156,9 @@ export type Messages = {
     disclosureHelp: string;
     preparingTitle: string;
     preparingText: string;
+    preparingQueuedText: string;
+    preparingRetryingText: string;
+    preparingDelayedText: string;
     phoneValid: string;
     phoneInvalid: string;
     requiredComplete: string;
@@ -257,7 +260,7 @@ const enReview: ReviewCopy = {
   preparationFailed: "Plan preparation failed",
   preparationFailedHelp: "SHPROHLI could not prepare a reliable plan. Your request is saved. Try preparing it again.",
   retryPreparation: "Retry preparation", retryingPreparation: "Preparing…",
-  approveAndCall: "Approve & call", successMeans: "A successful result",
+  approveAndCall: "Approve & call", successMeans: "Expected result",
   approvedInformation: "Approved information", none: "None", guardrails: "Safety rules", updating: "Updating…",
   continue: "Continue",
   tone: { formal: "Formal tone", neutral: "Neutral tone", friendly: "Friendly tone" },
@@ -294,7 +297,7 @@ const deReview: ReviewCopy = {
   preparationFailedHelp: "SHPROHLI konnte keinen zuverlässigen Plan erstellen. Ihre Anfrage ist gespeichert. Versuchen Sie die Vorbereitung erneut.",
   retryPreparation: "Vorbereitung wiederholen", retryingPreparation: "Wird vorbereitet…",
   starting: "Wird gestartet…", approveAndCall: "Genehmigen und anrufen",
-  successMeans: "Ein erfolgreiches Ergebnis", approvedInformation: "Freigegebene Informationen",
+  successMeans: "Erwartetes Ergebnis", approvedInformation: "Freigegebene Informationen",
   none: "Keine", guardrails: "Sicherheitsregeln", updating: "Wird aktualisiert…", continue: "Weiter",
   tone: { formal: "Formeller Ton", neutral: "Neutraler Ton", friendly: "Freundlicher Ton" },
   addressing: { formal: "Formelle Anrede", informal: "Informelle Anrede" },
@@ -396,7 +399,10 @@ const en: Messages = {
     disclosurePreview: "If shared, the assistant may say:",
     disclosureHelp: "The assistant always identifies itself as AI and asks the recipient for consent separately.",
     preparingTitle: "AI is reviewing your call plan…",
-    preparingText: "This can take around a minute. Keep this page open; your entries are preserved if it fails.",
+    preparingText: "Preparation can take a few minutes. Keep this page open; your plan will open automatically when ready.",
+    preparingQueuedText: "Your request is queued. Keep this page open; your plan will open automatically when ready.",
+    preparingRetryingText: "Preparation is being retried automatically. Your entries are saved. Keep this page open; your plan will open when ready.",
+    preparingDelayedText: "This is taking longer than usual, but preparation is still running. Keep this page open; your plan will open automatically when ready.",
     phoneValid: "Valid Swiss phone number",
     phoneInvalid: "During the public beta SHPROHLI can only call Swiss phone numbers, for example +41710000000",
     requiredComplete: "All required fields complete",
@@ -608,7 +614,10 @@ const de: Messages = {
     disclosurePreview: "Falls dieser Grund genannt wird, kann der Assistent sagen:",
     disclosureHelp: "Der Assistent gibt sich immer als KI zu erkennen und fragt die angerufene Person separat nach ihrer Zustimmung.",
     preparingTitle: "Die KI prüft Ihren Anrufplan…",
-    preparingText: "Dies kann etwa eine Minute dauern. Lassen Sie diese Seite geöffnet; bei einem Fehler bleiben Ihre Eingaben erhalten.",
+    preparingText: "Die Vorbereitung kann einige Minuten dauern. Lassen Sie diese Seite geöffnet; Ihr Plan wird automatisch geöffnet, sobald er bereit ist.",
+    preparingQueuedText: "Ihre Anfrage wartet auf die Verarbeitung. Lassen Sie diese Seite geöffnet; Ihr Plan wird automatisch geöffnet, sobald er bereit ist.",
+    preparingRetryingText: "Die Vorbereitung wird automatisch erneut versucht. Ihre Eingaben sind gespeichert. Lassen Sie diese Seite geöffnet; Ihr Plan wird geöffnet, sobald er bereit ist.",
+    preparingDelayedText: "Die Vorbereitung dauert länger als üblich, läuft aber weiter. Lassen Sie diese Seite geöffnet; Ihr Plan wird automatisch geöffnet, sobald er bereit ist.",
     phoneValid: "Gültige Schweizer Telefonnummer",
     phoneInvalid: "Während der öffentlichen Beta kann SHPROHLI nur Schweizer Telefonnummern anrufen, zum Beispiel +41710000000",
     requiredComplete: "Alle Pflichtfelder sind ausgefüllt",

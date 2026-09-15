@@ -11,7 +11,7 @@ export type RuntimeProcess = "api" | "worker";
 
 export class RuntimeConfigurationError extends Error {
   constructor(readonly issues: string[]) {
-    super(`Invalid production configuration: ${issues.join("; ")}`);
+    super(`Invalid runtime configuration: ${issues.join("; ")}`);
     this.name = "RuntimeConfigurationError";
   }
 }
@@ -20,7 +20,20 @@ export function validateRuntimeEnvironment(
   environment: NodeJS.ProcessEnv,
   runtime: RuntimeProcess
 ) {
-  if (environment.NODE_ENV !== "production") return;
+  if (environment.NODE_ENV !== "production") {
+    const compilerDriver = environment.BRIEF_COMPILER_DRIVER?.trim() ||
+      (environment.OPENAI_API_KEY?.trim() ? "openai" : "mock");
+    const textDriver = environment.TEXT_PROCESSOR_DRIVER?.trim() ||
+      environment.BRIEF_COMPILER_DRIVER?.trim() || "mock";
+    const generation = environment.TEXT_ARTIFACT_GENERATION_ENABLED?.trim();
+    const enabled = generation ? generation === "true" : textDriver === "mock";
+    if (environment.NODE_ENV !== "test" && compilerDriver === "openai" && textDriver === "mock" && enabled) {
+      throw new RuntimeConfigurationError([
+        "Real call preparation with enabled translations requires TEXT_PROCESSOR_DRIVER=openai; use BRIEF_COMPILER_DRIVER=mock for an entirely simulated workflow or disable text generation"
+      ]);
+    }
+    return;
+  }
 
   const issues: string[] = [];
   requireExact(environment, "STORAGE_DRIVER", "postgres", issues);

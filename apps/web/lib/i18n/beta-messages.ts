@@ -6,6 +6,10 @@ const en = {
   invalidInvitation: "This invitation is invalid, expired or already used. Check the code or ask for a new invitation.",
   busy: "All call slots are currently in use. Please try again after an active call finishes.",
   spending: "New requests are temporarily paused because of the beta spending limit. Please try later or contact support.",
+  budgetUnconfigured: "Call preparation is paused because the service budget has not been set. Your entries are saved. Please contact support.",
+  budgetExhausted: "Call preparation is paused because the service's spending limit for the last 24 hours has been reached. Your entries are saved. Please try later or contact support.",
+  spendingPaused: "Call preparation has been paused by the service operator. Your entries are saved. Please contact support.",
+  configureBudget: "Set the budget in admin settings",
   recipient: "This recipient has reached the beta call limit. Please try another day."
 };
 export const betaMessages: Record<UiLocale, Record<keyof typeof en, string>> = { en, de: {
@@ -15,6 +19,10 @@ export const betaMessages: Record<UiLocale, Record<keyof typeof en, string>> = {
   invalidInvitation: "Diese Einladung ist ungültig, abgelaufen oder bereits verwendet. Prüfen Sie den Code oder bitten Sie um eine neue Einladung.",
   busy: "Alle Anrufplätze sind gerade belegt. Versuchen Sie es erneut, sobald ein laufender Anruf beendet ist.",
   spending: "Neue Anfragen sind wegen des Ausgabenlimits der Beta vorübergehend pausiert. Versuchen Sie es später oder kontaktieren Sie den Support.",
+  budgetUnconfigured: "Die Anrufvorbereitung ist pausiert, weil das Budget des Dienstes noch nicht festgelegt wurde. Ihre Eingaben sind gespeichert. Bitte kontaktieren Sie den Support.",
+  budgetExhausted: "Die Anrufvorbereitung ist pausiert, weil das Ausgabenlimit des Dienstes für die letzten 24 Stunden erreicht wurde. Ihre Eingaben sind gespeichert. Versuchen Sie es später oder kontaktieren Sie den Support.",
+  spendingPaused: "Die Anrufvorbereitung wurde vom Betreiber pausiert. Ihre Eingaben sind gespeichert. Bitte kontaktieren Sie den Support.",
+  configureBudget: "Budget in den Admin-Einstellungen festlegen",
   recipient: "Das Anruflimit der Beta für diesen Empfänger ist erreicht. Versuchen Sie es an einem anderen Tag."
 } };
 export function betaErrorMessage(error: unknown, locale: UiLocale) {

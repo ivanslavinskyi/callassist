@@ -401,6 +401,7 @@ describe("OpenAIBriefCompiler", () => {
     expect(body).toMatchObject({
       model: "gpt-test",
       store: false,
+      max_output_tokens: 20_000,
       reasoning: { effort: "low" },
       text: {
         format: {
@@ -504,6 +505,28 @@ describe("OpenAIBriefCompiler", () => {
     expect(result.policyDecision.status).toBe("ready_for_review");
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(fetchMock.mock.calls[1]?.[0]);
+  });
+
+  it("does not accept a token-limited response even if its JSON parses and accounts for the incomplete attempt", async () => {
+    const completed: BriefCompilerProviderRequestResult[] = [];
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ flagged: false }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "truncated", status: "incomplete", incomplete_details: { reason: "max_output_tokens" },
+        output_text: JSON.stringify(modelOutput), usage: { input_tokens: 2900, output_tokens: 20000, total_tokens: 22900 }
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "compact", status: "completed", output_text: JSON.stringify(modelOutput) })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ flagged: false }] })));
+    const result = await new OpenAIBriefCompiler({ apiKey: "test-key", fetchImplementation: fetchMock })
+      .compile(normalizeCreateCallBriefInput(rawInput), 1, { afterProviderRequest: async value => { completed.push(value); } });
+    expect(result.compilerResponseId).toBe("compact");
+    expect(result.policyDecision.status).toBe("ready_for_review");
+    expect(completed[1]).toMatchObject({ outcome: "invalid_response", usage: { outputTextTokens: 20000 } });
+    const retry = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+    expect(retry.input[0].content).toContain("previous response was incomplete");
+    expect(retry.text.verbosity).toBe("low");
+    expect(retry.max_output_tokens).toBe(20_000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("retries once with validation feedback when model output violates the local schema", async () => {

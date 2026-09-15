@@ -1,6 +1,6 @@
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 
-export const openAIPublicPricingVersion = "openai-public-2026-09-05";
+export const openAIPublicPricingVersion = "openai-public-2026-09-15";
 
 type TokenRates = {
   inputTextUsdMicrosPerMillion?: number;
@@ -73,6 +73,7 @@ const openAIPublicRateCards: ProviderRateCard[] = [
     model: /^gpt-4o-transcribe(?:-\d{4}-\d{2}-\d{2})?$/,
     billing: "tokens",
     rates: {
+      inputTextUsdMicrosPerMillion: 2_500_000,
       inputAudioUsdMicrosPerMillion: 2_500_000,
       outputTextUsdMicrosPerMillion: 10_000_000
     }
