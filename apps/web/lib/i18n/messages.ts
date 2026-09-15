@@ -159,6 +159,7 @@ export type Messages = {
     preparingQueuedText: string;
     preparingRetryingText: string;
     preparingDelayedText: string;
+    preparingReviewReminder: string;
     phoneValid: string;
     phoneInvalid: string;
     requiredComplete: string;
@@ -398,7 +399,8 @@ const en: Messages = {
   form: {
     disclosurePreview: "If shared, the assistant may say:",
     disclosureHelp: "The assistant always identifies itself as AI and asks the recipient for consent separately.",
-    preparingTitle: "AI is reviewing your call plan…",
+    preparingTitle: "Preparing your call plan",
+    preparingReviewReminder: "Next: review your plan. No call will start yet.",
     preparingText: "Preparation can take a few minutes. Keep this page open; your plan will open automatically when ready.",
     preparingQueuedText: "Your request is queued. Keep this page open; your plan will open automatically when ready.",
     preparingRetryingText: "Preparation is being retried automatically. Your entries are saved. Keep this page open; your plan will open when ready.",
@@ -613,7 +615,8 @@ const de: Messages = {
   form: {
     disclosurePreview: "Falls dieser Grund genannt wird, kann der Assistent sagen:",
     disclosureHelp: "Der Assistent gibt sich immer als KI zu erkennen und fragt die angerufene Person separat nach ihrer Zustimmung.",
-    preparingTitle: "Die KI prüft Ihren Anrufplan…",
+    preparingTitle: "Ihr Anrufplan wird vorbereitet",
+    preparingReviewReminder: "Danach prüfen Sie Ihren Plan. Es wird noch kein Anruf gestartet.",
     preparingText: "Die Vorbereitung kann einige Minuten dauern. Lassen Sie diese Seite geöffnet; Ihr Plan wird automatisch geöffnet, sobald er bereit ist.",
     preparingQueuedText: "Ihre Anfrage wartet auf die Verarbeitung. Lassen Sie diese Seite geöffnet; Ihr Plan wird automatisch geöffnet, sobald er bereit ist.",
     preparingRetryingText: "Die Vorbereitung wird automatisch erneut versucht. Ihre Eingaben sind gespeichert. Lassen Sie diese Seite geöffnet; Ihr Plan wird geöffnet, sobald er bereit ist.",

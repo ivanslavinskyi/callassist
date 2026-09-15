@@ -1,6 +1,6 @@
 # SHPROHLI architecture
 
-Reviewed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. This describes
+Updated 2026-09-15 for preparation, spending and UI feedback after `4147ded`. This describes
 implemented behavior, including initial email proof, localized transactional delivery,
 appointments, compact results and live-transcript recovery.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
@@ -223,6 +223,8 @@ access. Public content reads never expose drafts. Web public-content fetches use
    cancelled preparations also erase input. At-least-once execution converges on one
    call through the creation key. Status polling returns bounded progress or a
    controlled failure; a browser timeout does not cancel durable work.
+   The browser waits up to eight minutes across recovery attempts and keeps a
+   viewport-fixed status panel visible. No progress state implies approval or dialing.
 4. Editing or clarifying an existing call also queues an idempotent encrypted
    preparation. The worker compiles the captured target revision; publication checks
    the immutable compilation ID, increments revision, resets approval and erases
@@ -248,6 +250,13 @@ codes. Source facts must round-trip exactly. Raw input and generated runtime tex
 are moderated separately. Deterministic policy decides review/clarification/blocking;
 the model cannot approve itself. Formal addressing, captured spoken results and
 voicemail without private details are explicit defaults.
+
+Generation requests use compact JSON, low verbosity and a 20,000-token output
+ceiling including reasoning. Incomplete Responses envelopes are rejected while
+preserving their paid usage. With a real compiler and enabled text generation,
+mock translation configuration is rejected; saved mock review artifacts cannot
+be presented or approved as real translations. See the
+[preparation checkpoint](plan-preparation-quality-2026-09-15.md).
 
 Immutable call_compilations rows are the authoritative source for plans. The
 canonical hash is revalidated at reads, approvals and attempt reservation. Realtime
@@ -432,8 +441,12 @@ additional one-use admin invitations. Admin System owns the versioned settings a
 the rolling 24-hour USD budget; an unset amount blocks paid provider requests.
 Call admission reserves full permitted duration; text, ASR, SMS and email reserve
 separately against conservative allowances. API and worker serialize reservations
-in PostgreSQL. Unknown provider termination retains the concurrency slot. See
-[beta controls](beta-controls-2026-09-14.md) for accounting and rollout boundaries.
+in PostgreSQL. Under the admission lock, eligible completed-operation reserves are
+reconciled with reported charges and calculated usage; missing evidence keeps a
+pending reserve. Moderation has no monetary allocation. Original reservation
+history is preserved; migration 0072 indexes the attempt lookup. Unknown provider
+termination retains the concurrency slot. See [current budget accounting](budget-accounting-2026-09-15.md)
+and [beta controls](beta-controls-2026-09-14.md) for rollout boundaries.
 Memory/test mode retains env-based call policy. Failed/refunded starts still consume abuse
 quotas. Disabling outbound calls blocks new starts and does not stop active calls.
 Admins can disable; only superadmins can resume. SMS-verified public opt-out and
@@ -520,6 +533,15 @@ and late deltas are ignored. `transcript.discarded` clears cancelled/empty/faile
 partials. SSE finals enter the client immediately; an older HTTP snapshot cannot
 remove them. Reconnect clears stale partials and refreshes canonical state; deletion
 clears client text. Draft deltas are ephemeral, not a cross-instance replay log.
+
+The call UI immediately reveals/focuses the transcript section on confirmed start,
+before the API response. The call snapshot then determines dialing, connected or
+approval feedback; SSE connectivity alone never establishes phone connection.
+Lost updates show uncertainty and pause the animation. The large recipient status
+becomes compact once transcript text arrives and disappears for terminal calls.
+Status announcements are outside the transcript live region. Typed EN/DE copy,
+theme tokens and reduced-motion rules are shared with preparation feedback;
+[browser verification](workflow-feedback-2026-09-15.md) records its limits.
 
 The browser follower separates user intent from scroll geometry. Frame-coalesced,
 instant updates follow streaming text; wheel/key/touch/scrollbar interaction allows

@@ -1,6 +1,6 @@
 # Documentation index
 
-Release status refreshed 2026-09-14 for beta controls following `34a0746`. Public brand: SHPROHLI;
+Release status refreshed 2026-09-15, including `4147ded` and workflow feedback. Public brand: SHPROHLI;
 internal package names, cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
@@ -31,6 +31,9 @@ This closes the four product review changes locally, not the external release ga
 | [Landing checkpoint, 2026-09-14](landing-checkpoint-2026-09-14.md) | Before/after screenshots, six EN/DE task groups and local publication results |
 | [Conversation credits, 2026-09-14](conversation-credit-2026-09-14.md) | Substantive-answer policy, atomic settlement, classification limits, migration 0071 and verification |
 | [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Admin cap/invitations, 7-minute calls, concurrency, conservative USD budget and recompile deadlock fix |
+| [Budget accounting, 2026-09-15](budget-accounting-2026-09-15.md) | Current usage/charge reconciliation, pending costs, migration 0072 and local revision 3 calibration |
+| [Plan preparation quality, 2026-09-15](plan-preparation-quality-2026-09-15.md) | Latency incident, compact generation, real review translations, 20,000-token ceiling and dated timing evidence |
+| [Workflow feedback, 2026-09-15](workflow-feedback-2026-09-15.md) | Persistent preparation status, review spacing, call-state animation, 216 web tests and browser-check boundaries |
 | [Email/SMS implementation, 2026-09-14](email-sms-implementation-2026-09-14.md) | Verification/notifications, seven-language capability matrix, provider configuration and remaining B03/B04 acceptance |
 | [Release roadmap](mvp-plan.md) | Delivered scope, next work and open acceptance/deployment gates; the single current backlog |
 | [Public-testing audit, 2026-09-13](public-testing-audit-2026-09-13.md) | Fresh code/test/browser/local-CMS evidence; email/SMS/admin findings, scenario pool and minimum release boundaries |
@@ -53,6 +56,9 @@ This closes the four product review changes locally, not the external release ga
 
 | Record | What it establishes |
 | --- | --- |
+| [Workflow feedback, 2026-09-15](workflow-feedback-2026-09-15.md) | Latest web checkpoint: 216 tests, lint/types/build; EN/DE desktop/mobile fixture checks. Real-provider and full assistive-technology acceptance remain open |
+| [Budget accounting, 2026-09-15](budget-accounting-2026-09-15.md) | 47 targeted accounting/admin/migration checks; recorded local migration 0072 and revision 3; no new paid calls |
+| [Plan preparation quality, 2026-09-15](plan-preparation-quality-2026-09-15.md) | 281 targeted API and 77 web tests, four real text probes at the former 5,000-token ceiling; final configured ceiling is 20,000 |
 | [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Current admission/spend implementation and closure of the local recompile defect; external configuration/drills still required |
 | [Email/SMS checkpoint, 2026-09-14](email-sms-implementation-2026-09-14.md) | Historical automated results and original recompile defect; real EN Gmail/CH SMS user evidence; remaining UA, email-client and provider-flow acceptance |
 | [B01/B02 remediation, 2026-09-13](b01-b02-remediation-2026-09-13.md) | Historical checkpoint: 1,102 tests / 139 files on isolated DB; lint/types/build pass; dependency audit clean; System regressions, independent control and browser-check boundary |

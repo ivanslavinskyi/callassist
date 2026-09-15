@@ -4,7 +4,8 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Reviewed 2026-09-14 for beta controls following `34a0746`. B01/B02 are remediated locally with
+Updated 2026-09-15 for preparation, spending reconciliation and workflow feedback,
+including backend checkpoint `4147ded`. B01/B02 are remediated locally with
 [current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
 [historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
 has async preparation, but its start stage still needs the v2 review-receipt contract
@@ -25,7 +26,34 @@ Route them to the named operator and rehearse exhaustion/pause on staging.
 The broader spending switch stops new paid text/ASR/SMS/email and calls; Stop and
 cleanup stay available. Unknown provider termination occupies its slot until
 reconciliation confirms completion; investigate rather than erasing its attempt.
-Detailed semantics, rollback and evidence: [beta controls](beta-controls-2026-09-14.md).
+Detailed admission semantics: [beta controls](beta-controls-2026-09-14.md).
+Current spending semantics and migration 0072: [budget accounting](budget-accounting-2026-09-15.md).
+Provider charges/calculated usage replace eligible completed-operation reserves;
+unknown costs stay pending, and free moderation has no monetary allocation.
+The recorded local configuration is revision 3: 20 USD/rolling 24 h,
+0.60 USD/call minute (4.20 USD for seven minutes), 0.15 USD/paid text operation.
+These local values do not configure the external deployment.
+
+## Preparation and call UI diagnosis
+
+Creation, editing and clarification share an eight-minute browser wait across
+retries. A persistent panel reports queued/preparing/retrying/delayed progress;
+it does not estimate a completion percentage or start a call. After a waiting
+deadline, retrying unchanged input checks the same durable operation. Diagnose
+provider/worker failures with the preparation ID rather than launching duplicate
+requests. Compact generation has a 20,000-token ceiling; the ceiling is not a
+target output size. Real-provider mode rejects mock translations for review.
+See [preparation incident and timings](plan-preparation-quality-2026-09-15.md).
+
+The call animation separates pending API submission, dialing, connected and
+approval states. "Live updates connected" only describes SSE, not the phone leg.
+Lost SSE updates stop the animation and show uncertainty; a disconnected browser
+does not establish that the call ended. Confirm provider termination before
+releasing an occupied slot. A terminal snapshot removes active-call feedback.
+[UI verification](workflow-feedback-2026-09-15.md) uses isolated fixtures and is
+not a real-provider/outage drill.
+
+## Communication and admin readiness
 
 B03/B04 implementation (2026-09-14): run `corepack pnpm communications:check`
 for a configuration-only report with no provider traffic or secret values.

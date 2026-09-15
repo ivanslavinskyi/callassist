@@ -1,0 +1,61 @@
+.preparationSpace { min-height: 164px; }
+.preparationPanel {
+  position: fixed;
+  z-index: 60;
+  inset-inline: 16px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: auto;
+  max-width: 600px;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  margin-inline: auto;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--control);
+  border-radius: 16px;
+  box-shadow: var(--shadow), 0 4px 12px #10281b14;
+}
+.preparationHeading { display: flex; align-items: center; gap: 12px; }
+.preparationHeading strong { font-size: 18px; line-height: 1.35; font-weight: 600; }
+.preparationPanel p { margin: 12px 0 16px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.preparationPanel small { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.spinner { width: 24px; height: 24px; flex: 0 0 24px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: feedback-spin 1s linear infinite; }
+.progressTrack { height: 4px; background: var(--tint); border-radius: 4px; overflow: hidden; }
+.progressTrack span { display: block; height: 100%; width: 40%; border-radius: inherit; background: var(--accent); animation: feedback-progress 2.2s ease-in-out infinite; }
+
+.callActivity { display: flex; min-height: 370px; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 40px 24px; text-align: center; }
+.callOrbit { position: relative; display: grid; place-items: center; width: 104px; height: 104px; flex-shrink: 0; color: var(--accent); }
+.recipientAvatar { display: grid; place-items: center; width: 80px; height: 80px; border-radius: 50%; background: var(--tint); color: var(--green); font-size: 26px; font-weight: 600; letter-spacing: -.03em; z-index: 1; }
+.orbitRing { position: absolute; inset: 10px; border: 1px solid currentColor; border-radius: 50%; opacity: 0; }
+.callActivity[data-phase="dialing"] .orbitRing { animation: feedback-ring 2.6s ease-out infinite; }
+.callActivity[data-phase="dialing"] .orbitRing:nth-child(2) { animation-delay: 1.3s; }
+.callActivity[data-phase="starting"] .callOrbit::after { content: ""; position: absolute; inset: 3px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: feedback-spin 1.5s linear infinite; }
+.callActivity[data-phase="connected"] .orbitRing:first-child { animation: feedback-connected 3s ease-in-out infinite; }
+.activityCopy { min-width: 0; max-width: 440px; }
+.activityLabel { display: inline-flex; align-items: center; gap: 8px; color: var(--green); font-size: 13px; font-weight: 600; }
+.activityLabel > span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.activityCopy h3 { margin: 12px 0 0; font-size: 26px; line-height: 1.25; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.activityCopy p { margin: 14px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.callActivity:is([data-phase="reconnecting"], [data-phase="approval"]) .activityLabel { color: var(--warning); }
+.callActivity:is([data-phase="reconnecting"], [data-phase="approval"]) .recipientAvatar { background: var(--warning-bg); color: var(--warning); }
+.compact { min-height: 0; flex-direction: row; justify-content: flex-start; text-align: start; padding: 16px 24px; gap: 16px; background: var(--surface); border-radius: 12px; margin-bottom: 16px; }
+.compact .callOrbit { width: 48px; height: 48px; }
+.compact .recipientAvatar { width: 40px; height: 40px; font-size: 15px; }
+.compact .activityCopy h3 { margin-top: 4px; font-size: 16px; }
+@keyframes feedback-spin { to { transform: rotate(360deg); } }
+@keyframes feedback-progress { 0% { transform: translateX(-105%); } 100% { transform: translateX(355%); } }
+@keyframes feedback-ring { 0% { transform: scale(.95); opacity: .4; } 100% { transform: scale(1.55); opacity: 0; } }
+@keyframes feedback-connected { 0%, 100% { transform: scale(1.12); opacity: .2; } 50% { transform: scale(1.24); opacity: .4; } }
+@media (max-width: 600px) {
+  .preparationPanel { inset-inline: 12px; bottom: max(12px, env(safe-area-inset-bottom)); padding: 20px; border-radius: 12px; }
+  .preparationHeading strong { font-size: 16px; }
+  .callActivity { min-height: 320px; padding: 32px 12px; gap: 24px; }
+  .activityCopy h3 { font-size: 23px; }
+  .compact { min-height: 0; padding: 16px; gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner, .progressTrack span, .callActivity .orbitRing, .callActivity .callOrbit::after { animation: none !important; }
+  .progressTrack span { opacity: .7; }
+  .callActivity:is([data-phase="dialing"], [data-phase="connected"]) .orbitRing:first-child { transform: scale(1.2); opacity: .3; }
+}

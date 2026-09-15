@@ -30,6 +30,9 @@ import { CallResultPanel } from "./call-result-panel";
 import { ConfirmDialog } from "./confirm-dialog";
 import { CreateCallForm } from "./create-call-form";
 import { CallPreparationStatus } from "./call-preparation-status";
+import { CallActivityStatus } from "./call-activity-status";
+import { callActivityPhase } from "@/lib/call-activity";
+import { callActivityMessages } from "@/lib/i18n/call-activity-messages";
 import { useUiLocale } from "./ui-locale-provider";
 import { useCallDraftStore } from "./call-draft-provider";
 import { getCallLanguageLabel, getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
@@ -111,6 +114,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [startingCall, setStartingCall] = useState(false);
   const [preparationProgress, setPreparationProgress] = useState<CallPreparationProgress | null>(null);
   const [editingBrief, setEditingBrief] = useState(() => Boolean(draftStore.forOwner(userId).get(userId, callId)));
   const [confirmingAudioDelete, setConfirmingAudioDelete] = useState(false);
@@ -224,6 +228,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   function revealLiveTranscript() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
+        transcriptCardRef.current?.focus({ preventScroll: true });
         transcriptCardRef.current?.scrollIntoView({
           behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
             ? "auto"
@@ -275,6 +280,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     } finally {
       setBusy(false);
     }
+  }
+
+  async function launchCall(action: () => Promise<CallSnapshot>) {
+    setStartingCall(true);
+    revealLiveTranscript();
+    try { await runAction(action); }
+    finally { setStartingCall(false); }
   }
 
   async function saveEditedBrief(
@@ -440,6 +452,9 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
   const isTerminal = isTerminalCallStatus(brief.status);
+  const pendingCallStart = startingCall && !isActive && !isTerminal;
+  const activityPhase = callActivityPhase(brief.status, startingCall, connectionStatus);
+  const hasTranscript = transcript.length > 0 || Object.keys(partialTranscript).length > 0;
   const callLanguageForbidden = !isCallLanguageAvailable(brief.locale, userRole) ||
     Boolean(brief.fallbackLocale && !isCallLanguageAvailable(brief.fallbackLocale, userRole));
   const preparationFailed = compilation ? isPlanPreparationFailure(compilation.policyDecision) : false;
@@ -449,7 +464,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const reviewProps = compilation ? {
     busy: busy || callLanguageForbidden, compilation, onAnswerClarifications: answerClarifications,
     onApproveAndCall: (review?: ReviewEvidence) => {
-      void runAction(() => approveAndStartCall(callId, compilationApprovalInput(compilation, review)), revealLiveTranscript);
+      void launchCall(() => approveAndStartCall(callId, compilationApprovalInput(compilation, review)));
     },
     onEdit: () => setEditingBrief(true), recipientName: brief.recipientName,
     onRetryPreparation: () => { void answerClarifications([]); },
@@ -528,13 +543,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
 
           <div className="call-actions">
           <span className={`status-pill status-${brief.status}`}>
-            <span aria-hidden="true" /> {brief.status === "blocked" && preparationFailed ? messages.review.preparationFailed : copy.status[brief.status]}
+            <span aria-hidden="true" /> {pendingCallStart ? callActivityMessages[uiLocale].starting.label : brief.status === "blocked" && preparationFailed ? messages.review.preparationFailed : copy.status[brief.status]}
           </span>
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
                 className="primary-button compact-button"
                 disabled={busy || callLanguageForbidden}
-                onClick={() => runAction(() => startCall(callId), revealLiveTranscript)}
+                onClick={() => launchCall(() => startCall(callId))}
                 type="button"
               >
                 <span className="button-signal" aria-hidden="true">◖</span>
@@ -601,7 +616,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
             saveCallBrief={saveEditedBrief}
             submitLabel={copy.updatePlan}
           />
-        ) : compilation && !isTerminal && !isActive ? (
+        ) : compilation && !isTerminal && !isActive && !pendingCallStart ? (
           reviewPanel
         ) : !hasImmutableExecutionPlan ? (
           <section className="compilation-review decision-blocked">
@@ -613,7 +628,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
 
         <div
           className={`live-grid ${
-            ["review_required", "needs_clarification", "blocked"].includes(
+            !pendingCallStart && ["review_required", "needs_clarification", "blocked"].includes(
               brief.status
             )
               ? "precall-hidden"
@@ -626,7 +641,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
               <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{uiLocale === "de" ? "Vorläufiges Transkript" : "Provisional transcript"}</button>
               <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
             </nav> : null}
-            <section className="transcript-card" hidden={isTerminal && transcriptView !== "provisional"} ref={transcriptCardRef}>
+            <section className="transcript-card" tabIndex={-1} hidden={isTerminal && transcriptView !== "provisional"} ref={transcriptCardRef}>
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">{copy.liveTranscriptEyebrow}</span>
@@ -644,14 +659,14 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
               ) : null}
             </div>
 
+            {activityPhase ? <CallActivityStatus phase={activityPhase} recipientName={brief.recipientName} compact={hasTranscript} /> : null}
             <div
               className="transcript-list"
               aria-live="polite"
               tabIndex={0}
               ref={transcriptListRef}
             >
-              {transcript.length === 0 &&
-              Object.keys(partialTranscript).length === 0 ? (
+              {!hasTranscript ? activityPhase ? null : (
                 <div className="transcript-empty">
                   <span className="wave-placeholder" aria-hidden="true">
                     <i /><i /><i /><i /><i />

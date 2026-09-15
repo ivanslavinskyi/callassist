@@ -1,11 +1,19 @@
 # Deployment preflight and first release
 
-Updated 2026-09-14. B06 remains open. The owner chose `shprohli.ch` for the first
+Updated 2026-09-15. B06 remains open. The owner chose `shprohli.ch` for the first
 deployment with temporary restricted access, on an existing VPS that already serves
 another Next.js project. B07 landing changes are now implemented and published locally;
 VPS topology and access details remain to be supplied before deployment.
 A separate staging hostname/server is not a release requirement; external acceptance
 can run on the final domain before public access opens.
+
+The latest local checkpoint includes migration 0072, corrected spending
+reconciliation, the 20,000-token compiler ceiling and the
+[preparation/review/call UI update](workflow-feedback-2026-09-15.md).
+Local budget settings (revision 3: 20 USD/24 h, 0.60 USD/call minute,
+0.15 USD/paid text) must be explicitly checked/configured in the deployment;
+they are not transferred by pushing the repository. The latest 216-test web
+checkpoint does not replace the full release-candidate and provider drills.
 
 ## Implemented preparation
 

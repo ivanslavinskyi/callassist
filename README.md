@@ -5,18 +5,29 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-14, beta controls following `34a0746`:** implemented supervised MVP with substantial beta
+**Repository status, 2026-09-15, including `4147ded` and the workflow feedback update:** implemented supervised MVP with substantial beta
 infrastructure. **B01/B02 are remediated locally:** production dependency audit is clean;
 Admin System supports nonempty jobs and independent outbound-call control.
 Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
 The user confirmed EN email delivery in Gmail and SMS from SHPROHLI to a Swiss number.
 Open registration now has an admin-controlled cap of 30 plus additional one-use invitations,
 7-minute calls, 1 call/account and 2 globally, with shared conservative USD spending reservations.
-Set the monetary amount in Admin System before real paid requests; its initial value is blank.
+New environments require a monetary amount in Admin System before paid requests.
+The owner configured **20 USD per rolling 24 hours locally**; revision 3 uses a
+0.60 USD/minute call reservation and 0.15 USD paid-text reservation. Reported costs
+and measured usage replace eligible completed-operation reservations; unknown costs
+remain pending. See [budget accounting](docs/budget-accounting-2026-09-15.md).
 The recompile deadlock is fixed. Call credits are now used only after consent and a
 confirmed substantive task answer; otherwise the reservation is returned at call end.
 The revised EN/DE landing and related policy copy are published locally. See the
 [conversation-credit checkpoint](docs/conversation-credit-2026-09-14.md).
+Plan preparation uses compact output with a 20,000-token ceiling and rejects
+incomplete responses and mock review translations in real-provider mode. See
+[preparation quality and dated timings](docs/plan-preparation-quality-2026-09-15.md).
+The [workflow feedback update](docs/workflow-feedback-2026-09-15.md) adds a persistent
+preparation panel, consistent review spacing and immediate, state-based call animation.
+Web validation: 216 tests, lint/typecheck and a production build; browser checks use
+isolated fixtures. This is not a new complete repository/provider acceptance run.
 **NO-GO for public testing** remains: delivery scenarios,
 deployment and operational acceptance are open. See the
 [beta controls and stability report](docs/beta-controls-2026-09-14.md).

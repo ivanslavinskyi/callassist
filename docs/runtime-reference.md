@@ -1,6 +1,7 @@
 # Runtime and API reference
 
-Reviewed 2026-09-14 for beta controls following `34a0746`, including email and beta-control routes. Configuration values here describe
+Updated 2026-09-15 for preparation and spending after `4147ded`; the dated route
+inventory below retains its original snapshot. Configuration values here describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
 
@@ -144,14 +145,20 @@ successful chunks. Provider usage, reported costs and versioned calculated rates
 separate from configured minute-based fallback estimates.
 
 Plan preparation distinguishes a provider failure from a policy rejection. The
-browser polls each explicit submission for up to two minutes between responses;
-reaching that deadline leaves the server operation running and shows a pending
+browser waits up to eight minutes across polling and recovery attempts for an
+explicit submission, reporting queued/preparing/retrying/delayed state in a
+viewport-fixed panel. This is a recovery allowance, not a normal latency target;
+reaching the deadline leaves the server operation running and shows a pending
 message. Retrying unchanged input reuses its operation key. Only a server-confirmed
 terminal failure retires that key. An explicit resubmit of an older uncertain
 operation may create one replacement after confirming failure; a failed fresh
 operation stops. Creation, editing and clarification answers use this recovery
 rule. No retry approves a plan or starts a call. Existing configured timeout values
 remain overrides; updating code alone does not replace an explicit 25-second value.
+The compiler sets `max_output_tokens: 20_000`, including reasoning, with compact
+JSON and low verbosity. Incomplete Responses envelopes are rejected and retain
+usage evidence. Earlier [latency measurements](plan-preparation-quality-2026-09-15.md)
+were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
 ## Language and generated-text endpoints
 
@@ -191,7 +198,12 @@ cap 30, additional one-use invitations, maximum 420 seconds, 1 call/account and
 across all accounts. The USD amount for the last 24 hours is initially unset and
 blocks paid requests until a superadmin configures it. Values and pause switch are
 shared by API and worker without restart; existing calls keep their admitted duration.
-See [semantics, conservative allocations and operator procedure](beta-controls-2026-09-14.md).
+The admission ledger now reconciles eligible reserves with provider charges and
+calculated usage; unknown costs remain pending. Moderation is free. Migration 0072
+adds the attempt lookup index. The admin view separates reported/calculated costs,
+pending reserves and remaining budget. See [current accounting and local calibration](budget-accounting-2026-09-15.md)
+and [admission/operator procedure](beta-controls-2026-09-14.md). Local revision 3
+(20 USD/24 h, 0.60 USD/min, 0.15 USD/paid text) is not a production default.
 
 | Variable | Default |
 | --- | --- |

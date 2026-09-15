@@ -264,16 +264,17 @@ input[aria-invalid="true"] { border: 2px solid var(--danger); }
 .review-plan { min-width: 0; }
 .review-plan .compilation-review-heading { border-top: 1px solid var(--line); padding-top: 32px; }
 .review-plan .eyebrow { display: none; }
-.review-plan .call-plan-lead { font-size: 18px; line-height: 1.5; max-width: none; }
+.review-plan .call-plan-lead { font-size: 18px; line-height: 1.5; max-width: none; margin: 0; }
 .review-plan .review-questions, .review-plan .review-opening, .review-plan .compiled-plan-grid > div { background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 32px 0; margin: 0; }
 .review-plan h2 { color: var(--ink); font-size: 24px; font-weight: 600; line-height: 1.3; letter-spacing: -.025em; margin: 0 0 20px; }
-.review-plan .review-success-criteria { border-top: 0; padding: 0 0 32px; }
+.review-plan .review-success-criteria { border-top: 0; padding: 32px 0; }
+.review-plan :is(.review-questions, .review-opening, .compiled-plan-grid > div) > :is(p, ul, ol):last-child { margin-bottom: 0; }
 .review-success-criteria ul { margin: 12px 0 0; }
 .review-plan .review-questions:has(+ .plan-setting-chips) { padding-bottom: 0; }
 .review-plan .review-questions > span, .review-plan .review-opening > span, .review-plan .compiled-plan-grid > div > span { font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 .review-plan :is(p,li) { font-size: 16px; line-height: 1.6; }
 .review-plan .compiled-plan-grid { grid-template-columns: 1fr; gap: 0; }
-.review-plan .plan-setting-chips { margin: 0 0 48px; }
+.review-plan .plan-setting-chips { margin: 0 0 32px; }
 .plan-setting-chips span { background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; font-weight: 400; }
 .review-sidebar { border-left: 1px solid var(--line); padding-left: 32px; }
 .review-sidebar > section { border-top: 1px solid var(--line); padding: 24px 0; }
