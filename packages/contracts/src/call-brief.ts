@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { callLifecycleSchema } from "./call-lifecycle";
 import { appointmentAuthorizationSchema } from "./appointment";
 import { swissDestinationPhoneSchema } from "./phone";
 import { callLanguageContextSchema } from "./languages";
@@ -704,6 +705,7 @@ export const callBriefSchema = callBriefStoredFieldsSchema
     assistanceDisclosure: z.string().trim(),
     id: z.string().uuid(),
     status: callBriefStatusSchema,
+    lifecycle: callLifecycleSchema.optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })

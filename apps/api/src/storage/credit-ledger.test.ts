@@ -231,6 +231,10 @@ describe("credit ledger", () => {
     const evidence = consent ? await conversationCreditFixture(repository, brief.id) : null;
     await repository.applyProviderStatus("CA-refund", "completed", "completed", brief.id);
     if (evidence) expect(await repository.qualifyConversationCredit(brief.id, started.attempt.id, evidence)).toBe(false);
+    if (consent) {
+      expect((await repository.get(brief.id))?.brief.lifecycle?.result).toBe("assessment_pending");
+      await repository.claimDueDurableJob({types:[],workerId:"expiry",now:new Date(Date.now()+360000).toISOString(),leaseExpiresAt:new Date(Date.now()+400000).toISOString()});
+    }
     const usage = await repository.getCreditUsage(owner);
     expect(usage.balance).toBe(3);
     expect(usage.transactions.filter(entry => entry.type === "call_refund")).toHaveLength(1);

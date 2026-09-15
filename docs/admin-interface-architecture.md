@@ -21,6 +21,16 @@ stored. UI errors do not pretend an uncertain write failed before commit: refres
 is required to inspect the current state. See [beta controls](beta-controls-2026-09-14.md)
 for public admission, USD budget, call duration/concurrency and stop semantics.
 
+Since 2026-09-15, Operations separates **Goal achievement ? AI** from **Goal achievement ? user feedback**.
+The former uses the latest attempt's canonical assessment (achieved/partial/not achieved/uncertain,
+plus pending/unavailable/not assessed); its rate is achieved / all completed assessments, including
+uncertain. The latter counts only the latest user answer per call (yes/partly/no/missing); its rate
+is yes / received responses. Neither model decisions nor staff classification alter user responses.
+Existing semantic outcomes and resolved-rate displays are explicitly labelled manual user/staff
+classification. History, recent calls and Inspector share conversation/credit/assessment projection;
+no-answer, no consent, analysis pending and analysis failure stay distinct. Counts retain the existing
+call-created date scope and one-row-per-call unit; they are not per-turn classifier counts.
+
 ## Decision
 
 The administrative interface is a separate, English-only application surface
@@ -76,3 +86,7 @@ inside administrative chrome.
 
 Navigation visibility is not an authorization boundary. Server layouts and
 every `/api/admin/*` endpoint continue to enforce access independently.
+
+## Call result alignment - 2026-09-15
+
+Call list and Inspector display the same latest-attempt lifecycle as customer history. Operations separates no answer, busy, explicit refusal, missing consent and confirmed conversations; technical-failure counters no longer include ordinary no-answer/refusal. Goal outcomes remain explicit user/staff feedback. The legacy outcome-metrics endpoint now derives technical failures from current durable evidence rather than historical snapshots. See [implementation and verification](call-lifecycle-history-2026-09-15.md).

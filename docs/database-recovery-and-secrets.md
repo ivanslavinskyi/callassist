@@ -129,8 +129,9 @@ the preparation and proves a no-op replay. The merged rotation regression also
 verifies immutable plans and attempt snapshots after retiring the old runtime key.
 The 2026-09-07 restore drill verified 12 populated families from the then 13-family inventory;
 its schema parity tests covered those 13 columns. See [merge evidence](merge-verification-2026-09-07.md).
-The current inventory has 17 ciphertext columns, adding final transcript revisions,
-generated text artifacts, persisted artifact chunks and plan review receipts. Updated
+The current inventory has 18 ciphertext columns, adding final transcript revisions,
+generated text artifacts, persisted artifact chunks, plan review receipts and canonical
+call assessments. Updated
 isolated rotation and Docker restore tests verify these payloads after retiring the
 old runtime key, including immutable hashes and privacy-redaction behavior. This local
 evidence does not replace production backup/deletion-replay acceptance.

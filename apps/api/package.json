@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "eval:call-assessment": "tsx src/text-processing/final-assessment.eval.ts",
     "deployment:check": "tsx src/config/check-deployment.ts",
     "deployment:check:prod": "node dist/config/check-deployment.js",
     "communications:check": "tsx src/auth/check-communications.ts",

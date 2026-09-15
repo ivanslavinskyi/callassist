@@ -13,6 +13,7 @@ export const genericCiphertextColumns = [
   ["final_transcripts", "segments_ciphertext"],
   ["final_transcript_revisions", "payload_ciphertext"],
   ["call_text_artifacts", "payload_ciphertext"],
+  ["call_assessments", "payload_ciphertext"],
   ["call_text_artifact_chunks", "payload_ciphertext"],
   ["call_plan_review_receipts", "payload_ciphertext"],
   ["post_call_transcription_chunks", "text_ciphertext"],

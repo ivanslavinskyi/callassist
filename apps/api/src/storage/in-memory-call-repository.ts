@@ -1,3 +1,7 @@
+import { assessmentDeadlineMs, assessmentVersion, validateFinalAssessment } from "../credits/final-assessment";
+import type { CallAssessmentRecord, CallTextArtifact } from "@callassist/contracts";
+import type { FinalCreditEvidence } from "./postgres-call-assessment-store";
+import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle } from "@callassist/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { InMemoryCallTextStore } from "./in-memory-call-text-store";
@@ -219,10 +223,13 @@ export class InMemoryCallRepository implements CallRepository {
     },
     enqueue: input => this.enqueueDurableJob(input),
     job: id => this.#findDurableJob(id),
-    jobs: () => [...this.#durableJobs.values()]
+    jobs: () => [...this.#durableJobs.values()],
+    complete: artifact => this.#completeAssessment(artifact),
+    failure: artifact => this.#failAssessment(artifact)
   });
   readonly mode = "memory" as const;
   readonly #calls = new Map<string, CallSnapshot>();
+  readonly #assessments = new Map<string, CallAssessmentRecord>();
   readonly #owners = new Map<string, string | null>();
   readonly #textCancelledUsers = new Set<string>();
   readonly #creationRequests = new Map<
@@ -249,6 +256,7 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
   readonly #recordingAttempts = new Map<string,string>();
+  readonly #consentedRecordingAttempts = new Set<string>();
   readonly #compilations = new Map<
     string,
     Array<{
@@ -283,6 +291,7 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #creditTransactions: Array<
     CreditTransaction & { userId: string; idempotencyKey: string }
   > = [];
+  readonly #qualifiedCreditAttempts = new Set<string>();
   readonly #promoCodes = new Map<string, StoredPromoCode>();
   readonly #promoCreationIdempotency = new Map<string, string>();
   readonly #promoRedemptions: StoredPromoRedemption[] = [];
@@ -327,7 +336,7 @@ export class InMemoryCallRepository implements CallRepository {
         this.#owners.get(brief.id) === (input.userId ?? null) &&
         !this.#callDataDeletions.has(brief.id)
       )
-      .map(({ brief }) => copy(brief))
+      .map(({ brief }) => ({ ...copy(brief), lifecycle: this.#lifecycle(brief) }))
       .filter((brief) => !input.status || brief.status === input.status)
       .filter((brief) =>
         !input.search || brief.recipientName.toLocaleLowerCase().includes(input.search.toLocaleLowerCase())
@@ -1126,6 +1135,7 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: input.deletedAt
     };
     this.#callText.redact(input.callId);
+    for (const attempt of this.#attempts.get(input.callId) ?? []) { const a=this.#assessments.get(attempt.id); if(a) a.decision=null; }
     snapshot.compilation = null;
     snapshot.languageContext = null;
     for (const stored of this.#compilations.get(input.callId) ?? []) {
@@ -1546,8 +1556,14 @@ export class InMemoryCallRepository implements CallRepository {
     const snapshot = this.#calls.get(id);
     if(!snapshot) return null;
     if(!snapshot.languageContext&&snapshot.compilation) snapshot.languageContext=resolveTaskLanguage({detectedLanguage:snapshot.compilation.compiledBrief?.sourceLanguage,compilationRevision:snapshot.compilation.revision});
-    return {...copy(snapshot),planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
+    return {...copy(snapshot),brief:{...copy(snapshot.brief),lifecycle:this.#lifecycle(snapshot.brief)},planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
       textArtifacts:this.#callText.listTextArtifacts(id),finalTranscriptRevision:await this.#callText.getCurrentTranscriptRevision(id)};
+  }
+
+  async getCallAssessment(callId: string, attemptId: string) {
+    if (this.#callDataDeletions.has(callId)) return null;
+    if (!this.#attempts.get(callId)?.some(a=>a.id===attemptId)) return null;
+    return copy(this.#assessments.get(attemptId) ?? null);
   }
 
   async getPlanSource(...args: Parameters<CallTextRepository["getPlanSource"]>) { return this.#callText.getPlanSource(...args); }
@@ -1564,7 +1580,11 @@ export class InMemoryCallRepository implements CallRepository {
   async failTextArtifact(...args: Parameters<CallTextRepository["failTextArtifact"]>) { return this.#callText.failTextArtifact(...args); }
   async retryTextArtifact(...args: Parameters<CallTextRepository["retryTextArtifact"]>) { return this.#callText.retryTextArtifact(...args); }
   async getCurrentReviewReceipt(...args: Parameters<CallTextRepository["getCurrentReviewReceipt"]>) { return this.#callText.getCurrentReviewReceipt(...args); }
-  async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) { return this.#callText.exportCallTextData(...args); }
+  async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) {
+    const text = this.#callText.exportCallTextData(...args);
+    const attempts = new Set((this.#attempts.get(args[0]) ?? []).map(a=>a.id));
+    return {...text, assessments: copy([...this.#assessments.values()].filter(a=>attempts.has(a.callAttemptId)))};
+  }
 
   async getLanguageContext(id: string) {
     return (await this.get(id))?.languageContext ?? null;
@@ -1697,6 +1717,8 @@ export class InMemoryCallRepository implements CallRepository {
       (!callId || brief.id === callId)
     );
     const facts = emptyAdminOperationsFacts();
+    facts.lifecycle = emptyCallLifecycleCounts();
+    facts.userGoalFeedback = {yes:0,partly:0,no:0,notProvided:0};
     facts.providerUsage.incurredFrom = from;
     facts.providerUsage.incurredTo = to;
     facts.providerCosts.incurredFrom = from;
@@ -1709,6 +1731,8 @@ export class InMemoryCallRepository implements CallRepository {
         .map(({ event }) => event);
       const attempts = this.#attempts.get(id) ?? [];
       const outcome = this.#buildOutcomeView(id);
+      const lifecycle = this.#lifecycle(snapshot.brief);
+      countCallLifecycle(facts.lifecycle, lifecycle);
       facts.createdCalls += 1;
       if (attempts.length > 0) facts.attemptedCalls += 1;
       if (interruptedStatuses.has(snapshot.brief.status)) {
@@ -1717,18 +1741,19 @@ export class InMemoryCallRepository implements CallRepository {
       if (terminalStatuses.has(snapshot.brief.status)) {
         facts.terminalCalls += 1;
       }
-      if (outcome.technical.connection === "confirmed") {
+      if (lifecycle.connected) {
         facts.connectedCalls += 1;
       }
-      if (outcome.technical.consent === "granted") {
+      if (lifecycle.consent === "granted") {
         facts.consentGrantedCalls += 1;
-      } else if (outcome.technical.consent === "failed") {
+      } else if (lifecycle.connected && (lifecycle.consent === "declined" || lifecycle.consent === "not_received")) {
         facts.consentFailedCalls += 1;
       }
-      if (outcome.technical.failureStage !== null) {
+      if (terminalStatuses.has(snapshot.brief.status) && outcome.technical.failureStage !== null) {
         facts.technicalFailureCalls += 1;
       }
       if (outcome.latestFeedback) facts.feedbackResponses += 1;
+      facts.userGoalFeedback[outcome.latestFeedback?.goalResult ?? "notProvided"]++;
       incrementAdminSemanticOutcome(
         facts,
         outcome.latestOutcome?.outcome ?? null
@@ -2595,7 +2620,7 @@ export class InMemoryCallRepository implements CallRepository {
       const snapshot = this.#require(callId);
       const now = new Date().toISOString();
       const previousCallStatus = snapshot.brief.status;
-      const applyCallStatus = shouldApplyProviderCallStatus(
+      const applyCallStatus = attempts.at(-1)?.id === attempt.id && shouldApplyProviderCallStatus(
         previousCallStatus,
         callStatus
       );
@@ -2634,13 +2659,13 @@ export class InMemoryCallRepository implements CallRepository {
       if (settlement) {
         this.#appendSettlementTelemetry(callId, attempt.id, settlement, now);
       }
+      if (shouldApplyProviderCallStatus(attempt.status,callStatus)) attempt.status = callStatus;
       if (applyCallStatus) {
-        attempt.status = callStatus;
         snapshot.brief.status = callStatus;
         snapshot.brief.updatedAt = now;
       }
       if (
-        terminalStatuses.has(callStatus) &&
+        terminalStatuses.has(callStatus) && snapshot.recording && this.#recordingAttempts.get(snapshot.recording.id)===attempt.id &&
         (snapshot.recording?.status === "starting" ||
           snapshot.recording?.status === "recording")
       ) {
@@ -2862,7 +2887,8 @@ export class InMemoryCallRepository implements CallRepository {
     if (recording.status === "starting") recording.status = "recording";
     recording.startedAt ??= new Date().toISOString();
     if (recording.status !== "failed") recording.failureReason = null;
-    const attempt = (this.#attempts.get(callId) ?? []).at(-1);
+    const attempt = (this.#attempts.get(callId) ?? []).find(a=>a.id===this.#recordingAttempts.get(recordingId));
+    if(attempt && recording.consentGrantedAt && recording.startedAt) this.#consentedRecordingAttempts.add(attempt.id);
     const providerStatus = safeTelemetryCode(
       _providerStatus,
       "unknown_provider_status"
@@ -2965,6 +2991,7 @@ export class InMemoryCallRepository implements CallRepository {
       recording.status = "failed";
       recording.failureReason = input.failureReason ?? "recording_absent";
     }
+    if(recording.consentGrantedAt && recording.startedAt) this.#consentedRecordingAttempts.add(attempt.id);
     if (input.providerStatus === "in-progress") {
       this.#appendTelemetry(input.callBriefId, {
         callAttemptId: attempt.id,
@@ -3319,7 +3346,22 @@ export class InMemoryCallRepository implements CallRepository {
     return this.#durableJobs.size - before;
   }
 
+  async expireCallAssessments(now: string) {
+    for (const [id, assessment] of this.#assessments) {
+      if (assessment.summary.status !== "pending" || !assessment.summary.deadlineAt || assessment.summary.deadlineAt > now) continue;
+      for (const [callId, attempts] of this.#attempts) {
+        const attempt = attempts.find(a=>a.id===id);
+        if (attempt) {
+          const settled = this.#settleAttempt(callId,attempt,"call_refund",undefined,true);
+          if (settled) this.#appendSettlementTelemetry(callId,id,settled,now);
+        }
+      }
+      assessment.summary = {...assessment.summary,status:"unavailable",reason:"deadline",updatedAt:now};
+    }
+  }
+
   async claimDueDurableJob(input: ClaimDurableJobInput) {
+    await this.expireCallAssessments(input.now);
     for (const job of this.#durableJobs.values()) {
       if (
         job.status === "running" &&
@@ -3590,6 +3632,7 @@ export class InMemoryCallRepository implements CallRepository {
       createdAt: snapshot.brief.createdAt,
       updatedAt: snapshot.brief.updatedAt,
       technical: outcomeView.technical,
+      lifecycle: this.#lifecycle(snapshot.brief),
       semanticOutcome: outcomeView.latestOutcome?.outcome ?? null,
       outcomeProvenance: outcomeView.latestOutcome?.provenance ?? null,
       feedback: feedback ? {
@@ -3601,6 +3644,13 @@ export class InMemoryCallRepository implements CallRepository {
       durationSeconds: snapshot.recording?.durationSeconds ?? null,
       eventCount: (this.#callTelemetryEvents.get(callBriefId) ?? []).length
     });
+  }
+
+  #lifecycle(brief: CallBrief) {
+    const attemptIds = new Set((this.#attempts.get(brief.id) ?? []).map(({ id }) => id));
+    return deriveCallLifecycle(brief.status, (this.#callTelemetryEvents.get(brief.id) ?? []).map(({ event }) => event), this.#creditTransactions.flatMap((entry) =>
+      entry.callAttemptId && attemptIds.has(entry.callAttemptId) && (entry.type === "call_charge" || entry.type === "call_refund")
+        ? [{ callAttemptId: entry.callAttemptId, settlement: entry.type === "call_charge" ? "charge" as const : "refund" as const, qualified: this.#qualifiedCreditAttempts.has(entry.callAttemptId) }] : []), [...this.#assessments.values()].filter(a=>attemptIds.has(a.callAttemptId)));
   }
 
   #appendConnectionTelemetry(
@@ -3756,11 +3806,61 @@ export class InMemoryCallRepository implements CallRepository {
     }
   }
 
+  #failAssessment(artifact: CallTextArtifact) {
+    if (artifact.kind !== "call_summary" || !artifact.generatorVersion.startsWith("summary-v3:") || !artifact.generatorVersion.includes(":openai:")) return;
+    const revision=this.#callText.revisions.get(artifact.transcriptRevisionId??"")?.revision;
+    const attempt=this.#attempts.get(artifact.callId)?.find(a=>a.id===revision?.callAttemptId);
+    if (!attempt || attempt.compilationId !== artifact.compilationId || revision?.sourceHash !== artifact.sourceHash ||
+      artifact.targetLanguage !== (attempt.contentLanguage ?? this.#require(artifact.callId).languageContext?.taskContentLanguage)) return;
+    if (!this.#consentedRecordingAttempts.has(attempt.id)) return;
+    const prior=this.#assessments.get(attempt.id) ?? {callAttemptId:attempt.id,compilationId:attempt.compilationId!,sourceHash:null,decision:null,
+      summary:{status:"pending" as const,conversation:null,goal:null,reason:null,updatedAt:new Date().toISOString(),deadlineAt:null,transcriptRevisionId:null,evaluatorVersion:null}};
+    if (prior?.summary.status !== "pending") return;
+    prior.summary={...prior.summary,status:"unavailable",reason:"generation_failed",updatedAt:new Date().toISOString()};
+    this.#assessments.set(attempt.id,prior);
+    if (attempt.endedAt) {
+      const settled=this.#settleAttempt(artifact.callId,attempt,"call_refund",undefined,true);
+      if(settled) this.#appendSettlementTelemetry(artifact.callId,attempt.id,settled);
+    }
+  }
+
+  #completeAssessment(artifact: CallTextArtifact) {
+    if (artifact.kind !== "call_summary" || !artifact.payload || !("assessment" in artifact.payload) || !artifact.payload.assessment ||
+      !artifact.generatorVersion.startsWith("summary-v3:") || !artifact.generatorVersion.includes(":openai:")) return;
+    const revision=this.#callText.revisions.get(artifact.transcriptRevisionId??"")?.revision;
+    const attempt=this.#attempts.get(artifact.callId)?.find(a=>a.id===revision?.callAttemptId);
+    const compilation=this.#callText.getTextArtifactSourceCompilation(artifact.callId,artifact.compilationId??"");
+    const snapshot=this.#require(artifact.callId);
+    if (artifact.targetLanguage !== (attempt?.contentLanguage ?? snapshot.languageContext?.taskContentLanguage)) return;
+    if (!revision || !attempt || attempt.compilationId !== artifact.compilationId || !compilation?.compiledBrief ||
+      revision.sourceHash !== artifact.sourceHash || !this.#consentedRecordingAttempts.has(attempt.id)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    let decision;
+    try { decision=validateFinalAssessment(artifact.payload.assessment,revision.segments,compilation.compiledBrief.successCriteria.map((_,i)=>`criterion.${i}`)); }
+    catch {throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");}
+    const prior=this.#assessments.get(attempt.id);
+    if (prior?.summary.status==="ready" && prior.summary.transcriptRevisionId===revision.id) return;
+    if (prior?.summary.deadlineAt && prior.summary.deadlineAt <= new Date().toISOString()) {
+      const settled=this.#settleAttempt(artifact.callId,attempt,"call_refund",undefined,true);
+      if(settled) this.#appendSettlementTelemetry(artifact.callId,attempt.id,settled);
+    }
+    const evaluatorVersion=`${assessmentVersion}:${artifact.generatorVersion}`;
+    this.#assessments.set(attempt.id,{callAttemptId:attempt.id,compilationId:artifact.compilationId!,sourceHash:revision.sourceHash,decision,
+      summary:{status:"ready",conversation:decision.conversation.status,goal:decision.goal.status,
+        reason:decision.conversation.status==="uncertain"?"evidence_uncertain":null,updatedAt:new Date().toISOString(),
+        deadlineAt:prior?.summary.deadlineAt??null,transcriptRevisionId:revision.id,evaluatorVersion}});
+    if(attempt.endedAt) {
+      const settled=this.#settleAttempt(artifact.callId,attempt,decision.conversation.status==="confirmed"?"call_charge":"call_refund",
+        decision.conversation.status==="confirmed"?{version:2,transcriptRevisionId:revision.id,sourceHash:revision.sourceHash,evaluatorVersion,category:decision.conversation.category}:undefined,true);
+      if(settled) this.#appendSettlementTelemetry(artifact.callId,attempt.id,settled);
+    }
+  }
+
   #settleAttempt(
     callBriefId: string,
     attempt: CallAttemptRecord,
     type: "call_charge" | "call_refund" | null,
-    qualification?: ConversationCreditEvidence
+    qualification?: ConversationCreditEvidence | FinalCreditEvidence,
+    finalSettlement = false
   ): "call_charge" | "call_refund" | null {
     if (!type) return null;
     if (type === "call_charge" && !qualification) return null;
@@ -3777,6 +3877,21 @@ export class InMemoryCallRepository implements CallRepository {
         (entry.type === "call_charge" || entry.type === "call_refund")
     );
     if (alreadySettled) return null;
+    if (type === "call_refund" && !finalSettlement && this.#consentedRecordingAttempts.has(attempt.id) && attempt.compilationId && !this.#callDataDeletions.has(callBriefId)) {
+      let assessment=this.#assessments.get(attempt.id);
+      if (!assessment) {
+        assessment={callAttemptId:attempt.id,compilationId:attempt.compilationId,sourceHash:null,decision:null,
+          summary:{status:"pending",conversation:null,goal:null,reason:null,updatedAt:new Date().toISOString(),
+            deadlineAt:new Date(Date.now()+assessmentDeadlineMs).toISOString(),transcriptRevisionId:null,evaluatorVersion:null}};
+        this.#assessments.set(attempt.id,assessment);
+      }
+      if (assessment.summary.status === "pending") return null;
+      if (assessment.summary.status === "ready" && assessment.decision?.conversation.status === "confirmed") {
+        return this.#settleAttempt(callBriefId,attempt,"call_charge",{version:2,transcriptRevisionId:assessment.summary.transcriptRevisionId!,
+          sourceHash:assessment.sourceHash!,evaluatorVersion:assessment.summary.evaluatorVersion!,category:assessment.decision.conversation.category},true);
+      }
+    }
+    if (type === "call_charge" && qualification) this.#qualifiedCreditAttempts.add(attempt.id);
     this.#creditTransactions.push({
       id: randomUUID(),
       userId,

@@ -1,5 +1,9 @@
 "use client";
 
+import { AdminGoalAssessments } from "./admin-goal-assessments";
+import { callResultCopy } from "@/lib/call-status";
+import type { CallResult } from "@callassist/contracts";
+
 import type {
   AdminMetricRatio,
   AdminOperationsOverview,
@@ -102,22 +106,29 @@ export function AdminOperationsDashboard() {
             <OperationsSection title={copy.volumeTitle}>
               <table className="admin-volume-table"><thead><tr><th scope="col">Stage</th><th scope="col">Count</th><th scope="col">Definition</th></tr></thead><tbody>
                 {([
-                  [copy.connectedCalls, overview.volume.connectedCalls, "Provider connection confirmed"],
+                  [copy.connectedCalls, overview.volume.connectedCalls, "Latest attempt connected; may include voicemail or an automated system"],
                   [copy.consentGrantedCalls, overview.volume.consentGrantedCalls, "Recipient agreed to continue"],
-                  [copy.consentFailedCalls, overview.volume.consentFailedCalls, "Attempt ended at consent"],
+                  [copy.consentFailedCalls, overview.volume.consentFailedCalls, "Latest attempt: declined or consent not confirmed; distinct from no answer"],
                   [copy.technicalFailureCalls, overview.volume.technicalFailureCalls, "Terminal technical failure"],
                   [copy.feedbackResponses, overview.volume.feedbackResponses, "User-provided feedback"]
                 ] as const).map(([label, value, definition]) => <tr key={label}><th scope="row">{label}</th><td>{value}</td><td>{definition}</td></tr>)}
               </tbody></table>
             </OperationsSection>
 
+            {overview.lifecycle ? <OperationsSection title="Call results · latest attempt">
+              <p>One result per ended call, using the same evidence as call history. A conversation requires consent and a substantive answer. Goal achievement is measured separately from user feedback.</p>
+              <table className="admin-volume-table"><thead><tr><th scope="col">Result</th><th scope="col">Calls</th><th scope="col">Definition</th></tr></thead><tbody>
+                {Object.entries(overview.lifecycle.results).map(([result, count]) => <tr key={result}><th scope="row">{callResultCopy[locale][result as CallResult][0]}</th><td>{count}</td><td>{callResultCopy[locale][result as CallResult][1]}</td></tr>)}
+              </tbody></table>
+            </OperationsSection> : null}
+            <AdminGoalAssessments overview={overview} locale={locale} />
             <OperationsSection title={copy.ratesTitle}>
               <div className="admin-metric-grid admin-rate-grid">
                 <RatioCard copy={copy} label={copy.connectionRate} locale={locale} ratio={overview.rates.connection} />
                 <RatioCard copy={copy} label={copy.consentRate} locale={locale} ratio={overview.rates.consent} />
                 <RatioCard copy={copy} label={copy.technicalFailureRate} locale={locale} ratio={overview.rates.technicalFailure} />
                 <RatioCard copy={copy} label={copy.feedbackRate} locale={locale} ratio={overview.rates.feedback} />
-                <RatioCard copy={copy} label={copy.resolvedRate} locale={locale} ratio={overview.rates.resolved} />
+                <RatioCard copy={copy} label={"Resolved per user/staff review"} locale={locale} ratio={overview.rates.resolved} />
               </div>
             </OperationsSection>
 
@@ -153,7 +164,7 @@ export function AdminOperationsDashboard() {
               </OperationsSection>
             </div>
 
-            <OperationsSection title={copy.outcomesTitle}>
+            <OperationsSection title={"Manual classification · user/staff"}>
               <div className="admin-outcome-grid">
                 {Object.entries(overview.semanticOutcomes).map(([key, value]) => (
                   <MetricCard

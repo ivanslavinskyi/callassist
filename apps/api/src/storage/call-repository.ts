@@ -501,6 +501,8 @@ export type AdminProviderCostBucket = {
 };
 
 export type AdminOperationsFacts = {
+  lifecycle?: import("@callassist/contracts").CallLifecycleCounts;
+  userGoalFeedback?: { yes: number; partly: number; no: number; notProvided: number };
   createdCalls: number;
   attemptedCalls: number;
   activeCalls: number;
@@ -841,6 +843,8 @@ export interface CallRepository extends CallTextRepository {
     publication?: CallPreparationPublication
   ): Promise<CallSnapshot>;
   get(id: string): Promise<CallSnapshot | null>;
+  expireCallAssessments(now: string): Promise<void>;
+  getCallAssessment(callId: string, attemptId: string): Promise<import("@callassist/contracts").CallAssessmentRecord | null>;
   appendCallTelemetryEvent(
     id: string,
     input: CallTelemetryEventInput

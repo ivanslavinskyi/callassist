@@ -1,5 +1,10 @@
 # Кредит за состоявшийся разговор — 14 сентября 2026
 
+> Historical implementation checkpoint. The agreed substantive-answer policy remains,
+> but realtime qualification and immediate post-consent refunds were replaced on
+> 2026-09-15 by [final assessment and deferred settlement](post-call-assessment-diagnosis-2026-09-15.md).
+
+
 Согласованное правило: кредит используется после согласия адресата и **первого
 содержательного ответа по задаче**. Успешное решение задачи не требуется. Этот
 checkpoint заменяет прежнее списание по факту соединения; основной backlog остаётся

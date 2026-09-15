@@ -863,7 +863,7 @@ describe("CallService", () => {
     );
   });
 
-  it("stops a call without losing its brief", async () => {
+  it.each([false, true])("stops a call without losing its brief (telemetry unavailable: %s)", async (telemetryUnavailable) => {
     const service = createService();
     const brief = await service.create({
       recipientName: "Example office",
@@ -880,9 +880,11 @@ describe("CallService", () => {
 
     await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id);
+    if (telemetryUnavailable) vi.spyOn(service, "recordTelemetry").mockRejectedValue(new Error("Test telemetry unavailable"));
     const snapshot = await service.stop(brief.id);
 
     expect(snapshot.brief.status).toBe("stopped");
+    expect(snapshot.brief.lifecycle).toMatchObject({ result: "stopped", stopRequestedBy: telemetryUnavailable ? null : "user", endedBy: telemetryUnavailable ? "unknown" : "user" });
     expect(snapshot.brief.id).toBe(brief.id);
   });
 
@@ -940,6 +942,7 @@ describe("CallService", () => {
 
       expect(stopCall).toHaveBeenCalledWith("CA-duration-limit");
       expect((await service.get(brief.id))?.brief.status).toBe("stopped");
+      expect((await service.get(brief.id))?.brief.lifecycle).toMatchObject({ result: "stopped", stopRequestedBy: "system", endedBy: "system" });
       expect((await service.getCreditUsage(userId)).balance).toBe(3);
     } finally {
       vi.useRealTimers();
@@ -1007,6 +1010,7 @@ describe("CallService", () => {
         ({ type }) => type === "provider_call_reconciliation"
       )?.status).toBe("succeeded");
     });
+    expect((await repository.get(brief.id))?.brief.lifecycle?.result).toBe("no_answer");
     const usage = await afterRestart.getCreditUsage(userId);
     expect(getCallStatus).toHaveBeenCalledWith("CA-reconcile-no-answer");
     expect(usage.balance).toBe(3);
@@ -1098,6 +1102,8 @@ describe("CallService", () => {
       expect(reconciliationJobs.every(({ status }) => status === "succeeded"))
         .toBe(true);
     });
+    expect((await repository.get(brief.id))?.brief.lifecycle?.result).toBe("assessment_pending");
+    await repository.claimDueDurableJob({types:[],workerId:"expiry",now:new Date(Date.now()+360000).toISOString(),leaseExpiresAt:new Date(Date.now()+400000).toISOString()});
     const usage = await afterRestart.getCreditUsage(userId);
     expect(getCallStatus).toHaveBeenCalledWith("CA-reconcile-completed");
     expect(getRecordingStatus).toHaveBeenCalledWith(

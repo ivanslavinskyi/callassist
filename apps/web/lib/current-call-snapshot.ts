@@ -8,6 +8,20 @@ export function currentCallSnapshot(current: CallSnapshot | null, incoming: Call
       (incoming.compilation && current.compilation && incoming.compilation.revision < current.compilation.revision)) return current;
   // Deletion removes the compilation as well as the transcript. Never restore it from local state.
   if (current.compilation && !incoming.compilation) return incoming;
+  if (incoming.brief.updatedAt === current.brief.updatedAt && current.brief.lifecycle?.assessment &&
+      (!incoming.brief.lifecycle?.assessment || incoming.brief.lifecycle.assessment.updatedAt < current.brief.lifecycle.assessment.updatedAt)) {
+    incoming = { ...incoming, brief: { ...incoming.brief, lifecycle: current.brief.lifecycle } };
+  }
+  if (incoming.brief.updatedAt === current.brief.updatedAt &&
+      (incoming.brief.lifecycle?.eventSequence ?? 0) < (current.brief.lifecycle?.eventSequence ?? 0)) {
+    incoming = { ...incoming, brief: { ...incoming.brief, lifecycle: current.brief.lifecycle } };
+  }
+  if (incoming.brief.updatedAt === current.brief.updatedAt && current.brief.lifecycle &&
+      incoming.brief.lifecycle?.eventSequence === current.brief.lifecycle.eventSequence &&
+      ["used", "returned"].includes(current.brief.lifecycle.credit) &&
+      !["used", "returned"].includes(incoming.brief.lifecycle.credit)) {
+    incoming = { ...incoming, brief: { ...incoming.brief, lifecycle: current.brief.lifecycle } };
+  }
   if (current.transcript?.some(segment => !incoming.transcript?.some(next => next.id === segment.id))) {
     incoming = { ...incoming, transcript: mergeTranscriptSegments(current.transcript, incoming.transcript ?? []) };
   }

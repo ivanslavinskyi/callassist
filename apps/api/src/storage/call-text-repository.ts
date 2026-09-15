@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   CallTextArtifact, FinalTranscriptRevision, FinalTranscriptSegment, PlanSource,
-  TextArtifactKind, TextLanguage, ReviewEvidence, CallCompilation
+  TextArtifactKind, TextLanguage, ReviewEvidence, CallCompilation, CallAssessmentRecord
 } from "@callassist/contracts";
 import type { DurableJob, DurableJobLease } from "../jobs/durable-job";
 
@@ -32,13 +32,14 @@ export interface CallTextRepository {
   getTextArtifactChunks(artifactId: string, lease: DurableJobLease): Promise<TextArtifactChunk[]>;
   saveTextArtifactChunk(artifactId: string, index: number, payload: unknown, lease: DurableJobLease): Promise<void>;
   completeTextArtifact(artifactId: string, payload: NonNullable<CallTextArtifact["payload"]>, lease: DurableJobLease): Promise<CallTextArtifact>;
-  failTextArtifact(artifactId: string, failureCode: string, lease: DurableJobLease): Promise<CallTextArtifact>;
+  failTextArtifact(artifactId: string, failureCode: string, lease: DurableJobLease, finalFailure?: boolean): Promise<CallTextArtifact>;
   retryTextArtifact(callId: string, artifactId: string): Promise<CallTextArtifact>;
   cancelUserTextArtifacts(userId: string, now: string): Promise<void>;
   reserveTextArtifactProviderRequest(input: TextArtifactProviderReservationInput, lease: DurableJobLease): Promise<boolean>;
   getCurrentReviewReceipt(callId: string): Promise<CallPlanReviewReceipt | null>;
   exportCallTextData(callId: string): Promise<{
     compilations: Array<{ id: string; compilation: CallCompilation }>;
+    assessments?: CallAssessmentRecord[];
     transcriptRevisions: FinalTranscriptRevision[]; artifacts: CallTextArtifact[]; reviewReceipts: CallPlanReviewReceipt[];
   }>;
 }

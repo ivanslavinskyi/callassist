@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { latestAttemptEvents } from "./call-lifecycle";
 import {
   callBriefStatusSchema,
   type CallBriefStatus
@@ -215,13 +216,12 @@ export function deriveTechnicalCallOutcome(
     failureCode: status === "blocked" ? "policy_blocked" : null
   };
 
-  for (const event of [...events].sort(
-    (left, right) => left.sequence - right.sequence
-  )) {
+  for (const event of latestAttemptEvents(events)) {
     const payload = event.payload;
     switch (payload.name) {
       case "provider.status_changed":
-        if (payload.metadata.callStatus === "failed") {
+        if (payload.metadata.applied && payload.metadata.callStatus === "failed" &&
+            !["no-answer", "busy", "canceled"].includes(payload.metadata.providerStatus)) {
           setFailure(outcome, "provider", payload.metadata.providerStatus);
         }
         break;
@@ -229,17 +229,15 @@ export function deriveTechnicalCallOutcome(
         outcome.connection = "confirmed";
         break;
       case "consent.granted":
+        outcome.connection = "confirmed";
         outcome.consent = "granted";
         break;
       case "consent.failed":
-        outcome.consent = "failed";
-        setFailure(
-          outcome,
-          payload.metadata.reason === "recording_start_failed"
-            ? "recording"
-            : "consent",
-          payload.metadata.reason
-        );
+        if (payload.metadata.reason === "negative") outcome.connection = "confirmed";
+        if (outcome.consent !== "granted") outcome.consent = "failed";
+        if (payload.metadata.reason === "recording_start_failed" || payload.metadata.reason === "recognition_failed") {
+          setFailure(outcome, payload.metadata.reason === "recording_start_failed" ? "recording" : "consent", payload.metadata.reason);
+        }
         break;
       case "recording.started":
         outcome.recording = "started";
@@ -279,7 +277,10 @@ export function deriveTechnicalCallOutcome(
     outcome.terminalStatus &&
     outcome.terminalStatus !== "blocked" &&
     outcome.connection === "not_confirmed" &&
-    outcome.failureStage === null
+    outcome.failureStage === null &&
+    !latestAttemptEvents(events).some(({ payload }) => payload.name === "provider.status_changed" &&
+      payload.metadata.applied && ["no-answer", "busy", "canceled"].includes(payload.metadata.providerStatus)) &&
+    status !== "stopped"
   ) {
     setFailure(outcome, "provider", `connection_${outcome.terminalStatus}`);
   }

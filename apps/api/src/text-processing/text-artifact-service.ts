@@ -1,3 +1,4 @@
+import { uncertainAssessment } from "../credits/final-assessment";
 import {
   callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema,
   type CallCompilation, type CallTextArtifact, type TextArtifactKind, type TextLanguage,
@@ -127,26 +128,28 @@ export class TextArtifactService {
       let payload = combinePayloads(artifact.kind, outputs, artifact.targetLanguage);
       if (needsCompaction && inputs[0]?.kind === "call_summary") {
         const extraction = callSummaryPayloadSchema.parse(payload);
-        const evidenceIds = new Set([...extraction.findings, ...extraction.nextSteps].flatMap(item => item.sourceSegmentIds));
         const allSegments = inputs.flatMap(input => input.kind === "call_summary" ? input.segments : []);
-        const compactInput: TextProcessingInput = { ...inputs[0], extraction, segments: allSegments.filter(segment => evidenceIds.has(segment.id)) };
+        const compactInput = await this.#assessmentInput(artifact, { ...inputs[0], extraction, segments: allSegments });
         try {
           validateTextProcessingInput(compactInput);
           payload = await runInput(compactInput, inputs.length, requestLimit);
         } catch (error) {
           // A compact view is optional. Keep the evidenced current-format details on a bounded provider failure.
           if (!(error instanceof TextProcessingError)) throw error;
-          payload = extraction;
-          await this.repository.saveTextArtifactChunk(artifact.id, inputs.length, extraction, lease());
+          const assessment = compactInput.assessmentMode === "preserve" ? compactInput.fixedAssessment : compactInput.assessmentMode === "evaluate"
+            ? {...uncertainAssessment(),criteria:compactInput.checks.filter(c=>c.id.startsWith("criterion.")).map(c=>({id:c.id,status:"uncertain" as const,sourceSegmentIds:[]}))} : undefined;
+          payload = {...extraction,...(assessment ? {assessment} : {})};
+          await this.repository.saveTextArtifactChunk(artifact.id, inputs.length, payload, lease());
         }
       }
       await this.repository.completeTextArtifact(artifact.id, payload, lease());
     } catch (error) {
       const code = error instanceof TextProcessingError || error instanceof DurableJobExecutionError || error instanceof CallRepositoryError || error instanceof TextArtifactServiceError || error instanceof BetaControlError ? error.code : "TEXT_ARTIFACT_GENERATION_FAILED";
-      await this.repository.failTextArtifact(job.textArtifactId, code, lease()).catch(() => undefined);
+      const retryable = error instanceof TextProcessingError || error instanceof DurableJobExecutionError ? error.retryable :
+        !(error instanceof CallRepositoryError) && !(error instanceof TextArtifactServiceError) && !(error instanceof BetaControlError);
+      await this.repository.failTextArtifact(job.textArtifactId, code, lease(), !retryable || job.attemptCount >= job.maxAttempts).catch(() => undefined);
       throw new DurableJobExecutionError(code, { cause: error, retryAfterMs: error instanceof TextProcessingError ? error.retryAfterMs : undefined,
-        retryable: error instanceof TextProcessingError ? error.retryable :
-        error instanceof DurableJobExecutionError ? error.retryable : !(error instanceof CallRepositoryError) && !(error instanceof TextArtifactServiceError) && !(error instanceof BetaControlError) });
+        retryable });
     }
   }
 
@@ -163,7 +166,30 @@ export class TextArtifactService {
     if (artifact.kind === "transcript_translation") return chunkBySize(source.segments).map((segments) => ({ kind: "transcript_translation", targetLanguage: artifact.targetLanguage, segments }));
     const compilation = artifact.compilationId ? await this.repository.getTextArtifactSourceCompilation(artifact.callId, artifact.compilationId) : null;
     if (!compilation?.compiledBrief) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
-    return chunkBySize(source.segments).map(segments => summaryInput(compilation, segments, artifact.targetLanguage));
+    const inputs = chunkBySize(source.segments).map(segments => summaryInput(compilation, segments, artifact.targetLanguage));
+    return inputs.length === 1 ? [await this.#assessmentInput(artifact, inputs[0]!)] : inputs;
+  }
+
+  async #assessmentInput(artifact: CallTextArtifact, input: Extract<TextProcessingInput,{kind:"call_summary"}>): Promise<Extract<TextProcessingInput,{kind:"call_summary"}>> {
+    if (!artifact.generatorVersion.startsWith("summary-v3:") || this.processor.driver !== "openai" || !artifact.transcriptRevisionId) return input;
+    const source = await this.repository.getTranscriptRevision(artifact.callId,artifact.transcriptRevisionId);
+    if (!source?.callAttemptId) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    const attempt = await this.repository.getAttempt(artifact.callId,source.callAttemptId);
+    const saved = await this.repository.getCallAssessment(artifact.callId,source.callAttemptId);
+    if (saved?.decision && saved.sourceHash === source.sourceHash && saved.summary.transcriptRevisionId === source.id) {
+      return {...input,assessmentMode:"preserve",fixedAssessment:saved.decision};
+    }
+    const snapshot = await this.repository.get(artifact.callId);
+    const language = attempt?.contentLanguage ?? snapshot?.languageContext?.taskContentLanguage;
+    if (!language) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    if (language !== artifact.targetLanguage) {
+      await this.repository.enqueueTextArtifact({callId:artifact.callId,kind:"call_summary",compilationId:artifact.compilationId!,
+        transcriptRevisionId:source.id,sourceHash:source.sourceHash,targetLanguage:language,generatorVersion:artifact.generatorVersion});
+      // This language can have its summary while the one canonical assessment is queued.
+      // It must not independently grade or settle the call.
+      return input;
+    }
+    return {...input,assessmentMode:"evaluate"};
   }
 
   async #find(callId: string, kind: TextArtifactKind, compilationId: string | null, transcriptRevisionId: string | null, sourceHash: string, targetLanguage: TextLanguage) {

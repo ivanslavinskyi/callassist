@@ -34,6 +34,10 @@ The recorded local configuration is revision 3: 20 USD/rolling 24 h,
 0.60 USD/call minute (4.20 USD for seven minutes), 0.15 USD/paid text operation.
 These local values do not configure the external deployment.
 
+## Call result diagnosis
+
+Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply migrations through 0074 before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
+
 ## Preparation and call UI diagnosis
 
 Creation, editing and clarification share an eight-minute browser wait across

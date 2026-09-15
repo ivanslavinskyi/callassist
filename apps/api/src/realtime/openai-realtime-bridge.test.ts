@@ -1332,17 +1332,12 @@ function emitJson(socket: FakeSocket, payload: object) {
   socket.emit("message", Buffer.from(JSON.stringify(payload)));
 }
 
-describe("conversation credit qualification", () => {
-  it.each(["task_answer", "cannot_answer", "referral", "not_substantive", "uncertain"])(
-    "settles only a bound substantive decision (%s) and keeps the classifier silent", async category => {
+describe("post-call credit assessment boundary", () => {
+  it.each(["Pizza, please.", "I do not know.", "Ask another department.", "Yes, go ahead."])(
+    "persists live speech but reserves credit for the final transcript (%s)", async answer => {
       const owner = randomUUID();
       const h = await createConsentHarness(false, "en-GB", false, undefined, owner);
       try {
-        const requests = () => h.openAISocket.sent.filter(event => event.type === "response.create" &&
-          !!(event.response as { metadata?: { credit_qualification?: string } })?.metadata?.credit_qualification);
-        emitJson(h.openAISocket, { type: "conversation.item.input_audio_transcription.completed", item_id: "before-consent", transcript: "Yes, arrived." });
-        await new Promise(resolve => setImmediate(resolve));
-        expect(requests()).toHaveLength(0);
         completeConsentPlayback(h);
         emitJson(h.consentSocket, { type: "conversation.item.input_audio_transcription.completed", transcript: "Yes" });
         await vi.waitFor(() => expect(h.startRecording).toHaveBeenCalled());
@@ -1350,31 +1345,16 @@ describe("conversation credit qualification", () => {
         emitJson(h.openAISocket, { type: "response.created", response: { id: "opening-credit" } });
         emitJson(h.openAISocket, { type: "response.done", response: { id: "opening-credit", status: "completed" } });
         emitJson(h.twilioSocket, { event: "mark", mark: { name: "callassist-opening-complete" } });
-        emitJson(h.openAISocket, { type: "response.output_audio_transcript.done", response_id: "question-credit", item_id: "question-credit", transcript: "Has the application arrived?" });
-        const answer = category === "cannot_answer" ? "I do not know." : category === "referral" ? "Please ask the registration department." : category === "not_substantive" ? "I have no time to talk." : "Yes, it arrived yesterday.";
+        emitJson(h.openAISocket, { type: "response.output_audio_transcript.done", response_id: "question-credit", item_id: "question-credit", transcript: "What would you like for dinner?" });
         emitJson(h.openAISocket, { type: "conversation.item.input_audio_transcription.completed", item_id: "answer-credit", transcript: answer });
-        await vi.waitFor(() => expect(requests()).toHaveLength(1));
-        const request = requests()[0].response as { conversation: string; output_modalities: string[]; metadata: Record<string, string> };
-        expect(request).toMatchObject({ conversation: "none", output_modalities: ["text"] });
-        expect((await h.repository.getCreditUsage(owner)).transactions.some(entry => entry.type === "call_charge")).toBe(false);
-        emitJson(h.openAISocket, { type: "response.created", response: { id: "credit-result", metadata: request.metadata } });
-        const mediaCount = h.twilioSocket.sent.filter(event => event.event === "media").length;
-        emitJson(h.openAISocket, { type: "response.output_audio.delta", response_id: "credit-result", delta: "AAAA" });
-        expect(h.twilioSocket.sent.filter(event => event.event === "media")).toHaveLength(mediaCount);
-        const done = { type: "response.done", response: { id: "credit-result", metadata: request.metadata, status: "completed", output: [{
-          type: "function_call", name: "classify_task_answer", call_id: "credit-check", arguments: JSON.stringify({ category, answerQuote: answer })
-        }] } };
-        emitJson(h.openAISocket, done);
-        emitJson(h.openAISocket, done);
-        const qualifies = !["not_substantive", "uncertain"].includes(category);
-        if (qualifies) await vi.waitFor(async () => {
-          expect((await h.repository.getCreditUsage(owner)).transactions.filter(entry => entry.type === "call_charge")).toHaveLength(1);
-          expect((await h.repository.listCallTelemetryEvents(h.created.id)).filter(event => event.payload.name === "credit.settled")).toHaveLength(1);
-        });
+        await vi.waitFor(async () => expect((await h.repository.get(h.created.id))?.transcript.some(s=>s.text===answer)).toBe(true));
+        expect(h.openAISocket.sent.filter(event=>event.type==="response.create" &&
+          !!(event.response as {metadata?:{credit_qualification?:string}})?.metadata?.credit_qualification)).toHaveLength(0);
         await h.repository.applyProviderStatus("CA-HANGUP", "completed", "completed", h.created.id);
         const usage = await h.repository.getCreditUsage(owner);
-        expect(usage.balance).toBe(qualifies ? 2 : 3);
-        expect(usage.transactions.filter(entry => entry.type === "call_refund")).toHaveLength(qualifies ? 0 : 1);
+        expect(usage.balance).toBe(2);
+        expect(usage.transactions.filter(entry=>["call_charge","call_refund"].includes(entry.type))).toHaveLength(0);
+        expect((await h.repository.get(h.created.id))?.brief.lifecycle?.result).toBe("assessment_pending");
       } finally {
         emitJson(h.twilioSocket, { event: "stop" });
         await h.service.close();

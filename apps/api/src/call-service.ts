@@ -777,7 +777,7 @@ export class CallService {
         if (["dialing", "in_progress", "awaiting_approval"].includes(
           call.brief.status
         )) {
-          await this.stop(id);
+          await this.stop(id, "system");
         }
       }
     );
@@ -805,18 +805,39 @@ export class CallService {
     return snapshot;
   }
 
-  async stop(id: string) {
+  async stop(id: string, actor: "user" | "system" = "user") {
     this.#clearTimers(id);
     const attempt = await this.repository.getLatestAttempt(id);
+    const before = await this.#require(id);
+    if (terminalStatuses.has(before.brief.status)) return before;
+    const requestKey = `stop:${attempt?.id ?? id}:${randomUUID()}`;
+    const recordStop = async (phase: "requested" | "succeeded" | "failed") => {
+      try {
+        await this.recordTelemetry(id, {
+          callAttemptId: attempt?.id ?? null,
+          idempotencyKey: `${requestKey}:${phase}`,
+          payload: { name: "call.stop", metadata: { actor, phase } }
+        });
+      } catch (error) {
+        // An observability failure must not prevent an urgent provider stop.
+        this.#onBackgroundError(error);
+      }
+    };
+    await recordStop("requested");
     if (attempt?.providerCallId) {
       try {
         await this.telephonyProvider.stopCall(attempt.providerCallId);
       } catch (error) {
+        await recordStop("failed");
         this.#onBackgroundError(error);
         throw new CallServiceError("TELEPHONY_STOP_FAILED", { cause: error });
       }
     }
-    const snapshot = await this.repository.stop(id);
+    const stopped = await this.repository.stop(id);
+    // A terminal provider callback may have won the race. Keep the request,
+    // but do not claim who disconnected in that case.
+    if (stopped.brief.status === "stopped") await recordStop("succeeded");
+    const snapshot = await this.#require(id);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     if (snapshot.recording) {
       this.#publish(id, {
@@ -923,24 +944,7 @@ export class CallService {
     return (await this.#persistTranscript(id, role, text.trim(), sourceKey)).segment;
   }
 
-  async qualifyConversationCredit(id: string, attemptId: string, evidence: import("./credits/conversation-credit").ConversationCreditEvidence) {
-    const charged = await this.repository.qualifyConversationCredit(id, attemptId, evidence);
-    if (charged) {
-      // The ledger stores the evidence atomically. Telemetry is a secondary view;
-      // a delivery failure must never undo or repeat the settled transaction.
-      try {
-        await this.recordTelemetry(id, {
-          callAttemptId: attemptId,
-          idempotencyKey: `attempt:${attemptId}:credit:charge`,
-          payload: { name: "credit.settled", metadata: {
-            settlement: "charge", connected: true, basis: "substantive_answer_v1",
-            questionSegmentId: evidence.questionSegmentId, answerSegmentId: evidence.answerSegmentId
-          } }
-        });
-      } catch (error) { this.#onBackgroundError(error); }
-    }
-    return charged;
-  }
+
 
   async startRecordingAfterConsent(
     id: string,

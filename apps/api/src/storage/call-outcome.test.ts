@@ -66,8 +66,8 @@ describe("call outcomes and owner feedback", () => {
       technical: {
         connection: "not_confirmed",
         terminalStatus: "failed",
-        failureStage: "provider",
-        failureCode: "no-answer"
+        failureStage: null,
+        failureCode: null
       },
       latestOutcome: null,
       latestFeedback: null
@@ -125,7 +125,7 @@ describe("call outcomes and owner feedback", () => {
       feedbackResponses: 1,
       goalResults: { yes: 0, partly: 0, no: 1 },
       semanticOutcomes: { unresolved: 1 },
-      technicalFailures: { provider: 1 }
+      technicalFailures: { provider: 0 }
     });
     expect(JSON.stringify(metrics)).not.toContain(feedbackInput.comment);
   });

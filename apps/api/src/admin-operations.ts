@@ -44,6 +44,8 @@ export function buildAdminOperationsOverview(input: {
       technicalFailureCalls: facts.technicalFailureCalls,
       feedbackResponses: facts.feedbackResponses
     },
+    lifecycle: facts.lifecycle,
+    userGoalFeedback: facts.userGoalFeedback,
     rates: {
       connection: ratio(facts.connectedCalls, facts.attemptedCalls),
       consent: ratio(facts.consentGrantedCalls, facts.connectedCalls),

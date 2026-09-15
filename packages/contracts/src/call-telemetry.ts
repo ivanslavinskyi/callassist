@@ -32,6 +32,13 @@ export type ConsentEvidence = z.infer<typeof consentEvidenceSchema>;
 
 export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
+    name: z.literal("call.stop"),
+    metadata: z.strictObject({
+      actor: z.enum(["user", "system"]),
+      phase: z.enum(["requested", "succeeded", "failed"])
+    })
+  }),
+  z.strictObject({
     name: z.literal("brief.created"),
     metadata: z.strictObject({
       locale: callLocaleSchema,
@@ -308,6 +315,8 @@ export function describeCallTelemetryEvent(
   severity: CallTelemetrySeverity;
 } {
   switch (name) {
+    case "call.stop":
+      return { source: "api", stage: "provider", severity: "info" };
     case "brief.created":
       return { source: "api", stage: "brief", severity: "info" };
     case "compilation.completed":

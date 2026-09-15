@@ -44,6 +44,7 @@ export class DurableJobWorker {
   #runtimeHeartbeatDirty = false;
   #drain: Promise<void> | null = null;
   #activeJobs = 0;
+  #assessmentSweep: Promise<void> | null = null;
   #closed = false;
 
   constructor(
@@ -81,7 +82,14 @@ export class DurableJobWorker {
       this.#timer ||
       this.#types.length === 0
     ) return;
-    this.#timer = setInterval(() => this.wake(), this.#pollIntervalMs);
+    this.#timer = setInterval(() => {
+      // A slow transcription/model request must not hold an expired credit reservation.
+      if (!this.#assessmentSweep) {
+        this.#assessmentSweep = this.repository.expireCallAssessments(this.#now().toISOString())
+          .catch(this.onError).finally(() => { this.#assessmentSweep = null; });
+      }
+      this.wake();
+    }, this.#pollIntervalMs);
     if (!this.#keepAlive) this.#timer.unref();
     if (this.#reportRuntimeHeartbeat) {
       this.#runtimeHeartbeatTimer = setInterval(
@@ -130,6 +138,7 @@ export class DurableJobWorker {
     }
     this.#runtimeHeartbeatTimer = null;
     await this.#drain;
+    await this.#assessmentSweep;
     await this.#runtimeHeartbeatWrite;
     if (this.#reportRuntimeHeartbeat) {
       await this.repository.stopDurableWorkerHeartbeat(

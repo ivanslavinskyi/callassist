@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { callLifecycleCountsSchema } from "./call-lifecycle";
 
 export const adminOperationsWindowSchema = z.enum(["24h", "7d", "30d"]);
 export type AdminOperationsWindow = z.infer<
@@ -82,6 +83,8 @@ export const adminOperationsOverviewSchema = z.strictObject({
     technicalFailureCalls: countSchema,
     feedbackResponses: countSchema
   }),
+  lifecycle: callLifecycleCountsSchema.optional(),
+  userGoalFeedback: z.strictObject({ yes: countSchema, partly: countSchema, no: countSchema, notProvided: countSchema }).optional(),
   rates: z.strictObject({
     connection: adminMetricRatioSchema,
     consent: adminMetricRatioSchema,

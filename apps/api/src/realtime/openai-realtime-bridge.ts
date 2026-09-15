@@ -10,7 +10,6 @@ import {
 } from "@callassist/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { transcriptPartKey } from "./transcript-part-key";
-import { conversationCreditRequest, parseConversationCreditDecision } from "./conversation-credit-classifier";
 import WebSocket, { type RawData } from "ws";
 import type { CallService } from "../call-service";
 import type { MediaStreamBinding } from "../telephony/telephony-provider";
@@ -111,7 +110,6 @@ type ResponsePurpose =
   | "conversation"
   | "farewell"
   | "closing_route"
-  | "credit_qualification"
   | "no_consent"
   | "recording_failure";
 
@@ -204,11 +202,6 @@ export class OpenAIRealtimeBridge {
     let speechEpoch = 0;
     let interruptedClosing: { generation: number; epoch: number; itemId: string | null; routed: boolean; requestId: string | null; responseId: string | null } | null = null;
     let closingRouteTimer: ReturnType<typeof setTimeout> | null = null;
-    let creditCheck: { requestId: string; responseId: string | null; question: TranscriptSegment; answer: TranscriptSegment; timer: ReturnType<typeof setTimeout> } | null = null;
-    let queuedCreditPair: { question: TranscriptSegment; answer: TranscriptSegment } | null = null;
-    let latestAssistantSegment: TranscriptSegment | null = null;
-    let creditCheckCount = 0;
-    let creditQualified = false;
     const silentResponses = new Set<string>();
     const finishedResponses = new Set<string>();
     const interruptedResponses = new Set<string>();
@@ -357,9 +350,6 @@ export class OpenAIRealtimeBridge {
       if (agentHangup?.pending) agentHangup.finish("transport_closed");
       agentHangup?.close();
       if (closingRouteTimer) clearTimeout(closingRouteTimer);
-      if (creditCheck) clearTimeout(creditCheck.timer);
-      creditCheck = null;
-      queuedCreditPair = null;
       interruptedClosing = null;
       closed = true;
       clearConsentTimer();
@@ -597,26 +587,6 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
       return true;
     };
 
-    const checkConversationCredit = (question: TranscriptSegment, answer: TranscriptSegment) => {
-      if (closed || creditQualified || !consentGranted || !openingPlaybackComplete || !currentExecutionSnapshot ||
-          !callBriefId || !callAttemptId || creditCheckCount >= 8) return;
-      if (creditCheck) { queuedCreditPair = { question, answer }; return; }
-      creditCheckCount += 1;
-      const requestId = randomUUID();
-      const timer = setTimeout(() => {
-        if (creditCheck?.requestId !== requestId) return;
-        const pending = creditCheck;
-        creditCheck = null;
-        if (pending.responseId) sendOpenAI({ type: "response.cancel", response_id: pending.responseId });
-        const next = queuedCreditPair;
-        queuedCreditPair = null;
-        if (next) checkConversationCredit(next.question, next.answer);
-      }, 8_000);
-      timer.unref?.();
-      creditCheck = { requestId, responseId: null, question, answer, timer };
-      sendOpenAI(conversationCreditRequest(requestId, currentExecutionSnapshot.plan, question, answer));
-    };
-
     const storeTranscript = (
       key: string,
       role: TranscriptSegment["role"],
@@ -625,16 +595,8 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
       if (!callBriefId || storedTranscripts.has(key) || !text.trim()) return;
       storedTranscripts.add(key);
       const id = callBriefId;
-      const eligibleForCredit = consentGranted && openingPlaybackComplete;
       transcriptWrites = transcriptWrites
-        .then(() => this.#service.addRealtimeTranscript(id, role, text, key))
-        .then(segment => {
-          if (!segment) return;
-          if (role === "assistant") latestAssistantSegment = segment;
-          else if (role === "recipient" && eligibleForCredit && latestAssistantSegment) {
-            checkConversationCredit(latestAssistantSegment, segment);
-          }
-        })
+        .then(async () => { await this.#service.addRealtimeTranscript(id, role, text, key); })
         .catch(() => {
           storedTranscripts.delete(key);
           this.#logger.error({ callBriefId: id }, "Failed to store realtime transcript");
@@ -964,14 +926,6 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
           break;
         case "response.created": {
           const responseId = event.response?.id;
-          const creditRequestId = event.response?.metadata?.credit_qualification;
-          if (responseId && creditRequestId) {
-            silentResponses.add(responseId);
-            responseStarts.set(responseId, { startedAtMs: Date.now(), purpose: "credit_qualification", speechEpoch });
-            if (creditCheck?.requestId === creditRequestId && !creditCheck.responseId) creditCheck.responseId = responseId;
-            else sendOpenAI({ type: "response.cancel", response_id: responseId });
-            break;
-          }
           const routeId = event.response?.metadata?.closing_route;
           if (responseId && routeId) {
             silentResponses.add(responseId);
@@ -1029,28 +983,6 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
           }
           if (responseId && finishedResponses.has(responseId)) break;
           if (responseId) finishedResponses.add(responseId);
-          if (event.response?.metadata?.credit_qualification ||
-              (responseId && responseStarts.get(responseId)?.purpose === "credit_qualification")) {
-            recordRealtimeResponse(event, "credit_qualification");
-            const pending = creditCheck;
-            if (!pending || pending.responseId !== responseId ||
-                (event.response?.metadata?.credit_qualification && event.response.metadata.credit_qualification !== pending.requestId)) break;
-            clearTimeout(pending.timer);
-            creditCheck = null;
-            const evidence = event.response?.status === "completed"
-              ? parseConversationCreditDecision(event.response.output, pending.question, pending.answer) : null;
-            const targetId = callBriefId;
-            const targetAttempt = callAttemptId;
-            const next = queuedCreditPair;
-            queuedCreditPair = null;
-            if (evidence && targetId && targetAttempt && consentGranted && !closed) {
-              creditQualified = true;
-              void this.#service.qualifyConversationCredit(targetId, targetAttempt, evidence).catch(() => {
-                this.#logger.error({ callBriefId: targetId }, "Failed to persist conversation credit qualification");
-              });
-            } else if (next) checkConversationCredit(next.question, next.answer);
-            break;
-          }
           if (event.response?.metadata?.closing_route || (responseId && silentResponses.has(responseId))) {
             const context = interruptedClosing;
             recordRealtimeResponse(event, "closing_route");

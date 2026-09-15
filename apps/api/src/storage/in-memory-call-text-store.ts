@@ -21,6 +21,8 @@ type Hooks={
   enqueue:(input:EnqueueDurableJobInput)=>Promise<DurableJob>;
   job:(id:string)=>DurableJob|null|undefined;
   jobs:()=>DurableJob[];
+  complete?:(artifact:CallTextArtifact)=>void;
+  failure?:(artifact:CallTextArtifact)=>void;
 };
 export class InMemoryCallTextStore {
   readonly artifacts=new Map<string,CallTextArtifact>();
@@ -104,7 +106,7 @@ export class InMemoryCallTextStore {
     const targets=new Set([...this.artifacts.values()].filter(a=>a.callId===artifact.callId&&a.kind===artifact.kind&&a.sourceHash===artifact.sourceHash).map(a=>a.targetLanguage));
     if(!targets.has(artifact.targetLanguage)&&targets.size>=textArtifactMaximumTargets) throw new CallRepositoryError("TEXT_ARTIFACT_LIMIT_REACHED");
     this.artifacts.set(artifact.id,artifact);
-    await this.hooks.enqueue({type:"text_artifact_generation",textArtifactId:artifact.id,runAfter:now,maxAttempts:3});
+    await this.hooks.enqueue({type:"text_artifact_generation",textArtifactId:artifact.id,runAfter:now,maxAttempts:input.kind==="call_summary"?2:3});
     return structuredClone(artifact);
   }
   requireLease(id:string,lease:DurableJobLease) {
@@ -140,12 +142,14 @@ export class InMemoryCallTextStore {
     const artifact=this.requireLease(id,lease);
     const parsed=parseArtifactPayload(artifact.kind,payload);
     if(artifact.status==="ready"&&artifact.payloadHash!==textPayloadHash(parsed)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    this.hooks.complete?.({...artifact,payload:parsed,status:"ready"});
     Object.assign(artifact,{status:"ready",payload:structuredClone(parsed),payloadHash:textPayloadHash(parsed),failureCode:null,updatedAt:new Date().toISOString()});
     return structuredClone(artifact);
   }
-  failTextArtifact(id:string,failureCode:string,lease:DurableJobLease) {
+  failTextArtifact(id:string,failureCode:string,lease:DurableJobLease,finalFailure=false) {
     const artifact=this.requireLease(id,lease);
     if(artifact.status!=="ready") Object.assign(artifact,{status:"failed",failureCode:/^[a-z0-9_.:/-]{1,160}$/i.test(failureCode)?failureCode:"TEXT_ARTIFACT_FAILED",updatedAt:new Date().toISOString()});
+    if(artifact.status!=="ready" && finalFailure) this.hooks.failure?.(artifact);
     return structuredClone(artifact);
   }
   async retryTextArtifact(callId:string,id:string) {

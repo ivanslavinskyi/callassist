@@ -385,12 +385,14 @@ export const accountExportReviewReceiptSchema = z.strictObject({
   revision: z.number().int().positive(), evidence: reviewEvidenceSchema, createdAt: z.iso.datetime()
 });
 
+import { callAssessmentRecordSchema } from "./call-assessment";
 export const accountExportCallTextDataSchema = z.strictObject({
   languageContext: callLanguageContextSchema.nullable(),
   compilations: z.array(z.strictObject({ id: z.uuid(), compilation: callCompilationSchema })),
   transcriptRevisions: z.array(finalTranscriptRevisionSchema),
   artifacts: z.array(callTextArtifactSchema),
-  reviewReceipts: z.array(accountExportReviewReceiptSchema)
+  reviewReceipts: z.array(accountExportReviewReceiptSchema),
+  assessments: z.array(callAssessmentRecordSchema).optional()
 });
 
 const legacyAccountDataExportCallSchema = z.strictObject({

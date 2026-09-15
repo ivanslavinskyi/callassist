@@ -99,6 +99,12 @@ describe("durable call telemetry", () => {
       ]);
 
     const serialized = JSON.stringify(events);
+    const projected = (await repository.get(brief.id))!.brief.lifecycle;
+    expect(projected).toMatchObject({ result: "no_answer", connected: false, consent: "not_recorded", credit: "returned" });
+    expect((await repository.list({ userId, limit: 10 })).items[0]?.lifecycle).toEqual(projected);
+    expect((await repository.getAdminCallInspector(brief.id))?.summary.lifecycle).toEqual(projected);
+    const facts = await repository.getAdminOperationsFacts("2020-01-01T00:00:00.000Z", "2099-01-01T00:00:00.000Z");
+    expect(facts).toMatchObject({ connectedCalls: 0, consentFailedCalls: 0, technicalFailureCalls: 0, lifecycle: { results: { no_answer: 1, consent_not_received: 0 }, conversations: 0 } });
     for (const privateValue of [
       baseInput.recipientName,
       baseInput.phoneNumber,
@@ -149,6 +155,7 @@ describe("durable call telemetry", () => {
 
     const events = await repository.listCallTelemetryEvents(brief.id);
     expect(lateRinging?.snapshot.brief.status).toBe("completed");
+    expect((await repository.get(brief.id))?.brief.lifecycle).toMatchObject({ result: "consent_not_received", connected: true, credit: "returned", endedBy: "unknown" });
     expect(events.filter(({ payload }) => payload.name === "connection.confirmed"))
       .toHaveLength(1);
     expect(events.filter(({ payload }) => payload.name === "credit.settled"))

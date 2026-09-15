@@ -12,6 +12,8 @@ This architecture includes the integration of that mainline work with the audit 
 
 ## Runtime and repository boundaries
 
+The [call lifecycle/history checkpoint](call-lifecycle-history-2026-09-15.md) adds a shared latest-attempt read projection from durable events and the immutable credit ledger. Transport completion, no answer, consent refusal, missing consent and a confirmed conversation are distinct. Customer history is `/[locale]/app/history`; New call retains five recent calls. Admin lists and metrics use the same evidence, while goal feedback remains separate.
+
 ### Profile defaults and controlled call completion
 
 New call forms receive only the current account's ID and first/last names from the
@@ -383,7 +385,7 @@ The validator requires evidence for non-unknown findings and all next steps; it
 checks references, not truth independently of the recording. Negative, partial,
 conditional and conflicting answers are valid outcomes. The compact view has
 expandable detail/evidence; if compaction is unavailable it shows validated findings.
-Summary generation uses its own `summary-v2` namespace, separate from the
+Summary generation uses its own `summary-v3` namespace, separate from the
 `text-processing-v2` translation/review generator; it does not retain a v1 summary
 reader. Plan/approval/ciphertext version compatibility is a separate concern.
 
@@ -396,7 +398,7 @@ transcript completion when that direction is enabled; it never delays audio rete
 
 Validated chunks persist across retries. Storage caps each artifact at 24 provider
 requests across at most three job generations (initial plus two manual retries),
-with at most three automatic attempts in each generation. Summary input is bounded
+with at most three automatic attempts for translations/reviews and two for summaries in each generation. Summary input is bounded
 to eight source chunks; optional final compaction may fail without discarding the
 validated detailed result. Request accounting spans generations and never resets on
 manual retry. `queued`/`processing` derive from the durable job, including retry backoff;
@@ -423,12 +425,31 @@ atomically; startup/hourly maintenance enforces their 30-day limit. See [data li
 ## Credits, admission and abuse
 
 The ledger grants `+3` on verification. Starting reserves `-1`; connection alone
-does not settle it. The first confirmed substantive task answer after recipient
-consent creates a zero-value `call_charge`, backed by transcript segment IDs and
-a classification category. Negative factual answers, lack of knowledge and referrals
-count; greetings, silence, consent alone and immediate refusal do not. Terminal calls
-without confirmed evidence refund `+1` once. Late classification cannot undo a refund.
-See [conversation-credit policy and verification limits](conversation-credit-2026-09-14.md).
+does not settle it. Consented attempts hold the reservation for the final transcript
+and the existing summary job. One canonical `summary-v3` request also grades the
+substantive exchange and goal against the attempt's approved plan. Server checks
+same attempt, compilation, source revision/hash, trusted recording consent, recipient
+speaker, preceding assistant question/message and exact quote. A confirmed exchange
+creates a zero-value `call_charge`; task success is a separate result. Negative facts,
+lack of knowledge and referrals count as conversation; greetings, consent alone and
+immediate refusal to talk do not. No answer/busy/no consent refunds immediately.
+Uncertain evidence or terminal analysis failure refunds; unresolved reservations
+expire five minutes after termination is processed. An independent worker sweep runs
+even during slow provider work, and completion rechecks the deadline. Process outages
+can delay refunds until recovery, but cannot authorize a charge after the deadline.
+
+Migration 0074 stores a canonical assessment per attempt, including encrypted decision,
+plan/source hashes, source revision, evaluator version, state/reason and deadline.
+Assessment, generated summary and ledger settlement commit in one transaction. Reads
+of assessment and settlement use one database snapshot. Uniqueness prevents duplicate
+settlement; a late result can correct history while leaving an earlier refund intact.
+Translated summaries reuse the canonical decision when available; a language requested
+before it is ready can generate its text and enqueue the canonical job, but cannot
+independently grade or debit. No per-reply realtime credit classifier remains.
+Legacy v1 ledger evidence is still readable. User deletion redacts decision ciphertext;
+account export and key rotation include it. Manual goal feedback and user/staff
+classification remain independent of `lifecycle.assessment` and AI aggregate counts.
+See [final assessment implementation and acceptance](post-call-assessment-diagnosis-2026-09-15.md).
 PostgreSQL locks and unique constraints serialize starts, protect balances
 and enforce one active attempt per user. Promo plaintext is stored only as a keyed
 digest; redemption and manual reasoned grants are transactional/idempotent.
@@ -461,8 +482,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog has **71 migrations**, `0001` through
-`0071_conversation_credit_evidence.sql`. The catalog is contiguous/checksummed; advisory locking and
+The current catalog has **73 migrations**, `0001` through
+`0074_final_call_assessments.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases

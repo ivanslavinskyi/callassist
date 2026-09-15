@@ -453,7 +453,7 @@ const en: Messages = {
       review_required: "Ready to call", needs_clarification: "Needs one detail",
       blocked: "Needs changes", ready: "Ready to start", dialing: "Dialing",
       in_progress: "Call in progress", awaiting_approval: "Awaiting decision",
-      completed: "Call completed", stopped: "Call stopped", failed: "Call failed"
+      completed: "Call ended", stopped: "Call stopped", failed: "Call failed"
     },
     recordingStatus: {
       starting: "Starting", recording: "Recording", processing: "Processing",
@@ -733,7 +733,7 @@ const de: Messages = {
       review_required: "Bereit zum Anrufen", needs_clarification: "Eine Angabe fehlt",
       blocked: "Muss geändert werden", ready: "Startbereit", dialing: "Wird gewählt",
       in_progress: "Anruf läuft", awaiting_approval: "Entscheidung ausstehend",
-      completed: "Anruf abgeschlossen", stopped: "Anruf gestoppt", failed: "Anruf fehlgeschlagen"
+      completed: "Anruf beendet", stopped: "Anruf gestoppt", failed: "Anruf fehlgeschlagen"
     },
     recordingStatus: {
       starting: "Wird gestartet", recording: "Aufnahme läuft", processing: "Wird verarbeitet",

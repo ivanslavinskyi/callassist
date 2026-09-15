@@ -1,4 +1,6 @@
 "use client";
+import { callStatusLabel, callConsentLabel } from "@/lib/call-status";
+import { CallLifecycleSummary } from "./call-lifecycle-summary";
 
 import type {
   AdminCallInspector as AdminCallInspectorData,
@@ -94,11 +96,11 @@ export function AdminCallInspector({ callId }: { callId: string }) {
             <section className="admin-inspector-summary" id="technical-state">
               <h2>{copy.technical}</h2>
               <dl>
-                <Fact label={copy.status} value={copy.statuses[summary.status]} />
+                <Fact label={copy.status} value={callStatusLabel(summary, locale, copy.statuses)} />
                 <Fact label={copy.owner} value={summary.ownerUserId ?? copy.notAvailable} />
                 <Fact label={copy.language} value={copy.languages[summary.locale]} />
                 <Fact label={copy.connection} value={copy.connections[summary.technical.connection]} />
-                <Fact label={copy.consent} value={copy.consents[summary.technical.consent]} />
+                <Fact label={copy.consent} value={callConsentLabel(summary.lifecycle, locale, copy.consents[summary.technical.consent])} />
                 <Fact label={copy.recording} value={copy.processStates[summary.technical.recording]} />
                 <Fact label={copy.transcription} value={copy.processStates[summary.technical.transcription]} />
                 <Fact
@@ -119,6 +121,7 @@ export function AdminCallInspector({ callId }: { callId: string }) {
               </dl>
             </section>
 
+            <CallLifecycleSummary lifecycle={summary.lifecycle} locale={locale} />
             <div id="cost-breakdown">{cost ? <AdminCostBreakdown cost={cost.cost} locale={locale} /> : null}</div>
 
             <div className="admin-inspector-grid">

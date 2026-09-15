@@ -7,9 +7,11 @@ VPS topology and access details remain to be supplied before deployment.
 A separate staging hostname/server is not a release requirement; external acceptance
 can run on the final domain before public access opens.
 
-The latest local checkpoint includes migration 0072, corrected spending
+The latest local checkpoint includes migrations through 0074, corrected spending
 reconciliation, the 20,000-token compiler ceiling and the
-[preparation/review/call UI update](workflow-feedback-2026-09-15.md).
+[preparation/review/call UI update](workflow-feedback-2026-09-15.md), followed by
+[distinct call results, history and admin metrics](call-lifecycle-history-2026-09-15.md).
+Apply migrations through 0074 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
 Local budget settings (revision 3: 20 USD/24 h, 0.60 USD/call minute,
 0.15 USD/paid text) must be explicitly checked/configured in the deployment;
 they are not transferred by pushing the repository. The latest 216-test web

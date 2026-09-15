@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { languageTagSchema, textLanguageSchema } from "./languages";
+import { callAssessmentDecisionSchema } from "./call-assessment";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const textArtifactKindSchema = z.enum(["plan_review", "clarification_review", "transcript_translation", "call_summary"]);
@@ -24,6 +25,7 @@ export const summaryItemSchema = z.strictObject({
 });
 export const callSummaryPayloadSchema = z.strictObject({
   schemaVersion: z.literal(2),
+  assessment: callAssessmentDecisionSchema.optional(),
   overview: z.array(z.strictObject({
     label: z.string().trim().min(1).max(160).nullable(), text: z.string().trim().min(1).max(1200),
     findingIds: z.array(z.string().min(1)).min(1).max(30)

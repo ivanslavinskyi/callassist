@@ -24,6 +24,7 @@ const temporaryDirectoryPrefix = "callassist-recovery-";
 const criticalTables = [
   "audit_events",
   "call_briefs",
+  "call_assessments",
   "call_compilations",
   "call_compilation_approvals",
   "call_compilation_review_policies",

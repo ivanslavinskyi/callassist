@@ -51,6 +51,7 @@ describe("persisted conversation credit qualification", () => {
     }
     expect(await repository.qualifyConversationCredit(f.brief.id, f.attempt.id, evidence)).toBe(false);
     await repository.updateStatus(f.brief.id, "completed");
+    await repository.claimDueDurableJob({types:[],workerId:"expiry",now:new Date(Date.now()+360000).toISOString(),leaseExpiresAt:new Date(Date.now()+400000).toISOString()});
     const usage = await repository.getCreditUsage(f.owner);
     expect(usage.balance).toBe(3);
     expect(usage.transactions.filter(item => item.type === "call_charge")).toHaveLength(0);

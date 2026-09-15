@@ -18,7 +18,10 @@ The owner configured **20 USD per rolling 24 hours locally**; revision 3 uses a
 and measured usage replace eligible completed-operation reservations; unknown costs
 remain pending. See [budget accounting](docs/budget-accounting-2026-09-15.md).
 The recompile deadlock is fixed. Call credits are now used only after consent and a
-confirmed substantive task answer; otherwise the reservation is returned at call end.
+confirmed substantive task answer in the final transcript. Consented calls keep the
+reservation during the final summary/assessment (up to five minutes). No answer,
+busy or missing consent refunds immediately; failed or uncertain assessment also refunds.
+Conversation, AI goal achievement and manual user feedback are separate facts.
 The revised EN/DE landing and related policy copy are published locally. See the
 [conversation-credit checkpoint](docs/conversation-credit-2026-09-14.md).
 Plan preparation uses compact output with a 20,000-token ceiling and rejects
@@ -175,11 +178,11 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog contains **69 migrations**, through
-`0069_email_verification.sql`. The current [email/SMS implementation and remaining
+The migration catalog contains **73 migrations**, through
+`0074_final_call_assessments.sql`. The current [email/SMS implementation and remaining
 provider setup](docs/email-sms-implementation-2026-09-14.md) covers the new contact flows.
 Latest implementation checks and their limits
-are recorded in [call/result verification, 2026-09-11](docs/call-result-live-fixes-2026-09-11.md).
+are recorded in [call lifecycle and history, 2026-09-15](docs/call-lifecycle-history-2026-09-15.md).
 That record distinguishes a full-suite run from subsequent targeted checks; it is
 not a claim of a fresh full-suite run on every commit. Older test counts are dated
 evidence, not the current suite size. See [documentation reconciliation](docs/documentation-sync-2026-09-12.md)

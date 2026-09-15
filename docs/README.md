@@ -18,6 +18,10 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+Latest checkpoint: [call lifecycle, separate history and matching admin metrics](call-lifecycle-history-2026-09-15.md). It also covers missing settlement telemetry, migration 0073 and the boundary between a phone connection and a human answer.
+
+Latest implementation: [final assessment and deferred credit settlement](post-call-assessment-diagnosis-2026-09-15.md). Migration 0074 stores canonical evidence; final summary and settlement publish atomically. Admin separates AI goal achievement from latest user feedback. Real-call release acceptance remains under B05/B09/B10.
+
 The latest local landing is **r8 EN/DE** with an interactive demo; see the
 [implementation and verification record](interactive-landing-2026-09-14.md).
 This closes the four product review changes locally, not the external release gates.

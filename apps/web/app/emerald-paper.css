@@ -728,3 +728,25 @@ button, .primary-button, .secondary-button, .danger-button { transition: box-sha
 .onboarding-actions .secondary-button { border: 0; color: var(--green); background: transparent; }
 .admin-cost-state, .admin-control-state { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .admin-cost-heading > div { grid-template-columns: minmax(0, 1fr); }
+.call-history-page { width: min(1100px, 100%); margin: 0 auto; padding: 40px 24px 72px; }
+.full-call-history { border: 0; padding: 0; background: transparent; }
+.full-call-history .history-filters { grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); margin: 24px 0; }
+.full-call-history .panel-heading { align-items: center; gap: 24px; flex-wrap: wrap; }
+.history-search { display: block; max-width: 520px; margin: 24px 0; }
+.brief-row { text-decoration: none; color: inherit; }
+.brief-row:focus-visible { outline: 2px solid var(--accent, #11845b); outline-offset: 4px; }
+.call-lifecycle-summary { margin: 0 0 32px; padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); }
+.lifecycle-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.call-lifecycle-summary h2 { margin: 0; font-size: 21px; }
+.call-lifecycle-summary p { margin: 12px 0 0; max-width: 80ch; }
+.call-lifecycle-summary details { margin-top: 18px; }
+.call-lifecycle-summary summary { cursor: pointer; font-weight: 600; width: fit-content; }
+.lifecycle-credit { font-size: 14px; font-weight: 600; }
+.lifecycle-timeline { list-style: none; padding: 0; margin: 16px 0; max-width: 600px; }
+.lifecycle-timeline li { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.lifecycle-timeline time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.status-pill[class*="result-"], .history-status[class*="result-"], .status-chip[class*="result-"] { background: var(--surface); color: var(--muted); }
+.history-status[class*="result-"] { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; width: fit-content; }
+.status-pill.result-conversation_completed, .history-status.result-conversation_completed, .status-chip.result-conversation_completed { background: var(--tint); color: var(--green); }
+.status-pill.result-technical_failure, .history-status.result-technical_failure, .status-chip.result-technical_failure { background: var(--danger-bg); color: var(--danger); }
+@media (max-width: 600px) { .call-history-page { padding: 24px 20px 48px; } .full-call-history .history-filters { grid-template-columns: 1fr; } .call-lifecycle-summary { padding: 20px; } .recent-call-history .panel-heading { flex-wrap: wrap; gap: 16px; } .call-history-page .brief-copy, .recent-call-history .brief-copy { grid-template-columns: minmax(0, 1fr); } }

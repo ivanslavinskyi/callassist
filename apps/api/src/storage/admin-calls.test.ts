@@ -137,7 +137,7 @@ describe("admin calls read model", () => {
       limit: 20,
       failureStage: "provider"
     });
-    expect(providerFailures.items.map(({ id }) => id)).toContain(failed.id);
+    expect(providerFailures.items.map(({ id }) => id)).not.toContain(failed.id);
 
     const inspector = await repository.getAdminCallInspector(completed.id);
     expect(inspector.timeline.map(({ sequence }) => sequence)).toEqual(

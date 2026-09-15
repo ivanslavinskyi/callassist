@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { callLifecycleSchema } from "./call-lifecycle";
 import {
   callBriefStatusSchema,
   callLocaleSchema,
@@ -69,6 +70,7 @@ export const adminCallSummarySchema = z.strictObject({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   technical: technicalCallOutcomeSchema,
+  lifecycle: callLifecycleSchema.optional(),
   semanticOutcome: semanticCallOutcomeSchema.nullable(),
   outcomeProvenance: callOutcomeProvenanceSchema.nullable(),
   feedback: adminCallFeedbackSummarySchema.nullable(),

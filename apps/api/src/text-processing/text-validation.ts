@@ -1,3 +1,4 @@
+import { validateFinalAssessment } from "../credits/final-assessment";
 import {
   callSummaryPayloadSchema,
   planReviewPayloadSchema,
@@ -86,6 +87,12 @@ export function validateTextProcessingOutput(
   const parsed = callSummaryPayloadSchema.safeParse(payload);
   if (!parsed.success || parsed.data.findings.length !== input.checks.length) invalid();
   const summary = parsed.data;
+  if (input.assessmentMode) {
+    if (!summary.assessment) invalid();
+    try { validateFinalAssessment(summary.assessment, input.segments, input.checks.filter(c => c.id.startsWith("criterion.")).map(c => c.id)); }
+    catch { invalid(); }
+    if (input.assessmentMode === "preserve" && JSON.stringify(summary.assessment) !== JSON.stringify(input.fixedAssessment)) invalid();
+  } else if (summary.assessment) invalid();
   if (input.extraction && ["findings", "nextSteps", "unresolved"].some(key =>
     JSON.stringify(summary[key as keyof typeof summary]) !== JSON.stringify(input.extraction![key as keyof typeof summary]))) invalid();
   const sourceIds = new Set(input.segments.map((segment) => segment.id));
@@ -147,6 +154,13 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
   if (input.kind === "transcript_translation") return object({ segments: translatedItems });
   return object({
     schemaVersion: { type: "integer", enum: [2] },
+    ...(input.assessmentMode ? { assessment: object({
+      conversation: object({ status: { type: "string", enum: ["confirmed", "absent", "uncertain"] },
+        category: { type: "string", enum: ["task_answer", "cannot_answer", "referral", "message_acknowledged", "none", "uncertain"] },
+        questionSegmentId: { type: ["string", "null"] }, answerSegmentId: { type: ["string", "null"] }, answerQuote: text }),
+      goal: object({ status: { type: "string", enum: ["achieved", "partial", "not_achieved", "uncertain"] }, sourceSegmentIds: stringList }),
+      criteria: { type: "array", items: object({ id: text, status: { type: "string", enum: ["achieved", "partial", "not_achieved", "uncertain"] }, sourceSegmentIds: stringList }) }
+    }) } : {}),
     overview: { type: "array", items: object({ label: { type: ["string", "null"] }, text, findingIds: stringList }) },
     findings: { type: "array", items: object({
       id: text, label: text, text,

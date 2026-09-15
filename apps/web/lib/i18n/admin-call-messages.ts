@@ -20,7 +20,7 @@ const en = {
   signIn: "Sign in",
   filters: "Filters",
   status: "Status",
-  outcome: "Outcome",
+  outcome: "Manual outcome · user/staff",
   consent: "Consent",
   failureStage: "Failure stage",
   language: "Call language",
@@ -52,7 +52,7 @@ const en = {
   failureCode: "Failure code",
   timeline: "Durable timeline",
   noTimeline: "No durable events are recorded for this call.",
-  outcomeHistory: "Outcome provenance",
+  outcomeHistory: "Manual outcome history",
   noOutcomeHistory: "No outcome revisions are recorded.",
   revision: "Revision",
   preparationEyebrow: "Preparation operations",
@@ -139,7 +139,7 @@ const en = {
   consents: {
     not_recorded: "Not recorded",
     granted: "Granted",
-    failed: "Failed"
+    failed: "Declined / not confirmed"
   },
   failures: {
     policy: "Policy",
@@ -226,7 +226,7 @@ const de: AdminCallMessages = {
   signIn: "Anmelden",
   filters: "Betriebsfilter",
   status: "Status",
-  outcome: "Ergebnis",
+  outcome: "Manuelles Ergebnis · Nutzer/Team",
   consent: "Einwilligung",
   failureStage: "Fehlerstufe",
   language: "Anrufsprache",
@@ -258,7 +258,7 @@ const de: AdminCallMessages = {
   failureCode: "Fehlercode",
   timeline: "Beständige Timeline",
   noTimeline: "Für diesen Anruf sind keine beständigen Ereignisse gespeichert.",
-  outcomeHistory: "Ergebnisprovenienz",
+  outcomeHistory: "Verlauf manueller Bewertungen",
   noOutcomeHistory: "Es sind keine Ergebnisrevisionen gespeichert.",
   revision: "Revision",
   preparationEyebrow: "Vorbereitungsvorgänge",
@@ -345,7 +345,7 @@ const de: AdminCallMessages = {
   consents: {
     not_recorded: "Nicht erfasst",
     granted: "Erteilt",
-    failed: "Fehlgeschlagen"
+    failed: "Abgelehnt / nicht bestätigt"
   },
   failures: {
     policy: "Richtlinie",

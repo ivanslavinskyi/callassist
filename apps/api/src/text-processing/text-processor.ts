@@ -1,5 +1,6 @@
 import type {
   CallSummaryPayload,
+  CallAssessmentDecision,
   PlanReviewPayload,
   SourceSegment,
   TextArtifactKind,
@@ -11,7 +12,7 @@ import { MockTextProcessor } from "./mock-text-processor";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
 export const TEXT_PROCESSOR_VERSION = "text-processing-v2";
-export const SUMMARY_PROCESSOR_VERSION = "summary-v2";
+export const SUMMARY_PROCESSOR_VERSION = "summary-v3";
 export const MAX_TEXT_PROCESSING_SOURCE_CHARACTERS = 60_000;
 
 export type TextProcessingInput = (
@@ -20,7 +21,8 @@ export type TextProcessingInput = (
   | { kind: "transcript_translation"; segments: SourceSegment[] }
   | { kind: "call_summary"; segments: SourceSegment[]; checks: Array<{ id: string; text: string }>;
       context: { objective: string; taskType: string; recipient: string; representedPerson: string };
-      extraction?: CallSummaryPayload }
+      extraction?: CallSummaryPayload;
+      assessmentMode?: "evaluate" | "preserve"; fixedAssessment?: CallAssessmentDecision }
 ) & { targetLanguage: TextLanguage };
 
 export type TextProcessingPayload = PlanReviewPayload | TranscriptTranslationPayload | CallSummaryPayload;

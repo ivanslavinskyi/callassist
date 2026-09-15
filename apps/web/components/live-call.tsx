@@ -1,4 +1,6 @@
 "use client";
+import { callStatusClass, callStatusLabel } from "@/lib/call-status";
+import { CallLifecycleSummary } from "./call-lifecycle-summary";
 import { betaErrorMessage, betaMessages } from "@/lib/i18n/beta-messages";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 
@@ -209,6 +211,12 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   }, [copyStatus]);
 
   useEffect(() => setCopyStatus("idle"), [snapshot?.finalTranscript?.updatedAt]);
+  useEffect(() => {
+    const terminal = ["completed","failed","stopped"].includes(snapshot?.brief.status ?? "");
+    if (snapshot?.brief.lifecycle?.assessment?.status !== "pending" && !(terminal && snapshot?.brief.lifecycle?.credit === "reserved")) return;
+    const timer = window.setInterval(() => { void refresh(false); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [snapshot?.brief.lifecycle?.assessment?.status, snapshot?.brief.lifecycle?.credit, snapshot?.brief.status, refresh]);
 
   useEffect(() => {
     if (!snapshot?.brief.recipientName) return;
@@ -521,7 +529,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         <div className="live-nav">
           <nav aria-label={messages.live.breadcrumbLabel} className="breadcrumbs">
             <ol>
-              <li><Link href={localizeHref("/app#history")}>{messages.live.allCallBriefs}</Link></li>
+              <li><Link href={localizeHref("/app/history")}>{messages.live.allCallBriefs}</Link></li>
               <li aria-current="page">{brief.recipientName}</li>
             </ol>
           </nav>
@@ -542,8 +550,8 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           </div>
 
           <div className="call-actions">
-          <span className={`status-pill status-${brief.status}`}>
-            <span aria-hidden="true" /> {pendingCallStart ? callActivityMessages[uiLocale].starting.label : brief.status === "blocked" && preparationFailed ? messages.review.preparationFailed : copy.status[brief.status]}
+          <span className={`status-pill ${callStatusClass(brief)}`}>
+            <span aria-hidden="true" /> {pendingCallStart ? callActivityMessages[uiLocale].starting.label : brief.status === "blocked" && preparationFailed ? messages.review.preparationFailed : callStatusLabel(brief, uiLocale, copy.status)}
           </span>
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
@@ -570,6 +578,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         </section>
 
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
+        {isTerminal ? <CallLifecycleSummary lifecycle={brief.lifecycle} locale={uiLocale} /> : null}
         {preparationProgress ? <CallPreparationStatus progress={preparationProgress} /> : null}
         {callLanguageForbidden && !isTerminal && !isActive ? (
           <div className="inline-notice" role="alert">
@@ -990,9 +999,9 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
             ) : isTerminal ? (
               <section className="guard-card terminal-summary">
                 <div className="guard-visual" aria-hidden="true">
-                  <span>{brief.status === "failed" ? "!" : "✓"}</span>
+                  <span>{brief.lifecycle?.substantiveAnswerConfirmed ? "✓" : "—"}</span>
                 </div>
-                <h2>{copy.status[brief.status]}</h2>
+                <h2>{callStatusLabel(brief, uiLocale, copy.status)}</h2>
                 <p>{copy.terminalHelp}</p>
               </section>
             ) : (

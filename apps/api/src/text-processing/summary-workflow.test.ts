@@ -48,24 +48,24 @@ describe("summary execution", () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (_url, init) => {
       requests++;
       if (requests === 1) return new Response("Unavailable", { status: 503 });
-      if (requests <= 3) return new Promise((_resolve, reject) => {
+      if (requests <= 2) return new Promise((_resolve, reject) => {
         init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
       });
       const input = JSON.parse(JSON.parse(String(init!.body)).input[1].content);
       return Response.json({ output_text: JSON.stringify({ schemaVersion: 2, overview: [],
         findings: input.checks.map((check: {id:string}) => ({ id: check.id, label: "Office hours", text: "Open on weekdays.", certainty: "reported", sourceSegmentIds: [input.segments[0].id] })),
-        nextSteps: [], unresolved: [] }) });
+        nextSteps: [], unresolved: [], assessment: { conversation: { status: "uncertain", category: "uncertain", questionSegmentId: null, answerSegmentId: null, answerQuote: "" }, goal: { status: "uncertain", sourceSegmentIds: [] }, criteria: input.checks.filter((c:{id:string})=>c.id.startsWith("criterion.")).map((c:{id:string})=>({id:c.id,status:"uncertain",sourceSegmentIds:[]})) } }) });
     });
     const h = await setup(false, false, new OpenAITextProcessor({ apiKey: "fixture", summaryTimeoutMs: 10, fetchImplementation }));
     let job = h.job;
-    for (const code of ["TEXT_PROVIDER_UNAVAILABLE", "TEXT_REQUEST_TIMEOUT", "TEXT_REQUEST_TIMEOUT"]) {
+    for (const code of ["TEXT_PROVIDER_UNAVAILABLE", "TEXT_REQUEST_TIMEOUT"]) {
       const lease = { ...h.lease, generation: job.generation, attemptNumber: job.attemptCount, workerId: job.leaseOwner! };
       await expect(h.service.process(job, lease)).rejects.toMatchObject({ code, retryable: true });
       expect(await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id)).toMatchObject({ status: "processing", retryable: false });
       await h.repository.failDurableJob(job.id, job.leaseOwner!, code, new Date().toISOString(), new Date().toISOString(), true);
       const projected = await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id);
-      expect(projected).toMatchObject(job.attemptCount < 3 ? { status: "queued", failureCode: null, retryable: false } : { status: "failed", retryable: true });
-      if (job.attemptCount < 3) job = (await h.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: h.lease.workerId,
+      expect(projected).toMatchObject(job.attemptCount < 2 ? { status: "queued", failureCode: null, retryable: false } : { status: "failed", retryable: true });
+      if (job.attemptCount < 2) job = (await h.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: h.lease.workerId,
         now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }))!;
     }
     await h.service.retry(h.artifact.callId, h.artifact.id);
@@ -74,7 +74,7 @@ describe("summary execution", () => {
     expect(job.generation).toBe(2);
     await h.service.process(job, { ...h.lease, generation: job.generation, attemptNumber: job.attemptCount });
     expect(await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id)).toMatchObject({ status: "ready", retryable: false });
-    expect(requests).toBe(4);
+    expect(requests).toBe(3);
     expect(await h.repository.getTranscriptRevision(h.artifact.callId, h.revision.id)).toEqual(h.revision);
   });
   it("checks the goal even without a spoken question and keeps text and voice versions independent", async () => {
@@ -87,7 +87,7 @@ describe("summary execution", () => {
     const processor = new MockTextProcessor();
     expect(textGeneratorVersion(processor, "plan_review")).toBe(processor.generatorVersion);
     expect(textGeneratorVersion(processor, "transcript_translation")).toBe(processor.generatorVersion);
-    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v2:${processor.generatorVersion}`);
+    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v3:${processor.generatorVersion}`);
   });
 
   it("uses one request for an ordinary transcript, persists new format and never regenerates a ready result", async () => {

@@ -6,6 +6,7 @@ import { normalizeCreateCallBriefInput, type CreateCallBriefInput } from "@calla
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
 import { decryptJson, encryptJson, parseDataEncryptionKeyring } from "../security/encryption";
+import { uncertainAssessment } from "../credits/final-assessment";
 import { encryptedColumns } from "./encrypted-columns";
 import { isolatedTestDatabase } from "./isolated-test-database";
 import { reencryptDatabase } from "./reencrypt-data";
@@ -54,6 +55,9 @@ it("rotates immutable text evidence and queued input without changing source has
     const transcript = await old.getCurrentTranscriptRevision(historical.id);
     const receipt = await old.getCurrentReviewReceipt(historical.id);
     const source = await old.getPlanSource(historical.id);
+    const assessmentDecision=uncertainAssessment();
+    await sql`INSERT INTO call_assessments(call_attempt_id,call_brief_id,compilation_id,transcript_revision_id,source_hash,plan_hash,evaluator_version,status,conversation,goal,payload_ciphertext)
+      VALUES(${attempt.attempt.id},${historical.id},${source.compilationId},${transcript!.id},${transcript!.sourceHash},${source.snapshotHash},'rotation-fixture','ready','uncertain','uncertain',${encryptJson(assessmentDecision,parseDataEncryptionKeyring({DATA_ENCRYPTION_KEY:oldKey,DATA_ENCRYPTION_ACTIVE_KEY_ID:"old"}))})`;
     const artifact = await old.enqueueTextArtifact({ callId: historical.id, kind: "plan_review",
       compilationId: source.compilationId, sourceHash: source.snapshotHash, targetLanguage: "ru", generatorVersion: "rotation-v1" });
     const textJob = await old.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: "rotate-text",
@@ -85,13 +89,14 @@ it("rotates immutable text evidence and queued input without changing source has
       DATA_ENCRYPTION_PREVIOUS_KEYS: JSON.stringify({ old: oldKey }), DATA_ENCRYPTION_REENCRYPT_CONFIRM: "current" };
     const rotation = await reencryptDatabase(environment);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 17, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 18, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);
     expect(await current.getTextArtifact(historical.id, artifact.id)).toEqual(ready);
     expect(await current.getCurrentTranscriptRevision(historical.id)).toEqual(transcript);
     expect(await current.getCurrentReviewReceipt(historical.id)).toEqual(receipt);
+    expect((await current.getCallAssessment(historical.id,attempt.attempt.id))?.decision).toEqual(assessmentDecision);
     const [chunk] = await sql<{ payload: string }[]>`SELECT payload_ciphertext AS payload
       FROM call_text_artifact_chunks WHERE artifact_id=${artifact.id}`;
     expect(decryptJson(chunk!.payload, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
@@ -100,8 +105,8 @@ it("rotates immutable text evidence and queued input without changing source has
     if (process.env.RUN_TEXT_RECOVERY_DRILL === "true") {
       expect(await runRecoveryDrill({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
         DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current", RECOVERY_SOURCE_DATABASE_URL: database.url }))
-        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 21,
-          temporaryResourcesRemoved: true, encryptedSamplesVerified: 14 });
+        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 22,
+          temporaryResourcesRemoved: true, encryptedSamplesVerified: 15 });
     }
     expect(await reencryptDatabase({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
       DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current" })).toMatchObject({ rewrittenCiphertexts: 0 });

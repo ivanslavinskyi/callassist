@@ -64,8 +64,8 @@ describe("call outcome contracts", () => {
     ])).toMatchObject({
       connection: "not_confirmed",
       terminalStatus: "failed",
-      failureStage: "provider",
-      failureCode: "no-answer"
+      failureStage: null,
+      failureCode: null
     });
 
     expect(deriveTechnicalCallOutcome("completed", [

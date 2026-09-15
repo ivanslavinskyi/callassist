@@ -1,4 +1,5 @@
 "use client";
+import { callStatusClass, callStatusLabel, callConsentLabel } from "@/lib/call-status";
 
 import { FilterDisclosure } from "./filter-disclosure";
 
@@ -221,15 +222,15 @@ export function AdminCallsConsole() {
               </tr></thead><tbody>{items.map(call => <tr key={call.id}>
                 <td data-label="Call"><details className="call-row-details"><summary><code>{call.id.slice(0,8)}</code></summary><dl>
                   <Fact label="Call ID" value={call.id} /><Fact label={copy.owner} value={call.ownerUserId ?? copy.notAvailable} />
-                  <Fact label={copy.consent} value={copy.consents[call.technical.consent]} />
+                  <Fact label={copy.consent} value={callConsentLabel(call.lifecycle, locale, copy.consents[call.technical.consent])} />
                   <Fact label={copy.failureStage} value={call.technical.failureStage ? copy.failures[call.technical.failureStage] : copy.notAvailable} />
                   <Fact label={copy.eventCount} value={String(call.eventCount)} />
                 </dl></details></td>
-                <td data-label={copy.status}><span className="status-chip" data-status={call.status}>{copy.statuses[call.status]}</span></td>
+                <td data-label={copy.status}><span className={`status-chip ${callStatusClass(call)}`}>{callStatusLabel(call, locale, copy.statuses)}</span></td>
                 <td data-label={copy.language}>{copy.languages[call.locale]}</td>
                 <td data-label={copy.created}><time dateTime={call.createdAt}>{formatDate(call.createdAt, locale)}</time></td>
                 <td data-label={copy.duration}>{formatDuration(call.durationSeconds)}</td>
-                <td data-label={copy.consent}>{copy.consents[call.technical.consent]}</td>
+                <td data-label={copy.consent}>{callConsentLabel(call.lifecycle, locale, copy.consents[call.technical.consent])}</td>
                 <td data-label={copy.outcome}>{call.semanticOutcome ? copy.outcomes[call.semanticOutcome] : copy.notAvailable}</td>
                 <td data-label="Action"><Link href={`/admin/calls/${call.id}`} aria-label={`${copy.inspect} ${call.id.slice(0,8)}`}>{copy.inspect}</Link></td>
               </tr>)}</tbody></table></div>

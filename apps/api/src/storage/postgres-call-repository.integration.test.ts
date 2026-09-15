@@ -101,6 +101,45 @@ describe("PostgresCallRepository", () => {
     await expect(repository.isOwnedBy(first.items[0]!.id, ownerB)).resolves.toBe(false);
   });
 
+  it("projects distinct lifecycle results consistently for owners and admin statistics", async () => {
+    const lifecycleOwner = randomUUID();
+    await inspection`INSERT INTO users (id, email, password_hash, phone_e164, phone_verified_at, first_name, last_name, role, status, ui_locale, created_at) VALUES (${lifecycleOwner}, ${`lifecycle-${lifecycleOwner}@example.com`}, 'test-only', ${`+419${lifecycleOwner.replaceAll("-", "").slice(0,8)}`}, now(), 'Nina', 'Keller', 'user', 'active', 'en', now())`;
+    await repository.grantSignupCredits(lifecycleOwner);
+    const prefix = `Lifecycle ${randomUUID()}`;
+    for (const [suffix, providerStatus, result] of [
+      ["unanswered", "no-answer", "no_answer"],
+      ["connected", "completed", "consent_not_received"],
+      ["declined", "completed", "consent_declined"]
+    ] as const) {
+      const input: CreateCallBriefInput = { recipientName: `${prefix} ${suffix}`, phoneNumber: "+41710000049", objective: "Ask when the office opens", assistantProfileId: "sebastian", representedPersonFirstName: "Nina", representedPersonLastName: "Keller", assistanceReason: "speech_impairment", locale: "en-GB", allowLanguageSwitch: false, allowedFacts: [] };
+      const brief = await repository.create(input, await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input)), lifecycleOwner);
+      await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
+      const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio", userId: lifecycleOwner, admissionPolicy: ledgerTestPolicy });
+      const providerId = `CA-${attempt.id}`;
+      await repository.attachProviderCall(attempt.id, providerId, "queued");
+      await repository.applyProviderStatus(providerId, "ringing", "dialing", brief.id);
+      if (providerStatus === "completed") {
+        await repository.applyProviderStatus(providerId, "in-progress", "in_progress", brief.id);
+        await repository.appendCallTelemetryEvent(brief.id, { callAttemptId: attempt.id, idempotencyKey: "consent-result", payload: { name: "consent.failed", metadata: { reason: suffix === "declined" ? "negative" : "stream_ended_before_consent" } } });
+      }
+      await repository.applyProviderStatus(providerId, providerStatus, providerStatus === "completed" ? "completed" : "failed", brief.id);
+      const lifecycle = (await repository.get(brief.id))!.brief.lifecycle!;
+      expect(lifecycle).toMatchObject({ result, credit: "returned", substantiveAnswerConfirmed: false });
+      const list = await repository.list({ userId: lifecycleOwner, search: `${prefix} ${suffix}`, limit: 1 });
+      expect(list.items[0]?.lifecycle).toEqual(lifecycle);
+      expect((await repository.list({ userId: ownerA, search: prefix, limit: 10 })).items).toEqual([]);
+      expect((await repository.getAdminCallInspector(brief.id))?.summary.lifecycle).toEqual(lifecycle);
+      const facts = await repository.getAdminOperationsFacts("2020-01-01T00:00:00.000Z", "2099-01-01T00:00:00.000Z", brief.id);
+      expect(facts.lifecycle?.results[result]).toBe(1);
+      expect(facts.lifecycle?.conversations).toBe(0);
+      expect(facts.technicalFailureCalls).toBe(0);
+      if (suffix === "unanswered") expect(facts.consentFailedCalls).toBe(0);
+      // New durable event is accepted by the DB constraint; it does not rewrite the result.
+      await repository.appendCallTelemetryEvent(brief.id, { callAttemptId: attempt.id, idempotencyKey: "late-stop-request", payload: { name: "call.stop", metadata: { actor: "user", phase: "requested" } } });
+      expect((await repository.get(brief.id))?.brief.lifecycle?.endedBy).toBe("unknown");
+    }
+  });
+
   it("recovers a persisted agent hangup after restart and a lost provider response", async () => {
     // This exercise starts a real worker, which must not consume other fixtures' jobs.
     const database = isolatedTestDatabase();
@@ -583,6 +622,9 @@ describe("PostgresCallRepository", () => {
     );
     expect(lateRinging?.snapshot.brief.status).toBe("completed");
     const chargedUsage = await repository.getCreditUsage(creditOwner);
+    expect((await repository.get(answered.id))?.brief.lifecycle).toMatchObject({ result: "conversation_completed", substantiveAnswerConfirmed: true, credit: "used" });
+    const answeredFacts = await repository.getAdminOperationsFacts("2020-01-01T00:00:00.000Z", "2099-01-01T00:00:00.000Z", answered.id);
+    expect(answeredFacts.lifecycle).toMatchObject({ results: { conversation_completed: 1 }, conversations: 1 });
     expect(chargedUsage.balance).toBe(2);
     expect(chargedUsage.transactions.filter(({ type }) => type === "call_charge"))
       .toHaveLength(1);
@@ -1174,8 +1216,8 @@ describe("PostgresCallRepository", () => {
     expect(technical).toMatchObject({
       technical: {
         connection: "not_confirmed",
-        failureStage: "provider",
-        failureCode: "no-answer"
+        failureStage: null,
+        failureCode: null
       },
       latestOutcome: null
     });
@@ -1244,7 +1286,6 @@ describe("PostgresCallRepository", () => {
       limit: 20,
       status: "failed",
       outcome: "unresolved",
-      failureStage: "provider",
       locale: "en-GB"
     });
     expect(adminList.items).toEqual(expect.arrayContaining([
@@ -1254,8 +1295,8 @@ describe("PostgresCallRepository", () => {
         semanticOutcome: "unresolved",
         technical: expect.objectContaining({
           connection: "not_confirmed",
-          failureStage: "provider",
-          failureCode: "no-answer"
+          failureStage: null,
+          failureCode: null
         })
       })
     ]));

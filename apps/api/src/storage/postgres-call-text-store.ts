@@ -26,7 +26,9 @@ type ArtifactRow = {
 };
 
 export class PostgresCallTextStore {
-  constructor(readonly sql: postgres.Sql, readonly key: DataEncryptionMaterial, readonly betaControlsEnabled = false) {}
+  constructor(readonly sql: postgres.Sql, readonly key: DataEncryptionMaterial, readonly betaControlsEnabled = false,
+    readonly onComplete?: (tx: postgres.TransactionSql, artifact: CallTextArtifact) => Promise<void>,
+    readonly onFailure?: (tx: postgres.TransactionSql, artifact: CallTextArtifact) => Promise<void>) {}
 
   async getPlanSource(callId: string): Promise<PlanSource> {
     await requireAvailableCall(this.sql, callId);
@@ -134,16 +136,19 @@ export class PostgresCallTextStore {
       }
       const [updated]=await tx<ArtifactRow[]>`UPDATE call_text_artifacts SET status='ready',payload_ciphertext=${encryptJson(parsed,this.key)},
         payload_hash=${textPayloadHash(parsed)},failure_code=NULL,updated_at=now() WHERE id=${id} RETURNING *`;
-      return mapArtifact(updated!,this.key);
+      const completed = mapArtifact(updated!,this.key);
+      await this.onComplete?.(tx, completed);
+      return completed;
     });
   }
 
-  async failTextArtifact(id:string,failureCode:string,lease:DurableJobLease) {
+  async failTextArtifact(id:string,failureCode:string,lease:DurableJobLease,finalFailure=false) {
     return this.sql.begin(async tx=>{
       const row=await requireTextLease(tx,id,lease);
       if(row.status==="ready") return mapArtifact(row,this.key);
       const code=/^[a-z0-9_.:/-]{1,160}$/i.test(failureCode)?failureCode:"TEXT_ARTIFACT_FAILED";
       const [updated]=await tx<ArtifactRow[]>`UPDATE call_text_artifacts SET status='failed',failure_code=${code},updated_at=now() WHERE id=${id} RETURNING *`;
+      if(finalFailure) await this.onFailure?.(tx,mapArtifact(updated!,this.key));
       return mapArtifact(updated!,this.key);
     });
   }
@@ -269,7 +274,7 @@ export async function enqueueArtifact(tx:postgres.TransactionSql,key:DataEncrypt
   const [row]=await tx<ArtifactRow[]>`INSERT INTO call_text_artifacts(id,call_brief_id,kind,compilation_id,transcript_revision_id,source_hash,target_language,generator_version,status)
     VALUES(${id},${input.callId},${input.kind},${input.compilationId??null},${input.transcriptRevisionId??null},${input.sourceHash},${input.targetLanguage},${input.generatorVersion},'queued') RETURNING *`;
   await tx`INSERT INTO durable_jobs(id,job_type,text_artifact_id,status,max_attempts,run_after)
-    VALUES(${randomUUID()},'text_artifact_generation',${id},'queued',3,now())`;
+    VALUES(${randomUUID()},'text_artifact_generation',${id},'queued',${input.kind === 'call_summary' ? 2 : 3},now())`;
   return mapArtifact(row!,key);
 }
 
@@ -376,5 +381,6 @@ export async function redactCallTextData(tx:postgres.TransactionSql,callId:strin
   await tx`UPDATE call_text_artifact_chunks SET payload_ciphertext=NULL WHERE artifact_id IN (SELECT id FROM call_text_artifacts WHERE call_brief_id=${callId})`;
   await tx`UPDATE call_text_artifacts SET payload_ciphertext=NULL,status='cancelled',updated_at=now() WHERE call_brief_id=${callId}`;
   await tx`UPDATE final_transcript_revisions SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
+  await tx`UPDATE call_assessments SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
   await tx`UPDATE call_plan_review_receipts SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
 }

@@ -125,8 +125,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       {uiLocales.map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}
     </select></label>;
   const primary = customer ? <>
-    <Link className="topbar-link" aria-current={pathname.endsWith("/app") ? "page" : undefined} href={localizeHref("/app#new-call")}>{messages.app.newCall}</Link>
-    <Link className="topbar-link" aria-current={pathname.includes("/app/calls/") ? "page" : undefined} href={localizeHref("/app#history")}>{messages.app.history}</Link>
+    <Link className="topbar-link" aria-current={pathname.endsWith("/app") ? "page" : undefined} href={localizeHref("/app")}>{messages.app.newCall}</Link>
+    <Link className="topbar-link" aria-current={(pathname.includes("/app/calls/") || pathname.endsWith("/app/history")) ? "page" : undefined} href={localizeHref("/app/history")}>{messages.app.history}</Link>
     <Link className="topbar-link" aria-current={pathname.endsWith("/account") ? "page" : undefined} href={localizeHref("/app/account")}>{messages.app.account}</Link>
   </> : publicLinks.map(item => <Link className="topbar-link" href={item.href} key={item.id}>{item.label}</Link>);
   const more = <>
