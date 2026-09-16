@@ -172,10 +172,10 @@ const en = {
     failed: "Failed"
   },
   languages: {
-    "de-CH": "German (CH)",
+    "de-CH": "German",
     "de-DE": "German (DE)",
-    "fr-CH": "French (CH)",
-    "it-CH": "Italian (CH)",
+    "fr-CH": "French",
+    "it-CH": "Italian",
     "en-GB": "English (UK)",
     "en-US": "English (US)",
     "ru-RU": "Russian"
@@ -371,10 +371,10 @@ const de: AdminCallMessages = {
     failed: "Fehlgeschlagen"
   },
   languages: {
-    "de-CH": "Deutsch (CH)",
+    "de-CH": "Deutsch",
     "de-DE": "Deutsch (DE)",
-    "fr-CH": "Französisch (CH)",
-    "it-CH": "Italienisch (CH)",
+    "fr-CH": "Französisch",
+    "it-CH": "Italienisch",
     "en-GB": "Englisch (UK)",
     "en-US": "Englisch (US)",
     "ru-RU": "Russisch"

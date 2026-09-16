@@ -1,6 +1,6 @@
 # Documentation index
 
-Release status refreshed 2026-09-15, including `4147ded` and workflow feedback. Public brand: SHPROHLI;
+Release status refreshed 2026-09-16, including the landing, call-language and recipient opt-out changes. Public brand: SHPROHLI;
 internal package names, cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
@@ -18,17 +18,26 @@ mapped there and are not separate work queues.
 
 ## Current references
 
-Latest checkpoint: [call lifecycle, separate history and matching admin metrics](call-lifecycle-history-2026-09-15.md). It also covers missing settlement telemetry, migration 0073 and the boundary between a phone connection and a human answer.
+Latest checkpoint: [delivery, 2026-09-16](delivery-2026-09-16.md): founder story/portrait,
+session-aware public CTAs, simplified language choices and contact-gated SMS opt-out.
+Migration 0075, an independent contact HMAC key and a dedicated opt-out Verify Service
+must be included in deployment. Local implementation is complete; **NO-GO** remains.
 
-Latest implementation: [final assessment and deferred credit settlement](post-call-assessment-diagnosis-2026-09-15.md). Migration 0074 stores canonical evidence; final summary and settlement publish atomically. Admin separates AI goal achievement from latest user feedback. Real-call release acceptance remains under B05/B09/B10.
+The preceding [call lifecycle and history](call-lifecycle-history-2026-09-15.md) and
+[final assessment and deferred credit settlement](post-call-assessment-diagnosis-2026-09-15.md)
+records cover migrations 0073/0074. Final summary and settlement publish atomically;
+admin separates AI goal achievement from latest user feedback. Real-call release
+acceptance remains under B05/B09/B10.
 
-The latest local landing is **r8 EN/DE** with an interactive demo; see the
-[implementation and verification record](interactive-landing-2026-09-14.md).
-This closes the four product review changes locally, not the external release gates.
+The local CMS landing remains **r8 EN/DE** with an interactive demo. The 16 September
+founder block and session-aware actions are rendered by the public frontend and do
+not create a new CMS publication. See the [delivery record](delivery-2026-09-16.md)
+and the preceding [interactive demo record](interactive-landing-2026-09-14.md).
 
 | Document | Purpose |
 | --- | --- |
 | [Project README](../README.md) | Product scope, setup, commands and repository status |
+| [Delivery, 2026-09-16](delivery-2026-09-16.md) | Founder story, session-aware CTAs, simplified call languages, opt-out eligibility, checks and deployment requirements |
 | [Architecture](architecture.md) | Current languages, appointments, consent, call control, summary schema, live state, privacy and limits |
 | [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and all 107 registered method/path pairs |
 | [Deployment preflight](deployment-preflight.md) | Proxy/env preparation and first release on shprohli.ch after landing completion; actual VPS deployment remains open |
@@ -51,6 +60,7 @@ This closes the four product review changes locally, not the external release ga
 | [Data deletion](data-deletion-policy.md) | Provider-first deletion, artifact fencing/redaction, account anonymization and contact cleanup |
 | [Password recovery](password-recovery-policy.md) | Verified-phone recovery, bounded capabilities and session invalidation |
 | [Phone change](phone-change-policy.md) | Session-bound replacement, OTP and temporary challenge lifecycle |
+| [Recipient opt-out](recipient-opt-out.md) | Proven-contact eligibility, dedicated Verify Service, one-use confirmation, retained fingerprints and safe legacy backfill |
 | [Rate limiting](rate-limit-policy.md) | Shared atomic endpoint limits, artifact budgets and operational boundaries |
 | [Real-provider drills](real-provider-drills.md) | Current UI procedure, CLI review-receipt limitation and dated supervised evidence |
 | [Admin architecture](admin-interface-architecture.md) | English-only admin surface, route/layout boundaries and roles |
@@ -60,7 +70,8 @@ This closes the four product review changes locally, not the external release ga
 
 | Record | What it establishes |
 | --- | --- |
-| [Workflow feedback, 2026-09-15](workflow-feedback-2026-09-15.md) | Latest web checkpoint: 216 tests, lint/types/build; EN/DE desktop/mobile fixture checks. Real-provider and full assistive-technology acceptance remain open |
+| [Delivery, 2026-09-16](delivery-2026-09-16.md) | API checkpoint: 1,013 tests on fresh PostgreSQL, followed by targeted final regressions; web 240, contracts 115, typechecks/builds and EN/DE browser checks. No external deployment or real SMS/calls |
+| [Workflow feedback, 2026-09-15](workflow-feedback-2026-09-15.md) | Dated web checkpoint: 216 tests, lint/types/build; EN/DE desktop/mobile fixture checks. Real-provider and full assistive-technology acceptance remain open |
 | [Budget accounting, 2026-09-15](budget-accounting-2026-09-15.md) | 47 targeted accounting/admin/migration checks; recorded local migration 0072 and revision 3; no new paid calls |
 | [Plan preparation quality, 2026-09-15](plan-preparation-quality-2026-09-15.md) | 281 targeted API and 77 web tests, four real text probes at the former 5,000-token ceiling; final configured ceiling is 20,000 |
 | [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Current admission/spend implementation and closure of the local recompile defect; external configuration/drills still required |

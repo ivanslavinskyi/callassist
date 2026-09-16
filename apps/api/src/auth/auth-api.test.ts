@@ -5,6 +5,7 @@ import {
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { buildApp } from "../app";
+import { RecipientOptOutService } from "../safety/recipient-opt-out-service";
 import { CallService } from "../call-service";
 import { CreditService } from "../credits/credit-service";
 import { ContentService } from "../content/content-service";
@@ -70,6 +71,7 @@ function createAuthApp(
     creditService,
     contentService,
     accountDeletionService,
+    recipientOptOutService: new RecipientOptOutService({ repository: callRepository, verificationProvider: new MockVerificationProvider("123456"), rateLimiter: options.endpointRateLimiter ?? options.rateLimiter }),
     logger: false,
     production: options.production,
     secureCookies: options.secureCookies ?? false,
@@ -2060,6 +2062,7 @@ describe("auth API", () => {
 
   it("accepts a public opt-out only after SMS proof and blocks future calls", async () => {
     const { app, callRepository } = createAuthApp();
+    callRepository.recipientOptOut.recordContact(callRepository.recipientOptOut.hash(callBrief.phoneNumber));
     const invalid = await app.inject({
       method: "POST",
       url: "/api/recipient-opt-out/verification",
@@ -2081,12 +2084,13 @@ describe("auth API", () => {
       payload: { phoneE164: callBrief.phoneNumber }
     });
     expect(requested.statusCode).toBe(202);
-    expect(requested.json()).toEqual({ status: "verification_required" });
+    expect(requested.json()).toEqual({ status: "verification_required", challengeToken: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const challengeToken = requested.json().challengeToken as string;
 
     const rejected = await app.inject({
       method: "POST",
       url: "/api/recipient-opt-out/confirm",
-      payload: { phoneE164: callBrief.phoneNumber, code: "999999" }
+      payload: { phoneE164: callBrief.phoneNumber, challengeToken, code: "999999" }
     });
     expect(rejected.statusCode).toBe(401);
     expect(rejected.json()).toEqual({ error: "INVALID_OPT_OUT_VERIFICATION" });
@@ -2094,7 +2098,7 @@ describe("auth API", () => {
     const confirmed = await app.inject({
       method: "POST",
       url: "/api/recipient-opt-out/confirm",
-      payload: { phoneE164: callBrief.phoneNumber, code: "123456" }
+      payload: { phoneE164: callBrief.phoneNumber, challengeToken, code: "123456" }
     });
     expect(confirmed.statusCode).toBe(200);
     expect(confirmed.json()).toEqual({ status: "suppressed" });

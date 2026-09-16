@@ -1,13 +1,13 @@
 # Runtime and API reference
 
-Updated 2026-09-15 for preparation and spending after `4147ded`; the dated route
+Updated 2026-09-16 for call-language choices and recipient opt-out; the dated route
 inventory below retains its original snapshot. Configuration values here describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
 
 ## Call lifecycle and history
 
-Migrations 0073/0074 add stop events and final assessments. List/snapshot/Inspector responses share the `lifecycle` projection, including `assessment_pending` and `assessment_unavailable`. Operations exposes independent `lifecycle.goals` and `userGoalFeedback` counts. No new production environment variable is required. Apply migrations before restarting all API/worker processes; do not leave an old worker using immediate refunds. History lives at `/[locale]/app/history`. [Final assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
+Migrations 0073/0074 add stop events and final assessments. List/snapshot/Inspector responses share the `lifecycle` projection, including `assessment_pending` and `assessment_unavailable`. Operations exposes independent `lifecycle.goals` and `userGoalFeedback` counts. Those two migrations introduce no production environment variable; migration 0075 and opt-out require the additional settings below. Apply migrations before restarting all API/worker processes; do not leave an old worker using immediate refunds. History lives at `/[locale]/app/history`. [Final assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
 
 `summary-v3` combines the final summary and canonical assessment. Normal short calls use one request; transient failures allow one automatic retry per generation. The five-minute reservation deadline starts when termination is first processed and survives restarts. Worker maintenance releases expired reservations independently of slow model/transcription work. Actual model availability and diarization still affect assessment quality. Optional billable smoke evaluation: `ALLOW_BILLABLE_EVAL=true pnpm --filter @callassist/api eval:call-assessment` (eight synthetic examples; `ASSESSMENT_EVAL_CASE` limits the run to one named case).
 
@@ -104,6 +104,8 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Required for real outbound telephony |
 | `VERIFICATION_DRIVER` | Example `mock`; factory infers Twilio from real telephony if unset; production API requires explicit `twilio` |
 | `TWILIO_VERIFY_SERVICE_SID` | Required for Twilio SMS verification |
+| `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` | Required on production API: separate Verify Service for public recipient opt-out; must differ from the account service |
+| `RECIPIENT_CONTACT_HASH_KEY` | Required on production API/workers: stable independent 32-byte base64 HMAC key, identical on every process; preserves opt-out eligibility after call deletion |
 | `SMS_ALLOWED_COUNTRIES` | `CH,UA`; comma-separated ISO countries for account verification, independently validated from outbound-call destinations |
 | `SMS_DAILY_SEND_LIMIT`, `SMS_PER_MINUTE_SEND_LIMIT` | `100` / `10`; shared across all SMS flows; each number also has 1/minute and 3/hour limits |
 | `MOCK_VERIFICATION_CODE` | `000000`, local only |
@@ -230,6 +232,33 @@ and [admission/operator procedure](beta-controls-2026-09-14.md). Local revision 
 Endpoint values are user budgets; IP budgets are five times larger. Auth, recovery,
 phone/email change and public opt-out also have code-owned limits. See the
 [rate policy](rate-limit-policy.md) and auth service for those controls.
+
+## Public recipient opt-out contract
+
+`POST /api/recipient-opt-out/verification` accepts a Swiss `phoneE164` and optional `uiLocale`.
+After input validation and rate limiting it returns HTTP 202 with
+`{ status: "verification_required", challengeToken }`, including when no SMS is sent
+because there is no contact evidence, an existing suppression, a cooldown or a
+provider-send failure. The token is 64 hexadecimal characters; it is not evidence
+that an SMS was delivered.
+
+`POST /api/recipient-opt-out/confirm` requires `phoneE164`, `code` and that
+`challengeToken`. Only a matching, active, sent challenge reaches the dedicated Verify
+Service. Success returns `{ status: "suppressed" }`; invalid/expired/consumed proof
+returns `INVALID_OPT_OUT_VERIFICATION`. Request limits are 3/phone and 10/IP per hour;
+confirmation limits are 8/phone and 20/IP per 15 minutes. Each challenge also has
+eight attempts, a ten-minute lifetime and a thirty-second verification lease.
+
+Apply migration 0075 and configure both new settings before starting the API/worker;
+startup backfills trusted historical contact in batches. Deploy matching web/API
+versions because older clients do not send the required token. See
+[eligibility, backfill and operations](recipient-opt-out.md).
+
+## Selectable call languages
+
+`GET /api/language-capabilities` advertises current call choices `de-CH`, `fr-CH`,
+`it-CH`, `en-GB`, plus `ru-RU` only for a superadmin. Historical `de-DE`/`en-US`
+remain in persisted schemas but are not selectable capabilities.
 
 ## Operations-only configuration
 

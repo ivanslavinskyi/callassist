@@ -1,21 +1,30 @@
 # Deployment preflight and first release
 
-Updated 2026-09-15. B06 remains open. The owner chose `shprohli.ch` for the first
+Updated 2026-09-16. B06 remains open. The owner chose `shprohli.ch` for the first
 deployment with temporary restricted access, on an existing VPS that already serves
 another Next.js project. B07 landing changes are now implemented and published locally;
 VPS topology and access details remain to be supplied before deployment.
 A separate staging hostname/server is not a release requirement; external acceptance
 can run on the final domain before public access opens.
 
-The latest local checkpoint includes migrations through 0074, corrected spending
+The latest local checkpoint includes migrations through 0075, corrected spending
 reconciliation, the 20,000-token compiler ceiling and the
 [preparation/review/call UI update](workflow-feedback-2026-09-15.md), followed by
 [distinct call results, history and admin metrics](call-lifecycle-history-2026-09-15.md).
-Apply migrations through 0074 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
+It also includes the [16 September landing, language and opt-out changes](delivery-2026-09-16.md).
+Apply migrations through 0075 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
 Local budget settings (revision 3: 20 USD/24 h, 0.60 USD/call minute,
 0.15 USD/paid text) must be explicitly checked/configured in the deployment;
-they are not transferred by pushing the repository. The latest 216-test web
-checkpoint does not replace the full release-candidate and provider drills.
+they are not transferred by pushing the repository. The 16 September local API,
+web and contracts checks do not replace the release-candidate and provider drills.
+
+For 0075, configure a dedicated `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` on the API,
+different from account Verify, and an independent stable 32-byte base64
+`RECIPIENT_CONTACT_HASH_KEY` shared by every API/worker. Production validation rejects
+missing settings; the contact key must differ from data-encryption keys. Preserve it
+in protected recovery configuration rather than rotating it with encryption keys.
+Initialization backfills trusted contact evidence; ambiguous historical destinations
+stay queued for manual reconciliation. Review [the rollout procedure](recipient-opt-out.md).
 
 ## Implemented preparation
 
@@ -58,14 +67,21 @@ See the [Fastify trustProxy reference](https://fastify.dev/docs/latest/Reference
   This preflight is not a packaging script, container image or server configuration.
 - Configure DNS/TLS and temporary site access. Check email links and signed Twilio
   HTTP/WebSocket callbacks under the access policy. Keep secrets out of web build output.
+- Configure and accept the separate opt-out Verify Service's sender, locales,
+  geo/fraud and spending controls. Check proven-contact success, missed-call
+  eligibility, generic unknown-number behavior and manual support for non-SMS numbers.
 - Verify secure cookies, login through SSR, CORS/CSRF, separate client IP limits,
   spoofed headers, SSE streaming/reconnect and Twilio WebSocket upgrades externally.
+  Check guest/authenticated landing CTAs, login/register redirects, session-check
+  failure/retry and session changes across tabs on the final hostname.
   Proxies must preserve streaming; see the [Next.js self-hosting guide](https://nextjs.org/docs/app/guides/self-hosting).
 - Compare effective API/worker settings on the running host, migrate the database,
   set the USD budget, test restart recovery, alerts/stop and backup/restore. Checking a
   combined env file cannot prove that the deployed processes received identical settings.
 
-Local verification of this preparation: 79 tests across proxy policy, runtime
+Original local verification of the proxy preparation: 79 tests across proxy policy, runtime
 configuration, deployment check and auth API; repository lint/typecheck; API production
 build including the new CLI. No external deployment, DNS changes or provider dispatches
 were performed. The earlier 1,163-test beta-controls checkpoint is separate evidence.
+Current implementation checks, including production validation of both new opt-out
+settings, are recorded in [delivery, 2026-09-16](delivery-2026-09-16.md).

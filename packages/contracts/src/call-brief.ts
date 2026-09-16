@@ -55,10 +55,10 @@ export function formatPersonName(firstName: string, lastName: string) {
 }
 
 export const SUPPORTED_CALL_LANGUAGES = [
-  { locale: "de-CH", label: "German (Switzerland)", shortLabel: "DE-CH" },
+  { locale: "de-CH", label: "German", shortLabel: "DE-CH" },
   { locale: "de-DE", label: "German (Germany)", shortLabel: "DE" },
-  { locale: "fr-CH", label: "French (Switzerland)", shortLabel: "FR-CH" },
-  { locale: "it-CH", label: "Italian (Switzerland)", shortLabel: "IT-CH" },
+  { locale: "fr-CH", label: "French", shortLabel: "FR-CH" },
+  { locale: "it-CH", label: "Italian", shortLabel: "IT-CH" },
   { locale: "en-GB", label: "English (United Kingdom)", shortLabel: "EN-GB" },
   { locale: "en-US", label: "English (United States)", shortLabel: "EN-US" },
   { locale: "ru-RU", label: "Russian", shortLabel: "RU" }
@@ -74,8 +74,8 @@ export const SUPPORTED_CALL_LOCALES = SUPPORTED_CALL_LANGUAGES.map(
 export const callLocaleSchema = z.enum(SUPPORTED_CALL_LOCALES);
 export type CallLocale = z.infer<typeof callLocaleSchema>;
 
-/** Availability for newly prepared calls; persisted schemas intentionally keep en-US. */
-export const SELECTABLE_CALL_LANGUAGES = SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== "en-US");
+/** Current choices; persisted schemas intentionally keep historical locales. */
+export const SELECTABLE_CALL_LANGUAGES = SUPPORTED_CALL_LANGUAGES.filter(({ locale }) => locale !== "en-US" && locale !== "de-DE");
 /** Call availability only; reading historical calls and text languages is unaffected. */
 export function isCallLanguageAvailable(locale: CallLocale, role?: string | null): boolean {
   return locale !== "ru-RU" || role === "superadmin";
@@ -86,7 +86,7 @@ export function selectableCallLanguagesForRole(role?: string | null) {
 }
 
 export function isSelectableCallLocale(locale: CallLocale, role?: string | null): boolean {
-  return locale !== "en-US" && isCallLanguageAvailable(locale, role);
+  return SELECTABLE_CALL_LANGUAGES.some(language => language.locale === locale) && isCallLanguageAvailable(locale, role);
 }
 
 export const callVoiceGenderSchema = z.enum(["male", "female"]);

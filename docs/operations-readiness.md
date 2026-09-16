@@ -4,8 +4,8 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Updated 2026-09-15 for preparation, spending reconciliation and workflow feedback,
-including backend checkpoint `4147ded`. B01/B02 are remediated locally with
+Updated 2026-09-16 for contact-gated opt-out, deployment requirements and session-aware
+landing behavior. B01/B02 are remediated locally with
 [current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
 [historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
 has async preparation, but its start stage still needs the v2 review-receipt contract
@@ -58,6 +58,20 @@ releasing an occupied slot. A terminal snapshot removes active-call feedback.
 not a real-provider/outage drill.
 
 ## Communication and admin readiness
+
+Public opt-out (0075) uses its own `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` and the stable
+`RECIPIENT_CONTACT_HASH_KEY` shared by API/workers. Set both before deployment and
+run `deployment:check`; account-Verify delivery evidence does not validate the new
+Service. Match web/API versions because confirmation now requires a challenge token.
+Inspect remaining `recipient_contact_backfill` entries through protected operator
+access: edited/deleted legacy destinations must not be guessed. Keep manual staff
+suppression available for missing SMS, landlines and unverifiable legacy contacts.
+See [recipient opt-out](recipient-opt-out.md) and [dated checks](delivery-2026-09-16.md).
+
+HTTP 202 on the public form intentionally does not confirm SMS dispatch or reveal
+call history. Diagnose the controlled `opt_out_sms_send_bounded` and
+`opt_out_sms_provider_failed` events without logging submitted phone numbers, codes
+or tokens. Do not manually retry an uncertain send outside the bounded flow.
 
 B03/B04 implementation (2026-09-14): run `corepack pnpm communications:check`
 for a configuration-only report with no provider traffic or secret values.

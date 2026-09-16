@@ -82,6 +82,23 @@ The owner retry button uses the server's `retryable` flag; changing generation o
 retrying never resets request accounting. Reading existing artifacts makes no model
 request. Automatic enqueue still obeys artifact budgets and capability switches.
 
+## Public opt-out eligibility and limits
+
+Since 0075, request limits apply even without call history: 3 verification starts
+per phone and 10 per IP per hour; 8 confirmations per phone and 20 per IP per
+15 minutes. Trusted Twilio contact and absence of active suppression are checked
+before dispatch to the dedicated opt-out Verify Service, so arbitrary numbers do
+not consume SMS or monetary reservations. Eligible sends still use the shared
+provider cooldown/hourly/global and beta budgets; these are not separate allowances.
+
+The durable store reserves one challenge per recipient per 60 seconds before sending.
+Only successful dispatch activates it. Each challenge expires after ten minutes,
+permits eight verification attempts and uses a thirty-second claim lease. A new send
+invalidates the old challenge; a consumed token cannot be replayed. Unknown or
+ineligible proof cannot reach the provider check. Existing request-limit failures
+still return 429, and limiter outages still fail closed. See
+[the opt-out contract and rollout](recipient-opt-out.md).
+
 ## Metrics and retention
 
 The store keeps hourly `allowed_count` and `denied_count` totals by controlled scope

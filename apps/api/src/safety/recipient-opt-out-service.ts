@@ -1,4 +1,5 @@
 import { VerificationSendError } from "../auth/bounded-verification-provider";
+import { createHash, randomBytes } from "node:crypto";
 import type {
   RecipientOptOutConfirmation,
   RecipientOptOutRequest
@@ -10,7 +11,7 @@ import {
   type RateLimiter
 } from "../auth/rate-limiter";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
-import type { RecipientSuppressionInput } from "../storage/call-repository";
+import type { RecipientOptOutStore } from "./recipient-opt-out-store";
 
 const minute = 60_000;
 
@@ -25,7 +26,7 @@ export const defaultRecipientOptOutRateLimitPolicy: RecipientOptOutRateLimitPoli
 };
 
 type RecipientOptOutRepository = {
-  suppressRecipient(input: RecipientSuppressionInput): Promise<boolean>;
+  recipientOptOut: RecipientOptOutStore;
 };
 
 export class RecipientOptOutService {
@@ -56,18 +57,18 @@ export class RecipientOptOutService {
       context.ip,
       this.#rateLimitPolicy.verificationSend
     );
+    const challengeToken = randomBytes(32).toString("hex");
+    const challenge = { phoneE164: input.phoneE164, tokenHash: hashToken(challengeToken) };
+    const response = { status: "verification_required" as const, challengeToken };
+    if (!await this.#repository.recipientOptOut.reserve(challenge)) return response;
     try {
       await this.#verificationProvider.send(input.phoneE164, input.uiLocale);
+      await this.#repository.recipientOptOut.activate(challenge);
     } catch (error) {
-      if (error instanceof VerificationSendError && error.code === "RATE_LIMITED") {
-        throw new RecipientOptOutServiceError("RATE_LIMITED", { retryAfterSeconds: error.retryAfterSeconds });
-      }
-      writePiiSafeOperationalError("opt_out_sms_provider_failed");
-      throw new RecipientOptOutServiceError("VERIFICATION_UNAVAILABLE", {
-        cause: error
-      });
+      // Keep eligibility private, including provider throttling/failure. Never retry an uncertain send.
+      writePiiSafeOperationalError(error instanceof VerificationSendError ? "opt_out_sms_send_bounded" : "opt_out_sms_provider_failed");
     }
-    return { status: "verification_required" as const };
+    return response;
   }
 
   async confirm(
@@ -80,6 +81,9 @@ export class RecipientOptOutService {
       context.ip,
       this.#rateLimitPolicy.verificationAttempt
     );
+    const challenge = { phoneE164: input.phoneE164, tokenHash: hashToken(input.challengeToken) };
+    const claimId = await this.#repository.recipientOptOut.claim(challenge);
+    if (!claimId) throw new RecipientOptOutServiceError("INVALID_OPT_OUT_VERIFICATION");
     let approved = false;
     try {
       approved = await this.#verificationProvider.check(
@@ -87,19 +91,14 @@ export class RecipientOptOutService {
         input.code
       );
     } catch (error) {
+      await this.#repository.recipientOptOut.finish(challenge, claimId, false);
       throw new RecipientOptOutServiceError("VERIFICATION_UNAVAILABLE", {
         cause: error
       });
     }
-    if (!approved) {
+    if (!await this.#repository.recipientOptOut.finish(challenge, claimId, approved)) {
       throw new RecipientOptOutServiceError("INVALID_OPT_OUT_VERIFICATION");
     }
-    await this.#repository.suppressRecipient({
-      phoneE164: input.phoneE164,
-      source: "recipient_request",
-      reason: "Recipient confirmed public opt-out by SMS",
-      actorUserId: null
-    });
     return { status: "suppressed" as const };
   }
 
@@ -141,6 +140,8 @@ export class RecipientOptOutService {
     }
   }
 }
+
+function hashToken(token: string) { return createHash("sha256").update(token).digest("hex"); }
 
 export class RecipientOptOutServiceError extends Error {
   readonly retryAfterSeconds?: number;

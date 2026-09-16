@@ -10,6 +10,7 @@ import {
 } from "./auth/create-email-provider";
 import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
+import { RecipientOptOutService } from "./safety/recipient-opt-out-service";
 import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
 import { createTextProcessorFromEnv } from "./text-processing/text-processor";
@@ -94,6 +95,11 @@ const app = buildApp({
   creditService,
   contentService,
   accountDeletionService,
+  recipientOptOutService: new RecipientOptOutService({
+    repository,
+    verificationProvider: createVerificationProviderFromEnv(rateLimiter, repository.betaControls, "recipient_opt_out"),
+    rateLimiter
+  }),
   endpointRateLimiter: rateLimiter,
   endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv(),
   realtimeConfigured: telephonyProvider instanceof TwilioTelephonyProvider

@@ -113,6 +113,7 @@ browser, source-control, CI-log or support-channel exposure.
 | `PROMO_CODE_HASH_KEY` | Deactivate every outstanding promo campaign/code before replacement, deploy the new independent key, and issue new codes. A future key-ID scheme is required for overlap without invalidation. |
 | `RATE_LIMIT_HASH_KEY` | Keep the old key through the maximum seven-day bucket window or clear the ephemeral rate-limit tables during a controlled maintenance window, then deploy the new independent key to every API instance at once. A mixed-key fleet would create separate budgets and is forbidden. |
 | `EMAIL_VERIFICATION_HASH_KEY` | Rotation invalidates every pending email-change code. Pause email changes, wait ten minutes or invalidate pending challenges, deploy the new independent key to every API instance at once, and then resume the flow. |
+| `RECIPIENT_CONTACT_HASH_KEY` | Stable independent key shared by every API/worker since migration 0075. Preserve it with protected recovery configuration. Never rotate it with data-encryption keys: retained contact HMACs cannot be re-keyed after the original phone is erased. Replacement requires a separate migration/recovery strategy; mixed-key processes break eligibility. |
 | Data-encryption keyring | Never replace `DATA_ENCRYPTION_KEY` alone. Introduce a new active ID/key while retaining the old key in `DATA_ENCRYPTION_PREVIOUS_KEYS`, map legacy `v1` rows with `DATA_ENCRYPTION_LEGACY_V1_KEY_ID`, run the confirmed re-encryption procedure below, verify a restore with the full keyring, and retire the old key only after affected backups expire or have an approved recovery path. |
 
 A suspected data-encryption-key compromise is a release-blocking security incident,
@@ -122,6 +123,12 @@ complete. The production launch remains blocked until the secret manager, named
 owners, access policy and one exercised credential/key procedure are evidenced.
 
 ## Data-encryption key rotation
+
+Migration 0075 also adds contact evidence and opt-out challenges. A restore must
+preserve these tables together with suppressions and the matching contact HMAC key;
+they do not belong to the ciphertext re-encryption inventory. Test recipient
+eligibility after replaying deletion/suppression obligations. See
+[recipient opt-out deployment](recipient-opt-out.md).
 
 The shared inventory includes `call_preparation_requests.input_ciphertext`.
 The queued-old-key regression rotates it, removes the old runtime key, completes

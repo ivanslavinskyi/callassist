@@ -61,6 +61,11 @@ export function validateRuntimeEnvironment(
   requireSecret(environment, "TWILIO_AUTH_TOKEN", issues);
   requireSecret(environment, "TWILIO_PHONE_NUMBER", issues);
   requireHttpsOrigin(environment.PUBLIC_BASE_URL, "PUBLIC_BASE_URL", issues);
+  requireBase64Key(environment.RECIPIENT_CONTACT_HASH_KEY, "RECIPIENT_CONTACT_HASH_KEY", issues);
+  const contactKey = decodeBase64Key(environment.RECIPIENT_CONTACT_HASH_KEY);
+  if (contactKey && dataEncryptionMaterial && dataEncryptionMaterialUsesKey(dataEncryptionMaterial, contactKey)) {
+    issues.push("RECIPIENT_CONTACT_HASH_KEY must be independent of data encryption keys");
+  }
 
   if (runtime === "api") {
     if (!environment.TRUSTED_PROXY_CIDRS?.trim()) {
@@ -73,6 +78,10 @@ export function validateRuntimeEnvironment(
     requireExact(environment, "VERIFICATION_DRIVER", "twilio", issues);
     requireExact(environment, "EMAIL_DRIVER", "resend", issues);
     requireSecret(environment, "TWILIO_VERIFY_SERVICE_SID", issues);
+    requireSecret(environment, "TWILIO_OPT_OUT_VERIFY_SERVICE_SID", issues);
+    if (environment.TWILIO_OPT_OUT_VERIFY_SERVICE_SID?.trim() && environment.TWILIO_OPT_OUT_VERIFY_SERVICE_SID.trim() === environment.TWILIO_VERIFY_SERVICE_SID?.trim()) {
+      issues.push("TWILIO_OPT_OUT_VERIFY_SERVICE_SID must differ from TWILIO_VERIFY_SERVICE_SID");
+    }
     requireSecret(environment, "RESEND_API_KEY", issues);
     requireSecret(environment, "EMAIL_FROM", issues);
     requireBase64Key(

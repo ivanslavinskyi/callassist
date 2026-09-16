@@ -56,7 +56,7 @@ export const demoMessages: Record<UiLocale, DemoMessages> = {
     exporting: "PDF wird erstellt…", exportError: "Das PDF konnte nicht erstellt werden. Bitte versuchen Sie es erneut.", replay: "Diese Demo wiederholen",
     tryOwn: "Konto für einen eigenen Anruf erstellen", pdfTitle: "Transkript des Demoanrufs", pdfVariant: "FIKTIVE DEMO",
     pdfNote: "Dies ist eine vorbereitete Demonstration, kein echter Anruf. Alle Personen und Organisationen sind frei erfunden.",
-    pdfSummary: "Beispiel-Zusammenfassung", taskLabel: "Anliegen", language: "Deutsch (Schweiz)", demoContact: "Fiktiver Kontakt · Schweiz",
+    pdfSummary: "Beispiel-Zusammenfassung", taskLabel: "Anliegen", language: "Deutsch", demoContact: "Fiktiver Kontakt · Schweiz",
     saved: "Endtranskript bereit", progress: "Demofortschritt", source: "Quelle im Transkript ansehen", credit: "Bei einem echten Anruf wird das Guthaben nach Zustimmung und einer inhaltlichen Antwort verbraucht.",
     introNote: "Vorbereitetes Beispiel. Eigene Anliegen sind nach der Registrierung möglich.",
     signedInIntroNote: "Vorbereitetes Beispiel. Eigene Anliegen können Sie in der Anwendung eingeben.",

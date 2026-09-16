@@ -20,6 +20,7 @@ export function RecipientOptOutForm() {
   const copy = optOutMessages[locale];
   const [step, setStep] = useState<Step>("phone");
   const [phoneE164, setPhoneE164] = useState("");
+  const [challengeToken, setChallengeToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +29,8 @@ export function RecipientOptOutForm() {
     setBusy(true);
     setError(null);
     try {
-      await requestRecipientOptOut({ phoneE164: phoneE164.trim(), uiLocale: locale });
+      const result = await requestRecipientOptOut({ phoneE164: phoneE164.trim(), uiLocale: locale });
+      setChallengeToken(result.challengeToken);
       setStep("verification");
     } catch (caught) {
       setError(getOptOutErrorMessage(caught, locale));
@@ -45,6 +47,7 @@ export function RecipientOptOutForm() {
     try {
       await confirmRecipientOptOut({
         phoneE164: phoneE164.trim(),
+        challengeToken,
         code: String(data.get("code") ?? "").trim()
       });
       setStep("complete");
@@ -73,7 +76,7 @@ export function RecipientOptOutForm() {
             <>
               <h1>{copy.verifyTitle}</h1>
               <p className="auth-intro">{copy.verifyIntro(phoneE164)}</p>
-              <form className="auth-form" onSubmit={confirm}>
+              <form key="verification" className="auth-form" onSubmit={confirm}>
                 <label className="field">
                   <span>{copy.code}</span>
                   <input
@@ -97,6 +100,7 @@ export function RecipientOptOutForm() {
                   disabled={busy}
                   onClick={() => {
                     setError(null);
+                    setChallengeToken("");
                     setStep("phone");
                   }}
                   type="button"
@@ -104,12 +108,13 @@ export function RecipientOptOutForm() {
                   {copy.changePhone}
                 </button>
               </form>
+              <p className="auth-alternative">{copy.noCode} <a href="mailto:support@shprohli.ch">support@shprohli.ch</a></p>
             </>
           ) : (
             <>
               <h1>{copy.title}</h1>
               <p className="auth-intro">{copy.intro}</p>
-              <form className="auth-form" onSubmit={requestCode}>
+              <form key="phone" className="auth-form" onSubmit={requestCode}>
                 <label className="field">
                   <span>{copy.phone}</span>
                   <input

@@ -10,7 +10,7 @@ function config(): NodeJS.ProcessEnv {
     DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "test-1", PROMO_CODE_HASH_KEY: Buffer.alloc(32, 2).toString("base64"),
     RATE_LIMIT_HASH_KEY: Buffer.alloc(32, 3).toString("base64"), EMAIL_VERIFICATION_HASH_KEY: Buffer.alloc(32, 4).toString("base64"),
     OPENAI_API_KEY: "fixture", TWILIO_ACCOUNT_SID: "ACfixture", TWILIO_AUTH_TOKEN: "fixture", TWILIO_PHONE_NUMBER: "+41710000000",
-    TWILIO_VERIFY_SERVICE_SID: "VAfixture", RESEND_API_KEY: "fixture", EMAIL_FROM: "mail@example.com",
+    TWILIO_VERIFY_SERVICE_SID: "VAfixture", TWILIO_OPT_OUT_VERIFY_SERVICE_SID: "VAoptout", RECIPIENT_CONTACT_HASH_KEY: Buffer.alloc(32, 13).toString("base64"), RESEND_API_KEY: "fixture", EMAIL_FROM: "mail@example.com",
     NEXT_PUBLIC_SITE_URL: "https://test.example.com", NEXT_PUBLIC_API_URL: "https://test.example.com",
     INTERNAL_API_URL: "http://api:4000", WEB_ORIGIN: "https://test.example.com", PUBLIC_BASE_URL: "https://voice-test.example.com",
     TRUSTED_PROXY_CIDRS: "10.40.0.2/32", TWILIO_WEBHOOK_HOST: "0.0.0.0" };

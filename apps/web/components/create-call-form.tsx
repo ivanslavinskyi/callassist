@@ -38,6 +38,7 @@ import { representedPersonDefaults, type ProfileName } from "@/lib/represented-p
 import { getCallLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 import { useCallDraftStore } from "./call-draft-provider";
 import type { CallDraft } from "@/lib/call-draft-store";
+import { normalizeCallFormLanguages } from "@/lib/call-form-languages";
 import { CallPreparationStatus } from "./call-preparation-status";
 
 const emptyForm: CreateCallBriefInput = {
@@ -111,21 +112,17 @@ export function CreateCallForm({
   const owner = userId ?? "anonymous";
   const [draft, setDraft] = useState<CallDraft>(() => {
     const previous = draftStore.forOwner(owner).get(owner, draftId);
-    if (previous) return previous;
-    const initialForm = {
+    if (previous) {
+      const form = normalizeCallFormLanguages(previous.form);
+      return form === previous.form ? previous : { ...previous, form, preparationAttempt: null };
+    }
+    const initialForm = normalizeCallFormLanguages({
       ...emptyForm,
       ...initialValue,
       ...representedPersonDefaults(initialValue, profileName),
       allowedFacts: cleanLegacyDemoFacts(initialValue?.allowedFacts),
       clarificationAnswers: initialValue?.clarificationAnswers ?? []
-    };
-    // Preserve old snapshots; a newly compiled version uses the current voice choice.
-    if (initialForm.locale === "en-US") initialForm.locale = "en-GB";
-    if (initialForm.fallbackLocale === "en-US") initialForm.fallbackLocale = "en-GB";
-    if (initialForm.fallbackLocale === initialForm.locale) {
-      initialForm.allowLanguageSwitch = false;
-      delete initialForm.fallbackLocale;
-    }
+    });
     return {
       form: initialForm,
       factsText: cleanLegacyDemoFacts(initialValue?.allowedFacts).join("\n"),

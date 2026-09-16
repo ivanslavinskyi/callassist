@@ -1,5 +1,6 @@
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
 import type { BetaControls } from "../beta/beta-controls";
+import type { RecipientOptOutStore } from "../safety/recipient-opt-out-store";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import type {
   ApprovalDecision,
@@ -74,6 +75,7 @@ export type ApprovalMutationResult = {
 };
 
 export type CallAttemptRecord = {
+  recipientContactHash?: string;
   maxDurationSeconds?: number;
   id: string;
   callBriefId: string;
@@ -737,6 +739,7 @@ export type FinalTranscriptMutationResult = {
 };
 
 export interface CallRepository extends CallTextRepository {
+  readonly recipientOptOut: RecipientOptOutStore;
   readonly betaControls?: BetaControls;
   getLanguageContext(id: string): Promise<CallLanguageContext | null>;
   updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number): Promise<CallLanguageContext>;

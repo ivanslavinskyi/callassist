@@ -9,6 +9,12 @@ deleted-user challenges on startup and hourly, even without new user traffic.
 
 ## Principles
 
+Updated 2026-09-16 for migration 0075. Contact eligibility is separate from caller
+content: a keyed recipient fingerprint and last-contact time remain after deletion
+so the recipient can still request suppression. This is retained pseudonymous
+safety data, not an anonymous aggregate; its no-expiry behavior must be included
+in the production retention/Privacy acceptance under B11.
+
 1. A deletion action removes or irreversibly redacts user-provided personal content. It does not rewrite immutable financial, consent, safety, or access evidence.
 2. Provider audio is deleted before local call content is redacted. A provider failure leaves the local content available for a safe retry and never produces a false success response.
 3. Owner requests are idempotent. A completed operation retains only a random request identifier, actor/call references, provider disposition, and time.
@@ -41,6 +47,9 @@ deleted-user challenges on startup and hourly, even without new user traffic.
 | Call outcome and categorical feedback revisions | Retain; remove feedback free text | Retain; remove feedback free text | Aggregate quality evidence without conversation content |
 | Audit, staff access, session/export/deletion evidence | Retain immutable minimized fields | Retain with tombstoned user reference | Accountability and incident investigation |
 | Recipient suppressions and safety events | Retain independently of caller | Retain independently of caller | Opt-out and safety continuity |
+| Attempt recipient-contact fingerprint | Null with call redaction | Null for every owned call | Remove the original recipient fingerprint from the caller's attempt shell |
+| Independent recipient contact evidence | Retain HMAC and last-contact time | Retain independently of caller | Preserve access to opt-out after proven contact; no automatic expiry |
+| Public opt-out challenges | Independent of caller; expire after ten minutes | Independent of caller; expire after ten minutes | Only token digest, recipient HMAC and bounded lifecycle metadata; expired rows are deleted on new opt-out requests, not by expiry alone |
 | Durable job attempts | Cancel content-producing work and retain minimized attempt history | Cancel all owned content-producing work and retain history | Failure recovery and stale-worker fencing |
 | Backups | No in-place mutation | No in-place mutation | Deleted data expires with the documented encrypted-backup lifecycle; a restore must replay deletion tombstones before service return |
 

@@ -805,7 +805,7 @@ describe("API client headers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await requestRecipientOptOut({ phoneE164: "+41791234567" });
-    await confirmRecipientOptOut({ phoneE164: "+41791234567", code: "123456" });
+    await confirmRecipientOptOut({ phoneE164: "+41791234567", challengeToken: "a".repeat(64), code: "123456" });
     await suppressRecipientAsStaff({
       phoneE164: "+41791234567",
       source: "complaint",

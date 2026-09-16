@@ -676,7 +676,7 @@ export async function revokeOwnSession(sessionId: string) {
 }
 
 export async function requestRecipientOptOut(input: RecipientOptOutRequest) {
-  return apiRequest<{ status: "verification_required" }>(
+  return apiRequest<{ status: "verification_required"; challengeToken: string }>(
     "/api/recipient-opt-out/verification",
     { method: "POST", body: JSON.stringify(input) }
   );

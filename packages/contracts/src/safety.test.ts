@@ -14,6 +14,9 @@ describe("recipient safety contracts", () => {
       phoneE164: "+41791234567",
       code: "12ab"
     }).success).toBe(false);
+    expect(recipientOptOutConfirmationSchema.safeParse({ phoneE164: "+41791234567", code: "123456" }).success).toBe(false);
+    expect(recipientOptOutConfirmationSchema.parse({ phoneE164: "079 123 45 67", challengeToken: "a".repeat(64), code: "123456" }))
+      .toMatchObject({ phoneE164: "+41791234567", challengeToken: "a".repeat(64) });
   });
 
   it("limits staff sources and requires an operational reason", () => {

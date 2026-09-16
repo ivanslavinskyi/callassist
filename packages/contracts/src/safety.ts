@@ -19,6 +19,7 @@ export type RecipientOptOutRequest = z.infer<
 
 export const recipientOptOutConfirmationSchema = z.object({
   phoneE164: swissDestinationPhoneSchema,
+  challengeToken: z.string().regex(/^[a-f0-9]{64}$/),
   code: verificationCodeSchema
 });
 export type RecipientOptOutConfirmation = z.infer<

@@ -24,6 +24,8 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     TWILIO_AUTH_TOKEN: "twilio-private",
     TWILIO_PHONE_NUMBER: "+41710000000",
     TWILIO_VERIFY_SERVICE_SID: "VA123",
+    TWILIO_OPT_OUT_VERIFY_SERVICE_SID: "VA456",
+    RECIPIENT_CONTACT_HASH_KEY: Buffer.alloc(32, 13).toString("base64"),
     PUBLIC_BASE_URL: "https://calls.example.test",
     WEB_ORIGIN: "https://www.example.test,https://admin.example.test",
     TRUSTED_PROXY_CIDRS: "127.0.0.1/32",
@@ -38,6 +40,16 @@ function productionEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe("production runtime configuration", () => {
+  it("requires a separate opt-out Verify service and a stable independent contact key", () => {
+    const sharedService = productionEnvironment();
+    sharedService.TWILIO_OPT_OUT_VERIFY_SERVICE_SID = sharedService.TWILIO_VERIFY_SERVICE_SID;
+    expect(() => validateRuntimeEnvironment(sharedService, "api")).toThrow("TWILIO_OPT_OUT_VERIFY_SERVICE_SID must differ");
+    const missingKey = productionEnvironment();
+    delete missingKey.RECIPIENT_CONTACT_HASH_KEY;
+    for (const runtime of ["api", "worker"] as const) {
+      expect(() => validateRuntimeEnvironment(missingKey, runtime)).toThrow("RECIPIENT_CONTACT_HASH_KEY");
+    }
+  });
   it.each([undefined, "development"])("rejects real preparation with mock translations in %s", NODE_ENV => {
     for (const runtime of ["api", "worker"] as const) {
       expect(() => validateRuntimeEnvironment({ NODE_ENV, OPENAI_API_KEY: "test-key" }, runtime))

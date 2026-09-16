@@ -236,6 +236,7 @@ export class CallService {
 
   async initialize() {
     await this.repository.ping();
+    await this.repository.recipientOptOut.backfill();
     if (
       !this.#unsubscribeCallChanges &&
       ["subscribe", "both"].includes(this.#liveEventMode)

@@ -5,7 +5,7 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-15, including `4147ded` and the workflow feedback update:** implemented supervised MVP with substantial beta
+**Repository status, 2026-09-16:** implemented supervised MVP with substantial beta
 infrastructure. **B01/B02 are remediated locally:** production dependency audit is clean;
 Admin System supports nonempty jobs and independent outbound-call control.
 Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
@@ -29,8 +29,12 @@ incomplete responses and mock review translations in real-provider mode. See
 [preparation quality and dated timings](docs/plan-preparation-quality-2026-09-15.md).
 The [workflow feedback update](docs/workflow-feedback-2026-09-15.md) adds a persistent
 preparation panel, consistent review spacing and immediate, state-based call animation.
-Web validation: 216 tests, lint/typecheck and a production build; browser checks use
-isolated fixtures. This is not a new complete repository/provider acceptance run.
+The [2026-09-16 delivery record](docs/delivery-2026-09-16.md) covers the founder story
+and portrait, session-aware landing actions, simplified call-language choices and
+recipient opt-out restricted to proven Twilio contact. Validation includes 240 web
+tests, 115 contracts tests, a 1,013-test API checkpoint on a fresh isolated database,
+subsequent targeted regressions, typechecks and API/web builds. Browser checks use
+isolated fixtures; external provider and deployment acceptance remain open.
 **NO-GO for public testing** remains: delivery scenarios,
 deployment and operational acceptance are open. See the
 [beta controls and stability report](docs/beta-controls-2026-09-14.md).
@@ -75,14 +79,18 @@ The public product copy uses “public beta”; that wording is not deployment e
   generation directions are configured independently from interface languages;
   zero-day audio deletion happens after the final transcript and does not erase text.
 - Three signup credits, transactional reserve/charge/refund, quotas, recipient
-  suppression, SMS-verified opt-out and an audited outbound-call kill switch.
+  suppression, SMS-verified opt-out after proven outbound contact and an audited
+  outbound-call kill switch. Staff can apply suppression without call history.
 - English-only `/admin` for content, SEO, users, calls, credits, safety and system
   operations; sensitive call reads require superadmin and an audited reason.
 - Versioned EN/DE public pages, Landing/FAQ/Navigation collections, drafts, previews,
   publication/history/rollback and Terms/AUP re-acceptance.
 
-Public call locales: `de-CH`, `de-DE`, `fr-CH`, `it-CH`, `en-GB`. Russian (`ru-RU`) is available only to superadmins, as either the primary or fallback call language. The API checks the current role on preparation, recompilation, approval and start; historical calls and Russian text translations remain readable.
-Historical `en-US` remains readable. `de-CH` means Swiss Standard German. UI locale,
+Public selectable call locales: `de-CH`, `fr-CH`, `it-CH`, `en-GB`. Russian (`ru-RU`) is available only to superadmins, as either the primary or fallback call language. The API checks the current role on preparation, recompilation, approval and start; historical calls and Russian text translations remain readable.
+Historical `de-DE` and `en-US` remain supported by persisted contracts. Editable forms
+normalize them to `de-CH` and `en-GB`, including fallback choices; saved snapshots stay
+unchanged. German/French/Italian labels omit the Switzerland suffix in both UI locales.
+`de-CH` means Swiss Standard German. UI locale,
 task content language and call language are independent; call-language labels follow
 the interface locale.
 
@@ -178,11 +186,13 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog contains **73 migrations**, through
-`0074_final_call_assessments.sql`. The current [email/SMS implementation and remaining
-provider setup](docs/email-sms-implementation-2026-09-14.md) covers the new contact flows.
+The migration catalog now extends through `0075_recipient_opt_out_eligibility.sql`.
+Public opt-out requires a separate `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` and a stable
+`RECIPIENT_CONTACT_HASH_KEY` shared by API/workers. Follow the
+[opt-out deployment and backfill procedure](docs/recipient-opt-out.md) and
+[deployment preflight](docs/deployment-preflight.md); pushing code does not configure them.
 Latest implementation checks and their limits
-are recorded in [call lifecycle and history, 2026-09-15](docs/call-lifecycle-history-2026-09-15.md).
+are recorded in [delivery, 2026-09-16](docs/delivery-2026-09-16.md).
 That record distinguishes a full-suite run from subsequent targeted checks; it is
 not a claim of a fresh full-suite run on every commit. Older test counts are dated
 evidence, not the current suite size. See [documentation reconciliation](docs/documentation-sync-2026-09-12.md)

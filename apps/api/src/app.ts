@@ -182,13 +182,7 @@ export function buildApp({
         callService: service
       })
     : undefined,
-  recipientOptOutService = authService
-    ? new RecipientOptOutService({
-        repository: service.repository,
-        verificationProvider: authService.verificationProvider,
-        rateLimiter: endpointRateLimiter
-      })
-    : undefined
+  recipientOptOutService
 }: BuildAppOptions) {
   const webOrigins = resolveWebOrigins(webOrigin);
   const app = Fastify({

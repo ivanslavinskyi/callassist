@@ -1,4 +1,6 @@
 import { assessmentDeadlineMs, assessmentVersion, validateFinalAssessment } from "../credits/final-assessment";
+import { InMemoryRecipientOptOutStore } from "./in-memory-recipient-opt-out-store";
+import { provesRecipientContact } from "../safety/recipient-opt-out-store";
 import type { CallAssessmentRecord, CallTextArtifact } from "@callassist/contracts";
 import type { FinalCreditEvidence } from "./postgres-call-assessment-store";
 import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle } from "@callassist/contracts";
@@ -228,6 +230,10 @@ export class InMemoryCallRepository implements CallRepository {
     failure: artifact => this.#failAssessment(artifact)
   });
   readonly mode = "memory" as const;
+  readonly recipientOptOut = new InMemoryRecipientOptOutStore(
+    phone => this.#recipientSuppressions.has(phone),
+    (phoneE164, reason) => this.suppressRecipient({ phoneE164, reason, source: "recipient_request", actorUserId: null })
+  );
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #assessments = new Map<string, CallAssessmentRecord>();
   readonly #owners = new Map<string, string | null>();
@@ -1166,6 +1172,7 @@ export class InMemoryCallRepository implements CallRepository {
     const attempts = this.#attempts.get(input.callId) ?? [];
     for (const attempt of attempts) {
       attempt.providerCallId = null;
+      delete attempt.recipientContactHash;
       attempt.failureReason = null;
       attempt.compilationRevision = null;
       attempt.compilationSnapshotHash = null;
@@ -2479,6 +2486,7 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
     }
     const attempt: CallAttemptRecord = {
+      recipientContactHash: this.recipientOptOut.hash(snapshot.brief.phoneNumber),
       id: randomUUID(),
       callBriefId: id,
       compilationId: currentCompilation.id,
@@ -2553,6 +2561,9 @@ export class InMemoryCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
       }
       const providerWasAttached = !attempt.providerCallId;
+      if (attempt.recipientContactHash && provesRecipientContact(attempt.provider, providerCallId, providerStatus)) {
+        this.recipientOptOut.recordContact(attempt.recipientContactHash);
+      }
       if (providerWasAttached) {
         attempt.providerCallId = providerCallId;
         attempt.providerStatus = providerStatus;
@@ -2629,6 +2640,9 @@ export class InMemoryCallRepository implements CallRepository {
         "unknown_provider_status"
       );
       attempt.providerCallId ??= providerCallId;
+      if (attempt.recipientContactHash && provesRecipientContact(attempt.provider, providerCallId, providerStatus)) {
+        this.recipientOptOut.recordContact(attempt.recipientContactHash);
+      }
       attempt.providerStatus = providerStatus;
       if (terminalStatuses.has(callStatus)) attempt.endedAt ??= now;
       if (callStatus === "failed") attempt.failureReason ??= providerStatus;

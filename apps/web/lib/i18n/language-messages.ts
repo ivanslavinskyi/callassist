@@ -3,13 +3,13 @@ import type { UiLocale } from "./messages";
 
 const callLanguageLabels = {
   en: {
-    "de-CH": "German (Switzerland)", "de-DE": "German (Germany)",
-    "fr-CH": "French (Switzerland)", "it-CH": "Italian (Switzerland)",
+    "de-CH": "German", "de-DE": "German (Germany)",
+    "fr-CH": "French", "it-CH": "Italian",
     "en-GB": "English", "en-US": "English (United States)", "ru-RU": "Russian"
   },
   de: {
-    "de-CH": "Deutsch (Schweiz)", "de-DE": "Deutsch (Deutschland)",
-    "fr-CH": "Französisch (Schweiz)", "it-CH": "Italienisch (Schweiz)",
+    "de-CH": "Deutsch", "de-DE": "Deutsch (Deutschland)",
+    "fr-CH": "Französisch", "it-CH": "Italienisch",
     "en-GB": "Englisch", "en-US": "Englisch (USA)", "ru-RU": "Russisch"
   }
 } satisfies Record<UiLocale, Record<CallLocale, string>>;

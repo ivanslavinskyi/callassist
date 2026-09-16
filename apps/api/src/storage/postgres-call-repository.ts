@@ -1,4 +1,6 @@
 import { PostgresCallAssessmentStore, type FinalCreditEvidence } from "./postgres-call-assessment-store";
+import { PostgresRecipientOptOutStore } from "./postgres-recipient-opt-out-store";
+import { recipientContactHashKey } from "../safety/recipient-opt-out-store";
 import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle, type CallSettlementFact, type CallAssessmentRecord } from "@callassist/contracts";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend } from "../beta/beta-controls";
@@ -531,6 +533,7 @@ function toIso(value: DatabaseDate) {
 }
 
 export class PostgresCallRepository implements CallRepository {
+  readonly recipientOptOut: PostgresRecipientOptOutStore;
   readonly betaControls?: PostgresBetaControls;
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
@@ -545,6 +548,7 @@ export class PostgresCallRepository implements CallRepository {
       onnotice: () => undefined
     });
     this.betaControls = betaControlsEnabled ? new PostgresBetaControls(this.#sql) : undefined;
+    this.recipientOptOut = new PostgresRecipientOptOutStore(this.#sql, recipientContactHashKey(encryptionKey));
     this.#assessments = new PostgresCallAssessmentStore(this.#sql,this.#encryptionKey,async (tx,attemptId,type,evidence)=>{
       const settled=await this.#settleAttempt(tx,attemptId,type,evidence,true);
       if (settled) {
@@ -1866,6 +1870,7 @@ export class PostgresCallRepository implements CallRepository {
         UPDATE call_attempts
         SET
           provider_call_id = NULL,
+          recipient_contact_hash = NULL,
           failure_reason = NULL,
           compilation_id = NULL,
           compilation_revision = NULL,
@@ -4651,6 +4656,7 @@ export class PostgresCallRepository implements CallRepository {
         )
       `;
       if (this.betaControls) await transaction`UPDATE call_attempts SET max_duration_seconds=${maxDurationSeconds!} WHERE id=${attemptId}`;
+      await transaction`UPDATE call_attempts SET recipient_contact_hash=${this.recipientOptOut.hash(call.phoneNumber)} WHERE id=${attemptId}`;
       if (userId) {
         await transaction`
           INSERT INTO credit_transactions (
@@ -4724,6 +4730,7 @@ export class PostgresCallRepository implements CallRepository {
         RETURNING call_brief_id AS "callId", provider
       `;
       if (!updated) return null;
+      await this.recipientOptOut.recordContact(transaction, attemptId, providerStatus);
       const settlement = await this.#settleAttempt(
         transaction,
         attemptId,
@@ -4855,6 +4862,7 @@ export class PostgresCallRepository implements CallRepository {
           END
         WHERE id = ${row.attemptId}
       `;
+      await this.recipientOptOut.recordContact(transaction, row.attemptId, providerStatus);
       const settlement = await this.#settleAttempt(
         transaction,
         row.attemptId,

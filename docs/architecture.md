@@ -1,6 +1,7 @@
 # SHPROHLI architecture
 
-Updated 2026-09-15 for preparation, spending and UI feedback after `4147ded`. This describes
+Updated 2026-09-16 for the public landing, shared session state, call-language choices
+and contact-gated recipient opt-out. This describes
 implemented behavior, including initial email proof, localized transactional delivery,
 appointments, compact results and live-transcript recovery.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
@@ -123,6 +124,20 @@ catalogue does not add a call voice or enable an untested translation direction.
 CMS supports separately published localizations and identifies the actual fallback
 locale in rendered content. Call-language option names use the UI locale.
 
+Public call choices are `de-CH`, `fr-CH`, `it-CH`, `en-GB`; `ru-RU` is visible only
+to superadmins. German, French and Italian labels have no country suffix in either
+UI locale. Historical `de-DE`/`en-US` remain in persisted contracts, but editable
+forms normalize them to `de-CH`/`en-GB`, including fallback choices. A duplicate
+fallback is removed; immutable plans and history retain the original locale.
+
+The public landing replaces the old problem section with the approved EN/DE founder
+story and supplied portrait. It is a frontend-only rendering option at the existing
+section position: CMS structure/publication and admin draft preview stay unchanged.
+Hero, final and demo-result CTAs share `LandingPrimaryAction`: guests use the CMS
+registration action, authenticated roles go to `/{locale}/app`. The existing app
+guard routes content editors to `/admin/content` and enforces onboarding for others;
+there is no extra content-management CTA. See [delivery evidence](delivery-2026-09-16.md).
+
 Each preparation captures a language context separately from the executable plan:
 detected input language, detection status (`detected`, `mixed`, `undetermined`), selected
 task content language, selection source and revision. There is no numeric confidence
@@ -151,8 +166,17 @@ frame and heartbeat; revocation also closes existing connections (R19 implemente
 Next.js SSR forwards the cookie received by the web host to the private API. Deploy
 web and browser-facing `/api` on the same public hostname: separate `www` and `api`
 hostnames do not share this host-only cookie, even if CORS allows both. Internal
-service origins can differ. Fastify does not configure `trustProxy`, so edge IP-based
-budgets need a reviewed proxy/IP policy before deployment.
+service origins can differ. Fastify uses explicit `TRUSTED_PROXY_CIDRS`; production
+requires reviewed peers or `none`. The actual edge must strip spoofed headers and
+isolate the API listener; see [deployment preflight](deployment-preflight.md).
+
+A shell-scoped `SessionProvider` hydrates a minimal request-scoped, no-store SSR
+snapshot from `/me`; there is no module-global user state. Client checks refresh on
+pathname/focus/pageshow/visibility changes, deduplicate in-flight requests and reject
+late responses after logout. Unknown/loading state disables landing actions; a failed
+check exposes retry rather than guest registration. Identity changes clear displayed
+credits. Authenticated login/register requests redirect through the existing app
+guard. These UI decisions do not replace server-side role or session authorization.
 
 | Role | Customer calls | Content/SEO | Operational admin | Sensitive call text |
 | --- | --- | --- | --- | --- |
@@ -474,6 +498,22 @@ Admins can disable; only superadmins can resume. SMS-verified public opt-out and
 reasoned staff/complaint suppression/lift are implemented; in-call spoken opt-out and
 complaint queues are not.
 
+Public SMS opt-out requires durable proof that Twilio reached the original
+destination: provider ID plus ringing, in-progress, completed, busy or no-answer.
+Queued/mock attempts and failure/cancellation without earlier contact do not qualify.
+Migration 0075 captures the original destination HMAC and stores a separate contact
+marker. Owner deletion removes the attempt fingerprint but preserves the independent
+marker, with no expiry. Backfill uses trusted provider history and an unambiguous
+original destination; ambiguous legacy rows need manual reconciliation.
+
+A dedicated Verify Service is isolated from account verification. The public form
+receives an opaque random challenge token for every valid request; only eligible,
+successfully sent challenges can be confirmed. Tokens expire after ten minutes and
+permit eight checks. A claim lease fences concurrent verification; suppression,
+token consumption and audit commit atomically under the recipient lock. Shared
+request/SMS/spending budgets still apply. Staff suppression needs no call history.
+See [opt-out policy and rollout](recipient-opt-out.md).
+
 Shared PostgreSQL rate limiting uses independent-key HMAC identifiers, atomic grouped
 decisions, bounded fixed windows, expiry and a cardinality cap. `429` includes
 `Retry-After`; store errors fail closed before sensitive work. Recovery's
@@ -482,8 +522,8 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 
 ## Persistence and encryption
 
-The current catalog has **73 migrations**, `0001` through
-`0074_final_call_assessments.sql`. The catalog is contiguous/checksummed; advisory locking and
+The current catalog extends from `0001` through
+`0075_recipient_opt_out_eligibility.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases
@@ -504,6 +544,7 @@ migration runner enforces the gate; see the [rollout sequence](approved-call-pla
 | Provider accounting | Deduplicated operations, request results, raw usage and reported costs; versioned calculated rates separate from actual/fallback/unknown |
 | Feedback/outcomes | Encrypted optional comment; immutable categorical ratings/outcomes and provenance |
 | Credits/promos/suppression | Immutable ledger/redemptions, code HMACs, retained safety evidence; suppression phone/reason remain personal data |
+| Recipient contact/opt-out | Stable independent-key phone HMAC plus last contact, retained after caller deletion; challenge token digests and phone HMACs expire after ten minutes and are cleaned on new requests |
 | Content/editorial/onboarding | Private drafts, immutable publications/audit, localized slugs, legal revision acceptances |
 | Jobs/operations/audit | Seven durable call-job types, separate deletion requests, leases/attempts/heartbeats, bounded technical and action events |
 
