@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PublicHome } from "@/components/public-home";
 import { isUiLocale } from "@/lib/i18n/messages";
 import { homeMetadata } from "@/lib/seo-metadata";
+import { getServerSessionSnapshot } from "@/lib/server-auth";
 import {
   getPublishedFaq,
   getPublishedLanding,
@@ -23,10 +24,11 @@ export default async function HomePage({ params }: {
 }) {
   const { locale } = await params;
   if (!isUiLocale(locale)) notFound();
-  const [landing, faq] = await Promise.all([
+  const [landing, faq, initialSession] = await Promise.all([
     getPublishedLanding(locale),
-    getPublishedFaq(locale)
+    getPublishedFaq(locale),
+    getServerSessionSnapshot()
   ]);
   if (!landing) notFound();
-  return <PublicHome faq={faq} landing={landing} />;
+  return <PublicHome faq={faq} landing={landing} initialSession={initialSession} />;
 }

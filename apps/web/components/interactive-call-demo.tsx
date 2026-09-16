@@ -1,30 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import Link from "next/link";
 import { demoMessages } from "@/lib/i18n/demo-messages";
 import type { UiLocale } from "@/lib/i18n/registry";
 import { buildDemoPdf, demoDelay, demoReducer, demoScenarioIds, demoStep, getDemoScenario, initialDemoState, type DemoScenarioId, type DemoTurn } from "@/lib/interactive-demo";
 import { CallPlanPresentation } from "./call-plan-presentation";
 import { CallSummaryPresentation } from "./call-summary-presentation";
 import styles from "./interactive-call-demo.module.css";
+import { LandingPrimaryAction } from "./landing-primary-action";
+import { useSession } from "./session-provider";
 
-export function InteractiveCallDemo({ locale, registerHref, autoStart = false, title }: { locale: UiLocale; registerHref: string; autoStart?: boolean; title?: string }) {
+export function InteractiveCallDemo({ locale, registerHref, sessionAware = false, autoStart = false, title }: { locale: UiLocale; registerHref: string; sessionAware?: boolean; autoStart?: boolean; title?: string }) {
   const [scenario, setScenario] = useState<DemoScenarioId>("documents");
   const [generation, setGeneration] = useState(0);
   const copy = demoMessages[locale];
   return <section className={styles.window} id="example" aria-label={title ?? copy.label} lang={locale}>
-    <DemoPlayer key={`${locale}:${scenario}:${generation}`} locale={locale} scenarioId={scenario} registerHref={registerHref} autoStart={autoStart && generation === 0} demoTitle={title}
+    <DemoPlayer key={`${locale}:${scenario}:${generation}`} locale={locale} scenarioId={scenario} registerHref={registerHref} sessionAware={sessionAware} autoStart={autoStart && generation === 0} demoTitle={title}
       onScenario={setScenario} onReplay={() => setGeneration(value => value + 1)} />
   </section>;
 }
 
-function DemoPlayer({ locale, scenarioId, registerHref, autoStart, demoTitle, onScenario, onReplay }: {
+function DemoPlayer({ locale, scenarioId, registerHref, sessionAware, autoStart, demoTitle, onScenario, onReplay }: {
   locale: UiLocale; scenarioId: DemoScenarioId; registerHref: string; autoStart: boolean;
+  sessionAware: boolean;
   demoTitle?: string;
   onScenario: (id: DemoScenarioId) => void; onReplay: () => void;
 }) {
   const copy = demoMessages[locale];
+  const { session } = useSession();
+  const introNote = !sessionAware || session.status === "anonymous" ? copy.introNote
+    : session.status === "authenticated" ? copy.signedInIntroNote : copy.pendingIntroNote;
   const scenario = useMemo(() => getDemoScenario(locale, scenarioId), [locale, scenarioId]);
   const [state, dispatch] = useReducer(demoReducer, autoStart ? { ...initialDemoState, phase: "typing" as const } : initialDemoState);
   const [manual, setManual] = useState(false);
@@ -114,7 +119,7 @@ function DemoPlayer({ locale, scenarioId, registerHref, autoStart, demoTitle, on
           <div><span className={styles.eyebrow}>{copy.recipient}</span><strong>{scenario.recipient}</strong><small>{copy.demoContact}</small></div>
         </div>
         <div className={styles.task}><span className={styles.eyebrow}>{copy.task}</span><p className={styles.taskText}><span className={styles.taskMeasure} aria-hidden="true">{scenario.request}</span><span className={styles.taskValue}>{state.phase === "typing" ? scenario.request.slice(0, Math.ceil(scenario.request.length * state.tick / 28)) : scenario.request}<span className={styles.cursor} aria-hidden="true" hidden={state.phase !== "typing"} /></span></p></div>
-        {state.phase === "idle" ? <><button className={styles.primary} type="button" onClick={() => dispatch({ type: "start" })}>{copy.start}</button><p className={styles.helper}>{copy.introNote}</p></> : null}
+        {state.phase === "idle" ? <><button className={styles.primary} type="button" onClick={() => dispatch({ type: "start" })}>{copy.start}</button><p className={styles.helper}>{introNote}</p></> : null}
       </> : null}
 
       {state.phase === "compiling" ? <div className={styles.processing} aria-busy="true"><div className={styles.spinner} aria-hidden="true" />
@@ -164,7 +169,7 @@ function DemoPlayer({ locale, scenarioId, registerHref, autoStart, demoTitle, on
         </div>
         <button className={styles.primary} type="button" onClick={() => void download()} disabled={exportState === "loading"}>{exportState === "loading" ? copy.exporting : copy.pdf}</button>
         {exportState === "error" ? <p role="alert" className={styles.error}>{copy.exportError}</p> : null}
-        <Link className={styles.accountLink} href={registerHref}>{copy.tryOwn}</Link>
+        <LandingPrimaryAction className={styles.accountLink} locale={locale} guestHref={registerHref} guestLabel={copy.tryOwn} sessionAware={sessionAware} />
       </> : null}
 
       <div className={styles.controls}>

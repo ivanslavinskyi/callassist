@@ -15,6 +15,7 @@ export async function fetchServerCurrentUser({
 }): Promise<User | null> {
   const response = await fetcher(`${apiUrl.replace(/\/$/, "")}/api/auth/me`, {
     cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
     headers: cookie ? { cookie } : undefined
   });
 

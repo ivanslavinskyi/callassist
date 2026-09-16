@@ -35,6 +35,7 @@ describe("server-side session lookup", () => {
       "http://api.internal/api/auth/me",
       {
         cache: "no-store",
+        signal: expect.any(AbortSignal),
         headers: { cookie: "callassist_session=secret" }
       }
     );

@@ -13,23 +13,30 @@ import { getCallLanguageLabel } from "@/lib/i18n/call-language-labels";
 import { contentLanguageDirection } from "@/lib/content-localizations";
 import { InteractiveCallDemo } from "./interactive-call-demo";
 import { FaqList } from "./faq-list";
+import { PublicFounderStory } from "./public-founder-story";
 import { useUiLocale } from "./ui-locale-provider";
 import { landingMessages } from "@/lib/i18n/landing-messages";
+import type { SessionSnapshot } from "@/lib/session-state";
+import { LandingPrimaryAction } from "./landing-primary-action";
 
 export function PublicHome({
   landing,
-  faq
+  faq,
+  initialSession
 }: {
   landing: PublishedLanding;
   faq: PublishedFaq | null;
+  initialSession: SessionSnapshot;
 }) {
   const { localizeHref } = useUiLocale();
 
   return (
-    <AppShell>
+    <AppShell initialSession={initialSession}>
       <PublicHomeContent
         faq={faq}
         landing={landing}
+        showFounderStory
+        sessionAware
         registerHref={localizeHref("/register")}
       />
     </AppShell>
@@ -40,11 +47,15 @@ export function PublicHomeContent({
   landing,
   faq,
   previewBanner,
+  showFounderStory = false,
+  sessionAware = false,
   registerHref
 }: {
   landing: PublishedLanding;
   faq: PublishedFaq | null;
   previewBanner?: ReactNode;
+  showFounderStory?: boolean;
+  sessionAware?: boolean;
   registerHref: string;
 }) {
   const [demoRun, setDemoRun] = useState(0);
@@ -53,7 +64,9 @@ export function PublicHomeContent({
   return (
     <main className="public-home" id="main-content" tabIndex={-1} lang={landing.locale} dir={contentLanguageDirection(landing.locale)}>
       {previewBanner}
-      {landing.blocks.map((block) => (
+      {landing.blocks.map((block) => showFounderStory && block.blockType === "problem" ? (
+        <PublicFounderStory headingId={`landing-${block.id}`} key={block.id} />
+      ) : (
         <LandingBlockView
           block={block}
           exampleTitle={example?.title}
@@ -64,6 +77,7 @@ export function PublicHomeContent({
           faq={faq}
           key={block.id}
           locale={landing.locale}
+          sessionAware={sessionAware}
           registerHref={registerHref}
         />
       ))}
@@ -71,7 +85,8 @@ export function PublicHomeContent({
   );
 }
 
-function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, heroAvailable, demoRun, onDemoStart, creditsAvailable }: {
+function LandingBlockView({ block, faq, locale, registerHref, sessionAware, exampleTitle, heroAvailable, demoRun, onDemoStart, creditsAvailable }: {
+  sessionAware: boolean;
   exampleTitle?: string;
   heroAvailable: boolean;
   demoRun: number;
@@ -94,7 +109,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, hero
           <p>{block.lead}</p>
           {block.secondaryText ? <p className="public-hero-secondary">{block.secondaryText}</p> : null}
           <div className="public-actions">
-            <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
+            <LandingPrimaryAction className="primary-button compact-button" locale={interfaceLocale} guestHref={registerHref} guestLabel={block.primaryCtaLabel} sessionAware={sessionAware} />
             <Link className="secondary-button" href={exampleTitle !== undefined ? "#example" : "#how-it-works"} onClick={exampleTitle !== undefined ? onDemoStart : undefined}>
               {exampleTitle !== undefined ? block.secondaryCtaLabel : locale === "de" ? "So funktioniert es" : "See how it works"}
             </Link>
@@ -104,7 +119,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, hero
           </ul>
           {creditsAvailable ? <p className="public-credit-details"><Link href="#beta-credits" lang={interfaceLocale}>{landingMessages[interfaceLocale].creditDetails}</Link></p> : null}
           </div>
-          {exampleTitle !== undefined ? <InteractiveCallDemo key={`${interfaceLocale}:${demoRun}`} locale={interfaceLocale} registerHref={registerHref} title={exampleTitle} autoStart={demoRun > 0} /> : null}
+          {exampleTitle !== undefined ? <InteractiveCallDemo key={`${interfaceLocale}:${demoRun}`} locale={interfaceLocale} registerHref={registerHref} sessionAware={sessionAware} title={exampleTitle} autoStart={demoRun > 0} /> : null}
         </section>
       );
     case "problem":
@@ -158,7 +173,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, hero
       );
     case "example":
       // The CMS example block now lives in the hero. Keep a standalone fallback when the hero is disabled.
-      return heroAvailable ? null : <InteractiveCallDemo locale={interfaceLocale} registerHref={registerHref} title={block.title} />;
+      return heroAvailable ? null : <InteractiveCallDemo locale={interfaceLocale} registerHref={registerHref} sessionAware={sessionAware} title={block.title} />;
     case "safety_privacy":
       return (
         <section className="public-section public-safety" aria-labelledby={`landing-${block.id}`}>
@@ -202,7 +217,7 @@ function LandingBlockView({ block, faq, locale, registerHref, exampleTitle, hero
             <h2>{block.title}</h2>
             <p>{block.text}</p>
           </div>
-          <Link className="primary-button compact-button" href={registerHref}>{block.primaryCtaLabel}</Link>
+          <LandingPrimaryAction className="primary-button compact-button" locale={interfaceLocale} guestHref={registerHref} guestLabel={block.primaryCtaLabel} sessionAware={sessionAware} />
           <Link className="public-credit-details" href={localizeHref("/faq")} lang={interfaceLocale}>{landingMessages[interfaceLocale].creditDetails}</Link>
         </section>
       );

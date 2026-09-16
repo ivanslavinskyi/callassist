@@ -232,7 +232,7 @@ export async function confirmPhoneChange(input: PhoneChangeConfirmInput) {
 }
 
 export async function getCurrentUser() {
-  return apiRequest<{ user: User }>("/api/auth/me");
+  return apiRequest<{ user: User }>("/api/auth/me", { cache: "no-store" });
 }
 
 /** A server-confirmed terminal preparation failure may be retried with a new operation key. */

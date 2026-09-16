@@ -1,12 +1,11 @@
 "use client";
 
-import type { PublishedNavigation, UserRole } from "@callassist/contracts";
+import type { PublishedNavigation } from "@callassist/contracts";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   getCreditUsage,
-  getCurrentUser,
   getPublishedNavigation,
   updateLanguagePreferences
 } from "@/lib/api";
@@ -24,15 +23,23 @@ import { useUiLocale } from "./ui-locale-provider";
 import { uiLocales, type UiLocale } from "@/lib/i18n/messages";
 import { languageMessages } from "@/lib/i18n/language-messages";
 import { rememberUiLocale } from "@/lib/ui-language-preference";
+import type { SessionSnapshot } from "@/lib/session-state";
+import { SessionProvider, useSession } from "./session-provider";
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, initialSession }: { children: ReactNode; initialSession?: SessionSnapshot }) {
+  return <SessionProvider initialSession={initialSession}><AppShellContent>{children}</AppShellContent></SessionProvider>;
+}
+
+function AppShellContent({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { locale, localizeHref, messages } = useUiLocale();
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
-  const [role, setRole] = useState<UserRole | null>(null);
+  const { session } = useSession();
+  const isAuthenticated = session.status === "authenticated" ? true : session.status === "anonymous" ? false : null;
+  const role = session.status === "authenticated" ? session.user.role : null;
+  const emailVerified = session.status === "authenticated" ? session.user.emailVerified : null;
+  const userId = session.status === "authenticated" ? session.user.id : null;
   const [changingLocale, setChangingLocale] = useState(false);
   const [localeError, setLocaleError] = useState(false);
   const [publicNavigation, setPublicNavigation] = useState<
@@ -53,30 +60,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [locale]);
 
   useEffect(() => {
-    let active = true;
-    void getCurrentUser()
-      .then(({ user }) => {
-        if (active) {
-          setIsAuthenticated(true);
-          setRole(user.role);
-          setEmailVerified(Boolean(user.emailVerifiedAt));
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setIsAuthenticated(false);
-          setRole(null);
-          setEmailVerified(null);
-        }
-      });
-    return () => { active = false; };
-  }, [pathname]);
-
-  useEffect(() => {
     if (isAuthenticated !== true || role === "content_editor") {
       setCreditBalance(null);
       return;
     }
+    setCreditBalance(null);
     let active = true;
     const refresh = async () => {
       try {
@@ -97,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener("callassist:usage-changed", onUsageChanged);
       window.removeEventListener("focus", onUsageChanged);
     };
-  }, [isAuthenticated, role]);
+  }, [isAuthenticated, role, userId]);
 
   async function changeLocale(nextLocale: UiLocale) {
     setChangingLocale(true);
@@ -135,9 +123,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     {customer ? <><Link href={contentPath(locale, "faq")}>{messages.app.faq}</Link><Link href={contentPath(locale, "support")}>{messages.app.support}</Link></> : null}
     {role && ["content_editor", "admin", "superadmin"].includes(role) ? <Link href="/admin">{messages.app.adminPortal}</Link> : null}
   </>;
-  const authLinks = isAuthenticated !== true ? <>
-    <Link className="topbar-link" href={localizeHref("/login")}>{messages.app.signIn}</Link>
-    <Link className="primary-button compact-button" href={localizeHref("/register")}>{messages.app.createAccount}</Link>
+  const authLinks = isAuthenticated === false ? <>
+    <Link className="topbar-link" href={localizeHref("/login")} prefetch={false}>{messages.app.signIn}</Link>
+    <Link className="primary-button compact-button" href={localizeHref("/register")} prefetch={false}>{messages.app.createAccount}</Link>
   </> : null;
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">{messages.app.skipToContent}</a>

@@ -1,0 +1,63 @@
+.story {
+  display: grid;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  grid-template-areas: "heading copy" "portrait copy";
+  align-items: start;
+  align-content: start;
+  gap: 24px 64px;
+}
+
+.heading { grid-area: heading; }
+.heading h2 {
+  font-size: 36px;
+  line-height: 1.25;
+  letter-spacing: -.025em;
+  font-weight: 600;
+  max-width: 24ch;
+  margin: 12px 0 0;
+  text-wrap: balance;
+}
+
+.portrait {
+  grid-area: portrait;
+  position: relative;
+  width: 192px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.photo {
+  object-fit: cover;
+  object-position: 50% 24%;
+  transform: scale(1.75);
+  transform-origin: 50% 24%;
+  filter: grayscale(1);
+}
+
+.copy {
+  grid-area: copy;
+  min-width: 0;
+  max-width: 66ch;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.copy p { margin: 0 0 20px; }
+.copy .signature { margin: 28px 0 0; }
+.signature strong { display: block; color: var(--ink); font-weight: 600; }
+.signature span { display: block; font-size: 14px; }
+
+@media (max-width: 1023px) {
+  .story { column-gap: 32px; }
+}
+
+@media (max-width: 767px) {
+  .story {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "heading" "portrait" "copy";
+  }
+  .heading h2 { font-size: 28px; }
+}

@@ -3,6 +3,7 @@ import "server-only";
 import type { ContentLocale, User } from "@callassist/contracts";
 import { headers } from "next/headers";
 import { cache } from "react";
+import { sessionForUser, type SessionSnapshot } from "./session-state";
 import {
   fetchServerCurrentUser,
   fetchServerOnboardingStatus
@@ -20,6 +21,15 @@ export const getServerCurrentUser = cache(async (): Promise<User | null> => {
     apiUrl: internalApiUrl,
     cookie: requestHeaders.get("cookie") ?? ""
   });
+});
+
+// Public content stays available when the session endpoint is temporarily unavailable.
+export const getServerSessionSnapshot = cache(async (): Promise<SessionSnapshot> => {
+  try {
+    return sessionForUser(await getServerCurrentUser());
+  } catch {
+    return { status: "unavailable" };
+  }
 });
 
 export const getServerOnboardingStatus = cache(async (locale: ContentLocale) => {

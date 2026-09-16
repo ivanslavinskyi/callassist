@@ -25,7 +25,9 @@ const en = {
   pdfNote: "This is a scripted demonstration, not a record of a real call. All people and organisations are fictional.",
   pdfSummary: "Example summary", taskLabel: "Task", language: "English", demoContact: "Fictional recipient · Switzerland",
   saved: "Final transcript ready", progress: "Demo progress", source: "View source in the transcript", credit: "In a real call, the credit is used after consent and a substantive task answer.",
-  introNote: "Prepared example. Enter your own task after signing up."
+  introNote: "Prepared example. Enter your own task after signing up.",
+  signedInIntroNote: "Prepared example. Enter your own task in the app.",
+  pendingIntroNote: "Prepared example."
 };
 type DemoMessages = { [K in keyof typeof en]: typeof en[K] };
 
@@ -56,6 +58,8 @@ export const demoMessages: Record<UiLocale, DemoMessages> = {
     pdfNote: "Dies ist eine vorbereitete Demonstration, kein echter Anruf. Alle Personen und Organisationen sind frei erfunden.",
     pdfSummary: "Beispiel-Zusammenfassung", taskLabel: "Anliegen", language: "Deutsch (Schweiz)", demoContact: "Fiktiver Kontakt · Schweiz",
     saved: "Endtranskript bereit", progress: "Demofortschritt", source: "Quelle im Transkript ansehen", credit: "Bei einem echten Anruf wird das Guthaben nach Zustimmung und einer inhaltlichen Antwort verbraucht.",
-    introNote: "Vorbereitetes Beispiel. Eigene Anliegen sind nach der Registrierung möglich."
+    introNote: "Vorbereitetes Beispiel. Eigene Anliegen sind nach der Registrierung möglich.",
+    signedInIntroNote: "Vorbereitetes Beispiel. Eigene Anliegen können Sie in der Anwendung eingeben.",
+    pendingIntroNote: "Vorbereitetes Beispiel."
   }
 };
