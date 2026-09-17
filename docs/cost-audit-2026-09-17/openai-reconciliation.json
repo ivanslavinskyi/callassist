@@ -1,0 +1,125 @@
+{
+  "at": "2026-09-17T19:40:00.109Z",
+  "currency": "USD",
+  "rows": [
+    {
+      "day": "2026-09-01",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-02",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-03",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-04",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-05",
+      "providerMicros": 186196,
+      "localMicros": 186082,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-06",
+      "providerMicros": 117746,
+      "localMicros": 116003,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-07",
+      "providerMicros": 199817,
+      "localMicros": 99186,
+      "missingUsage": 1,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-08",
+      "providerMicros": 300482,
+      "localMicros": 193536,
+      "missingUsage": 1,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-09",
+      "providerMicros": 191025,
+      "localMicros": 154203,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-10",
+      "providerMicros": 2591981,
+      "localMicros": 821738,
+      "missingUsage": 7,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-11",
+      "providerMicros": 620975,
+      "localMicros": 508835,
+      "missingUsage": 4,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-12",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-13",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-14",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-15",
+      "providerMicros": 964586,
+      "localMicros": 310199,
+      "missingUsage": 2,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-16",
+      "providerMicros": 51689,
+      "localMicros": 51689,
+      "missingUsage": 0,
+      "status": "available"
+    },
+    {
+      "day": "2026-09-17",
+      "providerMicros": 0,
+      "localMicros": null,
+      "missingUsage": 0,
+      "status": "available"
+    }
+  ]
+}

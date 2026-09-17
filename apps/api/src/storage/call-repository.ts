@@ -281,7 +281,7 @@ export type RealtimeProviderOperationInput = {
   requestedModel: string;
   clientRequestId: string;
   startedAt: string;
-  result: Omit<CompleteProviderOperationInput, "operationId">;
+  result: Omit<CompleteProviderOperationInput, "operationId"> | null;
 };
 
 export type CompleteProviderOperationInput = {
@@ -462,6 +462,11 @@ export type AdminOperationsAggregateFacts = {
 };
 
 export type AdminProviderUsageBucket = {
+  reportedUsdMicros?: number | null;
+  operationId?: string;
+  startedAt?: string;
+  outcome?: string | null;
+  pricingVersion?: string;
   provider: string;
   operationType: string;
   stage: string;
@@ -502,6 +507,7 @@ export type AdminProviderCostBucket = {
 };
 
 export type AdminOperationsFacts = {
+  billing?: import("@callassist/contracts").AdminOperationsOverview["cost"]["billing"];
   lifecycle?: import("@callassist/contracts").CallLifecycleCounts;
   userGoalFeedback?: { yes: number; partly: number; no: number; notProvided: number };
   createdCalls: number;
@@ -538,12 +544,16 @@ export type AdminOperationsFacts = {
     incurredTo: string;
     operationCount: number;
     usageRecordCount: number;
+    missingUsageOperations?: number;
+    incompleteSessions?: number;
+    firstRecordedAt?: string | null;
     buckets: AdminProviderUsageBucket[];
   };
   providerCosts: {
     incurredFrom: string;
     incurredTo: string;
     recordCount: number;
+    pendingOperations?: number;
     buckets: AdminProviderCostBucket[];
   };
 };

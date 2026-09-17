@@ -134,6 +134,8 @@ describe("admin operations overview", () => {
               operationType: "realtime_response",
               stage: "conversation",
               model: "gpt-realtime-2.1",
+              inputTextTokenSamples: 1,
+              outputTextTokenSamples: 1,
               inputAudioTokens: 500,
               inputAudioTokenSamples: 1,
               outputAudioTokens: 100,
@@ -226,7 +228,8 @@ describe("admin operations overview", () => {
     });
     expect(overview.cost.providerReported).toEqual({
       status: "reported",
-      cohort: "cost_observed_at",
+      cohort: "operation_started_at",
+      pendingOperations: 0,
       from: "2026-08-15T12:00:00.000Z",
       to: "2026-08-22T12:00:00.000Z",
       recordCount: 2,

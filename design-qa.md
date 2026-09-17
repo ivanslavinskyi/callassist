@@ -1,93 +1,102 @@
-# Interactive landing demo — design QA, 2026-09-14
+﻿# Expense inspector — design QA, 2026-09-17
 
 final result: passed
 
-Scope: the reference-inspired demo and four landing product improvements. This is
-local visual/functional acceptance, not release or WCAG certification. The previous
-application-wide record is preserved unchanged in
-[design-qa-original.md](Design/implementation-2026-09-07/design-qa-original.md).
+Post-QA update, 2026-09-17 19:39 UTC: OpenAI configuration is now present and the
+first Costs API sync succeeded. September provider total is $5.224497 versus the
+local $2.441471 usage estimate. The original visual checks below used the earlier
+unconfigured state; they are preserved as dated evidence. Current reconciliation
+data and its $2.783026 gap are recorded in the implementation report.
 
-## Visual truth and comparison
+Scope: the shared expense component, its integration into admin overview, call
+and preparation inspectors, and consistent money/budget wording in beta controls.
+This is local component acceptance, not a production deployment or full accessibility
+certification. The previous landing QA is preserved in
+[design-qa-previous.md](docs/cost-audit-2026-09-17/design-qa-previous.md).
 
-Source: `.codex-remote-attachments/01a09a48-1477-7590-a321-5d5a060cc592/6ddfa790-2999-498c-969c-c30936049234/1-Photo-1.jpg`
-(651 × 1280 px, source CSS size/DPR unknown; window approximately 585 px wide).
-The reference is a visual direction, not a pixel-exact clone.
+## Visual evidence
 
-Implementation: Next application at `http://localhost:3000/en` and `/de`, Landing r8.
-Screenshots: `Design/interactive-demo-2026-09-14/`.
+Selected source: [concept 3](docs/cost-audit-2026-09-17/concept-3.png), 1487 × 1058
+raster pixels. Prompt target: 1440 × 1024 desktop. Source DPR is unknown; it is a
+composition reference, not a pixel-exact contract. The user's subsequent request
+also requires consistency with the existing admin design.
 
-| File | Viewport, dimensions and state |
+Implementation: the actual `AdminExpenseExplorer` TSX and admin CSS rendered in a
+loopback preview with the current Postgres read model. Only Next Image is replaced
+with an ordinary image for this component harness. Production authentication is
+unchanged; the protected admin navigation redirects this browser to login. Full
+page visual testing inside an authenticated admin session is therefore outside this
+pass. API authorization remains covered by the backend test suite.
+
+| Evidence | Viewport / state |
 | --- | --- |
-| `01-hero-en-desktop.png` | 1280 × 1000 CSS px; 1265 × 988 capture; desktop hero. |
-| `03-live-desktop.png` | Same desktop size; paused after first substantive answer. Left hero copy is from the previous publication. |
-| `02-idle-de-mobile.png` | 390 × 1100 CSS px; 375 × 1023 capture; earlier long opening, top of frame cropped by scroll position. |
-| `07-refined-de-mobile.png` | 390 × 1100 CSS px; 375 × 1057 capture; final short opening, window approximately 335 × 844 CSS px. |
-| `05-result-de-mobile.png` | Same mobile viewport; 375 × 1057 capture; generated summary, full result frame and PDF control. |
-| `08-320-light.png` | 320 × 1000 CSS px; 305 × 953 capture; light-theme minimum-width hero. |
-| `09-hero-en-light.png` | 1280 × 1000 CSS px; light-theme final transcript in the hero; native CUA capture confirms the current painted state. |
-| `04-downloaded-pdf.png`, `06-downloaded-pdf-de.png` | Actual downloaded EN/DE A4 PDFs rendered at scale 1.3, 774 × 1095 px. |
+| `implementation-desktop.png` | 1440 × 1056 CSS viewport, DPR approximately 1, viewport capture 1424 × 1045; EN, AI conversation open. Native capture excludes browser/scrollbar pixels and is softened by host scaling. |
+| `implementation-expenses.png` | Component-only crop of that viewport: 1319 × 982; no repaint or design alteration. |
+| `implementation-mobile.png` | 393 × 852 requested CSS viewport, 378 × 2126 full-page capture; Twilio open. |
+| `implementation-dark-call.png` | Same mobile viewport, 378 × 1696 full-page capture; DE, dark, call scope. |
+| `comparison.png` | Source and implementation component normalized to equal 800px widths and displayed together. |
+| `comparison-detail.png` | Focused source/implementation panel crops normalized to equal 660px widths and displayed together. |
 
-CUA omits scrollbar/chrome and may compress captures. No source DPR is assumed:
-window width is compared proportionally (585 source pixels to ~335 CSS pixels).
-Source and implementation were displayed together in the same image-comparison
-input, first for the initial mobile version, then again after shortening. Desktop
-composition was reviewed alongside the source. The mobile frame is the focused
-comparison for type, controls and spacing; these regions are readable without another
-crop. Both actual PDF pages were opened and visually inspected.
+All files are in `docs/cost-audit-2026-09-17/`. The whole composition and focused
+panel comparisons were opened and visually inspected. An earlier full-page desktop
+capture had stitching/scale whitespace; it was replaced with a viewport capture
+before comparison. Scaling is explicit; no source DPR is inferred.
 
-## Findings and iteration history
+The 58/42 list/detail layout, provider headline amounts, six categories, selected
+row, prominent detail amount, three tabs and collapsed technical details match the
+chosen structure. Intentional adaptations: existing Emerald Paper tokens and font
+stack, EN/DE product locales, smaller supporting text to match admin, standard
+Heroicons, card border/radius, fuller coverage warning and reconciliation disclosure.
+The technical pricing version stays in the detail panel. Monetary values reflect
+corrected per-operation rounding and the now-recovered Twilio charge, so they differ
+slightly from the concept. No new raster decoration was needed.
 
-No actionable P0/P1/P2 finding remains within this scope.
+## Interaction and consistency
 
-| Earlier finding | Fix and post-fix evidence |
-| --- | --- |
-| P2: unnecessarily tall DE opening/request. | Shorter CMS title “Worum geht es?”, task and helper copy. `02` → `07`; initial window ~952 → ~844 CSS px. |
-| P2: typing shortened the task box and moved controls. | Hidden measuring span reserves the complete task height; final input-to-plan browser pass. |
-| P2: result could retain the paused badge after manual steps. | Final transcript readiness takes precedence. `05` shows “Endtranskript bereit”. |
-| P2: appointment source pointed to an offered slot rather than booking confirmation. | Source changed to explicit recipient confirmation; fixture test and DE transcript/PDF verify it. |
+Passed in the browser:
 
-Intentional adaptations: emerald colors replace blue/cyan; the actual brand symbol
-replaces decorative browser dots; five workflow stages replace three. No real phone
-number is shown for fictional contacts. Unsupported live translation/rescheduling
-controls from the reference are omitted. The initials tile is an ordinary text UI
-element as in the reference. No custom logo, icon substitute or raster art was added.
-The richer workflow makes the mobile window taller; content remains scrollable.
+- Category selection updates the panel and selected state; all six categories work.
+- Cost, Usage and Requests tabs update content. Arrow keys/Home/End move through
+  tabs. Selected tab has `aria-selected`; disclosure buttons have `aria-expanded`.
+- Click-to-open focuses the detail heading; close and Escape return focus to the
+  category. The initially open panel now also returns focus correctly. Closing
+  expands the summary to full width, without an empty visual panel.
+- Realtime counts 79 responses once; its audio and text components add to $1.363295.
+- Twilio displays account total $5.974220 and call subtotal $4.144600 separately;
+  its request list contains individual charges. Billing breakdown sums to total.
+- Preparation requests, token/formula details and reconciliation expand correctly.
+- Empty period displays unknown money and one empty state, without a false zero,
+  blank side panel or irrelevant coverage notice.
+- Narrow viewport: no horizontal document overflow; panel stacks below categories.
+  EN/DE and dark call detail remain readable. Browser warning/error log is empty.
 
-## Required fidelity surfaces
+Source/integration checks:
 
-| Surface | Assessment |
-| --- | --- |
-| Typography | Existing Geist/fallbacks; 27–29 px demo headings, 14 px task/turn text, smaller secondary labels. Hierarchy, DE wrapping, weights and line spacing reviewed. No essential text is truncated. |
-| Spacing/layout | Single hero demo, responsive minmax grid, 24–28 px outer radius, 20–26 px padding, segmented buttons, recipient tile and task inset. Review/transcript regions scroll independently. No horizontal page overflow at 1280/390/320 px. |
-| Colors/tokens | Paper/emerald/ink treatment works in light and dark themes. Text-to-paper samples: ink 14.1:1, muted 5.8:1, accent 5.0:1; not a full contrast audit. |
-| Images/assets | Actual SVG brand mark and PDF wordmark, sharp vectors. No raster scaling, halos, invented illustration or image approximation. |
-| Copy/content | Supported operations and approved facts only; fictional/no-audio labels. Benefit-led hero, concrete scenarios, short CTA and full credit rules in FAQ. |
+- Overview and call/preparation inspectors reuse the same component through
+  `AdminCostBreakdown`; scope controls period versus record-lifetime labels.
+- Beta uses the shared money formatter for measured costs, occupied/available budget
+  and next-call reserve. Its 24-hour reservation cohort is explicitly distinguished
+  from the service-date overview. Existing beta English-only UI was retained.
+- Missing data, partial coverage and subcent values have the same semantics across
+  expense surfaces. There is no sum of account billing and its call subtotal.
 
-## Functional verification and boundaries
+Fixed during this pass: initial-panel focus return, UTF-8 punctuation, empty state,
+closed-panel width, request sampling per category, Twilio request amounts and
+remaining beta formatting inconsistencies. No actionable P0/P1/P2 visual finding
+remains in this component scope. Screen-reader testing and authenticated full-page
+visual regression are not claimed.
 
-- Completed EN documents and DE appointment/repair in browser. Exercised explicit
-  approval, consent, sequential live replies, final transcript, optional summary,
-  pause/resume/manual step, reset/replay and scenario/language selection.
-- Full plan opened with Enter. Summary source selected and focused the exact
-  transcript turn. Native buttons, focus indicators, labelled regions and polite
-  stage announcements present. Reduced-motion manual mode is implemented; an OS-level
-  reduced-motion/screen-reader acceptance session was not performed.
-- Browser-downloaded EN documents and DE appointment PDF files were opened/rendered.
-  DE was verified in a fresh page after repeated downloads in one in-app tab did not
-  save; its download event was unreliable. All six fixtures also rendered locally
-  with final turns and Unicode intact. No real providers called.
-- Console error/warn checks returned empty arrays. Light/dark and 320/390/1280 px
-  checked. Temporary viewport override is reset at handoff.
-- 198 web tests, 9 final demo tests, 8 content-service tests, copy consistency,
-  lint/typecheck and isolated production build pass.
+## Validation
 
-## Implementation checklist
+API production build, API/web TypeScript checks, ESLint of changed expense/admin
+components, and money formatting unit test passed. Backend full run executed 1037
+tests; one obsolete cohort expectation was corrected and its 49-test related suite
+passed on rerun. Fresh isolated PostgreSQL fixtures were used; existing test DB
+migration checksums were not modified. Local API was restarted after migration and
+latest server changes; readiness reports database ready.
 
-- [x] Four product changes and one interactive hero demo.
-- [x] Shared real plan/summary/PDF presentation with explicit simulated content.
-- [x] EN/DE dictionaries and complete scenarios tied to UiLocale.
-- [x] CMS r8 with preserved history/backups; roadmap updated.
-- [x] Mobile/desktop, controls, source links, PDF and console checks.
-
-Remaining B10 acceptance: screen reader, 200% text zoom and cross-browser checks on
-the deployed release. Audio narration is outside this text-demo scope.
+OpenAI Costs is not configured in this environment. The UI correctly exposes that
+limitation plus 15 paid operations with missing usage and earliest local usage on
+September 5. This is an accounting coverage limitation, not a hidden UI success.
+See [implementation report](docs/cost-audit-2026-09-17/implementation.md) for exact
+amounts, operations, validation scope and deployment instructions.

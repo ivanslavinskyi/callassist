@@ -1,5 +1,6 @@
 "use client";
 
+import { AdminCostBreakdown } from "./admin-cost-breakdown";
 import { AdminGoalAssessments } from "./admin-goal-assessments";
 import { callResultCopy } from "@/lib/call-status";
 import type { CallResult } from "@callassist/contracts";
@@ -17,13 +18,13 @@ import {
   type AdminOperationsCopy
 } from "@/lib/i18n/admin-operations-messages";
 
-const windows: AdminOperationsWindow[] = ["24h", "7d", "30d"];
+const windows: AdminOperationsWindow[] = ["month", "previous_month", "24h", "7d", "30d"];
 
 export function AdminOperationsDashboard() {
   const locale = "en" as const;
   const copy = adminOperationsMessages[locale];
   const [selectedWindow, setSelectedWindow] = useState<AdminOperationsWindow>(
-    "24h"
+    "month"
   );
   const [overview, setOverview] = useState<AdminOperationsOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -176,181 +177,7 @@ export function AdminOperationsDashboard() {
               </div>
             </OperationsSection>
 
-            <OperationsSection title={copy.costTitle}>
-              <div className="admin-cost-heading">
-                <div>
-                  <span className="admin-cost-state" data-state={overview.cost.status}>
-                    {copy.costStatuses[overview.cost.status]}
-                  </span>
-                  <strong>{copy.totalEstimate}: {formatUsd(overview.cost.estimatedUsdMicros, copy.notAvailable)}</strong>
-                </div>
-                <small>{copy.pricingVersion}: {overview.cost.pricingVersion ?? copy.notAvailable}</small>
-              </div>
-              <div className="admin-cost-grid">
-                {Object.entries(overview.cost.components).map(([key, component]) => (
-                  <article key={key}>
-                    <h3>{copy.costComponents[key as keyof typeof copy.costComponents]}</h3>
-                    <dl>
-                      <Fact label={copy.usage} value={formatSeconds(component.usageSeconds)} />
-                      <Fact label={copy.rate} value={formatUsd(component.rateUsdMicrosPerMinute, copy.notAvailable)} />
-                      <Fact label={copy.totalEstimate} value={formatUsd(component.estimatedUsdMicros, copy.notAvailable)} />
-                    </dl>
-                  </article>
-                ))}
-              </div>
-              <p className="admin-cost-caveat">{copy.costCaveat}</p>
-              <div className="admin-cost-heading">
-                <div>
-                  <span
-                    className="admin-cost-state"
-                    data-state={overview.cost.providerUsage.status}
-                  >
-                    {copy.providerUsageStatuses[
-                      overview.cost.providerUsage.status
-                    ]}
-                  </span>
-                  <strong>
-                    {copy.providerUsageTitle}: {formatUsd(
-                      overview.cost.providerUsage.calculatedUsdMicros,
-                      copy.notAvailable
-                    )}
-                  </strong>
-                </div>
-                <small>
-                  {copy.pricingVersion}: {overview.cost.providerUsage.pricingVersion}
-                </small>
-              </div>
-              <dl className="admin-operations-list">
-                <Fact
-                  label={copy.providerOperations}
-                  value={String(overview.cost.providerUsage.operationCount)}
-                />
-                <Fact
-                  label={copy.providerUsageRecords}
-                  value={String(overview.cost.providerUsage.usageRecordCount)}
-                />
-                <Fact
-                  label={copy.unpricedBuckets}
-                  value={String(overview.cost.providerUsage.unpricedBuckets)}
-                />
-              </dl>
-              <div className="admin-cost-grid">
-                {Object.entries(overview.cost.providerUsage.components)
-                  .filter(([, component]) => component.usageRecords > 0)
-                  .map(([key, component]) => (
-                    <article key={key}>
-                      <h3>{copy.providerUsageComponents[
-                        key as keyof typeof copy.providerUsageComponents
-                      ]}</h3>
-                      <dl>
-                        <Fact label={copy.providerUsageRecords} value={String(component.usageRecords)} />
-                        <Fact label={copy.requests} value={String(component.requests)} />
-                        <Fact label={copy.models} value={component.models.join(", ") || copy.notAvailable} />
-                        <Fact
-                          label={copy.textTokens}
-                          value={formatTokenSequence([
-                            [component.inputTextTokens, component.inputTextTokenSamples],
-                            [component.cachedInputTextTokens, component.cachedInputTextTokenSamples],
-                            [component.cacheWriteInputTextTokens, component.cacheWriteInputTextTokenSamples],
-                            [component.outputTextTokens, component.outputTextTokenSamples]
-                          ], locale)}
-                        />
-                        <Fact
-                          label={copy.audioTokens}
-                          value={formatTokenSequence([
-                            [component.inputAudioTokens, component.inputAudioTokenSamples],
-                            [component.cachedInputAudioTokens, component.cachedInputAudioTokenSamples],
-                            [component.outputAudioTokens, component.outputAudioTokenSamples]
-                          ], locale)}
-                        />
-                        <Fact
-                          label={copy.reasoningTokens}
-                          value={formatMeasuredInteger(
-                            component.reasoningOutputTokens,
-                            component.reasoningOutputTokenSamples,
-                            locale
-                          )}
-                        />
-                        <Fact
-                          label={copy.totalTokens}
-                          value={formatMeasuredInteger(
-                            component.totalTokens,
-                            component.totalTokenSamples,
-                            locale
-                          )}
-                        />
-                        <Fact
-                          label={copy.usage}
-                          value={component.durationSamples === 0
-                            ? copy.notAvailable
-                            : formatSeconds(component.durationSeconds)}
-                        />
-                        <Fact
-                          label={copy.billableUsage}
-                          value={component.billableSamples === 0
-                            ? copy.notAvailable
-                            : formatSeconds(component.billableSeconds)}
-                        />
-                        <Fact
-                          label={copy.calculatedCost}
-                          value={formatUsd(component.calculatedUsdMicros, copy.notAvailable)}
-                        />
-                      </dl>
-                    </article>
-                  ))}
-              </div>
-              <p className="admin-cost-caveat">{copy.providerUsageCaveat}</p>
-              <div className="admin-cost-heading">
-                <div>
-                  <span
-                    className="admin-cost-state"
-                    data-state={overview.cost.providerReported.status}
-                  >
-                    {copy.providerReportedStatuses[
-                      overview.cost.providerReported.status
-                    ]}
-                  </span>
-                  <strong>
-                    {copy.providerReportedTitle}: {formatUsd(
-                      overview.cost.providerReported.usdMicros,
-                      copy.notAvailable
-                    )}
-                  </strong>
-                </div>
-              </div>
-              <dl className="admin-operations-list">
-                <Fact
-                  label={copy.providerCostRecords}
-                  value={String(overview.cost.providerReported.recordCount)}
-                />
-              </dl>
-              <div className="admin-cost-grid">
-                {overview.cost.providerReported.amounts.map((amount) => (
-                  <article key={[
-                    amount.provider,
-                    amount.component,
-                    amount.currency
-                  ].join(":")}>
-                    <h3>{amount.provider} · {copy.providerCostComponent}</h3>
-                    <dl>
-                      <Fact
-                        label={copy.providerCostRecords}
-                        value={String(amount.records)}
-                      />
-                      <Fact
-                        label={amount.currency}
-                        value={formatCurrency(
-                          amount.amountMicros,
-                          amount.currency,
-                          locale
-                        )}
-                      />
-                    </dl>
-                  </article>
-                ))}
-              </div>
-              <p className="admin-cost-caveat">{copy.providerReportedCaveat}</p>
-            </OperationsSection>
+            <AdminCostBreakdown cost={overview.cost} locale={locale} scope="period" />
           </div>
         ) : null}
     </main>
@@ -425,56 +252,14 @@ function formatSeconds(value: number) {
   return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
 }
 
-function formatTokenSequence(
-  values: Array<readonly [number, number]>,
-  locale: "en" | "de"
-) {
-  const formatter = new Intl.NumberFormat(locale === "de" ? "de-CH" : "en-GB");
-  return values.map(([value, samples]) =>
-    samples === 0 ? "—" : formatter.format(value)
-  ).join(" / ");
-}
-
-function formatMeasuredInteger(
-  value: number,
-  samples: number,
-  locale: "en" | "de"
-) {
-  if (samples === 0) return "—";
-  return new Intl.NumberFormat(locale === "de" ? "de-CH" : "en-GB")
-    .format(value);
-}
-
 function formatMilliseconds(value: number) {
   return value >= 1_000 ? `${(value / 1_000).toFixed(2)}s` : `${Math.round(value)}ms`;
-}
-
-function formatUsd(value: number | null, fallback: string) {
-  if (value === null) return fallback;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 6
-  }).format(value / 1_000_000);
-}
-
-function formatCurrency(
-  value: number,
-  currency: string,
-  locale: "en" | "de"
-) {
-  return new Intl.NumberFormat(locale === "de" ? "de-CH" : "en-GB", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 6
-  }).format(value / 1_000_000);
 }
 
 function formatDate(value: string, locale: "en" | "de") {
   return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
     dateStyle: "medium",
-    timeStyle: "medium"
+    timeStyle: "medium",
+    timeZone: "UTC"
   }).format(new Date(value));
 }

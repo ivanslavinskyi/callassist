@@ -2905,8 +2905,8 @@ describe("PostgresCallRepository", () => {
       rawPrice: "-0.013700"
     });
     const facts = await repository.getAdminOperationsFacts(
-      new Date(costObservedAt.getTime() - 1_000).toISOString(),
-      new Date(costObservedAt.getTime() + 1_000).toISOString(),
+      "2096-02-01T00:00:00.000Z",
+      "2096-02-02T00:00:00.000Z",
       brief.id
     );
     expect(facts.providerCosts).toMatchObject({

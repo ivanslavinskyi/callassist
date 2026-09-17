@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { callLifecycleCountsSchema } from "./call-lifecycle";
 
-export const adminOperationsWindowSchema = z.enum(["24h", "7d", "30d"]);
+export const adminOperationsWindowSchema = z.enum(["24h", "7d", "30d", "month", "previous_month"]);
 export type AdminOperationsWindow = z.infer<
   typeof adminOperationsWindowSchema
 >;
@@ -36,6 +36,7 @@ const costComponentSchema = z.strictObject({
 });
 
 const providerUsageCostComponentSchema = z.strictObject({
+  incompleteRecords: countSchema.default(0),
   usageRecords: countSchema,
   requests: countSchema,
   models: z.array(z.string().trim().min(1).max(160)).max(50),
@@ -114,6 +115,14 @@ export const adminOperationsOverviewSchema = z.strictObject({
     })
   }),
   cost: z.strictObject({
+    billing: z.array(z.strictObject({
+      provider: z.enum(["openai", "twilio"]), scope: z.string().nullable(),
+      status: z.enum(["not_configured", "unsupported_window", "awaiting_sync", "partial", "stale", "available"]),
+      from: z.iso.datetime(), to: z.iso.datetime(), currency: z.string(), totalMicros: z.number().int().safe().nullable(),
+      observedAt: z.iso.datetime().nullable(), days: countSchema, expectedDays: countSchema,
+      source: z.enum(["usage_api", "costs_api", "verified_import"]).nullable(),
+      components: z.array(z.strictObject({ key: z.string(), amountMicros: z.number().int().safe() }))
+    })).default([]),
     status: z.enum(["unavailable", "partial", "estimated"]),
     currency: z.literal("USD"),
     pricingVersion: z.string().trim().min(1).max(80).nullable(),
@@ -125,18 +134,29 @@ export const adminOperationsOverviewSchema = z.strictObject({
     }),
     providerUsage: z.strictObject({
       status: z.enum(["unavailable", "partial", "calculated"]),
-      cohort: z.literal("usage_observed_at"),
+      cohort: z.literal("operation_started_at"),
       from: z.iso.datetime(),
       to: z.iso.datetime(),
       pricingVersion: z.string().trim().min(1).max(80),
       operationCount: countSchema,
       usageRecordCount: countSchema,
       unpricedBuckets: countSchema,
+      missingUsageOperations: countSchema.default(0),
+      incompleteSessions: countSchema.default(0),
+      firstRecordedAt: z.iso.datetime().nullable().default(null),
+      pricingVersions: z.array(z.string()).default([]),
+      records: z.array(z.strictObject({
+        id: z.uuid(), startedAt: z.iso.datetime(), operationType: z.string(), stage: z.string(), model: z.string(),
+        costBasis: z.enum(["usage_estimate", "provider_reported"]),
+        outcome: z.string().nullable(), calculatedUsdMicros: countSchema.nullable(),
+        missingMetrics: z.array(z.string())
+      })).max(600).default([]),
       calculatedUsdMicros: countSchema.nullable(),
       components: z.strictObject({
         briefCompilation: providerUsageCostComponentSchema,
         textTranslation: providerUsageCostComponentSchema.optional(),
         callSummary: providerUsageCostComponentSchema.optional(),
+        realtime: providerUsageCostComponentSchema,
         realtimeText: providerUsageCostComponentSchema,
         realtimeAudio: providerUsageCostComponentSchema,
         realtimeTranscription: providerUsageCostComponentSchema,
@@ -145,8 +165,9 @@ export const adminOperationsOverviewSchema = z.strictObject({
       })
     }),
     providerReported: z.strictObject({
-      status: z.enum(["unavailable", "reported"]),
-      cohort: z.literal("cost_observed_at"),
+      status: z.enum(["unavailable", "partial", "reported"]),
+      pendingOperations: countSchema.default(0),
+      cohort: z.literal("operation_started_at"),
       from: z.iso.datetime(),
       to: z.iso.datetime(),
       recordCount: countSchema,
@@ -386,6 +407,10 @@ export function adminOperationsWindowBounds(
   kind: AdminOperationsWindow,
   now: Date
 ) {
+  if (kind === "month" || kind === "previous_month") {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (kind === "previous_month" ? 1 : 0), 1));
+    return { from: start.toISOString(), to: kind === "month" ? now.toISOString() : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString() };
+  }
   const durationMs = kind === "24h"
     ? 24 * 60 * 60 * 1_000
     : kind === "7d"

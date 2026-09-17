@@ -91,7 +91,7 @@ function withAvailability(
 export function buildAdminCostOverview(
   facts: Pick<
     AdminOperationsFacts,
-    "usageSeconds" | "providerUsage" | "providerCosts"
+    "usageSeconds" | "providerUsage" | "providerCosts" | "billing"
   >,
   policy: OperationalCostPolicy
 ) {
@@ -129,6 +129,7 @@ export function buildAdminCostOverview(
       ? null
       : estimates.reduce((total, value) => total + value, 0),
     components,
+    billing: facts.billing ?? [],
     providerUsage: buildProviderUsageCost(facts.providerUsage),
     providerReported: buildProviderReportedCost(facts.providerCosts)
   };
@@ -142,8 +143,9 @@ function buildProviderReportedCost(
   return {
     status: costs.recordCount === 0
       ? "unavailable" as const
-      : "reported" as const,
-    cohort: "cost_observed_at" as const,
+      : (costs.pendingOperations ?? 0) > 0 ? "partial" as const : "reported" as const,
+    pendingOperations: costs.pendingOperations ?? 0,
+    cohort: "operation_started_at" as const,
     from: costs.incurredFrom,
     to: costs.incurredTo,
     recordCount: costs.recordCount,
@@ -155,6 +157,7 @@ function buildProviderReportedCost(
 }
 
 type ProviderUsageCostComponent = {
+  incompleteRecords: number;
   usageRecords: number;
   requests: number;
   models: string[];
@@ -190,29 +193,42 @@ function buildProviderUsageCost(
     briefCompilation: emptyProviderUsageCostComponent(),
     textTranslation: emptyProviderUsageCostComponent(),
     callSummary: emptyProviderUsageCostComponent(),
+    realtime: emptyProviderUsageCostComponent(),
     realtimeText: emptyProviderUsageCostComponent(),
     realtimeAudio: emptyProviderUsageCostComponent(),
     realtimeTranscription: emptyProviderUsageCostComponent(),
     postCallTranscription: emptyProviderUsageCostComponent(),
     telephony: emptyProviderUsageCostComponent()
   };
+  const records: AdminOperationsOverview["cost"]["providerUsage"]["records"] = [];
+  const versions = new Set<string>();
   let relevantBuckets = 0;
   let unpricedBuckets = 0;
   for (const bucket of usage.buckets) {
     const destinations = providerUsageDestinations(bucket);
     if (destinations.length === 0) continue;
-    relevantBuckets += 1;
+    if (bucket.provider === "openai") relevantBuckets += 1;
     const cost = calculateProviderUsageCost(bucket);
-    if (
+    const incomplete = (
       !cost.matched ||
       cost.calculatedUsdMicros === null ||
       cost.unpricedMetrics.length > 0
-    ) {
-      unpricedBuckets += 1;
+    );
+    if (bucket.provider === "openai") {
+      versions.add(cost.pricingVersion);
+      if (incomplete) unpricedBuckets += bucket.usageRecords;
     }
+    if (bucket.operationId && bucket.startedAt) records.push({
+      id: bucket.operationId, startedAt: bucket.startedAt, operationType: bucket.operationType,
+      stage: bucket.stage, model: bucket.model, outcome: bucket.outcome ?? null,
+      costBasis: bucket.provider === "twilio" ? "provider_reported" : "usage_estimate",
+      calculatedUsdMicros: bucket.provider === "twilio" ? bucket.reportedUsdMicros ?? null : cost.calculatedUsdMicros,
+      missingMetrics: bucket.provider === "twilio" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics
+    });
     for (const destination of destinations) {
       const component = components[destination.name];
       addProviderUsage(component, bucket);
+      if (incomplete && bucket.provider === "openai") component.incompleteRecords += bucket.usageRecords;
       const amount = destination.cost(cost);
       if (amount !== null) {
         component.calculatedUsdMicros =
@@ -220,26 +236,38 @@ function buildProviderUsageCost(
       }
     }
   }
+  const recentCounts = new Map<string, number>();
   for (const component of Object.values(components)) {
     component.models.sort();
     component.models = component.models.slice(0, 50);
   }
-  const amounts = Object.values(components)
+  const amounts = Object.entries(components)
+    .filter(([key]) => !["realtimeText", "realtimeAudio"].includes(key))
+    .map(([, component]) => component)
     .map(({ calculatedUsdMicros }) => calculatedUsdMicros)
     .filter((value): value is number => value !== null);
   return {
-    status: relevantBuckets === 0
+    status: relevantBuckets === 0 && (usage.missingUsageOperations ?? 0) === 0 && (usage.incompleteSessions ?? 0) === 0
       ? "unavailable" as const
-      : unpricedBuckets > 0
+      : unpricedBuckets > 0 || (usage.missingUsageOperations ?? 0) > 0 || (usage.incompleteSessions ?? 0) > 0
         ? "partial" as const
         : "calculated" as const,
-    cohort: "usage_observed_at" as const,
+    cohort: "operation_started_at" as const,
     from: usage.incurredFrom,
     to: usage.incurredTo,
     pricingVersion: openAIPublicPricingVersion,
     operationCount: usage.operationCount,
     usageRecordCount: usage.usageRecordCount,
     unpricedBuckets,
+    missingUsageOperations: usage.missingUsageOperations ?? 0,
+    incompleteSessions: usage.incompleteSessions ?? 0,
+    firstRecordedAt: usage.firstRecordedAt ?? null,
+    pricingVersions: [...versions].sort(),
+    records: records.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.id.localeCompare(b.id)).filter(record => {
+      const count = (recentCounts.get(record.operationType) ?? 0) + 1;
+      recentCounts.set(record.operationType, count);
+      return count <= 100;
+    }),
     calculatedUsdMicros: amounts.length === 0
       ? null
       : amounts.reduce((total, amount) => total + amount, 0),
@@ -267,10 +295,10 @@ function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
   }
   if (bucket.operationType === "realtime_response") {
     const destinations: Array<{
-      name: "realtimeText" | "realtimeAudio";
+      name: "realtime" | "realtimeText" | "realtimeAudio";
       cost: (value: ReturnType<typeof calculateProviderUsageCost>) =>
         number | null;
-    }> = [];
+    }> = [{ name: "realtime", cost: value => value.calculatedUsdMicros }];
     if (
       bucket.inputTextTokenSamples > 0 ||
       bucket.cachedInputTextTokenSamples > 0 ||
@@ -291,7 +319,7 @@ function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
         cost: (value) => value.audioUsdMicros
       });
     }
-    if (destinations.length === 0) {
+    if (destinations.length === 1) {
       destinations.push({
         name: "realtimeText",
         cost: (value) => value.calculatedUsdMicros
@@ -315,6 +343,7 @@ function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
 
 function emptyProviderUsageCostComponent(): ProviderUsageCostComponent {
   return {
+    incompleteRecords: 0,
     usageRecords: 0,
     requests: 0,
     models: [],

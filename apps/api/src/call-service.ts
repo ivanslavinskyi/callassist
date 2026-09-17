@@ -1574,7 +1574,10 @@ export class CallService {
         sequenceNumber: null
       });
       if (!provider.providerReportedCost) {
-        throw new DurableJobExecutionError("PROVIDER_CALL_COST_PENDING");
+        throw new DurableJobExecutionError("PROVIDER_CALL_COST_PENDING", {
+          // Twenty attempts span several days, rather than exhausting in minutes.
+          retryAfterMs: job.attemptCount <= 2 ? 15 * 60_000 : 6 * 60 * 60_000
+        });
       }
       await this.repository.recordTelephonyProviderCost({
         id: randomUUID(),

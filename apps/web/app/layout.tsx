@@ -5,6 +5,7 @@ import { isUiLocale } from "@/lib/i18n/messages";
 import { siteOrigin } from "@/lib/site-config";
 import { CallDraftProvider } from "@/components/call-draft-provider";
 import "./globals.css";
+import "./admin-expenses.css";
 import "./emerald-paper.css";
 import "./language-workflow.css";
 

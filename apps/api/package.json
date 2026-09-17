@@ -11,6 +11,8 @@
     "build": "tsup && node scripts/copy-migrations.mjs",
     "calls:disable": "tsx src/db/set-outbound-calls.ts disable",
     "calls:enable": "tsx src/db/set-outbound-calls.ts enable",
+    "billing:sync:prod": "node --use-system-ca dist/db/sync-provider-billing.js",
+    "billing:sync": "node --use-system-ca --import tsx src/db/sync-provider-billing.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate:check": "tsx src/db/migrate.ts --check",
     "db:backfill:call-plans": "tsx src/db/backfill-call-compilations.ts",

@@ -89,7 +89,7 @@ export const durableJobMaxAttempts: Record<DurableJobType, number> = {
   final_transcription: 3,
   recording_retention: 5,
   provider_call_reconciliation: 5,
-  provider_call_cost_reconciliation: 10,
+  provider_call_cost_reconciliation: 20,
   provider_recording_reconciliation: 5
 };
 
@@ -108,7 +108,7 @@ export class DurableJobExecutionError extends Error {
   ) {
     super(code, options);
     this.name = "DurableJobExecutionError";
-    this.retryAfterMs = Number.isFinite(options?.retryAfterMs) ? Math.min(900_000, Math.max(0, options!.retryAfterMs!)) : 0;
+    this.retryAfterMs = Number.isFinite(options?.retryAfterMs) ? Math.min(24 * 60 * 60_000, Math.max(0, options!.retryAfterMs!)) : 0;
     this.retryable =
       options?.retryable ?? code !== "DURABLE_JOB_TARGET_INVALID";
   }

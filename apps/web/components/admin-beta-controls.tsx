@@ -1,4 +1,5 @@
 "use client";
+import { formatAdminMoney } from "@/lib/admin-costs";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { BetaControlsView, BetaSettings, UserRole } from "@callassist/contracts";
 import { ApiError, getBetaControls, updateBetaControls, createBetaInvitation, revokeBetaInvitation } from "@/lib/api";
@@ -51,16 +52,17 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
     {error && <p role="alert" className="form-error">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {view && <>
+      <p>Budget accounting follows reservations created in the last 24 hours. Expenses in the service overview follow service dates. Account-wide billing also includes costs outside these reservations.</p>
       <dl className="admin-operations-list">
         <div><dt>Public intake</dt><dd>{view.publicAccounts} / {view.settings.publicAccountLimit}</dd></div>
         <div><dt>Invited accounts</dt><dd>{view.invitedAccounts} (additional)</dd></div>
         <div><dt>Active calls</dt><dd>{view.activeCalls} / {view.settings.maxConcurrentCalls}</dd></div>
-        <div><dt>Provider-reported costs / 24 hours</dt><dd>{(view.reportedCostMicros / 1e6).toFixed(3)} USD</dd></div>
-        <div><dt>Cost calculated from usage / 24 hours</dt><dd>{(view.usageCostMicros / 1e6).toFixed(3)} USD</dd></div>
-        <div><dt>Pending reserves and allowances</dt><dd>{(view.pendingReserveMicros / 1e6).toFixed(3)} USD ({view.unresolvedReservations} requests)</dd></div>
-        <div><dt>Total budget occupied / 24 hours</dt><dd>{(view.reservedMicros / 1e6).toFixed(3)} USD</dd></div>
-        <div><dt>Available for new requests</dt><dd>{view.settings.rollingDayBudgetMicros === null ? "Set a budget" : `${(Math.max(0, view.settings.rollingDayBudgetMicros - view.reservedMicros) / 1e6).toFixed(3)} USD`}</dd></div>
-        <div><dt>Reserve for the next maximum-duration call</dt><dd>{(Math.ceil(view.settings.maxDurationSeconds / 60) * view.settings.callMinuteReserveMicros / 1e6).toFixed(2)} USD</dd></div>
+        <div><dt>Twilio call charges (budget cohort)</dt><dd>{formatAdminMoney(view.reportedCostMicros)}</dd></div>
+        <div><dt>OpenAI usage estimate (budget cohort)</dt><dd>{formatAdminMoney(view.usageCostMicros)}</dd></div>
+        <div><dt>Pending reserves and allowances (not expenses)</dt><dd>{formatAdminMoney(view.pendingReserveMicros)} ({view.unresolvedReservations} requests)</dd></div>
+        <div><dt>Budget occupied in the last 24 hours</dt><dd>{formatAdminMoney(view.reservedMicros)}</dd></div>
+        <div><dt>Available for new requests</dt><dd>{view.settings.rollingDayBudgetMicros === null ? "Set a budget" : formatAdminMoney(Math.max(0, view.settings.rollingDayBudgetMicros - view.reservedMicros))}</dd></div>
+        <div><dt>Reserve for the next maximum-duration call</dt><dd>{formatAdminMoney(Math.ceil(view.settings.maxDurationSeconds / 60) * view.settings.callMinuteReserveMicros)}</dd></div>
         <div><dt>Budget state</dt><dd role="status">{view.budgetState}</dd></div>
       </dl>
       {["unconfigured", "exhausted", "warning", "paused"].includes(view.budgetState) && <p role="alert">{view.budgetState === "unconfigured" ? "Set a budget before sending real messages or making paid requests." :

@@ -284,6 +284,7 @@ function twilioErrorStatus(error: unknown) {
 }
 
 function optionalNonNegativeInteger(value: unknown) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return undefined;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }

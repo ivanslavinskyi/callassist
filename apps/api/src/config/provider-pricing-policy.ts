@@ -83,6 +83,11 @@ const openAIPublicRateCards: ProviderRateCard[] = [
 export function calculateProviderUsageCost(
   usage: AdminProviderUsageBucket
 ): ProviderUsageCost {
+  // The persisted version selects an immutable snapshot. Never change old cards
+  // when adding new prices; register a new snapshot and change the insert default.
+  if (usage.pricingVersion && usage.pricingVersion !== openAIPublicPricingVersion) {
+    return { ...unmatchedCost(), pricingVersion: usage.pricingVersion, unpricedMetrics: ["pricing_version"] };
+  }
   const card = openAIPublicRateCards.find((candidate) =>
     candidate.provider === usage.provider && candidate.model.test(usage.model)
   );
@@ -106,11 +111,26 @@ export function calculateProviderUsageCost(
       textUsdMicros: null,
       audioUsdMicros: null,
       durationUsdMicros,
-      unpricedMetrics: []
+      unpricedMetrics: usage.durationSamples < usage.usageRecords ? ["duration_seconds"] : []
     };
   }
 
   const unpricedMetrics: string[] = [];
+  const required = [
+    [card.rates.inputTextUsdMicrosPerMillion, usage.inputTextTokenSamples, "input_text_tokens"],
+    [card.rates.outputTextUsdMicrosPerMillion, usage.outputTextTokenSamples, "output_text_tokens"],
+    [card.rates.inputAudioUsdMicrosPerMillion, usage.inputAudioTokenSamples, "input_audio_tokens"],
+    [card.rates.outputAudioUsdMicrosPerMillion, usage.outputAudioTokenSamples, "output_audio_tokens"]
+  ] as const;
+  for (const [rate, samples, metric] of required) {
+    if (rate !== undefined && samples < usage.usageRecords) unpricedMetrics.push(metric);
+  }
+  if (usage.cachedInputTextTokens + usage.cacheWriteInputTextTokens > usage.inputTextTokens ||
+      usage.cachedInputAudioTokens > usage.inputAudioTokens) unpricedMetrics.push("invalid_cached_tokens");
+  if (usage.totalTokenSamples === usage.usageRecords && usage.totalTokens !==
+      usage.inputTextTokens + usage.inputAudioTokens + usage.outputTextTokens + usage.outputAudioTokens) {
+    unpricedMetrics.push("inconsistent_total_tokens");
+  }
   const textCosts = [
     inputCost({
       total: usage.inputTextTokens,

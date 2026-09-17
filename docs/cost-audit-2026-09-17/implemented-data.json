@@ -1,0 +1,3487 @@
+{
+  "summary": {
+    "at": "2026-09-17T19:39:24.008Z",
+    "activeCalls": 0,
+    "openaiMicros": 2441471,
+    "twilioCallMicros": 4144600,
+    "pendingPrices": 0,
+    "missingUsage": 15,
+    "incompleteSessions": 0,
+    "unpriced": 0,
+    "realtimeResponses": 79,
+    "billing": [
+      {
+        "provider": "openai",
+        "from": "2026-09-01T00:00:00.000Z",
+        "to": "2026-09-17T19:39:24.008Z",
+        "currency": "USD",
+        "totalMicros": 5224497,
+        "observedAt": "2026-09-17T19:39:03.209Z",
+        "days": 17,
+        "expectedDays": 17,
+        "source": "costs_api",
+        "components": [
+          {
+            "key": "gpt-4o-transcribe audio, input",
+            "amountMicros": 36024
+          },
+          {
+            "key": "gpt-4o-transcribe text, input",
+            "amountMicros": 125990
+          },
+          {
+            "key": "gpt-4o-transcribe text, output",
+            "amountMicros": 19740
+          },
+          {
+            "key": "gpt-5.6-sol, cache writes",
+            "amountMicros": 576470
+          },
+          {
+            "key": "gpt-5.6-sol, cached input",
+            "amountMicros": 52606
+          },
+          {
+            "key": "gpt-5.6-sol, input",
+            "amountMicros": 40496
+          },
+          {
+            "key": "gpt-5.6-sol, output",
+            "amountMicros": 2972020
+          },
+          {
+            "key": "gpt-realtime-2.1 audio, cached input",
+            "amountMicros": 1203
+          },
+          {
+            "key": "gpt-realtime-2.1 audio, input",
+            "amountMicros": 109664
+          },
+          {
+            "key": "gpt-realtime-2.1 audio, output",
+            "amountMicros": 851136
+          },
+          {
+            "key": "gpt-realtime-2.1 image, cached input",
+            "amountMicros": 0
+          },
+          {
+            "key": "gpt-realtime-2.1 image, input",
+            "amountMicros": 0
+          },
+          {
+            "key": "gpt-realtime-2.1 text, cached input",
+            "amountMicros": 31668
+          },
+          {
+            "key": "gpt-realtime-2.1 text, input",
+            "amountMicros": 197424
+          },
+          {
+            "key": "gpt-realtime-2.1 text, output",
+            "amountMicros": 164976
+          },
+          {
+            "key": "gpt-realtime-whisper",
+            "amountMicros": 45080
+          },
+          {
+            "key": "moderations",
+            "amountMicros": 0
+          }
+        ],
+        "status": "available"
+      },
+      {
+        "provider": "twilio",
+        "from": "2026-09-01T00:00:00.000Z",
+        "to": "2026-09-17T19:39:24.008Z",
+        "currency": "USD",
+        "totalMicros": 5974220,
+        "observedAt": "2026-09-17T19:39:01.611Z",
+        "days": 17,
+        "expectedDays": 17,
+        "source": "usage_api",
+        "components": [
+          {
+            "key": "calls-outbound",
+            "amountMicros": 4144600
+          },
+          {
+            "key": "calls-inbound",
+            "amountMicros": 0
+          },
+          {
+            "key": "calls-media-stream-minutes",
+            "amountMicros": 96800
+          },
+          {
+            "key": "sms",
+            "amountMicros": 380600
+          },
+          {
+            "key": "authy-phone-verifications",
+            "amountMicros": 200000
+          },
+          {
+            "key": "phonenumbers",
+            "amountMicros": 1150000
+          },
+          {
+            "key": "recordingstorage",
+            "amountMicros": 2220
+          }
+        ],
+        "status": "available"
+      }
+    ]
+  },
+  "cost": {
+    "status": "unavailable",
+    "currency": "USD",
+    "pricingVersion": null,
+    "estimatedUsdMicros": null,
+    "components": {
+      "telephony": {
+        "usageSeconds": 983,
+        "rateUsdMicrosPerMinute": null,
+        "estimatedUsdMicros": null
+      },
+      "realtime": {
+        "usageSeconds": 950,
+        "rateUsdMicrosPerMinute": null,
+        "estimatedUsdMicros": null
+      },
+      "transcription": {
+        "usageSeconds": 741,
+        "rateUsdMicrosPerMinute": null,
+        "estimatedUsdMicros": null
+      }
+    },
+    "billing": [
+      {
+        "provider": "openai",
+        "scope": "[configured provider scope]",
+        "from": "2026-09-01T00:00:00.000Z",
+        "to": "2026-09-17T19:39:24.008Z",
+        "currency": "USD",
+        "totalMicros": 5224497,
+        "observedAt": "2026-09-17T19:39:03.209Z",
+        "days": 17,
+        "expectedDays": 17,
+        "source": "costs_api",
+        "components": [
+          {
+            "key": "gpt-4o-transcribe audio, input",
+            "amountMicros": 36024
+          },
+          {
+            "key": "gpt-4o-transcribe text, input",
+            "amountMicros": 125990
+          },
+          {
+            "key": "gpt-4o-transcribe text, output",
+            "amountMicros": 19740
+          },
+          {
+            "key": "gpt-5.6-sol, cache writes",
+            "amountMicros": 576470
+          },
+          {
+            "key": "gpt-5.6-sol, cached input",
+            "amountMicros": 52606
+          },
+          {
+            "key": "gpt-5.6-sol, input",
+            "amountMicros": 40496
+          },
+          {
+            "key": "gpt-5.6-sol, output",
+            "amountMicros": 2972020
+          },
+          {
+            "key": "gpt-realtime-2.1 audio, cached input",
+            "amountMicros": 1203
+          },
+          {
+            "key": "gpt-realtime-2.1 audio, input",
+            "amountMicros": 109664
+          },
+          {
+            "key": "gpt-realtime-2.1 audio, output",
+            "amountMicros": 851136
+          },
+          {
+            "key": "gpt-realtime-2.1 image, cached input",
+            "amountMicros": 0
+          },
+          {
+            "key": "gpt-realtime-2.1 image, input",
+            "amountMicros": 0
+          },
+          {
+            "key": "gpt-realtime-2.1 text, cached input",
+            "amountMicros": 31668
+          },
+          {
+            "key": "gpt-realtime-2.1 text, input",
+            "amountMicros": 197424
+          },
+          {
+            "key": "gpt-realtime-2.1 text, output",
+            "amountMicros": 164976
+          },
+          {
+            "key": "gpt-realtime-whisper",
+            "amountMicros": 45080
+          },
+          {
+            "key": "moderations",
+            "amountMicros": 0
+          }
+        ],
+        "status": "available"
+      },
+      {
+        "provider": "twilio",
+        "scope": "[configured provider scope]",
+        "from": "2026-09-01T00:00:00.000Z",
+        "to": "2026-09-17T19:39:24.008Z",
+        "currency": "USD",
+        "totalMicros": 5974220,
+        "observedAt": "2026-09-17T19:39:01.611Z",
+        "days": 17,
+        "expectedDays": 17,
+        "source": "usage_api",
+        "components": [
+          {
+            "key": "calls-outbound",
+            "amountMicros": 4144600
+          },
+          {
+            "key": "calls-inbound",
+            "amountMicros": 0
+          },
+          {
+            "key": "calls-media-stream-minutes",
+            "amountMicros": 96800
+          },
+          {
+            "key": "sms",
+            "amountMicros": 380600
+          },
+          {
+            "key": "authy-phone-verifications",
+            "amountMicros": 200000
+          },
+          {
+            "key": "phonenumbers",
+            "amountMicros": 1150000
+          },
+          {
+            "key": "recordingstorage",
+            "amountMicros": 2220
+          }
+        ],
+        "status": "available"
+      }
+    ],
+    "providerUsage": {
+      "status": "partial",
+      "cohort": "operation_started_at",
+      "from": "2026-09-01T00:00:00.000Z",
+      "to": "2026-09-17T19:39:24.008Z",
+      "pricingVersion": "openai-public-2026-09-15",
+      "operationCount": 362,
+      "usageRecordCount": 305,
+      "unpricedBuckets": 0,
+      "missingUsageOperations": 15,
+      "incompleteSessions": 0,
+      "firstRecordedAt": "2026-09-05T12:21:30.474Z",
+      "pricingVersions": [
+        "openai-public-2026-09-15"
+      ],
+      "records": [
+        {
+          "id": "2817da8e-1b5c-8a14-b3b0-faba4fae6ce1",
+          "startedAt": "2026-09-16T16:27:01.086Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16100,
+          "missingMetrics": []
+        },
+        {
+          "id": "a38d1801-cf85-4dff-a919-00fcef54ce65",
+          "startedAt": "2026-09-16T16:26:49.038Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "70199e0a-b634-4085-9651-78ab08a0a99d",
+          "startedAt": "2026-09-16T16:26:27.547Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 13852,
+          "missingMetrics": []
+        },
+        {
+          "id": "23bbf753-f779-4444-b641-a125e063e85b",
+          "startedAt": "2026-09-16T16:26:20.667Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 21737,
+          "missingMetrics": []
+        },
+        {
+          "id": "dbc043fe-5d7e-4834-bc65-fe68c7497050",
+          "startedAt": "2026-09-15T16:50:53.417Z",
+          "operationType": "call_summary",
+          "stage": "call_summary.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 14490,
+          "missingMetrics": []
+        },
+        {
+          "id": "7217b50d-d3b6-87cb-8c63-7809986a7677",
+          "startedAt": "2026-09-15T14:19:28.887Z",
+          "operationType": "realtime_response",
+          "stage": "consent_clarification",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9796,
+          "missingMetrics": []
+        },
+        {
+          "id": "17dfd591-b3f5-80b2-aa6c-e70fbe921e8a",
+          "startedAt": "2026-09-15T14:19:05.341Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 15740,
+          "missingMetrics": []
+        },
+        {
+          "id": "4c3bc5a0-bde4-4b35-8e5e-736c877ebcec",
+          "startedAt": "2026-09-15T14:18:47.530Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "e6eaf873-3551-4d89-9b05-b19a9e7292b9",
+          "startedAt": "2026-09-15T13:31:57.876Z",
+          "operationType": "call_summary",
+          "stage": "call_summary.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 14822,
+          "missingMetrics": []
+        },
+        {
+          "id": "4a5f4028-3815-43c6-9d66-1a56fa3ab137",
+          "startedAt": "2026-09-15T13:31:56.910Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 950,
+          "missingMetrics": []
+        },
+        {
+          "id": "4399f4ee-a8fb-40fd-8df5-bb552717ab10",
+          "startedAt": "2026-09-15T13:31:56.905Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 943,
+          "missingMetrics": []
+        },
+        {
+          "id": "6ec43da8-b4d8-4b14-b929-b3be7f7b0b7f",
+          "startedAt": "2026-09-15T13:31:55.650Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1245,
+          "missingMetrics": []
+        },
+        {
+          "id": "baefb662-86b1-44f3-99a0-03ff77904c3d",
+          "startedAt": "2026-09-15T13:31:55.645Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 845,
+          "missingMetrics": []
+        },
+        {
+          "id": "9d82fabf-e341-48d0-97a9-bf5e6022ce7b",
+          "startedAt": "2026-09-15T13:31:55.640Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 908,
+          "missingMetrics": []
+        },
+        {
+          "id": "e25f6b0f-e7c5-8f56-8613-9621765681ac",
+          "startedAt": "2026-09-15T13:31:45.994Z",
+          "operationType": "realtime_response",
+          "stage": "credit_qualification",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2304,
+          "missingMetrics": []
+        },
+        {
+          "id": "a4dcf0e1-835f-84a8-a964-cbd302ce9e11",
+          "startedAt": "2026-09-15T13:31:45.913Z",
+          "operationType": "realtime_response",
+          "stage": "farewell",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9832,
+          "missingMetrics": []
+        },
+        {
+          "id": "20624a75-872c-8ab1-bd34-93684270a432",
+          "startedAt": "2026-09-15T13:31:45.712Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1417,
+          "missingMetrics": []
+        },
+        {
+          "id": "fbb4c9ce-02d8-8b49-a569-6f8c26d94296",
+          "startedAt": "2026-09-15T13:31:45.214Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 3320,
+          "missingMetrics": []
+        },
+        {
+          "id": "e6192e64-054f-8b0a-b898-61bfb30ef249",
+          "startedAt": "2026-09-15T13:31:33.267Z",
+          "operationType": "realtime_response",
+          "stage": "credit_qualification",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2184,
+          "missingMetrics": []
+        },
+        {
+          "id": "b76c0837-845b-8f57-b152-cece6feef0ae",
+          "startedAt": "2026-09-15T13:31:33.040Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "bd35b5ae-7e13-87d1-8e2b-a27ccbb55f33",
+          "startedAt": "2026-09-15T13:31:32.476Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 12320,
+          "missingMetrics": []
+        },
+        {
+          "id": "7ecccb05-b08c-8882-be00-c325c8085552",
+          "startedAt": "2026-09-15T13:31:15.750Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 14960,
+          "missingMetrics": []
+        },
+        {
+          "id": "8904c9ef-4168-878d-b16a-78ef722b398c",
+          "startedAt": "2026-09-15T13:31:15.231Z",
+          "operationType": "transcription",
+          "stage": "consent_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "b33c9a6a-0415-8bce-973f-150917967064",
+          "startedAt": "2026-09-15T13:31:00.239Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16764,
+          "missingMetrics": []
+        },
+        {
+          "id": "0224104e-a491-49c1-8e4e-080f0374601f",
+          "startedAt": "2026-09-15T13:30:37.256Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "0120010a-0e96-492a-ae60-f2ae828a1db4",
+          "startedAt": "2026-09-15T13:27:14.976Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10457,
+          "missingMetrics": []
+        },
+        {
+          "id": "bf2598fe-66e5-48d9-b2e1-9f395beda420",
+          "startedAt": "2026-09-15T13:27:06.198Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 21777,
+          "missingMetrics": []
+        },
+        {
+          "id": "f065809b-c430-4c70-82dd-06516ca0dbb2",
+          "startedAt": "2026-09-15T11:07:46.916Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 13267,
+          "missingMetrics": []
+        },
+        {
+          "id": "d37743c2-8248-4752-98e3-ce9c5a3584cc",
+          "startedAt": "2026-09-15T10:35:00.470Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 26227,
+          "missingMetrics": []
+        },
+        {
+          "id": "00e66142-e32f-4d1f-9904-67e97da39051",
+          "startedAt": "2026-09-15T10:34:19.532Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 114497,
+          "missingMetrics": []
+        },
+        {
+          "id": "3b15fa95-6e12-4251-abe8-f0a50463e2f6",
+          "startedAt": "2026-09-11T14:48:34.130Z",
+          "operationType": "call_summary",
+          "stage": "call_summary.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 45454,
+          "missingMetrics": []
+        },
+        {
+          "id": "3405b0c8-2ef5-405d-b427-0fb4d197bd50",
+          "startedAt": "2026-09-11T08:33:17.979Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1863,
+          "missingMetrics": []
+        },
+        {
+          "id": "dbea3e92-4796-470d-a63c-804d33428fba",
+          "startedAt": "2026-09-11T08:33:17.945Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1698,
+          "missingMetrics": []
+        },
+        {
+          "id": "b21e8218-224f-42c1-80f8-f5a6bd952fe4",
+          "startedAt": "2026-09-11T08:33:17.800Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1841,
+          "missingMetrics": []
+        },
+        {
+          "id": "28cb89e9-d841-4fa2-a161-1056103a64bd",
+          "startedAt": "2026-09-11T08:33:17.146Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2018,
+          "missingMetrics": []
+        },
+        {
+          "id": "e028b31d-d7c7-428e-b5d5-fbafc9791ca4",
+          "startedAt": "2026-09-11T08:33:17.138Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1950,
+          "missingMetrics": []
+        },
+        {
+          "id": "5ba67a94-8739-4c15-a12c-e2b4b8d0f1f7",
+          "startedAt": "2026-09-11T08:33:17.131Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2086,
+          "missingMetrics": []
+        },
+        {
+          "id": "7c771b6b-964f-4778-b1eb-cf7d79b22e42",
+          "startedAt": "2026-09-11T08:33:17.119Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1858,
+          "missingMetrics": []
+        },
+        {
+          "id": "272928cb-70fc-4c95-92cf-4a243346a3ab",
+          "startedAt": "2026-09-11T08:33:15.909Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2040,
+          "missingMetrics": []
+        },
+        {
+          "id": "8f7c1975-d1e7-4d78-a16a-8e266d72fa85",
+          "startedAt": "2026-09-11T08:33:15.729Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2785,
+          "missingMetrics": []
+        },
+        {
+          "id": "bb540565-d318-4c50-aab6-a88ddfbd1a40",
+          "startedAt": "2026-09-11T08:33:15.362Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1630,
+          "missingMetrics": []
+        },
+        {
+          "id": "d2166153-229e-4944-b77b-4a4243379dcb",
+          "startedAt": "2026-09-11T08:33:15.231Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2558,
+          "missingMetrics": []
+        },
+        {
+          "id": "1285dd91-5388-4531-864f-d22cfa3224c8",
+          "startedAt": "2026-09-11T08:33:13.245Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 3038,
+          "missingMetrics": []
+        },
+        {
+          "id": "dfa81629-19e3-4cbf-8574-7dc09a3c7ecd",
+          "startedAt": "2026-09-11T08:33:13.236Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2385,
+          "missingMetrics": []
+        },
+        {
+          "id": "62ea2e5c-4afb-45aa-a068-b46cc2cb36bd",
+          "startedAt": "2026-09-11T08:33:13.230Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2680,
+          "missingMetrics": []
+        },
+        {
+          "id": "52f7ce6b-2730-436c-b6e1-dbe2d82d500f",
+          "startedAt": "2026-09-11T08:33:13.225Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2535,
+          "missingMetrics": []
+        },
+        {
+          "id": "156295f6-3c63-8a50-91cf-a4ea5d2bc3d8",
+          "startedAt": "2026-09-11T08:33:00.380Z",
+          "operationType": "realtime_response",
+          "stage": "farewell",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 18612,
+          "missingMetrics": []
+        },
+        {
+          "id": "ae1a2d9c-19a1-86c4-9926-108ee594e1a1",
+          "startedAt": "2026-09-11T08:32:58.714Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "f5b3f226-be32-814c-9a00-6ae90d360147",
+          "startedAt": "2026-09-11T08:32:58.338Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11689,
+          "missingMetrics": []
+        },
+        {
+          "id": "27a8a4a9-516e-8b80-bf80-d8d75a89bae3",
+          "startedAt": "2026-09-11T08:32:34.451Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "86ac38e9-f32d-846a-a3c6-4934808b6971",
+          "startedAt": "2026-09-11T08:32:34.091Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 33297,
+          "missingMetrics": []
+        },
+        {
+          "id": "31393be7-4faa-8695-b3a7-bec5a7a74595",
+          "startedAt": "2026-09-11T08:32:16.055Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 45740,
+          "missingMetrics": []
+        },
+        {
+          "id": "6e9d5eb0-a45f-8b57-be41-b93941133f69",
+          "startedAt": "2026-09-11T08:32:13.312Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1700,
+          "missingMetrics": []
+        },
+        {
+          "id": "697ebcd1-4b00-8ac9-bf43-2de5ce315cc7",
+          "startedAt": "2026-09-11T08:32:12.756Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 14193,
+          "missingMetrics": []
+        },
+        {
+          "id": "41aa4b22-8407-896b-8539-8cf12ee7d0cd",
+          "startedAt": "2026-09-11T08:32:08.165Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "080357fe-0b16-89bc-ba6f-44a7f413ea53",
+          "startedAt": "2026-09-11T08:32:07.613Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 4450,
+          "missingMetrics": []
+        },
+        {
+          "id": "960332d8-9d6e-89be-8ad3-d699c59b3dba",
+          "startedAt": "2026-09-11T08:31:50.145Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1417,
+          "missingMetrics": []
+        },
+        {
+          "id": "e9d472c3-5f93-8e98-905c-bb91fc515181",
+          "startedAt": "2026-09-11T08:31:49.578Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 37410,
+          "missingMetrics": []
+        },
+        {
+          "id": "66dc27f3-d27a-82dc-81f6-e97f383ab1e3",
+          "startedAt": "2026-09-11T08:31:19.301Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "e559819d-3c47-8770-89df-c8fa64b1ba7f",
+          "startedAt": "2026-09-11T08:31:18.815Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 57964,
+          "missingMetrics": []
+        },
+        {
+          "id": "32eb479a-5fdc-8a2f-8014-3036cc2245bc",
+          "startedAt": "2026-09-11T08:31:17.853Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1417,
+          "missingMetrics": []
+        },
+        {
+          "id": "40a0fec1-d2d0-89d8-87e6-58c608fbcf4e",
+          "startedAt": "2026-09-11T08:31:17.523Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 0,
+          "missingMetrics": []
+        },
+        {
+          "id": "938f60c4-c068-8637-9750-85f5b75c83dd",
+          "startedAt": "2026-09-11T08:30:55.256Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "89b2865f-bd1e-8d13-87b0-017a0c917c99",
+          "startedAt": "2026-09-11T08:30:54.710Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 36940,
+          "missingMetrics": []
+        },
+        {
+          "id": "058256ba-a96d-8725-90ef-929d4db17a75",
+          "startedAt": "2026-09-11T08:30:33.145Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 27740,
+          "missingMetrics": []
+        },
+        {
+          "id": "2b1d5131-8ec6-8b1a-b23a-4b8e6b0ad082",
+          "startedAt": "2026-09-11T08:30:32.565Z",
+          "operationType": "transcription",
+          "stage": "consent_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "dea1c6f1-e2f3-84e4-91bd-4e378d3ba02f",
+          "startedAt": "2026-09-11T08:30:16.564Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 17284,
+          "missingMetrics": []
+        },
+        {
+          "id": "bb83fea6-f6d5-4661-999f-84c976a64a2b",
+          "startedAt": "2026-09-11T08:30:04.758Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 540600,
+          "missingMetrics": []
+        },
+        {
+          "id": "3d4f6d86-d4bf-4879-81e1-890a80d6639b",
+          "startedAt": "2026-09-11T07:52:37.808Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 39622,
+          "missingMetrics": []
+        },
+        {
+          "id": "919e2669-7032-4dee-a7ba-d58739612ade",
+          "startedAt": "2026-09-11T07:51:16.531Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 28474,
+          "missingMetrics": []
+        },
+        {
+          "id": "7ad35736-b164-487b-b540-755ca1a3606a",
+          "startedAt": "2026-09-11T07:50:20.190Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 48782,
+          "missingMetrics": []
+        },
+        {
+          "id": "f412b11d-c5a4-4188-87a5-62818d1c7bae",
+          "startedAt": "2026-09-10T16:21:34.085Z",
+          "operationType": "call_summary",
+          "stage": "call_summary.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 50359,
+          "missingMetrics": []
+        },
+        {
+          "id": "9791a3f8-3d43-46a4-a483-5781c2c1101c",
+          "startedAt": "2026-09-10T14:17:45.805Z",
+          "operationType": "call_summary",
+          "stage": "call_summary.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 32237,
+          "missingMetrics": []
+        },
+        {
+          "id": "8e5f62b7-92d1-4ac5-bf38-7eb04c2f548a",
+          "startedAt": "2026-09-10T14:17:43.911Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1756,
+          "missingMetrics": []
+        },
+        {
+          "id": "ef472d44-c016-4d80-b237-bb969f5651d4",
+          "startedAt": "2026-09-10T14:17:43.866Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1741,
+          "missingMetrics": []
+        },
+        {
+          "id": "dd292269-a9ae-46d3-af12-208154bca2d2",
+          "startedAt": "2026-09-10T14:17:43.764Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1763,
+          "missingMetrics": []
+        },
+        {
+          "id": "9b875e08-3cdf-4c7a-8457-8b402737d5ec",
+          "startedAt": "2026-09-10T14:17:43.369Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1766,
+          "missingMetrics": []
+        },
+        {
+          "id": "50e97163-2d69-4eac-9084-3ab211cf1a4b",
+          "startedAt": "2026-09-10T14:17:43.367Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1805,
+          "missingMetrics": []
+        },
+        {
+          "id": "0cfc6402-6980-4192-9b1f-9edfaf96cfbe",
+          "startedAt": "2026-09-10T14:17:43.302Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1813,
+          "missingMetrics": []
+        },
+        {
+          "id": "9b6a924f-4e58-433a-ae16-092fa7976fbe",
+          "startedAt": "2026-09-10T14:17:43.160Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1715,
+          "missingMetrics": []
+        },
+        {
+          "id": "38071f48-9ec7-48de-a75d-5b91ddce5df6",
+          "startedAt": "2026-09-10T14:17:42.768Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1848,
+          "missingMetrics": []
+        },
+        {
+          "id": "4a4c6e81-cf7a-4185-887b-9fe625a751c7",
+          "startedAt": "2026-09-10T14:17:42.647Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1788,
+          "missingMetrics": []
+        },
+        {
+          "id": "a5c96cbd-2525-473e-bc8c-86b57fa58692",
+          "startedAt": "2026-09-10T14:17:42.635Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1878,
+          "missingMetrics": []
+        },
+        {
+          "id": "30bead42-2b67-46fc-aefd-db70b42af97b",
+          "startedAt": "2026-09-10T14:17:42.451Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1938,
+          "missingMetrics": []
+        },
+        {
+          "id": "5252c118-0aa2-4857-8c1d-e73a2bd27b11",
+          "startedAt": "2026-09-10T14:17:42.093Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1785,
+          "missingMetrics": []
+        },
+        {
+          "id": "7199b469-efad-4e2f-86d2-e4b700ab1647",
+          "startedAt": "2026-09-10T14:17:42.045Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1865,
+          "missingMetrics": []
+        },
+        {
+          "id": "8dd4a2d0-a1ce-43df-93ae-68562bac2a50",
+          "startedAt": "2026-09-10T14:17:41.979Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1738,
+          "missingMetrics": []
+        },
+        {
+          "id": "517ed3df-87e8-4435-b99c-daa10c2f5971",
+          "startedAt": "2026-09-10T14:17:41.381Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1813,
+          "missingMetrics": []
+        },
+        {
+          "id": "5bd1ae07-ccba-44a7-a357-a5a0bb7ab339",
+          "startedAt": "2026-09-10T14:17:41.378Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1835,
+          "missingMetrics": []
+        },
+        {
+          "id": "4a195833-04b1-4a50-b2a8-55cd7c684ab1",
+          "startedAt": "2026-09-10T14:17:41.376Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1748,
+          "missingMetrics": []
+        },
+        {
+          "id": "8966f3b1-5ea7-4e00-8de5-0f751e40b977",
+          "startedAt": "2026-09-10T14:17:41.373Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1813,
+          "missingMetrics": []
+        },
+        {
+          "id": "984addcc-5334-4a9a-8f9b-aa48bb4b1834",
+          "startedAt": "2026-09-10T14:17:40.249Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1848,
+          "missingMetrics": []
+        },
+        {
+          "id": "76902558-71bd-4713-883a-ee254fa0d370",
+          "startedAt": "2026-09-10T14:17:40.153Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1865,
+          "missingMetrics": []
+        },
+        {
+          "id": "44bdc6c1-704a-4192-842a-06b172070713",
+          "startedAt": "2026-09-10T14:17:40.019Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2183,
+          "missingMetrics": []
+        },
+        {
+          "id": "2d046ab6-9009-41a8-909d-7e13ea4a0997",
+          "startedAt": "2026-09-10T14:17:39.312Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1918,
+          "missingMetrics": []
+        },
+        {
+          "id": "12dd0641-2a79-402b-b89d-476d3b46ce5b",
+          "startedAt": "2026-09-10T14:17:39.268Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2275,
+          "missingMetrics": []
+        },
+        {
+          "id": "ba85b7f1-a3b8-4c67-98e4-545b12d8f36f",
+          "startedAt": "2026-09-10T14:17:38.902Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2450,
+          "missingMetrics": []
+        },
+        {
+          "id": "d17502ec-ab30-47dd-ad7f-5fa98f6f6c93",
+          "startedAt": "2026-09-10T14:17:38.237Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1815,
+          "missingMetrics": []
+        },
+        {
+          "id": "985275f0-3854-4060-a67c-b56fa339735f",
+          "startedAt": "2026-09-10T14:17:38.094Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2410,
+          "missingMetrics": []
+        },
+        {
+          "id": "681d256c-4791-426d-a03a-42b6aa8a00f9",
+          "startedAt": "2026-09-10T14:17:37.393Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1813,
+          "missingMetrics": []
+        },
+        {
+          "id": "e13bae10-d243-4686-87a6-cc5bb4807b5c",
+          "startedAt": "2026-09-10T14:17:37.389Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1645,
+          "missingMetrics": []
+        },
+        {
+          "id": "68e7e245-569a-48b3-8ba0-ddc5b5426b95",
+          "startedAt": "2026-09-10T14:17:37.298Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2358,
+          "missingMetrics": []
+        },
+        {
+          "id": "2cc15df9-749e-4254-82d7-fc12eceb8a7f",
+          "startedAt": "2026-09-10T14:17:37.289Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2388,
+          "missingMetrics": []
+        },
+        {
+          "id": "1bfd207b-e1e9-4813-bf83-ec8ebfe3876c",
+          "startedAt": "2026-09-10T14:17:36.105Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1880,
+          "missingMetrics": []
+        },
+        {
+          "id": "d0cc3d18-5cf5-486a-a906-f8f7e672728b",
+          "startedAt": "2026-09-10T14:17:36.100Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2385,
+          "missingMetrics": []
+        },
+        {
+          "id": "379a34a6-b2f6-4c59-8950-8275dde73808",
+          "startedAt": "2026-09-10T14:17:36.094Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 2200,
+          "missingMetrics": []
+        },
+        {
+          "id": "c1dc0053-046b-46d9-8c66-34c1c756d13a",
+          "startedAt": "2026-09-10T14:17:36.086Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1988,
+          "missingMetrics": []
+        },
+        {
+          "id": "984d43ce-9ffc-8bc6-9955-8a9cf4ca1ee8",
+          "startedAt": "2026-09-10T14:17:20.647Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "ae7fd1c7-6233-881a-84b7-821e9896095b",
+          "startedAt": "2026-09-10T14:17:20.095Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9969,
+          "missingMetrics": []
+        },
+        {
+          "id": "b7cfa3b9-d5d8-8742-b48d-e8669703466b",
+          "startedAt": "2026-09-10T14:17:12.470Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "1a7fb7d1-11a0-8924-b407-5a63960c4549",
+          "startedAt": "2026-09-10T14:17:12.008Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10109,
+          "missingMetrics": []
+        },
+        {
+          "id": "3cef448c-1675-8513-bac1-b8e0c89014ee",
+          "startedAt": "2026-09-10T14:16:59.564Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "d773685d-17b1-8c35-94c6-abc4023ed8d1",
+          "startedAt": "2026-09-10T14:16:58.995Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 23957,
+          "missingMetrics": []
+        },
+        {
+          "id": "d7eb2366-953d-8405-bbe8-a9ba45bcccc8",
+          "startedAt": "2026-09-10T14:16:57.880Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "ffc634e7-ff45-8dfa-890d-b04c42cca542",
+          "startedAt": "2026-09-10T14:16:57.222Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 27432,
+          "missingMetrics": []
+        },
+        {
+          "id": "c9f8359a-9ac5-8911-be2b-263c43c5cda9",
+          "startedAt": "2026-09-10T14:16:49.120Z",
+          "operationType": "realtime_response",
+          "stage": "farewell",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 22696,
+          "missingMetrics": []
+        },
+        {
+          "id": "386680df-0cc8-86ae-8dce-aa4cabba5537",
+          "startedAt": "2026-09-10T14:16:47.264Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "1027b1d8-723b-8694-89a0-63d76fd57997",
+          "startedAt": "2026-09-10T14:16:46.730Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11526,
+          "missingMetrics": []
+        },
+        {
+          "id": "95ddb58d-a522-80ac-bbc9-c80142ff3ca9",
+          "startedAt": "2026-09-10T14:16:31.669Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "ad2f69f4-af2f-82fa-8cdb-e89815272f7a",
+          "startedAt": "2026-09-10T14:16:31.099Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 20482,
+          "missingMetrics": []
+        },
+        {
+          "id": "f829e45e-143e-8602-9756-d2677fad4074",
+          "startedAt": "2026-09-10T14:16:14.722Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "0e34d394-545a-8c85-ade8-5b0d4613a18c",
+          "startedAt": "2026-09-10T14:16:14.149Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 36787,
+          "missingMetrics": []
+        },
+        {
+          "id": "1a05e444-ed1b-89f7-b18d-989b625b2271",
+          "startedAt": "2026-09-10T14:16:11.772Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 0,
+          "missingMetrics": []
+        },
+        {
+          "id": "9fae04f5-1987-8747-ade2-4bb567bdfd6d",
+          "startedAt": "2026-09-10T14:16:08.503Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "7c665fe2-d1c8-8285-b9f9-4a869d1b9416",
+          "startedAt": "2026-09-10T14:16:07.866Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 25251,
+          "missingMetrics": []
+        },
+        {
+          "id": "5f5e71e8-6ddc-8f20-9bd0-80a36013d4c1",
+          "startedAt": "2026-09-10T14:15:52.148Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "d5412d7f-fb42-88d5-b738-04c0e5625c55",
+          "startedAt": "2026-09-10T14:15:51.570Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 25550,
+          "missingMetrics": []
+        },
+        {
+          "id": "af42e554-e07d-8551-bf8c-f8f77ee4ae41",
+          "startedAt": "2026-09-10T14:15:49.148Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "ae54fbdd-1b87-8adf-abe8-c35ef196ef32",
+          "startedAt": "2026-09-10T14:15:48.644Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 22188,
+          "missingMetrics": []
+        },
+        {
+          "id": "e39232af-e5ac-8c1e-b108-19d6c7a95775",
+          "startedAt": "2026-09-10T14:15:46.102Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "74335520-d6ab-8831-ae6f-7bb41ff6f8c4",
+          "startedAt": "2026-09-10T14:15:45.644Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 0,
+          "missingMetrics": []
+        },
+        {
+          "id": "a9f6a834-675f-882b-bdc2-fce6e7fba4f8",
+          "startedAt": "2026-09-10T14:15:40.890Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1417,
+          "missingMetrics": []
+        },
+        {
+          "id": "e8ea82f1-9e10-88d8-8d57-9ae70e04827f",
+          "startedAt": "2026-09-10T14:15:40.395Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 47336,
+          "missingMetrics": []
+        },
+        {
+          "id": "0ce3e29e-1d13-86f2-bcd0-2ee75dd7dac1",
+          "startedAt": "2026-09-10T14:15:36.365Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1700,
+          "missingMetrics": []
+        },
+        {
+          "id": "ffdfe3de-85ba-8c2e-a7e1-a7d8eafb6c1b",
+          "startedAt": "2026-09-10T14:15:35.791Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 6667,
+          "missingMetrics": []
+        },
+        {
+          "id": "5c76c14e-78a9-88de-962d-16f9456c0e90",
+          "startedAt": "2026-09-10T14:15:14.735Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "a7e9aa57-acc5-80c7-9f4a-e4a0f20bd363",
+          "startedAt": "2026-09-10T14:15:14.179Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 49879,
+          "missingMetrics": []
+        },
+        {
+          "id": "8d951d18-4352-8a0d-80f2-fb32dd434b0c",
+          "startedAt": "2026-09-10T14:14:57.137Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "74711444-cde5-81c9-b45a-082616af9ee2",
+          "startedAt": "2026-09-10T14:14:56.647Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 20503,
+          "missingMetrics": []
+        },
+        {
+          "id": "6f9b89d6-1a72-8176-b5df-62f08096d80f",
+          "startedAt": "2026-09-10T14:14:54.207Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "704d926d-20e6-8f43-bc26-e7835f70491c",
+          "startedAt": "2026-09-10T14:14:53.601Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 6950,
+          "missingMetrics": []
+        },
+        {
+          "id": "eadc12e4-9954-8463-9893-0410868e5b9c",
+          "startedAt": "2026-09-10T14:14:47.216Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "819bae00-5e82-81e0-8b8b-76de78f0579d",
+          "startedAt": "2026-09-10T14:14:46.741Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 21234,
+          "missingMetrics": []
+        },
+        {
+          "id": "f341774d-2fc1-8e2a-a70d-f164d80a1c17",
+          "startedAt": "2026-09-10T14:14:29.367Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "e055a9d3-670b-8bb4-b0af-457b9b4e901b",
+          "startedAt": "2026-09-10T14:14:28.820Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 34984,
+          "missingMetrics": []
+        },
+        {
+          "id": "92101055-2296-8bd9-8a9e-1c9b283011ae",
+          "startedAt": "2026-09-10T14:14:03.634Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 25924,
+          "missingMetrics": []
+        },
+        {
+          "id": "a40c120d-b09f-8674-bc5b-434ea23e65cb",
+          "startedAt": "2026-09-10T14:14:03.123Z",
+          "operationType": "transcription",
+          "stage": "consent_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "68ef79c7-7362-88af-ae0c-347b866304ac",
+          "startedAt": "2026-09-10T14:13:48.513Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16332,
+          "missingMetrics": []
+        },
+        {
+          "id": "235d5552-ccdc-483d-82a6-0151704c4340",
+          "startedAt": "2026-09-10T14:13:38.480Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 720800,
+          "missingMetrics": []
+        },
+        {
+          "id": "f59cfbbe-890f-489d-8464-563b3f22465d",
+          "startedAt": "2026-09-10T14:12:34.606Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 42817,
+          "missingMetrics": []
+        },
+        {
+          "id": "2fe8acca-6c21-4c64-b56e-297069f8e1e4",
+          "startedAt": "2026-09-10T10:22:24.623Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 38027,
+          "missingMetrics": []
+        },
+        {
+          "id": "60bf74ff-0582-48a4-bf95-c4c54775947f",
+          "startedAt": "2026-09-10T10:22:04.801Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 23762,
+          "missingMetrics": []
+        },
+        {
+          "id": "1ee2b299-874e-42d4-be45-7cbfaccec371",
+          "startedAt": "2026-09-10T09:48:45.005Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 38162,
+          "missingMetrics": []
+        },
+        {
+          "id": "b790e1a1-13e4-490d-ba2b-587d199f9e52",
+          "startedAt": "2026-09-10T09:46:21.321Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 32242,
+          "missingMetrics": []
+        },
+        {
+          "id": "a6c0bf0b-1376-4989-a4d0-569be5ee881a",
+          "startedAt": "2026-09-10T09:44:33.701Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 18376,
+          "missingMetrics": []
+        },
+        {
+          "id": "0341e397-0664-4f33-9bcb-4a7034ee3618",
+          "startedAt": "2026-09-09T11:55:19.058Z",
+          "operationType": "text_translation",
+          "stage": "transcript_translation.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10008,
+          "missingMetrics": []
+        },
+        {
+          "id": "41c57fa8-27a6-4177-aaba-4ac9df4a725d",
+          "startedAt": "2026-09-09T11:46:45.885Z",
+          "operationType": "text_translation",
+          "stage": "transcript_translation.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10088,
+          "missingMetrics": []
+        },
+        {
+          "id": "35aa85aa-905b-4e04-9010-9fe1f5f6b756",
+          "startedAt": "2026-09-09T11:43:16.003Z",
+          "operationType": "call_summary",
+          "stage": "call_summary.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 7077,
+          "missingMetrics": []
+        },
+        {
+          "id": "2ce8308f-1a2b-488a-b854-5912ab1bbe26",
+          "startedAt": "2026-09-09T11:43:15.115Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1143,
+          "missingMetrics": []
+        },
+        {
+          "id": "3ca85ddf-ef81-4fcc-b8fe-42d42a2a8217",
+          "startedAt": "2026-09-09T11:43:15.112Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1211,
+          "missingMetrics": []
+        },
+        {
+          "id": "4511e1d7-549f-4f78-900e-b6daeeb0f3b0",
+          "startedAt": "2026-09-09T11:43:15.109Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1158,
+          "missingMetrics": []
+        },
+        {
+          "id": "2c6fa695-017f-46ec-a050-ceefaa8d0fd0",
+          "startedAt": "2026-09-09T11:43:13.833Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1081,
+          "missingMetrics": []
+        },
+        {
+          "id": "363ac3e8-097a-4005-ae26-0f54127b8b91",
+          "startedAt": "2026-09-09T11:43:13.829Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1406,
+          "missingMetrics": []
+        },
+        {
+          "id": "40a0b205-58fd-4ee0-843f-b26571e76700",
+          "startedAt": "2026-09-09T11:43:13.825Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1648,
+          "missingMetrics": []
+        },
+        {
+          "id": "89e08703-c6a6-4049-857b-7a82c8d85116",
+          "startedAt": "2026-09-09T11:43:13.820Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1161,
+          "missingMetrics": []
+        },
+        {
+          "id": "4ab5e182-8457-80dc-b963-61410fe0e943",
+          "startedAt": "2026-09-09T11:42:39.135Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "af2aab0f-ad03-847f-82eb-39ec1734f46e",
+          "startedAt": "2026-09-09T11:42:38.794Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11631,
+          "missingMetrics": []
+        },
+        {
+          "id": "e053f577-8a4d-84ed-99f0-96dadd3a860b",
+          "startedAt": "2026-09-09T11:42:27.017Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1134,
+          "missingMetrics": []
+        },
+        {
+          "id": "7558c20c-0576-8b43-b294-b6c9a72192ad",
+          "startedAt": "2026-09-09T11:42:26.494Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 8461,
+          "missingMetrics": []
+        },
+        {
+          "id": "6c967d33-1fcd-8e71-806a-c8459c6eca59",
+          "startedAt": "2026-09-09T11:42:15.220Z",
+          "operationType": "transcription",
+          "stage": "conversation_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 850,
+          "missingMetrics": []
+        },
+        {
+          "id": "e9b88f97-6f0d-85cd-998d-7c9fe19373ac",
+          "startedAt": "2026-09-09T11:42:14.673Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9468,
+          "missingMetrics": []
+        },
+        {
+          "id": "5894473e-177b-835a-8e71-44be2041d3cb",
+          "startedAt": "2026-09-09T11:42:00.101Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 17236,
+          "missingMetrics": []
+        },
+        {
+          "id": "1ddf0060-1e79-8a52-a4a5-56353e7b9266",
+          "startedAt": "2026-09-09T11:41:59.510Z",
+          "operationType": "transcription",
+          "stage": "consent_input_audio",
+          "model": "gpt-realtime-whisper",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 567,
+          "missingMetrics": []
+        },
+        {
+          "id": "0403a645-056e-8d31-b60f-b313ef85535a",
+          "startedAt": "2026-09-09T11:41:37.006Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 27136,
+          "missingMetrics": []
+        },
+        {
+          "id": "6dad7b08-73f0-4f4c-8f63-29ca5a4535f5",
+          "startedAt": "2026-09-09T11:41:12.719Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 360400,
+          "missingMetrics": []
+        },
+        {
+          "id": "4da36b5a-f7a9-40be-b865-6b810d0061c6",
+          "startedAt": "2026-09-09T11:40:14.082Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10916,
+          "missingMetrics": []
+        },
+        {
+          "id": "4e67f04e-6153-4e59-a266-8fd724707e08",
+          "startedAt": "2026-09-09T11:39:45.802Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11596,
+          "missingMetrics": []
+        },
+        {
+          "id": "588dd368-ed4a-464e-9162-2d1bdfd3bfae",
+          "startedAt": "2026-09-09T11:39:33.309Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 18377,
+          "missingMetrics": []
+        },
+        {
+          "id": "c96765d0-93d1-479f-8d5f-b4c2381c96e4",
+          "startedAt": "2026-09-08T10:25:19.139Z",
+          "operationType": "transcription",
+          "stage": "recipient_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1388,
+          "missingMetrics": []
+        },
+        {
+          "id": "8d69052c-a189-4c4d-a012-3339ee02ba61",
+          "startedAt": "2026-09-08T10:25:17.245Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1201,
+          "missingMetrics": []
+        },
+        {
+          "id": "41de4a7d-0cf2-44a6-a33a-1f933d41f65c",
+          "startedAt": "2026-09-08T10:25:17.240Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1963,
+          "missingMetrics": []
+        },
+        {
+          "id": "c48b9a73-618e-4cb5-a543-aa6873529283",
+          "startedAt": "2026-09-08T10:25:17.235Z",
+          "operationType": "transcription",
+          "stage": "assistant_utterance",
+          "model": "gpt-4o-transcribe",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 1713,
+          "missingMetrics": []
+        },
+        {
+          "id": "b4a5a6ba-b63b-8db7-8f8f-f746aab78b5f",
+          "startedAt": "2026-09-08T10:25:03.820Z",
+          "operationType": "realtime_response",
+          "stage": "farewell",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9200,
+          "missingMetrics": []
+        },
+        {
+          "id": "7096b792-5402-89ad-a996-527edb899098",
+          "startedAt": "2026-09-08T10:25:01.621Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11953,
+          "missingMetrics": []
+        },
+        {
+          "id": "3f16c967-a9cf-8031-92bb-2f5c93a199ba",
+          "startedAt": "2026-09-08T10:24:58.515Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11652,
+          "missingMetrics": []
+        },
+        {
+          "id": "08654f6a-f677-812c-af45-943521a1a493",
+          "startedAt": "2026-09-08T10:24:42.036Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 20240,
+          "missingMetrics": []
+        },
+        {
+          "id": "eebf28bb-4b58-868c-8376-a7a947f5bba8",
+          "startedAt": "2026-09-08T10:24:32.485Z",
+          "operationType": "realtime_response",
+          "stage": "consent_clarification",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9984,
+          "missingMetrics": []
+        },
+        {
+          "id": "be06af45-69ce-8a99-8c1c-f928afdf0c54",
+          "startedAt": "2026-09-08T10:24:16.720Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16540,
+          "missingMetrics": []
+        },
+        {
+          "id": "bcf860e8-bcc4-4d27-b0da-0e858bf694b8",
+          "startedAt": "2026-09-08T10:23:59.909Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "e6167a59-ff58-4b35-95ff-cf707651625f",
+          "startedAt": "2026-09-08T10:15:05.705Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 18612,
+          "missingMetrics": []
+        },
+        {
+          "id": "44605d3e-99a7-8b70-8ea6-a046830f102a",
+          "startedAt": "2026-09-08T07:48:54.348Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10816,
+          "missingMetrics": []
+        },
+        {
+          "id": "fda6ff4f-20de-85d8-b9b9-0030967dd839",
+          "startedAt": "2026-09-08T07:48:40.747Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 12504,
+          "missingMetrics": []
+        },
+        {
+          "id": "3bec99c5-1283-8eb2-ad36-2c75e9dc69b2",
+          "startedAt": "2026-09-08T07:48:31.287Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 8424,
+          "missingMetrics": []
+        },
+        {
+          "id": "cc834233-5451-8324-817b-7b32bc911597",
+          "startedAt": "2026-09-08T07:48:13.395Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 17136,
+          "missingMetrics": []
+        },
+        {
+          "id": "1fbd959c-90fd-84ba-acf1-093b416e79ae",
+          "startedAt": "2026-09-08T07:47:56.534Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 17364,
+          "missingMetrics": []
+        },
+        {
+          "id": "b33c76f6-5bd2-4dee-bbc1-c61a5ae24a11",
+          "startedAt": "2026-09-08T07:47:36.972Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 360400,
+          "missingMetrics": []
+        },
+        {
+          "id": "9f85117d-8038-4ecc-a29c-1a1959921a2c",
+          "startedAt": "2026-09-08T07:46:49.879Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 8822,
+          "missingMetrics": []
+        },
+        {
+          "id": "72639940-b5a5-80ef-a888-5afba1e30b88",
+          "startedAt": "2026-09-07T09:41:58.177Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10305,
+          "missingMetrics": []
+        },
+        {
+          "id": "74982cfa-21b5-8a7c-8f12-42b6ef37d069",
+          "startedAt": "2026-09-07T09:41:45.373Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 8768,
+          "missingMetrics": []
+        },
+        {
+          "id": "a57d63b5-2f0b-8464-9d5f-56ae514ad5ec",
+          "startedAt": "2026-09-07T09:41:33.936Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 8624,
+          "missingMetrics": []
+        },
+        {
+          "id": "3c5bfb56-0936-8bda-8b36-e1674437b78e",
+          "startedAt": "2026-09-07T09:41:14.394Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 18652,
+          "missingMetrics": []
+        },
+        {
+          "id": "8bd4c79c-9c62-849a-8b86-98c155de300c",
+          "startedAt": "2026-09-07T09:40:59.290Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16936,
+          "missingMetrics": []
+        },
+        {
+          "id": "c1bca6bd-4657-4b6a-8f1c-64f363ecf1f9",
+          "startedAt": "2026-09-07T09:40:44.476Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 360400,
+          "missingMetrics": []
+        },
+        {
+          "id": "d70d6aca-4981-45a1-ba2d-15f318f87227",
+          "startedAt": "2026-09-07T09:40:00.589Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9242,
+          "missingMetrics": []
+        },
+        {
+          "id": "76f7ddbc-7664-4682-add5-3a424e99ed12",
+          "startedAt": "2026-09-07T09:29:11.843Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "9e84aa77-03d9-42a5-a1a8-1f70d335ebd6",
+          "startedAt": "2026-09-07T09:27:57.286Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 15637,
+          "missingMetrics": []
+        },
+        {
+          "id": "246b25a9-2dec-8695-8fda-409379c61001",
+          "startedAt": "2026-09-06T09:26:50.507Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 15427,
+          "missingMetrics": []
+        },
+        {
+          "id": "779b3dd1-6ae6-8b9d-9ff9-b298c3dbd875",
+          "startedAt": "2026-09-06T09:26:39.005Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11991,
+          "missingMetrics": []
+        },
+        {
+          "id": "b6a3db15-9fc5-89e1-b76a-1e6e2b6b09d7",
+          "startedAt": "2026-09-06T09:26:25.493Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11436,
+          "missingMetrics": []
+        },
+        {
+          "id": "d2f35267-4d85-8a69-a2d1-571344dbd06b",
+          "startedAt": "2026-09-06T09:26:16.482Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9004,
+          "missingMetrics": []
+        },
+        {
+          "id": "95e80dff-39c1-8515-b11a-d149204edfd4",
+          "startedAt": "2026-09-06T09:26:00.005Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 18652,
+          "missingMetrics": []
+        },
+        {
+          "id": "58a62b68-ba75-8709-b55b-b199bc60a189",
+          "startedAt": "2026-09-06T09:25:44.438Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16412,
+          "missingMetrics": []
+        },
+        {
+          "id": "9e220f14-1c7c-47f0-93c8-df8a456395be",
+          "startedAt": "2026-09-06T09:25:27.098Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 360400,
+          "missingMetrics": []
+        },
+        {
+          "id": "e4f4b8e1-22f3-4dbb-bbb8-71ce830dc62c",
+          "startedAt": "2026-09-06T09:24:11.178Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 17057,
+          "missingMetrics": []
+        },
+        {
+          "id": "a592122c-d86d-88d4-b11b-7ad71b732e7e",
+          "startedAt": "2026-09-05T12:35:02.832Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 12724,
+          "missingMetrics": []
+        },
+        {
+          "id": "1d8d64a3-f4f5-88d8-b20f-17a9c1799058",
+          "startedAt": "2026-09-05T12:34:50.429Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9900,
+          "missingMetrics": []
+        },
+        {
+          "id": "65fac699-8ad6-854b-8157-5a7447a23038",
+          "startedAt": "2026-09-05T12:34:45.831Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "provider_error",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 10136,
+          "missingMetrics": []
+        },
+        {
+          "id": "1a0a5b33-ee99-8a77-bca5-bc4582a5b371",
+          "startedAt": "2026-09-05T12:34:33.088Z",
+          "operationType": "realtime_response",
+          "stage": "conversation",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16044,
+          "missingMetrics": []
+        },
+        {
+          "id": "bb5ad2d2-93fd-8b26-afe8-939acd2460e0",
+          "startedAt": "2026-09-05T12:34:07.060Z",
+          "operationType": "realtime_response",
+          "stage": "opening",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 32468,
+          "missingMetrics": []
+        },
+        {
+          "id": "ee1057ae-f3b3-8c8a-be68-c0a05c1401e7",
+          "startedAt": "2026-09-05T12:33:51.247Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16592,
+          "missingMetrics": []
+        },
+        {
+          "id": "62b1fa7e-d084-481e-8ff6-32fdb79b77e8",
+          "startedAt": "2026-09-05T12:33:38.910Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 360400,
+          "missingMetrics": []
+        },
+        {
+          "id": "38a95923-579e-4401-8206-e6529f6bcd0d",
+          "startedAt": "2026-09-05T12:33:21.241Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 11722,
+          "missingMetrics": []
+        },
+        {
+          "id": "2e95daed-9a88-8a96-b26e-32a7361b4676",
+          "startedAt": "2026-09-05T12:23:11.656Z",
+          "operationType": "realtime_response",
+          "stage": "consent_clarification",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 9292,
+          "missingMetrics": []
+        },
+        {
+          "id": "9d366fd8-5d66-86d7-b15d-0a7776f20691",
+          "startedAt": "2026-09-05T12:22:48.037Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 15792,
+          "missingMetrics": []
+        },
+        {
+          "id": "e1d942a9-c087-4279-a120-9014f27e98d9",
+          "startedAt": "2026-09-05T12:22:22.536Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "1c4c9f2a-d868-41c3-8a91-1a76bf09eef9",
+          "startedAt": "2026-09-05T12:22:12.794Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 13782,
+          "missingMetrics": []
+        },
+        {
+          "id": "9a29937b-b037-4384-baab-89ad65a3f773",
+          "startedAt": "2026-09-05T12:21:21.773Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 20522,
+          "missingMetrics": []
+        }
+      ],
+      "calculatedUsdMicros": 2441471,
+      "components": {
+        "briefCompilation": {
+          "incompleteRecords": 0,
+          "usageRecords": 21,
+          "requests": 21,
+          "models": [
+            "gpt-5.6-sol"
+          ],
+          "inputTextTokens": 46780,
+          "inputTextTokenSamples": 21,
+          "cachedInputTextTokens": 11230,
+          "cachedInputTextTokenSamples": 21,
+          "cacheWriteInputTextTokens": 35487,
+          "cacheWriteInputTextTokenSamples": 21,
+          "outputTextTokens": 20881,
+          "outputTextTokenSamples": 21,
+          "reasoningOutputTokens": 3548,
+          "reasoningOutputTokenSamples": 21,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 67661,
+          "totalTokenSamples": 21,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 599801
+        },
+        "textTranslation": {
+          "incompleteRecords": 0,
+          "usageRecords": 8,
+          "requests": 8,
+          "models": [
+            "gpt-5.6-sol"
+          ],
+          "inputTextTokens": 10309,
+          "inputTextTokenSamples": 8,
+          "cachedInputTextTokens": 2303,
+          "cachedInputTextTokenSamples": 8,
+          "cacheWriteInputTextTokens": 4212,
+          "cacheWriteInputTextTokenSamples": 8,
+          "outputTextTokens": 3575,
+          "outputTextTokenSamples": 8,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 8,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 13884,
+          "totalTokenSamples": 8,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 108658
+        },
+        "callSummary": {
+          "incompleteRecords": 0,
+          "usageRecords": 6,
+          "requests": 6,
+          "models": [
+            "gpt-5.6-sol"
+          ],
+          "inputTextTokens": 14657,
+          "inputTextTokenSamples": 6,
+          "cachedInputTextTokens": 4028,
+          "cachedInputTextTokenSamples": 6,
+          "cacheWriteInputTextTokens": 10611,
+          "cacheWriteInputTextTokenSamples": 6,
+          "outputTextTokens": 5485,
+          "outputTextTokenSamples": 6,
+          "reasoningOutputTokens": 875,
+          "reasoningOutputTokenSamples": 6,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 20142,
+          "totalTokenSamples": 6,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 164439
+        },
+        "realtime": {
+          "incompleteRecords": 0,
+          "usageRecords": 79,
+          "requests": 79,
+          "models": [
+            "gpt-realtime-2.1"
+          ],
+          "inputTextTokens": 129683,
+          "inputTextTokenSamples": 79,
+          "cachedInputTextTokens": 80256,
+          "cachedInputTextTokenSamples": 79,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 6811,
+          "outputTextTokenSamples": 79,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 6501,
+          "inputAudioTokenSamples": 79,
+          "cachedInputAudioTokens": 3008,
+          "cachedInputAudioTokenSamples": 79,
+          "outputAudioTokens": 13391,
+          "outputAudioTokenSamples": 79,
+          "totalTokens": 156386,
+          "totalTokenSamples": 79,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 1363295
+        },
+        "realtimeText": {
+          "incompleteRecords": 0,
+          "usageRecords": 79,
+          "requests": 79,
+          "models": [
+            "gpt-realtime-2.1"
+          ],
+          "inputTextTokens": 129683,
+          "inputTextTokenSamples": 79,
+          "cachedInputTextTokens": 80256,
+          "cachedInputTextTokenSamples": 79,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 6811,
+          "outputTextTokenSamples": 79,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 6501,
+          "inputAudioTokenSamples": 79,
+          "cachedInputAudioTokens": 3008,
+          "cachedInputAudioTokenSamples": 79,
+          "outputAudioTokens": 13391,
+          "outputAudioTokenSamples": 79,
+          "totalTokens": 156386,
+          "totalTokenSamples": 79,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 393285
+        },
+        "realtimeAudio": {
+          "incompleteRecords": 0,
+          "usageRecords": 79,
+          "requests": 79,
+          "models": [
+            "gpt-realtime-2.1"
+          ],
+          "inputTextTokens": 129683,
+          "inputTextTokenSamples": 79,
+          "cachedInputTextTokens": 80256,
+          "cachedInputTextTokenSamples": 79,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 6811,
+          "outputTextTokenSamples": 79,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 6501,
+          "inputAudioTokenSamples": 79,
+          "cachedInputAudioTokens": 3008,
+          "cachedInputAudioTokenSamples": 79,
+          "outputAudioTokens": 13391,
+          "outputAudioTokenSamples": 79,
+          "totalTokens": 156386,
+          "totalTokenSamples": 79,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 970010
+        },
+        "realtimeTranscription": {
+          "incompleteRecords": 0,
+          "usageRecords": 58,
+          "requests": 58,
+          "models": [
+            "gpt-realtime-whisper"
+          ],
+          "inputTextTokens": 0,
+          "inputTextTokenSamples": 0,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 0,
+          "outputTextTokenSamples": 0,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 0,
+          "totalTokenSamples": 0,
+          "durationSeconds": 157,
+          "durationSamples": 58,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 44498
+        },
+        "postCallTranscription": {
+          "incompleteRecords": 0,
+          "usageRecords": 96,
+          "requests": 96,
+          "models": [
+            "gpt-4o-transcribe"
+          ],
+          "inputTextTokens": 50395,
+          "inputTextTokenSamples": 96,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 1974,
+          "outputTextTokenSamples": 96,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 6004,
+          "inputAudioTokenSamples": 96,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 58373,
+          "totalTokenSamples": 96,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 160780
+        },
+        "telephony": {
+          "incompleteRecords": 0,
+          "usageRecords": 13,
+          "requests": 13,
+          "models": [
+            "programmable_voice"
+          ],
+          "inputTextTokens": 0,
+          "inputTextTokenSamples": 0,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 0,
+          "outputTextTokenSamples": 0,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 0,
+          "totalTokenSamples": 0,
+          "durationSeconds": 989,
+          "durationSamples": 13,
+          "billableSeconds": 1320,
+          "billableSamples": 12,
+          "calculatedUsdMicros": null
+        }
+      }
+    },
+    "providerReported": {
+      "status": "reported",
+      "pendingOperations": 0,
+      "cohort": "operation_started_at",
+      "from": "2026-09-01T00:00:00.000Z",
+      "to": "2026-09-17T19:39:24.008Z",
+      "recordCount": 13,
+      "usdMicros": 4144600,
+      "amounts": [
+        {
+          "provider": "twilio",
+          "costBasis": "provider_reported_actual",
+          "component": "connectivity",
+          "currency": "USD",
+          "records": 13,
+          "amountMicros": 4144600
+        }
+      ]
+    }
+  },
+  "callCost": {
+    "status": "unavailable",
+    "currency": "USD",
+    "pricingVersion": null,
+    "estimatedUsdMicros": null,
+    "components": {
+      "telephony": {
+        "usageSeconds": 7,
+        "rateUsdMicrosPerMinute": null,
+        "estimatedUsdMicros": null
+      },
+      "realtime": {
+        "usageSeconds": 4,
+        "rateUsdMicrosPerMinute": null,
+        "estimatedUsdMicros": null
+      },
+      "transcription": {
+        "usageSeconds": 0,
+        "rateUsdMicrosPerMinute": null,
+        "estimatedUsdMicros": null
+      }
+    },
+    "billing": [],
+    "providerUsage": {
+      "status": "calculated",
+      "cohort": "operation_started_at",
+      "from": "1970-01-01T00:00:00.000Z",
+      "to": "2026-09-17T19:39:24.008Z",
+      "pricingVersion": "openai-public-2026-09-15",
+      "operationCount": 8,
+      "usageRecordCount": 6,
+      "unpricedBuckets": 0,
+      "missingUsageOperations": 0,
+      "incompleteSessions": 0,
+      "firstRecordedAt": "2026-09-05T12:21:30.474Z",
+      "pricingVersions": [
+        "openai-public-2026-09-15"
+      ],
+      "records": [
+        {
+          "id": "2817da8e-1b5c-8a14-b3b0-faba4fae6ce1",
+          "startedAt": "2026-09-16T16:27:01.086Z",
+          "operationType": "realtime_response",
+          "stage": "consent_prompt",
+          "model": "gpt-realtime-2.1",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 16100,
+          "missingMetrics": []
+        },
+        {
+          "id": "a38d1801-cf85-4dff-a919-00fcef54ce65",
+          "startedAt": "2026-09-16T16:26:49.038Z",
+          "operationType": "telephony_leg",
+          "stage": "outbound_call",
+          "model": "programmable_voice",
+          "outcome": "succeeded",
+          "costBasis": "provider_reported",
+          "calculatedUsdMicros": 180200,
+          "missingMetrics": []
+        },
+        {
+          "id": "70199e0a-b634-4085-9651-78ab08a0a99d",
+          "startedAt": "2026-09-16T16:26:27.547Z",
+          "operationType": "text_translation",
+          "stage": "plan_review.0",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 13852,
+          "missingMetrics": []
+        },
+        {
+          "id": "23bbf753-f779-4444-b641-a125e063e85b",
+          "startedAt": "2026-09-16T16:26:20.667Z",
+          "operationType": "brief_compilation",
+          "stage": "compilation",
+          "model": "gpt-5.6-sol",
+          "outcome": "succeeded",
+          "costBasis": "usage_estimate",
+          "calculatedUsdMicros": 21737,
+          "missingMetrics": []
+        }
+      ],
+      "calculatedUsdMicros": 51689,
+      "components": {
+        "briefCompilation": {
+          "incompleteRecords": 0,
+          "usageRecords": 1,
+          "requests": 1,
+          "models": [
+            "gpt-5.6-sol"
+          ],
+          "inputTextTokens": 2944,
+          "inputTextTokenSamples": 1,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 1,
+          "cacheWriteInputTextTokens": 2941,
+          "cacheWriteInputTextTokenSamples": 1,
+          "outputTextTokens": 351,
+          "outputTextTokenSamples": 1,
+          "reasoningOutputTokens": 55,
+          "reasoningOutputTokenSamples": 1,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 3295,
+          "totalTokenSamples": 1,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 21737
+        },
+        "textTranslation": {
+          "incompleteRecords": 0,
+          "usageRecords": 1,
+          "requests": 1,
+          "models": [
+            "gpt-5.6-sol"
+          ],
+          "inputTextTokens": 1715,
+          "inputTextTokenSamples": 1,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 1,
+          "cacheWriteInputTextTokens": 1712,
+          "cacheWriteInputTextTokenSamples": 1,
+          "outputTextTokens": 264,
+          "outputTextTokenSamples": 1,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 1,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 1979,
+          "totalTokenSamples": 1,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 13852
+        },
+        "callSummary": {
+          "incompleteRecords": 0,
+          "usageRecords": 0,
+          "requests": 0,
+          "models": [],
+          "inputTextTokens": 0,
+          "inputTextTokenSamples": 0,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 0,
+          "outputTextTokenSamples": 0,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 0,
+          "totalTokenSamples": 0,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": null
+        },
+        "realtime": {
+          "incompleteRecords": 0,
+          "usageRecords": 1,
+          "requests": 1,
+          "models": [
+            "gpt-realtime-2.1"
+          ],
+          "inputTextTokens": 107,
+          "inputTextTokenSamples": 1,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 1,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 77,
+          "outputTextTokenSamples": 1,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 1,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 1,
+          "outputAudioTokens": 216,
+          "outputAudioTokenSamples": 1,
+          "totalTokens": 400,
+          "totalTokenSamples": 1,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 16100
+        },
+        "realtimeText": {
+          "incompleteRecords": 0,
+          "usageRecords": 1,
+          "requests": 1,
+          "models": [
+            "gpt-realtime-2.1"
+          ],
+          "inputTextTokens": 107,
+          "inputTextTokenSamples": 1,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 1,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 77,
+          "outputTextTokenSamples": 1,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 1,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 1,
+          "outputAudioTokens": 216,
+          "outputAudioTokenSamples": 1,
+          "totalTokens": 400,
+          "totalTokenSamples": 1,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 2276
+        },
+        "realtimeAudio": {
+          "incompleteRecords": 0,
+          "usageRecords": 1,
+          "requests": 1,
+          "models": [
+            "gpt-realtime-2.1"
+          ],
+          "inputTextTokens": 107,
+          "inputTextTokenSamples": 1,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 1,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 77,
+          "outputTextTokenSamples": 1,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 1,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 1,
+          "outputAudioTokens": 216,
+          "outputAudioTokenSamples": 1,
+          "totalTokens": 400,
+          "totalTokenSamples": 1,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": 13824
+        },
+        "realtimeTranscription": {
+          "incompleteRecords": 0,
+          "usageRecords": 0,
+          "requests": 0,
+          "models": [],
+          "inputTextTokens": 0,
+          "inputTextTokenSamples": 0,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 0,
+          "outputTextTokenSamples": 0,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 0,
+          "totalTokenSamples": 0,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": null
+        },
+        "postCallTranscription": {
+          "incompleteRecords": 0,
+          "usageRecords": 0,
+          "requests": 0,
+          "models": [],
+          "inputTextTokens": 0,
+          "inputTextTokenSamples": 0,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 0,
+          "outputTextTokenSamples": 0,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 0,
+          "totalTokenSamples": 0,
+          "durationSeconds": 0,
+          "durationSamples": 0,
+          "billableSeconds": 0,
+          "billableSamples": 0,
+          "calculatedUsdMicros": null
+        },
+        "telephony": {
+          "incompleteRecords": 0,
+          "usageRecords": 1,
+          "requests": 1,
+          "models": [
+            "programmable_voice"
+          ],
+          "inputTextTokens": 0,
+          "inputTextTokenSamples": 0,
+          "cachedInputTextTokens": 0,
+          "cachedInputTextTokenSamples": 0,
+          "cacheWriteInputTextTokens": 0,
+          "cacheWriteInputTextTokenSamples": 0,
+          "outputTextTokens": 0,
+          "outputTextTokenSamples": 0,
+          "reasoningOutputTokens": 0,
+          "reasoningOutputTokenSamples": 0,
+          "inputAudioTokens": 0,
+          "inputAudioTokenSamples": 0,
+          "cachedInputAudioTokens": 0,
+          "cachedInputAudioTokenSamples": 0,
+          "outputAudioTokens": 0,
+          "outputAudioTokenSamples": 0,
+          "totalTokens": 0,
+          "totalTokenSamples": 0,
+          "durationSeconds": 8,
+          "durationSamples": 1,
+          "billableSeconds": 60,
+          "billableSamples": 1,
+          "calculatedUsdMicros": null
+        }
+      }
+    },
+    "providerReported": {
+      "status": "reported",
+      "pendingOperations": 0,
+      "cohort": "operation_started_at",
+      "from": "1970-01-01T00:00:00.000Z",
+      "to": "2026-09-17T19:39:24.008Z",
+      "recordCount": 1,
+      "usdMicros": 180200,
+      "amounts": [
+        {
+          "provider": "twilio",
+          "costBasis": "provider_reported_actual",
+          "component": "connectivity",
+          "currency": "USD",
+          "records": 1,
+          "amountMicros": 180200
+        }
+      ]
+    }
+  }
+}

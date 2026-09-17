@@ -1768,8 +1768,8 @@ describe("auth API", () => {
       callId,
       cost: {
         currency: "USD",
-        providerUsage: { cohort: "usage_observed_at" },
-        providerReported: { cohort: "cost_observed_at" }
+        providerUsage: { cohort: "operation_started_at" },
+        providerReported: { cohort: "operation_started_at" }
       }
     });
     expect(JSON.stringify(cost.json())).not.toContain(callBrief.phoneNumber);
@@ -1788,7 +1788,7 @@ describe("auth API", () => {
         callBriefId: callId
       },
       cost: {
-        providerUsage: { cohort: "usage_observed_at" }
+        providerUsage: { cohort: "operation_started_at" }
       }
     });
     expect(JSON.stringify(preparation.json())).not.toContain(callBrief.phoneNumber);

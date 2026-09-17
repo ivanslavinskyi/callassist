@@ -1,3 +1,4 @@
+import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
 import { AuthService } from "./auth/auth-service";
@@ -142,6 +143,10 @@ if (webhookApp) {
   });
 }
 const recoveredCalls = await service.initialize();
+if (durableWorkerMode === "embedded") {
+  const stopBillingSync = startProviderBillingSync(result => app.log.info({ event: "provider_billing_sync", result }));
+  app.addHook("onClose", stopBillingSync);
+}
 accountDeletionService.start();
 const port = Number(process.env.PORT ?? 4000);
 await app.listen({ host: "0.0.0.0", port });

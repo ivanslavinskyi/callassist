@@ -6,6 +6,7 @@ export default defineConfig({
     "config/check-deployment": "src/config/check-deployment.ts",
     index: "src/index.ts",
     worker: "src/worker.ts",
+    "db/sync-provider-billing": "src/db/sync-provider-billing.ts",
     "db/migrate": "src/db/migrate.ts",
     "db/backfill-call-compilations": "src/db/backfill-call-compilations.ts",
     "db/classify-legacy-call-plans": "src/db/classify-legacy-call-plans.ts",

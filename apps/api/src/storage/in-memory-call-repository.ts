@@ -251,6 +251,7 @@ export class InMemoryCallRepository implements CallRepository {
     | RealtimeProviderOperationRecord
     | TelephonyProviderOperationRecord
   >();
+  readonly #usageSupplements = new Map<string, { durationSeconds: number | null; billableSeconds: number | null }>();
   readonly #providerCosts = new Map<string, ProviderCostRecord>();
   readonly #postCallTranscriptionChunks = new Map<
     string,
@@ -800,7 +801,11 @@ export class InMemoryCallRepository implements CallRepository {
   async recordRealtimeProviderOperation(
     input: RealtimeProviderOperationInput
   ) {
-    if (this.#providerOperations.has(input.id)) return;
+    const existing = this.#providerOperations.get(input.id);
+    if (existing) {
+      if (!existing.result && input.result) existing.result = copy(input.result);
+      return;
+    }
     const attempt = (this.#attempts.get(input.callBriefId) ?? []).find(
       ({ id }) => id === input.callAttemptId
     );
@@ -950,6 +955,11 @@ export class InMemoryCallRepository implements CallRepository {
     ) {
       operation.result = createTelephonyLegResult(input);
     }
+    const prior = this.#usageSupplements.get(operation.id);
+    this.#usageSupplements.set(operation.id, {
+      durationSeconds: prior?.durationSeconds ?? input.durationSeconds,
+      billableSeconds: prior?.billableSeconds ?? input.billableSeconds
+    });
     await this.enqueueDurableJob({
       type: "provider_call_cost_reconciliation",
       callAttemptId: input.callAttemptId,
@@ -1847,22 +1857,30 @@ export class InMemoryCallRepository implements CallRepository {
         callId,
         preparationId
       )) continue;
-      if (operation.startedAt >= from && operation.startedAt <= to) {
-        facts.providerUsage.operationCount += 1;
+      if (operation.provider === "openai" && operation.result?.usage) {
+        const at = operation.result.completedAt;
+        if (!facts.providerUsage.firstRecordedAt || at < facts.providerUsage.firstRecordedAt) facts.providerUsage.firstRecordedAt = at;
       }
-      const result = operation.result;
-      if (
-        !result?.usage ||
-        result.completedAt < from ||
-        result.completedAt > to
-      ) continue;
+      if (operation.startedAt < from || operation.startedAt >= to) continue;
+      facts.providerUsage.operationCount += 1;
+      if (operation.operationType === "realtime_session" && operation.result?.outcome !== "succeeded") {
+        facts.providerUsage.incompleteSessions = (facts.providerUsage.incompleteSessions ?? 0) + 1;
+      }
+      if (operation.operationType === "telephony_leg" && ![...this.#providerCosts.values()].some(c => c.operationId === operation.id)) {
+        facts.providerCosts.pendingOperations = (facts.providerCosts.pendingOperations ?? 0) + 1;
+      }
+      const result = operation.result ? structuredClone(operation.result) : null;
+      if (!result?.usage) {
+        if (operation.provider === "openai" && !["brief_moderation", "realtime_session"].includes(operation.operationType)) {
+          facts.providerUsage.missingUsageOperations = (facts.providerUsage.missingUsageOperations ?? 0) + 1;
+        }
+        continue;
+      }
+      const supplemental = this.#usageSupplements.get(operation.id);
+      result.usage.durationSeconds ??= supplemental?.durationSeconds ?? null;
+      result.usage.billableSeconds ??= supplemental?.billableSeconds ?? null;
       const model = result.providerModel ?? operation.requestedModel;
-      const key = [
-        operation.provider,
-        operation.operationType,
-        operation.stage,
-        model
-      ].join("\0");
+      const key = operation.id;
       let bucket = providerBuckets.get(key);
       if (!bucket) {
         bucket = emptyAdminProviderUsageBucket({
@@ -1873,8 +1891,13 @@ export class InMemoryCallRepository implements CallRepository {
         });
         providerBuckets.set(key, bucket);
       }
+      const reported = [...this.#providerCosts.values()].filter(c => c.operationId === operation.id && c.currency === "USD");
+      bucket.reportedUsdMicros = reported.length ? reported.reduce((sum, c) => sum + c.amountMicros, 0) : null;
+      bucket.operationId = operation.id;
+      bucket.startedAt = operation.startedAt;
+      bucket.outcome = result.outcome;
       bucket.usageRecords += 1;
-      bucket.requestCount += result.usage.requestCount ?? 0;
+      bucket.requestCount += result.usage.requestCount ?? 1;
       addAdminProviderMetric(
         bucket,
         "inputTextTokens",
@@ -1961,9 +1984,8 @@ export class InMemoryCallRepository implements CallRepository {
     );
     const providerCostBuckets = new Map<string, AdminProviderCostBucket>();
     for (const cost of this.#providerCosts.values()) {
-      if (cost.observedAt < from || cost.observedAt > to) continue;
       const operation = this.#providerOperations.get(cost.operationId);
-      if (!operation || !this.#providerOperationMatchesScope(
+      if (!operation || operation.startedAt < from || operation.startedAt >= to || !this.#providerOperationMatchesScope(
         operation,
         callId,
         preparationId

@@ -379,6 +379,26 @@ describe("OpenAIRealtimeBridge", () => {
     await harness.service.close();
   });
 
+  it("persists outstanding responses and accepts final usage after transport closure", async () => {
+    const h = await createConsentHarness();
+    emitJson(h.openAISocket, { type: "response.created", response: { id: "late-usage" } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(h.repository.providerOperationsForTest().find(o => o.operationType === "realtime_response")?.result).toBeNull();
+    emitJson(h.twilioSocket, { event: "stop" });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(h.repository.providerOperationsForTest().filter(o => o.operationType === "realtime_session").some(o => o.result?.outcome === "network_error")).toBe(true);
+    const event = { type: "response.done", response: { id: "late-usage", status: "cancelled", usage: {
+      input_tokens: 3, output_tokens: 1, total_tokens: 4,
+      input_token_details: { text_tokens: 3, audio_tokens: 0 }, output_token_details: { text_tokens: 0, audio_tokens: 1 }
+    } } };
+    emitJson(h.openAISocket, event); emitJson(h.openAISocket, event);
+    await new Promise(resolve => setImmediate(resolve));
+    const responses = h.repository.providerOperationsForTest().filter(o => o.operationType === "realtime_response");
+    expect(responses).toHaveLength(1);
+    expect(responses[0]?.result?.usage?.totalTokens).toBe(4);
+    await h.service.close();
+  });
+
   it("fails closed before opening provider sockets when compilation is not approved", async () => {
     const service = new CallService(new InMemoryCallRepository());
     const created = await service.create({

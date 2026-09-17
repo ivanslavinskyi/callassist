@@ -10,7 +10,7 @@ const callAncillaryMicrosPerMinute = 10_000;
 
 export type BudgetOperation = {
   id: string; provider: string; operationType: string; stage: string; model: string;
-  outcome: string | null; usage: Record<string, number | null> | null;
+  pricingVersion?: string; outcome: string | null; usage: Record<string, number | null> | null;
   costs: Array<{ component: string; currency: string; amount: number }>;
   separatelyReserved: boolean;
 };
@@ -36,7 +36,7 @@ export function priceBudgetOperation(operation: BudgetOperation): number | null 
   const present = (key: string) => u[key] == null ? 0 : 1;
   const bucket: AdminProviderUsageBucket = {
     provider: operation.provider, operationType: operation.operationType, stage: operation.stage,
-    model: operation.model, usageRecords: 1, requestCount: value("request_count"),
+    pricingVersion: operation.pricingVersion, model: operation.model, usageRecords: 1, requestCount: value("request_count"),
     inputTextTokens: value("input_text_tokens"), inputTextTokenSamples: present("input_text_tokens"),
     cachedInputTextTokens: value("cached_input_text_tokens"), cachedInputTextTokenSamples: present("cached_input_text_tokens"),
     cacheWriteInputTextTokens: value("cache_write_input_text_tokens"), cacheWriteInputTextTokenSamples: present("cache_write_input_text_tokens"),
@@ -129,7 +129,7 @@ export async function readBetaSpend(tx: postgres.TransactionSql) {
         'providerStatus',a.provider_status) END AS call,
       COALESCE((SELECT json_agg(json_build_object(
         'id',o.id,'provider',o.provider,'operationType',o.operation_type,'stage',o.stage,
-        'model',COALESCE(r.provider_model,o.requested_model),'outcome',r.outcome,
+        'model',COALESCE(r.provider_model,o.requested_model),'outcome',r.outcome,'pricingVersion',u.pricing_version,
         'usage',CASE WHEN u.id IS NULL THEN NULL ELSE json_build_object(
           'request_count',u.request_count,'input_text_tokens',u.input_text_tokens,
           'cached_input_text_tokens',u.cached_input_text_tokens,'cache_write_input_text_tokens',u.cache_write_input_text_tokens,
@@ -142,7 +142,7 @@ export async function readBetaSpend(tx: postgres.TransactionSql) {
           FROM provider_cost_records c WHERE c.operation_id=o.id),'[]'::json)))
         FROM provider_operations o
         LEFT JOIN provider_operation_results r ON r.operation_id=o.id
-        LEFT JOIN provider_usage_records u ON u.operation_id=o.id
+        LEFT JOIN effective_provider_usage u ON u.operation_id=o.id
         WHERE (b.kind='call' AND o.call_attempt_id=a.id)
           OR (b.kind<>'call' AND b.reservation_key LIKE 'provider:%' AND o.id=b.entity_id)), '[]'::json) AS operations
     FROM reservations b LEFT JOIN call_attempts a ON b.kind='call' AND b.reservation_key LIKE 'call:%' AND a.id=b.entity_id`;

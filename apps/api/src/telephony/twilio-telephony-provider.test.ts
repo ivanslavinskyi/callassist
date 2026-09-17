@@ -146,6 +146,12 @@ describe("TwilioTelephonyProvider", () => {
     expect(fetchCall).toHaveBeenCalledOnce();
   });
 
+  it.each([null, undefined, "", " "])("keeps absent duration unknown (%s)", async duration => {
+    const { fetchCall, provider } = createProvider();
+    fetchCall.mockResolvedValueOnce({ sid: "CA123", status: "completed", duration });
+    expect((await provider.getCallStatus("CA123")).durationSeconds).toBeUndefined();
+  });
+
   it("returns completed connected duration without inferring billed duration", async () => {
     const { fetchCall, provider } = createProvider();
     fetchCall.mockResolvedValueOnce({

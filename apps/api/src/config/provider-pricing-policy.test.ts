@@ -88,6 +88,18 @@ describe("provider pricing policy", () => {
       unpricedMetrics: []
     });
   });
+  it("does not treat missing input or partially measured duration as complete", () => {
+    expect(calculateProviderUsageCost(bucket({ outputTextTokens: 50, outputTextTokenSamples: 1, totalTokens: 150, totalTokenSamples: 1 })).unpricedMetrics)
+      .toEqual(expect.arrayContaining(["input_text_tokens", "inconsistent_total_tokens"]));
+    expect(calculateProviderUsageCost(bucket({ model: "gpt-realtime-whisper", usageRecords: 2, durationSeconds: 60, durationSamples: 1 })).unpricedMetrics)
+      .toEqual(["duration_seconds"]);
+  });
+  it("refuses unknown saved pricing versions and inconsistent cache splits", () => {
+    expect(calculateProviderUsageCost(bucket({ pricingVersion: "future" })).calculatedUsdMicros).toBeNull();
+    expect(calculateProviderUsageCost(bucket({ inputTextTokens: 1, inputTextTokenSamples: 1, cachedInputTextTokens: 2 })).unpricedMetrics)
+      .toContain("invalid_cached_tokens");
+  });
+
 });
 
 function bucket(

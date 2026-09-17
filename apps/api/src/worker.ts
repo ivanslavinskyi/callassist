@@ -1,3 +1,4 @@
+import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import "./config/load-env";
 import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
@@ -47,11 +48,13 @@ const accountDeletionService = new AccountDeletionService({
   workerEnabled: true,
   keepAlive: true
 });
+const stopBillingSync = startProviderBillingSync(result => process.stdout.write(`${JSON.stringify({ event: "provider_billing_sync", result })}\n`));
 const initialization = service.initialize();
 const shutdown = createGracefulShutdown(
   async () => {
     await initialization.catch(() => undefined);
     await accountDeletionService.close();
+    await stopBillingSync();
     await service.close();
     await authRepository.close();
   },

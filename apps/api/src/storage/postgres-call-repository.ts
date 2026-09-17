@@ -1,3 +1,4 @@
+import { readProviderBilling } from "../billing/read-provider-billing";
 import { PostgresCallAssessmentStore, type FinalCreditEvidence } from "./postgres-call-assessment-store";
 import { PostgresRecipientOptOutStore } from "./postgres-recipient-opt-out-store";
 import { recipientContactHashKey } from "../safety/recipient-opt-out-store";
@@ -357,9 +358,13 @@ type AdminOperationsFactsRow = {
   transcriptionUsageSeconds: number;
 };
 
-type AdminProviderOperationCountRow = { operationCount: number };
+type AdminProviderOperationCountRow = {
+  operationCount: number; missingUsageOperations: number; incompleteSessions: number;
+  pendingPrices: number; firstRecordedAt: Date | null;
+};
 
 type AdminProviderUsageRow = {
+  operationId: string; startedAt: Date; outcome: string | null; pricingVersion: string; reportedUsdMicros: number | null;
   provider: string;
   operationType: string;
   stage: string;
@@ -1296,7 +1301,7 @@ export class PostgresCallRepository implements CallRepository {
         )
         ON CONFLICT DO NOTHING
       `;
-      await this.#insertProviderOperationResult(
+      if (input.result) await this.#insertProviderOperationResult(
         transaction,
         input.id,
         input.result
@@ -3124,10 +3129,19 @@ export class PostgresCallRepository implements CallRepository {
     }
     const [[operationCount], usageRows, costRows] = await Promise.all([
       this.#sql<AdminProviderOperationCountRow[]>`
-        SELECT count(*)::int AS "operationCount"
+        SELECT count(*)::int AS "operationCount",
+          count(*) FILTER (WHERE provider='openai' AND operation_type IN
+            ('brief_compilation','text_translation','call_summary','realtime_response','transcription')
+            AND NOT EXISTS (SELECT 1 FROM provider_usage_records u WHERE u.operation_id=provider_operations.id))::int AS "missingUsageOperations",
+          count(*) FILTER (WHERE operation_type='realtime_session' AND NOT EXISTS
+            (SELECT 1 FROM provider_operation_results r WHERE r.operation_id=provider_operations.id AND r.outcome='succeeded'))::int AS "incompleteSessions",
+          count(*) FILTER (WHERE operation_type='telephony_leg' AND NOT EXISTS
+            (SELECT 1 FROM provider_cost_records c WHERE c.operation_id=provider_operations.id))::int AS "pendingPrices",
+          (SELECT min(u.observed_at) FROM provider_usage_records u JOIN provider_operations o ON o.id=u.operation_id
+            WHERE o.provider='openai') AS "firstRecordedAt"
         FROM provider_operations
         WHERE started_at >= ${from}::timestamptz
-          AND started_at <= ${to}::timestamptz
+          AND started_at < ${to}::timestamptz
           AND (
             (
               ${preparationId ?? null}::uuid IS NOT NULL
@@ -3153,6 +3167,9 @@ export class PostgresCallRepository implements CallRepository {
       `,
       this.#sql<AdminProviderUsageRow[]>`
         SELECT
+          operations.id AS "operationId", operations.started_at AS "startedAt",
+          (SELECT sum(c.amount_micros)::double precision FROM provider_cost_records c WHERE c.operation_id=operations.id AND c.currency='USD') AS "reportedUsdMicros",
+          results.outcome, usage.pricing_version AS "pricingVersion",
           operations.provider,
           operations.operation_type AS "operationType",
           operations.stage,
@@ -3197,13 +3214,13 @@ export class PostgresCallRepository implements CallRepository {
           COALESCE(sum(usage.billable_seconds), 0)::double precision
             AS "billableSeconds",
           count(usage.billable_seconds)::int AS "billableSamples"
-        FROM provider_usage_records usage
+        FROM effective_provider_usage usage
         JOIN provider_operations operations
           ON operations.id = usage.operation_id
         LEFT JOIN provider_operation_results results
           ON results.operation_id = operations.id
-        WHERE usage.observed_at >= ${from}::timestamptz
-          AND usage.observed_at <= ${to}::timestamptz
+        WHERE operations.started_at >= ${from}::timestamptz
+          AND operations.started_at < ${to}::timestamptz
           AND (
             (
               ${preparationId ?? null}::uuid IS NOT NULL
@@ -3225,6 +3242,7 @@ export class PostgresCallRepository implements CallRepository {
             )
           )
         GROUP BY
+          operations.id, operations.started_at, results.outcome, usage.pricing_version,
           operations.provider,
           operations.operation_type,
           operations.stage,
@@ -3245,8 +3263,8 @@ export class PostgresCallRepository implements CallRepository {
           sum(costs.amount_micros)::double precision AS "amountMicros"
         FROM provider_cost_records costs
         JOIN provider_operations operations ON operations.id = costs.operation_id
-        WHERE costs.observed_at >= ${from}::timestamptz
-          AND costs.observed_at <= ${to}::timestamptz
+        WHERE operations.started_at >= ${from}::timestamptz
+          AND operations.started_at < ${to}::timestamptz
           AND (
             (
               ${preparationId ?? null}::uuid IS NOT NULL
@@ -3272,6 +3290,7 @@ export class PostgresCallRepository implements CallRepository {
       `
     ]);
     return {
+      billing: !callId && !preparationId ? await readProviderBilling(this.#sql, from, to) : [],
       createdCalls: row.createdCalls,
       lifecycle,
       attemptedCalls: row.attemptedCalls,
@@ -3321,7 +3340,10 @@ export class PostgresCallRepository implements CallRepository {
           (total, bucket) => total + bucket.usageRecords,
           0
         ),
-        buckets: usageRows
+        missingUsageOperations: operationCount?.missingUsageOperations ?? 0,
+        incompleteSessions: operationCount?.incompleteSessions ?? 0,
+        firstRecordedAt: operationCount?.firstRecordedAt?.toISOString() ?? null,
+        buckets: usageRows.map(row => ({ ...row, startedAt: toIso(row.startedAt) }))
       },
       providerCosts: {
         incurredFrom: from,
@@ -3330,6 +3352,7 @@ export class PostgresCallRepository implements CallRepository {
           (total, bucket) => total + bucket.records,
           0
         ),
+        pendingOperations: operationCount?.pendingPrices ?? 0,
         buckets: costRows
       }
     };
@@ -7834,6 +7857,14 @@ export class PostgresCallRepository implements CallRepository {
       )
       ON CONFLICT (operation_id) DO NOTHING
     `;
+    if (input.usage.durationSeconds != null || input.usage.billableSeconds != null) {
+      await transaction`
+        INSERT INTO provider_usage_supplements(operation_id, observation_key, duration_seconds, billable_seconds, observed_at)
+        VALUES (${operationId}, ${JSON.stringify([input.usage.durationSeconds ?? null, input.usage.billableSeconds ?? null])},
+          ${input.usage.durationSeconds ?? null}, ${input.usage.billableSeconds ?? null}, ${input.completedAt}::timestamptz)
+        ON CONFLICT DO NOTHING
+      `;
+    }
   }
 
   async #audit(

@@ -367,7 +367,7 @@ export class OpenAIRealtimeBridge {
           metadata: { reason }
         });
       }
-      const providerFailure = reason === "openai_error" || reason === "openai_closed";
+      const providerFailure = reason === "openai_error" || reason === "openai_closed" || responseStarts.size > 0;
       completeRealtimeSession(
         conversationSession,
         providerFailure ? "network_error" : "succeeded",
@@ -900,7 +900,11 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
     };
 
     const handleOpenAIEvent = (event: OpenAIEvent, brief: CallBrief) => {
-      if (closed) return;
+      // Transport shutdown must not discard a final (including cancelled) usage event.
+      if (closed) {
+        if (event.type === "response.done") recordRealtimeResponse(event, null);
+        return;
+      }
       switch (event.type) {
         case "session.created":
           observeSession(conversationSession, event);
@@ -925,6 +929,18 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
           }
           break;
         case "response.created": {
+          const reservationId = event.response?.id ?? event.response_id;
+          if (reservationId && callBriefId && callAttemptId && conversationSession) {
+            const operationId = createProviderEventOperationId("realtime_response", reservationId);
+            const parentOperationId = conversationSession.operationId;
+            const startedAt = new Date().toISOString();
+            const stage = event.response?.metadata?.closing_route ? "closing_route" : activeResponsePurpose ?? (consentGranted ? "conversation" : "consent_prompt");
+            queueProviderWrite(() => this.#service.recordRealtimeProviderOperation({
+              id: operationId, parentOperationId, callBriefId: callBriefId!, callAttemptId: callAttemptId!,
+              provider: "openai", operationType: "realtime_response", stage, requestedModel: this.#model,
+              clientRequestId: operationId, startedAt, result: null
+            }), "realtime_response_reserved");
+          }
           const responseId = event.response?.id;
           const routeId = event.response?.metadata?.closing_route;
           if (responseId && routeId) {
