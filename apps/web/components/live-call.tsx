@@ -551,7 +551,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
 
           <div className="call-actions">
           <span className={`status-pill ${callStatusClass(brief)}`}>
-            <span aria-hidden="true" /> {pendingCallStart ? callActivityMessages[uiLocale].starting.label : brief.status === "blocked" && preparationFailed ? messages.review.preparationFailed : callStatusLabel(brief, uiLocale, copy.status)}
+            <span aria-hidden="true" /> {pendingCallStart ? callActivityMessages[uiLocale].starting.label : callStatusLabel(brief, uiLocale)}
           </span>
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
@@ -954,6 +954,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
             </section>
             {isTerminalCallStatus(brief.status) && brief.status !== "blocked" ? (
               <CallFeedback
+                brief={brief}
                 callId={callId}
                 hasCompletedTranscript={finalTranscript?.status === "completed"}
               />
@@ -1001,7 +1002,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                 <div className="guard-visual" aria-hidden="true">
                   <span>{brief.lifecycle?.substantiveAnswerConfirmed ? "✓" : "—"}</span>
                 </div>
-                <h2>{callStatusLabel(brief, uiLocale, copy.status)}</h2>
+                <h2>{callStatusLabel(brief, uiLocale)}</h2>
                 <p>{copy.terminalHelp}</p>
               </section>
             ) : (

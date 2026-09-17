@@ -1,3 +1,4 @@
+import { callStatusMessages } from "./call-presentation";
 import { uiLocales, type UiLocale } from "./registry";
 export { uiLocales, type UiLocale } from "./registry";
 
@@ -132,6 +133,8 @@ export type Messages = {
     lead: string;
     historyEyebrow: string;
     historyTitle: string;
+    duration: string;
+    durationUnavailable: string;
     emptyTitle: string;
     emptyText: string;
     privacyTitle: string;
@@ -372,6 +375,8 @@ const en: Messages = {
     lead: "SHPROHLI handles the conversation, shows a live transcript and creates a final transcript after the call.",
     historyEyebrow: "History",
     historyTitle: "Recent calls",
+    duration: "Call duration",
+    durationUnavailable: "Call duration not available",
     emptyTitle: "Your calls will appear here",
     emptyText: "Create your first call plan to get started.",
     privacyTitle: "The recipient chooses.",
@@ -389,12 +394,7 @@ const en: Messages = {
     loadingMore: "Loading…",
     noMatchesTitle: "No matching calls",
     noMatchesText: "Change the search or status filter and try again.",
-    status: {
-      review_required: "Ready to call", needs_clarification: "Needs one detail",
-      blocked: "Blocked", ready: "Ready", dialing: "Dialing",
-      in_progress: "In progress", awaiting_approval: "Decision required",
-      completed: "Completed", stopped: "Stopped", failed: "Failed"
-    }
+    status: callStatusMessages("en")
   },
   form: {
     disclosurePreview: "If shared, the assistant may say:",
@@ -449,12 +449,7 @@ const en: Messages = {
     breadcrumbLabel: "Breadcrumb",
     allCallBriefs: "All calls",
     callPageTitle: (recipient: string) => `${recipient} — SHPROHLI`,
-    status: {
-      review_required: "Ready to call", needs_clarification: "Needs one detail",
-      blocked: "Needs changes", ready: "Ready to start", dialing: "Dialing",
-      in_progress: "Call in progress", awaiting_approval: "Awaiting decision",
-      completed: "Call ended", stopped: "Call stopped", failed: "Call failed"
-    },
+    status: callStatusMessages("en"),
     recordingStatus: {
       starting: "Starting", recording: "Recording", processing: "Processing",
       available: "Available", failed: "Failed", deleted: "Deleted"
@@ -588,6 +583,8 @@ const de: Messages = {
     lead: "SHPROHLI führt das Gespräch, zeigt ein Live-Transkript und erstellt nach dem Anruf ein Endtranskript.",
     historyEyebrow: "Verlauf",
     historyTitle: "Letzte Anrufe",
+    duration: "Anrufdauer",
+    durationUnavailable: "Anrufdauer nicht verfügbar",
     emptyTitle: "Ihre Anrufe erscheinen hier",
     emptyText: "Erstellen Sie Ihren ersten Anrufplan.",
     privacyTitle: "Die angerufene Person entscheidet.",
@@ -605,12 +602,7 @@ const de: Messages = {
     loadingMore: "Wird geladen…",
     noMatchesTitle: "Keine passenden Anrufe",
     noMatchesText: "Ändern Sie Suche oder Statusfilter und versuchen Sie es erneut.",
-    status: {
-      review_required: "Bereit zum Anrufen", needs_clarification: "Eine Angabe fehlt",
-      blocked: "Blockiert", ready: "Bereit", dialing: "Wird gewählt",
-      in_progress: "Anruf läuft", awaiting_approval: "Entscheidung erforderlich",
-      completed: "Abgeschlossen", stopped: "Gestoppt", failed: "Fehlgeschlagen"
-    }
+    status: callStatusMessages("de")
   },
   form: {
     disclosurePreview: "Falls dieser Grund genannt wird, kann der Assistent sagen:",
@@ -729,12 +721,7 @@ const de: Messages = {
     breadcrumbLabel: "Brotkrümelnavigation",
     allCallBriefs: "Alle Anrufe",
     callPageTitle: (recipient: string) => `${recipient} — SHPROHLI`,
-    status: {
-      review_required: "Bereit zum Anrufen", needs_clarification: "Eine Angabe fehlt",
-      blocked: "Muss geändert werden", ready: "Startbereit", dialing: "Wird gewählt",
-      in_progress: "Anruf läuft", awaiting_approval: "Entscheidung ausstehend",
-      completed: "Anruf beendet", stopped: "Anruf gestoppt", failed: "Anruf fehlgeschlagen"
-    },
+    status: callStatusMessages("de"),
     recordingStatus: {
       starting: "Wird gestartet", recording: "Aufnahme läuft", processing: "Wird verarbeitet",
       available: "Verfügbar", failed: "Fehlgeschlagen", deleted: "Gelöscht"

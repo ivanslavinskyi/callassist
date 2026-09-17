@@ -1,4 +1,5 @@
-import type { CallBrief, CallResult } from "@callassist/contracts";
+import { callPresentation, callStage, type CallBrief, type CallResult } from "@callassist/contracts";
+import { callPresentationCopy } from "./i18n/call-presentation";
 export const terminalCallStatuses = new Set<CallBrief["status"]>(["completed", "stopped", "failed"]);
 export function isTerminalCallStatus(status: CallBrief["status"]) { return terminalCallStatuses.has(status); }
 
@@ -34,14 +35,15 @@ export const callResultCopy = {
 } satisfies Record<"en" | "de", Record<CallResult, readonly [string, string]>>;
 
 type StatusBrief = Pick<CallBrief, "status" | "lifecycle">;
-export function callStatusLabel(brief: StatusBrief, locale: "en" | "de", fallback: Record<CallBrief["status"], string>) {
-  const result = brief.lifecycle?.result;
-  if (result) return callResultCopy[locale][result][0];
-  if (brief.status === "completed") return callResultCopy[locale].ended[0];
-  return fallback[brief.status];
+export function callStatusLabel(brief: StatusBrief, locale: "en" | "de") {
+  return callPresentationCopy[locale].stages[callStage(brief.status)];
 }
 export function callStatusClass(brief: StatusBrief) {
-  return brief.lifecycle?.result ? `result-${brief.lifecycle.result}` : brief.status === "completed" ? "result-ended" : `status-${brief.status}`;
+  return `status-${callStage(brief.status)}`;
+}
+export function callResultLabel(brief: StatusBrief, locale: "en" | "de") {
+  const result = callPresentation(brief).result;
+  return result === null ? null : result === "unknown" ? callPresentationCopy[locale].unknown : callResultCopy[locale][result][0];
 }
 export function callConsentLabel(lifecycle: CallBrief["lifecycle"], locale: "en" | "de", fallback: string) {
   if (!lifecycle) return fallback;

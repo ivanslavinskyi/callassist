@@ -783,9 +783,9 @@ main:focus { outline: none; }
 }
 .recipient-suggestions-popup {
   background: var(--surface);
-  border: 1px solid #dce4e0;
+  border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 16px 36px rgba(20, 45, 37, .14);
+  box-shadow: var(--shadow);
   left: 0;
   max-height: 280px;
   overflow-y: auto;
@@ -804,7 +804,7 @@ main:focus { outline: none; }
   gap: 3px;
   padding: 10px 11px;
 }
-.recipient-suggestion[aria-selected="true"] { background: #edf5f1; }
+.recipient-suggestion[aria-selected="true"] { background: var(--tint); outline: 1px solid var(--green); outline-offset: -1px; }
 .recipient-suggestion strong { color: var(--ink); font-size: 13px; }
 .recipient-suggestion span { color: var(--muted); font-size: 11px; }
 .recipient-suggestions-status {

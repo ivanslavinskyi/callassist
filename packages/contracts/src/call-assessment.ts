@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const ids = z.array(z.string().min(1).max(160)).max(30);
 export const goalAssessmentStatusSchema = z.enum(["achieved", "partial", "not_achieved", "uncertain"]);
+export type GoalAssessmentStatus = z.infer<typeof goalAssessmentStatusSchema>;
 export const callAssessmentDecisionSchema = z.strictObject({
   conversation: z.strictObject({
     status: z.enum(["confirmed", "absent", "uncertain"]),

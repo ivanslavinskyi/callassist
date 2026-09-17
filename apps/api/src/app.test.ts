@@ -85,6 +85,15 @@ describe("call API", () => {
     expect(response.json()).toEqual({ error: "INVALID_CALL_LIST_QUERY" });
   });
 
+  it("accepts stage filtering and rejects unsupported or ambiguous filters", async () => {
+    const app = createApp();
+    const response = await app.inject({ method: "GET", url: "/api/call-briefs?stage=ended" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ items: [], stageCounts: { ended: 0 }, legacyStatusCount: null });
+    for (const query of ["stage=completed", "stage=awaiting_approval", "stage=ended&status=failed"])
+      expect((await app.inject({ method: "GET", url: `/api/call-briefs?${query}` })).statusCode).toBe(400);
+  });
+
   it("creates and returns a persisted call brief", async () => {
     const { app, service } = createAppWithService();
     const created = await service.create({

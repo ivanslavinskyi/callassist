@@ -3,7 +3,7 @@ import { InMemoryRecipientOptOutStore } from "./in-memory-recipient-opt-out-stor
 import { provesRecipientContact } from "../safety/recipient-opt-out-store";
 import type { CallAssessmentRecord, CallTextArtifact } from "@callassist/contracts";
 import type { FinalCreditEvidence } from "./postgres-call-assessment-store";
-import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle } from "@callassist/contracts";
+import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle, callStage, emptyCallStageCounts, summarizeCallFeedback, callFeedbackScope } from "@callassist/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { InMemoryCallTextStore } from "./in-memory-call-text-store";
@@ -337,16 +337,21 @@ export class InMemoryCallRepository implements CallRepository {
   #outboundCallsUpdatedAt: string | null = null;
 
   async list(input: ListCallBriefsInput) {
-    const filtered = [...this.#calls.values()]
+    const scoped = [...this.#calls.values()]
       .filter(({ brief }) =>
         this.#owners.get(brief.id) === (input.userId ?? null) &&
         !this.#callDataDeletions.has(brief.id)
       )
-      .map(({ brief }) => ({ ...copy(brief), lifecycle: this.#lifecycle(brief) }))
-      .filter((brief) => !input.status || brief.status === input.status)
+      .map(({ brief }) => brief)
       .filter((brief) =>
         !input.search || brief.recipientName.toLocaleLowerCase().includes(input.search.toLocaleLowerCase())
-      )
+      );
+    const stageCounts = emptyCallStageCounts();
+    for (const brief of scoped) stageCounts[callStage(brief.status)]++;
+    const legacyStatusCount = input.status ? scoped.filter(brief => brief.status === input.status).length : null;
+    const filtered = scoped
+      .filter(brief => !input.stage || callStage(brief.status) === input.stage)
+      .filter(brief => !input.status || brief.status === input.status)
       .filter((brief) =>
         !input.cursor || brief.createdAt < input.cursor.createdAt ||
           (brief.createdAt === input.cursor.createdAt && brief.id < input.cursor.id)
@@ -354,10 +359,14 @@ export class InMemoryCallRepository implements CallRepository {
       .sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
       );
-    const items = filtered.slice(0, input.limit);
+    const items = filtered.slice(0, input.limit).map(brief => ({ ...copy(brief), lifecycle: this.#lifecycle(brief),
+      feedback: summarizeCallFeedback(this.#callFeedbackRevisions.get(brief.id)?.at(-1)?.revision ?? null,
+        (this.#attempts.get(brief.id) ?? []).map(attempt => attempt.startedAt)) }));
     const last = items.at(-1);
     return {
       items,
+      stageCounts,
+      legacyStatusCount,
       nextCursor: filtered.length > input.limit && last
         ? encodeCallBriefCursor({ createdAt: last.createdAt, id: last.id })
         : null
@@ -3630,7 +3639,9 @@ export class InMemoryCallRepository implements CallRepository {
     return callOutcomeViewSchema.parse({
       technical: deriveTechnicalCallOutcome(snapshot.brief.status, events),
       latestOutcome,
-      latestFeedback
+      latestFeedback,
+      feedbackScope: latestFeedback ? callFeedbackScope(latestFeedback.createdAt,
+        (this.#attempts.get(callBriefId) ?? []).map(attempt => attempt.startedAt)) : "call"
     });
   }
 
@@ -3653,6 +3664,7 @@ export class InMemoryCallRepository implements CallRepository {
         revision: feedback.revision,
         goalResult: feedback.goalResult,
         transcriptQuality: feedback.transcriptQuality,
+        scope: outcomeView.feedbackScope,
         createdAt: feedback.createdAt
       } : null,
       durationSeconds: snapshot.recording?.durationSeconds ?? null,

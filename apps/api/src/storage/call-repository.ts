@@ -2,6 +2,7 @@ import type { CallTextRepository, TextArtifactProviderReservationInput } from ".
 import type { BetaControls } from "../beta/beta-controls";
 import type { RecipientOptOutStore } from "../safety/recipient-opt-out-store";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
+import type { CallHistoryStage, CallHistoryList } from "@callassist/contracts";
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -183,11 +184,9 @@ export type ListCallBriefsInput = {
   cursor?: CallBriefCursor;
   search?: string;
   status?: CallBrief["status"];
+  stage?: CallHistoryStage;
 };
-export type ListCallBriefsResult = {
-  items: CallBrief[];
-  nextCursor: string | null;
-};
+export type ListCallBriefsResult = CallHistoryList;
 
 export type ListRecipientSuggestionsInput = {
   userId: string;

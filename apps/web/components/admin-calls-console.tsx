@@ -1,5 +1,6 @@
 "use client";
-import { callStatusClass, callStatusLabel, callConsentLabel } from "@/lib/call-status";
+import { callStatusClass, callStatusLabel, callConsentLabel, callResultLabel } from "@/lib/call-status";
+import { callPresentationCopy, legacyCallStatusLabel } from "@/lib/i18n/call-presentation";
 
 import { FilterDisclosure } from "./filter-disclosure";
 
@@ -157,10 +158,10 @@ export function AdminCallsConsole() {
         {loading && items.length === 0 ? <p role="status">{copy.loading}</p> : null}
             <FilterDisclosure label={copy.filters}>
             <form className="admin-call-filters" onSubmit={applyFilters}>
-              <FilterSelect label={copy.status} name="status">
+              <FilterSelect label={callPresentationCopy[locale].technicalState} name="status">
                 <option value="">{copy.all}</option>
                 {statuses.map((value) =>
-                  <option key={value} value={value}>{copy.statuses[value]}</option>
+                  <option key={value} value={value}>{legacyCallStatusLabel(value, locale)}</option>
                 )}
               </FilterSelect>
               <FilterSelect label={copy.outcome} name="outcome">
@@ -226,7 +227,7 @@ export function AdminCallsConsole() {
                   <Fact label={copy.failureStage} value={call.technical.failureStage ? copy.failures[call.technical.failureStage] : copy.notAvailable} />
                   <Fact label={copy.eventCount} value={String(call.eventCount)} />
                 </dl></details></td>
-                <td data-label={copy.status}><span className={`status-chip ${callStatusClass(call)}`}>{callStatusLabel(call, locale, copy.statuses)}</span></td>
+                <td data-label={copy.status}><span className={`status-chip ${callStatusClass(call)}`}>{callStatusLabel(call, locale)}</span><small className="admin-call-result">{callResultLabel(call, locale)}</small></td>
                 <td data-label={copy.language}>{copy.languages[call.locale]}</td>
                 <td data-label={copy.created}><time dateTime={call.createdAt}>{formatDate(call.createdAt, locale)}</time></td>
                 <td data-label={copy.duration}>{formatDuration(call.durationSeconds)}</td>

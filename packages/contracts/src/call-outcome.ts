@@ -143,7 +143,8 @@ export type CallFeedbackRevision = z.infer<
 export const callOutcomeViewSchema = z.strictObject({
   technical: technicalCallOutcomeSchema,
   latestOutcome: callOutcomeRevisionSchema.nullable(),
-  latestFeedback: callFeedbackRevisionSchema.nullable()
+  latestFeedback: callFeedbackRevisionSchema.nullable(),
+  feedbackScope: z.enum(["current_attempt", "call"]).optional()
 });
 export type CallOutcomeView = z.infer<typeof callOutcomeViewSchema>;
 

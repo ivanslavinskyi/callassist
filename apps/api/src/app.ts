@@ -22,6 +22,7 @@ import {
   adminCreditGrantInputSchema,
   approvalDecisionSchema,
   callBriefStatusSchema,
+  callHistoryStageSchema,
   compilationReviewApprovalInputSchema,
   planReviewRequestSchema,
   transcriptArtifactRequestSchema,
@@ -2040,7 +2041,7 @@ export function buildApp({
   });
 
   app.get<{
-    Querystring: { limit?: string; cursor?: string; search?: string; status?: string };
+    Querystring: { limit?: string; cursor?: string; search?: string; status?: string; stage?: string };
   }>("/api/call-briefs", async (request, reply) => {
     const access = await authorizeCallAccess(request, reply);
     if (!access) return;
@@ -2049,6 +2050,7 @@ export function buildApp({
     const status = request.query.status
       ? callBriefStatusSchema.safeParse(request.query.status)
       : null;
+    const stage = request.query.stage ? callHistoryStageSchema.safeParse(request.query.stage) : null;
     const cursor = request.query.cursor
       ? decodeCallBriefCursor(request.query.cursor)
       : undefined;
@@ -2056,6 +2058,7 @@ export function buildApp({
       !Number.isInteger(limit) || limit < 1 || limit > 50 ||
       (search !== undefined && search.length > 100) ||
       (status !== null && !status.success) ||
+      (stage !== null && !stage.success) || (stage !== null && status !== null) ||
       (request.query.cursor !== undefined && !cursor)
     ) {
       return reply.status(400).send({ error: "INVALID_CALL_LIST_QUERY" });
@@ -2065,7 +2068,8 @@ export function buildApp({
       userId: access.userId,
       ...(cursor ? { cursor } : {}),
       ...(search ? { search } : {}),
-      ...(status?.success ? { status: status.data } : {})
+      ...(status?.success ? { status: status.data } : {}),
+      ...(stage?.success ? { stage: stage.data } : {})
     });
   });
 

@@ -2,12 +2,14 @@
 
 import type {
   CallGoalResult,
+  CallBrief,
   CallOutcomeView,
   TranscriptQualityRating
 } from "@callassist/contracts";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { getCallOutcome, submitCallFeedback } from "@/lib/api";
 import { useUiLocale } from "./ui-locale-provider";
+import { CallAssessments } from "./call-assessments";
 
 const goalResults: CallGoalResult[] = ["yes", "partly", "no"];
 const transcriptRatings: TranscriptQualityRating[] = [
@@ -18,12 +20,14 @@ const transcriptRatings: TranscriptQualityRating[] = [
 
 export function CallFeedback({
   callId,
+  brief,
   hasCompletedTranscript
 }: {
   callId: string;
+  brief: Pick<CallBrief, "status" | "lifecycle">;
   hasCompletedTranscript: boolean;
 }) {
-  const { messages } = useUiLocale();
+  const { locale, messages } = useUiLocale();
   const copy = messages.live;
   const [view, setView] = useState<CallOutcomeView | null>(null);
   const [goalResult, setGoalResult] = useState<CallGoalResult | null>(null);
@@ -81,6 +85,7 @@ export function CallFeedback({
       setView(next);
       submissionKey.current = null;
       setStatus("saved");
+      window.dispatchEvent(new Event("call-feedback-updated"));
     } catch {
       setStatus("error");
     }
@@ -91,6 +96,9 @@ export function CallFeedback({
       <span className="eyebrow">{copy.feedbackEyebrow}</span>
       <h2 id="call-feedback-title">{copy.feedbackTitle}</h2>
       <p>{copy.feedbackHelp}</p>
+      <CallAssessments brief={brief} locale={locale}
+        feedback={view?.latestFeedback ? { ...view.latestFeedback, scope: view.feedbackScope ?? "call" } : null}
+        feedbackState={!view && status === "loading" ? "loading" : !view ? "error" : "ready"} />
 
       <form onSubmit={(event) => void submit(event)}>
         <fieldset disabled={status === "loading" || status === "saving"}>

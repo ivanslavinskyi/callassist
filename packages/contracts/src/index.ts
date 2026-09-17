@@ -21,3 +21,4 @@ export * from "./safety";
 export * from "./beta-controls";
 export * from "./call-lifecycle";
 export * from "./call-assessment";
+export * from "./call-history";

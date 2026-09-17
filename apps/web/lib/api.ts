@@ -27,6 +27,8 @@ import type {
   AdminUserCreditLedger,
   AdminUserList,
   CallBrief,
+  CallHistoryList,
+  CallHistoryStage,
   CallLanguageContext,
   CallTextArtifact,
   CompilationReviewApprovalInput,
@@ -795,14 +797,16 @@ export async function listCallBriefs(options: {
   limit?: number;
   search?: string;
   status?: CallBrief["status"];
+  stage?: CallHistoryStage;
 } = {}) {
   const query = new URLSearchParams();
   if (options.cursor) query.set("cursor", options.cursor);
   if (options.limit) query.set("limit", String(options.limit));
   if (options.search) query.set("search", options.search);
   if (options.status) query.set("status", options.status);
+  if (options.stage) query.set("stage", options.stage);
   const suffix = query.size > 0 ? `?${query}` : "";
-  return apiRequest<{ items: CallBrief[]; nextCursor: string | null }>(
+  return apiRequest<CallHistoryList>(
     `/api/call-briefs${suffix}`
   );
 }

@@ -56,6 +56,7 @@ export const adminCallFeedbackSummarySchema = z.strictObject({
   revision: z.number().int().positive(),
   goalResult: callGoalResultSchema,
   transcriptQuality: transcriptQualityRatingSchema.nullable(),
+  scope: z.enum(["current_attempt", "call"]).optional(),
   createdAt: z.iso.datetime()
 });
 export type AdminCallFeedbackSummary = z.infer<
