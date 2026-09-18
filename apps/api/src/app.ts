@@ -129,7 +129,11 @@ import {
 } from "./telephony/telephony-provider";
 import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
+import { notificationSettingsUpdateSchema } from "@callassist/contracts";
+import { NotificationSettingsError, type NotificationAdmin } from "./notifications/superadmin-notifications";
+
 type BuildAppOptions = {
+  notifications?: NotificationAdmin;
   service: CallService;
   authService?: AuthService;
   creditService?: CreditService;
@@ -157,6 +161,7 @@ type BuildWebhookAppOptions = {
 };
 
 export function buildApp({
+  notifications,
   service,
   authService,
   creditService,
@@ -1586,6 +1591,30 @@ export function buildApp({
       if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
       return reply.header("Cache-Control", "private, no-store").send(betaControlsViewSchema.parse(await service.repository.betaControls.getView()));
     });
+    app.get("/api/admin/system/notifications", async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "NOTIFICATION_FORBIDDEN" });
+      if (!notifications) return reply.status(503).send({ error: "NOTIFICATIONS_UNAVAILABLE" });
+      return reply.send(await notifications.getView());
+    });
+    app.put("/api/admin/system/notifications", async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "NOTIFICATION_FORBIDDEN" });
+      const parsed = notificationSettingsUpdateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_NOTIFICATION_SETTINGS" });
+      if (!notifications) return reply.status(503).send({ error: "NOTIFICATIONS_UNAVAILABLE" });
+      try {
+        await notifications.update(parsed.data, actor.id);
+        return reply.send({ updated: true });
+      } catch (error) {
+        if (error instanceof NotificationSettingsError) return reply.status(error.code === "NOTIFICATION_FORBIDDEN" ? 403 : 409).send({ error: error.code });
+        throw error;
+      }
+    });
     app.put("/api/admin/system/beta", async (request, reply) => {
       const actor = await authorizeAdminMutation(request, reply);
       if (!actor) return;
@@ -2694,6 +2723,7 @@ export function buildApp({
   );
 
   app.addHook("onClose", async () => {
+    await notifications?.close();
     await Promise.all([
       accountDeletionService?.close(),
       service.close(),

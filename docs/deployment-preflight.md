@@ -12,7 +12,13 @@ reconciliation, the 20,000-token compiler ceiling and the
 [preparation/review/call UI update](workflow-feedback-2026-09-15.md), followed by
 [distinct call results, history and admin metrics](call-lifecycle-history-2026-09-15.md).
 It also includes the [16 September landing, language and opt-out changes](delivery-2026-09-16.md).
-Apply migrations through 0075 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
+Apply migrations through 0077 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
+
+The [superadmin notification layer](superadmin-notifications.md) requires the same
+`EMAIL_DRIVER`, `RESEND_API_KEY`, `EMAIL_FROM`, and `NEXT_PUBLIC_SITE_URL` on API and
+external worker. Migration 0077 creates an initially disabled queue configuration;
+choose verified superadmin recipients and enable categories in Admin > System.
+Existing registrations and calls are not backfilled.
 Local budget settings (revision 3: 20 USD/24 h, 0.60 USD/call minute,
 0.15 USD/paid text) must be explicitly checked/configured in the deployment;
 they are not transferred by pushing the repository. The 16 September local API,

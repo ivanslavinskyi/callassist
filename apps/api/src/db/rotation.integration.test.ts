@@ -87,9 +87,17 @@ it("rotates immutable text evidence and queued input without changing source has
     const environment = { DATABASE_URL: database.url, DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current", DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "old",
       DATA_ENCRYPTION_PREVIOUS_KEYS: JSON.stringify({ old: oldKey }), DATA_ENCRYPTION_REENCRYPT_CONFIRM: "current" };
+    const notificationId = randomUUID();
+    const notificationPayload = { to: "operator@example.test", text: "Итог звонка — original language", idempotencyKey: notificationId };
+    await sql`INSERT INTO superadmin_notifications(id,kind,source_id,source_user_id,recipient_user_id,occurred_at,payload_ciphertext)
+      VALUES(${notificationId},'registration',${userId},${userId},${userId},now(),${encryptJson(notificationPayload,
+        parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: oldKey, DATA_ENCRYPTION_ACTIVE_KEY_ID: "old" }))})`;
     const rotation = await reencryptDatabase(environment);
+    const [notification] = await sql`SELECT payload_ciphertext FROM superadmin_notifications WHERE id=${notificationId}`;
+    expect(decryptJson(notification!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
+      DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(notificationPayload);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 18, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 19, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);
@@ -105,8 +113,8 @@ it("rotates immutable text evidence and queued input without changing source has
     if (process.env.RUN_TEXT_RECOVERY_DRILL === "true") {
       expect(await runRecoveryDrill({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
         DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current", RECOVERY_SOURCE_DATABASE_URL: database.url }))
-        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 22,
-          temporaryResourcesRemoved: true, encryptedSamplesVerified: 15 });
+        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 25,
+          temporaryResourcesRemoved: true, encryptedSamplesVerified: 16 });
     }
     expect(await reencryptDatabase({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
       DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current" })).toMatchObject({ rewrittenCiphertexts: 0 });

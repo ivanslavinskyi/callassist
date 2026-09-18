@@ -1,5 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import type { EmailProvider } from "./email-provider";
+import { EmailDeliveryError, type AdminNotificationEmail } from "./email-provider";
 import type { BetaControls } from "../beta/beta-controls";
 import { emailChangeRequestNotice, securityNoticeEmail, verificationEmail, type EmailContent } from "./email-templates";
 import { emailIdentity, type EmailBranding } from "./email-branding";
@@ -11,6 +12,10 @@ export class ResendEmailProvider implements EmailProvider {
     fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>;
     betaControls?: BetaControls;
   }) {}
+
+  async sendAdminNotification(input: AdminNotificationEmail) {
+    return this.send(input.to, input.content, input.idempotencyKey, "superadmin_notification", "en");
+  }
 
   async sendEmailChangeVerification(input: Parameters<EmailProvider["sendEmailChangeVerification"]>[0]) {
     await this.send(input.to, verificationEmail(input, this.options.branding), input.idempotencyKey, "verification", input.locale);
@@ -27,11 +32,12 @@ export class ResendEmailProvider implements EmailProvider {
     // Reuse the same key AND payload after uncertain responses. Resend keeps
     // deduplication keys for 24 hours. A new code requires a new key.
     const idempotencyKey = key ?? messageId;
-    await this.options.betaControls?.reserve("email", `email:${messageId}`);
+    await this.options.betaControls?.reserve("email", `email:${idempotencyKey}`);
     const body = JSON.stringify({ from: this.options.from, to, reply_to: emailIdentity.supportAddress, ...content });
     const request = this.options.fetch ?? fetch;
     for (let attempt = 1; attempt <= 2; attempt++) {
       let retryable = true;
+      let retryAfterMs = 0;
       try {
         const response = await request("https://api.resend.com/emails", {
           method: "POST", signal: AbortSignal.timeout(this.options.timeoutMs ?? 5_000),
@@ -40,21 +46,22 @@ export class ResendEmailProvider implements EmailProvider {
         const result = await response.json().catch(() => null) as { id?: unknown; name?: unknown } | null;
         if (response.ok && typeof result?.id === "string" && /^[a-f0-9-]{36}$/i.test(result.id)) {
           writeDeliveryEvent({ messageId, purpose, locale, attempt, status: "accepted", providerId: result.id });
-          return;
+          return result.id;
         }
         retryable = response.status === 429 || response.status >= 500 ||
           (response.status === 409 && result?.name === "concurrent_idempotent_requests");
         const retryAfter = Number(response.headers.get("retry-after") ?? 0);
-        if (retryAfter > 1) retryable = false;
+        if (Number.isFinite(retryAfter) && retryAfter > 1) retryAfterMs = Math.min(20 * 3600_000, retryAfter * 1000);
       } catch {
         // A timeout can follow a successful send: retry using its original key.
       }
-      if (!retryable || attempt === 2) {
+      if (!retryable || retryAfterMs > 0 || attempt === 2) {
         writeDeliveryEvent({ messageId, purpose, locale, attempt, status: "failed" });
-        throw new Error("Email delivery unavailable");
+        throw new EmailDeliveryError(retryable, retryAfterMs);
       }
       await (this.options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(1_000);
     }
+    throw new EmailDeliveryError(true);
   }
 }
 

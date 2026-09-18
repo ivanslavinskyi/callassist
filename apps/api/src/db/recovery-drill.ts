@@ -22,6 +22,9 @@ import {
 const restoreDatabasePrefix = "callassist_restore_drill_";
 const temporaryDirectoryPrefix = "callassist-recovery-";
 const criticalTables = [
+  "superadmin_notification_settings",
+  "superadmin_notifications",
+  "superadmin_notification_audit",
   "audit_events",
   "call_briefs",
   "call_assessments",

@@ -1,4 +1,5 @@
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
+import { createNotificationsFromEnv } from "./notifications/create-notifications";
 import "./config/load-env";
 import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
@@ -24,6 +25,7 @@ const {
   postCallTranscriber
 } = createCallRuntimeDependenciesFromEnv();
 const authRepository = createAuthRepositoryFromEnv();
+const notifications = createNotificationsFromEnv(repository, true);
 const textProcessor = createTextProcessorFromEnv();
 const service = new CallService(
   repository,
@@ -53,6 +55,7 @@ const initialization = service.initialize();
 const shutdown = createGracefulShutdown(
   async () => {
     await initialization.catch(() => undefined);
+    await notifications?.close();
     await accountDeletionService.close();
     await stopBillingSync();
     await service.close();
@@ -63,12 +66,14 @@ const shutdown = createGracefulShutdown(
 registerProcessShutdown(shutdown);
 
 const recoveredCalls = await initialization.catch(async (error) => {
+  await notifications?.close();
   await accountDeletionService.close();
   await service.close();
   await authRepository.close();
   throw error;
 });
 accountDeletionService.start();
+notifications?.start();
 process.stdout.write(`${JSON.stringify({
   event: "durable_worker_ready",
   recoveredCalls

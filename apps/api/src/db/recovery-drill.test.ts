@@ -42,6 +42,9 @@ describe("database recovery drill", () => {
 
   it("requires every critical application table", () => {
     const tables = [
+      "superadmin_notification_settings",
+      "superadmin_notifications",
+      "superadmin_notification_audit",
       "audit_events",
       "call_briefs",
       "call_assessments",
@@ -66,7 +69,7 @@ describe("database recovery drill", () => {
       "users"
     ];
     expect(() => validateCriticalTables(tables)).not.toThrow();
-    for (const table of ["call_text_artifacts", "call_text_artifact_chunks", "final_transcript_revisions", "call_plan_review_receipts"]) {
+    for (const table of ["superadmin_notifications", "superadmin_notification_settings", "superadmin_notification_audit", "call_text_artifacts", "call_text_artifact_chunks", "final_transcript_revisions", "call_plan_review_receipts"]) {
       expect(() => validateCriticalTables(tables.filter((name) => name !== table)))
         .toThrow(`Restored critical tables are missing: ${table}`);
     }

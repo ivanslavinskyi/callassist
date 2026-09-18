@@ -57,6 +57,11 @@ export function validateRuntimeEnvironment(
       : "DATA_ENCRYPTION keyring is invalid");
   }
   requireSecret(environment, "OPENAI_API_KEY", issues);
+  // Both API and the external notification worker use the same mail identity.
+  requireExact(environment, "EMAIL_DRIVER", "resend", issues);
+  requireSecret(environment, "RESEND_API_KEY", issues);
+  requireSecret(environment, "EMAIL_FROM", issues);
+  requireHttpsOrigin(environment.NEXT_PUBLIC_SITE_URL, "NEXT_PUBLIC_SITE_URL", issues);
   requireSecret(environment, "TWILIO_ACCOUNT_SID", issues);
   requireSecret(environment, "TWILIO_AUTH_TOKEN", issues);
   requireSecret(environment, "TWILIO_PHONE_NUMBER", issues);
@@ -76,14 +81,11 @@ export function validateRuntimeEnvironment(
     try { twilioWebhookHost(environment); }
     catch { issues.push("TWILIO_WEBHOOK_HOST must be a literal IP address"); }
     requireExact(environment, "VERIFICATION_DRIVER", "twilio", issues);
-    requireExact(environment, "EMAIL_DRIVER", "resend", issues);
     requireSecret(environment, "TWILIO_VERIFY_SERVICE_SID", issues);
     requireSecret(environment, "TWILIO_OPT_OUT_VERIFY_SERVICE_SID", issues);
     if (environment.TWILIO_OPT_OUT_VERIFY_SERVICE_SID?.trim() && environment.TWILIO_OPT_OUT_VERIFY_SERVICE_SID.trim() === environment.TWILIO_VERIFY_SERVICE_SID?.trim()) {
       issues.push("TWILIO_OPT_OUT_VERIFY_SERVICE_SID must differ from TWILIO_VERIFY_SERVICE_SID");
     }
-    requireSecret(environment, "RESEND_API_KEY", issues);
-    requireSecret(environment, "EMAIL_FROM", issues);
     requireBase64Key(
       environment.EMAIL_VERIFICATION_HASH_KEY,
       "EMAIL_VERIFICATION_HASH_KEY",

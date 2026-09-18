@@ -1,4 +1,5 @@
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
+import { createNotificationsFromEnv } from "./notifications/create-notifications";
 import "./config/load-env";
 import { buildApp, buildWebhookApp } from "./app";
 import { AuthService } from "./auth/auth-service";
@@ -90,7 +91,9 @@ const creditService = new CreditService({
     process.env.DATA_ENCRYPTION_KEY
   )
 });
+const notifications = createNotificationsFromEnv(repository);
 const app = buildApp({
+  notifications,
   service,
   authService,
   creditService,
@@ -144,6 +147,7 @@ if (webhookApp) {
 }
 const recoveredCalls = await service.initialize();
 if (durableWorkerMode === "embedded") {
+  notifications?.start();
   const stopBillingSync = startProviderBillingSync(result => app.log.info({ event: "provider_billing_sync", result }));
   app.addHook("onClose", stopBillingSync);
 }

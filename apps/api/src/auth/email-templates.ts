@@ -84,7 +84,7 @@ const defaultBranding: EmailBranding = { siteUrl: "https://shprohli.ch" };
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
 }
-function render(locale: EmailLocale, subject: string, paragraphs: string[], branding: EmailBranding, code?: string): EmailContent {
+export function renderEmail(locale: EmailLocale, subject: string, paragraphs: string[], branding: EmailBranding, code?: string): EmailContent {
   const footer = emailMessages[locale].footer;
   // Only EN/DE legal pages are published. Future email languages use an explicit
   // EN fallback until their legal routes are published as well.
@@ -115,13 +115,13 @@ ${body}
 }
 export function verificationEmail(input: { locale: EmailLocale; code: string; expiresInMinutes: number }, branding = defaultBranding) {
   const copy = emailMessages[input.locale];
-  return render(input.locale, copy.verification, [copy.code, input.code, copy.expires.replace("{minutes}", String(input.expiresInMinutes)), copy.ignore], branding, input.code);
+  return renderEmail(input.locale, copy.verification, [copy.code, input.code, copy.expires.replace("{minutes}", String(input.expiresInMinutes)), copy.ignore], branding, input.code);
 }
 export function emailChangeRequestNotice(locale: EmailLocale, branding = defaultBranding) {
   const copy = emailMessages[locale];
-  return render(locale, copy.requested, [copy.requestedBody, copy.security], branding);
+  return renderEmail(locale, copy.requested, [copy.requestedBody, copy.security], branding);
 }
 export function securityNoticeEmail(locale: EmailLocale, kind: SecurityNoticeKind, branding = defaultBranding) {
   const copy = emailMessages[locale];
-  return render(locale, copy.notices[kind], [copy.noticeBody, copy.security], branding);
+  return renderEmail(locale, copy.notices[kind], [copy.noticeBody, copy.security], branding);
 }

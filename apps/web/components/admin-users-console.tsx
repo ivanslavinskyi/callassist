@@ -39,7 +39,7 @@ const roles: UserRole[] = [
 ];
 const statuses: UserStatus[] = ["active", "suspended", "deleted"];
 
-export function AdminUsersConsole() {
+export function AdminUsersConsole({ initialUserId }: { initialUserId?: string } = {}) {
   const locale = "en" as const;
   const session = useAdminSession();
   const copy = adminUserMessages[locale];
@@ -54,6 +54,16 @@ export function AdminUsersConsole() {
   const [loadingLedgerId, setLoadingLedgerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialUserId) return;
+    let active = true;
+    setLoadingLedgerId(initialUserId);
+    void getAdminUserCreditLedger(initialUserId).then(value => { if (active) setLedger(value); })
+      .catch(error => { if (active) setLedgerError(getAdminUserErrorMessage(error, locale)); })
+      .finally(() => { if (active) setLoadingLedgerId(null); });
+    return () => { active = false; };
+  }, [initialUserId, locale]);
 
   useEffect(() => {
     let active = true;

@@ -1028,3 +1028,11 @@ export async function decideApproval(
 export function callEventsUrl(id: string) {
   return `${API_URL}/api/call-briefs/${id}/events`;
 }
+import { notificationViewSchema, type NotificationSettingsUpdate } from "@callassist/contracts";
+
+export async function getNotificationSettings() {
+  return notificationViewSchema.parse(await apiRequest("/api/admin/system/notifications", { cache: "no-store" }));
+}
+export async function updateNotificationSettings(input: NotificationSettingsUpdate) {
+  return apiRequest<{ updated: true }>("/api/admin/system/notifications", { method: "PUT", body: JSON.stringify(input) });
+}

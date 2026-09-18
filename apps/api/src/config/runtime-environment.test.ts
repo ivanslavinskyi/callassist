@@ -27,6 +27,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     TWILIO_OPT_OUT_VERIFY_SERVICE_SID: "VA456",
     RECIPIENT_CONTACT_HASH_KEY: Buffer.alloc(32, 13).toString("base64"),
     PUBLIC_BASE_URL: "https://calls.example.test",
+    NEXT_PUBLIC_SITE_URL: "https://www.example.test",
     WEB_ORIGIN: "https://www.example.test,https://admin.example.test",
     TRUSTED_PROXY_CIDRS: "127.0.0.1/32",
     VERIFICATION_DRIVER: "twilio",
@@ -167,14 +168,19 @@ describe("production runtime configuration", () => {
     delete environment.TWILIO_VERIFY_SERVICE_SID;
     delete environment.WEB_ORIGIN;
     delete environment.VERIFICATION_DRIVER;
-    delete environment.EMAIL_DRIVER;
-    delete environment.RESEND_API_KEY;
-    delete environment.EMAIL_FROM;
     delete environment.EMAIL_VERIFICATION_HASH_KEY;
 
 
     expect(() => validateRuntimeEnvironment(environment, "worker"))
       .not.toThrow();
+  });
+
+  it("requires the mail transport and public link origin in the external worker", () => {
+    for (const name of ["EMAIL_DRIVER", "RESEND_API_KEY", "EMAIL_FROM", "NEXT_PUBLIC_SITE_URL"]) {
+      const environment = productionEnvironment();
+      delete environment[name];
+      expect(() => validateRuntimeEnvironment(environment, "worker")).toThrow(name);
+    }
   });
 
   it("rejects alternate loopback URL forms in production", () => {

@@ -100,7 +100,7 @@ describe("admin operations contracts", () => {
         },
         providerUsage: {
           status: "unavailable",
-          cohort: "usage_observed_at",
+          cohort: "operation_started_at",
           from: "2026-08-21T12:00:00.000Z",
           to: "2026-08-22T12:00:00.000Z",
           pricingVersion: "openai-public-2026-09-05",
@@ -110,6 +110,7 @@ describe("admin operations contracts", () => {
           calculatedUsdMicros: null,
           components: Object.fromEntries([
             "briefCompilation",
+            "realtime",
             "realtimeText",
             "realtimeAudio",
             "realtimeTranscription",
@@ -146,7 +147,7 @@ describe("admin operations contracts", () => {
         },
         providerReported: {
           status: "unavailable",
-          cohort: "cost_observed_at",
+          cohort: "operation_started_at",
           from: "2026-08-21T12:00:00.000Z",
           to: "2026-08-22T12:00:00.000Z",
           recordCount: 0,

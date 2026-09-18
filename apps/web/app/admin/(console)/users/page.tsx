@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false }
 };
 
-export default function AdminUsersPage() {
-  return <AdminUsersConsole />;
+export default async function AdminUsersPage({ searchParams }: { searchParams: Promise<{ userId?: string }> }) {
+  const { userId } = await searchParams;
+  const initialUserId = typeof userId === "string" && /^[0-9a-f-]{36}$/i.test(userId) ? userId : undefined;
+  return <AdminUsersConsole initialUserId={initialUserId} />;
 }

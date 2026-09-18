@@ -64,6 +64,7 @@ and the preceding [interactive demo record](interactive-landing-2026-09-14.md).
 | [Rate limiting](rate-limit-policy.md) | Shared atomic endpoint limits, artifact budgets and operational boundaries |
 | [Real-provider drills](real-provider-drills.md) | Current UI procedure, CLI review-receipt limitation and dated supervised evidence |
 | [Admin architecture](admin-interface-architecture.md) | English-only admin surface, route/layout boundaries and roles |
+| [Superadmin notifications](superadmin-notifications.md) | English email reports, SMS/call events, queue, recipient controls and delivery semantics |
 | [Public content staging](public-content-staging-2026-09-09.md) | Candidate/dry-run/staging procedure and dated unpublished drafts; source copy is not publication evidence |
 
 ## Latest delivery and verification records
