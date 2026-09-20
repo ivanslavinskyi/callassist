@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 
 import type { AdminCallPreparationInspector as InspectorData } from "@callassist/contracts";
 import Link from "next/link";
@@ -92,7 +93,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "medium"
   }).format(new Date(value));

@@ -7,14 +7,15 @@ export function buildWebSecurityHeaders(
   const apiOrigin = urlOrigin(
     environment.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
   );
-  const connectSources = ["'self'", ...(apiOrigin ? [apiOrigin] : [])];
+  const mediaSources = ["'self'", ...(apiOrigin ? [apiOrigin] : [])];
+  const connectSources = [...mediaSources, "https://*.google-analytics.com", "https://*.analytics.google.com", "https://www.googletagmanager.com"];
   if (!production) {
     connectSources.push(
       "ws://localhost:*",
       "ws://127.0.0.1:*"
     );
   }
-  const scriptSources = ["'self'", "'unsafe-inline'"];
+  const scriptSources = ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com"];
   if (!production) scriptSources.push("'unsafe-eval'");
   const contentSecurityPolicy = [
     "default-src 'self'",
@@ -24,8 +25,8 @@ export function buildWebSecurityHeaders(
     "form-action 'self'",
     "frame-ancestors 'none'",
     "frame-src 'none'",
-    "img-src 'self' data: blob:",
-    `media-src ${connectSources.join(" ")} blob:`,
+    "img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com",
+    `media-src ${mediaSources.join(" ")} blob:`,
     "object-src 'none'",
     `script-src ${scriptSources.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",

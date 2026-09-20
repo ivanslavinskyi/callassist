@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type {
   CallBriefStatus,
   CallFailureStage,
@@ -381,7 +382,7 @@ const de: AdminCallMessages = {
   }
 };
 
-export const adminCallMessages: Record<UiLocale, AdminCallMessages> = {
+export const adminCallMessages: Record<UiLocale, AdminCallMessages> = extendMessages({
   en,
   de
-};
+});

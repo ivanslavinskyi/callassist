@@ -1,6 +1,7 @@
 import type { EmailLocale } from "./communication-locales";
 import { emailIdentity, type EmailBranding } from "./email-branding";
 import { emailLogo } from "./email-logo";
+import { formatNumber, uiLocaleRegistry } from "@callassist/contracts";
 
 export type SecurityNoticeKind = "email_changed" | "phone_changed" | "password_reset";
 type EmailCopy = {
@@ -11,6 +12,17 @@ type EmailCopy = {
 };
 
 export const emailMessages: Record<EmailLocale, EmailCopy> = {
+  rm: {
+    verification: "Conferma tia adressa dad e-mail per SHPROHLI", code: "Tes code da conferma",
+    expires: "Quest code è valaivel durant {minutes} minutas. Na communitgescha el a nagin.",
+    ignore: "Sche ti n’has betg dumandà quest e-mail, pos ti al ignorar.",
+    requested: "Ina midada da tia adressa dad e-mail per SHPROHLI è vegnida dumandada",
+    requestedBody: "Ina midada da tia adressa per s’annunziar è vegnida dumandada. L’adressa actuala resta activa fin che la nova è confermada.",
+    security: "Sche quai n’eras betg ti, recuperescha l’access a tes conto sin la pagina d’annunzia, serra tut las sessiuns e contactescha il support.",
+    notices: { email_changed: "Tia adressa dad e-mail per SHPROHLI è vegnida midada", phone_changed: "Tes numer da telefon per SHPROHLI è vegnì midà", password_reset: "Tes pled-clav per SHPROHLI è vegnì retschentà" },
+    noticeBody: "La midada è terminada. Las autras sessiuns activas èn vegnidas serradas.",
+    footer: { support: "Agid", imprint: "Impressum", imprintEnglish: "Impressum (englais)" }
+  },
   en: {
     verification: "Confirm your SHPROHLI email address", code: "Your verification code",
     expires: "This code expires in {minutes} minutes. Never share it with anyone.",
@@ -86,11 +98,10 @@ function escapeHtml(value: string) {
 }
 export function renderEmail(locale: EmailLocale, subject: string, paragraphs: string[], branding: EmailBranding, code?: string): EmailContent {
   const footer = emailMessages[locale].footer;
-  // Only EN/DE legal pages are published. Future email languages use an explicit
-  // EN fallback until their legal routes are published as well.
-  const imprintUrl = new URL(locale === "de" ? "/de/impressum" : "/en/imprint", branding.siteUrl).href;
-  const imprintLabel = locale !== "en" && locale !== "de" ? footer.imprintEnglish : footer.imprint;
-  const text = ["SHPROHLI", subject, ...paragraphs, "---",
+  const imprintUrl = new URL(`/${locale}/${uiLocaleRegistry[locale].slugs.imprint}`, branding.siteUrl).href;
+  const imprintLabel = footer.imprint;
+  const slogan = uiLocaleRegistry[locale].slogan;
+  const text = ["SHPROHLI", slogan, subject, ...paragraphs, "---",
     `${imprintLabel}: ${imprintUrl}`, `${footer.support}: ${emailIdentity.supportAddress}`].join("\n\n");
   const body = paragraphs.map((value) => `<p style="margin:0 0 20px;${value === code ? 'font-family:Consolas,Menlo,monospace;font-size:36px;line-height:48px;letter-spacing:5px;font-weight:700;white-space:nowrap' : 'font-size:16px;line-height:25px'}">${escapeHtml(value)}</p>`).join("");
   const link = (url: string, label: string) => `<a href="${escapeHtml(url)}" style="color:#35614b;text-decoration:underline">${escapeHtml(label)}</a>`;
@@ -99,10 +110,12 @@ export function renderEmail(locale: EmailLocale, subject: string, paragraphs: st
   const html = `<!doctype html>
 <html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(subject)}</title></head>
 <body style="margin:0;padding:0;color:#222b25;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%;word-wrap:break-word">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">${escapeHtml(subject)}</div>
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse"><tr><td align="center">
 <!--[if mso]><table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:560px;border-collapse:collapse"><tr><td style="padding:28px 24px 12px">
 <img src="cid:${emailLogo.content_id}" width="184" height="31" alt="SHPROHLI" style="display:block;width:184px;height:31px;max-width:100%;border:0;color:#222b25;font-size:22px;font-weight:bold">
+<p style="margin:4px 0 0;font-size:12px;font-style:italic;color:#0d7045">${escapeHtml(slogan)}</p>
 <h1 style="margin:28px 0 20px;font-size:24px;line-height:32px;font-weight:700">${escapeHtml(subject)}</h1>
 ${body}
 </td></tr><tr><td style="padding:0 24px 28px">
@@ -115,7 +128,7 @@ ${body}
 }
 export function verificationEmail(input: { locale: EmailLocale; code: string; expiresInMinutes: number }, branding = defaultBranding) {
   const copy = emailMessages[input.locale];
-  return renderEmail(input.locale, copy.verification, [copy.code, input.code, copy.expires.replace("{minutes}", String(input.expiresInMinutes)), copy.ignore], branding, input.code);
+  return renderEmail(input.locale, copy.verification, [copy.code, input.code, copy.expires.replace("{minutes}", formatNumber(input.expiresInMinutes, input.locale)), copy.ignore], branding, input.code);
 }
 export function emailChangeRequestNotice(locale: EmailLocale, branding = defaultBranding) {
   const copy = emailMessages[locale];

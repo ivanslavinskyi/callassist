@@ -1,6 +1,8 @@
+import type { UiLocale as ProductUiLocale } from "@callassist/contracts";
+import { extendMessages } from "./extend-messages";
 import { callBriefStatusSchema, callStage, type CallBriefStatus, type CallStage, type CallAiAssessmentState, type GoalAssessmentStatus } from "@callassist/contracts";
 
-export const callPresentationCopy = {
+export const callPresentationCopy = extendMessages({
   en: {
     state: "Call state", technicalState: "Technical state", all: "All calls", result: "Call outcome", unknown: "Outcome unknown",
     goal: "Goal achievement", ai: "AI", user: "You", adminUser: "User", notRated: "Not rated yet",
@@ -23,17 +25,17 @@ export const callPresentationCopy = {
     aiStates: { pending: "Wird bewertet…", ready: "Bewertet", unavailable: "Bewertung nicht möglich", not_assessed: "Nicht bewertet", not_applicable: "Nicht zutreffend" },
     goals: { achieved: "Erreicht", partial: "Teilweise erreicht", not_achieved: "Nicht erreicht", uncertain: "Unklar" }
   }
-} satisfies Record<"en" | "de", {
+}) satisfies Record<ProductUiLocale, {
   state: string; technicalState: string; all: string; result: string; unknown: string; goal: string; ai: string; user: string; adminUser: string;
   notRated: string; loading: string; unavailable: string; mismatch: string; callScope: string; clear: string;
   legacy: string; completed: string; stopped: string; failed: string;
   stages: Record<CallStage, string>; aiStates: Record<CallAiAssessmentState, string>; goals: Record<GoalAssessmentStatus, string>;
 }>;
 
-export function legacyCallStatusLabel(status: CallBriefStatus, locale: "en" | "de") {
+export function legacyCallStatusLabel(status: CallBriefStatus, locale: ProductUiLocale) {
   const copy = callPresentationCopy[locale];
   return status === "completed" || status === "stopped" || status === "failed" ? copy[status] : copy.stages[callStage(status)];
 }
-export function callStatusMessages(locale: "en" | "de"): Record<CallBriefStatus, string> {
+export function callStatusMessages(locale: ProductUiLocale): Record<CallBriefStatus, string> {
   return Object.fromEntries(callBriefStatusSchema.options.map(status => [status, callPresentationCopy[locale].stages[callStage(status)]])) as Record<CallBriefStatus, string>;
 }

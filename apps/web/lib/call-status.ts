@@ -1,9 +1,12 @@
+import { lifecycleMessages } from "./i18n/lifecycle-messages";
+import type { UiLocale as ProductUiLocale } from "@callassist/contracts";
+import { extendMessages } from "./i18n/extend-messages";
 import { callPresentation, callStage, type CallBrief, type CallResult } from "@callassist/contracts";
 import { callPresentationCopy } from "./i18n/call-presentation";
 export const terminalCallStatuses = new Set<CallBrief["status"]>(["completed", "stopped", "failed"]);
 export function isTerminalCallStatus(status: CallBrief["status"]) { return terminalCallStatuses.has(status); }
 
-export const callResultCopy = {
+export const callResultCopy = extendMessages({
   en: {
     assessment_pending: ["Checking the result", "We are checking the final transcript against your task. Your credit remains reserved."],
     assessment_unavailable: ["Result could not be verified", "We could not reliably confirm a substantive answer from the final transcript."],
@@ -32,23 +35,21 @@ export const callResultCopy = {
     stopped: ["Anruf gestoppt", "Die Anwendung hat den Anruf gestoppt, bevor eine inhaltliche Antwort bestätigt wurde."],
     ended: ["Anruf beendet", "Die vorhandenen Ereignisse belegen nicht, ob ein Gespräch stattgefunden hat."]
   }
-} satisfies Record<"en" | "de", Record<CallResult, readonly [string, string]>>;
+}) satisfies Record<ProductUiLocale, Record<CallResult, readonly [string, string]>>;
 
 type StatusBrief = Pick<CallBrief, "status" | "lifecycle">;
-export function callStatusLabel(brief: StatusBrief, locale: "en" | "de") {
+export function callStatusLabel(brief: StatusBrief, locale: ProductUiLocale) {
   return callPresentationCopy[locale].stages[callStage(brief.status)];
 }
 export function callStatusClass(brief: StatusBrief) {
   return `status-${callStage(brief.status)}`;
 }
-export function callResultLabel(brief: StatusBrief, locale: "en" | "de") {
+export function callResultLabel(brief: StatusBrief, locale: ProductUiLocale) {
   const result = callPresentation(brief).result;
   return result === null ? null : result === "unknown" ? callPresentationCopy[locale].unknown : callResultCopy[locale][result][0];
 }
-export function callConsentLabel(lifecycle: CallBrief["lifecycle"], locale: "en" | "de", fallback: string) {
+export function callConsentLabel(lifecycle: CallBrief["lifecycle"], locale: ProductUiLocale, fallback: string) {
   if (!lifecycle) return fallback;
-  const labels = locale === "de"
-    ? { granted: "Erteilt", declined: "Abgelehnt", not_received: "Nicht bestätigt", not_recorded: "Nicht erfasst" }
-    : { granted: "Granted", declined: "Declined", not_received: "Not confirmed", not_recorded: "Not recorded" };
+  const labels = lifecycleMessages[locale].consent;
   return labels[lifecycle.consent];
 }

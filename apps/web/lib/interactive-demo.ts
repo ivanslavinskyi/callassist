@@ -1,3 +1,5 @@
+import type { UiLocale as ProductUiLocale } from "@callassist/contracts";
+import { extendMessages } from "./i18n/extend-messages";
 import type { CallSummaryPayload } from "@callassist/contracts";
 import type { CallPlanPresentationData } from "@/components/call-plan-presentation";
 import { landingDemo } from "./landing-demo";
@@ -34,7 +36,7 @@ export function demoStep(phase: DemoPhase) {
 }
 export function demoDelay(phase: DemoPhase) { return phase === "typing" ? 75 : phase === "live" ? 2300 : phase === "consent" ? 1900 : 850; }
 
-function buildDemoScenario(locale: "en" | "de", id: DemoScenarioId): DemoScenario {
+function buildDemoScenario(locale: ProductUiLocale, id: DemoScenarioId): DemoScenario {
   const de = locale === "de";
   const base = landingDemo[locale];
   let request: string, recipient: string, label: string, objective: string, questions: string[], facts: string[], limits: string[], replies: string[], findings: string[], nextStep: string;
@@ -77,10 +79,10 @@ function buildDemoScenario(locale: "en" | "de", id: DemoScenarioId): DemoScenari
 
 // Every enabled interface locale must provide all three complete fixtures.
 // Adding a locale cannot silently select English scenario copy.
-const scenarios: Record<UiLocale, Record<DemoScenarioId, DemoScenario>> = {
+const scenarios: Record<UiLocale, Record<DemoScenarioId, DemoScenario>> = extendMessages({
   en: { documents: buildDemoScenario("en", "documents"), repair: buildDemoScenario("en", "repair"), appointment: buildDemoScenario("en", "appointment") },
   de: { documents: buildDemoScenario("de", "documents"), repair: buildDemoScenario("de", "repair"), appointment: buildDemoScenario("de", "appointment") }
-};
+});
 export function getDemoScenario(locale: UiLocale, id: DemoScenarioId): DemoScenario { return scenarios[locale][id]; }
 
 export function buildDemoPdf(locale: UiLocale, scenario: DemoScenario, logoSvg?: string) {

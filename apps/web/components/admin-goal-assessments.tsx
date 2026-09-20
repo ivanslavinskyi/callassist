@@ -1,6 +1,7 @@
+import type { UiLocale } from "@callassist/contracts";
 import type { AdminOperationsOverview } from "@callassist/contracts";
 
-export function AdminGoalAssessments({ overview, locale }: { overview: AdminOperationsOverview; locale: "en" | "de" }) {
+export function AdminGoalAssessments({ overview, locale }: { overview: AdminOperationsOverview; locale: UiLocale }) {
   const de = locale === "de";
   const model = overview.lifecycle?.goals;
   const user = overview.userGoalFeedback;

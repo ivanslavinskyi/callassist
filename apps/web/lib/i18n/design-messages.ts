@@ -1,5 +1,6 @@
+import { extendMessages } from "./extend-messages";
 // Approved Emerald Paper interface copy. Product content remains CMS-owned.
-export const designMessages = {
+export const designMessages = extendMessages({
   en: {
     navigation: "Main navigation", more: "More", openMenu: "Open menu", closeMenu: "Close menu",
     authTitle: "A little help.\nA call made easier.",
@@ -28,4 +29,4 @@ export const designMessages = {
     rateCall: "Anrufqualität bewerten", example: "Beispiel-Anrufplan",
     exampleRecipient: "Gemeindeverwaltung", exampleGoal: "Prüfen, ob mein Aufenthaltsformular eingegangen ist."
   }
-} as const;
+});

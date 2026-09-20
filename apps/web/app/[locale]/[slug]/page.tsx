@@ -32,6 +32,6 @@ export default async function PublicContentPage({ params }: {
   if (!isUiLocale(locale)) notFound();
   const page = await getPublishedContentPage(locale, slug);
   if (!page) notFound();
-  const faq = page.key === "faq" ? await getPublishedFaq(locale) : null;
-  return <ContentPage faq={faq} page={page} />;
+  const faq = page.key === "faq" ? await getPublishedFaq(page.locale) : null;
+  return <ContentPage faq={faq?.locale === page.locale ? faq : null} page={page} />;
 }

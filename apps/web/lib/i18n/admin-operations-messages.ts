@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 const en = {
   overviewEyebrow: "Operations",
   overviewTitle: "Service overview",
@@ -597,4 +598,4 @@ const de: AdminOperationsCopy = {
   notAvailable: "Nicht verfügbar"
 };
 
-export const adminOperationsMessages = { en, de };
+export const adminOperationsMessages = extendMessages({ en, de });

@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 
 import { FilterDisclosure } from "./filter-disclosure";
 
@@ -666,13 +667,13 @@ function TransactionSource({ transaction, locale }: { transaction: CreditTransac
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium"
   }).format(new Date(value));
 }
 
 function formatDateTime(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

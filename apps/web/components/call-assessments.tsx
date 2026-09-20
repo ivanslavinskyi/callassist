@@ -1,10 +1,11 @@
+import type { UiLocale } from "@callassist/contracts";
 import { callPresentation, type CallBrief, type CallFeedbackSummary } from "@callassist/contracts";
 import { callPresentationCopy } from "@/lib/i18n/call-presentation";
 
 export function CallAssessments({ brief, feedback, locale, feedbackState = "ready", admin = false }: {
   brief: Pick<CallBrief, "status" | "lifecycle">;
   feedback?: CallFeedbackSummary | null;
-  locale: "en" | "de";
+  locale: UiLocale;
   feedbackState?: "ready" | "loading" | "error";
   admin?: boolean;
 }) {

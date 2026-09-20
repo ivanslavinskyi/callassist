@@ -1,3 +1,5 @@
+import { contentUiLocales } from "@callassist/contracts";
+import { localizedPublicText, localizePublicPage, publicText } from "./public-localizations";
 import type {
   ContentLink,
   ContentLocale,
@@ -300,10 +302,16 @@ const definitions: SeedDefinition[] = [
   }
 ];
 
+for (const definition of definitions) {
+  for (const locale of contentUiLocales) {
+    if (!definition.translations[locale]) definition.translations[locale] = localizePublicPage(definition.translations.en!, definition.key, locale);
+  }
+}
+
 export const seededContentPages: SeedContentPage[] = definitions.flatMap(
-  (definition, pageIndex) => (["en", "de"] as const).map((locale, localeIndex) => {
+  (definition, pageIndex) => contentUiLocales.map((locale) => {
     const translation = definition.translations[locale];
-    const suffix = String(pageIndex * 2 + localeIndex + 1).padStart(12, "0");
+    const suffix = String(locale === "en" || locale === "de" ? pageIndex * 2 + (locale === "de" ? 2 : 1) : (pageIndex + 1) * 100000 + locale.charCodeAt(0) * 100 + locale.charCodeAt(1)).padStart(12, "0");
     return {
       key: definition.key,
       pageType: "page",
@@ -329,8 +337,8 @@ const faqItems: FaqItem[] = faqDefinition.translations.en.sections.map((item, in
   id: `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   sortOrder: index,
   enabled: true,
-  question: { en: item.heading, de: faqDefinition.translations.de.sections[index]!.heading },
-  answer: { en: sectionAnswer(item), de: sectionAnswer(faqDefinition.translations.de.sections[index]!) }
+  question: Object.fromEntries(contentUiLocales.map(locale => [locale, faqDefinition.translations[locale]!.sections[index]!.heading])),
+  answer: Object.fromEntries(contentUiLocales.map(locale => [locale, sectionAnswer(faqDefinition.translations[locale]!.sections[index]!)]))
 }));
 
 const navigationItems: NavigationItem[] = [
@@ -394,9 +402,9 @@ const landingBlocks: LandingBlock[] = [
 ];
 
 export const seededEditorialCollections: SeedEditorialCollection[] = [
-  { collectionId: "80000000-0000-4000-8000-000000000001", revision: { key: "faq", id: "82000000-0000-4000-8000-000000000001", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, items: faqItems } },
-  { collectionId: "80000000-0000-4000-8000-000000000002", revision: { key: "navigation", id: "82000000-0000-4000-8000-000000000002", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, items: navigationItems } },
-  { collectionId: "80000000-0000-4000-8000-000000000003", revision: { key: "landing", id: "82000000-0000-4000-8000-000000000003", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, items: landingBlocks } }
+  { collectionId: "80000000-0000-4000-8000-000000000001", revision: { key: "faq", id: "82000000-0000-4000-8000-000000000001", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, requiredLocales: [...contentUiLocales], items: faqItems } },
+  { collectionId: "80000000-0000-4000-8000-000000000002", revision: { key: "navigation", id: "82000000-0000-4000-8000-000000000002", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, requiredLocales: [...contentUiLocales], items: navigationItems } },
+  { collectionId: "80000000-0000-4000-8000-000000000003", revision: { key: "landing", id: "82000000-0000-4000-8000-000000000003", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, requiredLocales: [...contentUiLocales], items: landingBlocks } }
 ];
 
 function sectionAnswer(value: ContentSection) {
@@ -404,11 +412,11 @@ function sectionAnswer(value: ContentSection) {
 }
 
 function navigationItem(sequence: number, destination: NavigationItem["destination"], location: NavigationItem["location"], en: string, de: string): NavigationItem {
-  return { id: `71000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`, sortOrder: sequence - 1, enabled: true, location, destination, label: { en, de } };
+  return { id: `71000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`, sortOrder: sequence - 1, enabled: true, location, destination, label: localized(en, de) };
 }
 
-function localized(en: string, de: string) { return { en, de }; }
-function localizedList(en: string[], de: string[]) { return { en, de }; }
+function localized(en: string, de: string) { return localizedPublicText(en, de); }
+function localizedList(en: string[], de: string[]) { return Object.fromEntries(contentUiLocales.map(locale => [locale, locale === "de" ? de : en.map(value => publicText(value, locale))])); }
 
 function landingContentItem(sequence: number, enTitle: string, deTitle: string, enText: string, deText: string) {
   return { id: `74000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`, title: localized(enTitle, deTitle), text: localized(enText, deText) };

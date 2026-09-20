@@ -1,3 +1,4 @@
+import { canUpgradeSeedLocales } from "./seed-locale-upgrade";
 import {
   adminEditorialRevisionSchema,
   localizeLandingBlock,
@@ -270,6 +271,19 @@ export class PostgresContentRepository implements ContentRepository {
           WHERE collection_id = ${collection.collectionId}
           ON CONFLICT DO NOTHING
         `;
+        const [latest] = await transaction<{ id: string; snapshot: AdminEditorialRevision["items"] }[]>`
+          SELECT id,snapshot FROM content_editorial_revisions
+          WHERE collection_id=${collection.collectionId} AND status='published'
+          ORDER BY revision_number DESC LIMIT 1
+        `;
+        if (latest && canUpgradeSeedLocales({ ...revision, items: latest.snapshot } as AdminEditorialRevision, revision)) {
+          await transaction`
+            INSERT INTO content_editorial_revisions(id,collection_id,revision_number,status,snapshot,created_by_user_id,created_at,updated_at,published_at,required_locales)
+            SELECT ${revision.id.replace(/^82/, "83")},${collection.collectionId},COALESCE(max(revision_number),0)+1,'published',${transaction.json(revision.items)},NULL,now(),now(),now(),${transaction.json(requiredContentLocales(revision))}
+            FROM content_editorial_revisions WHERE collection_id=${collection.collectionId}
+            ON CONFLICT DO NOTHING
+          `;
+        }
       }
     });
   }

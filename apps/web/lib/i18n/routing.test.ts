@@ -4,7 +4,7 @@ import { localeFromPathname, localizePathname, negotiateUiLocale } from "./routi
 describe("UI locale routing", () => {
   it("reads only supported locale prefixes", () => {
     expect(localeFromPathname("/de/app/calls/123")).toBe("de");
-    expect(localeFromPathname("/fr/app/calls/123")).toBeNull();
+    expect(localeFromPathname("/es/app/calls/123")).toBeNull();
   });
   it("adds and replaces locale prefixes", () => {
     expect(localizePathname("/app/calls/123", "de")).toBe("/de/app/calls/123");
@@ -16,6 +16,6 @@ describe("UI locale routing", () => {
   });
   it("matches regional browser languages and falls back to English", () => {
     expect(negotiateUiLocale({ acceptLanguage: "de-CH,de;q=.9" })).toBe("de");
-    expect(negotiateUiLocale({ acceptLanguage: "fr-CH" })).toBe("en");
+    expect(negotiateUiLocale({ acceptLanguage: "fr-CH" })).toBe("fr");
   });
 });

@@ -1,33 +1,14 @@
+import { uiLocales, uiLocaleRegistry, DEFAULT_UI_LOCALE } from "@callassist/contracts";
 import type {
   ContentLocale,
   ContentPageKey,
   NavigationDestination
 } from "@callassist/contracts";
 
-export const contentSlugs: Record<
-  ContentLocale,
-  Record<ContentPageKey, string>
-> = {
-  en: {
-    privacy: "privacy",
-    terms: "terms",
-    acceptable_use: "acceptable-use",
-    support: "support",
-    faq: "faq",
-    imprint: "imprint"
-  },
-  de: {
-    privacy: "datenschutz",
-    terms: "nutzungsbedingungen",
-    acceptable_use: "nutzungsregeln",
-    support: "hilfe",
-    faq: "faq",
-    imprint: "impressum"
-  }
-};
+export const contentSlugs: Record<ContentLocale, Record<ContentPageKey, string>> = Object.fromEntries(uiLocales.map(locale => [locale, uiLocaleRegistry[locale].slugs]));
 
 export function contentPath(locale: ContentLocale, key: ContentPageKey) {
-  const actualLocale = Object.hasOwn(contentSlugs, locale) ? locale : "en";
+  const actualLocale = Object.hasOwn(contentSlugs, locale) ? locale : DEFAULT_UI_LOCALE;
   return `/${actualLocale}/${contentSlugs[actualLocale][key]}`;
 }
 

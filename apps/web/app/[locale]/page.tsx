@@ -30,5 +30,6 @@ export default async function HomePage({ params }: {
     getServerSessionSnapshot()
   ]);
   if (!landing) notFound();
-  return <PublicHome faq={faq} landing={landing} initialSession={initialSession} />;
+  const matchingFaq = faq?.locale === landing.locale ? faq : await getPublishedFaq(landing.locale);
+  return <PublicHome faq={matchingFaq?.locale === landing.locale ? matchingFaq : null} landing={landing} initialSession={initialSession} />;
 }

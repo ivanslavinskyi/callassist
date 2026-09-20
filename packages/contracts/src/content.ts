@@ -1,3 +1,4 @@
+import { DEFAULT_UI_LOCALE } from "./ui-locales";
 import { z } from "zod";
 import { languageTagSchema, normalizeLanguageTag } from "./languages";
 
@@ -29,8 +30,8 @@ export function requiredContentLocales(value: { requiredLocales?: string[] }): s
 }
 
 /** One selected language for the whole document/collection; never per-field fallback. */
-export function resolvePublishedContentLocale(requested: string, available: string[], fallback = "en"): string | null {
-  return [requested, fallback, ...available].find((locale) => available.includes(locale)) ?? null;
+export function resolvePublishedContentLocale(requested: string, available: string[], fallback = DEFAULT_UI_LOCALE): string | null {
+  return [requested, fallback].find((locale) => available.includes(locale)) ?? null;
 }
 
 export const contentPageKeySchema = z.enum([

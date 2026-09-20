@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 import { callStatusLabel, callConsentLabel } from "@/lib/call-status";
 import { CallAssessments } from "./call-assessments";
 import { CallLifecycleSummary } from "./call-lifecycle-summary";
@@ -273,7 +274,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "medium"
   }).format(new Date(value));

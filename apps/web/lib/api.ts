@@ -1036,3 +1036,13 @@ export async function getNotificationSettings() {
 export async function updateNotificationSettings(input: NotificationSettingsUpdate) {
   return apiRequest<{ updated: true }>("/api/admin/system/notifications", { method: "PUT", body: JSON.stringify(input) });
 }
+
+export function getAnalyticsSettings() {
+  return apiRequest<import("@callassist/contracts").AnalyticsSettingsView>("/api/admin/system/analytics", { cache: "no-store" });
+}
+export function saveAnalyticsSettings(input: { settings: import("@callassist/contracts").AnalyticsSettings; expectedRevision: number }) {
+  return apiRequest<{ updated: true }>("/api/admin/system/analytics", { method: "PUT", body: JSON.stringify(input) });
+}
+export function getPublicAnalyticsSettings() {
+  return apiRequest<import("@callassist/contracts").AnalyticsSettings>("/api/analytics", { cache: "no-store", credentials: "omit" });
+}

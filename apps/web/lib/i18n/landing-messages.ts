@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./messages";
 
 type LandingMessages = {
@@ -15,7 +16,7 @@ type LandingMessages = {
   };
 };
 
-export const landingMessages: Record<UiLocale, LandingMessages> = {
+export const landingMessages: Record<UiLocale, LandingMessages> = extendMessages({
   en: {
     creditDetails: "When is a call credit used?",
     prepareCall: "Prepare a call",
@@ -50,4 +51,4 @@ export const landingMessages: Record<UiLocale, LandingMessages> = {
       role: "Gründer und Entwickler von SHPROHLI"
     }
   }
-};
+});

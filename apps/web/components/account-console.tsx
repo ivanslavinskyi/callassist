@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 
 import {
   ACCOUNT_DELETION_CONFIRMATION,
@@ -406,7 +407,7 @@ export function AccountConsole() {
     }
   }
 
-  const dateFormatter = new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-CH", {
+  const dateFormatter = new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "short"
   });

@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./messages";
 const en = {
   title: "Confirm your email", intro: "Confirm the address used to sign in before making your first call.",
@@ -16,7 +17,7 @@ const en = {
   banner: "Confirm your email before starting a call.", verified: "Email verified", unverified: "Email not yet verified"
 };
 export type EmailVerificationCopy = typeof en;
-export const emailVerificationMessages: Record<UiLocale, EmailVerificationCopy> = {
+export const emailVerificationMessages: Record<UiLocale, EmailVerificationCopy> = extendMessages({
   en,
   de: {
     title: "E-Mail bestätigen", intro: "Bestätigen Sie vor Ihrem ersten Anruf die Adresse, mit der Sie sich anmelden.",
@@ -34,4 +35,4 @@ export const emailVerificationMessages: Record<UiLocale, EmailVerificationCopy> 
     limited: "Zu viele Anfragen. Bitte warten Sie, bevor Sie es erneut versuchen.", session: "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an.",
     banner: "Bestätigen Sie Ihre E-Mail, bevor Sie einen Anruf starten.", verified: "E-Mail bestätigt", unverified: "E-Mail noch nicht bestätigt"
   }
-};
+});

@@ -18,6 +18,8 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+Local implementation: [seven-language localization, brand and Analytics, 2026-09-20](localization-and-analytics.md). Includes the registry, public CMS fallback/upgrade policy, localized emails, cookie notice, Admin Analytics and a complete [Rumantsch editorial handoff](rumantsch-review.md). Existing edited CMS publications are preserved; this does not assert a production publication.
+
 Latest checkpoint: [delivery, 2026-09-16](delivery-2026-09-16.md): founder story/portrait,
 session-aware public CTAs, simplified language choices and contact-gated SMS opt-out.
 Migration 0075, an independent contact HMAC key and a dedicated opt-out Verify Service

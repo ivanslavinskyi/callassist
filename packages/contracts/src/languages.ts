@@ -1,3 +1,4 @@
+import { uiLocales } from "./ui-locales";
 import { z } from "zod";
 
 /** Syntax is separate from the capabilities of UI, text and voice providers. */
@@ -16,7 +17,7 @@ export const languageTagSchema = z.string().transform((value, context) => {
   return language;
 });
 export type LanguageTag = z.infer<typeof languageTagSchema>;
-export const SUPPORTED_UI_LOCALES = ["en", "de"] as const;
+export const SUPPORTED_UI_LOCALES = uiLocales;
 export const supportedUiLocaleSchema = z.enum(SUPPORTED_UI_LOCALES);
 export const TEXT_LANGUAGES = ["en", "de", "fr", "it", "ru", "uk"] as const;
 export const textLanguageSchema = z.enum(TEXT_LANGUAGES);

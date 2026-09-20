@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./registry";
 
 const en = {
@@ -31,7 +32,7 @@ const en = {
 };
 type DemoMessages = { [K in keyof typeof en]: typeof en[K] };
 
-export const demoMessages: Record<UiLocale, DemoMessages> = {
+export const demoMessages: Record<UiLocale, DemoMessages> = extendMessages({
   en,
   de: {
     label: "Interaktive Demo", title: "Erleben Sie einen Anruf von Anfang bis Ende.",
@@ -62,4 +63,4 @@ export const demoMessages: Record<UiLocale, DemoMessages> = {
     signedInIntroNote: "Vorbereitetes Beispiel. Eigene Anliegen können Sie in der Anwendung eingeben.",
     pendingIntroNote: "Vorbereitetes Beispiel."
   }
-};
+});

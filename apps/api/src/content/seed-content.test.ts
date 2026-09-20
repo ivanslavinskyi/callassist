@@ -1,3 +1,4 @@
+import { uiLocales } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
 import {
   adminEditorialRevisionSchema,
@@ -6,7 +7,7 @@ import {
 import { seededContentPages, seededEditorialCollections } from "./seed-content";
 
 describe("published seed copy", () => {
-  it("contains a valid EN and DE publication with unique sections for every page", () => {
+  it("contains a valid publication in every enabled language with unique sections for every page", () => {
     const logicalPages = new Map<string, Set<string>>();
 
     for (const seededPage of seededContentPages) {
@@ -28,7 +29,7 @@ describe("published seed copy", () => {
 
     expect(logicalPages.size).toBe(6);
     for (const locales of logicalPages.values()) {
-      expect([...locales].sort()).toEqual(["de", "en"]);
+      expect([...locales].sort()).toEqual([...uiLocales].sort());
     }
   });
 
@@ -45,13 +46,13 @@ describe("published seed copy", () => {
     expect(new Set(landing.items.map(({ blockType }) => blockType)).size).toBe(9);
   });
 
-  it("publishes the complete bilingual public information set", () => {
+  it("publishes the complete multilingual public information set", () => {
     const keys = new Set(seededContentPages.map(({ key }) => key));
     expect(keys).toEqual(new Set([
       "privacy", "terms", "acceptable_use", "support", "faq", "imprint"
     ]));
     expect(seededContentPages.filter(({ key }) => key === "imprint"))
-      .toHaveLength(2);
+      .toHaveLength(uiLocales.length);
   });
 
   it("keeps upgraded legal seeds from forcing a new acceptance", () => {

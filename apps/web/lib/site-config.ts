@@ -1,3 +1,4 @@
+import { extendMessages } from "./i18n/extend-messages";
 import type { UiLocale } from "./i18n/messages";
 
 export function normalizeSiteOrigin(value: string | undefined) {
@@ -18,7 +19,7 @@ export const siteOrigin = normalizeSiteOrigin(
 export const homeSeo: Record<UiLocale, {
   title: string;
   description: string;
-}> = {
+}> = extendMessages({
   en: {
     title: "SHPROHLI — AI-assisted phone calls",
     description: "SHPROHLI helps people make everyday phone calls when speaking or the local language is a barrier."
@@ -27,7 +28,7 @@ export const homeSeo: Record<UiLocale, {
     title: "SHPROHLI — KI-unterstützte Telefonanrufe",
     description: "SHPROHLI hilft bei alltäglichen Telefonanrufen, wenn das Sprechen oder die lokale Sprache eine Hürde ist."
   }
-};
+});
 
 export function absoluteSiteUrl(pathname: string) {
   return new URL(pathname, `${siteOrigin}/`).toString();

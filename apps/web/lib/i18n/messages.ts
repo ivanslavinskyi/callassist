@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import { callStatusMessages } from "./call-presentation";
 import { uiLocales, type UiLocale } from "./registry";
 export { uiLocales, type UiLocale } from "./registry";
@@ -807,7 +808,7 @@ const de: Messages = {
   }
 };
 
-export const messages: Record<UiLocale, Messages> = { en, de };
+export const messages: Record<UiLocale, Messages> = extendMessages({ en, de });
 
 export function isUiLocale(value: string): value is UiLocale {
   return uiLocales.includes(value as UiLocale);

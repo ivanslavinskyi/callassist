@@ -1,6 +1,7 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./messages";
 
-export const appointmentMessages = {
+export const appointmentMessages = extendMessages({
   en: {
     title: "Appointment or meeting permission",
     operation: { book: "Arrange one appointment or meeting", confirm_existing: "Confirm one existing appointment or meeting" },
@@ -27,7 +28,7 @@ export const appointmentMessages = {
     },
     financialPolicy: "Keine neuen Kosten, Anzahlungen, Stornogebühren oder sonstigen finanziellen Bedingungen akzeptieren."
   }
-} satisfies Record<UiLocale, {
+}) satisfies Record<UiLocale, {
   title: string;
   operation: Record<"book" | "confirm_existing", string>;
   scope: string; windows: string; inclusive: string; timeZone: string;

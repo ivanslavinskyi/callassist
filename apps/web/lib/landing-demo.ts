@@ -1,3 +1,4 @@
+import { extendMessages } from "./i18n/extend-messages";
 import type { CallPlanPresentationData } from "@/components/call-plan-presentation";
 import type { CallSummaryPayload } from "@callassist/contracts";
 import type { UiLocale } from "./i18n/messages";
@@ -21,7 +22,7 @@ type LandingDemo = {
 };
 
 /** Fictional educational text, never a call/compilation record or provider input. */
-export const landingDemo: Record<UiLocale, LandingDemo> = {
+export const landingDemo: Record<UiLocale, LandingDemo> = extendMessages({
   en: {
     educationalLabel: "Illustrative example",
     educationalNote: "A fictional example of a call plan and conversation. No call is placed.",
@@ -130,4 +131,4 @@ export const landingDemo: Record<UiLocale, LandingDemo> = {
       { speaker: "Gemeinde", text: "Sie kann sie per E-Mail einreichen." }
     ]
   }
-};
+});

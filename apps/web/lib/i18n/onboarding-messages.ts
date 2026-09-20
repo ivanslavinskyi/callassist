@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./messages";
 
 type OnboardingMessages = {
@@ -62,4 +63,4 @@ const de: OnboardingMessages = {
   changed: "Ein rechtliches Dokument wurde währenddessen geändert. Prüfen Sie bitte die aktuellen Dokumente und versuchen Sie es erneut."
 };
 
-export const onboardingMessages: Record<UiLocale, OnboardingMessages> = { en, de };
+export const onboardingMessages: Record<UiLocale, OnboardingMessages> = extendMessages({ en, de });

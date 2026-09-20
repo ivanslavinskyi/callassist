@@ -22,15 +22,15 @@ it("never injects mock email codes into real delivery or production", () => {
   expect(() => mockEmailVerificationCodeFromEnv()).toThrow();
 });
 describe("communication language readiness", () => {
-  it("covers every enabled UI locale and keeps all five planned languages explicit", () => {
+  it("covers every enabled UI locale and tracks editorial readiness separately", () => {
     for (const language of SUPPORTED_UI_LOCALES) {
-      expect(communicationLocales[language].emailReadiness).toBe("reviewed");
+      expect(communicationLocales[language].emailReadiness).toMatch(/reviewed|candidate/);
       expect(emailMessages[communicationLocales[language].email]).toBeDefined();
     }
     for (const language of ["fr", "it", "rm", "uk", "ru"] as const) expect(communicationLocales[language]).toBeDefined();
-    expect(resolveCommunicationLocale("rm-CH")).toMatchObject({ language: "rm", email: "en", sms: "en", emailReadiness: "fallback" });
+    expect(resolveCommunicationLocale("rm-CH")).toMatchObject({ language: "rm", email: "rm", sms: "en", emailReadiness: "candidate" });
   });
-  it.each(["en", "de", "fr", "it", "uk", "ru"] as const)("renders complete HTML/text and notices for %s", (locale) => {
+  it.each(SUPPORTED_UI_LOCALES)("renders complete HTML/text and notices for %s", (locale) => {
     expect(resolveEmailLocale(`${locale}-${locale === "uk" ? "UA" : "CH"}`)).toBe(locale);
     const content = verificationEmail({ locale, code: "123456", expiresInMinutes: 10 });
     expect(content.text).toContain("123456"); expect(content.text).toContain("10");
@@ -41,9 +41,8 @@ describe("communication language readiness", () => {
     expect(content.html.match(/<a /g)).toHaveLength(2);
     expect(content.text).not.toMatch(/Ivan Slavinskyi|Weiernstrasse/);
     expect(content.html).not.toContain("background:");
-    const legalLanguage = locale === "de" ? "de" : "en";
+    const legalLanguage = locale;
     expect(content.text).toContain(`https://shprohli.ch/${legalLanguage}/`);
-    if (locale !== "en" && locale !== "de") expect(content.text).toContain(emailMessages[locale].footer.imprintEnglish);
     expect(emailChangeRequestNotice(locale).attachments).toEqual(content.attachments);
     for (const kind of ["email_changed", "phone_changed", "password_reset"] as const) {
       expect(securityNoticeEmail(locale, kind).text).not.toContain("undefined");

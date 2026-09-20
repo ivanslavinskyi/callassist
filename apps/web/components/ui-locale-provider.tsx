@@ -1,5 +1,6 @@
 "use client";
 
+import { PrivacyNotice } from "./privacy-notice";
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { messages, type Messages, type UiLocale } from "@/lib/i18n/messages";
 import { localizePathname } from "@/lib/i18n/routing";
@@ -12,18 +13,22 @@ const UiLocaleContext = createContext<{
 
 export function UiLocaleProvider({
   children,
-  locale
+  locale,
+  contentOnly = false
 }: {
   children: ReactNode;
   locale: UiLocale;
+  contentOnly?: boolean;
 }) {
   useEffect(() => {
+    if (contentOnly) return;
     document.documentElement.lang = locale;
     document.documentElement.dir = uiLocaleRegistry[locale].direction;
-  }, [locale]);
+  }, [locale, contentOnly]);
   return (
     <UiLocaleContext.Provider value={{ locale, messages: messages[locale] }}>
       {children}
+      {!contentOnly && <PrivacyNotice locale={locale} />}
     </UiLocaleContext.Provider>
   );
 }

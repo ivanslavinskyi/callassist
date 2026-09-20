@@ -1,3 +1,4 @@
+import { formatLocale } from "@callassist/contracts";
 import type { AdminOperationsOverview } from "@callassist/contracts";
 
 export type AdminCost = AdminOperationsOverview["cost"];
@@ -7,8 +8,8 @@ export type ExpenseCategory = "realtime" | "preparation" | "translation" | "summ
 /** One money presentation across admin. Unknown and a real zero stay distinct. */
 export function formatAdminMoney(micros: number | null, locale: "en" | "de" = "en", precise = false, currency = "USD") {
   if (micros === null) return "—";
-  const formatter = new Intl.NumberFormat(locale === "de" ? "de-CH" : "en-US", {
-    style: "currency", currency, minimumFractionDigits: precise ? 6 : 2, maximumFractionDigits: precise ? 6 : 2
+  const formatter = new Intl.NumberFormat(formatLocale(locale), {
+    style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: precise ? 6 : 2, maximumFractionDigits: precise ? 6 : 2
   });
   if (!precise && micros !== 0 && Math.abs(micros) < 10_000) return `${micros < 0 ? "−" : ""}<${formatter.format(.01)}`;
   return formatter.format(micros / 1_000_000);

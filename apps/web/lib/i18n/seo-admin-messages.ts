@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { ContentPageKey } from "@callassist/contracts";
 import type { SeoAuditIssue } from "../seo-audit";
 import type { UiLocale } from "./messages";
@@ -113,4 +114,4 @@ const de: SeoMessages = {
   }
 };
 
-export const seoAdminMessages: Record<UiLocale, SeoMessages> = { en, de };
+export const seoAdminMessages: Record<UiLocale, SeoMessages> = extendMessages({ en, de });

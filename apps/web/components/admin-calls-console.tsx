@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 import { callStatusClass, callStatusLabel, callConsentLabel, callResultLabel } from "@/lib/call-status";
 import { callPresentationCopy, legacyCallStatusLabel } from "@/lib/i18n/call-presentation";
 
@@ -283,7 +284,7 @@ function toIso(value: string) {
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

@@ -1,3 +1,4 @@
+import { uiLocaleRegistry } from "@callassist/contracts";
 import type {
   PublishedContentIndexPage,
   PublishedContentPage,
@@ -105,7 +106,7 @@ function socialImage(locale: string, title: string) {
 }
 
 function openGraphLocale(locale: string) {
-  if (locale === "en" || locale === "de") return `${locale}_CH`;
+  if (isUiLocale(locale)) return uiLocaleRegistry[locale].formatLocale.replace("-", "_");
   const tag = new Intl.Locale(locale).maximize();
   return `${tag.language}_${tag.region}`;
 }

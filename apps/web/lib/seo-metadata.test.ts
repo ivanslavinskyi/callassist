@@ -67,7 +67,7 @@ describe("public SEO metadata", () => {
       robots: { index: true, follow: true },
       openGraph: {
         locale: "de_CH",
-        alternateLocale: ["en_CH"],
+        alternateLocale: ["en_GB"],
         url: "/de/datenschutz"
       },
       twitter: { card: "summary_large_image" }

@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type {
   AccountDeletionStatus,
   AccountSessionBrowser,
@@ -381,7 +382,7 @@ const de: AccountMessages = {
   }
 };
 
-export const accountMessages: Record<UiLocale, AccountMessages> = { en, de };
+export const accountMessages: Record<UiLocale, AccountMessages> = extendMessages({ en, de });
 
 export function getAccountContactChangeErrorMessage(
   error: unknown,

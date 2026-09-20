@@ -23,3 +23,6 @@ export * from "./call-lifecycle";
 export * from "./call-assessment";
 export * from "./call-history";
 export * from "./admin-notifications";
+
+export * from "./ui-locales";
+export * from "./analytics";

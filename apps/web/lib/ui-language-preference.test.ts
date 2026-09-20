@@ -13,7 +13,7 @@ describe("independent interface preference", () => {
   });
 
   it("falls back to an available page language for an unavailable account UI", () => {
-    expect(readExplicitGuestLocale("callassist_explicit_guest_locale=ru")).toBeNull();
-    expect(resolvePostLoginLocale({ explicitGuestLocale: null, accountLocale: "ru", pageLocale: "de" })).toBe("de");
+    expect(readExplicitGuestLocale("callassist_explicit_guest_locale=es")).toBeNull();
+    expect(resolvePostLoginLocale({ explicitGuestLocale: null, accountLocale: "es", pageLocale: "de" })).toBe("de");
   });
 });

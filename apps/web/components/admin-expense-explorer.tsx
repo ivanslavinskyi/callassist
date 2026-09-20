@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 
 import Image from "next/image";
 import { useId, useRef, useState, type ReactNode } from "react";
@@ -23,7 +24,7 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
   const [tab, setTab] = useState<Tab>("cost");
   const heading = useRef<HTMLHeadingElement>(null);
   const money = (amount: number | null, precise = false, currency = "USD") => formatAdminMoney(amount, locale, precise, currency);
-  const date = (at: string, time = false) => new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", { dateStyle: "medium", ...(time ? { timeStyle: "short" as const } : {}), timeZone: "UTC" }).format(new Date(at));
+  const date = (at: string, time = false) => new Intl.DateTimeFormat(formatLocale(locale), { dateStyle: "medium", ...(time ? { timeStyle: "short" as const } : {}), timeZone: "UTC" }).format(new Date(at));
   const groups = expenseGroups(cost);
   const visibleGroups = groups.filter(g => g.records > 0 || g.amount !== null || (g.key === "twilio" && (cost.providerReported.recordCount > 0 || cost.providerReported.pendingOperations > 0)));
   const group = selected === null ? undefined : visibleGroups.find(g => g.key === selected) ?? visibleGroups[0];

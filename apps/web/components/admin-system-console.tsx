@@ -1,4 +1,6 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
+import { AdminAnalyticsSettings } from "./admin-analytics-settings";
 
 import type {
   AdminSystemStatus,
@@ -89,7 +91,8 @@ export function AdminSystemConsole() {
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
         <AdminOutboundControl role={role} />
-        <AdminBetaControls role={role} />
+        <AdminAnalyticsSettings />
+      <AdminBetaControls role={role} />
         {role === "superadmin" && <AdminNotificationControls />}
 
         {status ? (
@@ -425,7 +428,7 @@ function formatOptionalCount(value: number | null, fallback: string) {
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "medium"
   }).format(new Date(value));

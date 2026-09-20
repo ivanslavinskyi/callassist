@@ -17,6 +17,17 @@ import { TwilioVerificationProvider } from "../auth/twilio-verification-provider
 import { ResendEmailProvider } from "../auth/resend-email-provider";
 
 const closers: Array<() => Promise<unknown>> = [];
+it("persists analytics through the existing revisioned settings and preserves it for old beta clients", async () => {
+  const f = await fixture();
+  const before = await f.controls.getAnalytics();
+  expect(before.settings).toEqual({ enabled: false, measurementId: "" });
+  await f.controls.updateAnalytics({ enabled: true, measurementId: "G-TEST1234" }, before.revision, f.admin.id);
+  const enabled = await f.controls.getAnalytics();
+  await expect(f.controls.updateAnalytics({ enabled: false, measurementId: "" }, before.revision, f.admin.id)).rejects.toMatchObject({ code: "BETA_SETTINGS_STALE" });
+  await f.controls.update(f.settings, enabled.revision, f.admin.id, "Unrelated budget update");
+  expect((await f.controls.getAnalytics()).settings).toEqual(enabled.settings);
+  expect(await f.sql`SELECT action FROM beta_control_audit WHERE reason='Analytics settings'`).toHaveLength(1);
+});
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
 let phone = 1000;
 function profile() { return { email: `${randomUUID()}@example.com`, passwordHash: "test-only",

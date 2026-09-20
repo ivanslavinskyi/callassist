@@ -1,3 +1,4 @@
+import { DEFAULT_UI_LOCALE, uiLocaleRegistry, isUiLocale, type ContentPageKey } from "@callassist/contracts";
 import "server-only";
 
 import type {
@@ -23,7 +24,13 @@ export const getPublishedContentPage = cache(async (
     `${internalApiUrl}/api/content/pages/${encodeURIComponent(slug)}?locale=${locale}`,
     { next: { revalidate: 60 } }
   );
-  if (response.status === 404) return null;
+  if (response.status === 404) {
+    if (locale !== DEFAULT_UI_LOCALE && isUiLocale(locale)) {
+      const key = (Object.keys(uiLocaleRegistry[locale].slugs) as ContentPageKey[]).find(key => uiLocaleRegistry[locale].slugs[key] === slug);
+      if (key) return getPublishedContentPage(DEFAULT_UI_LOCALE, uiLocaleRegistry[DEFAULT_UI_LOCALE].slugs[key]);
+    }
+    return null;
+  }
   if (!response.ok) {
     throw new Error(`Unable to load published content (HTTP ${response.status})`);
   }

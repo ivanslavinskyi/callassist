@@ -1,3 +1,4 @@
+import { AnalyticsTracker } from "@/components/analytics-tracker";
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
@@ -30,7 +31,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('callassist_theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch(e){document.documentElement.dataset.theme='light'}})()` }} />
       </head>
-      <body><CallDraftProvider>{children}</CallDraftProvider></body>
+      <body><AnalyticsTracker /><CallDraftProvider>{children}</CallDraftProvider></body>
     </html>
   );
 }

@@ -1,3 +1,6 @@
+import { uiLocaleRegistry, resolveUiLocale } from "@callassist/contracts";
+import { homeSeo } from "@/lib/site-config";
+import { systemMessages } from "@/lib/i18n/system-messages";
 import { ImageResponse } from "next/og";
 import { isUiLocale } from "@/lib/i18n/messages";
 import { getPublishedLanding } from "@/lib/server-content";
@@ -14,14 +17,10 @@ export default async function OpenGraphImage({ params }: {
   const hero = landing?.blocks.find(({ blockType }) => blockType === "hero");
   const headline = hero?.blockType === "hero"
     ? hero.title
-    : locale === "de"
-      ? "KI-unterstützte Telefonanrufe"
-      : "AI-assisted phone calls";
+    : homeSeo[locale].title;
   const strapline = hero?.blockType === "hero"
     ? hero.badges.join(" · ")
-    : locale === "de"
-      ? "Alltagstelefonate · öffentliche Beta · Schweiz"
-      : "Everyday calls · public beta · Switzerland";
+    : homeSeo[locale].description;
   return new ImageResponse(
     <div style={{
       alignItems: "stretch",
@@ -35,7 +34,7 @@ export default async function OpenGraphImage({ params }: {
       width: "100%"
     }}>
       <div style={{ color: "#168553", display: "flex", fontSize: 30, fontWeight: 800 }}>
-        SHPROHLI
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}><span>SHPROHLI</span><span style={{ fontSize: 22, fontStyle: "italic" }}>{uiLocaleRegistry[locale].slogan}</span></div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
         <div style={{ display: "flex", fontSize: 68, fontWeight: 800, letterSpacing: "-3px", lineHeight: 1.05, maxWidth: 980 }}>
@@ -48,7 +47,7 @@ export default async function OpenGraphImage({ params }: {
       <div style={{ alignItems: "center", display: "flex", fontSize: 22, justifyContent: "space-between" }}>
         <span>SHPROHLI</span>
         <span style={{ color: "#168553" }}>
-          {locale.toUpperCase()} · {locale === "de" ? "Öffentliche Beta" : "Public beta"}
+          {locale.toUpperCase()} · {systemMessages[resolveUiLocale(landing?.locale ?? locale)].beta}
         </span>
       </div>
     </div>,

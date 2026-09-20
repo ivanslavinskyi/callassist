@@ -1,3 +1,4 @@
+import { extendMessages } from "./i18n/extend-messages";
 import type {
   CallBrief,
   FinalTranscript,
@@ -14,7 +15,7 @@ type ExportInput = {
   uiLocale: UiLocale;
 };
 
-export const transcriptExportCopy = {
+export const transcriptExportCopy = extendMessages({
   en: {
     title: "Final transcript",
     translationTitle: "Translated transcript",
@@ -45,7 +46,7 @@ export const transcriptExportCopy = {
     unassigned: "Nicht zugeordnete Stimme",
     warning: "Mit KI erstellt. Prüfen Sie wichtige Namen, Daten, Zahlen und Zusagen anhand der Aufnahme."
   }
-} as const;
+});
 
 export function buildFinalTranscriptCopyText(input: ExportInput) {
   const { brief, finalTranscript, languageLabel, uiLocale } = input;

@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { ContentPageKey } from "@callassist/contracts";
 import type { UiLocale } from "./messages";
 
@@ -150,7 +151,7 @@ const de: ContentAdminMessages = {
   }
 };
 
-export const contentAdminMessages: Record<UiLocale, ContentAdminMessages> = {
+export const contentAdminMessages: Record<UiLocale, ContentAdminMessages> = extendMessages({
   en,
   de
-};
+});

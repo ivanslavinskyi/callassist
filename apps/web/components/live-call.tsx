@@ -1,4 +1,6 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
+import { systemMessages } from "@/lib/i18n/system-messages";
 import { callStatusClass, callStatusLabel } from "@/lib/call-status";
 import { CallLifecycleSummary } from "./call-lifecycle-summary";
 import { betaErrorMessage, betaMessages } from "@/lib/i18n/beta-messages";
@@ -544,7 +546,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
               <span>{brief.phoneNumber}</span>
               <span className="meta-divider" />
               <span>{language?.label ?? brief.locale}</span>
-              <time dateTime={brief.createdAt}>{new Intl.DateTimeFormat(uiLocale === "de" ? "de-CH" : "en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(brief.createdAt))}</time>
+              <time dateTime={brief.createdAt}>{new Intl.DateTimeFormat(formatLocale(uiLocale), { day: "numeric", month: "short", year: "numeric" }).format(new Date(brief.createdAt))}</time>
               {isTerminal && recording?.durationSeconds != null ? <span>{formatDuration(recording.durationSeconds)}</span> : null}
             </div>
           </div>
@@ -647,14 +649,14 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           <div className="transcript-column">
             {isTerminal && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
               <button type="button" aria-pressed={transcriptView === "final"} onClick={() => setTranscriptView("final")}>{copy.finalTitle}</button>
-              <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{uiLocale === "de" ? "Vorläufiges Transkript" : "Provisional transcript"}</button>
+              <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{systemMessages[uiLocale].provisionalTranscript}</button>
               <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
             </nav> : null}
             <section className="transcript-card" tabIndex={-1} hidden={isTerminal && transcriptView !== "provisional"} ref={transcriptCardRef}>
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">{copy.liveTranscriptEyebrow}</span>
-                <h2>{isTerminal ? (uiLocale === "de" ? "Vorläufiges Transkript" : "Provisional transcript") : copy.liveCaptions}</h2>
+                <h2>{isTerminal ? systemMessages[uiLocale].provisionalTranscript : copy.liveCaptions}</h2>
                 <p className="transcript-subtitle">{copy.liveTranscriptHelp}</p>
               </div>
               {isActive ? (
@@ -1151,7 +1153,7 @@ function formatOffset(seconds: number) {
 function retentionLabel(
   days: number,
   deleteAfter: string | null,
-  locale: "en" | "de",
+  locale: import("@callassist/contracts").UiLocale,
   copy: {
     retentionImmediate: string;
     retentionScheduled: (date: string) => string;

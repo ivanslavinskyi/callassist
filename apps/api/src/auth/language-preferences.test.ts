@@ -105,7 +105,7 @@ describe("account language preferences", () => {
 
   it("accepts enabled writes only and rejects no-op or unrelated patches", () => {
     for (const invalid of [
-      {}, { uiLocale: undefined }, { uiLocale: "uk" },
+      {}, { uiLocale: undefined }, { uiLocale: "es" },
       { preferredContentLanguage: "xx" }, { uiLocale: null },
       { uiLocale: "en", userId: randomUUID() },
       { preferredContentLanguage: "en_US" }

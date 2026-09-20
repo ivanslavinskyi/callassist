@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import { ApiError } from "../api";
 import type { UiLocale } from "./messages";
 
@@ -122,7 +123,7 @@ const de: CreditMessages = {
   }
 };
 
-export const creditMessages: Record<UiLocale, CreditMessages> = { en, de };
+export const creditMessages: Record<UiLocale, CreditMessages> = extendMessages({ en, de });
 
 export function getCreditErrorMessage(error: unknown, locale: UiLocale) {
   const copy = creditMessages[locale].errors;

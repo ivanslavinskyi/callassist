@@ -2,21 +2,15 @@ export type UiLocaleDefinition = {
   nativeName: string;
   formatLocale: string;
   direction: "ltr" | "rtl";
+  enabled?: boolean; ui?: boolean;
 };
 
-/** Interface capabilities are independent of call voices, content storage and text-generation directions. */
-export const uiLocaleRegistry = {
-  en: { nativeName: "English", formatLocale: "en-GB", direction: "ltr" },
-  de: { nativeName: "Deutsch", formatLocale: "de-CH", direction: "ltr" }
-} as const satisfies Record<string, UiLocaleDefinition>;
-
-export type UiLocale = keyof typeof uiLocaleRegistry;
-export const uiLocales = Object.keys(uiLocaleRegistry) as UiLocale[];
+export { uiLocaleRegistry, uiLocales, type UiLocale } from "@callassist/contracts";
 
 export function createUiLocaleRouting<const R extends Record<string, UiLocaleDefinition>>(registry: R, defaultLocale: keyof R & string) {
   type L = keyof R & string;
-  const locales = Object.keys(registry) as L[];
-  const isLocale = (value: string): value is L => Object.prototype.hasOwnProperty.call(registry, value);
+  const locales = Object.keys(registry).filter(key => registry[key]?.enabled !== false && registry[key]?.ui !== false) as L[];
+  const isLocale = (value: string): value is L => locales.includes(value as L);
   const fromPathname = (pathname: string): L | null => {
     const segment = pathname.split("/").filter(Boolean)[0];
     return segment && isLocale(segment) ? segment : null;

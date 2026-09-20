@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import { ApiError } from "@/lib/api";
 import type { UiLocale } from "./messages";
 import { betaErrorMessage } from "./beta-messages";
@@ -196,7 +197,7 @@ const de: AuthMessages = {
   }
 };
 
-export const authMessages: Record<UiLocale, AuthMessages> = { en, de };
+export const authMessages: Record<UiLocale, AuthMessages> = extendMessages({ en, de });
 
 export function getAuthErrorMessage(error: unknown, locale: UiLocale) {
   const beta = betaErrorMessage(error, locale);

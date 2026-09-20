@@ -1,4 +1,5 @@
 "use client";
+import { Brand } from "./brand";
 
 import type { PublishedNavigation } from "@callassist/contracts";
 import Link from "next/link";
@@ -29,7 +30,7 @@ export function SiteFooter({ locale, navigation }: { locale: UiLocale; navigatio
     { id: "imprint", href: contentPath(locale, "imprint"), label: copy.imprint }
   ];
   return <footer className="site-footer">
-    <div className="footer-brand"><strong>SHPROHLI</strong><p>{copy.publicBeta}</p></div>
+    <div className="footer-brand"><Brand locale={locale} href={`/${locale}`} label={copy.homeLabel} /><p>{copy.publicBeta}</p></div>
     <nav aria-label={copy.footerProduct}>{product.map(item => <Link key={item.id} href={item.href}>{item.label}</Link>)}</nav>
     <nav aria-label={copy.footerLegal}>{legal.map(item => <Link key={item.id} href={item.href}>{item.label}</Link>)}</nav>
   </footer>;

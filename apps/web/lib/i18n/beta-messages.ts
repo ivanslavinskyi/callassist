@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./messages";
 const en = {
   invitation: "Invitation code (optional)",
@@ -12,7 +13,7 @@ const en = {
   configureBudget: "Set the budget in admin settings",
   recipient: "This recipient has reached the beta call limit. Please try another day."
 };
-export const betaMessages: Record<UiLocale, Record<keyof typeof en, string>> = { en, de: {
+export const betaMessages: Record<UiLocale, Record<keyof typeof en, string>> = extendMessages({ en, de: {
   invitation: "Einladungscode (optional)",
   invitationHelp: "Wenn Sie eine einmalige Einladung erhalten haben, geben Sie hier den Code ein. Einladungen gelten auch bei voller offener Registrierung.",
   full: "Diese Beta-Runde ist voll. Geben Sie Ihren Einladungscode ein oder wenden Sie sich an den Support.",
@@ -24,7 +25,7 @@ export const betaMessages: Record<UiLocale, Record<keyof typeof en, string>> = {
   spendingPaused: "Die Anrufvorbereitung wurde vom Betreiber pausiert. Ihre Eingaben sind gespeichert. Bitte kontaktieren Sie den Support.",
   configureBudget: "Budget in den Admin-Einstellungen festlegen",
   recipient: "Das Anruflimit der Beta für diesen Empfänger ist erreicht. Versuchen Sie es an einem anderen Tag."
-} };
+} });
 export function betaErrorMessage(error: unknown, locale: UiLocale) {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
   const copy = betaMessages[locale];

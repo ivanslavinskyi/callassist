@@ -1,4 +1,4 @@
-import type { CallBrief } from "@callassist/contracts";
+import { formatLocale, type CallBrief } from "@callassist/contracts";
 import { isTerminalCallStatus } from "./call-status";
 import type { UiLocale } from "./i18n/messages";
 
@@ -26,7 +26,7 @@ export function formatCallTime(createdAt: string, locale: UiLocale, now = new Da
         : absoluteSeconds < 86400 ? [Math.round(seconds / 3600), "hour"]
           : [Math.round(seconds / 86400), "day"];
   return {
-    relative: new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(value, unit),
-    exact: new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date)
+    relative: new Intl.RelativeTimeFormat(formatLocale(locale), { numeric: "auto" }).format(value, unit),
+    exact: new Intl.DateTimeFormat(formatLocale(locale), { dateStyle: "medium", timeStyle: "short" }).format(date)
   };
 }

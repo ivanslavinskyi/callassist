@@ -5,16 +5,18 @@ import type {
   PublishedLanding,
   PublishedLandingBlock
 } from "@callassist/contracts";
-import { selectableCallLanguagesForRole } from "@callassist/contracts";
+import { resolveUiLocale, selectableCallLanguagesForRole } from "@callassist/contracts";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
+import { systemMessages } from "@/lib/i18n/system-messages";
+import { ContentLocaleNotice } from "./content-locale-notice";
 import { AppShell } from "./app-shell";
 import { getCallLanguageLabel } from "@/lib/i18n/call-language-labels";
 import { contentLanguageDirection } from "@/lib/content-localizations";
 import { InteractiveCallDemo } from "./interactive-call-demo";
 import { FaqList } from "./faq-list";
 import { PublicFounderStory } from "./public-founder-story";
-import { useUiLocale } from "./ui-locale-provider";
+import { UiLocaleProvider, useUiLocale } from "./ui-locale-provider";
 import { landingMessages } from "@/lib/i18n/landing-messages";
 import type { SessionSnapshot } from "@/lib/session-state";
 import { LandingPrimaryAction } from "./landing-primary-action";
@@ -32,6 +34,8 @@ export function PublicHome({
 
   return (
     <AppShell initialSession={initialSession}>
+      <ContentLocaleNotice contentLocale={landing.locale} />
+      <UiLocaleProvider locale={resolveUiLocale(landing.locale)} contentOnly>
       <PublicHomeContent
         faq={faq}
         landing={landing}
@@ -39,6 +43,7 @@ export function PublicHome({
         sessionAware
         registerHref={localizeHref("/register")}
       />
+      </UiLocaleProvider>
     </AppShell>
   );
 }
@@ -104,14 +109,14 @@ function LandingBlockView({ block, faq, locale, registerHref, sessionAware, exam
         <section className={`public-hero${exampleTitle !== undefined ? " public-hero-interactive" : ""}`}>
           <div className="public-hero-copy">
           <span className="eyebrow">{block.eyebrow}</span>
-          <h1><HeroTitle title={block.title} locale={locale} /></h1>
+          <h1>{block.title}</h1>
           {block.supportingTitle ? <p className="public-hero-support"><strong>{block.supportingTitle}</strong></p> : null}
           <p>{block.lead}</p>
           {block.secondaryText ? <p className="public-hero-secondary">{block.secondaryText}</p> : null}
           <div className="public-actions">
             <LandingPrimaryAction className="primary-button compact-button" locale={interfaceLocale} guestHref={registerHref} guestLabel={block.primaryCtaLabel} sessionAware={sessionAware} />
             <Link className="secondary-button" href={exampleTitle !== undefined ? "#example" : "#how-it-works"} onClick={exampleTitle !== undefined ? onDemoStart : undefined}>
-              {exampleTitle !== undefined ? block.secondaryCtaLabel : locale === "de" ? "So funktioniert es" : "See how it works"}
+              {exampleTitle !== undefined ? block.secondaryCtaLabel : systemMessages[interfaceLocale].how}
             </Link>
           </div>
           <ul className="public-badges" aria-label={block.eyebrow}>
@@ -192,7 +197,7 @@ function LandingBlockView({ block, faq, locale, registerHref, sessionAware, exam
         <section className="public-section public-language">
           <h2>{block.title}</h2>
           <p>{block.text}</p>
-          <ul aria-label={locale === "de" ? "Unterstützte Gesprächssprachen" : "Supported call languages"}>
+          <ul aria-label={systemMessages[interfaceLocale].languages}>
             {selectableCallLanguagesForRole().map((language) => (
               <li key={language.locale}>
                 <span>{language.shortLabel}</span>
@@ -222,11 +227,4 @@ function LandingBlockView({ block, faq, locale, registerHref, sessionAware, exam
         </section>
       );
   }
-}
-
-function HeroTitle({ title, locale }: { title: string; locale: string }) {
-  const word = locale === "de" ? "Sprechen" : "speaking";
-  const index = title.indexOf(word);
-  if (index < 0) return title;
-  return <>{title.slice(0, index)}<span className="accent">{word}</span>{title.slice(index + word.length)}</>;
 }

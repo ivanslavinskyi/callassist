@@ -1,7 +1,9 @@
+import { analyticsSettingsSchema, defaultAnalyticsSettings } from "./analytics";
 import { z } from "zod";
 
 const micros = z.number().int().min(1).max(1_000_000_000);
 export const betaSettingsSchema = z.strictObject({
+  analytics: analyticsSettingsSchema.default(defaultAnalyticsSettings).catch(defaultAnalyticsSettings),
   publicAccountLimit: z.number().int().min(0).max(10000),
   maxDurationSeconds: z.number().int().min(60).max(900),
   maxConcurrentCalls: z.number().int().min(1).max(20),
@@ -19,6 +21,7 @@ export const betaSettingsSchema = z.strictObject({
 });
 export type BetaSettings = z.infer<typeof betaSettingsSchema>;
 export const defaultBetaSettings: BetaSettings = {
+  analytics: defaultAnalyticsSettings,
   publicAccountLimit: 30, maxDurationSeconds: 420, maxConcurrentCalls: 2,
   maxStartsPerHour: 3, maxStartsPerDay: 10, maxStartsPerRecipientPerDay: 2,
   spendingEnabled: true, currency: "USD", rollingDayBudgetMicros: null,

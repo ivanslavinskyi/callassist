@@ -1,3 +1,4 @@
+import { resolveEmailLocale } from "../auth/communication-locales";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { notificationSettingsSchema, notificationSettingsUpdateSchema, notificationViewSchema,
@@ -122,7 +123,7 @@ export class SuperadminNotifications implements NotificationAdmin {
       }
       if(!report) { await this.cancel(row,"SOURCE_UNAVAILABLE"); return; }
       message={to:recipient.email,idempotencyKey:`superadmin-notification:${row.id}`,
-        content:'userId' in report ? registrationNotificationEmail(report,this.branding) : callNotificationEmail(report,this.branding)};
+        content:'userId' in report ? registrationNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale)) : callNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale))};
       const saved=await this.sql`UPDATE superadmin_notifications SET payload_ciphertext=${encryptJson(message,this.key)},
         first_send_at=COALESCE(first_send_at,${this.now()}) WHERE id=${row.id} AND status='processing' AND lease_owner=${this.workerId}`;
       if(!saved.count) return;
@@ -169,7 +170,7 @@ export class SuperadminNotifications implements NotificationAdmin {
   }
 }
 async function eligibleRecipient(sql:Sql,id:string) {
-  const [user]=await sql<{email:string}[]>`SELECT email FROM users WHERE id=${id} AND status='active' AND role='superadmin'
+  const [user]=await sql<{email:string;uiLocale:string}[]>`SELECT email,ui_locale AS "uiLocale" FROM users WHERE id=${id} AND status='active' AND role='superadmin'
     AND email_verified_at IS NOT NULL AND phone_verified_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=users.id AND d.status<>'completed')`;
   return user ?? null;

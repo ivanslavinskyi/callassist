@@ -155,7 +155,7 @@ export class AuthService {
     }
     await this.#limit("verification-send:phone", user.phoneE164, 3, 60 * minute);
     try {
-      await this.verificationProvider.send(user.phoneE164, input.uiLocale ?? user.uiLocale);
+      await this.verificationProvider.send(user.phoneE164, user.uiLocale ?? input.uiLocale);
     } catch (error) {
       throw verificationServiceError(error);
     }
@@ -174,7 +174,7 @@ export class AuthService {
     const corrected = await this.repository.correctUnverifiedPhone({ userId: user.id, expectedPasswordHash: user.passwordHash, newPhoneE164: input.newPhoneE164 });
     if (!corrected) throw new AuthServiceError("PHONE_CORRECTION_NOT_AVAILABLE");
     // The number remains unverified if delivery fails; resend/correction can recover.
-    try { await this.verificationProvider.send(corrected.phoneE164, input.uiLocale ?? corrected.uiLocale); }
+    try { await this.verificationProvider.send(corrected.phoneE164, corrected.uiLocale ?? input.uiLocale); }
     catch (error) { throw verificationServiceError(error); }
     return { status: "verification_required" as const };
   }
@@ -258,7 +258,7 @@ export class AuthService {
             now.getTime() + passwordRecoveryChallengeTtlMs
           ).toISOString()
         });
-        if (created) await this.verificationProvider.send(user.phoneE164, input.uiLocale ?? user.uiLocale);
+        if (created) await this.verificationProvider.send(user.phoneE164, user.uiLocale ?? input.uiLocale);
       } catch {
         await this.repository.invalidatePasswordRecoveryChallenge(
           recoveryId,
@@ -487,7 +487,7 @@ export class AuthService {
   async startEmailVerification(user: User, sessionId: string, input: EmailVerificationStartInput, context: AuthRequestContext) {
     if (user.emailVerifiedAt) throw new AuthServiceError("EMAIL_ALREADY_VERIFIED");
     const result = await this.#startEmailChallenge(user, sessionId,
-      { newEmail: user.email, currentPassword: "" }, context, "verify", input.uiLocale ?? user.uiLocale);
+      { newEmail: user.email, currentPassword: "" }, context, "verify", resolveEmailLocale(user.uiLocale, input.uiLocale));
     return { status: "verification_required" as const, verificationId: result.emailChangeId, expiresAt: result.expiresAt };
   }
 

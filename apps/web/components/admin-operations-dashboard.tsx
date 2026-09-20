@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 
 import { AdminCostBreakdown } from "./admin-cost-breakdown";
 import { AdminGoalAssessments } from "./admin-goal-assessments";
@@ -241,7 +242,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function formatPercent(value: number, locale: "en" | "de") {
-  return new Intl.NumberFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.NumberFormat(formatLocale(locale), {
     style: "percent",
     maximumFractionDigits: 1
   }).format(value);
@@ -257,7 +258,7 @@ function formatMilliseconds(value: number) {
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-GB", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "medium",
     timeZone: "UTC"

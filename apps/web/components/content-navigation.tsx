@@ -1,3 +1,4 @@
+import { systemMessages } from "@/lib/i18n/system-messages";
 import type { ContentLocale, ContentPageKey } from "@callassist/contracts";
 import Link from "next/link";
 import { contentPath } from "@/lib/i18n/content-routing";
@@ -10,7 +11,7 @@ export function ContentNavigation({ locale, current }: { locale: ContentLocale; 
     ["faq", copy.faq], ["support", copy.support], ["privacy", copy.privacy],
     ["terms", copy.terms], ["acceptable_use", copy.acceptableUse], ["imprint", copy.imprint]
   ];
-  return <nav className="content-navigation" lang={interfaceLocale} aria-label={interfaceLocale === "de" ? "Informationen" : "Information pages"}>
+  return <nav className="content-navigation" lang={interfaceLocale} aria-label={systemMessages[interfaceLocale].information}>
     {items.map(([key, label]) => <Link key={key} href={contentPath(locale, key)} aria-current={key === current ? "page" : undefined}>{label}</Link>)}
   </nav>;
 }

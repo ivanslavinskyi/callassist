@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 const en = {
   title: "Expenses", lifetime: "All activity for this record", period: "Service dates", currency: "USD · UTC",
   openai: "OpenAI · usage estimate", twilio: "Twilio · account billing", twilioLocal: "Twilio · call charges",
@@ -44,4 +45,4 @@ const de: typeof en = {
   metric: { inputTextTokens: "Text-Input", cachedInputTextTokens: "Text aus Cache (im Input enthalten)", cacheWriteInputTextTokens: "Cache-Schreibvorgänge (im Input enthalten)", outputTextTokens: "Text-Output", reasoningOutputTokens: "Reasoning (im Output enthalten)", inputAudioTokens: "Audio-Input", cachedInputAudioTokens: "Audio aus Cache (im Input enthalten)", outputAudioTokens: "Audio-Output", totalTokens: "Token-Gesamtzahl des Anbieters", durationSeconds: "Gemessene Sekunden", billableSeconds: "Abgerechnete Sekunden" },
   components: { "calls-outbound": "Ausgehende Anrufe", "calls-inbound": "Eingehende Anrufe", "calls-media-stream-minutes": "Media Streams", sms: "SMS (einschliesslich Authy)", "authy-phone-verifications": "Verifizierung", phonenumbers: "Telefonnummern", recordingstorage: "Aufzeichnungsspeicher", other_or_adjustments: "Weitere Nutzung / Korrekturen" }
 };
-export const adminExpenseMessages = { en, de };
+export const adminExpenseMessages = extendMessages({ en, de });

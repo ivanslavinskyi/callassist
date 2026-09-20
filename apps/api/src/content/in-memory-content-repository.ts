@@ -1,3 +1,4 @@
+import { canUpgradeSeedLocales } from "./seed-locale-upgrade";
 import { localizeLandingBlock, localizedContentValue, requiredContentLocales, resolvePublishedContentLocale } from "@callassist/contracts";
 import { assertEditorialLocalesReady, commonLegalLocale, editorialAvailableLocales, editorialLocale } from "./content-locales";
 import type {
@@ -115,6 +116,10 @@ export class InMemoryContentRepository implements ContentRepository {
       };
       if (!current.revisions.some(({ id }) => id === collection.revision.id)) {
         current.revisions.push(structuredClone(collection.revision));
+      }
+      const latest = current.revisions.filter(revision => revision.status === "published").sort((a,b) => b.number - a.number)[0];
+      if (latest && canUpgradeSeedLocales(latest, collection.revision)) {
+        current.revisions.push({ ...structuredClone(collection.revision), id: collection.revision.id.replace(/^82/, "83"), number: latest.number + 1 });
       }
       this.#editorialCollections.set(collection.revision.key, current);
     }

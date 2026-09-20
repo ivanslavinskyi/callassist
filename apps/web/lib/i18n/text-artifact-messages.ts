@@ -1,6 +1,7 @@
+import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./messages";
 
-export const textArtifactMessages = {
+export const textArtifactMessages = extendMessages({
   en: {
     original: "Original", translated: "Translation", originalPlan: "In the call language",
     loading: "Preparing the translation…", failed: "The translation is unavailable. Try again or explicitly choose the original.",
@@ -45,4 +46,4 @@ export const textArtifactMessages = {
     pending: "Die Verarbeitung läuft noch. Sie können den Status aktualisieren oder später zurückkehren.",
     sourceRevision: "Quellversion", copy: "Angezeigten Text kopieren", copied: "Kopiert", exportPdf: "PDF herunterladen", exporting: "PDF wird erstellt…", exportError: "Export fehlgeschlagen. Bitte versuchen Sie es erneut."
   }
-} satisfies Record<UiLocale, Record<string, string>>;
+}) satisfies Record<UiLocale, Record<string, string>>;

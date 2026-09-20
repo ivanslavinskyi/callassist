@@ -40,6 +40,13 @@ async function fixture(driver: "memory" | "postgres") {
 }
 
 describe.each(["memory", "postgres"] as const)("email verification on %s", (driver) => {
+  it("uses the saved interface language ahead of the active request language", async () => {
+    const f = await fixture(driver);
+    await f.auth.updateLanguagePreferences(f.session.user.id, { uiLocale: "fr" });
+    const sent = await f.post("/api/auth/email-verification/start", { uiLocale: "uk" });
+    expect(sent.statusCode).toBe(202);
+    expect(f.email.verificationMessages.at(-1)?.locale).toBe("fr");
+  });
   it("supports Ukrainian registration, correction, phone change and recovery", async () => {
     const f = await fixture(driver);
     const email = `${randomUUID()}@example.com`;

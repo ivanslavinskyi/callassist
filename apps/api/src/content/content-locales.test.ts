@@ -1,3 +1,4 @@
+import { uiLocales } from "@callassist/contracts";
 import { randomUUID } from "node:crypto";
 import {
   adminEditorialRevisionSchema,
@@ -85,13 +86,13 @@ describe("independent CMS languages", () => {
     await service.updateDraft(actor, "support", localizedPage(source, "pl", { slug: "pomoc" }));
     await service.publishDraft(actor, "support", "Test third locale");
     expect(await service.getPublishedPage("pl", "pomoc")).toMatchObject({ locale: "pl", title: `TEST pl: ${source.title}` });
-    expect((await service.listPublishedContentIndex()).pages.find(({ key }) => key === "support")?.localizations).toHaveLength(3);
+    expect((await service.listPublishedContentIndex()).pages.find(({ key }) => key === "support")?.localizations).toHaveLength(uiLocales.length + 1);
     expect(await repository.getAdminRevision("support", "en", { revisionNumber: source.revision.number }))
       .toMatchObject({ title: source.title, sections: source.sections });
     const rollback = await service.createRollbackDraft(actor, "support", source.revision.number, "Restore original fixture");
     expect(rollback.requiredLocales).toEqual(["en", "de"]);
     await service.publishDraft(actor, "support", "Optional locale must not block original release");
-    expect((await service.listPublishedContentIndex()).pages.find(({ key }) => key === "support")?.localizations).toHaveLength(2);
+    expect((await service.listPublishedContentIndex()).pages.find(({ key }) => key === "support")?.localizations).toHaveLength(uiLocales.length);
   });
 
   it("selects one common Terms/AUP locale and stores the actual language of acceptance", async () => {
@@ -130,6 +131,6 @@ describe("independent CMS languages", () => {
     });
     await service.publishEditorialDraft(actor, "landing", "Publish EN DE with optional incomplete translation");
     expect(await service.getPublishedLanding("pl")).toMatchObject({ locale: "en" });
-    expect((await service.listPublishedContentIndex()).landing?.localizations.map(({ locale }) => locale)).toEqual(["de", "en"]);
+    expect((await service.listPublishedContentIndex()).landing?.localizations.map(({ locale }) => locale)).toEqual([...uiLocales].sort());
   });
 });

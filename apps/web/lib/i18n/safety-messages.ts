@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import { ApiError } from "../api";
 import type { UiLocale } from "./messages";
 
@@ -79,7 +80,7 @@ const de: SafetyMessages = {
   }
 };
 
-export const safetyMessages: Record<UiLocale, SafetyMessages> = { en, de };
+export const safetyMessages: Record<UiLocale, SafetyMessages> = extendMessages({ en, de });
 
 export function getSafetyErrorMessage(error: unknown, locale: UiLocale) {
   const copy = safetyMessages[locale].errors;

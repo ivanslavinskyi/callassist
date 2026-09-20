@@ -14,13 +14,14 @@ import {
   switchContentLocale
 } from "@/lib/i18n/content-routing";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
+import { LanguageSwitcher } from "./language-switcher";
 import { Brand } from "./brand";
 import { ThemeToggle } from "./theme-toggle";
 import { NavigationMenu } from "./navigation-menu";
 import { SiteFooter } from "./site-footer";
 import { designMessages } from "@/lib/i18n/design-messages";
 import { useUiLocale } from "./ui-locale-provider";
-import { uiLocales, type UiLocale } from "@/lib/i18n/messages";
+import { type UiLocale } from "@/lib/i18n/messages";
 import { languageMessages } from "@/lib/i18n/language-messages";
 import { rememberUiLocale } from "@/lib/ui-language-preference";
 import type { SessionSnapshot } from "@/lib/session-state";
@@ -108,10 +109,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     {id: "faq", href: contentPath(locale, "faq"), label: messages.app.faq},
     {id: "support", href: contentPath(locale, "support"), label: messages.app.support}
   ];
-  const language = <label className="locale-picker"><span className="sr-only">{messages.app.interfaceLanguage}</span>
-    <select aria-label={messages.app.interfaceLanguage} disabled={changingLocale || isAuthenticated === null} value={locale} onChange={event => void changeLocale(event.target.value as UiLocale)}>
-      {uiLocales.map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}
-    </select></label>;
+  const language = <LanguageSwitcher locale={locale} label={messages.app.interfaceLanguage} disabled={changingLocale || isAuthenticated === null} onChange={next => void changeLocale(next)} />;
   const primary = customer ? <>
     <Link className="topbar-link" aria-current={pathname.endsWith("/app") ? "page" : undefined} href={localizeHref("/app")}>{messages.app.newCall}</Link>
     <Link className="topbar-link" aria-current={(pathname.includes("/app/calls/") || pathname.endsWith("/app/history")) ? "page" : undefined} href={localizeHref("/app/history")}>{messages.app.history}</Link>
@@ -130,7 +128,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">{messages.app.skipToContent}</a>
     <header className="topbar">
-      <Brand href={localizeHref("/")} label={messages.app.homeLabel} />
+      <Brand locale={locale} href={localizeHref("/")} label={messages.app.homeLabel} />
       <nav className="topbar-navigation" aria-label={copy.navigation}>{primary}
         {isAuthenticated === true ? <NavigationMenu id="app-more-navigation" label={copy.more} openLabel={copy.openMenu} closeLabel={copy.closeMenu}>{more}</NavigationMenu> : null}
       </nav>
@@ -138,10 +136,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
         <div className="desktop-tools">{authLinks}
           {creditBalance !== null ? <Link className="credit-balance" href={localizeHref("/app/account#usage")}>{messages.app.creditsRemaining(creditBalance)}</Link> : null}
         </div>
+        {language}
         <ThemeToggle lightLabel={messages.app.switchToLightTheme} darkLabel={messages.app.switchToDarkTheme} />
-        <div className="desktop-tools">{language}</div>
         <NavigationMenu id="app-mobile-navigation" mobile label={copy.navigation} openLabel={copy.openMenu} closeLabel={copy.closeMenu}>
-          {primary}{more}{authLinks}<div className="menu-language">{language}</div>
+          {primary}{more}{authLinks}
         </NavigationMenu>
       </div>
     </header>

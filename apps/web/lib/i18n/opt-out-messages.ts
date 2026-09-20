@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import { ApiError } from "../api";
 import type { UiLocale } from "./messages";
 
@@ -68,7 +69,7 @@ const de: OptOutMessages = {
   }
 };
 
-export const optOutMessages: Record<UiLocale, OptOutMessages> = { en, de };
+export const optOutMessages: Record<UiLocale, OptOutMessages> = extendMessages({ en, de });
 
 export function getOptOutErrorMessage(error: unknown, locale: UiLocale) {
   const copy = optOutMessages[locale].errors;

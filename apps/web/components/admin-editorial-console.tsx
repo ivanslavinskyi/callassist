@@ -1,4 +1,5 @@
 "use client";
+import { formatLocale } from "@callassist/contracts";
 
 import type {
   AdminEditorialRevision,
@@ -757,7 +758,7 @@ function move<T>(items: T[], index: number, offset: -1 | 1) {
 }
 
 function formatDate(value: string, locale: "en" | "de") {
-  return new Intl.DateTimeFormat(locale === "de" ? "de-CH" : "en-CH", {
+  return new Intl.DateTimeFormat(formatLocale(locale), {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

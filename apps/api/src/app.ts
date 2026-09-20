@@ -1,3 +1,4 @@
+import { analyticsSettingsUpdateSchema, defaultAnalyticsSettings } from "@callassist/contracts";
 import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, selectableCallLanguagesForRole, isCallLanguageAvailable, TEXT_LANGUAGES, type CallLocale } from "@callassist/contracts";
 import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
 import { betaControlsViewSchema, betaSettingsUpdateSchema, betaInvitationCreateSchema } from "@callassist/contracts";
@@ -206,6 +207,12 @@ export function buildApp({
     origin: webOrigins,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+  });
+
+  app.get("/api/analytics", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    try { return (await service.repository.betaControls?.getAnalytics())?.settings ?? defaultAnalyticsSettings; }
+    catch { return defaultAnalyticsSettings; }
   });
 
   async function authorizeCallAccess(
@@ -1583,6 +1590,24 @@ export function buildApp({
         .send(adminOutboundCallControlViewSchema.parse({
           outboundCalls: await service.repository.getOutboundCallControl()
         }));
+    });
+
+    app.get("/api/admin/system/analytics", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      return reply.header("Cache-Control", "private, no-store").send(await service.repository.betaControls.getAnalytics());
+    });
+    app.put("/api/admin/system/analytics", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      const parsed = analyticsSettingsUpdateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_ANALYTICS_SETTINGS" });
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      try {
+        await service.repository.betaControls.updateAnalytics(parsed.data.settings, parsed.data.expectedRevision, actor.id);
+        return reply.header("Cache-Control", "private, no-store").send({ updated: true });
+      } catch (error) { return sendRepositoryError(reply, error); }
     });
 
     app.get("/api/admin/system/beta", async (request, reply) => {

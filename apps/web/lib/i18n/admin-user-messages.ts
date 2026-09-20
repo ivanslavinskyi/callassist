@@ -1,3 +1,4 @@
+import { extendMessages } from "./extend-messages";
 import type {
   AccountDeletionStatus,
   CreditTransactionType,
@@ -304,7 +305,7 @@ const de: AdminUserMessages = {
   }
 };
 
-export const adminUserMessages: Record<UiLocale, AdminUserMessages> = { en, de };
+export const adminUserMessages: Record<UiLocale, AdminUserMessages> = extendMessages({ en, de });
 
 export function getAdminUserErrorMessage(error: unknown, locale: UiLocale) {
   const copy = adminUserMessages[locale].errors;

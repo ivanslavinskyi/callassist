@@ -1,7 +1,8 @@
+import { extendMessages } from "./extend-messages";
 import type { CallLocale, TextLanguage } from "@callassist/contracts";
 import type { UiLocale } from "./messages";
 
-const callLanguageLabels = {
+const callLanguageLabels = extendMessages({
   en: {
     "de-CH": "German", "de-DE": "German (Germany)",
     "fr-CH": "French", "it-CH": "Italian",
@@ -12,22 +13,24 @@ const callLanguageLabels = {
     "fr-CH": "Französisch", "it-CH": "Italienisch",
     "en-GB": "Englisch", "en-US": "Englisch (USA)", "ru-RU": "Russisch"
   }
-} satisfies Record<UiLocale, Record<CallLocale, string>>;
+}) satisfies Record<UiLocale, Record<CallLocale, string>>;
 
-const textLanguageLabels = {
+const textLanguageLabels = extendMessages({
   en: { en: "English", de: "German", fr: "French", it: "Italian", ru: "Russian", uk: "Ukrainian" },
   de: { en: "Englisch", de: "Deutsch", fr: "Französisch", it: "Italienisch", ru: "Russisch", uk: "Ukrainisch" }
-} satisfies Record<UiLocale, Record<TextLanguage, string>>;
+}) satisfies Record<UiLocale, Record<TextLanguage, string>>;
 
 export function getCallLanguageLabel(callLocale: CallLocale, uiLocale: UiLocale) {
-  return callLanguageLabels[uiLocale][callLocale];
+  if (uiLocale === "en" || uiLocale === "de") return callLanguageLabels[uiLocale][callLocale];
+  return new Intl.DisplayNames([uiLocale], { type: "language" }).of(callLocale) ?? callLocale;
 }
 
 export function getTextLanguageLabel(language: TextLanguage, uiLocale: UiLocale) {
-  return textLanguageLabels[uiLocale][language];
+  if (uiLocale === "en" || uiLocale === "de") return textLanguageLabels[uiLocale][language];
+  return new Intl.DisplayNames([uiLocale], { type: "language" }).of(language) ?? language;
 }
 
-export const languageMessages = {
+export const languageMessages = extendMessages({
   en: {
     taskLanguage: "Plan and result",
     callLanguageForbidden: "This call language is not available for your account. Choose another language and prepare the plan again.",
@@ -52,4 +55,4 @@ export const languageMessages = {
     originalPlan: "Der folgende Plan ist in der Anrufsprache.",
     change: "Ändern"
   }
-} satisfies Record<UiLocale, Record<string, string>>;
+}) satisfies Record<UiLocale, Record<string, string>>;
