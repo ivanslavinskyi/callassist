@@ -788,8 +788,11 @@ button, .primary-button, .secondary-button, .danger-button { transition: box-sha
 .brand:hover { text-decoration: none; }
 .language-switcher { position: relative; flex: none; }
 .language-switcher > button { font-size: 14px; font-weight: 600; }
-.language-options { position: absolute; right: 0; top: 48px; width: 196px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 100px); overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); box-shadow: var(--shadow); z-index: 45; }
+.language-options { position: absolute; right: 0; top: 48px; width: 224px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 100px); overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); box-shadow: var(--shadow); z-index: 45; }
 .language-options button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 12px; color: var(--ink); background: transparent; border: 0; text-align: start; font-size: 15px; }
+.language-medallion { flex: none; width: 32px; height: 32px; border-radius: 50%; object-fit: contain; }
+.language-option-name { flex: 1; min-width: 0; }
+.language-option-check { flex: none; width: 1em; }
 .language-options button:hover, .language-options button[aria-pressed="true"] { background: var(--tint); color: var(--green); }
 .language-options .language-group-start { border-top: 1px solid var(--line); margin-top: 4px; border-radius: 0 0 var(--radius) var(--radius); }
 .privacy-notice { position: fixed; z-index: 60; inset: auto 16px max(16px, env(safe-area-inset-bottom)) auto; width: min(520px, calc(100vw - 32px)); display: flex; gap: 16px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--bg); color: var(--ink); box-shadow: var(--shadow); }

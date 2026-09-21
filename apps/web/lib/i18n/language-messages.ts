@@ -21,8 +21,7 @@ const textLanguageLabels = extendMessages({
 }) satisfies Record<UiLocale, Record<TextLanguage, string>>;
 
 export function getCallLanguageLabel(callLocale: CallLocale, uiLocale: UiLocale) {
-  if (uiLocale === "en" || uiLocale === "de") return callLanguageLabels[uiLocale][callLocale];
-  return new Intl.DisplayNames([uiLocale], { type: "language" }).of(callLocale) ?? callLocale;
+  return callLanguageLabels[uiLocale][callLocale];
 }
 
 export function getTextLanguageLabel(language: TextLanguage, uiLocale: UiLocale) {

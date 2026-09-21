@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import Image from "next/image";
 import { uiLocales, uiLocaleRegistry, type UiLocale } from "@callassist/contracts";
 
 /** A disclosure of native buttons: Tab, Enter/Space, arrows, Home/End and Escape. */
@@ -40,7 +41,10 @@ export function LanguageSwitcher({ locale, label, disabled, onChange }: {
       {uiLocales.map((code, index) => <button type="button" key={code} lang={code} aria-pressed={code === locale}
         className={index > 0 && uiLocaleRegistry[uiLocales[index - 1]!].group !== uiLocaleRegistry[code].group ? "language-group-start" : undefined}
         onClick={() => { setOpen(false); trigger.current?.focus(); if (code !== locale) onChange(code); }}>
-        <span>{uiLocaleRegistry[code].nativeName}</span><span aria-hidden="true">{code === locale ? "✓" : ""}</span>
+        <Image className="language-medallion" src={`/brand/languages/${uiLocaleRegistry[code].medallion}.png`}
+          width={32} height={32} alt="" aria-hidden="true" unoptimized />
+        <span className="language-option-name">{uiLocaleRegistry[code].nativeName}</span>
+        <span className="language-option-check" aria-hidden="true">{code === locale ? "✓" : ""}</span>
       </button>)}
     </div>}
   </div>;
