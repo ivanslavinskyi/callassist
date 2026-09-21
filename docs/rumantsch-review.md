@@ -3383,6 +3383,51 @@
 - **Imprint | SHPROHLI**
   Impressum | SHPROHLI
 
+- **SHPROHLI is an independent Swiss project created by Ivan Slavinskyi. It grew from the idea that a routine phone call should not become an obstacle because speaking is difficult or the local language is unfamiliar. SHPROHLI helps people prepare and make low-risk everyday calls while keeping them in control of the information shared. The project is currently available as a public beta.**
+  SHPROHLI è in project svizzer independent da Ivan Slavinskyi. El sa basa sin in’idea simpla: in telefonat dal mintgadi na duess betg daventar in impediment per persunas che han difficultads da discurrer u che na san betg bain la lingua locala. SHPROHLI gida a preparar e far telefonats dal mintgadi cun pitschen ristg. Las persunas che dovran il servetsch decidan tge infurmaziuns che vegnan communitgadas. Il project è actualmain accessibel sco versiun beta publica.
+
+- **Support and safety**
+  Agid e segirezza
+
+- **How to get help with account access, privacy, call safety, or abuse during local beta development.**
+  Co survegnir agid per l’access al conto, la protecziun da datas, la segirezza dals telefonats u abus durant ils tests locals da la versiun beta.
+
+- **Support and safety | CallAssist**
+  Agid e segirezza | SHPROHLI
+
+- **Support, privacy, and abuse-reporting guidance for CallAssist.**
+  Agid, protecziun da datas ed annunzia d’abus tar SHPROHLI.
+
+- **Not an emergency service**
+  Nagin servetsch d’urgenza
+
+- **Do not use CallAssist in an emergency. Contact the appropriate local emergency service directly.**
+  Na dovra betg SHPROHLI en in cas d’urgenza. Contactescha directamain il servetsch d’urgenza cumpetent en tia regiun.
+
+- **Account and technical help**
+  Conto ed agid tecnic
+
+- **When reporting a problem, include the approximate time, call status, browser, and a short description. Never send passwords, verification codes, session cookies, or unnecessary transcript text.**
+  Sche ti annunzias in problem, inditgescha l’ura approximativa, il status dal telefonat, il navigatur ed ina curta descripziun. Na trametta mai pleds-clav, codes da verificaziun, cookies da sessiun u parts da la transcripziun che n’èn betg necessarias per schliar il problem.
+
+- **Privacy or data request**
+  Protecziun da datas e dumondas davart datas persunalas
+
+- **Identify the account email and the request type: access, correction, deletion, or another privacy question. The formal verified request workflow and response targets are not yet launched.**
+  Inditgescha l’adressa dad email dal conto e tge che ti giavischas: access, correctura, stizzar datas u in’autra dumonda davart la protecziun da datas. La procedura formala per verifitgar las dumondas ed ils termins per respunder n’èn anc betg introducids.
+
+- **Unwanted calls or abuse**
+  Telefonats nungiavischads u abus
+
+- **Recipients can use Stop calls to verify control of a Swiss number and add it to the global suppression list. Complaint intake ownership and published response targets remain a release task.**
+  Sin la pagina « Bloccar telefonats » pon destinataris verifitgar ch’els controlleschan in numer svizzer e l’agiuntar a la glista da bloccar dal servetsch. Avant il lanciamant ston anc vegnir definidas las responsabladads per tractar reclamaziuns e publitgads ils termins per respunder.
+
+- **Contact channel**
+  Contact
+
+- **A monitored public support address has not yet been configured for this local pre-beta build. This page must be updated with reviewed operator identity and contact details before launch.**
+  Per questa versiun locala da test n’è anc betg endrizzada in’adressa publica d’agid che vegn controllada regularmain. Avant il lanciamant sto questa pagina cuntegnair l’identitad e las indicaziuns da contact verifitgadas da la persuna responsabla dal servetsch.
+
 ## Account emails
 
 - **verification**

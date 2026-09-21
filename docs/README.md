@@ -20,6 +20,10 @@ mapped there and are not separate work queues.
 
 Local implementation: [seven-language localization, brand and Analytics, 2026-09-20](localization-and-analytics.md). Includes the registry, public CMS fallback/upgrade policy, localized emails, cookie notice, Admin Analytics and a complete [Rumantsch editorial handoff](rumantsch-review.md). Existing edited CMS publications are preserved; this does not assert a production publication.
 
+Local CMS update: [missing translations completed, 2026-09-21](cms-localization-completion-2026-09-21.md).
+Landing r10 and all six published pages now support all seven locales. English
+layout and EN/DE copy are preserved; the report covers application, replay and checks.
+
 Latest checkpoint: [delivery, 2026-09-16](delivery-2026-09-16.md): founder story/portrait,
 session-aware public CTAs, simplified language choices and contact-gated SMS opt-out.
 Migration 0075, an independent contact HMAC key and a dedicated opt-out Verify Service
@@ -31,10 +35,10 @@ records cover migrations 0073/0074. Final summary and settlement publish atomica
 admin separates AI goal achievement from latest user feedback. Real-call release
 acceptance remains under B05/B09/B10.
 
-The local CMS landing remains **r8 EN/DE** with an interactive demo. The 16 September
-founder block and session-aware actions are rendered by the public frontend and do
-not create a new CMS publication. See the [delivery record](delivery-2026-09-16.md)
-and the preceding [interactive demo record](interactive-landing-2026-09-14.md).
+The local CMS landing is now **r10, seven locales**, with the English r9 layout
+preserved. The earlier [delivery record](delivery-2026-09-16.md) and
+[interactive demo record](interactive-landing-2026-09-14.md) describe historical
+EN/DE publications; current translation evidence is in the 21 September report above.
 
 | Document | Purpose |
 | --- | --- |
