@@ -4,6 +4,7 @@ import { callStatusClass, callStatusLabel, callConsentLabel, callResultLabel } f
 import { callPresentationCopy, legacyCallStatusLabel } from "@/lib/i18n/call-presentation";
 
 import { FilterDisclosure } from "./filter-disclosure";
+import { AdminTelemetryExports } from "./admin-telemetry-exports";
 
 import {
   SUPPORTED_CALL_LOCALES,
@@ -155,6 +156,8 @@ export function AdminCallsConsole() {
           <h1>{copy.title}</h1>
           <p>{copy.intro}</p>
         </header>
+
+        <AdminTelemetryExports />
 
         {loading && items.length === 0 ? <p role="status">{copy.loading}</p> : null}
             <FilterDisclosure label={copy.filters}>

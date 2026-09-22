@@ -1,7 +1,7 @@
 # Admin interface architecture
 
-Status: implemented; updated for B02 remediation on 2026-09-13 (working tree based
-on `ef36cfa`). The original design was accepted on 2026-08-27. Remaining admin
+Status: implemented; updated 2026-09-22 for expenses, notifications, Analytics,
+localized OG management and telemetry exports. The original design was accepted on 2026-08-27. Remaining admin
 workflows are tracked under B08 in the [current roadmap](mvp-plan.md).
 
 System diagnostics project an explicit public durable-job DTO shared by memory and
@@ -33,6 +33,15 @@ call-created date scope and one-row-per-call unit; they are not per-turn classif
 
 ## Decision
 
+Recent panels preserve these role boundaries: [expense explorer](cost-audit-2026-09-17/implementation.md)
+is shared by operations and call/preparation inspectors; [notification settings](superadmin-notifications.md)
+and [telemetry export](admin-call-telemetry-export.md) require superadmin.
+Analytics settings are described in [localization and Analytics](localization-and-analytics.md).
+Content-authorized staff manage [localized OG images](home-og-images.md) in SEO.
+Export has a separate queue and status/heartbeat in Calls; general System job
+diagnostics are not its queue monitor. Export selection uses attempt/preparation
+time independently of Calls table filters and requires an audited content-access reason.
+
 The administrative interface is a separate, English-only application surface
 under `/admin`.
 
@@ -40,11 +49,11 @@ under `/admin`.
 - Admin routes never use `/en/admin` or `/de/admin`.
 - There are no rewrites or compatibility redirects for the removed localized
   admin routes. Those paths return `404`.
-- The public and customer application remains localized under `/en/*` and
-  `/de/*`.
-- German remains a supported content locale inside the English admin UI. The
+- The public and customer application is localized under `/de/*`, `/fr/*`, `/it/*`,
+  `/rm/*`, `/en/*`, `/ru/*` and `/uk/*`.
+- All seven locales are supported content locales inside the English admin UI. The
   interface language and the locale of edited or previewed content are separate
-  concepts. Content locale syntax/storage is extensible (0067); EN/DE remain the
+  concepts. Content locale syntax/storage is extensible (0067); all seven are
   enabled customer UI dictionaries. Publishing a localization does not enable a UI.
 - The customer shell contains at most one role-gated entry point to `/admin`;
   individual admin functions are shown only inside the admin shell.

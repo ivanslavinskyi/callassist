@@ -132,10 +132,13 @@ import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provi
 
 import { notificationSettingsUpdateSchema } from "@callassist/contracts";
 import { registerOgRoutes } from "./og/og-routes";
+import { registerTelemetryExportRoutes } from "./telemetry-export/routes";
+import type { TelemetryExportService } from "./telemetry-export/service";
 import type { OgService } from "./og/og-service";
 import { NotificationSettingsError, type NotificationAdmin } from "./notifications/superadmin-notifications";
 
 type BuildAppOptions = {
+  telemetryExports?: TelemetryExportService;
   ogService?: OgService;
   notifications?: NotificationAdmin;
   service: CallService;
@@ -167,6 +170,7 @@ type BuildWebhookAppOptions = {
 export function buildApp({
   ogService,
   notifications,
+  telemetryExports,
   service,
   authService,
   creditService,
@@ -211,6 +215,21 @@ export function buildApp({
     origin: webOrigins,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+  });
+
+  registerTelemetryExportRoutes(app, telemetryExports, async (request, reply, mutation) => {
+    const actor = mutation ? await authorizeSensitiveCallMutation(request, reply) : await authorizeAdminRead(request, reply);
+    if (!actor) return null;
+    if (actor.role !== "superadmin") { await reply.status(403).send({ error: "SENSITIVE_CALL_ACCESS_FORBIDDEN" }); return null; }
+    const download = request.url.split("?")[0]?.endsWith("/download");
+    if (!await enforceEndpointRateLimit(request, reply, actor.id, download ? "telemetry-export-download" : "telemetry-export", {
+      userLimit: download ? 6 : 120, ipLimit: download ? 30 : 240, windowMs: 60_000
+    })) return null;
+    return actor;
+  }, async (request, actorId) => {
+    const actor = await authService?.authenticate(sessionTokenFromHeaders(request.headers, secureCookies));
+    return !!actor && actor.id === actorId && actor.role === "superadmin" &&
+      (!contentService || await contentService.hasCurrentAcceptance(actor.id));
   });
 
   if (ogService) registerOgRoutes(app, ogService, authorizeContentRead, async (request, reply) => {

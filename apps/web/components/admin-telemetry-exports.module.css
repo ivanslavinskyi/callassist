@@ -1,0 +1,16 @@
+.panel { border: 1px solid var(--line); border-radius: 16px; margin: 1.25rem 0; background: var(--surface); }
+.toggle { padding: 1rem 1.25rem; cursor: pointer; font-weight: 700; }
+.toggle span { margin-left: .75rem; font-size: .85rem; font-weight: 400; color: var(--muted); }
+.content { padding: 0 1.25rem 1.25rem; }
+.content > p { max-width: 85ch; margin: .5rem 0; }
+.note { color: var(--muted); font-size: .85rem; line-height: 1.5; margin: .35rem 0; }
+.form { display: grid; gap: .85rem; max-width: 48rem; padding: 1rem 0; }
+.form > button { justify-self: start; }
+.dates { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.heading { font-size: 1rem; margin-top: 1.25rem; }
+.list { list-style: none; padding: 0; display: grid; gap: .85rem; }
+.item { padding: 1rem; border: 1px solid var(--line); border-radius: 12px; overflow-wrap: anywhere; }
+.status { margin: .5rem 0; font-size: .9rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: .6rem; }
+.error { color: var(--danger, #b42318); }
+@media (max-width: 600px) { .toggle span { display: block; margin: .35rem 0 0; } .dates { grid-template-columns: 1fr; } .content { padding: 0 .85rem .85rem; } }

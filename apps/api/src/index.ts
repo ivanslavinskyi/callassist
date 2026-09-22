@@ -1,6 +1,7 @@
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import { createNotificationsFromEnv } from "./notifications/create-notifications";
 import "./config/load-env";
+import { createTelemetryExportsFromEnv } from "./telemetry-export/service";
 import { buildApp, buildWebhookApp } from "./app";
 import { AuthService } from "./auth/auth-service";
 import { AccountDeletionService } from "./auth/account-deletion-service";
@@ -93,7 +94,9 @@ const creditService = new CreditService({
   )
 });
 const notifications = createNotificationsFromEnv(repository);
+const telemetryExports = createTelemetryExportsFromEnv();
 const app = buildApp({
+  telemetryExports,
   ogService: createOgServiceFromEnv(),
   notifications,
   service,
@@ -149,6 +152,7 @@ if (webhookApp) {
 }
 const recoveredCalls = await service.initialize();
 if (durableWorkerMode === "embedded") {
+  telemetryExports?.start();
   notifications?.start();
   const stopBillingSync = startProviderBillingSync(result => app.log.info({ event: "provider_billing_sync", result }));
   app.addHook("onClose", stopBillingSync);

@@ -1,7 +1,7 @@
 # SHPROHLI architecture
 
-Updated 2026-09-16 for the public landing, shared session state, call-language choices
-and contact-gated recipient opt-out. This describes
+Updated 2026-09-22 for seven-language UI/content/email, expenses, notifications,
+OG publication and telemetry exports, alongside the existing opt-out/session boundaries. This describes
 implemented behavior, including initial email proof, localized transactional delivery,
 appointments, compact results and live-transcript recovery.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
@@ -119,14 +119,14 @@ compatibility redirects. See [admin architecture](admin-interface-architecture.m
 The URL selects customer UI locale; middleware negotiates absent locales from a
 browser cookie, `Accept-Language`, then English. Account language preferences have
 their own PATCH API. UI, editorial content, call locale and text-processing languages
-use separate registries. EN/DE UI catalogues are enabled today; adding another UI
+use separate registries. DE/FR/IT/RM/EN/RU/UK UI catalogues are enabled; adding another UI
 catalogue does not add a call voice or enable an untested translation direction.
 CMS supports separately published localizations and identifies the actual fallback
 locale in rendered content. Call-language option names use the UI locale.
 
 Public call choices are `de-CH`, `fr-CH`, `it-CH`, `en-GB`; `ru-RU` is visible only
-to superadmins. German, French and Italian labels have no country suffix in either
-UI locale. Historical `de-DE`/`en-US` remain in persisted contracts, but editable
+to superadmins. German, French and Italian labels have no country suffix in the supported
+UI locales. Historical `de-DE`/`en-US` remain in persisted contracts, but editable
 forms normalize them to `de-CH`/`en-GB`, including fallback choices. A duplicate
 fallback is removed; immutable plans and history retain the original locale.
 
@@ -523,7 +523,7 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 ## Persistence and encryption
 
 The current catalog extends from `0001` through
-`0075_recipient_opt_out_eligibility.sql`. The catalog is contiguous/checksummed; advisory locking and
+`0079_admin_telemetry_exports.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases
@@ -630,6 +630,24 @@ terminal failures do not retry. Completed ASR chunks are reused on retry, with u
 retained even when a request fails. Admin views expose per-call and failed-preparation
 costs, raw usage and separate provider-reported/calculated/fallback/unknown amounts.
 Public-rate assumptions live in the versioned provider-pricing-policy module.
+
+## Recent admin and content subsystems
+
+The [17–22 September delivery](delivery-2026-09-22.md) adds provider billing/usage
+reconciliation (0076), durable superadmin email (0077), localized OG assets and
+publication (0078), and telemetry export (0079). Notifications and exports have
+independent bounded consumers alongside the call worker. Export reads one
+REPEATABLE READ snapshot, streams encrypted database parts, and rechecks session,
+role, expiry and privacy revision. Deletion/access changes globally revoke stored
+archives; restored archives must be invalidated before reopening traffic. See
+[export data boundaries](admin-call-telemetry-export.md).
+
+UI/site/email use the seven-locale registry; the admin UI remains English. CMS
+completion preserves existing authored translations and legal acceptance IDs.
+Analytics settings and privacy acknowledgement do not implicitly grant opt-in
+consent; current policy and its release review are documented in
+[localization and Analytics](localization-and-analytics.md). Homepage OG publication
+is separate from CMS content caching, with immutable image URLs and bundled fallbacks.
 
 ## Verification and limits
 

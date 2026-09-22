@@ -5,8 +5,8 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-16:** implemented supervised MVP with substantial beta
-infrastructure. **B01/B02 are remediated locally:** production dependency audit is clean;
+**Repository status, 2026-09-22:** implemented supervised MVP with substantial beta
+infrastructure. **B01/B02 are remediated locally:** the recorded dependency audit was clean;
 Admin System supports nonempty jobs and independent outbound-call control.
 Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
 The user confirmed EN email delivery in Gmail and SMS from SHPROHLI to a Swiss number.
@@ -35,6 +35,13 @@ recipient opt-out restricted to proven Twilio contact. Validation includes 240 w
 tests, 115 contracts tests, a 1,013-test API checkpoint on a fresh isolated database,
 subsequent targeted regressions, typechecks and API/web builds. Browser checks use
 isolated fixtures; external provider and deployment acceptance remain open.
+The [17–22 September delivery record](docs/delivery-2026-09-22.md) adds unified
+expense accounting, superadmin notifications, seven-language UI/site/email,
+localized CMS r10, language medallions, managed homepage OG images and admin
+telemetry ZIP/JSONL exports. The current source migration catalog ends at **0079**.
+Export verification passed 84 targeted tests and API/web builds; this does not
+replace a fresh full-suite release run. Migration 0079 has only been applied to
+isolated test databases in the implementation task.
 **NO-GO for public testing** remains: delivery scenarios,
 deployment and operational acceptance are open. See the
 [beta controls and stability report](docs/beta-controls-2026-09-14.md).
@@ -45,7 +52,7 @@ The public product copy uses “public beta”; that wording is not deployment e
 
 ## Implemented product
 
-- Authenticated EN/DE customer application, account recovery, verified phone/email
+- Authenticated DE/FR/IT/RM/EN/RU/UK customer application, account recovery, verified phone/email
   changes, session management, export, call deletion and queued account anonymization.
 - Initial email proof before starting calls; branded HTML/plain-text verification and
   security notices, explicit communication locales and shared SMS budgets. Account
@@ -83,13 +90,18 @@ The public product copy uses “public beta”; that wording is not deployment e
   outbound-call kill switch. Staff can apply suppression without call history.
 - English-only `/admin` for content, SEO, users, calls, credits, safety and system
   operations; sensitive call reads require superadmin and an audited reason.
-- Versioned EN/DE public pages, Landing/FAQ/Navigation collections, drafts, previews,
+- Versioned public pages in seven UI locales, Landing/FAQ/Navigation collections, drafts, previews,
   publication/history/rollback and Terms/AUP re-acceptance.
+- Unified provider expense explorer with Cost / Usage / Requests, billing snapshots
+  and explicit gaps; durable, localized superadmin email reports.
+- Homepage OG image templates/uploads, versioned publishing and rollback in Admin SEO.
+- Superadmin telemetry export in Admin Calls: background ZIP/JSONL, 36 retained data
+  sources, bounded streaming, encrypted storage, 24-hour expiry and deletion revocation.
 
 Public selectable call locales: `de-CH`, `fr-CH`, `it-CH`, `en-GB`. Russian (`ru-RU`) is available only to superadmins, as either the primary or fallback call language. The API checks the current role on preparation, recompilation, approval and start; historical calls and Russian text translations remain readable.
 Historical `de-DE` and `en-US` remain supported by persisted contracts. Editable forms
 normalize them to `de-CH` and `en-GB`, including fallback choices; saved snapshots stay
-unchanged. German/French/Italian labels omit the Switzerland suffix in both UI locales.
+unchanged. Call-language labels are localized independently of UI language availability.
 `de-CH` means Swiss Standard German. UI locale,
 task content language and call language are independent; call-language labels follow
 the interface locale.
@@ -98,7 +110,7 @@ New tasks use the detected input language for plan/result text, with a compact
 correction before approval. The account preference is a fallback. Results use that
 saved task language; transcript translation is on demand, with original/translation
 views. The UI has no separate result-language menus. Text languages are currently
-`en`, `de`, `fr`, `it`, `ru`, `uk`; UI dictionaries remain EN/DE. Enabling another UI
+`en`, `de`, `fr`, `it`, `ru`, `uk`; UI dictionaries are DE/FR/IT/RM/EN/RU/UK. Enabling another UI
 dictionary does not change call contracts or enable a text-provider direction.
 
 ## Architecture
@@ -141,7 +153,7 @@ port. `DATABASE_URL`, `TEST_DATABASE_URL` and the published Compose port must ag
 Use a separate disposable test database: integration tests write and delete fixtures.
 
 Web: [localhost:3000](http://localhost:3000); main API: port 4000.
-Open `/en` or `/de`, register, and verify with `000000` in mock mode.
+Open `/en`, `/de`, `/fr`, `/it`, `/rm`, `/ru` or `/uk`, register, and verify with `000000` in mock mode.
 `STORAGE_DRIVER=memory` is available for disposable single-process development.
 The API does not automatically restart on edits; restart manually between calls.
 
@@ -162,8 +174,9 @@ corepack pnpm --filter @callassist/api worker
 
 Both processes must use the same database/keyring and compiler configuration.
 The API enqueues preparation and the worker compiles it. Separate worker loops handle
-text artifacts and account deletion. If the worker is stopped, creation, recompilation
-and text generation remain queued.
+text artifacts, account deletion, superadmin notifications and telemetry exports.
+If the worker is stopped, their asynchronous work remains queued. See the
+[telemetry runbook](docs/admin-call-telemetry-export.md) for limits, heartbeat and cleanup.
 
 ## Quality checks
 
@@ -186,7 +199,7 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog now extends through `0075_recipient_opt_out_eligibility.sql`.
+The migration catalog now extends through `0079_admin_telemetry_exports.sql`.
 Public opt-out requires a separate `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` and a stable
 `RECIPIENT_CONTACT_HASH_KEY` shared by API/workers. Follow the
 [opt-out deployment and backfill procedure](docs/recipient-opt-out.md) and

@@ -1,18 +1,18 @@
 # Deployment preflight and first release
 
-Updated 2026-09-16. B06 remains open. The owner chose `shprohli.ch` for the first
+Updated 2026-09-22. B06 remains open. The owner chose `shprohli.ch` for the first
 deployment with temporary restricted access, on an existing VPS that already serves
 another Next.js project. B07 landing changes are now implemented and published locally;
 VPS topology and access details remain to be supplied before deployment.
 A separate staging hostname/server is not a release requirement; external acceptance
 can run on the final domain before public access opens.
 
-The latest local checkpoint includes migrations through 0075, corrected spending
+The latest local checkpoint includes source migrations through 0079, corrected spending
 reconciliation, the 20,000-token compiler ceiling and the
 [preparation/review/call UI update](workflow-feedback-2026-09-15.md), followed by
 [distinct call results, history and admin metrics](call-lifecycle-history-2026-09-15.md).
 It also includes the [16 September landing, language and opt-out changes](delivery-2026-09-16.md).
-Apply migrations through 0077 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
+Apply migrations through 0079 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
 
 The [superadmin notification layer](superadmin-notifications.md) requires the same
 `EMAIL_DRIVER`, `RESEND_API_KEY`, `EMAIL_FROM`, and `NEXT_PUBLIC_SITE_URL` on API and
@@ -31,6 +31,28 @@ missing settings; the contact key must differ from data-encryption keys. Preserv
 in protected recovery configuration rather than rotating it with encryption keys.
 Initialization backfills trusted contact evidence; ambiguous historical destinations
 stay queued for manual reconciliation. Review [the rollout procedure](recipient-opt-out.md).
+
+## Additions for the 22 September candidate
+
+Follow the [17–22 September delivery record](delivery-2026-09-22.md) as well as the
+older acceptance evidence. Migrations 0076–0079 cover expenses, notifications, OG
+images and telemetry exports; verify the target database rather than inferring its
+state from the source catalog. Migration 0079 has only been exercised on isolated
+fixtures in the export implementation task.
+
+- Deploy the same API/worker revision and keyring. Verify the export consumer
+  heartbeat in Calls; `ADMIN_TELEMETRY_EXPORT_ENABLED=false` disables it. PostgreSQL
+  17 is required. Check TTL cleanup and source-deletion revocation.
+- Verify billing sync scope/credentials without treating account billing as another
+  per-call charge. Unknown historic usage remains explicitly incomplete.
+- Notifications default to disabled; select eligible recipients and verify real
+  email delivery separately. Their bodies use recipient locale, while Admin is English.
+- API build must include OG logo/font assets; web contains seven fallback PNGs.
+  Verify published OG/Twitter tags and immutable anonymous image delivery.
+- Local CMS r10/translation completion is not a production content update. Review
+  the target revisions, seven locale routes, RM copy and Analytics/privacy policy.
+- On restore, invalidate telemetry archives before exposing traffic and perform
+  deletion/suppression replay. See [recovery](database-recovery-and-secrets.md).
 
 ## Implemented preparation
 

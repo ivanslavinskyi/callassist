@@ -1047,6 +1047,20 @@ export function getPublicAnalyticsSettings() {
   return apiRequest<import("@callassist/contracts").AnalyticsSettings>("/api/analytics", { cache: "no-store", credentials: "omit" });
 }
 
+export async function listTelemetryExports(cursor?: string) {
+  const { telemetryExportListSchema } = await import("@callassist/contracts");
+  return telemetryExportListSchema.parse(await apiRequest(`/api/admin/telemetry-exports${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" }));
+}
+export async function createTelemetryExport(input: import("@callassist/contracts").TelemetryExportInput) {
+  return apiRequest<import("@callassist/contracts").TelemetryExportView>("/api/admin/telemetry-exports", { method: "POST", body: JSON.stringify(input) });
+}
+export async function changeTelemetryExport(id: string, action: "cancel" | "retry") {
+  return apiRequest<import("@callassist/contracts").TelemetryExportView>(`/api/admin/telemetry-exports/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
+}
+export function telemetryExportDownloadUrl(id: string) {
+  return `${API_URL}/api/admin/telemetry-exports/${encodeURIComponent(id)}/download`;
+}
+
 export function getAdminOgImages() {
   return apiRequest<{ locales: import("@callassist/contracts").OgLocaleState[] }>("/api/admin/content/og", { cache: "no-store" });
 }

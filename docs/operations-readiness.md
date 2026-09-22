@@ -4,8 +4,8 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Updated 2026-09-16 for contact-gated opt-out, deployment requirements and session-aware
-landing behavior. B01/B02 are remediated locally with
+Updated 2026-09-22 for expense diagnostics, notification/export consumers and recovery,
+alongside opt-out and deployment requirements. B01/B02 are remediated locally with
 [current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
 [historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
 has async preparation, but its start stage still needs the v2 review-receipt contract
@@ -36,7 +36,7 @@ These local values do not configure the external deployment.
 
 ## Call result diagnosis
 
-Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply migrations through 0074 before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
+Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply the current migration catalog through 0079 before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
 
 ## Preparation and call UI diagnosis
 
@@ -197,6 +197,22 @@ For every incident:
 6. Record impact, decisions, evidence locations, user/provider communication, root
    cause, and follow-up owner/date. Escalate possible personal-data exposure to the
    privacy owner immediately.
+
+## Recent diagnostics and asynchronous consumers
+
+The shared [expense explorer](cost-audit-2026-09-17/implementation.md) distinguishes
+provider-reported charges, calculated usage, reserves and account billing. Historical
+missing usage is visible and must not be treated as zero or repaired from daily totals.
+[Superadmin notifications](superadmin-notifications.md) have their own settings and
+audit; accepted means provider acceptance, not mailbox delivery.
+
+[Telemetry exports](admin-call-telemetry-export.md) use a separate bounded PostgreSQL
+consumer, not the call durable-job queue. Admin Calls reports its heartbeat and
+request status. Check worker/config/database/keyring on stale queued jobs; shorten
+the requested interval on size/time limits. Do not bypass a source-decryption failure
+or publish partial files. Expiration is enforced at download even when cleanup is
+offline; physical deletion resumes with the worker. Revoked archives require a new
+request. These panels do not replace external alerts and an on-call operator.
 
 ## Runbooks
 

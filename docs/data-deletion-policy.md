@@ -1,5 +1,20 @@
 # Data deletion and account anonymization policy
 
+## Telemetry export copies (2026-09-22)
+
+Migration 0079 adds encrypted temporary archive parts. A call-content deletion,
+account-deletion request, or user role/status change transactionally revokes all
+queued/running/ready exports and removes stored parts. Global invalidation also
+covers requests whose source membership has not yet been captured. A new export
+excludes deleted/pending-deletion content and preserves only permitted tombstones
+and technical evidence. Ready files expire after 24 hours; the worker performs
+physical cleanup, while the download endpoint enforces expiry independently.
+Downloaded copies cannot be recalled. Before activating a restored backup, revoke
+restored archives as part of deletion replay. See the
+[export contract and restore procedure](admin-call-telemetry-export.md).
+
+## Existing source-data lifecycle
+
 Status: implemented application baseline through checkpoint 6F3b. This document is a technical lifecycle policy, not a substitute for the final Swiss legal/privacy review or production backup evidence.
 
 Reviewed 2026-09-12 against `ef36cfa`, including text artifacts, language context and review receipts. R05 removes email/phone-change

@@ -1,7 +1,7 @@
 # Runtime and API reference
 
-Updated 2026-09-16 for call-language choices and recipient opt-out; the dated route
-inventory below retains its original snapshot. Configuration values here describe
+Updated 2026-09-22 for expenses, notifications, Analytics, OG images and telemetry
+exports; the route inventory below was regenerated from the current source. Configuration values here describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
 
@@ -168,6 +168,27 @@ JSON and low verbosity. Incomplete Responses envelopes are rejected and retain
 usage evidence. Earlier [latency measurements](plan-preparation-quality-2026-09-15.md)
 were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
+## Recent configuration and workers
+
+Apply the complete source catalog through **0079** before starting the new API and
+worker. Source catalog availability is not deployment evidence; verify the target's
+applied checksums. See [delivery and rollout](delivery-2026-09-22.md).
+
+| Setting / subsystem | Current behavior |
+| --- | --- |
+| `OPENAI_ADMIN_API_KEY`, `OPENAI_PROJECT_ID` | Optional server-only, project-scoped Costs API sync; missing credentials produce not-configured status rather than zero costs |
+| Twilio billing | Uses existing account SID/auth token; account-level daily context is separate from call charges |
+| Billing worker | PostgreSQL-only; runs on worker startup and hourly under advisory locking; manual API command `billing:sync` / `billing:sync:prod` |
+| Superadmin notifications | PostgreSQL queue/settings, disabled by default; API and worker need EMAIL_DRIVER/RESEND_API_KEY/EMAIL_FROM/public site origin; recipients/categories are configured in Admin System |
+| `ADMIN_TELEMETRY_EXPORT_ENABLED` | Enabled with PostgreSQL unless exactly `false`; use the same setting on API and worker; memory reports unavailable |
+| Export worker | Embedded API or external worker according to DURABLE_WORKER_MODE; independent 2-second queue poll, one global builder, Calls panel heartbeat; PostgreSQL 17 |
+| Export storage | Same database/keyring; encrypted parts ≤1 MiB, ready TTL 24 hours, source-deletion/access-change revocation; cleanup requires running consumer |
+| Analytics | Revisioned beta settings exposed via protected Admin System API; public read returns tracker settings; consent/acknowledgement policy is separate |
+| Homepage OG | No external image service; migration 0078, bundled logo/font and seven fallback PNGs; API build copies assets |
+
+Details: [notifications](superadmin-notifications.md), [export contract and limits](admin-call-telemetry-export.md),
+[Analytics/locales](localization-and-analytics.md), [OG publication](home-og-images.md).
+
 ## Language and generated-text endpoints
 
 Language preferences are separate from UI routing and the immutable executable plan.
@@ -273,7 +294,7 @@ The last is a read-only gate required before migration 0061; follow the
 | `ADMIN_COST_TELEPHONY_USD_MICROS_PER_MINUTE` | Optional nonnegative integer connected-minute estimate |
 | `ADMIN_COST_REALTIME_USD_MICROS_PER_MINUTE` | Optional nonnegative integer connected-minute estimate |
 | `ADMIN_COST_TRANSCRIPTION_USD_MICROS_PER_MINUTE` | Optional nonnegative integer recorded-minute estimate |
-| `DATA_ENCRYPTION_REENCRYPT_CONFIRM` | Must equal active key ID; rotation verifies all seventeen ciphertext columns |
+| `DATA_ENCRYPTION_REENCRYPT_CONFIRM` | Must equal active key ID; rotation verifies all twenty ciphertext columns |
 | `DATA_ENCRYPTION_REENCRYPT_BATCH_SIZE` | 1–500; default 100 |
 | `RECOVERY_SOURCE_DATABASE_URL` | Overrides DATABASE_URL for the local recovery drill |
 | `RECOVERY_POSTGRES_CONTAINER` | Explicit Docker PostgreSQL container, otherwise discovered through Compose |
@@ -299,7 +320,9 @@ the normal admin API preserves the admin-disable/superadmin-enable role distinct
 
 ## API conventions
 
-The list below is extracted from registrations in [app.ts](../apps/api/src/app.ts).
+The list below is extracted from registrations in [app.ts](../apps/api/src/app.ts),
+[OG routes](../apps/api/src/og/og-routes.ts) and
+[telemetry routes](../apps/api/src/telemetry-export/routes.ts).
 It is a route inventory, not a generated OpenAPI specification. Schemas/DTOs come
 from [contracts](../packages/contracts/src/index.ts); method-specific authorization
 and errors remain in each handler. Content/auth/admin routes are mounted when their
@@ -340,117 +363,135 @@ not durable replay history. See [live state](architecture.md#jobs-live-state-and
 
 ## Registered routes
 
-107 HTTP method/path registrations in the 2026-09-14 working tree, including the two
-paths expanded by the text-artifact loop. The media GET upgrades to WebSocket.
-Lines point to registrations, not authorization rules; use the handler and contracts
-for those rules. This inventory was extracted from the TypeScript syntax tree.
+125 explicit HTTP method/path registrations in the 2026-09-22 source, including
+expanded text-artifact, OG and export loops. Framework-generated HEAD/OPTIONS are
+not counted. The media GET upgrades to WebSocket. Lines identify registrations;
+authorization remains in handlers. Extracted from the TypeScript syntax tree.
 
 | Method | Path | Registration |
 | --- | --- | --- |
-| GET | `/api/content/index` | [app.ts:434](../apps/api/src/app.ts#L434) |
-| GET | `/api/content/faq` | [app.ts:440](../apps/api/src/app.ts#L440) |
-| GET | `/api/content/landing` | [app.ts:457](../apps/api/src/app.ts#L457) |
-| GET | `/api/content/navigation` | [app.ts:474](../apps/api/src/app.ts#L474) |
-| GET | `/api/content/pages/:slug` | [app.ts:493](../apps/api/src/app.ts#L493) |
-| POST | `/api/recipient-opt-out/verification` | [app.ts:513](../apps/api/src/app.ts#L513) |
-| POST | `/api/recipient-opt-out/confirm` | [app.ts:534](../apps/api/src/app.ts#L534) |
-| POST | `/api/auth/register` | [app.ts:556](../apps/api/src/app.ts#L556) |
-| POST | `/api/auth/verification/resend` | [app.ts:576](../apps/api/src/app.ts#L576) |
-| POST | `/api/auth/verification/phone` | [app.ts:593](../apps/api/src/app.ts#L593) |
-| POST | `/api/auth/verify-phone` | [app.ts:603](../apps/api/src/app.ts#L603) |
-| POST | `/api/auth/login` | [app.ts:625](../apps/api/src/app.ts#L625) |
-| POST | `/api/auth/recovery/start` | [app.ts:644](../apps/api/src/app.ts#L644) |
-| POST | `/api/auth/recovery/verify` | [app.ts:665](../apps/api/src/app.ts#L665) |
-| POST | `/api/auth/recovery/complete` | [app.ts:685](../apps/api/src/app.ts#L685) |
-| POST | `/api/auth/phone-change/start` | [app.ts:705](../apps/api/src/app.ts#L705) |
-| POST | `/api/auth/phone-change/confirm` | [app.ts:734](../apps/api/src/app.ts#L734) |
-| POST | `/api/auth/logout` | [app.ts:762](../apps/api/src/app.ts#L762) |
-| POST | `/api/auth/sessions/revoke` | [app.ts:773](../apps/api/src/app.ts#L773) |
-| GET | `/api/auth/sessions` | [app.ts:788](../apps/api/src/app.ts#L788) |
-| DELETE | `/api/auth/sessions/:sessionId` | [app.ts:803](../apps/api/src/app.ts#L803) |
-| GET | `/api/auth/me` | [app.ts:832](../apps/api/src/app.ts#L832) |
-| POST | `/api/auth/email-verification/start` | [app.ts:842](../apps/api/src/app.ts#L842) |
-| POST | `/api/auth/email-verification/confirm` | [app.ts:855](../apps/api/src/app.ts#L855) |
-| POST | `/api/auth/email-change/start` | [app.ts:868](../apps/api/src/app.ts#L868) |
-| POST | `/api/auth/email-change/confirm` | [app.ts:897](../apps/api/src/app.ts#L897) |
-| PATCH | `/api/account/language-preferences` | [app.ts:925](../apps/api/src/app.ts#L925) |
-| PATCH | `/api/account/profile/name` | [app.ts:936](../apps/api/src/app.ts#L936) |
-| POST | `/api/account/data-export` | [app.ts:963](../apps/api/src/app.ts#L963) |
-| GET | `/api/account/deletion` | [app.ts:995](../apps/api/src/app.ts#L995) |
-| POST | `/api/account/deletion` | [app.ts:1007](../apps/api/src/app.ts#L1007) |
-| GET | `/api/onboarding/status` | [app.ts:1047](../apps/api/src/app.ts#L1047) |
-| POST | `/api/onboarding/accept` | [app.ts:1067](../apps/api/src/app.ts#L1067) |
-| GET | `/api/admin/content/pages` | [app.ts:1090](../apps/api/src/app.ts#L1090) |
-| GET | `/api/admin/content/pages/:key` | [app.ts:1098](../apps/api/src/app.ts#L1098) |
-| GET | `/api/admin/content/pages/:key/preview` | [app.ts:1118](../apps/api/src/app.ts#L1118) |
-| GET | `/api/admin/content/pages/:key/revisions` | [app.ts:1140](../apps/api/src/app.ts#L1140) |
-| POST | `/api/admin/content/pages/:key/drafts` | [app.ts:1157](../apps/api/src/app.ts#L1157) |
-| PUT | `/api/admin/content/pages/:key/draft` | [app.ts:1176](../apps/api/src/app.ts#L1176) |
-| POST | `/api/admin/content/pages/:key/publish` | [app.ts:1206](../apps/api/src/app.ts#L1206) |
-| POST | `/api/admin/content/pages/:key/revisions/:revisionNumber/rollback` | [app.ts:1233](../apps/api/src/app.ts#L1233) |
-| GET | `/api/admin/content/editorial/:key` | [app.ts:1268](../apps/api/src/app.ts#L1268) |
-| GET | `/api/admin/content/editorial/:key/preview` | [app.ts:1289](../apps/api/src/app.ts#L1289) |
-| GET | `/api/admin/content/editorial/:key/revisions` | [app.ts:1312](../apps/api/src/app.ts#L1312) |
-| POST | `/api/admin/content/editorial/:key/drafts` | [app.ts:1333](../apps/api/src/app.ts#L1333) |
-| PUT | `/api/admin/content/editorial/:key/draft` | [app.ts:1357](../apps/api/src/app.ts#L1357) |
-| POST | `/api/admin/content/editorial/:key/publish` | [app.ts:1389](../apps/api/src/app.ts#L1389) |
-| POST | `/api/admin/content/editorial/:key/revisions/:revisionNumber/rollback` | [app.ts:1418](../apps/api/src/app.ts#L1418) |
-| GET | `/api/usage` | [app.ts:1456](../apps/api/src/app.ts#L1456) |
-| POST | `/api/credits/promo-redemptions` | [app.ts:1468](../apps/api/src/app.ts#L1468) |
-| POST | `/api/admin/promo-codes` | [app.ts:1493](../apps/api/src/app.ts#L1493) |
-| POST | `/api/admin/credit-grants` | [app.ts:1509](../apps/api/src/app.ts#L1509) |
-| GET | `/api/admin/call-outcome-metrics` | [app.ts:1526](../apps/api/src/app.ts#L1526) |
-| GET | `/api/admin/operations/overview` | [app.ts:1534](../apps/api/src/app.ts#L1534) |
-| GET | `/api/admin/system` | [app.ts:1553](../apps/api/src/app.ts#L1553) |
-| GET | `/api/admin/system/outbound-calls` | [app.ts:1561](../apps/api/src/app.ts#L1561) |
-| GET | `/api/admin/system/beta` | [app.ts:1571](../apps/api/src/app.ts#L1571) |
-| PUT | `/api/admin/system/beta` | [app.ts:1577](../apps/api/src/app.ts#L1577) |
-| POST | `/api/admin/system/beta/invitations` | [app.ts:1589](../apps/api/src/app.ts#L1589) |
-| POST | `/api/admin/system/beta/invitations/:id/revoke` | [app.ts:1599](../apps/api/src/app.ts#L1599) |
-| PUT | `/api/admin/system/outbound-calls` | [app.ts:1612](../apps/api/src/app.ts#L1612) |
-| POST | `/api/admin/system/jobs/:jobId/retry` | [app.ts:1637](../apps/api/src/app.ts#L1637) |
-| GET | `/api/admin/calls` | [app.ts:1671](../apps/api/src/app.ts#L1671) |
-| GET | `/api/admin/calls/:id` | [app.ts:1723](../apps/api/src/app.ts#L1723) |
-| GET | `/api/admin/calls/:id/cost` | [app.ts:1741](../apps/api/src/app.ts#L1741) |
-| GET | `/api/admin/call-preparations/:id` | [app.ts:1759](../apps/api/src/app.ts#L1759) |
-| POST | `/api/admin/calls/:id/sensitive-access` | [app.ts:1779](../apps/api/src/app.ts#L1779) |
-| GET | `/api/admin/users` | [app.ts:1807](../apps/api/src/app.ts#L1807) |
-| GET | `/api/admin/users/:userId/credits` | [app.ts:1860](../apps/api/src/app.ts#L1860) |
-| PUT | `/api/admin/users/:userId/status` | [app.ts:1889](../apps/api/src/app.ts#L1889) |
-| POST | `/api/admin/users/:userId/sessions/revoke` | [app.ts:1917](../apps/api/src/app.ts#L1917) |
-| POST | `/api/admin/users/:userId/account-deletion/:requestId/retry` | [app.ts:1943](../apps/api/src/app.ts#L1943) |
-| POST | `/api/admin/recipient-suppressions` | [app.ts:1972](../apps/api/src/app.ts#L1972) |
-| POST | `/api/admin/recipient-suppressions/lift` | [app.ts:1988](../apps/api/src/app.ts#L1988) |
-| GET | `/health/live` | [app.ts:2005](../apps/api/src/app.ts#L2005) |
-| GET | `/health/ready` | [app.ts:2011](../apps/api/src/app.ts#L2011) |
-| GET | `/api/call-briefs` | [app.ts:2031](../apps/api/src/app.ts#L2031) |
-| GET | `/api/recipient-suggestions` | [app.ts:2061](../apps/api/src/app.ts#L2061) |
-| GET | `/api/language-capabilities` | [app.ts:2087](../apps/api/src/app.ts#L2087) |
-| GET | `/api/call-briefs/:id/language-context` | [app.ts:2095](../apps/api/src/app.ts#L2095) |
-| PATCH | `/api/call-briefs/:id/content-language` | [app.ts:2100](../apps/api/src/app.ts#L2100) |
-| GET | `/api/call-briefs/:id/text-artifacts` | [app.ts:2114](../apps/api/src/app.ts#L2114) |
-| GET | `/api/call-briefs/:id/text-artifacts/:artifactId` | [app.ts:2119](../apps/api/src/app.ts#L2119) |
-| POST | `/api/call-briefs/:id/plan-review` | [app.ts:2126](../apps/api/src/app.ts#L2126) |
-| POST | `/api/call-briefs/:id/final-transcript/translations` | [app.ts:2140](../apps/api/src/app.ts#L2140) |
-| POST | `/api/call-briefs/:id/summaries` | [app.ts:2140](../apps/api/src/app.ts#L2140) |
-| POST | `/api/call-briefs/:id/text-artifacts/:artifactId/retry` | [app.ts:2154](../apps/api/src/app.ts#L2154) |
-| POST | `/api/call-preparations` | [app.ts:2166](../apps/api/src/app.ts#L2166) |
-| GET | `/api/call-preparations/:id` | [app.ts:2233](../apps/api/src/app.ts#L2233) |
-| GET | `/api/call-briefs/:id` | [app.ts:2251](../apps/api/src/app.ts#L2251) |
-| GET | `/api/call-briefs/:id/outcome` | [app.ts:2264](../apps/api/src/app.ts#L2264) |
-| PUT | `/api/call-briefs/:id/feedback` | [app.ts:2281](../apps/api/src/app.ts#L2281) |
-| PUT | `/api/call-briefs/:id` | [app.ts:2310](../apps/api/src/app.ts#L2310) |
-| GET | `/api/call-briefs/:id/recording` | [app.ts:2388](../apps/api/src/app.ts#L2388) |
-| DELETE | `/api/call-briefs/:id/recording` | [app.ts:2418](../apps/api/src/app.ts#L2418) |
-| POST | `/api/call-briefs/:id/data-deletion` | [app.ts:2434](../apps/api/src/app.ts#L2434) |
-| POST | `/api/call-briefs/:id/final-transcript/retry` | [app.ts:2481](../apps/api/src/app.ts#L2481) |
-| POST | `/api/call-briefs/:id/approve` | [app.ts:2506](../apps/api/src/app.ts#L2506) |
-| POST | `/api/call-briefs/:id/approve-and-start` | [app.ts:2526](../apps/api/src/app.ts#L2526) |
-| POST | `/api/call-briefs/:id/start` | [app.ts:2558](../apps/api/src/app.ts#L2558) |
-| POST | `/api/call-briefs/:id/stop` | [app.ts:2582](../apps/api/src/app.ts#L2582) |
-| POST | `/api/call-briefs/:id/approvals/:approvalId` | [app.ts:2598](../apps/api/src/app.ts#L2598) |
-| GET | `/api/call-briefs/:id/events` | [app.ts:2623](../apps/api/src/app.ts#L2623) |
-| POST | `/webhooks/twilio/voice` | [app.ts:2882](../apps/api/src/app.ts#L2882) |
-| GET | `/webhooks/twilio/media` | [app.ts:2951](../apps/api/src/app.ts#L2951) |
-| POST | `/webhooks/twilio/status` | [app.ts:2966](../apps/api/src/app.ts#L2966) |
-| POST | `/webhooks/twilio/recording` | [app.ts:3035](../apps/api/src/app.ts#L3035) |
+| GET | `/api/analytics` | [app.ts:242](../apps/api/src/app.ts#L242) |
+| GET | `/api/content/index` | [app.ts:488](../apps/api/src/app.ts#L488) |
+| GET | `/api/content/faq` | [app.ts:494](../apps/api/src/app.ts#L494) |
+| GET | `/api/content/landing` | [app.ts:511](../apps/api/src/app.ts#L511) |
+| GET | `/api/content/navigation` | [app.ts:528](../apps/api/src/app.ts#L528) |
+| GET | `/api/content/pages/:slug` | [app.ts:547](../apps/api/src/app.ts#L547) |
+| POST | `/api/recipient-opt-out/verification` | [app.ts:567](../apps/api/src/app.ts#L567) |
+| POST | `/api/recipient-opt-out/confirm` | [app.ts:588](../apps/api/src/app.ts#L588) |
+| POST | `/api/auth/register` | [app.ts:610](../apps/api/src/app.ts#L610) |
+| POST | `/api/auth/verification/resend` | [app.ts:630](../apps/api/src/app.ts#L630) |
+| POST | `/api/auth/verification/phone` | [app.ts:647](../apps/api/src/app.ts#L647) |
+| POST | `/api/auth/verify-phone` | [app.ts:657](../apps/api/src/app.ts#L657) |
+| POST | `/api/auth/login` | [app.ts:679](../apps/api/src/app.ts#L679) |
+| POST | `/api/auth/recovery/start` | [app.ts:698](../apps/api/src/app.ts#L698) |
+| POST | `/api/auth/recovery/verify` | [app.ts:719](../apps/api/src/app.ts#L719) |
+| POST | `/api/auth/recovery/complete` | [app.ts:739](../apps/api/src/app.ts#L739) |
+| POST | `/api/auth/phone-change/start` | [app.ts:759](../apps/api/src/app.ts#L759) |
+| POST | `/api/auth/phone-change/confirm` | [app.ts:788](../apps/api/src/app.ts#L788) |
+| POST | `/api/auth/logout` | [app.ts:816](../apps/api/src/app.ts#L816) |
+| POST | `/api/auth/sessions/revoke` | [app.ts:827](../apps/api/src/app.ts#L827) |
+| GET | `/api/auth/sessions` | [app.ts:842](../apps/api/src/app.ts#L842) |
+| DELETE | `/api/auth/sessions/:sessionId` | [app.ts:857](../apps/api/src/app.ts#L857) |
+| GET | `/api/auth/me` | [app.ts:886](../apps/api/src/app.ts#L886) |
+| POST | `/api/auth/email-verification/start` | [app.ts:896](../apps/api/src/app.ts#L896) |
+| POST | `/api/auth/email-verification/confirm` | [app.ts:909](../apps/api/src/app.ts#L909) |
+| POST | `/api/auth/email-change/start` | [app.ts:922](../apps/api/src/app.ts#L922) |
+| POST | `/api/auth/email-change/confirm` | [app.ts:951](../apps/api/src/app.ts#L951) |
+| PATCH | `/api/account/language-preferences` | [app.ts:979](../apps/api/src/app.ts#L979) |
+| PATCH | `/api/account/profile/name` | [app.ts:990](../apps/api/src/app.ts#L990) |
+| POST | `/api/account/data-export` | [app.ts:1017](../apps/api/src/app.ts#L1017) |
+| GET | `/api/account/deletion` | [app.ts:1049](../apps/api/src/app.ts#L1049) |
+| POST | `/api/account/deletion` | [app.ts:1061](../apps/api/src/app.ts#L1061) |
+| GET | `/api/onboarding/status` | [app.ts:1101](../apps/api/src/app.ts#L1101) |
+| POST | `/api/onboarding/accept` | [app.ts:1121](../apps/api/src/app.ts#L1121) |
+| GET | `/api/admin/content/pages` | [app.ts:1144](../apps/api/src/app.ts#L1144) |
+| GET | `/api/admin/content/pages/:key` | [app.ts:1152](../apps/api/src/app.ts#L1152) |
+| GET | `/api/admin/content/pages/:key/preview` | [app.ts:1172](../apps/api/src/app.ts#L1172) |
+| GET | `/api/admin/content/pages/:key/revisions` | [app.ts:1194](../apps/api/src/app.ts#L1194) |
+| POST | `/api/admin/content/pages/:key/drafts` | [app.ts:1211](../apps/api/src/app.ts#L1211) |
+| PUT | `/api/admin/content/pages/:key/draft` | [app.ts:1230](../apps/api/src/app.ts#L1230) |
+| POST | `/api/admin/content/pages/:key/publish` | [app.ts:1260](../apps/api/src/app.ts#L1260) |
+| POST | `/api/admin/content/pages/:key/revisions/:revisionNumber/rollback` | [app.ts:1287](../apps/api/src/app.ts#L1287) |
+| GET | `/api/admin/content/editorial/:key` | [app.ts:1322](../apps/api/src/app.ts#L1322) |
+| GET | `/api/admin/content/editorial/:key/preview` | [app.ts:1343](../apps/api/src/app.ts#L1343) |
+| GET | `/api/admin/content/editorial/:key/revisions` | [app.ts:1366](../apps/api/src/app.ts#L1366) |
+| POST | `/api/admin/content/editorial/:key/drafts` | [app.ts:1387](../apps/api/src/app.ts#L1387) |
+| PUT | `/api/admin/content/editorial/:key/draft` | [app.ts:1411](../apps/api/src/app.ts#L1411) |
+| POST | `/api/admin/content/editorial/:key/publish` | [app.ts:1443](../apps/api/src/app.ts#L1443) |
+| POST | `/api/admin/content/editorial/:key/revisions/:revisionNumber/rollback` | [app.ts:1472](../apps/api/src/app.ts#L1472) |
+| GET | `/api/usage` | [app.ts:1510](../apps/api/src/app.ts#L1510) |
+| POST | `/api/credits/promo-redemptions` | [app.ts:1522](../apps/api/src/app.ts#L1522) |
+| POST | `/api/admin/promo-codes` | [app.ts:1547](../apps/api/src/app.ts#L1547) |
+| POST | `/api/admin/credit-grants` | [app.ts:1563](../apps/api/src/app.ts#L1563) |
+| GET | `/api/admin/call-outcome-metrics` | [app.ts:1580](../apps/api/src/app.ts#L1580) |
+| GET | `/api/admin/operations/overview` | [app.ts:1588](../apps/api/src/app.ts#L1588) |
+| GET | `/api/admin/system` | [app.ts:1607](../apps/api/src/app.ts#L1607) |
+| GET | `/api/admin/system/outbound-calls` | [app.ts:1615](../apps/api/src/app.ts#L1615) |
+| GET | `/api/admin/system/analytics` | [app.ts:1625](../apps/api/src/app.ts#L1625) |
+| PUT | `/api/admin/system/analytics` | [app.ts:1631](../apps/api/src/app.ts#L1631) |
+| GET | `/api/admin/system/beta` | [app.ts:1643](../apps/api/src/app.ts#L1643) |
+| GET | `/api/admin/system/notifications` | [app.ts:1649](../apps/api/src/app.ts#L1649) |
+| PUT | `/api/admin/system/notifications` | [app.ts:1657](../apps/api/src/app.ts#L1657) |
+| PUT | `/api/admin/system/beta` | [app.ts:1673](../apps/api/src/app.ts#L1673) |
+| POST | `/api/admin/system/beta/invitations` | [app.ts:1685](../apps/api/src/app.ts#L1685) |
+| POST | `/api/admin/system/beta/invitations/:id/revoke` | [app.ts:1695](../apps/api/src/app.ts#L1695) |
+| PUT | `/api/admin/system/outbound-calls` | [app.ts:1708](../apps/api/src/app.ts#L1708) |
+| POST | `/api/admin/system/jobs/:jobId/retry` | [app.ts:1733](../apps/api/src/app.ts#L1733) |
+| GET | `/api/admin/calls` | [app.ts:1767](../apps/api/src/app.ts#L1767) |
+| GET | `/api/admin/calls/:id` | [app.ts:1819](../apps/api/src/app.ts#L1819) |
+| GET | `/api/admin/calls/:id/cost` | [app.ts:1837](../apps/api/src/app.ts#L1837) |
+| GET | `/api/admin/call-preparations/:id` | [app.ts:1855](../apps/api/src/app.ts#L1855) |
+| POST | `/api/admin/calls/:id/sensitive-access` | [app.ts:1875](../apps/api/src/app.ts#L1875) |
+| GET | `/api/admin/users` | [app.ts:1903](../apps/api/src/app.ts#L1903) |
+| GET | `/api/admin/users/:userId/credits` | [app.ts:1956](../apps/api/src/app.ts#L1956) |
+| PUT | `/api/admin/users/:userId/status` | [app.ts:1985](../apps/api/src/app.ts#L1985) |
+| POST | `/api/admin/users/:userId/sessions/revoke` | [app.ts:2013](../apps/api/src/app.ts#L2013) |
+| POST | `/api/admin/users/:userId/account-deletion/:requestId/retry` | [app.ts:2039](../apps/api/src/app.ts#L2039) |
+| POST | `/api/admin/recipient-suppressions` | [app.ts:2068](../apps/api/src/app.ts#L2068) |
+| POST | `/api/admin/recipient-suppressions/lift` | [app.ts:2084](../apps/api/src/app.ts#L2084) |
+| GET | `/health/live` | [app.ts:2101](../apps/api/src/app.ts#L2101) |
+| GET | `/health/ready` | [app.ts:2107](../apps/api/src/app.ts#L2107) |
+| GET | `/api/call-briefs` | [app.ts:2127](../apps/api/src/app.ts#L2127) |
+| GET | `/api/recipient-suggestions` | [app.ts:2160](../apps/api/src/app.ts#L2160) |
+| GET | `/api/language-capabilities` | [app.ts:2186](../apps/api/src/app.ts#L2186) |
+| GET | `/api/call-briefs/:id/language-context` | [app.ts:2197](../apps/api/src/app.ts#L2197) |
+| PATCH | `/api/call-briefs/:id/content-language` | [app.ts:2202](../apps/api/src/app.ts#L2202) |
+| GET | `/api/call-briefs/:id/text-artifacts` | [app.ts:2216](../apps/api/src/app.ts#L2216) |
+| GET | `/api/call-briefs/:id/text-artifacts/:artifactId` | [app.ts:2221](../apps/api/src/app.ts#L2221) |
+| POST | `/api/call-briefs/:id/plan-review` | [app.ts:2228](../apps/api/src/app.ts#L2228) |
+| POST | `/api/call-briefs/:id/final-transcript/translations` | [app.ts:2242](../apps/api/src/app.ts#L2242) |
+| POST | `/api/call-briefs/:id/summaries` | [app.ts:2242](../apps/api/src/app.ts#L2242) |
+| POST | `/api/call-briefs/:id/text-artifacts/:artifactId/retry` | [app.ts:2256](../apps/api/src/app.ts#L2256) |
+| POST | `/api/call-preparations` | [app.ts:2268](../apps/api/src/app.ts#L2268) |
+| GET | `/api/call-preparations/:id` | [app.ts:2336](../apps/api/src/app.ts#L2336) |
+| GET | `/api/call-briefs/:id` | [app.ts:2354](../apps/api/src/app.ts#L2354) |
+| GET | `/api/call-briefs/:id/outcome` | [app.ts:2367](../apps/api/src/app.ts#L2367) |
+| PUT | `/api/call-briefs/:id/feedback` | [app.ts:2384](../apps/api/src/app.ts#L2384) |
+| PUT | `/api/call-briefs/:id` | [app.ts:2413](../apps/api/src/app.ts#L2413) |
+| GET | `/api/call-briefs/:id/recording` | [app.ts:2492](../apps/api/src/app.ts#L2492) |
+| DELETE | `/api/call-briefs/:id/recording` | [app.ts:2522](../apps/api/src/app.ts#L2522) |
+| POST | `/api/call-briefs/:id/data-deletion` | [app.ts:2538](../apps/api/src/app.ts#L2538) |
+| POST | `/api/call-briefs/:id/final-transcript/retry` | [app.ts:2585](../apps/api/src/app.ts#L2585) |
+| POST | `/api/call-briefs/:id/approve` | [app.ts:2610](../apps/api/src/app.ts#L2610) |
+| POST | `/api/call-briefs/:id/approve-and-start` | [app.ts:2631](../apps/api/src/app.ts#L2631) |
+| POST | `/api/call-briefs/:id/start` | [app.ts:2664](../apps/api/src/app.ts#L2664) |
+| POST | `/api/call-briefs/:id/stop` | [app.ts:2689](../apps/api/src/app.ts#L2689) |
+| POST | `/api/call-briefs/:id/approvals/:approvalId` | [app.ts:2705](../apps/api/src/app.ts#L2705) |
+| GET | `/api/call-briefs/:id/events` | [app.ts:2730](../apps/api/src/app.ts#L2730) |
+| POST | `/webhooks/twilio/voice` | [app.ts:2990](../apps/api/src/app.ts#L2990) |
+| GET | `/webhooks/twilio/media` | [app.ts:3059](../apps/api/src/app.ts#L3059) |
+| POST | `/webhooks/twilio/status` | [app.ts:3074](../apps/api/src/app.ts#L3074) |
+| POST | `/webhooks/twilio/recording` | [app.ts:3143](../apps/api/src/app.ts#L3143) |
+| GET | `/api/content/og` | [og-routes.ts:8](../apps/api/src/og/og-routes.ts#L8) |
+| GET | `/api/admin/content/og` | [og-routes.ts:9](../apps/api/src/og/og-routes.ts#L9) |
+| GET | `/api/admin/content/og/:locale/images/:hash.png` | [og-routes.ts:13](../apps/api/src/og/og-routes.ts#L13) |
+| GET | `/api/content/og/:locale/images/:hash.png` | [og-routes.ts:13](../apps/api/src/og/og-routes.ts#L13) |
+| POST | `/api/admin/content/og/:locale/generate` | [og-routes.ts:30](../apps/api/src/og/og-routes.ts#L30) |
+| POST | `/api/admin/content/og/:locale/upload` | [og-routes.ts:30](../apps/api/src/og/og-routes.ts#L30) |
+| POST | `/api/admin/content/og/:locale/publish` | [og-routes.ts:30](../apps/api/src/og/og-routes.ts#L30) |
+| GET | `/api/admin/telemetry-exports` | [routes.ts:22](../apps/api/src/telemetry-export/routes.ts#L22) |
+| POST | `/api/admin/telemetry-exports` | [routes.ts:30](../apps/api/src/telemetry-export/routes.ts#L30) |
+| GET | `/api/admin/telemetry-exports/:id` | [routes.ts:36](../apps/api/src/telemetry-export/routes.ts#L36) |
+| POST | `/api/admin/telemetry-exports/:id/cancel` | [routes.ts:41](../apps/api/src/telemetry-export/routes.ts#L41) |
+| POST | `/api/admin/telemetry-exports/:id/retry` | [routes.ts:41](../apps/api/src/telemetry-export/routes.ts#L41) |
+| GET | `/api/admin/telemetry-exports/:id/download` | [routes.ts:47](../apps/api/src/telemetry-export/routes.ts#L47) |

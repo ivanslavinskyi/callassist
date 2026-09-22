@@ -1,6 +1,8 @@
 # Superadmin notifications
 
-Implemented 2026-09-18. All interface and email boilerplate is English. Source
+Implemented 2026-09-18; localization updated 2026-09-20. The admin interface remains
+English; email boilerplate uses the recipient's saved DE/FR/IT/RM/EN/RU/UK locale
+(English fallback). Frozen retry payloads retain their original locale. Source
 objectives, model summary labels/text, next steps and criteria retain their original
 language. Notification delivery never invokes a model or a translation service.
 

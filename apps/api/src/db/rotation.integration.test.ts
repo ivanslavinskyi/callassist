@@ -92,12 +92,21 @@ it("rotates immutable text evidence and queued input without changing source has
     await sql`INSERT INTO superadmin_notifications(id,kind,source_id,source_user_id,recipient_user_id,occurred_at,payload_ciphertext)
       VALUES(${notificationId},'registration',${userId},${userId},${userId},now(),${encryptJson(notificationPayload,
         parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: oldKey, DATA_ENCRYPTION_ACTIVE_KEY_ID: "old" }))})`;
+    const exportId = randomUUID();
+    const exportPayload = Buffer.from("fixture archive part").toString("base64");
+    await sql`INSERT INTO admin_telemetry_exports(id,actor_user_id,request_id,input_hash,reason,from_at,to_at)
+      VALUES(${exportId},${userId},${randomUUID()},'fixture','Rotation fixture',now()-interval '1 day',now())`;
+    await sql`INSERT INTO admin_telemetry_export_parts(export_id,generation,part,payload_ciphertext,byte_count,sha256)
+      VALUES(${exportId},1,0,${encryptJson(exportPayload,parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: oldKey, DATA_ENCRYPTION_ACTIVE_KEY_ID: "old" }))},20,'fixture')`;
     const rotation = await reencryptDatabase(environment);
+    const [exportPart] = await sql`SELECT payload_ciphertext FROM admin_telemetry_export_parts WHERE export_id=${exportId}`;
+    expect(decryptJson(exportPart!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
+      DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toBe(exportPayload);
     const [notification] = await sql`SELECT payload_ciphertext FROM superadmin_notifications WHERE id=${notificationId}`;
     expect(decryptJson(notification!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(notificationPayload);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 19, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 20, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);
@@ -113,7 +122,7 @@ it("rotates immutable text evidence and queued input without changing source has
     if (process.env.RUN_TEXT_RECOVERY_DRILL === "true") {
       expect(await runRecoveryDrill({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
         DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current", RECOVERY_SOURCE_DATABASE_URL: database.url }))
-        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 25,
+        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 29,
           temporaryResourcesRemoved: true, encryptedSamplesVerified: 16 });
     }
     expect(await reencryptDatabase({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",

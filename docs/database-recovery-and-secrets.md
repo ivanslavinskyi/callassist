@@ -1,8 +1,9 @@
 # Database recovery and secret operations
 
-Reviewed 2026-09-12 against `ef36cfa`. Rotation/restore share the inventory of seventeen
-ciphertext columns. The catalog has 68 migrations through
-`0068_conversation_tool_results.sql`; schema inventory is checked by integration tests.
+Updated 2026-09-22. Rotation/restore share the inventory of **20 ciphertext columns**,
+including assessment, notification and telemetry archive payloads. The source catalog
+has **79 migrations**, through `0079_admin_telemetry_exports.sql`; recovery checks
+29 critical tables. Schema inventory is checked by isolated integration tests.
 See [text-data verification](verification-text-data-2026-09-09.md) for dated local
 rotation/restore/deletion evidence; it is not production recovery evidence.
 
@@ -94,7 +95,11 @@ and preserve only the minimized evidence record.
 5. Verify liveness/readiness, users/sessions, credits, suppressions, audit immutability,
    worker fencing, queues, consent/retention state and provider reconciliation.
 6. Replay deletion, suppression and retention obligations that occurred after the
-   selected recovery point. The privacy owner must approve this step before traffic.
+   selected recovery point. Invalidate all restored telemetry exports and delete
+   their encrypted parts using the [export restore procedure](admin-call-telemetry-export.md#deployment-and-operations)
+   before exposing the API; a backup can resurrect an unexpired copy of deleted
+   content. Include notification payload retention and recipient eligibility checks.
+   The privacy owner must approve this step before traffic.
 7. Resume the API, then one worker, then a supervised non-billable smoke path. A
    superadmin records the decision before re-enabling outbound calls.
 8. Preserve only minimized evidence and complete the incident/postmortem process.

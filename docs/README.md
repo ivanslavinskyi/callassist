@@ -1,6 +1,6 @@
 # Documentation index
 
-Release status refreshed 2026-09-16, including the landing, call-language and recipient opt-out changes. Public brand: SHPROHLI;
+Release status refreshed 2026-09-22, including expenses, notifications, seven-language localization, CMS completion, OG management and telemetry export. Public brand: SHPROHLI;
 internal package names, cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
@@ -18,13 +18,21 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+Latest checkpoint: [delivery and documentation reconciliation, 17–22 September](delivery-2026-09-22.md).
+Source migrations now run through **0079**. The [roadmap](mvp-plan.md) retains NO-GO
+for external release acceptance; local implementation and production rollout are distinct.
+
+Local implementation: [admin call telemetry export, 2026-09-22](admin-call-telemetry-export.md).
+ZIP/JSONL export, durable worker, encryption, deletion revocation and migration 0079.
+This records code and isolated verification, not a production deployment.
+
 Local implementation: [seven-language localization, brand and Analytics, 2026-09-20](localization-and-analytics.md). Includes the registry, public CMS fallback/upgrade policy, localized emails, cookie notice, Admin Analytics and a complete [Rumantsch editorial handoff](rumantsch-review.md). Existing edited CMS publications are preserved; this does not assert a production publication.
 
 Local CMS update: [missing translations completed, 2026-09-21](cms-localization-completion-2026-09-21.md).
 Landing r10 and all six published pages now support all seven locales. English
 layout and EN/DE copy are preserved; the report covers application, replay and checks.
 
-Latest checkpoint: [delivery, 2026-09-16](delivery-2026-09-16.md): founder story/portrait,
+Earlier checkpoint: [delivery, 2026-09-16](delivery-2026-09-16.md): founder story/portrait,
 session-aware public CTAs, simplified language choices and contact-gated SMS opt-out.
 Migration 0075, an independent contact HMAC key and a dedicated opt-out Verify Service
 must be included in deployment. Local implementation is complete; **NO-GO** remains.
@@ -43,9 +51,13 @@ EN/DE publications; current translation evidence is in the 21 September report a
 | Document | Purpose |
 | --- | --- |
 | [Project README](../README.md) | Product scope, setup, commands and repository status |
+| [Delivery, 17–22 September](delivery-2026-09-22.md) | Recent implementation, migration 0079, verification limits and remaining release gates |
+| [Telemetry export](admin-call-telemetry-export.md) | ZIP/JSONL contract, periods, encrypted queue, privacy revocation, limits and rollout |
+| [Homepage OG](home-og-images.md) | Localized templates/uploads, draft/publication/rollback and immutable image delivery |
+| [Expense implementation](cost-audit-2026-09-17/implementation.md) | Unified explorer, provider billing reconciliation and historical usage gaps |
 | [Delivery, 2026-09-16](delivery-2026-09-16.md) | Founder story, session-aware CTAs, simplified call languages, opt-out eligibility, checks and deployment requirements |
 | [Architecture](architecture.md) | Current languages, appointments, consent, call control, summary schema, live state, privacy and limits |
-| [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and all 107 registered method/path pairs |
+| [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and registered API route inventory |
 | [Deployment preflight](deployment-preflight.md) | Proxy/env preparation and first release on shprohli.ch after landing completion; actual VPS deployment remains open |
 | [Landing checkpoint, 2026-09-14](landing-checkpoint-2026-09-14.md) | Before/after screenshots, six EN/DE task groups and local publication results |
 | [Conversation credits, 2026-09-14](conversation-credit-2026-09-14.md) | Substantive-answer policy, atomic settlement, classification limits, migration 0071 and verification |
@@ -62,7 +74,7 @@ EN/DE publications; current translation evidence is in the 21 September report a
 | Document | Purpose |
 | --- | --- |
 | [Operations](operations-readiness.md) | Health, minimized logs, worker/result/live-state diagnosis, recovery and deployment gaps |
-| [Database recovery and secrets](database-recovery-and-secrets.md) | Rotation/restore procedures, seventeen ciphertext columns and dated evidence |
+| [Database recovery and secrets](database-recovery-and-secrets.md) | Rotation/restore procedures, twenty ciphertext columns and dated evidence |
 | [Data deletion](data-deletion-policy.md) | Provider-first deletion, artifact fencing/redaction, account anonymization and contact cleanup |
 | [Password recovery](password-recovery-policy.md) | Verified-phone recovery, bounded capabilities and session invalidation |
 | [Phone change](phone-change-policy.md) | Session-bound replacement, OTP and temporary challenge lifecycle |
@@ -70,7 +82,7 @@ EN/DE publications; current translation evidence is in the 21 September report a
 | [Rate limiting](rate-limit-policy.md) | Shared atomic endpoint limits, artifact budgets and operational boundaries |
 | [Real-provider drills](real-provider-drills.md) | Current UI procedure, CLI review-receipt limitation and dated supervised evidence |
 | [Admin architecture](admin-interface-architecture.md) | English-only admin surface, route/layout boundaries and roles |
-| [Superadmin notifications](superadmin-notifications.md) | English email reports, SMS/call events, queue, recipient controls and delivery semantics |
+| [Superadmin notifications](superadmin-notifications.md) | Localized registration/call email reports, queue, recipient controls and delivery semantics |
 | [Public content staging](public-content-staging-2026-09-09.md) | Candidate/dry-run/staging procedure and dated unpublished drafts; source copy is not publication evidence |
 
 ## Latest delivery and verification records

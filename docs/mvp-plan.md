@@ -1,6 +1,6 @@
 # SHPROHLI — минимальный roadmap публичного тестирования
 
-Актуально на **16 сентября 2026**, включая итоговую оценку звонков 15.09, лендинг/сессии `aa07ff8` и сегодняшние изменения языков/opt-out. **Текущий статус: NO-GO. B01/B02 закрыты локально; B05 реализован, расчёт расходов и локальный deadlock B12 исправлены. Авторский блок, CTA по сессии и упрощённый выбор языков проверены локально. SMS для публичной блокировки ограничен подтверждёнными звонками; deployment требует миграции 0075, отдельного Verify Service и общего ключа API/worker. Внешняя приёмка остаётся открытой.**
+Актуально на **22 сентября 2026**. **Текущий статус: NO-GO.** За 17–22.09 реализованы единый учёт расходов, уведомления суперадминам, семь UI/site/email локалей, локальный CMS Landing r10, языковые медальоны, управление OG-изображениями и выгрузка телеметрии. Каталог исходников — до **0079**; миграция экспорта проверена только на изолированных БД. Внешние deployment, provider/recovery/support и полная приёмка кандидата остаются открыты. [Сводка поставки и доказательств](delivery-2026-09-22.md).
 Это **единственный текущий backlog и список условий запуска**. Факты, причины, исходники и снимки — в [полном аудите](public-testing-audit-2026-09-13.md). Предыдущий текст с R01–R21 сохранён в [историческом снимке](release-roadmap-history-2026-09-12.md).
 
 ## 1. Цель ближайшего релиза
@@ -13,9 +13,11 @@
 
 Уточнение от 14.09: русский как основной или резервный язык звонка доступен только суперадмину. Проверка текущей роли действует при подготовке, повторной компиляции, одобрении и запуске; история звонков и русский язык текстов остаются доступны. В публичных EN/DE импрессуме и политике конфиденциальности улица и дом заменены на `[on request]` / `[auf Anfrage]`; локальные публикации — Imprint r2 и Privacy r5, независимые правки Imprint сохранены в черновике r3.
 
-Для первого запуска не нужны платежи, организации, CRM, календарь, массовые звонки, новые UI-языки или новый дизайн. Поддержка, достоверные условия и работающее аварийное управление нужны с первого внешнего пользователя.
+Для первого запуска не нужны платежи, организации, CRM, календарь, массовые звонки или новый дизайн. Семь UI-языков уже реализованы; это не расширяет список разрешённых голосовых направлений. Поддержка, достоверные условия и работающее аварийное управление нужны с первого внешнего пользователя.
 
 ## 2. Промежуточный итог
+
+**17–22.09:** расходы и provider billing унифицированы (B05), уведомления и экспорт добавлены в админку (B08/B12), UI/сайт/email переведены на семь языков, локальный Landing r10 дополнен переводами и SEO получил управление OG (B07/B10). Для B06/B11 добавлены миграции 0076–0079 и требования к очередям, ключам и восстановлению. [Точные изменения, проверки и ограничения](delivery-2026-09-22.md). Ниже ранние результаты сохранены с датами.
 
 16.09: [отчёт за день](delivery-2026-09-16.md) фиксирует авторский блок с настоящим
 портретом и согласованной EN/DE копией, единые CTA по состоянию сессии, четыре
@@ -31,8 +33,9 @@
 
 | Состояние | Что входит |
 | --- | --- |
-| Реализовано | EN/DE app, auth/phone recovery, смена email/phone, сессии, immutable plan/review, CH telephony, consent, кредиты, suppression, результаты/переводы/PDF, feedback, export/delete, CMS/RBAC, очереди/ротация |
-| Проверено 16.09 | API: **1 013 тестов / 95 файлов** на свежей PostgreSQL БД; затем целевые финальные проверки удаления и гонок (44 и 13 тестов отдельными прогонами). Web: **240 / 48**, contracts: **115 / 17**; typecheck, web lint, API/web build и copy-check прошли. EN/DE браузерные проверки лендинга/opt-out до 320 px, без реальных SMS/звонков. [Точные границы](delivery-2026-09-16.md) |
+| Реализовано | DE/FR/IT/RM/EN/RU/UK UI/site/email; auth/recovery, immutable plan/review, CH telephony, consent/credits/suppression, результаты/переводы/PDF, CMS/RBAC, unified expenses/billing, notifications, Analytics, localized OG, ZIP/JSONL telemetry export, очереди/ротация |
+| Проверено 22.09 — целевой набор | Экспорт и связанные auth/app/recovery/rotation: **84 теста / 6 файлов**, после доработки download audit повторно **12 export integration**; API typecheck/build и web production build с lint/types, desktop/mobile fixtures. Это не полный CI кандидата. [Отчёт](admin-call-telemetry-export.md#verification) |
+| Проверено 16.09 — исторический checkpoint | API: **1 013 тестов / 95 файлов** на свежей PostgreSQL БД; затем целевые финальные проверки удаления и гонок (44 и 13 тестов отдельными прогонами). Web: **240 / 48**, contracts: **115 / 17**; typecheck, web lint, API/web build и copy-check прошли. EN/DE браузерные проверки лендинга/opt-out до 320 px, без реальных SMS/звонков. [Точные границы](delivery-2026-09-16.md) |
 | Предшествующий checkpoint B05 | 14.09: **1 163 passed / 0 failed**, 143 файла на свежей изолированной БД. Детерминированный deadlock исправлен; десять быстрых recompile проходят без неожиданных фоновых ошибок. [Исторические результаты](beta-controls-2026-09-14.md) |
 | Полный прогон 14.09 — исторический checkpoint | 1 212 passed, один 15-секундный timeout восстановления worker при параллельной сборке; отдельный повтор всех 22 PostgreSQL-тестов прошёл. Lint/typecheck/production build — 3/3 пакета; на этом этапе локально применена миграция 0071. [Подробности и границы](conversation-credit-2026-09-14.md) |
 | UI-checkpoint 15.09 | **216 web-тестов**, lint/typecheck и production build прошли. Закреплённая подготовка, одинаковые отступы review, мгновенный старт/набор/соединение, SSE loss/recovery и terminal states проверены в браузере на изолированных данных, EN/DE, desktop/mobile до 320 px. [Отчёт B10](workflow-feedback-2026-09-15.md). Это не новый полный прогон API/провайдеров |
@@ -64,7 +67,7 @@
 | **B03 Transactional email** | P0 · EN verification в Gmail подтверждён пользователем; остальная приёмка открыта | Код/status/correction/gate, уведомления и bounded delivery готовы; migration 0069 применена. Resend/DNS настроены, пользователь подтвердил работу email. Обновлены логотип, прозрачный фон и компактный футер Impressum/Support; принять новый вид и остальные EN/DE сценарии | EN/DE письма реально доставлены; новое оформление проверено в почтовых клиентах; bounce/outage виден оператору по ID; принято поведение при потере best-effort security notice | Backend/web + владелец домена |
 | **B04 SMS Verify** | P0 · CH SMS/sender подтверждены пользователем; остальная приёмка открыта | Verify/SID подключены; локали, CH/UA allow-list, общие лимиты, исправление телефона и защита от гонки готовы. После исправления пользователь подтвердил работу и SMS от SHPROHLI на CH, текст EN. Два UA-кода приняты Twilio; выяснить попадание сообщений в Telegram и sender на UA; завершить EN/DE сценарии, geo/fraud/cost controls и безопасный support | Реальные verify/resend/recovery/phone correction/change/opt-out проходят; на телефоне sender SHPROHLI; ошибки/истечение/повторы приняты; потеря телефона имеет безопасный support-путь | Backend + Twilio operator |
 
-Следующие действия B03/B04 — [конкретный остаток и настройки](email-sms-implementation-2026-09-14.md). B01/B02 закрыты в `f172a1a`, [отчёт об исправлениях](b01-b02-remediation-2026-09-13.md) фиксирует приёмку и изменение ответа API. UI остаётся EN/DE; FR/IT/UK/RU письма подготовлены как кандидаты, RM использует явный EN fallback до вычитки/custom template. Диагностика в кабинете провайдера допустима, если сообщения находятся по безопасному ID и ответственный имеет доступ.
+Следующие действия B03/B04 — [конкретный остаток и настройки](email-sms-implementation-2026-09-14.md). B01/B02 закрыты в `f172a1a`, [отчёт об исправлениях](b01-b02-remediation-2026-09-13.md) фиксирует приёмку и изменение ответа API. С 20.09 UI/site/email поддерживают DE/FR/IT/RM/EN/RU/UK; email-оболочка использует язык адресата. RM SMS сохраняет English fallback из-за capability провайдера; это не fallback email. Независимая RM-вычитка и реальная доставка по матрице остаются открыты. Диагностика в кабинете провайдера допустима, если сообщения находятся по безопасному ID и ответственный имеет доступ.
 
 **Дополнение B04 от 16.09:** [public opt-out](recipient-opt-out.md) теперь использует
 отдельный `TWILIO_OPT_OUT_VERIFY_SERVICE_SID`, подтверждённый контакт с номером и
@@ -78,9 +81,9 @@
 | --- | --- | --- | --- | --- |
 | **B05 Admission / расходы** | P0 · реализация проверена, 15.09 локально задано 20 USD / 24 ч; внешняя приёмка открыта | Админка: cap 30, дополнительные one-use приглашения, 7 минут, 2 глобально/1 на аккаунт, USD budget/пауза/резервы. Общий recipient cap сохраняется при удалении данных. [Семантика и отчёт](beta-controls-2026-09-14.md) | Сумма перенесена во внешний контур, оценки сверены с B09; exhaustion/stop/complaint/suppression drill пройден на staging; сигналы 80%/отказа доставлены оператору через B12 | Backend + operations |
 | **B06 Deployment / proxy** | P0 · следующий этап после локальной публикации B07 | [Preflight и доверенные proxy IP](deployment-preflight.md) реализованы и локально проверены. Первый деплой сразу на shprohli.ch с временно ограниченным доступом, существующий VPS. Остались topology/packaging/DB, HTTPS, cookies/SSR/CORS/CSRF, Twilio ingress/SSE/WS и фактические API/worker settings | Login/SSR/SSE работают снаружи; разные IP не делят registration limit, spoofed headers не обходят его; restart не теряет jobs; canonical не localhost; обязательные drivers реальные | Platform |
-| **B07 Landing / CMS** | P0 · авторский блок и CTA 16.09 проверены локально; проверка конечного домена открыта | [Лендинг 16.09](delivery-2026-09-16.md): согласованная EN/DE история и портрет, CTA по сессии, сокращённый список языков. CMS остаётся Landing r8; FAQ collection r5, Terms/FAQ r4, AUP r5, Privacy r5, Imprint r2; отдельный Imprint draft r3 сохранён | На shprohli.ch проверены EN/DE, гостевые/авторизованные CTA и ошибки сессии, support/legal и ревизии. Реальные звонки подтверждают [правило кредита](post-call-assessment-diagnosis-2026-09-15.md); disclosures соответствуют принятому runtime | Product/content + ответственный за данные |
-| **B08 Admin / support** | P0 · основа есть, частичные пробелы | Защищённый staff-вход; доступный stop; lookup user/call/credit/suppression; reason+confirm+evidence для lift; текстовые жалобы; deletion retry/audit | Оператор самостоятельно разбирает failed call, ошибочный credit, жалобу и needs_support deletion; staff-сессии защищены; инцидент имеет ответственного и следующее действие | Backend/web + operations |
-| **B11 Данные / recovery** | P0 · локальные механизмы есть | Backup/ключи/доступы, RPO/RTO, изолированный restore с deletion/suppression replay; категории хранения и cleanup минимального auth/operational хвоста | Restore выполнен на выбранном контуре; удалённое не возвращается; ключи доступны; export/delete/provider failures проверены; Privacy соответствует retention | Platform/security |
+| **B07 Landing / CMS** | P0 · семь локалей, локальный Landing r10 и OG реализованы; конечный домен не принят | [CMS completion](cms-localization-completion-2026-09-21.md): шесть опубликованных страниц × семь локалей, сохранены authored EN/DE и legal revision IDs. [OG](home-og-images.md): draft/upload/crop/publish/rollback. Проверить RM с редактором и Analytics/privacy policy | На shprohli.ch проверены локали, гостевые/авторизованные CTA, support/legal, фактические revision IDs и OG/Twitter. Disclosures соответствуют принятому runtime; нет неподтверждённых обещаний о звонках | Product/content + ответственный за данные |
+| **B08 Admin / support** | P0 · расходы, уведомления и экспорт реализованы; staff/support приёмка открыта | [Notifications](superadmin-notifications.md) и [telemetry export](admin-call-telemetry-export.md): только superadmin, audit и content lifecycle. Осталось: защищённый staff-вход, lookup/stop, reason+confirm+evidence для lift, жалобы и deletion retry | Оператор разбирает failed call/credit/жалобу/needs_support deletion; реальная доставка отчётов принята; экспорт используется с ограниченным доступом; инциденты имеют владельца | Backend/web + operations |
+| **B11 Данные / recovery** | P0 · локальные механизмы и тесты обновлены до 0079; внешний restore открыт | Backup/ключи/RPO/RTO, 20 ciphertext families, 29 critical tables, OG assets, notification lifecycle; перед открытием восстановленной БД отозвать все telemetry archives, затем deletion/suppression replay | Restore выполнен на выбранном контуре; удалённое не возвращается через архивы/очереди; ключи доступны; export/delete/provider failures приняты; Privacy соответствует retention | Platform/security |
 
 Допустимые упрощения B08: один оператор и резервный, защищённый ручной журнал вместо CRM, существующий audited grant вместо новой refund-панели, read-only audit tooling вместо большого admin/audit. Промокампании не запускать до deactivation/limits; signup credits и ручные grants достаточны.
 
@@ -108,7 +111,7 @@ staging-домен/сервер не обязателен; ниже «staging dr
 | ID | Приоритет / статус | Минимальная работа | Готово, когда | Владелец |
 | --- | --- | --- | --- | --- |
 | **B09 Provider drills** | P0 · частичные старые свидетельства | Текущий UI: signup → verification → plan/review → call → consent → result; EN/DE/включённые направления; no answer/busy/no consent/wrong person/voicemail; farewell/Stop; Realtime/worker/ASR/text failures | Есть протокол с commit/config, исходом и стоимостью; нет нарушений consent/authorization, двойных звонков/списаний, ложных подтверждений встречи, неуправляемых зависаний | Voice/backend + QA |
-| **B10 UX / доступность** | P0 · три замечания 15.09 закрыты локально; полная приёмка открыта | [Видимая подготовка, отступы review и индикация звонка](workflow-feedback-2026-09-15.md) реализованы и проверены на fixtures. Осталось: полный путь mobile/desktop EN/DE, клавиатура/focus/ошибки/200% zoom; OTP/password manager; screen reader critical flow; доступный Stop на реальном звонке | Новый пользователь без объяснений разработчика завершает задачу и восстанавливается после ошибки; ввод не теряется; критические controls доступны | Web/product + QA |
+| **B10 UX / доступность** | P0 · три замечания 15.09 закрыты локально; полная приёмка открыта | [Видимая подготовка, отступы review и индикация звонка](workflow-feedback-2026-09-15.md) реализованы и проверены на fixtures. Осталось: полный путь mobile/desktop на включённых UI-локалях, редакторская RM-проверка, клавиатура/focus/ошибки/200% zoom; OTP/password manager; screen reader critical flow; доступный Stop на реальном звонке | Новый пользователь без объяснений разработчика завершает задачу и восстанавливается после ошибки; ввод не теряется; критические controls доступны | Web/product + QA |
 | **B12 Operations / release** | P0 · локальный recompile defect закрыт; внешний контур открыт | Порядок PostgreSQL-блокировок исправлен, stale text jobs отменяются с сохранением evidence; тесты проверяют отсутствие фоновых ошибок. Осталось: CI на кандидате, миграции/dependencies, защищённая release-ветка, primary/backup support, routed alerts/budget, rollback, review условий/vendor arrangements и release record | Нет незакрытых P0; полный прогон стабилен; тревога дошла оператору; stop/rollback отрепетированы; контакты отвечают; scope/пороги/владельцы/evidence записаны | Release owner |
 
 Подробная матрица B09 — в разделе 7 [аудита](public-testing-audit-2026-09-13.md). Drills выполняются на согласившихся участниках/разрешённых номерах. Этот аудит не включал реальные SMS/email/calls или deployment.
@@ -117,7 +120,7 @@ staging-домен/сервер не обязателен; ниже «staging dr
 opt-out: EN/DE desktop/mobile до 320 px, ошибка/повтор и пустой OTP-ввод при смене
 шага. Полная клавиатурная/screen-reader приёмка и нативная смена сессии в другой
 вкладке не закрыты этими проверками. B12 должен проверить кандидата с миграцией
-0075 и новой конфигурацией, затем выполнить внешний opt-out/stop/recovery drill.
+0079 и новой конфигурацией, затем выполнить внешний opt-out/stop/recovery drill.
 
 Старый CLI start можно явно исключить, если приёмка/бета используют UI. Бесшовный Realtime reconnect не нужен: допустимо безопасное завершение, понятный partial result и корректный кредит. SSE reconnect и durable recovery проверяются отдельно.
 
@@ -132,7 +135,7 @@ Cap/длительность/USD согласованы и реализован�
 | Длительность | 7 минут; управление в админке, изменение для новых звонков, Twilio timeLimit |
 | Параллельность | 1 на аккаунт, 2 глобально; общий предел в админке; неизвестный provider stop не освобождает слот |
 | География | CH destinations; страны signup mobile — отдельный согласованный список |
-| Языки | UI EN/DE; текущий публичный выбор `de-CH`, `fr-CH`, `it-CH`, `en-GB`, русский только суперадмину. `de-DE` убран из выбора; старые записи сохранены. Реальную приёмку call/text directions завершить до открытия |
+| Языки | UI/site/email DE/FR/IT/RM/EN/RU/UK; административный UI English-only. Публичные звонки: `de-CH`, `fr-CH`, `it-CH`, `en-GB`, `ru-RU` только superadmin. UI-переводы не включают новые call/text directions; RM требует редакторской приёмки |
 | Задачи | Информация, ответы на вопросы, статус/документы, нейтральное сообщение, одна явно разрешённая booking/confirmation action |
 | Расходы | 20 USD за скользящие 24 часа, локальный checkpoint 15.09 — revision 3. Резерв 7-минутного звонка 4.20 USD, paid text 0.15 USD; usage/charges + pending. Перенос настройки во внешний контур, калибровка B09 и upstream billing alerts до GO |
 | Поддержка | Первые звонки в объявленные часы присутствия оператора; текстовый канал и резервный ответственный |
@@ -149,12 +152,13 @@ Cap/длительность/USD согласованы и реализован�
 | P1 | Promo list/deactivate, широкий audit UI, complaint queue, связи user/call/feedback | Перед промокампаниями или когда ручной процесс перестанет успевать |
 | P1 | Полный signup/delivery/call funnel, SMS/email cost ingestion | После первых измерений; для старта provider dashboards и счётчики |
 | P1 | CMS concurrent-edit protection, общий dirty navigation guard | При регулярном редактировании; первую публикацию провести контролируемо |
-| P1 | Дополнительные call/text языки и полная device/a11y матрица | До объявления их поддержанными; critical flow B10 остаётся P0 |
+| P1 | Новые call/text направления сверх включённых и полная device/a11y матрица | До объявления поддержки; critical flow B10 и вычитка текущих локалей остаются условиями запуска |
 | P1 | Вторая recovery-механика, MFA для всех пользователей, расширенные notices | После B03/B04; staff-защита B08 не откладывается |
 | P1 | Сложная multi-account корреляция и дополнительные retention/analytics thresholds | Перед снятием ограничений регистрации |
 | P2 | Перенос/отмена встреч, календарь, CRM/RAG, платежи/подписки, команды, native app | Отдельное продуктовое решение |
+| P1 | Per-session runtime descriptors и attempt attribution новых live-сегментов | После приёмки telemetry export; исторические несохранённые данные не реконструируются |
 | P2 | Realtime reconnect, transcript click-to-seek, operator corrections | После подтверждения базового качества |
-| P2 | Новый визуальный стиль, блог/media CMS, идеальные SEO lengths, новые UI-языки | По результатам использования |
+| P2 | Новый визуальный стиль, блог/media CMS и расширение локалей сверх семи реализованных | По результатам использования; локализованные OG уже реализованы |
 
 ## 9. GO / NO-GO — заполняемый лист
 
@@ -163,24 +167,24 @@ Cap/длительность/USD согласованы и реализован�
 - [ ] **B03:** первичный email и смена контакта доставляются, ошибки/retry/уведомления приняты.
 - [ ] **B04:** реальный Verify/recovery и отдельный opt-out Verify Service, доставка/fraud controls приняты.
 - [ ] **B05:** реализация локально проверена, 20 USD / 24 ч установлен локально; перенести настройку во внешний контур, принять ставки резервов и staging exhaustion/complaint/stop drill.
-- [ ] **B06:** внешний deploy, миграция/backfill 0075, общий recipient HMAC key, proxy/cookies/SSR CTA/SSE/worker/effective flags проверены.
-- [ ] **B07:** опубликованные EN/DE revision IDs и обещания сверены.
+- [ ] **B06:** внешний deploy, миграции до 0079 (включая opt-out backfill), общий recipient HMAC/keyring, proxy/cookies/SSR/SSE, worker/notification/export consumers и effective flags проверены.
+- [ ] **B07:** фактические опубликованные revisions и семь локалей на целевом домене, OG/Twitter, обещания и privacy/Analytics policy сверены; RM review принят.
 - [ ] **B08:** staff-защита, support, suppression, grant/deletion/audit workflow приняты.
 - [ ] **B09:** текущая provider/language/outage матрица без блокирующих дефектов.
 - [ ] **B10:** основной путь доступен и понятен на целевых устройствах.
-- [ ] **B11:** restore/keys/deletion replay/retention подтверждены, включая сохраняемый контактный HMAC и поддержку номеров без восстанавливаемой истории.
+- [ ] **B11:** restore/keys/deletion replay/retention подтверждены; notification payloads и restored telemetry archives обработаны; contact HMAC сохранён.
 - [ ] **B12:** CI, alerts, on-call/backup, rollback и release record заполнены.
 
 | Поле release record | Сейчас |
 | --- | --- |
-| Решение / дата | **NO-GO / 2026-09-16** |
-| Код | Итоговая оценка звонков `9823d1a`, лендинг/сессии `aa07ff8` и поставка языков/opt-out от 16.09. Перед deployment записать точные итоговые commit/artifact IDs web/API/worker; [состав и проверки](delivery-2026-09-16.md) |
-| Schema/config | Catalog через 0075; миграция 0075 проверена на изолированных БД, применение во внешнем контуре не выполнено. Требуются отдельный opt-out Verify SID и стабильный recipient HMAC key на API/worker. Локальный бюджет: 20 USD / 24 ч, revision 3, 0.60 USD/мин и 0.15 USD/text; перенести и проверить на целевом контуре |
+| Решение / дата | **NO-GO / 2026-09-22** |
+| Код | Коммиты 17–22.09 через `1c4f4bb` и поставка telemetry export; [состав](delivery-2026-09-22.md). При deployment записать итоговые commit/artifact IDs web/API/worker |
+| Schema/config | Catalog 0001–0079. 0079 проверена на изолированных БД, рабочее применение не выполнено этой поставкой. Проверить opt-out Verify/HMAC, billing settings, email recipients, export flag/worker/keyring. Бюджетный checkpoint 15.09: 20 USD / 24 ч, revision 3; целевые значения подтвердить в админке |
 | Scope | Открытый cap 30 + дополнительные приглашения, 7 минут, 1/account и 2 globally; денежная сумма в админке; приёмка языков/внешнего контура открыта |
 | Release owner / оператор / резервный | Не назначены в этом аудите |
-| Evidence | [Поставка 16.09](delivery-2026-09-16.md), [оценка/кредит](post-call-assessment-diagnosis-2026-09-15.md), [исходный аудит](public-testing-audit-2026-09-13.md), [B01/B02](b01-b02-remediation-2026-09-13.md), [email/SMS](email-sms-implementation-2026-09-14.md), [beta/recompile](beta-controls-2026-09-14.md), [подготовка](plan-preparation-quality-2026-09-15.md), [расходы](budget-accounting-2026-09-15.md), [UI](workflow-feedback-2026-09-15.md); внешняя приёмка открыта |
+| Evidence | [Поставка 17–22.09](delivery-2026-09-22.md), [телеметрия](admin-call-telemetry-export.md), [CMS](cms-localization-completion-2026-09-21.md), [локализация](localization-and-analytics.md), [расходы](cost-audit-2026-09-17/implementation.md), [уведомления](superadmin-notifications.md), [OG](home-og-images.md) и датированные ранние отчёты. Свежий полный CI и внешняя приёмка открыты |
 | Исключения P1 | ID, compensating control, владелец, дата пересмотра |
-| Следующий шаг | B06 — shprohli.ch на существующем VPS с временным ограничением доступа: подготовить Verify SID/key/0075 по [preflight](deployment-preflight.md), перенести budget 20 USD / 24 ч. Принять SSR CTA, реальный opt-out и правило кредита; завершить B03/B04/B05/B09 drills и B08/B11/B12 support/recovery/operations |
+| Следующий шаг | B06: выполнить [preflight](deployment-preflight.md) с migrations через 0079 на shprohli.ch с ограниченным доступом; затем B03/B04/B05/B09 provider drills, B07/B10 локали/OG/доступность и B08/B11/B12 support/recovery/alerts/полный CI |
 
 ## 10. Как не разнести backlog снова
 
