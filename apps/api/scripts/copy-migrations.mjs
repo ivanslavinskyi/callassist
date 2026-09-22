@@ -8,3 +8,4 @@ const destination = resolve(packageRoot, "dist/db/migrations");
 
 await mkdir(dirname(destination), { recursive: true });
 await cp(source, destination, { recursive: true });
+await cp(resolve(packageRoot, "src/og/assets"), resolve(packageRoot, "dist/og/assets"), { recursive: true });

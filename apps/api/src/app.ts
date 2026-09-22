@@ -131,9 +131,12 @@ import {
 import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provider";
 
 import { notificationSettingsUpdateSchema } from "@callassist/contracts";
+import { registerOgRoutes } from "./og/og-routes";
+import type { OgService } from "./og/og-service";
 import { NotificationSettingsError, type NotificationAdmin } from "./notifications/superadmin-notifications";
 
 type BuildAppOptions = {
+  ogService?: OgService;
   notifications?: NotificationAdmin;
   service: CallService;
   authService?: AuthService;
@@ -162,6 +165,7 @@ type BuildWebhookAppOptions = {
 };
 
 export function buildApp({
+  ogService,
   notifications,
   service,
   authService,
@@ -207,6 +211,13 @@ export function buildApp({
     origin: webOrigins,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+  });
+
+  if (ogService) registerOgRoutes(app, ogService, authorizeContentRead, async (request, reply) => {
+    const actor = await authorizeContentMutation(request, reply);
+    if (!actor) return null;
+    if (!await enforceEndpointRateLimit(request, reply, actor.id, "home-og", { userLimit: 30, ipLimit: 90, windowMs: 60_000 })) return null;
+    return actor;
   });
 
   app.get("/api/analytics", async (_request, reply) => {

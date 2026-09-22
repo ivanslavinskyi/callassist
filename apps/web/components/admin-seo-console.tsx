@@ -1,9 +1,10 @@
 "use client";
 
-import type { ContentLocale } from "@callassist/contracts";
+import { uiLocales, type ContentLocale } from "@callassist/contracts";
+import { AdminOgConsole } from "./admin-og-console";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getPublishedContentIndex } from "@/lib/api";
+import { getPublishedContentIndex, getPublicOgImages } from "@/lib/api";
 import { seoAdminMessages } from "@/lib/i18n/seo-admin-messages";
 import { buildSeoAudit, type SeoAuditRoute } from "@/lib/seo-audit";
 import { absoluteSiteUrl } from "@/lib/site-config";
@@ -18,15 +19,16 @@ export function AdminSeoConsole() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [publication, setPublication] = useState(0);
 
   useEffect(() => {
     let active = true;
-    void getPublishedContentIndex()
-      .then((index) => { if (active) setRoutes(buildSeoAudit(index)); })
+    void Promise.all([getPublishedContentIndex(), getPublicOgImages()])
+      .then(([index, { images }]) => { if (active) setRoutes(buildSeoAudit(index, images)); })
       .catch(() => { if (active) setError(copy.loadError); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [copy.loadError]);
+  }, [copy.loadError, publication]);
 
   const visibleRoutes = useMemo(() => routes.filter((route) => {
     if (localeFilter !== "all" && route.locale !== localeFilter) return false;
@@ -51,6 +53,8 @@ export function AdminSeoConsole() {
           </div>
         </header>
 
+        <AdminOgConsole onPublished={() => setPublication(value => value + 1)} />
+
         <dl className="admin-seo-summary">
           <Summary label={copy.routes} value={routes.length} />
           <Summary label={copy.warnings} value={warningCount} warning={warningCount > 0} />
@@ -63,8 +67,7 @@ export function AdminSeoConsole() {
             <span>{copy.locale}</span>
             <select onChange={(event) => setLocaleFilter(event.target.value as "all" | ContentLocale)} value={localeFilter}>
               <option value="all">{copy.allLocales}</option>
-              <option value="en">EN</option>
-              <option value="de">DE</option>
+              {uiLocales.map(locale => <option key={locale} value={locale}>{locale.toUpperCase()}</option>)}
             </select>
           </label>
           <label className="field">

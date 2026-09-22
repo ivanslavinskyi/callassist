@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "og:build-fallbacks": "node --import tsx scripts/build-og-fallbacks.ts",
     "eval:call-assessment": "tsx src/text-processing/final-assessment.eval.ts",
     "deployment:check": "tsx src/config/check-deployment.ts",
     "deployment:check:prod": "node dist/config/check-deployment.js",
@@ -44,13 +45,17 @@
     "@fastify/cors": "^11.0.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.3.0",
+    "@vercel/og": "0.8.6",
     "dotenv": "^17.4.2",
     "fastify": "^5.12.1",
+    "fontkit": "^2.0.4",
     "postgres": "^3.4.9",
+    "sharp": "0.35.4",
     "twilio": "^6.0.2",
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@types/fontkit": "^2.0.9",
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.1",
     "tsup": "^8.5.0",

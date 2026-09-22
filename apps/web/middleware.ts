@@ -3,8 +3,9 @@ import { localeFromPathname, localizePathname, negotiateUiLocale, uiLocaleCookie
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  // Brand assets are shared across locales and must retain their public URLs.
-  if (pathname.startsWith("/brand/") || ["/icon.svg", "/apple-icon.png", "/favicon.ico"].includes(pathname)) return NextResponse.next();
+  // Shared assets and OG resources already carry their own locale/version.
+  if (["/brand/", "/og/home/", "/media/og/home/"].some(prefix => pathname.startsWith(prefix))
+    || ["/icon.svg", "/apple-icon.png", "/favicon.ico"].includes(pathname)) return NextResponse.next();
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-callassist-ui-locale", "en");

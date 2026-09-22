@@ -18,6 +18,7 @@ import { CallService } from "./call-service";
 import { createTextProcessorFromEnv } from "./text-processing/text-processor";
 import { textCapabilitiesFromEnv } from "./text-processing/text-capabilities";
 import { ContentService } from "./content/content-service";
+import { createOgServiceFromEnv } from "./og/og-service";
 import { createContentRepositoryFromEnv } from "./content/create-content-repository";
 import { callAdmissionPolicyFromEnv } from "./config/call-admission-policy";
 import { durableWorkerModeFromEnv } from "./config/durable-worker-mode";
@@ -93,6 +94,7 @@ const creditService = new CreditService({
 });
 const notifications = createNotificationsFromEnv(repository);
 const app = buildApp({
+  ogService: createOgServiceFromEnv(),
   notifications,
   service,
   authService,

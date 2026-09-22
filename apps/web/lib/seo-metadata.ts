@@ -1,4 +1,4 @@
-import { uiLocaleRegistry } from "@callassist/contracts";
+import { uiLocaleRegistry, ogImagePath, fallbackOgImagePath, type PublishedOgImage } from "@callassist/contracts";
 import type {
   PublishedContentIndexPage,
   PublishedContentPage,
@@ -12,7 +12,8 @@ import { homeSeo } from "./site-config";
 export function homeMetadata(
   locale: UiLocale,
   landing?: PublishedLanding | null,
-  publishedIndex?: PublishedLandingIndex | null
+  publishedIndex?: PublishedLandingIndex | null,
+  image?: PublishedOgImage | null
 ): Metadata {
   const seo = landing?.seo ?? homeSeo[locale];
   const actualLocale = landing?.locale ?? locale;
@@ -38,13 +39,13 @@ export function homeMetadata(
       url: canonical,
       title: seo.title,
       description: seo.description,
-      images: [socialImage(locale, seo.title)]
+      images: [socialImage(locale, image)]
     },
     twitter: {
       card: "summary_large_image",
       title: seo.title,
       description: seo.description,
-      images: [`/${locale}/opengraph-image`]
+      images: [socialImage(locale, image)]
     }
   };
 }
@@ -84,24 +85,25 @@ export function contentPageMetadata(
       url: canonical,
       title: page.seoTitle,
       description: page.seoDescription,
-      images: [socialImage(page.locale, page.title)]
+      images: [socialImage(page.locale)]
     },
     twitter: {
       card: "summary_large_image",
       title: page.seoTitle,
       description: page.seoDescription,
-      images: [socialImage(page.locale, page.title).url]
+      images: [socialImage(page.locale).url]
     }
   };
 }
 
-function socialImage(locale: string, title: string) {
+function socialImage(locale: string, image?: PublishedOgImage | null) {
   const imageLocale = isUiLocale(locale) ? locale : "en";
   return {
-    url: `/${imageLocale}/opengraph-image`,
+    url: image?.locale === imageLocale ? ogImagePath(image) : fallbackOgImagePath(imageLocale),
     width: 1200,
     height: 630,
-    alt: `${title} — SHPROHLI`
+    type: "image/png",
+    alt: image?.locale === imageLocale ? image.alt : `SHPROHLI — ${uiLocaleRegistry[imageLocale].slogan}`
   };
 }
 

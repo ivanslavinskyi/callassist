@@ -5,6 +5,7 @@ import type {
 } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
 import { contentPageMetadata, homeMetadata } from "./seo-metadata";
+import { uiLocales } from "@callassist/contracts";
 
 const page: PublishedContentPage = {
   key: "privacy",
@@ -54,6 +55,18 @@ const landing: PublishedLanding = {
 };
 
 describe("public SEO metadata", () => {
+  it("uses one published immutable image for OG and Twitter in every locale", () => {
+    for (const locale of uiLocales) {
+      const image = { locale, hash: "a".repeat(64), alt: "Localized social image" };
+      const expected = { url: `/media/og/home/${locale}/${image.hash}.png`, width: 1200, height: 630, alt: image.alt };
+      expect(homeMetadata(locale, null, null, image)).toMatchObject({
+        openGraph: { images: [expected] }, twitter: { images: [expected] }
+      });
+      expect(homeMetadata(locale)).toMatchObject({ openGraph: { images: [{ url: `/og/home/${locale}.png` }] } });
+    }
+    expect(homeMetadata("ru", null, null, { locale: "en", hash: "a".repeat(64), alt: "English" }))
+      .toMatchObject({ openGraph: { images: [{ url: "/og/home/ru.png" }] } });
+  });
   it("generates localized canonical, hreflang, OG, and Twitter metadata", () => {
     expect(contentPageMetadata(page, indexPage)).toMatchObject({
       alternates: {

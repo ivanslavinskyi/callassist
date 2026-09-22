@@ -1046,3 +1046,30 @@ export function saveAnalyticsSettings(input: { settings: import("@callassist/con
 export function getPublicAnalyticsSettings() {
   return apiRequest<import("@callassist/contracts").AnalyticsSettings>("/api/analytics", { cache: "no-store", credentials: "omit" });
 }
+
+export function getAdminOgImages() {
+  return apiRequest<{ locales: import("@callassist/contracts").OgLocaleState[] }>("/api/admin/content/og", { cache: "no-store" });
+}
+export function getPublicOgImages() {
+  return apiRequest<{ images: import("@callassist/contracts").PublishedOgImage[] }>("/api/content/og", { cache: "no-store" });
+}
+export function generateOgImage(locale: string, slogan: string, expectedRevision: number) {
+  return apiRequest<import("@callassist/contracts").OgLocaleState>(`/api/admin/content/og/${locale}/generate`, {
+    method: "POST", body: JSON.stringify({ slogan, expectedRevision })
+  });
+}
+export function uploadOgImage(locale: string, input: import("@callassist/contracts").OgUploadInput) {
+  return apiRequest<import("@callassist/contracts").OgLocaleState>(`/api/admin/content/og/${locale}/upload`, {
+    method: "POST", body: JSON.stringify(input)
+  });
+}
+export function publishOgImage(locale: string, versionId: string, expectedRevision: number) {
+  return apiRequest<import("@callassist/contracts").OgLocaleState>(`/api/admin/content/og/${locale}/publish`, {
+    method: "POST", body: JSON.stringify({ versionId, expectedRevision })
+  });
+}
+export async function getOgPreview(version: import("@callassist/contracts").OgImageVersion) {
+  const response = await fetch(`${API_URL}/api/admin/content/og/${version.locale}/images/${version.hash}.png`, { credentials: "include", cache: "no-store" });
+  if (!response.ok) throw await apiErrorFromResponse(response);
+  return response.blob();
+}

@@ -4,6 +4,7 @@ import type {
   PublishedContentIndex
 } from "@callassist/contracts";
 import { absoluteSiteUrl, homeSeo } from "./site-config";
+import { fallbackOgImagePath, isUiLocale, ogImagePath, type PublishedOgImage } from "@callassist/contracts";
 
 export type SeoAuditIssue =
   | "translation_stale"
@@ -27,15 +28,18 @@ export type SeoAuditRoute = {
   issues: SeoAuditIssue[];
 };
 
-export function buildSeoAudit(index: PublishedContentIndex): SeoAuditRoute[] {
-  const routes: SeoAuditRoute[] = (["en", "de"] as const).map((locale) => {
+export function buildSeoAudit(index: PublishedContentIndex, images: PublishedOgImage[] = []): SeoAuditRoute[] {
+  const available = index.landing?.localizations.filter(item => isUiLocale(item.locale)) ?? [];
+  const sourceLocale = index.landing?.sourceLocale;
+  const defaultLocale = available.find(item => item.locale === sourceLocale)?.locale ?? available[0]?.locale;
+  const routes: SeoAuditRoute[] = available.map(({ locale }) => {
     const localization = index.landing?.localizations.find(
       (candidate) => candidate.locale === locale
     );
     const seo = localization ? {
       title: localization.seoTitle,
       description: localization.seoDescription
-    } : homeSeo[locale];
+    } : homeSeo[isUiLocale(locale) ? locale : "en"];
     return routeAudit({
       key: "home",
       locale,
@@ -45,11 +49,11 @@ export function buildSeoAudit(index: PublishedContentIndex): SeoAuditRoute[] {
       revisionNumber: index.landing?.revision.number ?? null,
       publishedAt: index.landing?.revision.publishedAt ?? null,
       translationStale: localization?.translationStale ?? false,
-      alternates: {
-        en: absoluteSiteUrl("/en"),
-        de: absoluteSiteUrl("/de"),
-        "x-default": absoluteSiteUrl("/en")
-      }
+      alternates: Object.fromEntries([
+        ...available.map(item => [item.locale, absoluteSiteUrl(`/${item.locale}`)]),
+        ...(defaultLocale ? [["x-default", absoluteSiteUrl(`/${defaultLocale}`)]] : [])
+      ]),
+      image: images.find(image => image.locale === locale)
     });
   });
   for (const page of index.pages) {
@@ -90,6 +94,7 @@ function routeAudit(input: {
   publishedAt: string | null;
   translationStale: boolean;
   alternates: Record<string, string>;
+  image?: PublishedOgImage;
 }): SeoAuditRoute {
   const issues: SeoAuditIssue[] = [];
   if (input.translationStale) issues.push("translation_stale");
@@ -109,7 +114,7 @@ function routeAudit(input: {
     publishedAt: input.publishedAt,
     translationStale: input.translationStale,
     alternates: input.alternates,
-    ogImage: absoluteSiteUrl(`/${input.locale}/opengraph-image`),
+    ogImage: absoluteSiteUrl(input.image ? ogImagePath(input.image) : fallbackOgImagePath(isUiLocale(input.locale) ? input.locale : "en")),
     issues
   };
 }

@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Restore prose lists after Preflight; component and utility styles still win. */
+@layer base {
+  ul { list-style: disc outside; padding-inline-start: 1.25em; }
+  ol { list-style: decimal outside; padding-inline-start: 1.25em; }
+}
+
 @font-face {
   font-display: swap;
   font-family: "Geist Web";
