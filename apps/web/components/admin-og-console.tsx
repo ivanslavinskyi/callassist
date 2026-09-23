@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { fallbackOgImagePath, ogImagePath, OG_UPLOAD_MAX_BYTES, uiLocaleRegistry, type OgImageVersion, type OgLocaleState, type OgUploadInput, type UiLocale } from "@callassist/contracts";
 import { ApiError, generateOgImage, getAdminOgImages, getOgPreview, publishOgImage, uploadOgImage } from "@/lib/api";
 import styles from "./admin-og-console.module.css";
@@ -133,11 +133,11 @@ function LocaleEditor({ state, busy, run, onSaved, onPublished }: {
       <label className="field"><span>Image source</span><select disabled={busy} value={mode} onChange={event => setMode(event.target.value as typeof mode)}>
         <option value="generated">Brand template</option><option value="uploaded">Manual upload</option>
       </select></label>
-      {mode === "generated" ? <>
+      {mode === "generated" ? <Fragment key="generated">
         <label className="field"><span>Slogan</span><input disabled={busy} maxLength={100} value={slogan} onChange={event => setSlogan(event.target.value)} /></label>
         <p className={styles.help}>Large logo with a readable slogan. Text is checked to fit within two lines.</p>
         <button className="secondary-button" disabled={busy || !slogan.trim()} onClick={() => void run(async () => onSaved(await generateOgImage(state.locale, slogan, state.revision)))}>Generate preview</button>
-      </> : <>
+      </Fragment> : <Fragment key="uploaded">
         <label className="field"><span>Image file</span><input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy}
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(() => chooseFile(file)); }} /></label>
         <p className={styles.help}>PNG, JPEG or WebP, up to 5 MB and 24 megapixels. Adjust the crop before saving.</p>
@@ -154,7 +154,7 @@ function LocaleEditor({ state, busy, run, onSaved, onPublished }: {
           </div>
           <button className="secondary-button" disabled={busy || !alt.trim()} onClick={() => void run(async () => onSaved(await uploadOgImage(state.locale, { image: upload.image, crop, alt, expectedRevision: state.revision })))}>Save upload preview</button>
         </>}
-      </>}
+      </Fragment>}
       {selected && <>
         <h3>{selected.id === state.draft?.id ? "Draft preview" : "Version preview"}</h3>
         <PrivatePreview version={selected} />
