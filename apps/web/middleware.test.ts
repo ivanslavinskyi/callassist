@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { middleware } from "./middleware";
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("admin middleware boundary", () => {
   it.each(["/brand/logo-light.svg", "/brand/logo-dark.svg", "/icon.svg", "/apple-icon.png", "/favicon.ico"])("serves %s without a locale redirect", pathname => {
@@ -23,6 +25,20 @@ describe("admin middleware boundary", () => {
       headers: { "accept-language": "de-CH,de;q=0.9" }
     }));
     expect(response.headers.get("location")).toBe("https://callassist.test/de/login");
+  });
+
+  it("uses the configured public origin for production locale redirects", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://shprohli.ch");
+    const response = middleware(new NextRequest("http://localhost:3100/?campaign=beta", {
+      headers: {
+        "accept-language": "de-CH",
+        "host": "localhost:3100",
+        "x-forwarded-host": "unexpected.example",
+        "x-forwarded-proto": "https"
+      }
+    }));
+    expect(response.headers.get("location")).toBe("https://shprohli.ch/de?campaign=beta");
   });
 
   it.each(["/en/admin", "/de/admin/calls"]) (

@@ -17,8 +17,10 @@ export function middleware(request: NextRequest) {
       acceptLanguage: request.headers.get("accept-language"),
       cookieLocale: request.cookies.get(uiLocaleCookie)?.value
     });
-    const url = request.nextUrl.clone();
-    url.pathname = localizePathname(pathname, locale);
+    const redirectBase = process.env.NODE_ENV === "production"
+      ? process.env.NEXT_PUBLIC_SITE_URL
+      : request.nextUrl.href;
+    const url = new URL(localizePathname(pathname, locale) + request.nextUrl.search, redirectBase);
     return NextResponse.redirect(url);
   }
   const requestHeaders = new Headers(request.headers);
