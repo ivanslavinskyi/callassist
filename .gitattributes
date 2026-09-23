@@ -2,3 +2,4 @@
 Design/*.ai binary
 Design/*.psd binary
 Design/*.pdf binary
+scripts/shprohli-vps-release.sh text eol=lf
