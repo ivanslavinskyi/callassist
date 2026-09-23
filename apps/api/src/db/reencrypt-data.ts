@@ -27,6 +27,7 @@ type FeedbackRow = {
   payloadFingerprintKeyId: string;
   idempotencyKey: string;
 };
+type FeedbackRotationRow = FeedbackRow & { commentRedacted: boolean };
 
 export function parseReencryptionBatchSize(value: string | undefined) {
   const parsed = value === undefined || value.trim() === ""
@@ -173,12 +174,13 @@ async function reencryptFeedback(
 ) {
   let rewrittenRows = 0;
   let rewrittenCiphertexts = 0;
+  let cursor: string | null = null;
   while (true) {
     const changed = await sql.begin(async (transaction) => {
       await transaction`
         SELECT set_config('callassist.encryption_rotation', 'enabled', true)
       `;
-      const rows = await transaction.unsafe<FeedbackRow[]>(`
+      const rows = await transaction.unsafe<FeedbackRotationRow[]>(`
         SELECT
           id::text AS id,
           goal_result AS "goalResult",
@@ -186,21 +188,21 @@ async function reencryptFeedback(
           comment_ciphertext AS "commentCiphertext",
           payload_fingerprint AS "payloadFingerprint",
           payload_fingerprint_key_id AS "payloadFingerprintKeyId",
-          idempotency_key::text AS "idempotencyKey"
+          idempotency_key::text AS "idempotencyKey",
+          comment_ciphertext IS NULL AND EXISTS (
+            SELECT 1 FROM call_briefs b
+            JOIN call_data_deletion_events e ON e.call_brief_id = b.id
+            WHERE b.id = call_feedback_revisions.call_brief_id
+              AND b.data_deleted_at IS NOT NULL
+          ) AS "commentRedacted"
         FROM call_feedback_revisions
-        WHERE payload_fingerprint_key_id <> $1
-          OR (
-            comment_ciphertext IS NOT NULL
-            AND (
-              split_part(comment_ciphertext, ':', 1) <> 'v2'
-              OR split_part(comment_ciphertext, ':', 2) <> $1
-            )
-          )
+        WHERE ($1::uuid IS NULL OR id > $1::uuid)
         ORDER BY id
         LIMIT $2
         FOR UPDATE SKIP LOCKED
-      `, [keyring.activeKeyId, batchSize]);
+      `, [cursor, batchSize]);
       let changedCiphertexts = 0;
+      let changedRows = 0;
       for (const row of rows) {
         const comment = row.commentCiphertext
           ? decryptJson<string>(row.commentCiphertext, keyring)
@@ -211,14 +213,15 @@ async function reencryptFeedback(
           comment,
           idempotencyKey: row.idempotencyKey
         };
-        assertFingerprint(
-          row.payloadFingerprint,
-          createCallFeedbackFingerprint(
-            input,
-            keyring,
-            row.payloadFingerprintKeyId
-          )
-        );
+        // Audited privacy deletion destroys the original comment, so its old
+        // fingerprint cannot be verified. Re-key only the retained, redacted
+        // fields; intact feedback must still pass integrity verification.
+        if (!row.commentRedacted) {
+          assertFingerprint(
+            row.payloadFingerprint,
+            createCallFeedbackFingerprint(input, keyring, row.payloadFingerprintKeyId)
+          );
+        }
         const commentCiphertext = comment === null
           ? null
           : encryptedPayloadKeyId(row.commentCiphertext!) === keyring.activeKeyId
@@ -226,6 +229,9 @@ async function reencryptFeedback(
             : encryptJson(comment, keyring);
         if (commentCiphertext !== row.commentCiphertext) changedCiphertexts += 1;
         const fingerprint = createCallFeedbackFingerprint(input, keyring);
+        if (commentCiphertext === row.commentCiphertext &&
+          fingerprint === row.payloadFingerprint &&
+          row.payloadFingerprintKeyId === keyring.activeKeyId) continue;
         const updated = await transaction.unsafe<{ id: string }[]>(`
           UPDATE call_feedback_revisions
           SET
@@ -249,14 +255,16 @@ async function reencryptFeedback(
         if (updated.length !== 1) {
           throw new Error("Concurrent feedback update prevented re-encryption");
         }
+        changedRows += 1;
       }
-      return { rows: rows.length, ciphertexts: changedCiphertexts };
+      return { scanned: rows.length, rows: changedRows, ciphertexts: changedCiphertexts, cursor: rows.at(-1)?.id };
     });
     rewrittenRows += changed.rows;
     rewrittenCiphertexts += changed.ciphertexts;
-    if (changed.rows < batchSize) {
+    if (changed.scanned < batchSize) {
       return { rewrittenRows, rewrittenCiphertexts };
     }
+    cursor = changed.cursor!;
   }
 }
 
