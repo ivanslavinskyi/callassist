@@ -179,7 +179,8 @@ fresh_backup() {
 }
 
 replace_link() {
-  local name=$1 destination=$2 temporary="$base/.$name-next-$$"
+  local name=$1 destination=$2 temporary
+  temporary="$base/.$name-next-$$"
   [[ ! -e $temporary && ! -L $temporary ]] || return 1
   ln -s "$destination" "$temporary"
   mv -Tf -- "$temporary" "$base/$name"
@@ -255,7 +256,8 @@ recover_cutover() {
 }
 
 cutover() {
-  local target=$1 target_path=$base/releases/$target
+  local target=$1 target_path
+  target_path=$base/releases/$target
   [[ $(release_sha "$target_path") == "$target" ]] || die 'Invalid target release.'
   candidate_gate "$target_path"
   ledger_gate "$active_path"
