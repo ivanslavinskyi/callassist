@@ -25,10 +25,10 @@ function worker() {
   const result=new SuperadminNotifications(db.url,key,email,{siteUrl:"https://example.test"},calls,{now:()=>now,onError:error=>{throw error;}});
   closers.push(result);return result;
 }
-async function user(role="user",verified=false) {
+async function user(role="user",verified=false,locale="de") {
   const id=randomUUID();
   await sql`INSERT INTO users(id,email,password_hash,phone_e164,phone_verified_at,email_verified_at,first_name,last_name,role,status,ui_locale,created_at)
-    VALUES(${id},${`${id}@example.test`},'test-only',${`+417400${String(++sequence).padStart(5,"0")}`},${verified?new Date():null},${verified?new Date():null},'Nina','Example',${role},'active','de',now())`;
+    VALUES(${id},${`${id}@example.test`},'test-only',${`+417400${String(++sequence).padStart(5,"0")}`},${verified?new Date():null},${verified?new Date():null},'Nina','Example',${role},'active',${locale},now())`;
   return id;
 }
 async function configure(settings:Partial<{enabled:boolean;registrations:boolean;calls:boolean;recipientUserIds:string[]}>) {
@@ -39,7 +39,7 @@ beforeEach(async()=>{
   now=new Date(Date.now()+60_000);email=new MockEmailProvider();
   await sql`UPDATE superadmin_notification_settings SET settings='{"enabled":false,"registrations":true,"calls":true,"recipientUserIds":[]}',revision=revision+1`;
   await sql`TRUNCATE superadmin_notification_audit,superadmin_notifications`;
-  operator=await user("superadmin",true);service=worker();await configure({enabled:true,recipientUserIds:[operator]});
+  operator=await user("superadmin",true,"en");service=worker();await configure({enabled:true,recipientUserIds:[operator]});
 });
 async function confirm(id:string) { return authRepository.markPhoneVerified(id,new Date().toISOString()); }
 async function callFixture(connected=true) {
@@ -54,7 +54,11 @@ async function callFixture(connected=true) {
 }
 async function rows() {return sql`SELECT * FROM superadmin_notifications ORDER BY created_at,id`;}
 describe("durable superadmin notifications",()=>{
-  it("enqueues once only after successful SMS verification, including concurrent requests",async()=>{
+  it.each([
+    ["en", "Email verified: No"],
+    ["de", "E-Mail bestätigt: Nein"]
+  ])("enqueues once after successful SMS verification and uses recipient locale %s",async(locale,verificationText)=>{
+    await sql`UPDATE users SET ui_locale=${locale} WHERE id=${operator}`;
     const id=await user();const record=await authRepository.findUserByEmail(`${id}@example.test`);
     const sms=new MockVerificationProvider("123456");await sms.send(record!.phoneE164);
     const auth=new AuthService({repository:authRepository,verificationProvider:sms,signupCreditGranter:calls});
@@ -64,7 +68,8 @@ describe("durable superadmin notifications",()=>{
     expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
     expect(await rows()).toHaveLength(1);
     await service.tick();expect(email.adminMessages).toHaveLength(1);
-    expect(email.adminMessages[0]!.content.text).toContain("Email verified: No");
+    expect(email.adminMessages[0]!.content.text).toContain(verificationText);
+    expect(email.adminMessages[0]!.content.html).toContain(`lang="${locale}"`);
     await sql`UPDATE users SET phone_verified_at=NULL WHERE id=${id}`;await confirm(id);
     await service.tick();expect(email.adminMessages).toHaveLength(1);
   });
@@ -130,16 +135,21 @@ describe("durable superadmin notifications",()=>{
     await service.tick();expect(email.adminMessages).toHaveLength(0);
     await calls.updateStatus(f.brief.id,"completed");expect(await rows()).toHaveLength(1);
     now=new Date(now.getTime()+5*60_000);await service.tick();
-    expect(email.adminMessages).toHaveLength(1);expect(email.adminMessages[0]!.content.text).toContain("LLM assessment: Unavailable");
+    expect(email.adminMessages).toHaveLength(1);expect(email.adminMessages[0]!.content.text).toContain("AI assessment: Unavailable");
     expect(email.adminMessages[0]!.content.text).toContain(f.attempt.id);
   });
-  it("reports no-answer attempts without inventing an LLM failure or a connection",async()=>{
+  it.each([
+    ["en", "Status: No answer", "Not assessed (no recording consent)", "Connected duration: 0 seconds"],
+    ["de", "Status: Keine Antwort", "Nicht bewertet (keine Zustimmung zur Aufnahme)", "Verbindungsdauer: 0 Sekunden"]
+  ])("reports no-answer attempts in recipient locale %s without inventing an LLM failure or a connection",async(locale,status,assessment,duration)=>{
+    await sql`UPDATE users SET ui_locale=${locale} WHERE id=${operator}`;
     const f=await callFixture(false);
     await calls.applyProviderStatus(`CA-${f.attempt.id}`,"no-answer","failed",f.brief.id);
     await service.tick();expect(email.adminMessages).toHaveLength(1);
     const text=email.adminMessages[0]!.content.text;
-    expect(text).toContain("Status: No answer");expect(text).toContain("Not assessed (no recording consent)");
-    expect(text).toContain("Connected duration: 0 seconds");
+    expect(text).toContain(status);expect(text).toContain(assessment);
+    expect(text).toContain(duration);
+    expect(email.adminMessages[0]!.content.html).toContain(`lang="${locale}"`);
   });
   it("suppresses reports when source data is deleted",async()=>{
     const id=await user();await confirm(id);await sql`UPDATE users SET status='deleted' WHERE id=${id}`;
@@ -196,10 +206,10 @@ describe("durable superadmin notifications",()=>{
     expect(email.adminMessages).toHaveLength(2);
     const first=email.adminMessages.find(m=>m.content.text.includes(`Attempt ID: ${f.attempt.id}`))!.content.text;
     const last=email.adminMessages.find(m=>m.content.text.includes(`Attempt ID: ${second.id}`))!.content.text;
-    expect(first).toContain("Attempt — Summary and assessment: USD 0.000600");
-    expect(first).not.toContain("USD 0.001200");
-    expect(last).toContain("Attempt — Summary and assessment: USD 0.001200");
-    expect(last).not.toContain("USD 0.000600");
-    for(const text of [first,last]) expect(text).toContain("Shared — Plan preparation: USD 0.001800");
+    expect(first).toContain("Attempt — Summary and assessment: US$0.0006");
+    expect(first).not.toContain("US$0.0012");
+    expect(last).toContain("Attempt — Summary and assessment: US$0.0012");
+    expect(last).not.toContain("US$0.0006");
+    for(const text of [first,last]) expect(text).toContain("Shared — Plan preparation: US$0.0018");
   });
 });

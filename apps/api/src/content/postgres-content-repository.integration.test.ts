@@ -207,7 +207,7 @@ describe("PostgresContentRepository", () => {
     expect(draft).toMatchObject({
       number: sourceNumber + 1,
       status: "draft",
-      locales: ["de", "en"]
+      locales: ["de", "en", "fr", "it", "rm", "ru", "uk"]
     });
     await expect(contentRepository.updateDraft(editor.id, "privacy", {
       locale: "en",

@@ -37,6 +37,7 @@
   },
   "pnpm": {
     "overrides": {
+      "fflate@0.7.3": "0.7.5",
       "postcss": "8.5.23",
       "sharp": "0.35.4"
     }
