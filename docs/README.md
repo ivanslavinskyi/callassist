@@ -1,6 +1,6 @@
 # Documentation index
 
-Release status refreshed 2026-09-22, including expenses, notifications, seven-language localization, CMS completion, OG management and telemetry export. Public brand: SHPROHLI;
+Release status refreshed 2026-09-23, including expenses, notifications, seven-language localization, CMS completion, OG management and telemetry export. Public brand: SHPROHLI;
 internal package names, cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
@@ -18,8 +18,9 @@ mapped there and are not separate work queues.
 
 ## Current references
 
-Latest checkpoint: [delivery and documentation reconciliation, 17–22 September](delivery-2026-09-22.md).
-Source migrations now run through **0079**. The [roadmap](mvp-plan.md) retains NO-GO
+Latest checkpoint: [predeployment code, dependency and documentation audit, 23 September](release-audit-2026-09-23.md).
+Source migrations now run through **0080**. Earlier feature delivery is recorded in
+[17–22 September](delivery-2026-09-22.md). The [roadmap](mvp-plan.md) retains NO-GO
 for external release acceptance; local implementation and production rollout are distinct.
 
 Local implementation: [admin call telemetry export, 2026-09-22](admin-call-telemetry-export.md).
@@ -50,6 +51,7 @@ EN/DE publications; current translation evidence is in the 21 September report a
 
 | Document | Purpose |
 | --- | --- |
+| [Audit, 2026-09-23](release-audit-2026-09-23.md) | Dependency fixes, export pagination, current verification and deployment boundaries |
 | [Project README](../README.md) | Product scope, setup, commands and repository status |
 | [Delivery, 17–22 September](delivery-2026-09-22.md) | Recent implementation, migration 0079, verification limits and remaining release gates |
 | [Telemetry export](admin-call-telemetry-export.md) | ZIP/JSONL contract, periods, encrypted queue, privacy revocation, limits and rollout |

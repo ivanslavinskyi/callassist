@@ -4,7 +4,7 @@ This document defines the repository-owned operational contract. It does not cla
 that a production monitor, pager, log destination, provider probe, or named human
 rotation is configured. Those deployment controls remain release blockers.
 
-Updated 2026-09-22 for expense diagnostics, notification/export consumers and recovery,
+Updated 2026-09-23 for expense diagnostics, notification/export consumers and recovery,
 alongside opt-out and deployment requirements. B01/B02 are remediated locally with
 [current verification and its browser boundary](b01-b02-remediation-2026-09-13.md). Earlier R01-R05/R18/R19 work has
 [historical remediation evidence](remediation-2026-09-07.md). The two-stage real-call runner
@@ -36,7 +36,7 @@ These local values do not configure the external deployment.
 
 ## Call result diagnosis
 
-Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply the current migration catalog through 0079 before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
+Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply the current migration catalog through 0080 before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
 
 ## Preparation and call UI diagnosis
 
@@ -353,12 +353,14 @@ harassment, disputed consent, or possible data exposure to the safety/privacy ow
 ## Security and migration release evidence
 
 Before deployment, preserve the successful CI run for the exact commit and confirm
-that it includes the frozen install, production dependency audit, migration catalog
+that it includes the frozen install, production and development dependency audit, migration catalog
 validation, two consecutive migration runs, a disposable recovery drill, lint,
 typecheck, tests, populated-database re-encryption proof and builds. Confirm
 that branch protection requires the workflow and review. A passing dependency audit
-means no finding at or above its configured high-severity threshold; moderate findings
-still require triage and a recorded disposition.
+now requires zero findings at low severity or above, including development tools.
+This cannot detect every bundled dependency or prove absence of exploitable bugs;
+the [23 September audit](release-audit-2026-09-23.md) includes a separate check of
+the OG renderer's upstream advisory.
 
 Turbo now passes declared environment in strict mode; test results are not cached.
 PostgreSQL suites fail without a dedicated test URL or available database. A clean

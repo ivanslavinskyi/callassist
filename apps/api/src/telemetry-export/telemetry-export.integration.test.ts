@@ -79,6 +79,16 @@ describe("durable telemetry export", () => {
       await expect(sql.unsafe(`${sourceQuery(source)} LIMIT 0`, ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]), source.table).resolves.toBeDefined();
     }
   });
+  it.each([
+    { at: "2026-09-23T00:00:00.000Z", id: "-".repeat(36) },
+    { at: "2026-09-23T00:00:00.000Z", id: "a".repeat(36) },
+    { at: 123, id: "12345678-1234-4123-8123-123456789abc" },
+    { at: "2026-02-30T00:00:00.000Z", id: "12345678-1234-4123-8123-123456789abc" },
+    { at: "2026-09-23T00:00:00.000Z", id: null }
+  ])("rejects malformed export cursors as client input errors: %j", async cursor => {
+    await expect(service.list(actor, Buffer.from(JSON.stringify(cursor)).toString("base64url")))
+      .rejects.toMatchObject({ code: "EXPORT_INVALID_CURSOR", status: 400 });
+  });
   it("exports the complete retained cohort, revisions and orphan preparation with verified ZIP checksums", async () => {
     const input = request();
     const created = await service.create(actor, input);
@@ -247,5 +257,20 @@ describe("durable telemetry export", () => {
     await service.cancel(actor, created.id);
     await sql`UPDATE admin_telemetry_exports SET created_at=now() WHERE actor_user_id=${actor}`;
     await expect(service.create(actor, request())).rejects.toThrow("EXPORT_CAPACITY_REACHED");
+  });
+  it("paginates without losing exports created within the same millisecond", async () => {
+    const ids: string[] = Array.from({ length: 21 }, () => randomUUID());
+    for (const id of ids) {
+      await sql`INSERT INTO admin_telemetry_exports(id,actor_user_id,request_id,input_hash,reason,from_at,to_at,status,created_at)
+        VALUES(${id},${stranger},${randomUUID()},'fixture','Pagination test','2020-01-01','2020-01-02','cancelled','2030-01-01T00:00:00.123456Z')`;
+    }
+    const first = await service.list(stranger);
+    expect(first.items).toHaveLength(20);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await service.list(stranger, first.nextCursor!);
+    const seen = [...first.items, ...second.items].map(item => item.id).filter(id => ids.includes(id));
+    expect(seen).toHaveLength(21);
+    expect(new Set(seen).size).toBe(21);
+    expect((await service.list(owner)).items).toHaveLength(0);
   });
 });

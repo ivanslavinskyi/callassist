@@ -45,12 +45,12 @@
     "@fastify/cors": "^11.0.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.3.0",
-    "@vercel/og": "0.8.6",
     "dotenv": "^17.4.2",
     "fastify": "^5.12.1",
     "fflate": "0.8.3",
     "fontkit": "^2.0.4",
     "postgres": "^3.4.9",
+    "satori": "0.33.5",
     "sharp": "0.35.4",
     "twilio": "^6.0.2",
     "ws": "^8.21.3"
@@ -62,6 +62,6 @@
     "tsup": "^8.5.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.11"
   }
 }

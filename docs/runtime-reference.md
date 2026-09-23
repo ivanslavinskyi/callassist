@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated 2026-09-22 for expenses, notifications, Analytics, OG images and telemetry
+Updated 2026-09-23 for expenses, notifications, Analytics, OG images and telemetry
 exports; the route inventory below was regenerated from the current source. Configuration values here describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
@@ -170,7 +170,7 @@ were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
 ## Recent configuration and workers
 
-Apply the complete source catalog through **0079** before starting the new API and
+Apply the complete source catalog through **0080** before starting the new API and
 worker. Source catalog availability is not deployment evidence; verify the target's
 applied checksums. See [delivery and rollout](delivery-2026-09-22.md).
 

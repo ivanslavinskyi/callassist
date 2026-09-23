@@ -2,6 +2,13 @@
 
 Status: core implementation complete; final multi-browser/device acceptance remains.
 
+2026-09-23: email/phone editors now expand inside the corresponding profile row.
+Only one contact editor is open at a time. Opening focuses and reveals the editable
+input; verification focuses the OTP field. Cancel/success restores focus to the
+row's Change button, and success is announced beside that row. Contact/name
+switches are disabled while a contact request is pending. Username/password-manager
+semantics remain intact. See the [current audit](release-audit-2026-09-23.md).
+
 Reviewed 2026-09-14 for the email/SMS checkpoint following `f172a1a`. The dated checkpoint counts below are historical;
 latest verification records are in the [documentation index](README.md). Automated tests
 do not prove real password-manager or screen-reader behavior. R05 contact-challenge

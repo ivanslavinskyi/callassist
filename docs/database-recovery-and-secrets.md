@@ -1,8 +1,8 @@
 # Database recovery and secret operations
 
-Updated 2026-09-22. Rotation/restore share the inventory of **20 ciphertext columns**,
+Updated 2026-09-23. Rotation/restore share the inventory of **20 ciphertext columns**,
 including assessment, notification and telemetry archive payloads. The source catalog
-has **79 migrations**, through `0079_admin_telemetry_exports.sql`; recovery checks
+has **80 migrations**, through `0080_feedback_rotation_after_privacy_redaction.sql`; recovery checks
 29 critical tables. Schema inventory is checked by isolated integration tests.
 See [text-data verification](verification-text-data-2026-09-09.md) for dated local
 rotation/restore/deletion evidence; it is not production recovery evidence.
@@ -129,6 +129,12 @@ owners, access policy and one exercised credential/key procedure are evidenced.
 
 ## Data-encryption key rotation
 
+Apply migration 0080 before rotation. It restores the narrow feedback rotation
+exception without weakening immutable ratings or privacy redaction. The rotation
+command distinguishes a redacted comment from the original fingerprint: it can
+re-key retained ratings without reconstructing deleted text. Regression coverage
+is in `apps/api/src/db/feedback-rotation.integration.test.ts`.
+
 Migration 0075 also adds contact evidence and opt-out challenges. A restore must
 preserve these tables together with suppressions and the matching contact HMAC key;
 they do not belong to the ciphertext re-encryption inventory. Test recipient
@@ -141,9 +147,9 @@ the preparation and proves a no-op replay. The merged rotation regression also
 verifies immutable plans and attempt snapshots after retiring the old runtime key.
 The 2026-09-07 restore drill verified 12 populated families from the then 13-family inventory;
 its schema parity tests covered those 13 columns. See [merge evidence](merge-verification-2026-09-07.md).
-The current inventory has 18 ciphertext columns, adding final transcript revisions,
-generated text artifacts, persisted artifact chunks, plan review receipts and canonical
-call assessments. Updated
+The current inventory has 20 ciphertext columns, including final transcript revisions,
+generated text artifacts, persisted artifact chunks, plan review receipts, canonical
+call assessments, superadmin notifications and temporary telemetry archive parts. Updated
 isolated rotation and Docker restore tests verify these payloads after retiring the
 old runtime key, including immutable hashes and privacy-redaction behavior. This local
 evidence does not replace production backup/deletion-replay acceptance.

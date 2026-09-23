@@ -1,18 +1,18 @@
 # Deployment preflight and first release
 
-Updated 2026-09-22. B06 remains open. The owner chose `shprohli.ch` for the first
+Updated 2026-09-23. B06 remains open. The owner chose `shprohli.ch` for the first
 deployment with temporary restricted access, on an existing VPS that already serves
 another Next.js project. B07 landing changes are now implemented and published locally;
 VPS topology and access details remain to be supplied before deployment.
 A separate staging hostname/server is not a release requirement; external acceptance
 can run on the final domain before public access opens.
 
-The latest local checkpoint includes source migrations through 0079, corrected spending
+The latest local checkpoint includes source migrations through 0080, corrected spending
 reconciliation, the 20,000-token compiler ceiling and the
 [preparation/review/call UI update](workflow-feedback-2026-09-15.md), followed by
 [distinct call results, history and admin metrics](call-lifecycle-history-2026-09-15.md).
 It also includes the [16 September landing, language and opt-out changes](delivery-2026-09-16.md).
-Apply migrations through 0079 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
+Apply migrations through 0080 before restarting every updated API/worker. Old workers refund immediately and must not coexist with the new final-assessment settlement path.
 
 The [superadmin notification layer](superadmin-notifications.md) requires the same
 `EMAIL_DRIVER`, `RESEND_API_KEY`, `EMAIL_FROM`, and `NEXT_PUBLIC_SITE_URL` on API and
@@ -37,8 +37,9 @@ stay queued for manual reconciliation. Review [the rollout procedure](recipient-
 Follow the [17–22 September delivery record](delivery-2026-09-22.md) as well as the
 older acceptance evidence. Migrations 0076–0079 cover expenses, notifications, OG
 images and telemetry exports; verify the target database rather than inferring its
-state from the source catalog. Migration 0079 has only been exercised on isolated
-fixtures in the export implementation task.
+state from the source catalog. The current candidate also requires migration 0080 for feedback re-encryption
+after privacy redaction. Check the target migration ledger; source/CI state does
+not prove the target has been migrated. See the [23 September audit](release-audit-2026-09-23.md).
 
 - Deploy the same API/worker revision and keyring. Verify the export consumer
   heartbeat in Calls; `ADMIN_TELEMETRY_EXPORT_ENABLED=false` disables it. PostgreSQL

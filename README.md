@@ -5,7 +5,7 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-22:** implemented supervised MVP with substantial beta
+**Repository status, 2026-09-23:** implemented supervised MVP with substantial beta
 infrastructure. **B01/B02 are remediated locally:** the recorded dependency audit was clean;
 Admin System supports nonempty jobs and independent outbound-call control.
 Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
@@ -38,10 +38,11 @@ isolated fixtures; external provider and deployment acceptance remain open.
 The [17–22 September delivery record](docs/delivery-2026-09-22.md) adds unified
 expense accounting, superadmin notifications, seven-language UI/site/email,
 localized CMS r10, language medallions, managed homepage OG images and admin
-telemetry ZIP/JSONL exports. The current source migration catalog ends at **0079**.
-Export verification passed 84 targeted tests and API/web builds; this does not
-replace a fresh full-suite release run. Migration 0079 has only been applied to
-isolated test databases in the implementation task.
+telemetry ZIP/JSONL exports. The current source migration catalog ends at **0080**.
+The [23 September audit](docs/release-audit-2026-09-23.md) supersedes the earlier
+verification checkpoint: dependency remediation, CI scope, contact-form behavior,
+export pagination and migration/rotation checks are recorded there. The target
+deployment database must still be checked explicitly.
 **NO-GO for public testing** remains: delivery scenarios,
 deployment and operational acceptance are open. See the
 [beta controls and stability report](docs/beta-controls-2026-09-14.md).
@@ -199,13 +200,13 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog now extends through `0079_admin_telemetry_exports.sql`.
+The migration catalog now extends through `0080_feedback_rotation_after_privacy_redaction.sql`.
 Public opt-out requires a separate `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` and a stable
 `RECIPIENT_CONTACT_HASH_KEY` shared by API/workers. Follow the
 [opt-out deployment and backfill procedure](docs/recipient-opt-out.md) and
 [deployment preflight](docs/deployment-preflight.md); pushing code does not configure them.
 Latest implementation checks and their limits
-are recorded in [delivery, 2026-09-16](docs/delivery-2026-09-16.md).
+are recorded in the [23 September audit](docs/release-audit-2026-09-23.md).
 That record distinguishes a full-suite run from subsequent targeted checks; it is
 not a claim of a fresh full-suite run on every commit. Older test counts are dated
 evidence, not the current suite size. See [documentation reconciliation](docs/documentation-sync-2026-09-12.md)
@@ -231,7 +232,7 @@ Production requires external workers, durable storage, managed secrets, TLS, a
 same-host web/API cookie topology, restricted Twilio geographic permissions and
 completed operational/privacy gates. Both API and worker require explicit
 `BRIEF_COMPILER_DRIVER=openai` in production; missing or mock drivers fail startup.
-Rotation and restore verification cover all seventeen ciphertext columns. See the
+Rotation and restore verification cover all twenty ciphertext columns. See the
 [remediation evidence](docs/remediation-2026-09-07.md) and [recovery runbook](docs/database-recovery-and-secrets.md).
 
 ## Documentation

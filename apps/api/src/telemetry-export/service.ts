@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { telemetryExportViewSchema, type TelemetryExportInput, type TelemetryExportView } from "@callassist/contracts";
 import { decryptJson, encryptJson, parseDataEncryptionKeyring, type DataEncryptionMaterial } from "../security/encryption";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
+import { isUuid } from "../storage/call-repository";
 import { buildTelemetryArchive, ExportError } from "./archive";
 import { resolveExportPeriod } from "./period";
 
@@ -68,15 +69,22 @@ export class TelemetryExportService {
     let before: { at: string; id: string } | null = null;
     if (cursor) {
       try {
+        if (cursor.length > 512 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
         before = JSON.parse(Buffer.from(cursor, "base64url").toString());
-        if (!before || !Number.isFinite(Date.parse(before.at)) || !/^[a-f0-9-]{36}$/.test(before.id)) throw new Error();
+        if (!before || typeof before.at !== "string" || typeof before.id !== "string" || !isUuid(before.id) ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(?:\d{3})?Z$/.test(before.at) ||
+          !Number.isFinite(Date.parse(before.at)) ||
+          new Date(before.at).toISOString() !== before.at.replace(/(\.\d{3})\d{3}Z$/, "$1Z")) throw new Error();
       } catch { throw new ExportError("EXPORT_INVALID_CURSOR", 400); }
     }
-    const rows = await this.sql.unsafe<Row[]>(`SELECT ${rowFields} FROM admin_telemetry_exports WHERE actor_user_id=$1
-      AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT 21`, [actor, before?.at ?? null, before?.id ?? null]);
+    // Keep PostgreSQL microseconds in the cursor; JS Date would truncate them and skip rows.
+    const rows = await this.sql.unsafe<(Row & { cursor_at: string })[]>(`SELECT ${rowFields},
+      to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at
+      FROM admin_telemetry_exports WHERE actor_user_id=$1
+      AND ($2::text IS NULL OR (created_at,id)<($2::text::timestamptz,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT 21`, [actor, before?.at ?? null, before?.id ?? null]);
     const last = rows[19];
     const [heartbeat] = await this.sql<{ worker_seen_at: Date | null }[]>`SELECT worker_seen_at FROM admin_telemetry_privacy_epoch WHERE id=true`;
-    return { available: true, workerLastSeenAt: heartbeat?.worker_seen_at?.toISOString() ?? null, items: rows.slice(0, 20).map(view), nextCursor: rows.length > 20 && last ? Buffer.from(JSON.stringify({ at: last.created_at.toISOString(), id: last.id })).toString("base64url") : null };
+    return { available: true, workerLastSeenAt: heartbeat?.worker_seen_at?.toISOString() ?? null, items: rows.slice(0, 20).map(view), nextCursor: rows.length > 20 && last ? Buffer.from(JSON.stringify({ at: last.cursor_at, id: last.id })).toString("base64url") : null };
   }
   async get(actor: string, id: string) {
     const [row] = await this.sql.unsafe<Row[]>(`SELECT ${rowFields} FROM admin_telemetry_exports WHERE id=$1 AND actor_user_id=$2`, [id, actor]);

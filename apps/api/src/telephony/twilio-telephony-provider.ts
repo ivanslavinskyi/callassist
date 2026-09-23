@@ -128,13 +128,17 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
   }
 
   async getRecordingMedia(providerRecordingId: string) {
+    // Bound headers and body together, including the legacy mono fallback.
+    const signal = AbortSignal.timeout(30_000);
     let channels: 1 | 2 = 2;
-    let response = await this.#downloadRecording(providerRecordingId, channels);
+    let response = await this.#downloadRecording(providerRecordingId, channels, signal);
     if (response.status === 400) {
+      await response.body?.cancel();
       channels = 1;
-      response = await this.#downloadRecording(providerRecordingId, channels);
+      response = await this.#downloadRecording(providerRecordingId, channels, signal);
     }
     if (!response.ok) {
+      await response.body?.cancel();
       throw new Error(`TWILIO_RECORDING_DOWNLOAD_${response.status}`);
     }
     return {
@@ -145,7 +149,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     };
   }
 
-  #downloadRecording(providerRecordingId: string, channels: 1 | 2) {
+  #downloadRecording(providerRecordingId: string, channels: 1 | 2, signal: AbortSignal) {
     const url = new URL(
       `/2010-04-01/Accounts/${encodeURIComponent(
         this.#accountSid
@@ -154,6 +158,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     );
     url.searchParams.set("RequestedChannels", String(channels));
     return fetch(url, {
+      signal,
       headers: {
         Authorization: `Basic ${Buffer.from(
           `${this.#accountSid}:${this.#authToken}`

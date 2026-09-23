@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { ImageResponse } from "@vercel/og";
+import satori from "satori";
 import { create, type Font } from "fontkit";
 import sharp from "sharp";
 import { OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT, OG_UPLOAD_MAX_BYTES, ogSloganSchema, type OgUploadInput } from "@callassist/contracts";
@@ -14,7 +14,7 @@ function loadAssets() {
   ]).then(async ([font, logo]) => ({
     font, metrics: create(font) as Font,
     logo: `data:image/png;base64,${(await sharp(logo).resize(880).png().toBuffer()).toString("base64")}`,
-    templateVersion: `home-v2-${createHash("sha256").update(font).update(logo).digest("hex").slice(0, 12)}`
+    templateVersion: `home-v3-${createHash("sha256").update(font).update(logo).digest("hex").slice(0, 12)}`
   })).catch(error => { assets = undefined; throw error; });
 }
 
@@ -58,11 +58,13 @@ export async function renderOgImage(input: string) {
       } }
     ]
   } };
-  const response = new ImageResponse(element, {
+  // Use the patched renderer directly: an older wrapper can bundle vulnerable
+  // Satori code that neither a transitive override nor audit can replace.
+  const svg = await satori(element, {
     width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT,
     fonts: [{ name: "Roboto", data: Uint8Array.from(font).buffer, weight: 500, style: "normal" }]
   });
-  const png = await sharp(Buffer.from(await response.arrayBuffer())).png().toBuffer();
+  const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return { png, slogan, templateVersion };
 }
 

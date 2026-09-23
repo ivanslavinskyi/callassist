@@ -82,7 +82,7 @@ function createProvider() {
 }
 
 describe("TwilioTelephonyProvider", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("enforces the admitted seven-minute duration at the provider even if the API stops", async () => {
     const { provider, calls } = createProvider();
@@ -307,6 +307,22 @@ describe("TwilioTelephonyProvider", () => {
     expect(String(fetchImplementation.mock.calls[1][0])).toContain(
       "RequestedChannels=1"
     );
+    expect(fetchImplementation.mock.calls[1][1].signal).toBe(fetchImplementation.mock.calls[0][1].signal);
+  });
+
+  it.each(["headers", "body"])("aborts a recording download stalled at %s", async phase => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => realTimeout(20));
+    vi.stubGlobal("fetch", vi.fn((_url: URL, options: RequestInit) => {
+      const wait = () => new Promise<never>((_resolve, reject) => {
+        const signal = options.signal;
+        if (signal?.aborted) reject(signal.reason);
+        else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      return phase === "headers" ? wait() : Promise.resolve({ ok: true, status: 200, headers: new Headers(), arrayBuffer: wait });
+    }));
+    const { provider } = createProvider();
+    await expect(provider.getRecordingMedia("RE-stalled")).rejects.toMatchObject({ name: "TimeoutError" });
   });
 
   it("treats an already-deleted provider recording as deleted", async () => {

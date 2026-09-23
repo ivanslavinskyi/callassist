@@ -4,6 +4,12 @@ Implemented locally on 2026-09-22. This document describes the shipped source co
 not a production deployment. The earlier [research and proposal](admin-call-telemetry-export-proposal-2026-09-22.md)
 records the investigation and future instrumentation work.
 
+Updated 2026-09-23: list cursors validate UUIDs and canonical UTC timestamps before
+querying PostgreSQL. Invalid cursors return `400 EXPORT_INVALID_CURSOR`. Pagination
+retains PostgreSQL microseconds both in the cursor and in its bound SQL parameter,
+so records sharing a millisecond are not skipped. Existing millisecond cursors
+remain accepted. See the [audit and regression evidence](release-audit-2026-09-23.md).
+
 ## Using the feature
 
 Open **Admin → Calls → Export telemetry** as an active, verified superadmin.

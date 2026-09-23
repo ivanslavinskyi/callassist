@@ -58,6 +58,13 @@ again. Each changed image has a new content-hash URL; old files are retained.
 
 ## Deployment and maintenance
 
+The 23 September security update uses patched Satori 0.33.5 directly with sharp
+0.35.4 for PNG output. Updating only a transitive Satori resolution cannot repair code
+bundled inside an older `@vercel/og` release. Install the committed lockfile and rebuild/restart
+the API. The template is now v3; previously published PNGs remain valid. In the admin
+editor, generated/upload branches have separate React keys, so switching to a file
+input does not reuse the controlled slogan input. See the [audit](release-audit-2026-09-23.md).
+
 1. Install dependencies with the committed pnpm lockfile.
 2. Apply normal database migrations before starting the updated API.
 3. Build and deploy the API and web together. API build copies local logo/font

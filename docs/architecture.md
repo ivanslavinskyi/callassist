@@ -1,6 +1,6 @@
 # SHPROHLI architecture
 
-Updated 2026-09-22 for seven-language UI/content/email, expenses, notifications,
+Updated 2026-09-23 for seven-language UI/content/email, expenses, notifications,
 OG publication and telemetry exports, alongside the existing opt-out/session boundaries. This describes
 implemented behavior, including initial email proof, localized transactional delivery,
 appointments, compact results and live-transcript recovery.
@@ -51,7 +51,8 @@ Generation has a 10-second watchdog; playback uses queued PCMU duration plus a
 2-second allowance, capped at 15 seconds from the farewell request. Persistence
 has a 2-second bridge deadline; on failure, the stream closes and the existing
 maximum-duration recovery remains the last bound. Twilio REST requests time out
-after 10 seconds. `conversation.hangup` records bounded phase/reason/trigger facts,
+after 10 seconds. Recording downloads have a separate 30-second total deadline,
+including response headers, body and the legacy mono fallback. `conversation.hangup` records bounded phase/reason/trigger facts,
 with normal or fallback reasons in `conversation.ended`. Feature flag rollback
 requires an API restart and leaves consent/error paths and queued recovery intact.
 
@@ -110,11 +111,16 @@ mode. [Configuration and endpoints](runtime-reference.md) describe the actual in
 
 ## Browser, session and role boundaries
 
-Customer/public routes live under `/en` and `/de`: Landing, content slugs,
+Customer/public routes live under `/de`, `/fr`, `/it`, `/rm`, `/en`, `/ru` and `/uk`: Landing, content slugs,
 register/verify/login/recover, onboarding, opt-out, redeem, `/app`, `/app/account`,
-and `/app/calls/[id]`. Admin is English-only under `/admin`, with separate console
+`/app/history`, and `/app/calls/[id]`. Admin is English-only under `/admin`, with separate console
 and preview route groups. Removed localized admin and old call routes have no
 compatibility redirects. See [admin architecture](admin-interface-architecture.md).
+
+Account email and phone editors expand inside their own profile row, with one
+contact editor open at a time. Opening/OTP transitions focus the editable input;
+closing or saving returns focus to its trigger and success is announced beside
+the updated row. Requests in flight disable switching to another profile editor.
 
 The URL selects customer UI locale; middleware negotiates absent locales from a
 browser cookie, `Accept-Language`, then English. Account language preferences have
@@ -523,7 +529,7 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 ## Persistence and encryption
 
 The current catalog extends from `0001` through
-`0079_admin_telemetry_exports.sql`. The catalog is contiguous/checksummed; advisory locking and
+`0080_feedback_rotation_after_privacy_redaction.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases
@@ -550,14 +556,16 @@ migration runner enforces the gate; see the [rollout sequence](approved-call-pla
 
 AES-256-GCM `v2` envelopes authenticate key ID as additional data; the keyring supports
 an active write key, up to four decrypt-only previous keys and an explicit legacy `v1`
-mapping. Rotation and restore verification share an inventory of seventeen ciphertext
-columns, including preparation inputs and all four new text payload families. An integration test
+mapping. Rotation and restore verification share an inventory of twenty ciphertext
+columns, including preparation/text payloads, final assessments, notification
+payloads and temporary telemetry archive parts. An integration test
 checks the inventory against the migrated schema and completes a queued preparation
 after rotating and removing the old runtime key. See the [recovery runbook](database-recovery-and-secrets.md).
 
 Immutable audit/financial/consent evidence is separate from removable call content.
 Narrow privacy-redaction triggers allow feedback comments to be removed without
-rewriting scores. “Encrypted private fields” does not mean full-database encryption
+rewriting scores. Migration 0080 also permits the scoped ciphertext/fingerprint
+rotation operation; redacted comments remain absent after rotation. “Encrypted private fields” does not mean full-database encryption
 or anonymization of all evidence. Database/disk/backup encryption, retention schedules
 and deletion replay are separate deployment obligations.
 
