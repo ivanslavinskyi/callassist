@@ -283,6 +283,7 @@ export function PasswordRecoveryForm() {
   const [error, setError] = useState<string | null>(null);
   const [recoveryId, setRecoveryId] = useState<string | null>(null);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState("");
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -294,6 +295,7 @@ export function PasswordRecoveryForm() {
         email: String(data.get("email") ?? "").trim(), uiLocale: locale
       });
       setRecoveryId(result.recoveryId);
+      setVerificationCode("");
       setStage("verify");
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));
@@ -305,16 +307,22 @@ export function PasswordRecoveryForm() {
   async function verify(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!recoveryId) return restart();
+    const code = String(new FormData(event.currentTarget).get("code") ?? "").trim();
+    if (!/^\d{4,10}$/.test(code)) {
+      setVerificationCode("");
+      setError(copy.errors.invalidVerification);
+      return;
+    }
     setBusy(true);
     setError(null);
-    const data = new FormData(event.currentTarget);
     try {
       const result = await verifyPasswordRecovery({
         recoveryId,
-        code: String(data.get("code") ?? "").trim()
+        code
       });
       setRecoveryToken(result.recoveryToken);
       setRecoveryId(null);
+      setVerificationCode("");
       setStage("reset");
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));
@@ -348,6 +356,7 @@ export function PasswordRecoveryForm() {
   function restart() {
     setRecoveryId(null);
     setRecoveryToken(null);
+    setVerificationCode("");
     setError(null);
     setBusy(false);
     setStage("start");
@@ -368,10 +377,23 @@ export function PasswordRecoveryForm() {
       <AuthFrame>
         <h1>{copy.recovery.codeTitle}</h1>
         <p className="auth-intro">{copy.recovery.codeIntro}</p>
-        <form className="auth-form" onSubmit={verify}>
+        <form className="auth-form" key="recovery-code" onSubmit={verify}>
           <label className="field">
             <span>{copy.recovery.code}</span>
-            <input autoComplete="one-time-code" inputMode="numeric" maxLength={10} minLength={4} name="code" pattern="[0-9]{4,10}" placeholder={copy.recovery.codePlaceholder} required />
+            <input
+              autoComplete="one-time-code"
+              id="password-recovery-sms-code"
+              inputMode="numeric"
+              maxLength={10}
+              minLength={4}
+              name="code"
+              onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
+              pattern="[0-9]{4,10}"
+              placeholder={copy.recovery.codePlaceholder}
+              required
+              type="text"
+              value={verificationCode}
+            />
           </label>
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <SubmitButton busy={busy} busyLabel={copy.recovery.verifying} label={copy.recovery.verify} />
@@ -386,7 +408,7 @@ export function PasswordRecoveryForm() {
       <AuthFrame>
         <h1>{copy.recovery.resetTitle}</h1>
         <p className="auth-intro">{copy.recovery.resetIntro}</p>
-        <form className="auth-form" onSubmit={complete}>
+        <form className="auth-form" key="recovery-reset" onSubmit={complete}>
           <label className="field">
             <span>{copy.recovery.password}</span>
             <input autoComplete="new-password" maxLength={128} minLength={12} name="newPassword" required type="password" />
@@ -408,7 +430,7 @@ export function PasswordRecoveryForm() {
     <AuthFrame>
       <h1>{copy.recovery.title}</h1>
       <p className="auth-intro">{copy.recovery.intro}</p>
-      <form className="auth-form" onSubmit={start}>
+      <form className="auth-form" key="recovery-email" onSubmit={start}>
         <label className="field">
           <span>{copy.recovery.email}</span>
           <input autoComplete="email" maxLength={320} name="email" required type="email" />
