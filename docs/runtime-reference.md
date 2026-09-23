@@ -64,7 +64,8 @@ configuration evidence: [hangup restoration](hangup-runtime-restoration-2026-09-
 | --- | --- | --- |
 | `NODE_ENV` | Set explicitly to `production` for API/worker deployment | Enables fail-closed production checks and secure API cookie |
 | `STORAGE_DRIVER` | Example `postgres`; factory fallback `memory` | Calls, auth, content and shared rate limiter |
-| `DATABASE_URL` | Example `localhost:56432/callassist` | Server-only database credentials; production validator rejects loopback |
+| `DATABASE_URL` | Example `localhost:56432/callassist` | Server-only database credentials; production accepts loopback only with `ALLOW_LOOPBACK_DATABASE=true` |
+| `ALLOW_LOOPBACK_DATABASE` | Unset by default; `true` for a reviewed local PostgreSQL cluster | API/worker production validator; does not weaken public-origin validation |
 | `TEST_DATABASE_URL` | Separate `callassist_test` on the selected server | Integration tests require a dedicated `*_test` database; missing/unavailable URL fails |
 | `POSTGRES_PORT` / `POSTGRES_PASSWORD` | Example `56432` / development password | Compose; port fallback without variable is `55432` |
 | `DATA_ENCRYPTION_KEY` | Independent base64 32-byte key | API/worker private JSON encryption |
@@ -74,7 +75,8 @@ configuration evidence: [hangup restoration](hangup-runtime-restoration-2026-09-
 | `PROMO_CODE_HASH_KEY` | Generated independently by env:init | Promo HMAC; legacy local fallback to data key, independent key required in production API |
 | `RATE_LIMIT_HASH_KEY` | Generated independently by env:init | Shared identifier HMAC; independent production API key |
 | `EMAIL_VERIFICATION_HASH_KEY` | Generated independently by env:init | Initial email verification and email-change OTP HMAC; independent production API key |
-| `PORT` | `4000` | Main API binds `0.0.0.0` |
+| `PORT` | `4000` | Main API port |
+| `API_HOST` | Production default `127.0.0.1`; development default `0.0.0.0` | Literal main API bind address; set explicitly for a private container interface |
 | `TWILIO_WEBHOOK_PORT` | `4001` | Twilio-mode listener; must differ from main port |
 | `TWILIO_WEBHOOK_HOST` | `127.0.0.1` | Literal listener IP; use a private, unpublished interface when containerised |
 | `TRUSTED_PROXY_CIDRS` | Development fallback `none` | Explicit production API choice: trusted literal IPs/CIDRs or `none`; no trust-all/hop counts/named networks |

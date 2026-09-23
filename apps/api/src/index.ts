@@ -26,7 +26,7 @@ import { durableWorkerModeFromEnv } from "./config/durable-worker-mode";
 import { endpointRateLimitPolicyFromEnv } from "./config/endpoint-rate-limit-policy";
 import { operationalCostPolicyFromEnv } from "./config/operational-cost-policy";
 import { validateRuntimeEnvironment } from "./config/runtime-environment";
-import { twilioWebhookHost } from "./config/proxy-policy";
+import { apiHost, twilioWebhookHost } from "./config/proxy-policy";
 import {
   CreditService,
   parsePromoCodeHashKey
@@ -159,7 +159,7 @@ if (durableWorkerMode === "embedded") {
 }
 accountDeletionService.start();
 const port = Number(process.env.PORT ?? 4000);
-await app.listen({ host: "0.0.0.0", port });
+await app.listen({ host: apiHost(), port });
 
 if (webhookApp) {
   const webhookPort = Number(process.env.TWILIO_WEBHOOK_PORT ?? 4001);

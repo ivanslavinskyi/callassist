@@ -93,6 +93,22 @@ describe("production runtime configuration", () => {
     )).not.toThrow();
   });
 
+  it("allows an explicitly reviewed loopback database for both production processes", () => {
+    const environment = {
+      ...productionEnvironment(),
+      DATABASE_URL: "postgresql://shprohli:private@127.0.0.1:5433/shprohli",
+      ALLOW_LOOPBACK_DATABASE: "true",
+      API_HOST: "127.0.0.1"
+    };
+    for (const runtime of ["api", "worker"] as const) {
+      expect(() => validateRuntimeEnvironment(environment, runtime)).not.toThrow();
+      expect(() => validateRuntimeEnvironment({ ...environment, ALLOW_LOOPBACK_DATABASE: "yes" }, runtime))
+        .toThrow("ALLOW_LOOPBACK_DATABASE=true");
+    }
+    expect(() => validateRuntimeEnvironment({ ...environment, API_HOST: "shprohli.local" }, "api"))
+      .toThrow("API_HOST must be a literal IP address");
+  });
+
   it("keeps local development configuration flexible", () => {
     expect(() => validateRuntimeEnvironment({
       NODE_ENV: "development",
@@ -127,7 +143,7 @@ describe("production runtime configuration", () => {
           "VERIFICATION_DRIVER must be twilio",
           "EMAIL_DRIVER must be resend",
           "BRIEF_COMPILER_DRIVER must be openai",
-          "DATABASE_URL must not use a loopback host",
+          "DATABASE_URL uses loopback; set ALLOW_LOOPBACK_DATABASE=true only for a reviewed local PostgreSQL deployment",
           "PUBLIC_BASE_URL must contain only non-local HTTPS origins",
           "WEB_ORIGIN must contain only non-local HTTPS origins",
           "PROMO_CODE_HASH_KEY must be independent",
@@ -195,7 +211,7 @@ describe("production runtime configuration", () => {
     } catch (error) {
       expect((error as RuntimeConfigurationError).issues).toEqual(
         expect.arrayContaining([
-          "DATABASE_URL must not use a loopback host",
+          "DATABASE_URL uses loopback; set ALLOW_LOOPBACK_DATABASE=true only for a reviewed local PostgreSQL deployment",
           "WEB_ORIGIN must contain only non-local HTTPS origins"
         ])
       );

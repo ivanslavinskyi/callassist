@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { trustedProxyPolicy, twilioWebhookHost } from "./proxy-policy";
+import { apiHost, trustedProxyPolicy, twilioWebhookHost } from "./proxy-policy";
 import { buildApp } from "../app";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
@@ -22,6 +22,10 @@ describe("explicit proxy trust", () => {
     expect(twilioWebhookHost({})).toBe("127.0.0.1");
     expect(twilioWebhookHost({ TWILIO_WEBHOOK_HOST: "0.0.0.0" })).toBe("0.0.0.0");
     expect(() => twilioWebhookHost({ TWILIO_WEBHOOK_HOST: "https://calls.example" })).toThrow();
+    expect(apiHost({ NODE_ENV: "production" })).toBe("127.0.0.1");
+    expect(apiHost({ NODE_ENV: "development" })).toBe("0.0.0.0");
+    expect(apiHost({ NODE_ENV: "production", API_HOST: "::1" })).toBe("::1");
+    expect(() => apiHost({ NODE_ENV: "production", API_HOST: "api.local" })).toThrow("API_HOST");
   });
   it("uses the last untrusted address; direct callers cannot spoof forwarding headers", async () => {
     const app = buildApp({ service: new CallService(new InMemoryCallRepository()), logger: false, trustedProxyCidrs: "10.40.0.2/32" });

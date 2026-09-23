@@ -5,7 +5,7 @@ import {
   type DataEncryptionMaterial
 } from "../security/encryption";
 
-import { trustedProxyPolicy, twilioWebhookHost } from "./proxy-policy";
+import { apiHost, trustedProxyPolicy, twilioWebhookHost } from "./proxy-policy";
 
 export type RuntimeProcess = "api" | "worker";
 
@@ -47,7 +47,7 @@ export function validateRuntimeEnvironment(
   if (textGenerationEnabled && textProcessorDriver !== "openai") {
     issues.push("Enabled text artifact generation requires TEXT_PROCESSOR_DRIVER=openai");
   }
-  requirePostgresUrl(environment.DATABASE_URL, issues);
+  requirePostgresUrl(environment.DATABASE_URL, environment.ALLOW_LOOPBACK_DATABASE === "true", issues);
   let dataEncryptionMaterial: DataEncryptionMaterial | undefined;
   try {
     dataEncryptionMaterial = parseDataEncryptionKeyring(environment);
@@ -73,6 +73,8 @@ export function validateRuntimeEnvironment(
   }
 
   if (runtime === "api") {
+    try { apiHost(environment); }
+    catch { issues.push("API_HOST must be a literal IP address"); }
     if (!environment.TRUSTED_PROXY_CIDRS?.trim()) {
       issues.push("TRUSTED_PROXY_CIDRS is required: explicit proxy IP/CIDR list or none for direct ingress");
     }
@@ -205,7 +207,7 @@ function decodeBase64Key(value: string | undefined) {
   return decoded?.length === 32 && canonical ? decoded : null;
 }
 
-function requirePostgresUrl(value: string | undefined, issues: string[]) {
+function requirePostgresUrl(value: string | undefined, allowLoopback: boolean, issues: string[]) {
   try {
     const url = new URL(value ?? "");
     if (
@@ -214,8 +216,8 @@ function requirePostgresUrl(value: string | undefined, issues: string[]) {
     ) {
       throw new Error("invalid");
     }
-    if (isLoopbackHostname(url.hostname)) {
-      issues.push("DATABASE_URL must not use a loopback host");
+    if (isLoopbackHostname(url.hostname) && !allowLoopback) {
+      issues.push("DATABASE_URL uses loopback; set ALLOW_LOOPBACK_DATABASE=true only for a reviewed local PostgreSQL deployment");
     }
   } catch {
     issues.push("DATABASE_URL must be an authenticated PostgreSQL URL");

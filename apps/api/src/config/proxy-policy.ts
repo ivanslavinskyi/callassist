@@ -26,3 +26,10 @@ export function twilioWebhookHost(environment: NodeJS.ProcessEnv = process.env) 
   if (!isIP(host)) throw new Error("TWILIO_WEBHOOK_HOST must be a literal IP address");
   return host;
 }
+
+export function apiHost(environment: NodeJS.ProcessEnv = process.env) {
+  const host = environment.API_HOST?.trim() ||
+    (environment.NODE_ENV === "production" ? "127.0.0.1" : "0.0.0.0");
+  if (!isIP(host)) throw new Error("API_HOST must be a literal IP address");
+  return host;
+}

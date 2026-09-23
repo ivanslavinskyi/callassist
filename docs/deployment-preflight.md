@@ -89,9 +89,11 @@ See the [Fastify trustProxy reference](https://fastify.dev/docs/latest/Reference
 - Inspect the VPS OS, existing process supervisor, reverse proxy, port allocation,
   database/backup setup and an owner-provided SSH alias. Preserve the existing project;
   do not install a competing listener on ports 80/443.
-- Select isolated SHPROHLI processes, database and secrets. The current production
-  database validator rejects loopback URLs; reconcile this deliberately with the chosen
-  private database topology. Do not falsify `NODE_ENV` to bypass validation.
+- Select isolated SHPROHLI processes, database and secrets. For a local PostgreSQL 17
+  cluster, use a loopback `DATABASE_URL` with `ALLOW_LOOPBACK_DATABASE=true` on both
+  production processes. The API binds loopback by default in production; verify the
+  actual socket and keep `API_HOST` explicit in the host configuration. Do not falsify
+  `NODE_ENV` to bypass validation.
 - Prepare deployment/restart/migration/rollback commands for that actual host.
   This preflight is not a packaging script, container image or server configuration.
 - Configure DNS/TLS and temporary site access. Check email links and signed Twilio
