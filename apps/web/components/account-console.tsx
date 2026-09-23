@@ -14,7 +14,7 @@ import {
 } from "@callassist/contracts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 import { AppShell } from "./app-shell";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -49,6 +49,12 @@ type AccountData = {
   sessionInventory: AccountSessionList;
   deletion: AccountDeletionRequest | null;
 };
+
+function focusContactControl(control: HTMLElement | null) {
+  if (!control) return;
+  control.focus({ preventScroll: true });
+  control.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+}
 
 export function AccountConsole() {
   const router = useRouter();
@@ -106,6 +112,16 @@ export function AccountConsole() {
   const [emailChangeSuccess, setEmailChangeSuccess] = useState(false);
   const [emailChangeOpen, setEmailChangeOpen] = useState(false);
   const [phoneChangeOpen, setPhoneChangeOpen] = useState(false);
+  const emailChangeButton = useRef<HTMLButtonElement>(null);
+  const phoneChangeButton = useRef<HTMLButtonElement>(null);
+  const returnContactFocus = useRef<HTMLButtonElement | null>(null);
+
+  // Restore focus after the form has collapsed and its trigger is enabled.
+  useLayoutEffect(() => {
+    if (!returnContactFocus.current) return;
+    focusContactControl(returnContactFocus.current);
+    returnContactFocus.current = null;
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -277,6 +293,7 @@ export function AccountConsole() {
       setPhoneChangeId(null);
       setPhoneChangeSuccess(true);
       setPhoneChangeOpen(false);
+      returnContactFocus.current = phoneChangeButton.current;
     } catch (error) {
       setPhoneChangeError(getAccountContactChangeErrorMessage(error, locale, "phone"));
     } finally {
@@ -291,10 +308,11 @@ export function AccountConsole() {
     setPhoneChangeError(null);
   }
 
-  function closePhoneChange() {
+  function closePhoneChange(restoreFocus = true) {
     cancelPhoneChange();
     setNewPhoneE164("");
     setPhoneChangeOpen(false);
+    if (restoreFocus) returnContactFocus.current = phoneChangeButton.current;
   }
 
   async function beginEmailChange(event: FormEvent<HTMLFormElement>) {
@@ -341,6 +359,7 @@ export function AccountConsole() {
       setEmailChangeCode("");
       setEmailChangeSuccess(true);
       setEmailChangeOpen(false);
+      returnContactFocus.current = emailChangeButton.current;
     } catch (error) {
       setEmailChangeError(getAccountContactChangeErrorMessage(error, locale, "email"));
     } finally {
@@ -355,26 +374,31 @@ export function AccountConsole() {
     setEmailChangeError(null);
   }
 
-  function closeEmailChange() {
+  function closeEmailChange(restoreFocus = true) {
     cancelEmailChange();
     setNewEmail("");
     setEmailChangeOpen(false);
+    if (restoreFocus) returnContactFocus.current = emailChangeButton.current;
   }
 
   function openEmailChange() {
-    closePhoneChange();
+    closePhoneChange(false);
     setEmailChangeSuccess(false);
     setEmailChangeOpen(true);
+    focusContactControl(document.getElementById(emailChangeId ? "email-change-code" : "new-email"));
   }
 
   function openPhoneChange() {
-    closeEmailChange();
+    closeEmailChange(false);
     setPhoneChangeSuccess(false);
     setPhoneChangeOpen(true);
+    focusContactControl(document.getElementById(phoneChangeId ? "phone-change-code" : "new-mobile"));
   }
 
   function editName() {
     if (!data) return;
+    closeEmailChange(false);
+    closePhoneChange(false);
     setProfileFirstName(data.user.firstName);
     setProfileLastName(data.user.lastName);
     setProfileError(false);
@@ -459,9 +483,152 @@ export function AccountConsole() {
                   </div>
                 </form>
               ) : <dl className="account-details">
-                <div><dt>{copy.name}</dt><dd className="account-detail-action"><strong>{data.user.firstName} {data.user.lastName}</strong><button className="text-button" onClick={editName} type="button">{copy.nameEdit}</button></dd></div>
-                <div><dt>{copy.email}</dt><dd className="account-detail-action"><span>{data.user.email}</span><button aria-controls="account-email-change" aria-expanded={emailChangeOpen || Boolean(emailChangeId)} aria-label={copy.emailChangeActionLabel} className="text-button" onClick={openEmailChange} type="button">{copy.emailChangeAction}</button></dd></div>
-                <div><dt>{copy.phone}</dt><dd className="account-detail-action"><span>{formatPhone(data.user.phoneE164)}</span><button aria-controls="account-phone-change" aria-expanded={phoneChangeOpen || Boolean(phoneChangeId)} aria-label={copy.phoneChangeActionLabel} className="text-button" onClick={openPhoneChange} type="button">{copy.phoneChangeAction}</button></dd></div>
+                <div><dt>{copy.name}</dt><dd className="account-detail-action"><strong>{data.user.firstName} {data.user.lastName}</strong><button className="text-button" disabled={emailChangeBusy || phoneChangeBusy} onClick={editName} type="button">{copy.nameEdit}</button></dd></div>
+                <div>
+                  <dt>{copy.email}</dt><dd className="account-detail-action"><span>{data.user.email}</span><button aria-controls="account-email-change" aria-expanded={emailChangeOpen || Boolean(emailChangeId)} aria-label={copy.emailChangeActionLabel} className="text-button" disabled={emailChangeBusy || phoneChangeBusy} ref={emailChangeButton} onClick={openEmailChange} type="button">{copy.emailChangeAction}</button></dd>
+                  {emailChangeOpen || emailChangeId ? <dd className="account-contact-editor"><section aria-labelledby="email-change-heading" className="account-inline-contact account-email-change" id="account-email-change">
+                    <h3 id="email-change-heading">{copy.emailChangeTitle}</h3>
+                    <p>{copy.emailChangeText}</p>
+                    {emailChangeId ? (
+                      <form key="email-confirm" onSubmit={finishEmailChange}>
+                        <p className="account-change-destination">
+                          {copy.emailChangeSent} <strong>{maskEmail(newEmail)}</strong>
+                        </p>
+                        <div className="account-contact-change-fields">
+                          <label>
+                            <span>{copy.emailChangeCode}</span>
+                            <input aria-describedby={emailChangeError ? "email-change-code-hint email-change-error" : "email-change-code-hint"} aria-invalid={emailChangeError ? true : undefined} autoComplete="one-time-code" id="email-change-code" ref={focusContactControl} inputMode="numeric" maxLength={6} minLength={6} name="code" onChange={(event) => setEmailChangeCode(event.target.value)} pattern="[0-9]{6}" required type="text" value={emailChangeCode} />
+                            <small id="email-change-code-hint">{copy.emailChangeCodeHint}</small>
+                          </label>
+                        </div>
+                        <div className="account-actions">
+                          <button className="primary-button compact-button" disabled={emailChangeBusy} type="submit">{emailChangeBusy ? copy.emailChangeVerifying : copy.emailChangeVerify}</button>
+                          <button className="secondary-button" disabled={emailChangeBusy} onClick={cancelEmailChange} type="button">{copy.emailChangeCancel}</button>
+                          <button className="secondary-button" disabled={emailChangeBusy} onClick={() => closeEmailChange()} type="button">{copy.emailChangeClose}</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <form autoComplete="on" key="email-entry" name="change-email" onSubmit={beginEmailChange}>
+                        <div className="account-contact-change-fields">
+                          <label className="account-current-account">
+                            <span>{copy.currentAccount}</span>
+                            <input autoComplete="username" id="change-email-username" name="username" readOnly type="email" value={data.user.email} />
+                          </label>
+                          <label>
+                            <span>{copy.emailChangeNewEmail}</span>
+                            <input aria-describedby={emailChangeError ? "email-change-error" : undefined} aria-invalid={emailChangeError ? true : undefined} autoComplete="email" id="new-email" ref={focusContactControl} maxLength={320} name="newEmail" onChange={(event) => setNewEmail(event.target.value)} required type="email" value={newEmail} />
+                          </label>
+                          <label>
+                            <span>{copy.emailChangeCurrentPassword}</span>
+                            <input aria-describedby={emailChangeError ? "email-change-error" : undefined} aria-invalid={emailChangeError ? true : undefined} autoComplete="current-password" id="change-email-current-password" maxLength={128} name="currentPassword" onChange={(event) => setEmailChangePassword(event.target.value)} required type="password" value={emailChangePassword} />
+                          </label>
+                        </div>
+                        <div className="account-actions">
+                          <button className="primary-button compact-button" disabled={emailChangeBusy} type="submit">{emailChangeBusy ? copy.emailChangeSending : copy.emailChangeSend}</button>
+                          <button className="secondary-button" disabled={emailChangeBusy} onClick={() => closeEmailChange()} type="button">{copy.emailChangeClose}</button>
+                        </div>
+                      </form>
+                    )}
+                    {emailChangeError ? <p className="form-error" id="email-change-error" role="alert">{emailChangeError}</p> : null}
+                  </section></dd> : null}
+                  {emailChangeSuccess ? <dd className="account-contact-status"><p className="auth-success" role="status">{copy.emailChangeSuccess}</p></dd> : null}
+                </div>
+                <div>
+                  <dt>{copy.phone}</dt><dd className="account-detail-action"><span>{formatPhone(data.user.phoneE164)}</span><button aria-controls="account-phone-change" aria-expanded={phoneChangeOpen || Boolean(phoneChangeId)} aria-label={copy.phoneChangeActionLabel} className="text-button" disabled={emailChangeBusy || phoneChangeBusy} ref={phoneChangeButton} onClick={openPhoneChange} type="button">{copy.phoneChangeAction}</button></dd>
+                  {phoneChangeOpen || phoneChangeId ? <dd className="account-contact-editor"><section aria-labelledby="phone-change-heading" className="account-inline-contact account-phone-change" id="account-phone-change">
+                    <h3 id="phone-change-heading">{copy.phoneChangeTitle}</h3>
+                    <p>{copy.phoneChangeText}</p>
+                    <p className="account-muted">{copy.phoneChangeSecurity}</p>
+                    {phoneChangeId ? (
+                      <form key="phone-confirm" onSubmit={finishPhoneChange}>
+                        <p className="account-change-destination">
+                          {copy.phoneChangeSent} <strong>{maskPhone(normalizeAccountPhoneNumber(newPhoneE164))}</strong>
+                        </p>
+                        <div className="account-phone-change-fields">
+                          <label>
+                            <span>{copy.phoneChangeCode}</span>
+                            <input
+                              aria-describedby={phoneChangeError ? "phone-change-code-hint phone-change-error" : "phone-change-code-hint"}
+                              aria-invalid={phoneChangeError ? true : undefined}
+                              autoComplete="one-time-code"
+                              id="phone-change-code" ref={focusContactControl}
+                              inputMode="numeric"
+                              maxLength={10}
+                              minLength={4}
+                              name="code"
+                              onChange={(event) => setPhoneChangeCode(event.target.value)}
+                              pattern="[0-9]{4,10}"
+                              required
+                              type="text"
+                              value={phoneChangeCode}
+                            />
+                            <small id="phone-change-code-hint">{copy.phoneChangeCodeHint}</small>
+                          </label>
+                        </div>
+                        <div className="account-actions">
+                          <button className="primary-button compact-button" disabled={phoneChangeBusy} type="submit">
+                            {phoneChangeBusy ? copy.phoneChangeVerifying : copy.phoneChangeVerify}
+                          </button>
+                          <button className="secondary-button" disabled={phoneChangeBusy} onClick={() => closePhoneChange()} type="button">
+                            {copy.phoneChangeCancel}
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <form autoComplete="on" key="phone-entry" name="change-mobile" onSubmit={beginPhoneChange}>
+                        <div className="account-phone-change-fields">
+                          <label className="account-current-account">
+                            <span>{copy.currentAccount}</span>
+                            <input autoComplete="username" id="change-mobile-username" name="username" readOnly type="email" value={data.user.email} />
+                          </label>
+                          <label>
+                            <span>{copy.phoneChangeNewPhone}</span>
+                            <input
+                              aria-describedby={phoneChangeError ? "new-mobile-hint phone-change-error" : "new-mobile-hint"}
+                              aria-invalid={phoneChangeError ? true : undefined}
+                              autoComplete="tel"
+                              id="new-mobile" ref={focusContactControl}
+                              inputMode="tel"
+                              maxLength={40}
+                              name="newPhoneE164"
+                              onChange={(event) => setNewPhoneE164(event.target.value)}
+                              placeholder="079 123 45 67"
+                              required
+                              type="tel"
+                              value={newPhoneE164}
+                            />
+                            <small id="new-mobile-hint">{copy.phoneChangeFormatHint}</small>
+                          </label>
+                          <label>
+                            <span>{copy.phoneChangeCurrentPassword}</span>
+                            <input
+                              aria-describedby={phoneChangeError ? "phone-change-error" : undefined}
+                              aria-invalid={phoneChangeError ? true : undefined}
+                              autoComplete="current-password"
+                              id="change-mobile-current-password"
+                              maxLength={128}
+                              name="currentPassword"
+                              onChange={(event) => setPhoneChangePassword(event.target.value)}
+                              required
+                              type="password"
+                              value={phoneChangePassword}
+                            />
+                          </label>
+                        </div>
+                        <div className="account-actions">
+                          <button className="primary-button compact-button" disabled={phoneChangeBusy} type="submit">
+                            {phoneChangeBusy ? copy.phoneChangeSending : copy.phoneChangeSend}
+                          </button>
+                          <button className="secondary-button" disabled={phoneChangeBusy} onClick={() => closePhoneChange()} type="button">{copy.phoneChangeClose}</button>
+                        </div>
+                      </form>
+                    )}
+                    {phoneChangeError ? (
+                      <p className="form-error" id="phone-change-error" role="alert">{phoneChangeError}</p>
+                    ) : null}
+                  </section></dd> : null}
+                  {phoneChangeSuccess ? <dd className="account-contact-status"><p className="auth-success" role="status">{copy.phoneChangeSuccess}</p></dd> : null}
+                </div>
                 <div><dt>{copy.role}</dt><dd>{copy.roles[data.user.role]}</dd></div>
                 <div><dt>{copy.status}</dt><dd><span className="status-chip" data-status={data.user.status}>{copy.statuses[data.user.status]}</span></dd></div>
                 <div>
@@ -498,147 +665,7 @@ export function AccountConsole() {
               </details>
               {languageError ? <p className="form-error" role="alert">{languageCopy.saveError}</p> : null}
               {languageSaved ? <p className="auth-success" role="status">{languageCopy.saved}</p> : null}
-              {emailChangeSuccess ? <p className="auth-success" role="status">{copy.emailChangeSuccess}</p> : null}
-              {phoneChangeSuccess ? <p className="auth-success" role="status">{copy.phoneChangeSuccess}</p> : null}
             </section>
-
-            {emailChangeOpen || emailChangeId ? <section className="account-card account-email-change" id="account-email-change">
-              <h2>{copy.emailChangeTitle}</h2>
-              <p>{copy.emailChangeText}</p>
-              {emailChangeId ? (
-                <form onSubmit={finishEmailChange}>
-                  <p className="account-change-destination">
-                    {copy.emailChangeSent} <strong>{maskEmail(newEmail)}</strong>
-                  </p>
-                  <div className="account-contact-change-fields">
-                    <label>
-                      <span>{copy.emailChangeCode}</span>
-                      <input aria-describedby={emailChangeError ? "email-change-code-hint email-change-error" : "email-change-code-hint"} aria-invalid={emailChangeError ? true : undefined} autoComplete="one-time-code" id="email-change-code" inputMode="numeric" maxLength={6} minLength={6} name="code" onChange={(event) => setEmailChangeCode(event.target.value)} pattern="[0-9]{6}" required type="text" value={emailChangeCode} />
-                      <small id="email-change-code-hint">{copy.emailChangeCodeHint}</small>
-                    </label>
-                  </div>
-                  <div className="account-actions">
-                    <button className="primary-button compact-button" disabled={emailChangeBusy} type="submit">{emailChangeBusy ? copy.emailChangeVerifying : copy.emailChangeVerify}</button>
-                    <button className="secondary-button" disabled={emailChangeBusy} onClick={cancelEmailChange} type="button">{copy.emailChangeCancel}</button>
-                  </div>
-                </form>
-              ) : (
-                <form autoComplete="on" name="change-email" onSubmit={beginEmailChange}>
-                  <div className="account-contact-change-fields">
-                    <label className="account-current-account">
-                      <span>{copy.currentAccount}</span>
-                      <input autoComplete="username" id="change-email-username" name="username" readOnly type="email" value={data.user.email} />
-                    </label>
-                    <label>
-                      <span>{copy.emailChangeNewEmail}</span>
-                      <input aria-describedby={emailChangeError ? "email-change-error" : undefined} aria-invalid={emailChangeError ? true : undefined} autoComplete="email" id="new-email" maxLength={320} name="newEmail" onChange={(event) => setNewEmail(event.target.value)} required type="email" value={newEmail} />
-                    </label>
-                    <label>
-                      <span>{copy.emailChangeCurrentPassword}</span>
-                      <input aria-describedby={emailChangeError ? "email-change-error" : undefined} aria-invalid={emailChangeError ? true : undefined} autoComplete="current-password" id="change-email-current-password" maxLength={128} name="currentPassword" onChange={(event) => setEmailChangePassword(event.target.value)} required type="password" value={emailChangePassword} />
-                    </label>
-                  </div>
-                  <div className="account-actions">
-                    <button className="primary-button compact-button" disabled={emailChangeBusy} type="submit">{emailChangeBusy ? copy.emailChangeSending : copy.emailChangeSend}</button>
-                    <button className="secondary-button" disabled={emailChangeBusy} onClick={closeEmailChange} type="button">{copy.emailChangeClose}</button>
-                  </div>
-                </form>
-              )}
-              {emailChangeError ? <p className="form-error" id="email-change-error" role="alert">{emailChangeError}</p> : null}
-            </section> : null}
-
-            {phoneChangeOpen || phoneChangeId ? <section className="account-card account-phone-change" id="account-phone-change">
-              <h2>{copy.phoneChangeTitle}</h2>
-              <p>{copy.phoneChangeText}</p>
-              <p className="account-muted">{copy.phoneChangeSecurity}</p>
-              {phoneChangeId ? (
-                <form onSubmit={finishPhoneChange}>
-                  <p className="account-change-destination">
-                    {copy.phoneChangeSent} <strong>{maskPhone(normalizeAccountPhoneNumber(newPhoneE164))}</strong>
-                  </p>
-                  <div className="account-phone-change-fields">
-                    <label>
-                      <span>{copy.phoneChangeCode}</span>
-                      <input
-                        aria-describedby={phoneChangeError ? "phone-change-code-hint phone-change-error" : "phone-change-code-hint"}
-                        aria-invalid={phoneChangeError ? true : undefined}
-                        autoComplete="one-time-code"
-                        id="phone-change-code"
-                        inputMode="numeric"
-                        maxLength={10}
-                        minLength={4}
-                        name="code"
-                        onChange={(event) => setPhoneChangeCode(event.target.value)}
-                        pattern="[0-9]{4,10}"
-                        required
-                        type="text"
-                        value={phoneChangeCode}
-                      />
-                      <small id="phone-change-code-hint">{copy.phoneChangeCodeHint}</small>
-                    </label>
-                  </div>
-                  <div className="account-actions">
-                    <button className="primary-button compact-button" disabled={phoneChangeBusy} type="submit">
-                      {phoneChangeBusy ? copy.phoneChangeVerifying : copy.phoneChangeVerify}
-                    </button>
-                    <button className="secondary-button" disabled={phoneChangeBusy} onClick={cancelPhoneChange} type="button">
-                      {copy.phoneChangeCancel}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <form autoComplete="on" name="change-mobile" onSubmit={beginPhoneChange}>
-                  <div className="account-phone-change-fields">
-                    <label className="account-current-account">
-                      <span>{copy.currentAccount}</span>
-                      <input autoComplete="username" id="change-mobile-username" name="username" readOnly type="email" value={data.user.email} />
-                    </label>
-                    <label>
-                      <span>{copy.phoneChangeNewPhone}</span>
-                      <input
-                        aria-describedby={phoneChangeError ? "new-mobile-hint phone-change-error" : "new-mobile-hint"}
-                        aria-invalid={phoneChangeError ? true : undefined}
-                        autoComplete="tel"
-                        id="new-mobile"
-                        inputMode="tel"
-                        maxLength={40}
-                        name="newPhoneE164"
-                        onChange={(event) => setNewPhoneE164(event.target.value)}
-                        placeholder="079 123 45 67"
-                        required
-                        type="tel"
-                        value={newPhoneE164}
-                      />
-                      <small id="new-mobile-hint">{copy.phoneChangeFormatHint}</small>
-                    </label>
-                    <label>
-                      <span>{copy.phoneChangeCurrentPassword}</span>
-                      <input
-                        aria-describedby={phoneChangeError ? "phone-change-error" : undefined}
-                        aria-invalid={phoneChangeError ? true : undefined}
-                        autoComplete="current-password"
-                        id="change-mobile-current-password"
-                        maxLength={128}
-                        name="currentPassword"
-                        onChange={(event) => setPhoneChangePassword(event.target.value)}
-                        required
-                        type="password"
-                        value={phoneChangePassword}
-                      />
-                    </label>
-                  </div>
-                  <div className="account-actions">
-                    <button className="primary-button compact-button" disabled={phoneChangeBusy} type="submit">
-                      {phoneChangeBusy ? copy.phoneChangeSending : copy.phoneChangeSend}
-                    </button>
-                    <button className="secondary-button" disabled={phoneChangeBusy} onClick={closePhoneChange} type="button">{copy.phoneChangeClose}</button>
-                  </div>
-                </form>
-              )}
-              {phoneChangeError ? (
-                <p className="form-error" id="phone-change-error" role="alert">{phoneChangeError}</p>
-              ) : null}
-            </section> : null}
 
             <section className="account-card account-usage" id="usage">
               <h2>{copy.usageTitle}</h2>

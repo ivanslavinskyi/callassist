@@ -1566,6 +1566,12 @@ button:disabled { cursor: wait; opacity: .55; }
 .account-details dd, .account-usage-summary dd { font-size: 12px; font-weight: 750; margin: 0; overflow-wrap: anywhere; text-align: right; }
 .account-detail-action { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .account-detail-action .text-button { flex: 0 0 auto; }
+.account-details .account-contact-editor, .account-details .account-contact-status { grid-column: 1 / -1; min-width: 0; text-align: left; font-weight: 400; }
+.account-inline-contact { border-left: 3px solid var(--line); margin-top: 12px; padding: 8px 0 8px 20px; }
+.account-inline-contact h3 { font-size: 18px; margin: 0 0 12px; }
+.account-inline-contact input { min-width: 0; width: 100%; }
+.account-inline-contact input, .account-detail-action .text-button { scroll-margin-block: 96px 24px; }
+.account-contact-status .auth-success { margin-bottom: 0; }
 .account-usage h3 { border-top: 1px solid var(--line); font-size: 13px; margin: 20px 0 12px; padding-top: 20px; }
 .account-transactions { display: grid; gap: 8px; list-style: none; margin: 0; max-height: 390px; overflow-y: auto; padding: 0; }
 .account-transactions li { align-items: center; background: var(--canvas); border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 14px; justify-content: space-between; padding: 12px 14px; }
