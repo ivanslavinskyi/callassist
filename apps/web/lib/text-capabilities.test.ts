@@ -22,4 +22,8 @@ describe("text generation capability boundaries", () => {
       expect(canGenerateText({ ...enabled, operations: [{ kind, sourceLanguage: "*", targetLanguage: "ru" }] }, kind, "*", "ru")).toBe(true);
     }
   });
+  it("accepts a configured wildcard for a manually selected language outside the presets", () => {
+    expect(canGenerateText({ ...enabled, operations: [{ kind: "transcript_translation", sourceLanguage: "*", targetLanguage: "*" }] },
+      "transcript_translation", "de", "pt-BR")).toBe(true);
+  });
 });

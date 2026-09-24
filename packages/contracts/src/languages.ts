@@ -20,7 +20,8 @@ export type LanguageTag = z.infer<typeof languageTagSchema>;
 export const SUPPORTED_UI_LOCALES = uiLocales;
 export const supportedUiLocaleSchema = z.enum(SUPPORTED_UI_LOCALES);
 export const TEXT_LANGUAGES = ["en", "de", "fr", "it", "ru", "uk"] as const;
-export const textLanguageSchema = z.enum(TEXT_LANGUAGES);
+// The preset list is for quick selection; text generation accepts any valid language tag.
+export const textLanguageSchema = languageTagSchema.refine((tag) => !["und", "mul", "zxx"].includes(tag), "Choose a specific language");
 export type TextLanguage = z.infer<typeof textLanguageSchema>;
 export const preferredContentLanguageSchema = textLanguageSchema.nullable();
 
@@ -35,7 +36,7 @@ export function supportedTextLanguage(value: string | null | undefined): TextLan
   const tag = normalizeLanguageTag(value);
   if (!tag) return null;
   const parsed = textLanguageSchema.safeParse(tag);
-  return parsed.success ? parsed.data : writtenAliases[tag] ?? null;
+  return parsed.success ? writtenAliases[tag] ?? parsed.data : null;
 }
 
 export const taskLanguagePreferencesSchema = z.strictObject({

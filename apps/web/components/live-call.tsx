@@ -130,6 +130,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [customTargetLanguage, setCustomTargetLanguage] = useState("");
   const [connectionStatus, setConnectionStatus] = useState<
     "connecting" | "connected" | "reconnecting"
   >("connecting");
@@ -366,6 +367,21 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     }
   }
 
+  async function changeTaskLanguage(targetLanguage: TextLanguage, disclosure?: HTMLDetailsElement | null) {
+    if (!snapshot?.languageContext) return;
+    setBusy(true); setActionError(null);
+    try {
+      const languageContext = await updateCallContentLanguage(callId, {
+        targetLanguage, expectedSelectionRevision: snapshot.languageContext.selectionRevision
+      });
+      setSnapshot((current) => current && current.compilation?.revision === languageContext.compilationRevision &&
+        (current.languageContext?.selectionRevision ?? 0) <= languageContext.selectionRevision ? { ...current, languageContext } : current);
+      if (disclosure) disclosure.open = false;
+      setCustomTargetLanguage("");
+    } catch { setActionError(languageCopy.saveError); }
+    finally { setBusy(false); }
+  }
+
   async function copyFinalTranscript() {
     if (!snapshot?.finalTranscript || !language) return;
     try {
@@ -499,23 +515,24 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         <span className="sr-only">{languageCopy.taskLanguage}</span>
         <select disabled={busy}
           value={snapshot.languageContext.taskContentLanguage}
-          onChange={async (event) => {
-            const disclosure = event.currentTarget.closest("details");
-            const targetLanguage = event.target.value as TextLanguage;
-            setBusy(true); setActionError(null);
-            try {
-              const languageContext = await updateCallContentLanguage(callId, {
-                targetLanguage, expectedSelectionRevision: snapshot.languageContext!.selectionRevision
-              });
-              setSnapshot((current) => current && current.compilation?.revision === languageContext.compilationRevision &&
-                (current.languageContext?.selectionRevision ?? 0) <= languageContext.selectionRevision ? { ...current, languageContext } : current);
-              if (disclosure) disclosure.open = false;
-            } catch { setActionError(languageCopy.saveError); }
-            finally { setBusy(false); }
-          }}>
+          onChange={(event) => { void changeTaskLanguage(event.target.value, event.currentTarget.closest("details")); }}>
+          {!TEXT_LANGUAGES.some((value) => value === snapshot.languageContext!.taskContentLanguage) ?
+            <option value={snapshot.languageContext.taskContentLanguage}>{getTextLanguageLabel(snapshot.languageContext.taskContentLanguage, uiLocale)}</option> : null}
           {TEXT_LANGUAGES.map((value) => <option key={value} value={value}>{getTextLanguageLabel(value, uiLocale)}</option>)}
         </select>
       </label>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        const target = supportedTextLanguage(customTargetLanguage);
+        if (!target) { setActionError(languageCopy.customTagInvalid); return; }
+        void changeTaskLanguage(target, event.currentTarget.closest("details"));
+      }}>
+        <label className="field"><span>{languageCopy.customTagLabel}</span>
+          <input value={customTargetLanguage} onChange={(event) => setCustomTargetLanguage(event.target.value)}
+            placeholder="es, pt-BR, zh-Hant" maxLength={35} autoComplete="off" disabled={busy} />
+        </label>
+        <button type="submit" disabled={busy || !customTargetLanguage.trim()}>{languageCopy.customTagApply}</button>
+      </form>
     </details> : null}
     {snapshot.planSource && snapshot.languageContext && !preparationFailed ? <TranslatedPlanReview
       key={`${snapshot.planSource.compilationId}:${snapshot.languageContext.selectionRevision}`}

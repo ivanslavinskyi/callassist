@@ -275,7 +275,7 @@ export type LanguageCapabilities = {
   textLanguages: TextLanguage[];
   selectableCallLanguages: string[];
   textGenerationEnabled: boolean;
-  operations: Array<{ kind: TextArtifactKind; sourceLanguage: string; targetLanguage: TextLanguage }>;
+  operations: Array<{ kind: TextArtifactKind; sourceLanguage: string; targetLanguage: TextLanguage | "*" }>;
   processorMode: "mock" | "openai";
 };
 

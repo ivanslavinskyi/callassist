@@ -11,7 +11,7 @@ export class VerificationSendError extends Error {
 export class BoundedVerificationProvider implements VerificationProvider {
   get mode() { return this.provider.mode; }
   constructor(private readonly provider: VerificationProvider, private readonly limiter: RateLimiter,
-    private readonly policy: { countries: string[]; daily: number; perMinute: number }) {}
+    private readonly policy: { countries: string[]; daily: number; perMinute: number; perPhoneHour?: number; cooldownSeconds?: number }) {}
 
   async send(phoneE164: string, locale?: string) {
     const country = verificationPhoneCountry(phoneE164);
@@ -19,8 +19,8 @@ export class BoundedVerificationProvider implements VerificationProvider {
     // One shared budget across signup, recovery, changes and public opt-out.
     // Reserve before dispatch; uncertain sends are never refunded or auto-retried.
     const result = await this.limiter.consumeMany([
-      { scope: "sms-send:cooldown", identifier: phoneE164, limit: 1, windowMs: 60_000 },
-      { scope: "sms-send:phone", identifier: phoneE164, limit: 3, windowMs: 3_600_000 },
+      { scope: "sms-send:cooldown", identifier: phoneE164, limit: 1, windowMs: (this.policy.cooldownSeconds ?? 60) * 1_000 },
+      { scope: "sms-send:phone", identifier: phoneE164, limit: this.policy.perPhoneHour ?? 3, windowMs: 3_600_000 },
       { scope: "sms-send:global-minute", identifier: "all", limit: this.policy.perMinute, windowMs: 60_000 },
       { scope: "sms-send:global-day", identifier: "all", limit: this.policy.daily, windowMs: 86_400_000 }
     ]);
@@ -40,6 +40,7 @@ export function boundVerificationProvider(provider: VerificationProvider, limite
     return value;
   };
   return new BoundedVerificationProvider(provider, limiter ?? new ApplicationRateLimiter(), {
-    countries, daily: limit("SMS_DAILY_SEND_LIMIT", 100), perMinute: limit("SMS_PER_MINUTE_SEND_LIMIT", 10)
+    countries, daily: limit("SMS_DAILY_SEND_LIMIT", 100), perMinute: limit("SMS_PER_MINUTE_SEND_LIMIT", 10),
+    perPhoneHour: limit("SMS_PHONE_SEND_LIMIT_PER_HOUR", 3), cooldownSeconds: limit("SMS_COOLDOWN_SECONDS", 60)
   });
 }

@@ -1,6 +1,6 @@
 import { uncertainAssessment } from "../credits/final-assessment";
 import {
-  callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema,
+  TEXT_LANGUAGES, callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema,
   type CallCompilation, type CallTextArtifact, type TextArtifactKind, type TextLanguage,
   type PlanReviewPayload, type CallSummaryPayload
 } from "@callassist/contracts";
@@ -249,9 +249,9 @@ export function combinePayloads(kind: TextArtifactKind, outputs: TextProcessingP
     }
     if (unique.size === 0) {
       const sourceSegmentIds = [...new Set(present.flatMap(finding => finding.sourceSegmentIds))].slice(0, 30);
-      return { ...first, text: sourceSegmentIds.length && new Set(present.map(finding => finding.text)).size > 1 ? multiPartUncertainty[language] : first.text, sourceSegmentIds };
+      return { ...first, text: sourceSegmentIds.length && new Set(present.map(finding => finding.text)).size > 1 ? uncertaintyText(language, first.text) : first.text, sourceSegmentIds };
     }
-    return { ...first, text: multiPartUncertainty[language], certainty: "unknown" as const,
+    return { ...first, text: uncertaintyText(language, first.text), certainty: "unknown" as const,
       sourceSegmentIds: [...new Set(present.flatMap(finding => finding.sourceSegmentIds))].slice(0, 30) };
   });
   const unresolvedAnswers = findings.some((finding, index) => finding.certainty === "unknown" && summaries.some(summary => summary.findings[index]?.certainty !== "unknown"));
@@ -262,10 +262,14 @@ export function combinePayloads(kind: TextArtifactKind, outputs: TextProcessingP
   }
   // Keep cited steps where the chunk answers agree; conflicting evidence stays explicitly unresolved.
   return { schemaVersion: 2, overview: [], findings, nextSteps: unresolvedAnswers ? [] : [...mergedSteps.values()].slice(0, 30),
-    unresolved: [...new Set([...summaries.flatMap((summary) => summary.unresolved), ...(unresolvedAnswers ? [multiPartUncertainty[language]] : [])])].slice(0, 30) } satisfies CallSummaryPayload;
+    unresolved: [...new Set([...summaries.flatMap((summary) => summary.unresolved), ...(unresolvedAnswers ? [uncertaintyText(language, summaries[0]!.unresolved[0] ?? summaries[0]!.findings[0]?.text ?? "…")] : [])])].slice(0, 30) } satisfies CallSummaryPayload;
 }
 
-const multiPartUncertainty: Record<TextLanguage, string> = {
+function uncertaintyText(language: TextLanguage, fallback: string) {
+  return Object.hasOwn(multiPartUncertainty, language) ? multiPartUncertainty[language as keyof typeof multiPartUncertainty] : fallback;
+}
+
+const multiPartUncertainty: Record<(typeof TEXT_LANGUAGES)[number], string> = {
   en: "The transcript spans several parts. Review the cited original passages to resolve differences and confirm next steps.",
   de: "Das Transkript umfasst mehrere Teile. Prüfen Sie die zitierten Originalstellen, um Unterschiede zu klären und nächste Schritte zu bestätigen.",
   fr: "La transcription comprend plusieurs parties. Consultez les passages originaux cités pour clarifier les différences et confirmer les prochaines étapes.",

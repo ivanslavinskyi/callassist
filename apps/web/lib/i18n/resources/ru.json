@@ -1,4 +1,7 @@
 {
+  "Other language (language code)": "Другой язык (код языка)",
+  "Apply language": "Применить язык",
+  "Enter a valid language code, such as es or pt-BR.": "Введите корректный код языка, например es или pt-BR.",
   "Account": "Аккаунт",
   "Profile, usage, and sessions": "Профиль, расходы и сеансы",
   "Review your profile, call credits, active sessions and personal data controls.": "Управляйте профилем, кредитами на звонки, сеансами и личными данными.",

@@ -1,5 +1,5 @@
 import { extendMessages } from "./extend-messages";
-import type { CallLocale, TextLanguage } from "@callassist/contracts";
+import { TEXT_LANGUAGES, type CallLocale, type TextLanguage } from "@callassist/contracts";
 import type { UiLocale } from "./messages";
 
 const callLanguageLabels = extendMessages({
@@ -18,14 +18,15 @@ const callLanguageLabels = extendMessages({
 const textLanguageLabels = extendMessages({
   en: { en: "English", de: "German", fr: "French", it: "Italian", ru: "Russian", uk: "Ukrainian" },
   de: { en: "Englisch", de: "Deutsch", fr: "Französisch", it: "Italienisch", ru: "Russisch", uk: "Ukrainisch" }
-}) satisfies Record<UiLocale, Record<TextLanguage, string>>;
+}) satisfies Record<UiLocale, Record<(typeof TEXT_LANGUAGES)[number], string>>;
 
 export function getCallLanguageLabel(callLocale: CallLocale, uiLocale: UiLocale) {
   return callLanguageLabels[uiLocale][callLocale];
 }
 
 export function getTextLanguageLabel(language: TextLanguage, uiLocale: UiLocale) {
-  if (uiLocale === "en" || uiLocale === "de") return textLanguageLabels[uiLocale][language];
+  if ((uiLocale === "en" || uiLocale === "de") && TEXT_LANGUAGES.some((preset) => preset === language))
+    return textLanguageLabels[uiLocale][language as (typeof TEXT_LANGUAGES)[number]];
   return new Intl.DisplayNames([uiLocale], { type: "language" }).of(language) ?? language;
 }
 
@@ -40,7 +41,8 @@ export const languageMessages = extendMessages({
     saveError: "The language preference could not be saved. Please try again.",
     legacyEnglish: "This earlier plan used US English. Updated plans use British English.",
     originalPlan: "The plan below is in the call language.",
-    change: "Change"
+    change: "Change",
+    customTagLabel: "Other language (language code)", customTagApply: "Apply language", customTagInvalid: "Enter a valid language code, such as es or pt-BR."
   },
   de: {
     taskLanguage: "Plan und Ergebnis",
@@ -52,6 +54,7 @@ export const languageMessages = extendMessages({
     saveError: "Die Spracheinstellung konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.",
     legacyEnglish: "Dieser frühere Plan verwendete US-Englisch. Aktualisierte Pläne verwenden britisches Englisch.",
     originalPlan: "Der folgende Plan ist in der Anrufsprache.",
-    change: "Ändern"
+    change: "Ändern",
+    customTagLabel: "Andere Sprache (Sprachcode)", customTagApply: "Sprache anwenden", customTagInvalid: "Geben Sie einen gültigen Sprachcode ein, z. B. es oder pt-BR."
   }
 }) satisfies Record<UiLocale, Record<string, string>>;

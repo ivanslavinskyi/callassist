@@ -54,6 +54,11 @@ import {
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 
 const minute = 60_000;
+function authHourlyLimit(name: "AUTH_VERIFICATION_SEND_PHONE_PER_HOUR" | "AUTH_REGISTER_IP_PER_HOUR" | "AUTH_REGISTER_IDENTITY_PER_HOUR", fallback: number) {
+  const value = Number(process.env[name]?.trim() || fallback);
+  if (!Number.isInteger(value) || value < 1 || value > 1000) throw new Error(`${name} must be an integer between 1 and 1000`);
+  return value;
+}
 const accountSessionInventoryLimit = 50;
 const passwordRecoveryChallengeTtlMs = 10 * minute;
 const passwordRecoveryGrantTtlMs = 15 * minute;
@@ -116,10 +121,10 @@ export class AuthService {
 
   async register(input: RegistrationInput, context: AuthRequestContext) {
     await this.#limitMany([
-      limitEntry("register:ip", context.ip, 5, 60 * minute),
-      limitEntry("register:email", input.email, 3, 60 * minute),
-      limitEntry("register:phone", input.phoneE164, 3, 60 * minute),
-      limitEntry("verification-send:phone", input.phoneE164, 3, 60 * minute)
+      limitEntry("register:ip", context.ip, authHourlyLimit("AUTH_REGISTER_IP_PER_HOUR", 5), 60 * minute),
+      limitEntry("register:email", input.email, authHourlyLimit("AUTH_REGISTER_IDENTITY_PER_HOUR", 3), 60 * minute),
+      limitEntry("register:phone", input.phoneE164, authHourlyLimit("AUTH_REGISTER_IDENTITY_PER_HOUR", 3), 60 * minute),
+      limitEntry("verification-send:phone", input.phoneE164, authHourlyLimit("AUTH_VERIFICATION_SEND_PHONE_PER_HOUR", 3), 60 * minute)
     ]);
     await this.#betaControls?.assertAvailable("sms");
     const passwordHash = await hashPassword(input.password);
@@ -147,13 +152,13 @@ export class AuthService {
   ) {
     await this.#limitMany([
       limitEntry("verification-send:ip", context.ip, 10, 60 * minute),
-      limitEntry("verification-send:email", input.email, 3, 60 * minute)
+      limitEntry("verification-send:email", input.email, authHourlyLimit("AUTH_VERIFICATION_SEND_PHONE_PER_HOUR", 3), 60 * minute)
     ]);
     const user = await this.repository.findUserByEmail(input.email);
     if (!user || user.phoneVerifiedAt || user.status !== "active") {
       return { status: "verification_required" as const };
     }
-    await this.#limit("verification-send:phone", user.phoneE164, 3, 60 * minute);
+    await this.#limit("verification-send:phone", user.phoneE164, authHourlyLimit("AUTH_VERIFICATION_SEND_PHONE_PER_HOUR", 3), 60 * minute);
     try {
       await this.verificationProvider.send(user.phoneE164, user.uiLocale ?? input.uiLocale);
     } catch (error) {
@@ -170,7 +175,7 @@ export class AuthService {
     const user = await this.repository.findUserByEmail(input.email);
     const matches = await verifyPassword(input.currentPassword, user?.passwordHash ?? await dummyPasswordHash);
     if (!user || !matches || user.status !== "active" || user.phoneVerifiedAt) throw new AuthServiceError("PHONE_CORRECTION_NOT_AVAILABLE");
-    await this.#limit("verification-send:phone", input.newPhoneE164, 3, 60 * minute);
+    await this.#limit("verification-send:phone", input.newPhoneE164, authHourlyLimit("AUTH_VERIFICATION_SEND_PHONE_PER_HOUR", 3), 60 * minute);
     const corrected = await this.repository.correctUnverifiedPhone({ userId: user.id, expectedPasswordHash: user.passwordHash, newPhoneE164: input.newPhoneE164 });
     if (!corrected) throw new AuthServiceError("PHONE_CORRECTION_NOT_AVAILABLE");
     // The number remains unverified if delivery fails; resend/correction can recover.

@@ -115,7 +115,7 @@ function language(raw: RawCallBrief, sourceLanguage?: string) {
   if (/[а-яё]/iu.test(raw.objective)) return "ru";
   return raw.locale.split("-")[0] as keyof typeof copy;
 }
-export function appointmentClarification(raw: RawCallBrief, sourceLanguage?: string) { return (copy[language(raw, sourceLanguage)] ?? copy.en).clarify; }
+export function appointmentClarification(raw: RawCallBrief, sourceLanguage?: string) { return (copy[language(raw, sourceLanguage) as keyof typeof copy] ?? copy.en).clarify; }
 
 /** Confirmation is an execution rule and a post-call criterion, not an extra scripted question. */
 export function enforceAppointmentPlan(raw: RawCallBrief, compiled: CompiledCallBrief): CompiledCallBrief {

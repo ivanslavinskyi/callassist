@@ -10,7 +10,9 @@ describe("independent language choices", () => {
   it("normalizes tags without conflating scripts or voice capabilities", () => {
     expect(languageTagSchema.parse("zh-hant")).toBe("zh-Hant");
     expect(supportedTextLanguage("de-CH")).toBe("de");
-    expect(supportedTextLanguage("ru-Latn")).toBeNull();
+    expect(supportedTextLanguage("ru-Latn")).toBe("ru-Latn");
+    expect(supportedTextLanguage("pt-br")).toBe("pt-BR");
+    expect(supportedTextLanguage("und")).toBeNull();
     expect(languageTagSchema.safeParse("Russian language").success).toBe(false);
   });
   it("uses detected request language independently from UI and preserves it across recompilation", () => {
@@ -27,15 +29,19 @@ describe("independent language choices", () => {
     expect(resolveTaskLanguage({ preferences: { mode: "auto", uiLocaleHint: "de" }, accountPreference: "fr",
       detectedLanguage, compilationRevision: 1 })).toMatchObject({ taskContentLanguage: "ru", selectionSource: "detection", selectionRevision: 1 });
   });
-  it.each([undefined, "und", "mul", "pl", "ru-Latn"])("uses the account fallback when detected language %s cannot select a supported text language", (detectedLanguage) => {
+  it.each([undefined, "und", "mul"])("uses the account fallback when detected language %s cannot select a specific text language", (detectedLanguage) => {
     expect(resolveTaskLanguage({ preferences: { mode: "auto", uiLocaleHint: "de" }, accountPreference: "fr",
       detectedLanguage, compilationRevision: 1 })).toMatchObject({ taskContentLanguage: "fr", selectionSource: "account", selectionRevision: 1 });
   });
-  it("uses the supported interface language and then English when neither detection nor account can select a target", () => {
+  it("accepts any specific detected language independently of the interface", () => {
+    expect(resolveTaskLanguage({ preferences: { mode: "auto", uiLocaleHint: "de" }, accountPreference: "fr",
+      detectedLanguage: "pl", compilationRevision: 1 })).toMatchObject({ taskContentLanguage: "pl", selectionSource: "detection" });
+  });
+  it("uses the interface language and then English when neither detection nor account can select a target", () => {
     expect(resolveTaskLanguage({ preferences: { mode: "auto", uiLocaleHint: "de-CH" }, accountPreference: null,
       detectedLanguage: "mul", compilationRevision: 1 })).toMatchObject({ taskContentLanguage: "de", selectionSource: "ui_fallback", detectionStatus: "mixed" });
     expect(resolveTaskLanguage({ preferences: { mode: "auto", uiLocaleHint: "pl" }, accountPreference: null,
-      detectedLanguage: "und", compilationRevision: 1 })).toMatchObject({ taskContentLanguage: "en", selectionSource: "default", detectionStatus: "undetermined" });
+      detectedLanguage: "und", compilationRevision: 1 })).toMatchObject({ taskContentLanguage: "pl", selectionSource: "ui_fallback", detectionStatus: "undetermined" });
   });
   it.each(["account", "task", "detection", "ui_fallback", "default"] as const)("preserves a saved %s selection under the new automatic precedence", (selectionSource) => {
     const previous: CallLanguageContext = { taskContentLanguage: "fr", selectionSource, selectionRevision: 4,

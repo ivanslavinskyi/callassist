@@ -46,6 +46,10 @@ describe("text artifact orchestration boundaries", () => {
     expect(textDirectionEnabled(capabilities, "plan_review", "de-CH", "ru")).toBe(true);
     expect(textDirectionEnabled(capabilities, "transcript_translation", "de-CH", "ru")).toBe(false);
     expect(textDirectionEnabled(capabilities, "call_summary", "fr-CH", "uk")).toBe(true);
+    const any = textCapabilitiesFromEnv(processor, { TEXT_ARTIFACT_GENERATION_ENABLED: "true", TEXT_ARTIFACT_DIRECTIONS: "plan_review:*:*,clarification_review:*:*,transcript_translation:*:*,call_summary:*:*" });
+    expect(textDirectionEnabled(any, "transcript_translation", "zh-Hant", "pt-BR")).toBe(true);
+    expect(textDirectionEnabled(any, "call_summary", "de", "es")).toBe(true);
+    expect(() => textCapabilitiesFromEnv(processor, { TEXT_ARTIFACT_GENERATION_ENABLED: "true", TEXT_ARTIFACT_DIRECTIONS: "call_summary:*:und" })).toThrow();
     expect(textDirectionEnabled({ enabled: true, directions: [{ kind: "transcript_translation", sourceLanguage: "de", targetLanguage: "ru" }] }, "transcript_translation", "*", "ru")).toBe(false);
     expect(textDirectionEnabled({ enabled: true, directions: [{ kind: "transcript_translation", sourceLanguage: "*", targetLanguage: "ru" }] }, "transcript_translation", "*", "ru")).toBe(true);
     expect(textCapabilitiesFromEnv(new MockTextProcessor(), {}).directions).toEqual(allTextDirections());

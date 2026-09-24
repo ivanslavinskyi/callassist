@@ -1,11 +1,11 @@
-import { TEXT_LANGUAGES, supportedTextLanguage, textArtifactKindSchema, type TextArtifactKind, type TextLanguage } from "@callassist/contracts";
+import { supportedTextLanguage, textArtifactKindSchema, type TextArtifactKind, type TextLanguage } from "@callassist/contracts";
 import type { TextProcessor } from "./text-processor";
 
-export type TextDirection = { kind: TextArtifactKind; sourceLanguage: TextLanguage | "*"; targetLanguage: TextLanguage };
+export type TextDirection = { kind: TextArtifactKind; sourceLanguage: TextLanguage | "*"; targetLanguage: TextLanguage | "*" };
 export type TextCapabilities = { enabled: boolean; directions: TextDirection[] };
 
 export function allTextDirections(): TextDirection[] {
-  return textArtifactKindSchema.options.flatMap((kind) => TEXT_LANGUAGES.map((targetLanguage) => ({ kind, sourceLanguage: "*" as const, targetLanguage })));
+  return textArtifactKindSchema.options.map((kind) => ({ kind, sourceLanguage: "*", targetLanguage: "*" }));
 }
 
 /** Real directions are enabled independently after language-quality checks. Reads never depend on this switch. */
@@ -20,7 +20,7 @@ export function textCapabilitiesFromEnv(processor: Pick<TextProcessor, "driver">
     const [kind, source, target, extra] = entry.trim().split(":");
     const parsedKind = textArtifactKindSchema.safeParse(kind);
     const sourceLanguage = source === "*" ? "*" : supportedTextLanguage(source);
-    const targetLanguage = supportedTextLanguage(target);
+    const targetLanguage = target === "*" ? "*" : supportedTextLanguage(target);
     if (extra || !parsedKind.success || !sourceLanguage || !targetLanguage) throw new Error("Invalid TEXT_ARTIFACT_DIRECTIONS entry");
     return { kind: parsedKind.data, sourceLanguage, targetLanguage };
   });
@@ -29,6 +29,6 @@ export function textCapabilitiesFromEnv(processor: Pick<TextProcessor, "driver">
 
 export function textDirectionEnabled(capabilities: TextCapabilities, kind: TextArtifactKind, sourceLanguage: string | null, targetLanguage: TextLanguage) {
   const source = supportedTextLanguage(sourceLanguage);
-  return capabilities.enabled && capabilities.directions.some((direction) => direction.kind === kind && direction.targetLanguage === targetLanguage &&
+  return capabilities.enabled && capabilities.directions.some((direction) => direction.kind === kind && (direction.targetLanguage === "*" || direction.targetLanguage === targetLanguage) &&
     (direction.sourceLanguage === "*" || direction.sourceLanguage === source));
 }

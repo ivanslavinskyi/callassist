@@ -104,6 +104,18 @@ describe("Resend bounded delivery", () => {
 });
 
 describe("SMS dispatch", () => {
+  it("uses configured per-phone limits while retaining a resend cooldown", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SMS_PHONE_SEND_LIMIT_PER_HOUR", "4");
+    vi.stubEnv("SMS_COOLDOWN_SECONDS", "30");
+    let now = 0;
+    const provider = boundVerificationProvider(new MockVerificationProvider(), new ApplicationRateLimiter(() => now));
+    for (let index = 0; index < 4; index++) {
+      await provider.send("+41791234567", "de");
+      now += 31_000;
+    }
+    await expect(provider.send("+41791234567", "de")).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
   it("allows Swiss and Ukrainian contacts with the configured/default policy and keeps other countries blocked", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("SMS_DAILY_SEND_LIMIT", "100"); vi.stubEnv("SMS_PER_MINUTE_SEND_LIMIT", "10");
