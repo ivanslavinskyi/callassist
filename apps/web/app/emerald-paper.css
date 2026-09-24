@@ -21,6 +21,7 @@
   --focus: #6ace9a; --shadow: 0 16px 44px #0006;
 }
 html { background: var(--bg); scroll-padding-top: 24px; }
+html:has(.public-home--published) { scroll-behavior: smooth; }
 body, :root[data-theme="dark"] body { background: var(--bg); font-size: 16px; line-height: 1.5; }
 body { overflow-wrap: break-word; }
 h1, h2, h3, h4 { color: var(--ink); font-family: var(--font-body); }
@@ -117,7 +118,19 @@ input[aria-invalid="true"] { border: 2px solid var(--danger); }
 .auth-alternative { text-align: left; font-size: 14px; }
 .auth-alternative a { font-weight: 400; }
 .auth-submit > [aria-hidden] { display: none; }
+.registration-password-field > label { color: var(--ink); font-size: 14px; font-weight: 550; }
+.password-input-wrap { position: relative; }
+.password-input-wrap input { padding-inline-end: 58px; }
+.password-visibility-toggle { position: absolute; inset-inline-end: 2px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.password-visibility-toggle:hover { background: var(--surface); color: var(--ink); }
+.password-length-meter { height: 5px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.password-length-meter > span { display: block; height: 100%; border-radius: inherit; transition: width 180ms ease, background-color 180ms ease; }
+.password-length-meter > span[data-level="short"] { background: var(--danger); }
+.password-length-meter > span[data-level="growing"] { background: var(--warning); }
+.password-length-meter > span[data-level="ready"] { background: var(--green); }
 .public-home { max-width: 1280px; margin: 0 auto; padding: 48px 40px; }
+.back-to-top { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 15; display: inline-flex; align-items: center; justify-content: center; width: 48px; min-height: 48px; padding: 0; border: 1px solid var(--accent); border-radius: 50%; background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow); }
+.back-to-top:hover { background: var(--accent-strong); color: var(--on-accent); }
 .public-hero { display: grid; grid-template-columns: 1.4fr 1fr; gap: 80px; align-items: center; padding: 72px 0; border: 0; background: none; border-radius: 0; box-shadow: none; }
 .public-hero h1 { font-size: 52px; line-height: 1.07; letter-spacing: -.045em; font-weight: 650; margin: 12px 0 28px; max-width: 16ch; }
 .public-hero h1 .accent { color: var(--green); }

@@ -22,6 +22,7 @@ import { betaMessages } from "@/lib/i18n/beta-messages";
 import { useUiLocale } from "@/components/ui-locale-provider";
 import { localizePathname } from "@/lib/i18n/routing";
 import { clearExplicitGuestLocale, readExplicitGuestLocale, rememberUiLocale, resolvePostLoginLocale } from "@/lib/ui-language-preference";
+import { UiIcon } from "@/components/ui-icon";
 
 export function AuthFrame({ children }: { children: ReactNode }) {
   const { locale } = useUiLocale();
@@ -59,6 +60,10 @@ export function RegistrationForm() {
   const copy = authMessages[locale];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const passwordLength = Math.min(password.length, 12);
+  const passwordLengthLevel = password.length === 0 ? "empty" : password.length < 6 ? "short" : password.length < 12 ? "growing" : "ready";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -112,11 +117,44 @@ export function RegistrationForm() {
           <input autoComplete="tel" inputMode="tel" name="phoneE164" maxLength={40} placeholder={copy.register.phonePlaceholder} required type="tel" />
           <small>{copy.register.phoneHelp}</small>
         </label>
-        <label className="field">
-          <span>{copy.register.password}</span>
-          <input autoComplete="new-password" maxLength={128} minLength={12} name="password" required type="password" />
-          <small>{copy.register.passwordHelp}</small>
-        </label>
+        <div className="field registration-password-field">
+          <label htmlFor="registration-password">{copy.register.password}</label>
+          <div className="password-input-wrap">
+            <input
+              aria-describedby="registration-password-help"
+              autoComplete="new-password"
+              id="registration-password"
+              maxLength={128}
+              minLength={12}
+              name="password"
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type={passwordVisible ? "text" : "password"}
+              value={password}
+            />
+            <button
+              aria-label={passwordVisible ? copy.register.hidePassword : copy.register.showPassword}
+              aria-pressed={passwordVisible}
+              className="password-visibility-toggle"
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              title={passwordVisible ? copy.register.hidePassword : copy.register.showPassword}
+              type="button"
+            >
+              <UiIcon name={passwordVisible ? "eye" : "eye-slash"} />
+            </button>
+          </div>
+          <div
+            aria-label={copy.register.passwordLength}
+            aria-valuemax={12}
+            aria-valuemin={0}
+            aria-valuenow={passwordLength}
+            className="password-length-meter"
+            role="meter"
+          >
+            <span data-level={passwordLengthLevel} style={{ width: `${passwordLength / 12 * 100}%` }} />
+          </div>
+          <small id="registration-password-help">{copy.register.passwordHelp}</small>
+        </div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <SubmitButton busy={busy} busyLabel={copy.register.submitting} label={copy.register.submit} />
       </form>

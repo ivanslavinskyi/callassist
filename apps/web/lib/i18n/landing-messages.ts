@@ -3,6 +3,7 @@ import type { UiLocale } from "./messages";
 
 type LandingMessages = {
   creditDetails: string;
+  backToTop: string;
   prepareCall: string;
   checkingSession: string;
   retrySession: string;
@@ -19,6 +20,7 @@ type LandingMessages = {
 export const landingMessages: Record<UiLocale, LandingMessages> = extendMessages({
   en: {
     creditDetails: "When is a call credit used?",
+    backToTop: "Back to top",
     prepareCall: "Prepare a call",
     checkingSession: "Please wait…",
     retrySession: "Try again",
@@ -36,6 +38,7 @@ export const landingMessages: Record<UiLocale, LandingMessages> = extendMessages
   },
   de: {
     creditDetails: "Wann wird ein Anrufguthaben verbraucht?",
+    backToTop: "Nach oben",
     prepareCall: "Anruf vorbereiten",
     checkingSession: "Bitte warten…",
     retrySession: "Erneut versuchen",

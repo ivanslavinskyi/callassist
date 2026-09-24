@@ -7,7 +7,7 @@ import type {
 } from "@callassist/contracts";
 import { resolveUiLocale, selectableCallLanguagesForRole } from "@callassist/contracts";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { systemMessages } from "@/lib/i18n/system-messages";
 import { ContentLocaleNotice } from "./content-locale-notice";
 import { AppShell } from "./app-shell";
@@ -20,6 +20,7 @@ import { UiLocaleProvider, useUiLocale } from "./ui-locale-provider";
 import { landingMessages } from "@/lib/i18n/landing-messages";
 import type { SessionSnapshot } from "@/lib/session-state";
 import { LandingPrimaryAction } from "./landing-primary-action";
+import { UiIcon } from "./ui-icon";
 
 export function PublicHome({
   landing,
@@ -40,6 +41,7 @@ export function PublicHome({
         faq={faq}
         landing={landing}
         showFounderStory
+        enablePageScroll
         sessionAware
         registerHref={localizeHref("/register")}
       />
@@ -52,6 +54,7 @@ export function PublicHomeContent({
   landing,
   faq,
   previewBanner,
+  enablePageScroll = false,
   showFounderStory = false,
   sessionAware = false,
   registerHref
@@ -59,6 +62,7 @@ export function PublicHomeContent({
   landing: PublishedLanding;
   faq: PublishedFaq | null;
   previewBanner?: ReactNode;
+  enablePageScroll?: boolean;
   showFounderStory?: boolean;
   sessionAware?: boolean;
   registerHref: string;
@@ -67,7 +71,7 @@ export function PublicHomeContent({
   const example = landing.blocks.find((item) => item.blockType === "example");
   const heroAvailable = landing.blocks.some((item) => item.blockType === "hero");
   return (
-    <main className="public-home" id="main-content" tabIndex={-1} lang={landing.locale} dir={contentLanguageDirection(landing.locale)}>
+    <main className={`public-home${enablePageScroll ? " public-home--published" : ""}`} id="main-content" tabIndex={-1} lang={landing.locale} dir={contentLanguageDirection(landing.locale)}>
       {previewBanner}
       {landing.blocks.map((block) => showFounderStory && block.blockType === "problem" ? (
         <PublicFounderStory headingId={`landing-${block.id}`} key={block.id} />
@@ -86,7 +90,38 @@ export function PublicHomeContent({
           registerHref={registerHref}
         />
       ))}
+      {enablePageScroll ? <BackToTop /> : null}
     </main>
+  );
+}
+
+function BackToTop() {
+  const { locale } = useUiLocale();
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const updateVisibility = () => setVisible(window.scrollY >= 600);
+    updateVisibility();
+    window.addEventListener("scroll", updateVisibility, { passive: true });
+    return () => window.removeEventListener("scroll", updateVisibility);
+  }, []);
+
+  if (!visible) return null;
+  const label = landingMessages[locale].backToTop;
+  return (
+    <button
+      aria-label={label}
+      className="back-to-top"
+      onClick={() => {
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) window.scrollTo(0, 0);
+        else window.scrollTo({ top: 0, behavior: "smooth" });
+        document.getElementById("main-content")?.focus({ preventScroll: true });
+      }}
+      title={label}
+      type="button"
+    >
+      <UiIcon name="arrow-up" />
+    </button>
   );
 }
 
