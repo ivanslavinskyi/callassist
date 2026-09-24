@@ -32,10 +32,10 @@ describe("independent CMS languages", () => {
     await service.initialize();
   });
 
-  it("reads legacy JSON unchanged and accepts a third CMS locale without voice/text capability", () => {
+  it("reads legacy JSON unchanged and keeps CMS and voice capabilities independent of text", () => {
     const revision = seededEditorialCollections.find(({ revision }) => revision.key === "faq")!.revision;
     expect(adminEditorialRevisionSchema.parse(revision).items).toEqual(revision.items);
-    expect(textLanguageSchema.safeParse("pl").success).toBe(false);
+    expect(textLanguageSchema.safeParse("pl").success).toBe(true);
     expect(callLocaleSchema.safeParse("pl").success).toBe(false);
     expect(editorialDraftUpdateInputSchema.safeParse({
       key: "faq", requiredLocales: ["en"], items: [{ id: randomUUID(), sortOrder: 0, enabled: true,

@@ -13,6 +13,7 @@ describe("independent language choices", () => {
     expect(supportedTextLanguage("ru-Latn")).toBe("ru-Latn");
     expect(supportedTextLanguage("pt-br")).toBe("pt-BR");
     expect(supportedTextLanguage("und")).toBeNull();
+    expect(supportedTextLanguage("xx")).toBeNull();
     expect(languageTagSchema.safeParse("Russian language").success).toBe(false);
   });
   it("uses detected request language independently from UI and preserves it across recompilation", () => {

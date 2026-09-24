@@ -21,7 +21,10 @@ export const SUPPORTED_UI_LOCALES = uiLocales;
 export const supportedUiLocaleSchema = z.enum(SUPPORTED_UI_LOCALES);
 export const TEXT_LANGUAGES = ["en", "de", "fr", "it", "ru", "uk"] as const;
 // The preset list is for quick selection; text generation accepts any valid language tag.
-export const textLanguageSchema = languageTagSchema.refine((tag) => !["und", "mul", "zxx"].includes(tag), "Choose a specific language");
+const languageDisplayNames = new Intl.DisplayNames(["en"], { type: "language" });
+export const textLanguageSchema = languageTagSchema.refine((tag) =>
+  !["und", "mul", "zxx"].includes(tag) && languageDisplayNames.of(tag) !== tag,
+"Choose a recognized language");
 export type TextLanguage = z.infer<typeof textLanguageSchema>;
 export const preferredContentLanguageSchema = textLanguageSchema.nullable();
 
