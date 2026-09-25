@@ -973,5 +973,7 @@
   "Save changes": "Зберегти зміни",
   "Your feedback could not be loaded. Try again before editing it.": "Не вдалося завантажити відгук. Спробуйте ще раз перед редагуванням.",
   "Switzerland": "Швейцарія",
-  "Ukraine": "Україна"
+  "Ukraine": "Україна",
+  "Phone connection established": "Телефонне з’єднання встановлено",
+  "A phone connection does not confirm who answered. Recording starts only after consent.": "Телефонне з’єднання не підтверджує, хто відповів. Запис починається лише після згоди."
 }

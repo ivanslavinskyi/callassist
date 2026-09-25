@@ -973,5 +973,7 @@
   "Save changes": "Salva le modifiche",
   "Your feedback could not be loaded. Try again before editing it.": "Impossibile caricare il tuo feedback. Riprova prima di modificarlo.",
   "Switzerland": "Svizzera",
-  "Ukraine": "Ucraina"
+  "Ukraine": "Ucraina",
+  "Phone connection established": "Collegamento telefonico stabilito",
+  "A phone connection does not confirm who answered. Recording starts only after consent.": "Un collegamento telefonico non conferma chi ha risposto. La registrazione inizia solo dopo il consenso."
 }

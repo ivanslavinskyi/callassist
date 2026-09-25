@@ -41,6 +41,37 @@ async function fixture(driver: "memory" | "postgres", status = "no-answer") {
 }
 
 describe.each(["memory", "postgres"] as const)("repeat unanswered calls on %s", driver => {
+  it("reuses a completed pre-consent connection without copying disclosure or dialing automatically", async () => {
+    const f = await fixture(driver, "in-progress");
+    await f.repository.appendCallTelemetryEvent(f.source.id, { callAttemptId: f.started.attempt.id,
+      idempotencyKey: "consent-missing", payload: { name: "consent.failed", metadata: { reason: "stream_ended_before_consent" } } });
+    await f.repository.applyProviderStatus(f.providerId, "completed", "completed", f.source.id);
+    expect((await f.repository.get(f.source.id))?.brief.lifecycle).toMatchObject({ connected: true, result: "consent_not_received" });
+    const calls = f.compile.mock.calls.length;
+    const [first, second] = await Promise.all([f.service.repeatUnansweredCall(f.source.id, f.owner), f.service.repeatUnansweredCall(f.source.id, f.owner)]);
+    expect(first.id).toBe(second.id);
+    expect(first.status).toBe("review_required");
+    expect(f.compile).toHaveBeenCalledTimes(calls);
+    expect(await f.repository.getLatestAttempt(first.id)).toBeNull();
+    expect(await f.repository.getCurrentReviewReceipt(first.id)).toBeNull();
+    const snapshot = (await f.repository.get(first.id))!;
+    expect(snapshot.recording).toBeNull();
+    expect(snapshot.transcript).toEqual([]);
+    expect(snapshot.compilation?.approvedAt).toBeNull();
+    await expect(f.repository.startAttempt(first.id, { provider: "twilio", userId: f.owner })).rejects.toMatchObject({ code: "CALL_NOT_READY" });
+    await f.repository.applyProviderStatus(f.providerId, "completed", "completed", f.source.id);
+    expect((await f.repository.get(first.id))?.brief.status).toBe("review_required");
+  });
+
+  it.each(["granted", "declined"] as const)("rejects completed calls with %s consent", async consent => {
+    const f = await fixture(driver, "in-progress");
+    await f.repository.appendCallTelemetryEvent(f.source.id, { callAttemptId: f.started.attempt.id, idempotencyKey: "consent-result",
+      payload: consent === "granted" ? { name: "consent.granted", metadata: { method: "voice", decision: "affirmative", locale: "en-GB" } }
+        : { name: "consent.failed", metadata: { reason: "negative" } } });
+    await f.repository.applyProviderStatus(f.providerId, "completed", "completed", f.source.id);
+    await expect(f.service.repeatUnansweredCall(f.source.id, f.owner)).rejects.toMatchObject({ code: "CALL_RETRY_NOT_AVAILABLE" });
+  });
+
   it("reuses compilation without provider/LLM work and creates one fresh review for concurrent requests", async () => {
     const f = await fixture(driver);
     const before = await f.repository.get(f.source.id);

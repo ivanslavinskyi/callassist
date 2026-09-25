@@ -19,6 +19,10 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+Manual acceptance follow-up: [pre-consent connection and repeat correction](pre-consent-retry-2026-09-25.md)
+distinguishes telephone connection from human response and enables fresh review
+after a settled call without consent, including possible voicemail answers.
+
 Latest checkpoint: [registration/call improvements and validation, 25 September](registration-and-call-improvements-2026-09-25.md),
 on implementation commit `457c9b2`: 1,591 tests / 191 files, lint/types/build and
 seven-locale browser smoke passed. The [parallel Live pilot](gpt-live-pilot.md)

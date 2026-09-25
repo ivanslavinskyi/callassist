@@ -37,6 +37,10 @@ requires a fresh review receipt and execution snapshot. Consent, tool decisions,
 results, transcripts and feedback are not copied. Unchanged edits do not recompile;
 task changes do. Expired appointment windows require edits before a new start.
 Current email, destination, credit, quota and spending checks apply at admission.
+The same reuse path covers a settled completed connection without received consent;
+it excludes explicit refusal, granted consent, started conversations and recordings.
+This covers possible voicemail answers without claiming they were detected. See
+[pre-consent investigation and correction](pre-consent-retry-2026-09-25.md).
 
 History/recent rows use `sourceObjective` from the original compiler response, or
 retained source-language text for older records, with UI truncation and no list-time

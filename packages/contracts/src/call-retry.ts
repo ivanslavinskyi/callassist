@@ -2,8 +2,13 @@ import { getAppointmentAuthorization } from "./appointment";
 import type { CallBrief, CallCompilation } from "./call-brief";
 
 export function canRepeatUnansweredCall(brief: Pick<CallBrief, "status" | "lifecycle">) {
-  return ["failed", "stopped", "completed"].includes(brief.status) && Boolean(brief.lifecycle &&
-    !brief.lifecycle.connected && ["no_answer", "busy", "canceled", "technical_failure"].includes(brief.lifecycle.result ?? ""));
+  const lifecycle = brief.lifecycle;
+  if (!["failed", "stopped", "completed"].includes(brief.status) || !lifecycle ||
+      lifecycle.consent === "granted" || lifecycle.consent === "declined" ||
+      lifecycle.conversationStartedAt || lifecycle.substantiveAnswerConfirmed) return false;
+  if (!lifecycle.connected && ["no_answer", "busy", "canceled", "technical_failure"].includes(lifecycle.result ?? "")) return true;
+  // A voicemail or IVR can answer the telephone leg without a consenting conversation.
+  return brief.status === "completed" && lifecycle.result === "consent_not_received";
 }
 
 export function appointmentPlanExpired(compilation: CallCompilation, now = new Date()) {

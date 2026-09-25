@@ -766,6 +766,8 @@ export class PostgresCallRepository implements CallRepository {
         const [source] = await transaction<CallBriefRow[]>`${this.#briefSelect(true)} WHERE call_briefs.id=${retrySource.callId}
           AND user_id IS NOT DISTINCT FROM ${userId}::uuid AND data_deleted_at IS NULL FOR UPDATE`;
         if (!source) throw new CallRepositoryError("CALL_NOT_FOUND");
+        const recordings = await transaction`SELECT id FROM call_recordings WHERE call_brief_id=${retrySource.callId} LIMIT 1`;
+        if (recordings.length) throw new CallRepositoryError("CALL_RETRY_NOT_AVAILABLE");
         const sourceCompilation = this.#mapCurrentCompilation(source);
         const attempt = await this.getLatestAttempt(retrySource.callId);
         const events = await this.#selectTelemetryForCallIds([retrySource.callId], transaction);

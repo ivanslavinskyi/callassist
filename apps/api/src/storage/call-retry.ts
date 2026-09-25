@@ -3,8 +3,10 @@ import { hasValidCompilationSnapshotHash } from "../brief-compiler/compilation-i
 import { CallRepositoryError, type CallAttemptRecord } from "./call-repository";
 
 export function assertRetryableCall(snapshot: CallSnapshot, attempt: CallAttemptRecord | null) {
-  if (!canRepeatUnansweredCall(snapshot.brief) || !attempt?.endedAt ||
-      !["busy", "no-answer", "canceled", "failed"].includes(attempt.providerStatus ?? "")) {
+  const providerStates = snapshot.brief.lifecycle?.result === "consent_not_received"
+    ? ["completed"] : ["busy", "no-answer", "canceled", "failed"];
+  if (!canRepeatUnansweredCall(snapshot.brief) || snapshot.recording || !attempt?.endedAt ||
+      !providerStates.includes(attempt.providerStatus ?? "")) {
     throw new CallRepositoryError("CALL_RETRY_NOT_AVAILABLE");
   }
   if (!snapshot.compilation || snapshot.executionPlanSource !== "immutable" ||

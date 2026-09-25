@@ -57,6 +57,8 @@ Earlier audits remain dated evidence, not proof of the current deployment.
 - Repeat definitively unanswered calls into a new draft with the saved compilation,
   fresh review/approval and current admission checks; unchanged plans incur no new
   compiler request. History/recent calls show a truncated source-language objective.
+  Settled calls ending without received consent also support repeat; explicit refusal
+  and consented conversations do not.
 - Visible New call/History navigation on mobile; saved feedback is read-only until Edit.
 - Live SSE transcript, recording playback proxy, clipboard/PDF export, feedback,
   retention choices of 0/7/30 days and manual recording deletion.

@@ -74,6 +74,8 @@ change the browser origin. Main API is port 4000; Twilio gateway is port 4001.
   call preparation use paid providers when enabled in the local environment.
 - For a definitively unanswered call, use Repeat, inspect the saved plan and approve
   again. An unchanged plan reuses compilation; edits can invoke the compiler.
+  Repeat also appears after a completed connection without received consent, such
+  as a possible voicemail answer. It excludes explicit refusal and consented calls.
   Verify mobile New call/History navigation and source-language objectives in lists.
 - Save feedback, reload, then Edit and Cancel/Save. The saved view must be read-only.
 - Place calls only to an agreed test recipient. Check consent, captions, interruption,

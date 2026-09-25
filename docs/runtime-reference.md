@@ -21,6 +21,9 @@ the address without verification. Switching back to `required` gates new starts.
 settled source attempt. It returns a new draft using the saved compilation, with
 one clone per source attempt. Review/approval and all admission checks run again;
 unchanged plans do not invoke the compiler. Migration 0083 preserves provenance.
+Settled `completed` attempts with `consent_not_received` also qualify; explicit
+refusal, granted consent, conversation evidence and recordings do not. Technical
+connection is not treated as proof of a human answer.
 See [registration/call behavior and tests](registration-and-call-improvements-2026-09-25.md).
 
 ## Call lifecycle and history
