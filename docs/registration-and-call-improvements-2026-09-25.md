@@ -98,3 +98,10 @@ database and servers. Test migrations ran only on isolated local databases;
 historical migration checksums were preserved. The two new beta-policy integration
 tests use a 30-second deadline, matching other migration-heavy fixtures in that file.
 Owner acceptance, merge and production deployment remain pending.
+
+Manual UI feedback, 25 September: restored the original single phone field on
+call creation/editing, with the existing localized validity hint. The country
+selector and canonical-number preview belong to account phone flows; outbound
+calls still have the fixed CH boundary. Shared normalization remains active on blur
+and submission, including national and international prefix variants. Web tests
+(281), lint and typecheck passed after this layout correction.

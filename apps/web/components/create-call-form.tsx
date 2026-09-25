@@ -1,5 +1,4 @@
 "use client";
-import { PhoneInput } from "./phone-input";
 
 import {
   ASSISTANT_PROFILES,
@@ -354,7 +353,16 @@ export function CreateCallForm({
 
         <label className="field">
           <span>{copy.phone}</span>
-          <PhoneInput value={form.phoneNumber} onChange={value => update("phoneNumber", value)} countries={["CH"]} destination invalid={phoneEntered ? !phoneValid : undefined} />
+          <input
+            value={form.phoneNumber}
+            onChange={(event) => update("phoneNumber", event.target.value)}
+            onBlur={() => update("phoneNumber", normalizedPhone)}
+            placeholder="+41..."
+            type="tel"
+            inputMode="tel"
+            aria-invalid={phoneEntered ? !phoneValid : undefined}
+            required
+          />
           <small className={phoneEntered ? (phoneValid ? "field-valid" : "field-invalid") : ""}>
             {phoneEntered
               ? (phoneValid ? messages.form.phoneValid : messages.form.phoneInvalid)
