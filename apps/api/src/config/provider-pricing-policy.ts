@@ -1,6 +1,7 @@
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 
-export const openAIPublicPricingVersion = "openai-public-2026-09-15";
+export const openAIPublicPricingVersion = "openai-public-2026-09-25";
+const previousPricingVersion = "openai-public-2026-09-15";
 
 type TokenRates = {
   inputTextUsdMicrosPerMillion?: number;
@@ -80,15 +81,30 @@ const openAIPublicRateCards: ProviderRateCard[] = [
   }
 ];
 
+// Official model pages checked 2026-09-25. Old snapshots keep their old SKU set.
+const liveRateCards: ProviderRateCard[] = [
+  { provider: "openai", model: /^gpt-live-1(?:-\d{4}-\d{2}-\d{2})?$/, billing: "duration",
+    rates: { durationUsdMicrosPerMinute: 50_000 } },
+  { provider: "openai", model: /^gpt-6-luna(?:-\d{4}-\d{2}-\d{2})?$/, billing: "tokens",
+    rates: { inputTextUsdMicrosPerMillion: 100_000, cachedInputTextUsdMicrosPerMillion: 10_000,
+      cacheWriteInputTextUsdMicrosPerMillion: 125_000, outputTextUsdMicrosPerMillion: 500_000 } }
+];
+
 export function calculateProviderUsageCost(
   usage: AdminProviderUsageBucket
 ): ProviderUsageCost {
+  const version = usage.pricingVersion ?? openAIPublicPricingVersion;
+  return { ...calculateUsageCost(usage, version), pricingVersion: version };
+}
+
+function calculateUsageCost(usage: AdminProviderUsageBucket, version: string): ProviderUsageCost {
   // The persisted version selects an immutable snapshot. Never change old cards
   // when adding new prices; register a new snapshot and change the insert default.
-  if (usage.pricingVersion && usage.pricingVersion !== openAIPublicPricingVersion) {
-    return { ...unmatchedCost(), pricingVersion: usage.pricingVersion, unpricedMetrics: ["pricing_version"] };
+  if (![openAIPublicPricingVersion, previousPricingVersion].includes(version)) {
+    return { ...unmatchedCost(), pricingVersion: version, unpricedMetrics: ["pricing_version"] };
   }
-  const card = openAIPublicRateCards.find((candidate) =>
+  const cards = version === previousPricingVersion ? openAIPublicRateCards : [...openAIPublicRateCards, ...liveRateCards];
+  const card = cards.find((candidate) =>
     candidate.provider === usage.provider && candidate.model.test(usage.model)
   );
   if (!card) return unmatchedCost();

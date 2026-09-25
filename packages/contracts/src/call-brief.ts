@@ -719,7 +719,11 @@ export const transcriptSegmentSchema = z.object({
   text: z.string(),
   locale: callLocaleSchema,
   final: z.boolean(),
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
+  nativeTiming: z.object({
+    sessionId: z.string().min(1).max(200), eventId: z.string().min(1).max(200),
+    sessionStartedAt: z.string().datetime(), startMs: z.number().nonnegative(), endMs: z.number().nonnegative()
+  }).refine(value => value.endMs >= value.startMs).optional()
 });
 export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 

@@ -31,7 +31,8 @@ function harness({ failure, stalled = false, onboardingRequired = false, started
     } else if (path === `/api/call-briefs/${callId}/approve-and-start`) { started = true; body = { brief: { id: callId, status: "dialing" } }; }
     else if (path === `/api/call-briefs/${callId}`) body = {
       brief: { id: callId, status: started ? "completed" : "review_required" },
-      compilation: { revision: 1, snapshotHash }
+      compilation: { revision: 1, snapshotHash, rawBrief: { locale: "ru-RU" } },
+      languageContext: { selectionRevision: 1 }
     };
     else throw new Error(`Unexpected request ${path}`);
     return Response.json(body, { status, headers });
@@ -57,7 +58,7 @@ describe("non-billable drill harness", () => {
     expect(h.requests.some((r) => r.path.startsWith("/api/call-preparations"))).toBe(false);
     expect(h.requests.filter((r) => r.path.endsWith("approve-and-start"))).toHaveLength(1);
     expect(JSON.parse(h.requests.find((r) => r.path.endsWith("approve-and-start")).body))
-      .toEqual({ revision: 1, snapshotHash });
+      .toEqual({ revision: 1, snapshotHash, review: { mode: "original", language: "ru-RU", selectionRevision: 1 } });
   });
   it("refuses to approve a changed plan after the prepare/review boundary", async () => {
     const h = harness();

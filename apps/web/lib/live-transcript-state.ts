@@ -25,3 +25,23 @@ export function mergeTranscriptSegments(current: TranscriptSegment[], incoming: 
   for (const segment of incoming) if (!segments.has(segment.id)) segments.set(segment.id, segment);
   return [...segments.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
+
+/** Display grouping only. Native fragments remain independent persisted evidence. */
+export function groupNativeTranscriptSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
+  const rows: TranscriptSegment[] = [];
+  const lastBySpeaker = new Map<string, TranscriptSegment>();
+  for (const segment of [...segments].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    const timing = segment.nativeTiming;
+    if (!timing) { rows.push(segment); lastBySpeaker.clear(); continue; }
+    const key = `${timing.sessionId}:${segment.role}:${segment.locale}`;
+    const previous = lastBySpeaker.get(key);
+    if (previous?.nativeTiming && timing.startMs - previous.nativeTiming.endMs <= 1500) {
+      previous.text += segment.text;
+      previous.nativeTiming.endMs = Math.max(previous.nativeTiming.endMs, timing.endMs);
+    } else {
+      const row = { ...segment, nativeTiming: { ...timing } };
+      rows.push(row); lastBySpeaker.set(key, row);
+    }
+  }
+  return rows;
+}

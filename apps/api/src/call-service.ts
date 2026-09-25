@@ -945,6 +945,11 @@ export class CallService {
     return (await this.#persistTranscript(id, role, text.trim(), sourceKey)).segment;
   }
 
+  async addNativeLiveTranscript(id: string, role: "recipient" | "assistant", text: string, sourceKey: string, nativeTiming: NonNullable<TranscriptSegment["nativeTiming"]>) {
+    if (!text.length) return null;
+    return (await this.#persistTranscript(id, role, text, sourceKey, nativeTiming)).segment;
+  }
+
 
 
   async startRecordingAfterConsent(
@@ -1691,13 +1696,14 @@ export class CallService {
     return (await this.#persistTranscript(id, role, text, sourceKey)).snapshot;
   }
 
-  async #persistTranscript(id: string, role: TranscriptSegment["role"], text: string, sourceKey?: string) {
+  async #persistTranscript(id: string, role: TranscriptSegment["role"], text: string, sourceKey?: string, nativeTiming?: TranscriptSegment["nativeTiming"]) {
     const snapshot = await this.#require(id);
     const result = await this.repository.addTranscript(
       id,
       role,
       text,
-      snapshot.brief.locale
+      snapshot.brief.locale,
+      nativeTiming
     );
     this.#publish(id, { type: "transcript.added", segment: result.segment, ...(sourceKey ? { key: sourceKey } : {}) });
     return result;

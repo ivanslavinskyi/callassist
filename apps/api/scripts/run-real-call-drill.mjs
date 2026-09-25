@@ -93,9 +93,14 @@ export async function runRealCallDrill(environment = process.env, dependencies =
     if (snapshot.compilation.revision !== reviewedRevision || snapshot.compilation.snapshotHash !== reviewedHash) {
       throw new Error("Reviewed plan changed; review the current compilation before starting");
     }
+    if (!snapshot.compilation.rawBrief?.locale || !Number.isSafeInteger(snapshot.languageContext?.selectionRevision)) {
+      throw new Error("Current original-plan review context is unavailable");
+    }
     const { body: started } = await request(`/api/call-briefs/${callId}/approve-and-start`, { method: "POST", body: {
       revision: reviewedRevision,
-      snapshotHash: reviewedHash
+      snapshotHash: reviewedHash,
+      review: { mode: "original", language: snapshot.compilation.rawBrief.locale,
+        selectionRevision: snapshot.languageContext.selectionRevision }
     } });
     let status = started.brief.status;
     write({ event: "real_call_started", callId, status });

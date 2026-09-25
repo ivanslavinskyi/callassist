@@ -11,6 +11,7 @@ import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, re
 import type { CallTextRepository } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import { conversationCreditEvidenceSchema, conversationCreditReason, conversationCreditRefundReason, type ConversationCreditEvidence } from "../credits/conversation-credit";
+import { openAIPublicPricingVersion } from "../config/provider-pricing-policy";
 import {
   isSupportedBriefCompilerVersion,
   CALL_OUTCOME_SCHEMA_VERSION,
@@ -199,6 +200,7 @@ type TranscriptRow = {
   locale: CallLocale;
   final: boolean;
   createdAt: DatabaseDate;
+  nativeTiming: TranscriptSegment["nativeTiming"] | null;
 };
 
 type ApprovalRow = {
@@ -2657,7 +2659,8 @@ export class PostgresCallRepository implements CallRepository {
           text,
           locale,
           final,
-          created_at AS "createdAt"
+          created_at AS "createdAt",
+          native_timing AS "nativeTiming"
         FROM transcript_segments
         WHERE call_brief_id = ${id}
         ORDER BY created_at ASC
@@ -5060,7 +5063,8 @@ export class PostgresCallRepository implements CallRepository {
     id: string,
     role: TranscriptSegment["role"],
     text: string,
-    locale: CallLocale
+    locale: CallLocale,
+    nativeTiming?: TranscriptSegment["nativeTiming"]
   ) {
     const segment: TranscriptSegment = {
       id: randomUUID(),
@@ -5068,7 +5072,8 @@ export class PostgresCallRepository implements CallRepository {
       text,
       locale,
       final: true,
-      createdAt: new Date().toISOString()
+      createdAt: nativeTiming ? new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString() : new Date().toISOString(),
+      ...(nativeTiming ? { nativeTiming } : {})
     };
 
     await this.#sql.begin(async (transaction) => {
@@ -5078,10 +5083,10 @@ export class PostgresCallRepository implements CallRepository {
       if (call.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
       await transaction`
         INSERT INTO transcript_segments (
-          id, call_brief_id, role, text, locale, final, created_at
+          id, call_brief_id, role, text, locale, final, created_at, native_timing
         ) VALUES (
           ${segment.id}, ${id}, ${role}, ${text}, ${locale}, true,
-          ${new Date(segment.createdAt)}
+          ${new Date(segment.createdAt)}, ${nativeTiming ? transaction.json(nativeTiming) : null}
         )
       `;
       await this.#audit(transaction, id, "transcript.finalized", {
@@ -6856,8 +6861,10 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapTranscript(row: TranscriptRow): TranscriptSegment {
+    const { nativeTiming, ...rest } = row;
     return {
-      ...row,
+      ...rest,
+      ...(nativeTiming ? { nativeTiming } : {}),
       createdAt: toIso(row.createdAt)
     };
   }
@@ -7837,7 +7844,7 @@ export class PostgresCallRepository implements CallRepository {
         cache_write_input_text_tokens, output_text_tokens,
         reasoning_output_tokens, input_audio_tokens,
         cached_input_audio_tokens, output_audio_tokens, total_tokens,
-        duration_seconds, billable_seconds, raw_usage, observed_at
+        duration_seconds, billable_seconds, raw_usage, observed_at, pricing_version
       ) VALUES (
         ${randomUUID()}, ${operationId}, 1,
         ${input.usage.requestCount ?? 1},
@@ -7853,7 +7860,7 @@ export class PostgresCallRepository implements CallRepository {
         ${input.usage.durationSeconds ?? null},
         ${input.usage.billableSeconds ?? null},
         ${transaction.json(input.usage.rawUsage as postgres.JSONValue)},
-        ${input.completedAt}::timestamptz
+        ${input.completedAt}::timestamptz, ${openAIPublicPricingVersion}
       )
       ON CONFLICT (operation_id) DO NOTHING
     `;

@@ -6,6 +6,16 @@ import {
 } from "./provider-pricing-policy";
 
 describe("provider pricing policy", () => {
+  it("prices Live duration per second and Luna tokens separately without changing older snapshots", () => {
+    expect(calculateProviderUsageCost(bucket({ model: "gpt-live-1", durationSeconds: 90.5, durationSamples: 1 })))
+      .toMatchObject({ calculatedUsdMicros: 75_417, durationUsdMicros: 75_417, unpricedMetrics: [] });
+    expect(calculateProviderUsageCost(bucket({ model: "gpt-6-luna", inputTextTokens: 1_000_000, inputTextTokenSamples: 1,
+      cachedInputTextTokens: 100_000, cachedInputTextTokenSamples: 1, outputTextTokens: 100_000, outputTextTokenSamples: 1 })))
+      .toMatchObject({ calculatedUsdMicros: 141_000, unpricedMetrics: [] });
+    expect(calculateProviderUsageCost(bucket({ model: "gpt-live-1", pricingVersion: "openai-public-2026-09-15", durationSeconds: 90, durationSamples: 1 })).matched).toBe(false);
+    expect(calculateProviderUsageCost(bucket({ model: "gpt-transcribe", pricingVersion: "openai-public-2026-09-15", durationSeconds: 90, durationSamples: 1 })))
+      .toMatchObject({ pricingVersion: "openai-public-2026-09-15", calculatedUsdMicros: 6_750 });
+  });
   it("prices compiler text tokens without charging cached input twice", () => {
     expect(calculateProviderUsageCost(bucket({
       model: "gpt-5.6-2026-08-01",

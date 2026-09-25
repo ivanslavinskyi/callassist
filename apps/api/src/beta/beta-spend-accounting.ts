@@ -53,7 +53,7 @@ export function priceBudgetOperation(operation: BudgetOperation): number | null 
   if (!priced.matched || priced.calculatedUsdMicros === null || priced.unpricedMetrics.length) return null;
   if (priced.durationUsdMicros !== null) return priced.calculatedUsdMicros;
   // Token totals and all billable input/output modalities must be present.
-  const audio = operation.operationType === "realtime_response";
+  const audio = operation.operationType === "realtime_response" && operation.stage !== "live_delegation";
   if (audio && ["input_text_tokens", "output_text_tokens", "input_audio_tokens", "output_audio_tokens"].some(k => !present(k))) return null;
   if (!audio && (!present("output_text_tokens") || (!present("input_text_tokens") && !present("input_audio_tokens")))) return null;
   const accounted = value("input_text_tokens") + value("input_audio_tokens") + value("output_text_tokens") + value("output_audio_tokens");
@@ -89,7 +89,7 @@ export function accountBudgetReservation(reservation: BudgetReservation): Amount
   if (reservation.call?.providerStatus === "completed" && sessions.length === 0) complete = false;
   if (sessions.some(o => o.outcome !== "succeeded")) complete = false;
   for (const operation of operations) {
-    if (legs.includes(operation) || sessions.includes(operation)) continue;
+    if (legs.includes(operation) || (sessions.includes(operation) && operation.stage !== "live_conversation")) continue;
     const price = priceBudgetOperation(operation);
     if (price === null) complete = false;
     else amounts.usageCostMicros += price;

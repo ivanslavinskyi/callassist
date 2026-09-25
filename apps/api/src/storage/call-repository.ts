@@ -264,7 +264,7 @@ export type RealtimeProviderSessionInput = {
   callAttemptId: string;
   provider: "openai";
   operationType: "realtime_session";
-  stage: "conversation" | "consent_transcription";
+  stage: "conversation" | "consent_transcription" | "live_conversation";
   requestedModel: string;
   clientRequestId: string;
   startedAt: string;
@@ -927,7 +927,8 @@ export interface CallRepository extends CallTextRepository {
     id: string,
     role: TranscriptSegment["role"],
     text: string,
-    locale: CallLocale
+    locale: CallLocale,
+    nativeTiming?: TranscriptSegment["nativeTiming"]
   ): Promise<{ segment: TranscriptSegment; snapshot: CallSnapshot }>;
   qualifyConversationCredit(
     id: string,

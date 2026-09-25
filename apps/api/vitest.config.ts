@@ -5,7 +5,7 @@ export default defineConfig({
     // PostgreSQL integration suites create independent repositories and run
     // migration/setup work. Bounding file concurrency avoids starving Fastify
     // and database assertions on high-core developer and CI hosts.
-    maxWorkers: 4,
+    maxWorkers: 2,
     testTimeout: 10_000,
     hookTimeout: 30_000
   }

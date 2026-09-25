@@ -99,7 +99,7 @@ import {
   type EndpointRateLimitPolicy,
   type EndpointRateLimitRule
 } from "./config/endpoint-rate-limit-policy";
-import type { OpenAIRealtimeBridge } from "./realtime/openai-realtime-bridge";
+import type { VoiceRuntime } from "./voice/voice-runtime";
 import {
   piiSafeLoggerOptions,
   registerPiiSafeRequestLogging,
@@ -162,7 +162,7 @@ type BuildAppOptions = {
 type BuildWebhookAppOptions = {
   service: CallService;
   twilioProvider: TwilioTelephonyProvider;
-  realtimeBridge: OpenAIRealtimeBridge;
+  realtimeBridge: VoiceRuntime;
   logger?: boolean;
   production?: boolean;
 };

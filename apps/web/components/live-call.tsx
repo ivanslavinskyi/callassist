@@ -42,7 +42,7 @@ import { useCallDraftStore } from "./call-draft-provider";
 import { getCallLanguageLabel, getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 import { isTerminalCallStatus } from "@/lib/call-status";
 import { useTranscriptFollowing } from "./use-transcript-following";
-import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments } from "@/lib/live-transcript-state";
+import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments, groupNativeTranscriptSegments } from "@/lib/live-transcript-state";
 import { currentCallSnapshot } from "@/lib/current-call-snapshot";
 import { compilationApprovalInput } from "@/lib/compilation-approval";
 import { isPlanPreparationFailure } from "@/lib/plan-preparation-failure";
@@ -704,7 +704,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                 </div>
               ) : (
                 <>
-                  {transcript.map((segment) => (
+                  {groupNativeTranscriptSegments(transcript).map((segment) => (
                   <article className={`transcript-line role-${segment.role}`} key={segment.id}>
                     <div className="speaker-mark">
                       {segment.role === "assistant" ? "AI" : "RE"}

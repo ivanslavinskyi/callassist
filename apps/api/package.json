@@ -32,6 +32,7 @@
     "db:test:prepare": "tsx src/db/prepare-test-database.ts",
     "dev": "node --use-system-ca --import tsx src/index.ts",
     "drill:real-call": "node --use-system-ca scripts/run-real-call-drill.mjs",
+    "drill:voice-runtime": "node --use-system-ca --import tsx scripts/run-voice-runtime-smoke.mjs",
     "drill:real-call:inspect": "node --use-system-ca --import tsx scripts/inspect-real-call-drill.mjs",
     "worker": "node --use-system-ca --import tsx src/worker.ts",
     "lint": "tsc --noEmit",

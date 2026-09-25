@@ -3,6 +3,7 @@ import { formatLocale } from "@callassist/contracts";
 import { callStatusLabel, callConsentLabel } from "@/lib/call-status";
 import { CallAssessments } from "./call-assessments";
 import { CallLifecycleSummary } from "./call-lifecycle-summary";
+import { groupNativeTranscriptSegments } from "@/lib/live-transcript-state";
 
 import type {
   AdminCallInspector as AdminCallInspectorData,
@@ -244,7 +245,7 @@ function SensitiveContent({
         <h3>{copy.liveTranscript}</h3>
         {content.transcript.length > 0 ? (
           <ol className="admin-sensitive-transcript">
-            {content.transcript.map((segment) => (
+            {groupNativeTranscriptSegments(content.transcript).map((segment) => (
               <li key={segment.id}>
                 <strong>{segment.role}</strong>
                 <p>{segment.text}</p>

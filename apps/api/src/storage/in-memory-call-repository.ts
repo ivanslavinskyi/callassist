@@ -2774,7 +2774,8 @@ export class InMemoryCallRepository implements CallRepository {
     id: string,
     role: TranscriptSegment["role"],
     text: string,
-    locale: CallLocale
+    locale: CallLocale,
+    nativeTiming?: TranscriptSegment["nativeTiming"]
   ) {
     const snapshot = this.#require(id);
     const segment: TranscriptSegment = {
@@ -2783,7 +2784,8 @@ export class InMemoryCallRepository implements CallRepository {
       text,
       locale,
       final: true,
-      createdAt: new Date().toISOString()
+      createdAt: nativeTiming ? new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString() : new Date().toISOString(),
+      ...(nativeTiming ? { nativeTiming } : {})
     };
     snapshot.transcript.push(segment);
     return { segment: copy(segment), snapshot: copy(snapshot) };

@@ -20,6 +20,12 @@ export function validateRuntimeEnvironment(
   environment: NodeJS.ProcessEnv,
   runtime: RuntimeProcess
 ) {
+  if (!["realtime", "live"].includes(environment.VOICE_RUNTIME_DRIVER?.trim() || "realtime")) {
+    throw new RuntimeConfigurationError(["VOICE_RUNTIME_DRIVER must be realtime or live"]);
+  }
+  if (environment.VOICE_RUNTIME_LIVE_FALLBACK?.trim() && !["true", "false"].includes(environment.VOICE_RUNTIME_LIVE_FALLBACK.trim())) {
+    throw new RuntimeConfigurationError(["VOICE_RUNTIME_LIVE_FALLBACK must be true or false"]);
+  }
   if (environment.NODE_ENV !== "production") {
     const compilerDriver = environment.BRIEF_COMPILER_DRIVER?.trim() ||
       (environment.OPENAI_API_KEY?.trim() ? "openai" : "mock");

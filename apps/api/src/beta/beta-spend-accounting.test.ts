@@ -52,6 +52,16 @@ describe("beta spending from provider evidence", () => {
   it("does not release a call from local termination alone", () => {
     expect(summarizeBetaSpend([call({ call: { terminal: false, providerStatus: "in-progress" } })]).reservedMicros).toBe(4_200_000);
   });
+  it("includes native Live duration and text-only delegation alongside the bounded Realtime speech", () => {
+    const c = call();
+    c.operations.push(operation({ operationType: "realtime_session", stage: "live_conversation", model: "gpt-live-1",
+      usage: { duration_seconds: 90 } }));
+    c.operations.push(operation({ operationType: "realtime_response", stage: "live_delegation", model: "gpt-6-luna",
+      usage: { input_text_tokens: 1000, output_text_tokens: 100, total_tokens: 1100 } }));
+    expect(accountBudgetReservation(c)).toEqual({ reportedCostMicros: 360_400, usageCostMicros: 161_550, pendingReserveMicros: 20_000 });
+    c.operations[3].outcome = "network_error";
+    expect(summarizeBetaSpend([c]).reservedMicros).toBe(4_200_000);
+  });
   it.each(["missing price", "other currency", "unknown usage", "failed session", "missing session", "missing duration"])("keeps the call reserve on %s", failure => {
     const c = call();
     if (failure === "missing price") c.operations[0].costs = [];

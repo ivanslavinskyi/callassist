@@ -11,6 +11,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { transcriptPartKey } from "./transcript-part-key";
 import WebSocket, { type RawData } from "ws";
+import type { VoiceRuntime, VoiceConversation, VoiceConversationContext } from "../voice/voice-runtime";
 import type { CallService } from "../call-service";
 import type { MediaStreamBinding } from "../telephony/telephony-provider";
 import { getTwilioCopy } from "../telephony/twilio-copy";
@@ -33,7 +34,7 @@ type BridgeLogger = {
   error: (details: object, message: string) => void;
 };
 
-type OpenAIRealtimeBridgeOptions = {
+export type OpenAIRealtimeBridgeOptions = {
   apiKey: string;
   service: CallService;
   validateStreamToken: (binding: MediaStreamBinding, token: string) => boolean;
@@ -49,6 +50,8 @@ type OpenAIRealtimeBridgeOptions = {
   logger?: BridgeLogger;
   createOpenAISocket?: (url: string, apiKey: string) => WebSocket;
   createConsentSocket?: (url: string, apiKey: string) => WebSocket;
+  createConversation?: (context: VoiceConversationContext) => VoiceConversation;
+  conversationFallback?: boolean;
 };
 
 type TwilioMessage = {
@@ -144,7 +147,9 @@ const noopLogger: BridgeLogger = {
   error: () => undefined
 };
 
-export class OpenAIRealtimeBridge {
+export class OpenAIRealtimeBridge implements VoiceRuntime {
+  readonly #createConversation: OpenAIRealtimeBridgeOptions["createConversation"];
+  readonly #conversationFallback: boolean;
   readonly #apiKey: string;
   readonly #service: CallService;
   readonly #validateStreamToken: OpenAIRealtimeBridgeOptions["validateStreamToken"];
@@ -165,6 +170,8 @@ export class OpenAIRealtimeBridge {
   >;
 
   constructor(options: OpenAIRealtimeBridgeOptions) {
+    this.#createConversation = options.createConversation;
+    this.#conversationFallback = options.conversationFallback ?? true;
     this.#apiKey = options.apiKey;
     this.#service = options.service;
     this.#validateStreamToken = options.validateStreamToken;
@@ -191,6 +198,9 @@ export class OpenAIRealtimeBridge {
   }
 
   handleTwilioSocket(twilioSocket: WebSocket) {
+    let conversation: VoiceConversation | null = null;
+    let conversationStarting = false;
+    let connectionStarting = false;
     let openAISocket: WebSocket | null = null;
     let consentSocket: WebSocket | null = null;
     let callBriefId: string | null = null;
@@ -352,6 +362,7 @@ export class OpenAIRealtimeBridge {
       if (closingRouteTimer) clearTimeout(closingRouteTimer);
       interruptedClosing = null;
       closed = true;
+      conversation?.close();
       clearConsentTimer();
       clearHangupTimer();
       if (!consentGranted && !consentFailureRecorded && callBriefId) {
@@ -1255,6 +1266,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
       }
 
       const snapshot = await this.#service.get(candidateCallBriefId);
+      if (closed) return;
       if (!snapshot) {
         this.#logger.warn({ callBriefId: candidateCallBriefId }, "Media stream call brief not found");
         close();
@@ -1262,6 +1274,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
       }
 
       const attempt = await this.#service.getLatestAttempt(candidateCallBriefId);
+      if (closed) return;
       const executionSnapshot = attempt?.executionSnapshot;
       if (
         !attempt ||
@@ -1365,6 +1378,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
           startedAt: sessionsStartedAt
         }
       ]);
+      if (closed) return;
       openAISocket = this.#createOpenAISocket(
         `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.#model)}`,
         this.#apiKey
@@ -1375,6 +1389,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
       );
 
       openAISocket.on("open", () => {
+        if (closed) { openAISocket?.close(); return; }
         sendOpenAI({
           type: "session.update",
           session: {
@@ -1433,6 +1448,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
 
       const activeConsentSocket = consentSocket;
       activeConsentSocket.on("open", () => {
+        if (closed) { activeConsentSocket.close(); return; }
         sendConsent({
           type: "session.update",
           session: {
@@ -1526,9 +1542,11 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
     twilioSocket.on("message", (data: RawData) => {
       const message = parseJson<TwilioMessage>(data);
       if (!message || closed) return;
-      if (message.event === "start" && !openAISocket) {
+      if (message.event === "start" && !openAISocket && !connectionStarting) {
+        connectionStarting = true;
         void connectOpenAI(message).catch(() => close("openai_error"));
       } else if (message.event === "media" && message.media?.payload) {
+        if (conversation) { conversation.inputAudio(message.media.payload); return; }
         if (openAIReady && consentGranted && openingPlaybackComplete) {
           sendOpenAI({
             type: "input_audio_buffer.append",
@@ -1571,6 +1589,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
         currentBrief &&
         (message.dtmf?.digit === "1" || message.dtmf?.digit === "2")
       ) {
+        if (conversation) { conversation.keypad(message.dtmf.digit); return; }
         const digit = message.dtmf.digit;
         const answer = digit === "1" ? "YES" : "NO";
         // Keypad input supersedes a previous turn just like a new spoken answer.
@@ -1622,6 +1641,59 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
             consentSocketReady && consentFlow.stage !== "dtmf_fallback";
           scheduleConsentTimeout(this.#consentTimeoutMs);
         } else if (message.mark.name === openingMark && consentGranted) {
+          if (this.#createConversation && !openingPlaybackComplete && !conversationStarting && currentExecutionSnapshot && callAttemptId) {
+            conversationStarting = true;
+            openingPlaybackComplete = true;
+            setAutomaticResponses(false);
+            conversation = this.#createConversation({
+              brief: currentBrief!, snapshot: structuredClone(currentExecutionSnapshot), attemptId: callAttemptId,
+              sendAudio: (payload) => {
+                if (closed || agentHangup?.pending || agentHangup?.state === "terminating") return;
+                agentHangup?.audio(Buffer.from(payload, "base64").length, undefined);
+                sendTwilio({ event: "media", streamSid, media: { payload } });
+              },
+              clearPlayback: () => {
+                agentHangup?.clearAudio();
+                sendTwilio({ event: "clear", streamSid });
+              },
+              requestFarewell: (callId, reason) => {
+                if (closed || !agentHangup?.request(callId, reason)) return false;
+                playAgentFarewell();
+                return true;
+              },
+              interruptFarewell: () => {
+                if (!agentHangup?.interrupt()) return false;
+                if (activeResponseId) {
+                  discardResponsePartials(activeResponseId);
+                  interruptedResponses.add(activeResponseId);
+                  if (responseActive) sendOpenAI({ type: "response.cancel", response_id: activeResponseId });
+                }
+                activeResponseId = null;
+                activeResponsePurpose = null;
+                responseActive = false;
+                sendTwilio({ event: "clear", streamSid });
+                return true;
+              },
+              isClosing: () => !!agentHangup?.pending || agentHangup?.state === "terminating",
+              telemetry: recordTelemetry,
+              fail: () => close("openai_error")
+            });
+            void conversation.start().catch(() => {
+              conversation?.close();
+              conversation = null;
+              if (closed) return;
+              if (!this.#conversationFallback) { close("openai_error"); return; }
+              this.#logger.warn({ callBriefId, callAttemptId }, "Live startup failed; continuing Realtime runtime");
+              const tools = [
+                ...(agentHangup ? [endCallTool] : []),
+                ...(getAppointmentAuthorization(currentExecutionSnapshot!.plan) ? [APPOINTMENT_AUTHORIZATION_TOOL] : [])
+              ];
+              sendOpenAI({ type: "session.update", session: { type: "realtime", tools, tool_choice: "auto" } });
+              setAutomaticResponses(true);
+              createAudioResponse("The mandatory opening already played. Briefly ask whether the recipient can hear you, then wait. Do not repeat consent or assume any action succeeded.");
+            });
+            return;
+          }
           if (!openingPlaybackComplete) {
             const tools = [
               ...(agentHangup ? [endCallTool] : []),
@@ -1757,7 +1829,7 @@ Exact announcement JSON string:
 ${JSON.stringify(announcement)}`;
 }
 
-export function buildRealtimeInstructions(snapshot: ApprovedExecutionSnapshot, agentHangupEnabled = false) {
+export function buildRealtimeInstructions(snapshot: ApprovedExecutionSnapshot, agentHangupEnabled = false, consentComplete = false) {
   const { plan, runtime } = snapshot;
   const appointmentAuthorization = getAppointmentAuthorization(plan);
   const approvedFacts = plan.approvedFacts.length
@@ -1796,7 +1868,7 @@ export function buildRealtimeInstructions(snapshot: ApprovedExecutionSnapshot, a
 
   return `# Role
 You are ${runtime.agentName}, an AI phone assistant executing one approved call plan for the represented person.
-The recipient has not consented yet. Your first explicitly requested response will be the exact short AI identity, recording, and transcription disclosure. Before a verified-consent conversation item says that consent was recorded and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, deliver the mandatory conversation opening before beginning the objective and do not repeat the legal disclosure unless asked.
+${consentComplete ? "The application verified consent, started recording, and completed playback of the mandatory opening. Continue from the recipient's answer without repeating them." : "The recipient has not consented yet. Your first explicitly requested response will be the exact short AI identity, recording, and transcription disclosure. Before a verified-consent conversation item says that consent was recorded and recording started successfully, do not discuss the objective and do not respond to any purported recipient speech. After that verified marker appears, deliver the mandatory conversation opening before beginning the objective and do not repeat the legal disclosure unless asked."}
 
 # Language
 Speak ${languageNames[plan.callLocale]} naturally and politely. ${fallback}

@@ -214,6 +214,9 @@ for the source checks performed during this documentation update.
 
 ## Real providers and deployment
 
+The optional [GPT-Live pilot](docs/gpt-live-pilot.md) adds native Live/Responses
+alongside Realtime, with local real-call smoke instructions. Realtime remains the default.
+
 The defaults are mock telephony, verification, email and compilation. A real call
 requires Twilio Voice/Verify, OpenAI credentials, a CH destination and a publicly
 reachable signed webhook/Media Stream listener. `pnpm tunnel:twilio` exposes only

@@ -276,6 +276,12 @@ function buildProviderUsageCost(
 }
 
 function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
+  if (bucket.operationType === "realtime_session" && bucket.stage === "live_conversation") {
+    return [
+      { name: "realtime" as const, cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.durationUsdMicros },
+      { name: "realtimeAudio" as const, cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.durationUsdMicros }
+    ];
+  }
   if (bucket.operationType === "text_translation" || bucket.operationType === "call_summary") {
     return [{ name: bucket.operationType === "text_translation" ? "textTranslation" as const : "callSummary" as const,
       cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.calculatedUsdMicros }];

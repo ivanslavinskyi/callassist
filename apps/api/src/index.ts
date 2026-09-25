@@ -32,9 +32,9 @@ import {
   parsePromoCodeHashKey
 } from "./credits/credit-service";
 import {
-  OpenAIRealtimeBridge,
   type RealtimeTranscriptionDelay
 } from "./realtime/openai-realtime-bridge";
+import { createVoiceRuntime, voiceRuntimeDriver } from "./voice/create-voice-runtime";
 import { createCallRuntimeDependenciesFromEnv } from "./runtime/call-runtime-dependencies";
 import {
   createGracefulShutdown,
@@ -115,7 +115,7 @@ const app = buildApp({
 });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
-    ? new OpenAIRealtimeBridge({
+    ? createVoiceRuntime({
         apiKey: realtimeApiKey!,
         service,
         validateStreamToken: (binding, token) =>
@@ -133,8 +133,8 @@ const realtimeBridge =
     : null;
 if (realtimeBridge) {
   app.log.info(
-    { agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true" },
-    "Realtime agent hangup configuration"
+    { driver: voiceRuntimeDriver(process.env), agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true" },
+    "Voice runtime configuration"
   );
 }
 const webhookApp =
