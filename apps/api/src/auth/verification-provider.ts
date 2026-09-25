@@ -1,5 +1,6 @@
 export interface VerificationProvider {
   readonly mode: "mock" | "twilio";
+  validateDestination?(phoneE164: string): void;
   send(phoneE164: string, locale?: string): Promise<void>;
   check(phoneE164: string, code: string): Promise<boolean>;
 }

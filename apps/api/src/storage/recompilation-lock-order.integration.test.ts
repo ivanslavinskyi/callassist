@@ -6,6 +6,7 @@ import { normalizeCreateCallBriefInput } from "@callassist/contracts";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "./postgres-call-repository";
+import { originalPlanReview } from "../test-helpers/original-plan-review";
 
 const database = isolatedTestDatabase();
 let sql: postgres.Sql, repository: PostgresCallRepository;
@@ -15,6 +16,37 @@ beforeAll(async () => {
   repository = new PostgresCallRepository(database.url, Buffer.alloc(32, 9));
 }, 30000);
 afterAll(async () => { await repository?.close(); await sql?.end(); await database.teardown(); });
+
+it.each(["telephony operation", "leg usage", "voice session"])("locks the brief before the attempt for %s while a provider callback holds the brief", async kind => {
+  const input = normalizeCreateCallBriefInput({ recipientName: "Lock order test", phoneNumber: "+41523686688",
+    objective: "Ask about office opening hours", assistantProfileId: "sebastian", representedPersonFirstName: "Test", representedPersonLastName: "Owner", locale: "en-GB", allowedFacts: [] });
+  const brief = await repository.create(input, await new DeterministicBriefCompiler().compile(input));
+  await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
+  const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
+  const providerCallId = `CA${randomUUID()}`;
+  await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
+  let pending: Promise<unknown> = Promise.resolve();
+  try {
+    await sql.begin(async tx => {
+      const [{ pid }] = await tx<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      await tx`SELECT id FROM call_briefs WHERE id=${brief.id} FOR UPDATE`;
+      const common = { id: randomUUID(), callBriefId: brief.id, callAttemptId: attempt.id, clientRequestId: randomUUID(), startedAt: new Date().toISOString() };
+      pending = kind === "telephony operation" ? repository.startTelephonyProviderOperation({ ...common, provider: "twilio", operationType: "telephony_leg", stage: "outbound_call", requestedModel: "programmable_voice" })
+        : kind === "voice session" ? repository.startRealtimeProviderSessions([{ ...common, provider: "openai", operationType: "realtime_session", stage: "conversation", requestedModel: "gpt-realtime-2.1" }])
+        : repository.recordTelephonyLegUsage({ fallbackOperationId: common.id, callBriefId: brief.id, callAttemptId: attempt.id, providerCallId,
+          providerStatus: "completed", durationSeconds: 12, billableSeconds: null, sequenceNumber: null, occurredAt: common.startedAt });
+      void pending.catch(() => undefined);
+      await vi.waitFor(async () => {
+        const [waiting] = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND ${pid}=ANY(pg_blocking_pids(pid))`;
+        expect(waiting.count).toBeGreaterThan(0);
+      }, { timeout: 5000 });
+      // Before the fix, accounting held SHARE on this attempt while its INSERT
+      // waited for the callback's brief lock, creating a deterministic deadlock.
+      await tx`UPDATE call_attempts SET provider_status='completed' WHERE id=${attempt.id}`;
+    });
+    await expect(pending).resolves.toBeUndefined();
+  } finally { await pending.catch(() => undefined); }
+});
 
 it("takes the owner lock before the brief, allowing an owner-first text mutation to finish", async () => {
   const owner = randomUUID();

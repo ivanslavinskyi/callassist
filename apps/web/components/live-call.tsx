@@ -1,5 +1,6 @@
 "use client";
-import { formatLocale } from "@callassist/contracts";
+import { canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
+import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { systemMessages } from "@/lib/i18n/system-messages";
 import { callStatusClass, callStatusLabel } from "@/lib/call-status";
 import { CallLifecycleSummary } from "./call-lifecycle-summary";
@@ -57,6 +58,7 @@ import {
   getCallSnapshot,
   recompileCallBrief,
   retryFinalTranscript,
+  repeatUnansweredCall,
   startCall,
   stopCall,
   updateCallContentLanguage,
@@ -306,6 +308,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     languagePreferences?: TaskLanguagePreferences,
     onProgress?: (progress: CallPreparationProgress) => void
   ) {
+    if (snapshot?.compilation && JSON.stringify(createCallBriefInputSchema.parse(input)) === JSON.stringify(createCallBriefInputSchema.parse(snapshot.compilation.rawBrief))) {
+      if (languagePreferences?.mode === "manual" && languagePreferences.targetLanguage && snapshot.languageContext && languagePreferences.targetLanguage !== snapshot.languageContext.taskContentLanguage) {
+        await updateCallContentLanguage(callId, { targetLanguage: languagePreferences.targetLanguage, expectedSelectionRevision: snapshot.languageContext.selectionRevision });
+        setSnapshot(await getCallSnapshot(callId));
+      }
+      setEditingBrief(false); setActionError(null); return snapshot.brief;
+    }
     const updated = await recompileCallBrief(callId, input, idempotencyKey, languagePreferences, onProgress);
     setSnapshot((current) => currentCallSnapshot(current, updated));
     setEditingBrief(false);
@@ -490,6 +499,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const reviewProps = compilation ? {
     busy: busy || callLanguageForbidden, compilation, onAnswerClarifications: answerClarifications,
     onApproveAndCall: (review?: ReviewEvidence) => {
+      if (appointmentPlanExpired(compilation)) { setActionError(registrationCallMessages[uiLocale].appointmentExpired); return; }
       void launchCall(() => approveAndStartCall(callId, compilationApprovalInput(compilation, review)));
     },
     onEdit: () => setEditingBrief(true), recipientName: brief.recipientName,
@@ -536,7 +546,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     </details> : null}
     {snapshot.planSource && snapshot.languageContext && !preparationFailed ? <TranslatedPlanReview
       key={`${snapshot.planSource.compilationId}:${snapshot.languageContext.selectionRevision}`}
-      {...reviewProps!} callId={callId} userId={userId} source={snapshot.planSource}
+      {...reviewProps!} reuseExistingOnly={Boolean(brief.retrySourceCallId)} callId={callId} userId={userId} source={snapshot.planSource}
       languageContext={snapshot.languageContext} initialArtifacts={snapshot.textArtifacts}
     /> : <CompilationReview {...reviewProps!} />}
     </>
@@ -546,6 +556,10 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     <AppShell>
       <main data-terminal={isTerminal} className="live-page" id="main-content" tabIndex={-1}>
         <div className="live-nav">
+          <nav className="call-page-links" aria-label={messages.live.breadcrumbLabel}>
+            <Link href={localizeHref("/app")}>{messages.app.newCall}</Link>
+            <Link href={localizeHref("/app/history")}>{messages.app.history}</Link>
+          </nav>
           <nav aria-label={messages.live.breadcrumbLabel} className="breadcrumbs">
             <ol>
               <li><Link href={localizeHref("/app/history")}>{messages.live.allCallBriefs}</Link></li>
@@ -569,13 +583,21 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           </div>
 
           <div className="call-actions">
+          {canRepeatUnansweredCall(brief) ? <button type="button" className="primary-button compact-button" disabled={busy} onClick={async () => {
+            if (busy) return;
+            setBusy(true); setActionError(null);
+            try { const repeated = await repeatUnansweredCall(callId); router.push(localizeHref(`/app/calls/${repeated.id}`)); }
+            catch { setActionError(registrationCallMessages[uiLocale].retryError); }
+            finally { setBusy(false); }
+          }}>{busy ? registrationCallMessages[uiLocale].retryBusy : registrationCallMessages[uiLocale].retryCall}</button> : null}
+
           <span className={`status-pill ${callStatusClass(brief)}`}>
             <span aria-hidden="true" /> {pendingCallStart ? callActivityMessages[uiLocale].starting.label : callStatusLabel(brief, uiLocale)}
           </span>
             {brief.status === "ready" && hasImmutableExecutionPlan ? (
               <button
                 className="primary-button compact-button"
-                disabled={busy || callLanguageForbidden}
+                disabled={busy || callLanguageForbidden || Boolean(compilation && appointmentPlanExpired(compilation))}
                 onClick={() => launchCall(() => startCall(callId))}
                 type="button"
               >
@@ -596,6 +618,8 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           </div>
         </section>
 
+        {brief.retrySourceCallId && !isTerminal && !isActive ? <p className="inline-notice">{registrationCallMessages[uiLocale].retryHelp}</p> : null}
+        {compilation && !isTerminal && !isActive && appointmentPlanExpired(compilation) ? <p role="alert" className="inline-notice">{registrationCallMessages[uiLocale].appointmentExpired}</p> : null}
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
         {isTerminal ? <CallLifecycleSummary lifecycle={brief.lifecycle} locale={uiLocale} /> : null}
         {preparationProgress ? <CallPreparationStatus progress={preparationProgress} /> : null}

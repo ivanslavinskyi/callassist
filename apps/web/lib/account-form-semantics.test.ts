@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const accountConsole = readFileSync(fileURLToPath(
   new URL("../components/account-console.tsx", import.meta.url)
 ), "utf8");
+const phoneInput = readFileSync(fileURLToPath(new URL("../components/phone-input.tsx", import.meta.url)), "utf8");
 
 describe("account contact-change form semantics", () => {
   it("gives password managers an explicit current username before phone and password", () => {
@@ -14,13 +15,14 @@ describe("account contact-change form semantics", () => {
     );
     expect(form).toContain('autoComplete="username"');
     expect(form).toContain('name="username"');
-    expect(form).toContain('id="new-mobile"');
+    expect(form).toContain('inputId="new-mobile"');
     expect(form).toContain('name="newPhoneE164"');
-    expect(form).toContain('autoComplete="tel"');
+    expect(phoneInput).toContain('id={inputId}');
+    expect(phoneInput).toContain('autoComplete="tel"');
     expect(form).toContain('id="change-mobile-current-password"');
     expect(form.indexOf('autoComplete="username"'))
-      .toBeLessThan(form.indexOf('id="new-mobile"'));
-    expect(form.indexOf('id="new-mobile"'))
+      .toBeLessThan(form.indexOf('inputId="new-mobile"'));
+    expect(form.indexOf('inputId="new-mobile"'))
       .toBeLessThan(form.indexOf('autoComplete="current-password"'));
   });
 

@@ -1,5 +1,6 @@
 "use client";
 import { formatAdminMoney } from "@/lib/admin-costs";
+import { RegistrationPolicyControls } from "./registration-policy-controls";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { BetaControlsView, BetaSettings, UserRole } from "@callassist/contracts";
 import { ApiError, getBetaControls, updateBetaControls, createBetaInvitation, revokeBetaInvitation } from "@/lib/api";
@@ -47,6 +48,7 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
     <label className="field" key={name}><span>{label}</span><input type="number" name={name} defaultValue={value} min={min} max={max} step={step} required /></label>;
   return <section className="admin-system-panel" id="beta-controls" aria-busy={busy}>
     <h2>Beta access and spending</h2>
+    <RegistrationPolicyControls role={role} />
     <p>Open registration has a lifetime intake cap. One-use invitations are additional places. Every verified account receives 3 starting credits; one call per account can run at a time.</p>
     <button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh beta settings</button>
     {error && <p role="alert" className="form-error">{error}</p>}

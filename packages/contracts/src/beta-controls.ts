@@ -2,7 +2,17 @@ import { analyticsSettingsSchema, defaultAnalyticsSettings } from "./analytics";
 import { z } from "zod";
 
 const micros = z.number().int().min(1).max(1_000_000_000);
+export const registrationPolicySchema = z.strictObject({
+  onboarding: z.enum(["full", "registration"]),
+  emailVerification: z.enum(["required", "deferrable"])
+});
+export type RegistrationPolicy = z.infer<typeof registrationPolicySchema>;
+export const defaultRegistrationPolicy: RegistrationPolicy = { onboarding: "full", emailVerification: "required" };
+export const registrationPolicyUpdateSchema = z.strictObject({
+  settings: registrationPolicySchema, expectedRevision: z.number().int().positive(), reason: z.string().trim().min(3).max(500)
+});
 export const betaSettingsSchema = z.strictObject({
+  registration: registrationPolicySchema.default(defaultRegistrationPolicy),
   analytics: analyticsSettingsSchema.default(defaultAnalyticsSettings).catch(defaultAnalyticsSettings),
   publicAccountLimit: z.number().int().min(0).max(10000),
   maxDurationSeconds: z.number().int().min(60).max(900),
@@ -21,6 +31,7 @@ export const betaSettingsSchema = z.strictObject({
 });
 export type BetaSettings = z.infer<typeof betaSettingsSchema>;
 export const defaultBetaSettings: BetaSettings = {
+  registration: defaultRegistrationPolicy,
   analytics: defaultAnalyticsSettings,
   publicAccountLimit: 30, maxDurationSeconds: 420, maxConcurrentCalls: 2,
   maxStartsPerHour: 3, maxStartsPerDay: 10, maxStartsPerRecipientPerDay: 2,

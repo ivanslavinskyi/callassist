@@ -1,3 +1,6 @@
+import { historyObjective } from "./history-objective";
+import { assertRetryableCall } from "./call-retry";
+import { appointmentPlanExpired } from "@callassist/contracts";
 import { assessmentDeadlineMs, assessmentVersion, validateFinalAssessment } from "../credits/final-assessment";
 import { InMemoryRecipientOptOutStore } from "./in-memory-recipient-opt-out-store";
 import { provesRecipientContact } from "../safety/recipient-opt-out-store";
@@ -360,7 +363,8 @@ export class InMemoryCallRepository implements CallRepository {
       .sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
       );
-    const items = filtered.slice(0, input.limit).map(brief => ({ ...copy(brief), lifecycle: this.#lifecycle(brief),
+    const items = filtered.slice(0, input.limit).map(brief => ({ ...copy(brief),
+      ...historyObjective(this.#calls.get(brief.id)?.compilation, this.#callText.listTextArtifacts(brief.id)), lifecycle: this.#lifecycle(brief),
       feedback: summarizeCallFeedback(this.#callFeedbackRevisions.get(brief.id)?.at(-1)?.revision ?? null,
         (this.#attempts.get(brief.id) ?? []).map(attempt => attempt.startedAt)) }));
     const last = items.at(-1);
@@ -414,9 +418,18 @@ export class InMemoryCallRepository implements CallRepository {
     compilation: CallCompilation,
     userId: string | null = null,
     creationIdempotencyKey: string = randomUUID(),
-    publication?: CallPreparationPublication
+    publication?: CallPreparationPublication,
+    retrySource?: import("./call-repository").CallRetrySource
   ) {
     assertCompilationIntegrity(compilation);
+    if (retrySource) {
+      if (this.#owners.get(retrySource.callId) !== userId || this.#callDataDeletions.has(retrySource.callId)) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const source = await this.get(retrySource.callId);
+      const attempt = await this.getLatestAttempt(retrySource.callId);
+      if (!source) throw new CallRepositoryError("CALL_NOT_FOUND");
+      assertRetryableCall(source, attempt);
+      if (attempt?.id !== retrySource.attemptId || source.compilation?.snapshotHash !== compilation.snapshotHash) throw new CallRepositoryError("CALL_COMPILATION_STALE");
+    }
     let preparation: StoredCallPreparation | null = null;
     if (publication) {
       this.#assertDurableJobLease(publication.lease);
@@ -451,7 +464,7 @@ export class InMemoryCallRepository implements CallRepository {
         !this.#callDataDeletions.has(creationRequest.callId)
       ) {
         const existing = this.#calls.get(creationRequest.callId);
-        if (existing) {
+        if (existing && (!retrySource || existing.brief.retrySourceCallId === retrySource.callId)) {
           finishPublication(existing.brief.id);
           return copy(existing.brief);
         }
@@ -464,6 +477,7 @@ export class InMemoryCallRepository implements CallRepository {
     const now = new Date().toISOString();
     const brief: CallBrief = {
       ...storedBriefIdentity(parsed),
+      retrySourceCallId: retrySource?.callId ?? null,
       ...runtime,
       id: randomUUID(),
       createdAt: now,
@@ -488,6 +502,16 @@ export class InMemoryCallRepository implements CallRepository {
       approvedAt: null,
       executionSnapshot: null
     }]);
+    if (retrySource) {
+      const source = this.#calls.get(retrySource.callId)!;
+      this.#calls.get(brief.id)!.languageContext = copy(source.languageContext);
+      const compilationId = this.#compilations.get(brief.id)![0]!.id;
+      for (const artifact of this.#callText.listTextArtifacts(retrySource.callId)) {
+        if (artifact.kind !== "plan_review" || artifact.status !== "ready" || artifact.sourceHash !== compilation.snapshotHash || !artifact.payload) continue;
+        const id = randomUUID();
+        this.#callText.artifacts.set(id, { ...copy(artifact), id, callId: brief.id, compilationId, createdAt: now, updatedAt: now, retryable: false });
+      }
+    }
     this.#owners.set(brief.id, userId);
     this.#creationRequests.set(
       creationIdempotencyKey,
@@ -505,7 +529,7 @@ export class InMemoryCallRepository implements CallRepository {
         }
       }
     });
-    this.#appendCompilationTelemetry(brief.id, compilation, now);
+    if (!retrySource) this.#appendCompilationTelemetry(brief.id, compilation, now);
     finishPublication(brief.id);
 
     return copy(brief);
@@ -2489,6 +2513,7 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
     }
     assertCompilationIntegrity(snapshot.compilation);
+    if (appointmentPlanExpired(snapshot.compilation)) throw new CallRepositoryError("CALL_APPOINTMENT_EXPIRED");
     if (!this.#outboundCallsEnabled) {
       throw new CallRepositoryError("OUTBOUND_CALLS_DISABLED");
     }

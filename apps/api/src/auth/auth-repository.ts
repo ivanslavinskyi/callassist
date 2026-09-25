@@ -26,6 +26,8 @@ export type CreateAuthSessionInput = AuthSessionRecord & {
   expectedPasswordHash?: string;
 };
 
+export type RegistrationAcceptanceWriter = (userId: string, transaction?: import("postgres").TransactionSql) => Promise<void>;
+
 export type CreateAuthUserInput = Omit<RegistrationInput, "password"> & {
   passwordHash: string;
 };
@@ -147,7 +149,8 @@ export type ListAdminUsersResult = {
 
 export interface AuthRepository {
   readonly mode: "memory" | "postgres";
-  createUser(input: CreateAuthUserInput): Promise<AuthUserRecord>;
+  createUser(input: CreateAuthUserInput, accept?: RegistrationAcceptanceWriter): Promise<AuthUserRecord>;
+  deferEmailVerification(userId: string, expectedEmail: string, now: string): Promise<AuthUserRecord | null>;
   findUserByEmail(email: string): Promise<AuthUserRecord | null>;
   updateOwnName(input: {
     userId: string;

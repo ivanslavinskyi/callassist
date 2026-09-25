@@ -1,9 +1,10 @@
 "use client";
-import type { User } from "@callassist/contracts";
+import type { User, RegistrationOptions } from "@callassist/contracts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
-import { ApiError, startEmailVerification, confirmEmailVerification, startEmailChange, confirmEmailChange, getCurrentUser } from "@/lib/api";
+import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
+import { ApiError, getRegistrationOptions, deferEmailVerification, startEmailVerification, confirmEmailVerification, startEmailChange, confirmEmailChange, getCurrentUser } from "@/lib/api";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
 import { useUiLocale } from "./ui-locale-provider";
 
@@ -11,6 +12,17 @@ export function EmailVerificationForm({ initialUser }: { initialUser: User }) {
   const { locale, localizeHref } = useUiLocale();
   const copy = emailVerificationMessages[locale];
   const router = useRouter();
+  const extra = registrationCallMessages[locale];
+  const [options, setOptions] = useState<RegistrationOptions | null>(null);
+  const [optionsReload, setOptionsReload] = useState(0);
+  useEffect(() => { let active = true; void getRegistrationOptions(locale).then(value => { if (active) { setOptions(value); setError(null); } }).catch(() => { if (active) setError(extra.optionsError); }); return () => { active = false; }; }, [locale, extra.optionsError, optionsReload]);
+  async function defer() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try { await deferEmailVerification(); router.replace(localizeHref("/app")); router.refresh(); }
+    catch (caught) { showError(caught); void getRegistrationOptions(locale).then(setOptions).catch(() => undefined); setBusy(false); }
+  }
+
   const [user, setUser] = useState(initialUser);
   const [correcting, setCorrecting] = useState(false);
   const [email, setEmail] = useState(initialUser.email);
@@ -73,7 +85,7 @@ export function EmailVerificationForm({ initialUser }: { initialUser: User }) {
     <Link className="primary-button auth-submit" href={localizeHref("/app")}>{copy.continue}</Link>
   </>;
   return <>
-    <h1>{copy.title}</h1><p className="auth-intro">{copy.intro}</p>
+    <h1>{copy.title}</h1><p className="auth-intro">{options?.policy.emailVerification === "deferrable" ? extra.optionalEmail : copy.intro}</p>
     {challenge ? <form className="auth-form" onSubmit={confirm}>
       <p role="status">{copy.sent} <strong>{challenge.change ? email : user.email}</strong></p>
       <label className="field"><span>{copy.code}</span><input autoComplete="one-time-code" inputMode="numeric" maxLength={6} minLength={6} pattern="[0-9]{6}" required value={code} onChange={(event) => setCode(event.target.value)} aria-describedby="email-code-hint" /></label>
@@ -90,7 +102,9 @@ export function EmailVerificationForm({ initialUser }: { initialUser: User }) {
     </form>}
     {remaining > 0 ? <p>{copy.wait.replace("{seconds}", String(remaining))}</p> : null}
     {error ? <p className="form-error" role="alert">{error}</p> : null}
+    {!options && error === extra.optionsError ? <button type="button" className="secondary-button" onClick={() => setOptionsReload(value => value + 1)}>{extra.reload}</button> : null}
     <button className="text-button" disabled={busy} type="button" onClick={() => { setCorrecting(!correcting); setChallenge(null); setCode(""); setPassword(""); setError(null); }}>{correcting ? copy.cancel : copy.change}</button>
+    {options?.policy.emailVerification === "deferrable" ? <button className="secondary-button" type="button" disabled={busy} onClick={() => void defer()}>{extra.later}</button> : null}
     <p><Link href={localizeHref("/app/account")}>{copy.account}</Link></p>
   </>;
 }

@@ -1,5 +1,31 @@
 # Deployment preflight and first release
 
+## Candidate on `feat/gpt-live-pilot` (25 September)
+
+After local acceptance and explicit owner approval, apply additive migrations through
+0083 before updating API/workers/web to the same revision. Migration 0082 adds email
+deferral and Privacy Notice version evidence; 0083 adds retry provenance and a unique
+source-attempt constraint. Historical data and compilation hashes are not rewritten.
+Keep the added columns when rolling application code back; do not reverse migrations
+or modify historical migration checksums. Older code validates beta settings strictly:
+before starting an older API/worker revision, preserve the current settings/audit and
+remove the new `registration` JSON key from `beta_controls.settings` in the controlled
+rollback. Older code then resumes full onboarding and mandatory email. Do not run old
+and new workers concurrently after the new policy key has been saved.
+
+Keep `VOICE_RUNTIME_DRIVER=realtime`. New registration policies default to the current
+full onboarding and mandatory email verification. A superadmin can independently
+enable agreement at registration and deferrable email under Admin > System. Users
+still see email verification after SMS and choose whether to defer. Changing email
+clears deferral; switching the policy to required immediately gates new call starts.
+Registration policy updates have revision checks and audit reasons. SMS countries
+remain configured by `SMS_ALLOWED_COUNTRIES`; outbound destinations remain CH-only.
+No SMS, email, OpenAI or Twilio call is triggered by changing these settings.
+
+See the [implementation and local acceptance record](registration-and-call-improvements-2026-09-25.md)
+and the existing GPT-Live pilot instructions. This candidate has not been authorized
+for merge or production deployment yet.
+
 Updated 2026-09-23. B06 remains open. The owner chose `shprohli.ch` for the first
 deployment with temporary restricted access, on an existing VPS that already serves
 another Next.js project. B07 landing changes are now implemented and published locally;

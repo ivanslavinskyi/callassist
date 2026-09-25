@@ -224,6 +224,8 @@ export type CallPreparationWork = {
   targetRevision: number;
 };
 
+export type CallRetrySource = { callId: string; attemptId: string };
+
 export type CallPreparationPublication = {
   preparationId: string;
   lease: DurableJobLease;
@@ -762,7 +764,8 @@ export interface CallRepository extends CallTextRepository {
     compilation: CallCompilation,
     userId?: string | null,
     creationIdempotencyKey?: string,
-    publication?: CallPreparationPublication
+    publication?: CallPreparationPublication,
+    retrySource?: CallRetrySource
   ): Promise<CallBrief>;
   findByCreationRequest(
     userId: string | null,
@@ -852,7 +855,8 @@ export interface CallRepository extends CallTextRepository {
     id: string,
     input: CreateCallBriefInput,
     compilation: CallCompilation,
-    publication?: CallPreparationPublication
+    publication?: CallPreparationPublication,
+    retrySource?: CallRetrySource
   ): Promise<CallSnapshot>;
   get(id: string): Promise<CallSnapshot | null>;
   expireCallAssessments(now: string): Promise<void>;
@@ -1036,6 +1040,9 @@ export class CallRepositoryError extends Error {
       | "CALL_LANGUAGE_NOT_SELECTABLE"
       | "APPROVAL_NOT_FOUND"
       | "CALL_NOT_READY"
+      | "CALL_RETRY_NOT_AVAILABLE"
+      | "CALL_APPOINTMENT_EXPIRED"
+      | "EMAIL_VERIFICATION_REQUIRED"
       | "CALL_BRIEF_NOT_REVIEWABLE"
       | "CALL_COMPILATION_STALE"
       | "CALL_COMPILATION_INTEGRITY_FAILED"

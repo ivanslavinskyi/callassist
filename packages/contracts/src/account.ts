@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { normalizeAccountPhoneNumber } from "./phone";
+import { normalizeAccountPhoneNumber, parseAccountPhoneNumber } from "./phone";
 import { callCompilationSchema, callSnapshotSchema, personNamePartSchema } from "./call-brief";
 import { callOutcomeViewSchema } from "./call-outcome";
-import { contentLocaleSchema } from "./content";
+import { contentLocaleSchema, onboardingAcceptanceInputSchema } from "./content";
 import { callTextArtifactSchema, finalTranscriptRevisionSchema, reviewEvidenceSchema } from "./call-text-artifact";
 import {
   languageTagSchema,
@@ -47,7 +47,8 @@ export const accountPhoneSchema = z
   .string()
   .trim()
   .max(40)
-  .transform(normalizeAccountPhoneNumber)
+  .transform(value => normalizeAccountPhoneNumber(value))
+  .refine(value => parseAccountPhoneNumber(value) !== null, "Use a valid phone number")
   .pipe(z.string().regex(/^\+[1-9]\d{7,14}$/, "Use international phone format"));
 
 export const registrationInputSchema = z.object({
@@ -57,6 +58,7 @@ export const registrationInputSchema = z.object({
   firstName: personNamePartSchema,
   lastName: personNamePartSchema,
   uiLocale: supportedUiLocaleSchema,
+  legalAcceptance: onboardingAcceptanceInputSchema.optional(),
   invitationCode: z.string().trim().regex(/^[A-Za-z0-9_-]{43}$/).optional()
 });
 export type RegistrationInput = z.infer<typeof registrationInputSchema>;
@@ -143,6 +145,7 @@ export const userSchema = z.object({
   phoneVerifiedAt: z.iso.datetime().nullable(),
   // Optional on historical exports/clients; current auth responses always emit null or a date.
   emailVerifiedAt: z.iso.datetime().nullable().optional(),
+  emailVerificationDeferredAt: z.iso.datetime().nullable().optional(),
   firstName: personNamePartSchema,
   lastName: personNamePartSchema,
   role: userRoleSchema,
@@ -364,6 +367,8 @@ export type CreditUsage = z.infer<typeof creditUsageSchema>;
 export const ACCOUNT_DATA_EXPORT_SCHEMA_VERSION = "2" as const;
 
 export const onboardingAcceptanceRecordSchema = z.strictObject({
+  privacyRevisionId: z.uuid().nullable().optional(),
+  privacyLocale: contentLocaleSchema.nullable().optional(),
   id: z.uuid(),
   termsRevisionId: z.uuid(),
   acceptableUseRevisionId: z.uuid(),

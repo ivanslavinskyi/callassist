@@ -1,3 +1,4 @@
+import { resolveUiLocale, uiLocaleRegistry, type RegistrationOptions } from "@callassist/contracts";
 import type {
   ContentLocale,
   ContentDraftUpdateInput,
@@ -47,6 +48,14 @@ export class ContentService {
 
   async getPublishedNavigation(locale: ContentLocale) {
     return this.repository.getPublishedNavigation(locale);
+  }
+
+  async getRegistrationDocuments(locale: ContentLocale): Promise<RegistrationOptions["documents"]> {
+    const { current } = await this.repository.getOnboardingStatus("00000000-0000-0000-0000-000000000000", locale);
+    const privacy = await this.repository.getPublishedPage(locale, uiLocaleRegistry[resolveUiLocale(locale)].slugs.privacy);
+    if (!privacy) throw new ContentRepositoryError("LEGAL_CONTENT_UNAVAILABLE");
+    return { ...current, privacy: { id: privacy.revision.id, key: "privacy", revisionNumber: privacy.revision.number,
+      locale: privacy.locale, slug: privacy.slug, title: privacy.title, publishedAt: privacy.revision.publishedAt } };
   }
 
   async getOnboardingStatus(userId: string, locale: ContentLocale) {

@@ -1087,3 +1087,17 @@ export async function getOgPreview(version: import("@callassist/contracts").OgIm
   if (!response.ok) throw await apiErrorFromResponse(response);
   return response.blob();
 }
+
+export function getRegistrationOptions(locale: string) {
+  return apiRequest<import("@callassist/contracts").RegistrationOptions>(`/api/auth/registration-options?locale=${encodeURIComponent(locale)}`, { cache: "no-store" });
+}
+export function deferEmailVerification() {
+  return apiRequest<{ user: User }>("/api/auth/email-verification/defer", { method: "POST" });
+}
+export function updateRegistrationPolicy(settings: import("@callassist/contracts").RegistrationPolicy, expectedRevision: number, reason: string) {
+  return apiRequest("/api/admin/system/registration", { method: "PUT", body: JSON.stringify({ settings, expectedRevision, reason }) });
+}
+
+export function repeatUnansweredCall(id: string) {
+  return apiRequest<CallBrief>(`/api/call-briefs/${id}/repeat`, { method: "POST" });
+}

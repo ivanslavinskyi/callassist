@@ -1,4 +1,4 @@
-import { getCountries, parsePhoneNumberFromString } from "libphonenumber-js/max";
+import { getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js/max";
 import { z } from "zod";
 
 export const SWISS_DESTINATION_ONLY_MESSAGE =
@@ -12,25 +12,30 @@ export function isPhoneCountryCode(value: string): boolean {
   return (getCountries() as string[]).includes(value);
 }
 
-function preparePhoneInput(value: string) {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("00")) return `+${trimmed.slice(2)}`;
-  if (!trimmed.startsWith("+") && /^41(?:\D|\d)/.test(trimmed)) {
-    return `+${trimmed}`;
-  }
-  return trimmed;
+export function parseAccountPhoneNumber(value: string, country: string = "CH"): string | null {
+  if (!isPhoneCountryCode(country) || value.length > 40 || !/^[+\d\s().-]+$/.test(value.trim())) return null;
+  const compact = value.trim().replace(/[\s().-]/g, "");
+  const input = compact.startsWith("00") ? `+${compact.slice(2)}` : compact;
+  const selected = country as CountryCode;
+  const parse = (text: string) => {
+    const phone = parsePhoneNumberFromString(text, { defaultCountry: selected, extract: false });
+    return phone?.isValid() && !phone.ext ? phone : null;
+  };
+  if (input.startsWith("+")) return parse(input)?.number ?? null;
+  const national = parse(input);
+  const international = input.startsWith(getCountryCallingCode(selected)) ? parse(`+${input}`) : null;
+  const candidates = new Set([national, international].filter(phone => phone?.country === selected).map(phone => phone!.number));
+  return candidates.size === 1 ? [...candidates][0]! : null;
 }
 
-// Account contacts use international numbers; unprefixed local input defaults to CH.
-// SMS destination permissions are enforced separately by the verification provider.
-export function normalizeAccountPhoneNumber(value: string) {
-  const phone = parsePhoneNumberFromString(preparePhoneInput(value), "CH");
-  return phone?.isValid() ? phone.number : value.trim();
+export function normalizeAccountPhoneNumber(value: string, country = "CH") {
+  return parseAccountPhoneNumber(value, country) ?? value.trim();
 }
 
 export function parseSwissDestinationPhone(value: string) {
   try {
-    const phone = parsePhoneNumberFromString(preparePhoneInput(value), "CH");
+    const normalized = parseAccountPhoneNumber(value, "CH");
+    const phone = normalized ? parsePhoneNumberFromString(normalized) : null;
     if (!phone || phone.country !== "CH" || !phone.isValid()) return null;
     return phone.number;
   } catch {

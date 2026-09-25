@@ -9,6 +9,7 @@ import { formatCallDuration, formatCallTime } from "@/lib/call-time";
 import { callStatusClass, callStatusLabel, callResultLabel, isTerminalCallStatus } from "@/lib/call-status";
 import { historyFilterOptions, readCallHistoryFilter, showHistoryFilter } from "@/lib/call-history-filter";
 import { callPresentationCopy, legacyCallStatusLabel } from "@/lib/i18n/call-presentation";
+import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { CallAssessments } from "./call-assessments";
 import { getCallLanguageLabel } from "@/lib/i18n/call-language-labels";
 import { useUiLocale } from "./ui-locale-provider";
@@ -130,7 +131,7 @@ export function CallHistory({ recent = false }: { recent?: boolean }) {
         const initials = brief.recipientName.trim().split(/\s+/).slice(0, 2).map((word) => [...word][0]).join("").toLocaleUpperCase(locale);
         return <li key={brief.id}><Link className="brief-row" href={localizeHref(`/app/calls/${brief.id}`)}>
           <span className="brief-avatar" aria-hidden="true">{initials}</span>
-          <span className="brief-copy"><strong>{brief.recipientName}</strong><small>{getCallLanguageLabel(brief.locale, locale)}</small></span>
+          <span className="brief-copy"><strong>{brief.recipientName}</strong>{brief.displayObjective ? <span className="brief-objective" lang={brief.objectiveLanguage && brief.objectiveLanguage !== "und" ? brief.objectiveLanguage : undefined} title={brief.displayObjective}><span className="sr-only">{registrationCallMessages[locale].objective}: </span>{brief.displayObjective}</span> : null}<small>{getCallLanguageLabel(brief.locale, locale)}</small></span>
           <span className="brief-arrow" aria-hidden="true">↗</span>
           <span className={`history-status ${callStatusClass(brief)}`}>{callStatusLabel(brief, locale)}</span>
           {isTerminalCallStatus(brief.status) ? <span className="history-outcome"><span className="sr-only">{presentationCopy.result}: </span>{callResultLabel(brief, locale)}</span> : null}

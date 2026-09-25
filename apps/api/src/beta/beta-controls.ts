@@ -1,4 +1,4 @@
-import { analyticsSettingsSchema, type AnalyticsSettingsView, type AnalyticsSettings } from "@callassist/contracts";
+import { registrationPolicySchema, type RegistrationPolicy, analyticsSettingsSchema, type AnalyticsSettingsView, type AnalyticsSettings } from "@callassist/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import { betaSettingsSchema, type BetaSettings, type BetaControlsView } from "@callassist/contracts";
@@ -12,7 +12,9 @@ export class BetaControlError extends Error {
 }
 export interface BetaControls {
   getView(): Promise<BetaControlsView>;
+  getRegistrationPolicy(): Promise<import("@callassist/contracts").RegistrationPolicy>;
   getAnalytics(): Promise<AnalyticsSettingsView>;
+  updateRegistration(settings: RegistrationPolicy, expectedRevision: number, actor: string, reason: string): Promise<void>;
   updateAnalytics(settings: AnalyticsSettings, expectedRevision: number, actor: string): Promise<void>;
   update(settings: BetaSettings, expectedRevision: number, actor: string, reason: string): Promise<void>;
   createInvitation(actor: string, reason: string): Promise<{ id: string; code: string; expiresAt: string }>;
@@ -70,9 +72,26 @@ function budgetSignal(event: string, reservedMicros: number, limitMicros: number
 // Admission counts observed expenses plus reservations for unresolved expenses.
 export class PostgresBetaControls implements BetaControls {
   constructor(readonly sql: postgres.Sql) {}
+  async getRegistrationPolicy() {
+    const [row] = await this.sql<Row[]>`SELECT settings FROM beta_controls WHERE id=true`;
+    if (!row) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
+    return betaSettingsSchema.parse(row.settings).registration;
+  }
   async getAnalytics(): Promise<AnalyticsSettingsView> {
     const [row] = await this.sql<Row[]>`SELECT settings,revision FROM beta_controls WHERE id=true`;
     return { settings: betaSettingsSchema.parse(row?.settings).analytics, revision: row!.revision };
+  }
+  async updateRegistration(settings: RegistrationPolicy, expectedRevision: number, actor: string, reason: string) {
+    const registration = registrationPolicySchema.parse(settings);
+    await this.sql.begin(async tx => {
+      const row = await lockBetaControls(tx);
+      await requireBetaAdmin(tx, actor);
+      if (row.revision !== expectedRevision) throw new BetaControlError("BETA_SETTINGS_STALE");
+      const next = { ...row.settings, registration };
+      await tx`UPDATE beta_controls SET settings=${tx.json(next)},revision=revision+1,updated_at=now(),reason=${reason} WHERE id=true`;
+      await tx`INSERT INTO beta_control_audit(id,actor_user_id,action,reason,previous_settings,next_settings)
+        VALUES(${randomUUID()},${actor},'settings.updated',${reason},${tx.json(row.settings)},${tx.json(next)})`;
+    });
   }
   async updateAnalytics(settings: AnalyticsSettings, expectedRevision: number, actor: string) {
     const parsed = analyticsSettingsSchema.parse(settings);
@@ -121,6 +140,7 @@ export class PostgresBetaControls implements BetaControls {
       const row = await lockBetaControls(tx);
       await requireBetaAdmin(tx, actor);
       if (row.revision !== expectedRevision) throw new BetaControlError("BETA_SETTINGS_STALE");
+      parsed.registration = row.settings.registration; // Separate endpoint protects policies from older settings clients.
       parsed.analytics = row.settings.analytics; // Analytics has its own update endpoint; older settings clients cannot reset it.
       await tx`UPDATE beta_controls SET settings=${tx.json(parsed)},revision=revision+1,updated_at=now(),reason=${reason} WHERE id=true`;
       await tx`INSERT INTO beta_control_audit(id,actor_user_id,action,reason,previous_settings,next_settings)

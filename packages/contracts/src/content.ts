@@ -691,6 +691,8 @@ export type OnboardingStatus = z.infer<typeof onboardingStatusSchema>;
 
 export const onboardingAcceptanceInputSchema = z.object({
   locale: contentLocaleSchema,
+  privacyRevisionId: z.uuid().optional(),
+  privacyLocale: contentLocaleSchema.optional(),
   termsRevisionId: z.uuid(),
   acceptableUseRevisionId: z.uuid(),
   acceptTerms: z.literal(true),

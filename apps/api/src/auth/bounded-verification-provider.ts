@@ -13,9 +13,13 @@ export class BoundedVerificationProvider implements VerificationProvider {
   constructor(private readonly provider: VerificationProvider, private readonly limiter: RateLimiter,
     private readonly policy: { countries: string[]; daily: number; perMinute: number; perPhoneHour?: number; cooldownSeconds?: number }) {}
 
-  async send(phoneE164: string, locale?: string) {
+  validateDestination(phoneE164: string) {
     const country = verificationPhoneCountry(phoneE164);
     if (!country || !this.policy.countries.includes(country)) throw new VerificationSendError("SMS_DESTINATION_NOT_ALLOWED");
+  }
+
+  async send(phoneE164: string, locale?: string) {
+    this.validateDestination(phoneE164);
     // One shared budget across signup, recovery, changes and public opt-out.
     // Reserve before dispatch; uncertain sends are never refunded or auto-retried.
     const result = await this.limiter.consumeMany([
@@ -30,10 +34,15 @@ export class BoundedVerificationProvider implements VerificationProvider {
   check(phoneE164: string, code: string) { return this.provider.check(phoneE164, code); }
 }
 
+export function smsAllowedCountries() {
+  const countries = (process.env.SMS_ALLOWED_COUNTRIES?.trim() || "CH,UA").split(",").map(v => v.trim().toUpperCase());
+  if (!countries.length || countries.some(v => !isPhoneCountryCode(v))) throw new Error("SMS_ALLOWED_COUNTRIES must contain ISO country codes");
+  return [...new Set(countries)];
+}
+
 export function boundVerificationProvider(provider: VerificationProvider, limiter?: RateLimiter) {
   if (process.env.NODE_ENV === "production" && !limiter?.shared) throw new Error("Production SMS requires a shared rate limiter");
-  const countries = (process.env.SMS_ALLOWED_COUNTRIES?.trim() || "CH,UA").split(",").map((v) => v.trim().toUpperCase());
-  if (!countries.length || countries.some((v) => !isPhoneCountryCode(v))) throw new Error("SMS_ALLOWED_COUNTRIES must contain ISO country codes");
+  const countries = smsAllowedCountries();
   const limit = (name: string, fallback: number) => {
     const value = Number(process.env[name]?.trim() || fallback);
     if (!Number.isInteger(value) || value < 1 || value > 100_000) throw new Error(`${name} must be an integer between 1 and 100000`);

@@ -39,7 +39,9 @@ export function summarizeCallFeedback(
     scope: callFeedbackScope(feedback.createdAt, attemptStarts) } : null;
 }
 
-export const callHistoryItemSchema = callBriefSchema.and(z.object({ feedback: callFeedbackSummarySchema.nullable() }));
+export const callHistoryItemSchema = callBriefSchema.and(z.object({
+  feedback: callFeedbackSummarySchema.nullable(), displayObjective: z.string().nullable().optional(), objectiveLanguage: z.string().nullable().optional()
+}));
 export type CallHistoryItem = z.infer<typeof callHistoryItemSchema>;
 export const callHistoryListSchema = z.strictObject({
   items: z.array(callHistoryItemSchema), nextCursor: z.string().nullable(),

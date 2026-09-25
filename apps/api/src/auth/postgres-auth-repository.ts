@@ -34,6 +34,7 @@ type UserRow = {
   phoneE164: string;
   phoneVerifiedAt: DatabaseDate | null;
   emailVerifiedAt: DatabaseDate | null;
+  emailVerificationDeferredAt: DatabaseDate | null;
   firstName: string;
   lastName: string;
   role: UserRole;
@@ -167,7 +168,7 @@ export class PostgresAuthRepository implements AuthRepository {
     this.#sql = postgres(databaseUrl, { max: 5, onnotice: () => undefined });
   }
 
-  async createUser(input: CreateAuthUserInput) {
+  async createUser(input: CreateAuthUserInput, accept?: import("./auth-repository").RegistrationAcceptanceWriter) {
     const id = randomUUID();
     const now = new Date();
     try {
@@ -185,6 +186,7 @@ export class PostgresAuthRepository implements AuthRepository {
         RETURNING ${this.#userColumns()}
       `;
       if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
+      await accept?.(id, tx);
       return this.#mapUser(row);
       });
     } catch (error) {
@@ -193,6 +195,14 @@ export class PostgresAuthRepository implements AuthRepository {
       }
       throw error;
     }
+  }
+
+  async deferEmailVerification(userId: string, expectedEmail: string, now: string) {
+    const [row] = await this.#sql<UserRow[]>`UPDATE users
+      SET email_verification_deferred_at = COALESCE(email_verification_deferred_at, ${now}::timestamptz)
+      WHERE id=${userId} AND email=${expectedEmail} AND status='active' AND phone_verified_at IS NOT NULL
+      RETURNING ${this.#userColumns()}`;
+    return row ? this.#mapUser(row) : null;
   }
 
   async findUserByEmail(email: string) {
@@ -1823,6 +1833,7 @@ export class PostgresAuthRepository implements AuthRepository {
       phone_e164 AS "phoneE164",
       phone_verified_at AS "phoneVerifiedAt",
       email_verified_at AS "emailVerifiedAt",
+      email_verification_deferred_at AS "emailVerificationDeferredAt",
       first_name AS "firstName",
       last_name AS "lastName",
       role AS "role",
@@ -1842,6 +1853,7 @@ export class PostgresAuthRepository implements AuthRepository {
       users.phone_e164 AS "phoneE164",
       users.phone_verified_at AS "phoneVerifiedAt",
       users.email_verified_at AS "emailVerifiedAt",
+      users.email_verification_deferred_at AS "emailVerificationDeferredAt",
       users.first_name AS "firstName",
       users.last_name AS "lastName",
       users.role AS "role",
@@ -1892,6 +1904,7 @@ export class PostgresAuthRepository implements AuthRepository {
       preferredContentLanguage: row.preferredContentLanguage ?? null,
       phoneVerifiedAt: row.phoneVerifiedAt ? toIso(row.phoneVerifiedAt) : null,
       emailVerifiedAt: row.emailVerifiedAt ? toIso(row.emailVerifiedAt) : null,
+      emailVerificationDeferredAt: row.emailVerificationDeferredAt ? toIso(row.emailVerificationDeferredAt) : null,
       createdAt: toIso(row.createdAt),
       lastLoginAt: row.lastLoginAt ? toIso(row.lastLoginAt) : null
     };

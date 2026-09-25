@@ -147,7 +147,15 @@ export class InMemoryAuthRepository implements AuthRepository {
   readonly #emailChangeChallenges = new Map<string, EmailChangeChallenge>();
   readonly #emailChangeEvents: EmailChangeEvent[] = [];
 
-  async createUser(input: CreateAuthUserInput) {
+  #registrationQueue: Promise<void> = Promise.resolve();
+  async createUser(input: CreateAuthUserInput, accept?: import("./auth-repository").RegistrationAcceptanceWriter) {
+    const previous = this.#registrationQueue;
+    let release!: () => void;
+    this.#registrationQueue = new Promise<void>(resolve => { release = resolve; });
+    await previous;
+    try { return await this.#createUser(input, accept); } finally { release(); }
+  }
+  async #createUser(input: CreateAuthUserInput, accept?: import("./auth-repository").RegistrationAcceptanceWriter) {
     const email = input.email.toLowerCase();
     if (
       [...this.#users.values()].some(
@@ -173,7 +181,15 @@ export class InMemoryAuthRepository implements AuthRepository {
       createdAt: now,
       lastLoginAt: null
     };
+    await accept?.(user.id);
     this.#users.set(user.id, user);
+    return structuredClone(user);
+  }
+
+  async deferEmailVerification(userId: string, expectedEmail: string, now: string) {
+    const user = this.#users.get(userId);
+    if (!user || user.status !== "active" || !user.phoneVerifiedAt || user.email !== expectedEmail) return null;
+    if (!user.emailVerifiedAt) user.emailVerificationDeferredAt ??= now;
     return structuredClone(user);
   }
 
@@ -568,6 +584,7 @@ export class InMemoryAuthRepository implements AuthRepository {
     user.passwordHash = `deleted:${randomUUID()}`;
     user.phoneVerifiedAt = null;
     user.emailVerifiedAt = null;
+    user.emailVerificationDeferredAt = null;
     user.lastLoginAt = null;
     user.status = "deleted";
     for (const [id, challenge] of this.#phoneChangeChallenges) {
@@ -1113,6 +1130,7 @@ export class InMemoryAuthRepository implements AuthRepository {
     const previousEmail = user.email;
     user.email = challenge.newEmail;
     user.emailVerifiedAt = input.now;
+    user.emailVerificationDeferredAt = null;
     challenge.completedAt = input.now;
     let revokedSessionCount = 0;
     for (const candidate of this.#sessions.values()) {

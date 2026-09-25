@@ -9,6 +9,7 @@ import type {
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { getCallOutcome, submitCallFeedback } from "@/lib/api";
 import { useUiLocale } from "./ui-locale-provider";
+import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { CallAssessments } from "./call-assessments";
 
 const goalResults: CallGoalResult[] = ["yes", "partly", "no"];
@@ -29,6 +30,9 @@ export function CallFeedback({
 }) {
   const { locale, messages } = useUiLocale();
   const copy = messages.live;
+  const extra = registrationCallMessages[locale];
+  const [editing, setEditing] = useState(false);
+  const [reload, setReload] = useState(0);
   const [view, setView] = useState<CallOutcomeView | null>(null);
   const [goalResult, setGoalResult] = useState<CallGoalResult | null>(null);
   const [transcriptQuality, setTranscriptQuality] = useState<
@@ -43,6 +47,7 @@ export function CallFeedback({
   useEffect(() => {
     let active = true;
     setStatus("loading");
+    setView(null); setEditing(false); submissionKey.current = null;
     void getCallOutcome(callId)
       .then((next) => {
         if (!active) return;
@@ -52,7 +57,8 @@ export function CallFeedback({
           next.latestFeedback?.transcriptQuality ?? null
         );
         setComment(next.latestFeedback?.comment ?? "");
-        setStatus("idle");
+        setEditing(!next.latestFeedback);
+        setStatus(next.latestFeedback ? "saved" : "idle");
       })
       .catch(() => {
         if (active) setStatus("error");
@@ -60,7 +66,7 @@ export function CallFeedback({
     return () => {
       active = false;
     };
-  }, [callId]);
+  }, [callId, reload]);
 
   function changeAnswer(action: () => void) {
     submissionKey.current = null;
@@ -70,7 +76,7 @@ export function CallFeedback({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!goalResult || status === "saving") return;
+    if (!view || !editing || !goalResult || status === "saving") return;
     submissionKey.current ??= crypto.randomUUID();
     setStatus("saving");
     try {
@@ -83,6 +89,8 @@ export function CallFeedback({
         comment: comment.trim() || null
       });
       setView(next);
+      setEditing(false);
+      setComment(next.latestFeedback?.comment ?? "");
       submissionKey.current = null;
       setStatus("saved");
       window.dispatchEvent(new Event("call-feedback-updated"));
@@ -100,7 +108,16 @@ export function CallFeedback({
         feedback={view?.latestFeedback ? { ...view.latestFeedback, scope: view.feedbackScope ?? "call" } : null}
         feedbackState={!view && status === "loading" ? "loading" : !view ? "error" : "ready"} />
 
-      <form onSubmit={(event) => void submit(event)}>
+      {!view && status === "error" ? <div role="alert"><p>{extra.feedbackLoadingError}</p><button type="button" className="secondary-button" onClick={() => setReload(value => value + 1)}>{extra.reload}</button></div> : null}
+      {!editing && view?.latestFeedback ? <div className="feedback-saved">
+        <p role="status">{extra.feedbackSent}</p>
+        {view.latestFeedback.comment ? <p className="feedback-saved-comment">{view.latestFeedback.comment}</p> : null}
+        <button type="button" className="secondary-button" onClick={() => {
+          setGoalResult(view.latestFeedback!.goalResult); setTranscriptQuality(view.latestFeedback!.transcriptQuality);
+          setComment(view.latestFeedback!.comment ?? ""); submissionKey.current = null; setEditing(true); setStatus("idle");
+        }}>{extra.editFeedback}</button>
+      </div> : null}
+      {editing && view ? <form onSubmit={(event) => void submit(event)}>
         <fieldset disabled={status === "loading" || status === "saving"}>
           <legend>{copy.feedbackGoalQuestion}</legend>
           <div className="feedback-options">
@@ -175,6 +192,10 @@ export function CallFeedback({
         </label>
 
         <div className="feedback-submit-row">
+          {view.latestFeedback ? <button type="button" className="secondary-button" disabled={status === "saving"} onClick={() => {
+            setEditing(false); setStatus("saved"); submissionKey.current = null;
+            setGoalResult(view.latestFeedback!.goalResult); setTranscriptQuality(view.latestFeedback!.transcriptQuality); setComment(view.latestFeedback!.comment ?? "");
+          }}>{extra.cancel}</button> : null}
           <button
             className="primary-button"
             disabled={!goalResult || status === "loading" || status === "saving"}
@@ -183,7 +204,7 @@ export function CallFeedback({
             {status === "saving"
               ? copy.feedbackSaving
               : view?.latestFeedback
-                ? copy.feedbackUpdate
+                ? extra.saveChanges
                 : copy.feedbackSave}
           </button>
           <span
@@ -197,7 +218,7 @@ export function CallFeedback({
                 : ""}
           </span>
         </div>
-      </form>
+      </form> : null}
     </section>
   );
 }

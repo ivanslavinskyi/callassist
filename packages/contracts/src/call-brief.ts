@@ -659,6 +659,7 @@ export const policyDecisionSchema = z.discriminatedUnion("policyVersion", [legac
 export type PolicyDecision = z.infer<typeof policyDecisionSchema>;
 
 export const callCompilationSchema = z.object({
+  displayObjective: z.object({ text: z.string().trim().min(1).max(2000), language: z.string().min(2).max(35) }).optional(),
   rawBrief: callBriefInputBaseSchema.superRefine(validateLanguagePolicy),
   compiledBrief: compiledCallBriefSchema.nullable(),
   policyDecision: policyDecisionSchema,
@@ -706,6 +707,7 @@ export const callBriefSchema = callBriefStoredFieldsSchema
     id: z.string().uuid(),
     status: callBriefStatusSchema,
     lifecycle: callLifecycleSchema.optional(),
+    retrySourceCallId: z.string().uuid().nullable().optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })

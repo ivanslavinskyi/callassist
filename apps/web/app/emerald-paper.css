@@ -818,3 +818,13 @@ button, .primary-button, .secondary-button, .danger-button { transition: box-sha
   .topbar-actions { gap: 2px; }
   .privacy-notice { gap: 10px; padding: 12px; }
 }
+
+/* Registration and repeat-call controls share the existing responsive layout. */
+.phone-input { display: grid; gap: 8px; min-width: 0; }
+.phone-input select, .phone-input input { width: 100%; min-width: 0; }
+.registration-documents { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; }
+.call-page-links { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.call-page-links a { display: inline-flex; align-items: center; min-height: 44px; }
+.live-nav > .breadcrumbs { display: none; }
+.brief-objective { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.feedback-saved-comment { white-space: pre-wrap; overflow-wrap: anywhere; }

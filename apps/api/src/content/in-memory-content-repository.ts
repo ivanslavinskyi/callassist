@@ -1,3 +1,4 @@
+import { resolveUiLocale, uiLocaleRegistry } from "@callassist/contracts";
 import { canUpgradeSeedLocales } from "./seed-locale-upgrade";
 import { localizeLandingBlock, localizedContentValue, requiredContentLocales, resolvePublishedContentLocale } from "@callassist/contracts";
 import { assertEditorialLocalesReady, commonLegalLocale, editorialAvailableLocales, editorialLocale } from "./content-locales";
@@ -311,6 +312,10 @@ export class InMemoryContentRepository implements ContentRepository {
     input: OnboardingAcceptanceInput,
     acceptedAt: string
   ) {
+    if (input.privacyRevisionId || input.privacyLocale) {
+      const privacy = input.privacyLocale ? await this.getPublishedPage(input.privacyLocale, uiLocaleRegistry[resolveUiLocale(input.privacyLocale)].slugs.privacy) : null;
+      if (!privacy || privacy.revision.id !== input.privacyRevisionId || privacy.locale !== input.privacyLocale) throw new ContentRepositoryError("LEGAL_REVISION_CHANGED");
+    }
     const legalLocale = this.#commonLegalLocale(input.locale);
     const terms = this.#legalPage("terms", legalLocale);
     const acceptableUse = this.#legalPage("acceptable_use", legalLocale);
@@ -348,6 +353,7 @@ export class InMemoryContentRepository implements ContentRepository {
         id,
         termsRevisionId: input.termsRevisionId,
         acceptableUseRevisionId: input.acceptableUseRevisionId,
+        privacyRevisionId: input.privacyRevisionId ?? null, privacyLocale: input.privacyLocale ?? null,
         acceptedLocale: input.locale,
         acceptedTerms: input.acceptTerms,
         acceptedAcceptableUse: input.acceptAcceptableUse,

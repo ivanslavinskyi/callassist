@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import type { RegistrationOptions } from "@callassist/contracts";
+import { PhoneInput } from "./phone-input";
+import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { designMessages } from "@/lib/i18n/design-messages";
@@ -11,6 +14,7 @@ import {
   completePasswordRecovery,
   login,
   registerAccount,
+  getRegistrationOptions,
   resendPhoneVerification,
   startPasswordRecovery,
   verifyPasswordRecovery,
@@ -62,6 +66,15 @@ export function RegistrationForm() {
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const extra = registrationCallMessages[locale];
+  const [options, setOptions] = useState<RegistrationOptions | null>(null);
+  const [optionsError, setOptionsError] = useState(false);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    let active = true; setOptions(null); setOptionsError(false);
+    void getRegistrationOptions(locale).then(value => { if (active) setOptions(value); }).catch(() => { if (active) setOptionsError(true); });
+    return () => { active = false; };
+  }, [locale, reload]);
   const passwordLength = Math.min(password.length, 12);
   const passwordLengthLevel = password.length === 0 ? "empty" : password.length < 6 ? "short" : password.length < 12 ? "growing" : "ready";
 
@@ -72,7 +85,16 @@ export function RegistrationForm() {
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") ?? "").trim();
     try {
+      if (!options) throw new Error("Registration options unavailable");
+      const docs = options.documents;
+      const legalAcceptance = options.policy.onboarding === "registration" && docs && data.has("legalAgreement") ? {
+        locale: docs.terms.locale, termsRevisionId: docs.terms.id, acceptableUseRevisionId: docs.acceptableUse.id,
+        privacyRevisionId: docs.privacy.id, privacyLocale: docs.privacy.locale,
+        acceptTerms: true as const, acceptAcceptableUse: true as const,
+        acknowledgeConsent: true as const, acknowledgeRetention: true as const, acknowledgeUseLimits: true as const, acknowledgeCredits: true as const
+      } : undefined;
       await registerAccount({
+        legalAcceptance,
         firstName: String(data.get("firstName") ?? "").trim(),
         lastName: String(data.get("lastName") ?? "").trim(),
         email,
@@ -83,7 +105,9 @@ export function RegistrationForm() {
       });
       router.push(`${localizeHref("/verify")}?email=${encodeURIComponent(email)}`);
     } catch (caught) {
-      setError(getAuthErrorMessage(caught, locale));
+      if (caught instanceof ApiError && caught.code === "LEGAL_REVISION_CHANGED") {
+        setError(extra.legalChanged); setReload(value => value + 1);
+      } else setError(getAuthErrorMessage(caught, locale));
       setBusy(false);
     }
   }
@@ -114,7 +138,7 @@ export function RegistrationForm() {
         </label>
         <label className="field">
           <span>{copy.register.phone}</span>
-          <input autoComplete="tel" inputMode="tel" name="phoneE164" maxLength={40} placeholder={copy.register.phonePlaceholder} required type="tel" />
+          <PhoneInput name="phoneE164" countries={options?.smsCountries} />
           <small>{copy.register.phoneHelp}</small>
         </label>
         <div className="field registration-password-field">
@@ -156,7 +180,15 @@ export function RegistrationForm() {
           <small id="registration-password-help">{copy.register.passwordHelp}</small>
         </div>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <SubmitButton busy={busy} busyLabel={copy.register.submitting} label={copy.register.submit} />
+        {options?.policy.onboarding === "registration" && options.documents ? <div key={`${locale}:${reload}`}>
+          <label className="onboarding-check"><input type="checkbox" name="legalAgreement" required /><span>{extra.agreement}</span></label>
+          <div className="registration-documents">{(["terms", "acceptableUse", "privacy"] as const).map(key => {
+            const doc = options.documents![key];
+            return <Link key={key} href={`/${doc.locale}/${doc.slug}`} target="_blank" rel="noreferrer">{extra[key]}</Link>;
+          })}</div>
+        </div> : null}
+        {optionsError ? <p role="alert">{extra.optionsError} <button type="button" className="text-button" onClick={() => setReload(value => value + 1)}>{extra.reload}</button></p> : null}
+        <SubmitButton busy={busy || !options || (options.policy.onboarding === "registration" && !options.documents)} busyLabel={copy.register.submitting} label={copy.register.submit} />
       </form>
       <p className="auth-alternative">{copy.register.existing} <Link href={localizeHref("/login")}>{copy.register.signIn}</Link></p>
     </AuthFrame>
@@ -234,7 +266,7 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
           <input autoComplete="email" maxLength={320} onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
         </label>
         {correctingPhone ? <>
-          <label className="field"><span>{copy.verify.newPhone}</span><input autoComplete="tel" inputMode="tel" type="tel" maxLength={40} required value={newPhone} onChange={(event) => setNewPhone(event.target.value)} /></label>
+          <label className="field"><span>{copy.verify.newPhone}</span><PhoneInput defaultValue={newPhone} onChange={setNewPhone} /></label>
           <label className="field"><span>{copy.verify.password}</span><input autoComplete="current-password" type="password" required maxLength={128} value={registrationPassword} onChange={(event) => setRegistrationPassword(event.target.value)} /></label>
         </> : <label className="field">
           <span>{copy.verify.code}</span>
@@ -277,7 +309,9 @@ export function LoginForm() {
       const nextLocale = resolvePostLoginLocale({ explicitGuestLocale, accountLocale: user.uiLocale, pageLocale: locale });
       rememberUiLocale(nextLocale);
       clearExplicitGuestLocale();
-      router.push(localizePathname(user.emailVerifiedAt ? "/app" : "/verify-email", nextLocale));
+      const policy = await getRegistrationOptions(nextLocale);
+      const canContinue = user.emailVerifiedAt || (user.emailVerificationDeferredAt && policy.policy.emailVerification === "deferrable");
+      router.push(localizePathname(canContinue ? "/app" : "/verify-email", nextLocale));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));

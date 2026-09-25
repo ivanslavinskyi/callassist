@@ -14,9 +14,9 @@ import { useCallTextArtifacts } from "./use-call-text-artifacts";
 import { useCallDraftStore } from "./call-draft-provider";
 import { canGenerateText, useTextCapabilities } from "./use-text-capabilities";
 
-export function TranslatedPlanReview({ callId, userId, compilation, source, languageContext, initialArtifacts, ...reviewProps }: {
+export function TranslatedPlanReview({ callId, userId, compilation, source, languageContext, initialArtifacts, reuseExistingOnly = false, ...reviewProps }: {
   callId: string; userId: string; compilation: CallCompilation; source: PlanSource;
-  languageContext: CallLanguageContext; initialArtifacts?: CallTextArtifact[];
+  languageContext: CallLanguageContext; initialArtifacts?: CallTextArtifact[]; reuseExistingOnly?: boolean;
   busy: boolean; recipientName: string; showActions?: boolean; callDetails?: Array<{ label: string; value: string }>;
   onAnswerClarifications: (answers: ClarificationAnswer[]) => Promise<void>;
   onApproveAndCall: (review: ReviewEvidence) => void; onEdit: () => void; onRetryPreparation?: () => void;
@@ -28,8 +28,11 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
   const viewKey = `review:${callId}:${source.compilationId}:${languageContext.selectionRevision}`;
   const callLocale = compilation.rawBrief.locale;
   const { kind, sourceLanguage, needsTranslation } = planReviewLanguage(compilation, languageContext);
-  const [view, setView] = useState<"original" | "translated">(() =>
-    store.getView(userId, viewKey) === "original" ? "original" : needsTranslation ? "translated" : "original");
+  const [view, setView] = useState<"original" | "translated">(() => {
+    const saved = currentPlanReviewArtifact(initialArtifacts ?? [], compilation, source, languageContext.taskContentLanguage, kind);
+    const canReuse = saved && projectPlanReview(compilation, source, saved) !== null;
+    return store.getView(userId, viewKey) === "original" || (reuseExistingOnly && !canReuse) ? "original" : needsTranslation ? "translated" : "original";
+  });
   const [error, setError] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
   const started = useRef(false);
@@ -51,12 +54,12 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
     } finally { setRequesting(false); }
   }
   useEffect(() => {
-    if (!canGenerate || !needsTranslation || view !== "translated" || artifact || started.current) return;
+    if (reuseExistingOnly || !canGenerate || !needsTranslation || view !== "translated" || artifact || started.current) return;
     started.current = true;
     void request();
     // The parent keys this component by source and language-selection revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canGenerate, needsTranslation, view, artifact]);
+  }, [canGenerate, needsTranslation, view, artifact, reuseExistingOnly]);
 
   const ready = view === "original" || Boolean(projection);
   const evidence: ReviewEvidence = view === "translated" && artifact?.payloadHash
@@ -76,9 +79,10 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
         : availabilityStatus === "error" ? copy.availabilityError
         : capabilities?.textGenerationEnabled === false ? copy.generationDisabled
         : !canGenerate && !artifact ? copy.unsupported
+        : reuseExistingOnly && !artifact && !requesting ? copy.failed
         : artifact?.status === "failed" || artifact?.status === "cancelled" ? (artifact.retryable ? copy.failed : copy.reviewRetryUnavailable) : pollingPaused ? copy.pending : copy.loading)}</p>
       {availabilityStatus === "error" ? <button type="button" className="secondary-button" onClick={() => void refreshCapabilities()}>{copy.refresh}</button> : null}
-      {canGenerate && ((artifact && isMockPlanReview(artifact)) || (canRequestTextArtifact(artifact) && (error || artifact?.status === "failed"))) ? <button type="button" className="secondary-button" disabled={requesting} onClick={() => void request(artifact?.status === "failed")}>{copy.retry}</button> : null}
+      {canGenerate && ((reuseExistingOnly && !artifact) || (artifact && isMockPlanReview(artifact)) || (canRequestTextArtifact(artifact) && (error || artifact?.status === "failed"))) ? <button type="button" className="secondary-button" disabled={requesting} onClick={() => void request(artifact?.status === "failed")}>{reuseExistingOnly && !artifact ? `${copy.translateTo} ${getTextLanguageLabel(languageContext.taskContentLanguage, locale)}` : copy.retry}</button> : null}
       {pollingPaused ? <button type="button" className="secondary-button" onClick={() => void refresh().catch(() => setError(copy.failed))}>{copy.refresh}</button> : null}
     </div> : <div lang={view === "original" ? callLocale : languageContext.taskContentLanguage}>
       <CompilationReview {...reviewProps} compilation={view === "translated" ? projection! : compilation}

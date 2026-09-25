@@ -1,3 +1,8 @@
+import { smsAllowedCountries, VerificationSendError } from "./auth/bounded-verification-provider";
+import { toPublicUser } from "./auth/auth-repository";
+import { defaultRegistrationPolicy, registrationOptionsSchema, registrationPolicyUpdateSchema } from "@callassist/contracts";
+import { lockBetaControls } from "./beta/beta-controls";
+import { PostgresContentRepository } from "./content/postgres-content-repository";
 import { analyticsSettingsUpdateSchema, defaultAnalyticsSettings } from "@callassist/contracts";
 import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, selectableCallLanguagesForRole, isCallLanguageAvailable, TEXT_LANGUAGES, type CallLocale } from "@callassist/contracts";
 import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
@@ -299,7 +304,7 @@ export function buildApp({
         return null;
       }
     }
-    if (options.requireVerifiedEmail && user && !user.emailVerifiedAt) {
+    if (options.requireVerifiedEmail && user && !user.emailVerifiedAt && (await registrationPolicy()).emailVerification === "required") {
       await reply.status(403).send({ error: "EMAIL_VERIFICATION_REQUIRED" });
       return null;
     }
@@ -606,7 +611,27 @@ export function buildApp({
     });
   }
 
+  async function registrationPolicy() {
+    return await service.repository.betaControls?.getRegistrationPolicy() ?? defaultRegistrationPolicy;
+  }
+
   if (authService) {
+    app.get<{ Querystring: { locale?: string } }>("/api/auth/registration-options", async (request, reply) => {
+      const locale = contentLocaleSchema.safeParse(request.query.locale ?? "en");
+      if (!locale.success) return reply.status(400).send({ error: "INVALID_LOCALE" });
+      return reply.header("Cache-Control", "no-store").send(registrationOptionsSchema.parse({
+        policy: await registrationPolicy(), smsCountries: smsAllowedCountries(), documents: contentService ? await contentService.getRegistrationDocuments(locale.data) : null
+      }));
+    });
+    app.post("/api/auth/email-verification/defer", async (request, reply) => {
+      if (!hasAllowedOrigin(request.headers.origin, webOrigins)) return reply.status(403).send({ error: "INVALID_ORIGIN" });
+      const authenticated = await authService.authenticateSession(sessionTokenFromHeaders(request.headers, secureCookies));
+      if (!authenticated) return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+      if ((await registrationPolicy()).emailVerification !== "deferrable") return reply.status(403).send({ error: "EMAIL_VERIFICATION_REQUIRED" });
+      const user = await authService.repository.deferEmailVerification(authenticated.user.id, authenticated.user.email, new Date().toISOString());
+      if (!user) return reply.status(409).send({ error: "EMAIL_VERIFICATION_CHANGED" });
+      return reply.header("Cache-Control", "no-store").send({ user: toPublicUser(user) });
+    });
     app.post("/api/auth/register", async (request, reply) => {
       if (!hasAllowedOrigin(request.headers.origin, webOrigins)) {
         return reply.status(403).send({ error: "INVALID_ORIGIN" });
@@ -621,8 +646,23 @@ export function buildApp({
       try {
         return reply
           .status(202)
-          .send(await authService.register(parsed.data, authContext(request)));
+          .send(await authService.register(parsed.data, authContext(request), async (userId, transaction) => {
+            const policy = transaction && service.repository.betaControls
+              ? (await lockBetaControls(transaction)).settings.registration : await registrationPolicy();
+            const acceptance = parsed.data.legalAcceptance;
+            if (policy.onboarding === "full" && acceptance) throw new ContentRepositoryError("LEGAL_REVISION_CHANGED");
+            if (policy.onboarding === "registration" && (!acceptance?.privacyRevisionId || !acceptance.privacyLocale)) {
+              throw new ContentRepositoryError("LEGAL_REVISION_CHANGED");
+            }
+            if (acceptance) {
+              if (!contentService) throw new ContentRepositoryError("LEGAL_CONTENT_UNAVAILABLE");
+              if (transaction) await new PostgresContentRepository("", transaction).acceptOnboarding(userId, acceptance, new Date().toISOString());
+              else await contentService.acceptOnboarding(userId, acceptance);
+            }
+          }));
       } catch (error) {
+        if (error instanceof ContentRepositoryError) return sendContentError(reply, error);
+        if (error instanceof VerificationSendError) return reply.status(400).send({ error: error.code });
         return sendAuthError(reply, error);
       }
     });
@@ -1670,6 +1710,18 @@ export function buildApp({
         throw error;
       }
     });
+    app.put("/api/admin/system/registration", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      const parsed = registrationPolicyUpdateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_BETA_SETTINGS" });
+      if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      try {
+        await service.repository.betaControls.updateRegistration(parsed.data.settings, parsed.data.expectedRevision, actor.id, parsed.data.reason);
+        return reply.header("Cache-Control", "no-store").send({ updated: true });
+      } catch (error) { return sendRepositoryError(reply, error); }
+    });
     app.put("/api/admin/system/beta", async (request, reply) => {
       const actor = await authorizeAdminMutation(request, reply);
       if (!actor) return;
@@ -2607,6 +2659,14 @@ export function buildApp({
     }
   );
 
+  app.post<{ Params: { id: string } }>("/api/call-briefs/:id/repeat", async (request, reply) => {
+    const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
+    if (!access) return;
+    if (!(await enforceEndpointRateLimit(request, reply, access.userId, "call-start", endpointRateLimitPolicy.callStart))) return;
+    try { return reply.send(await service.repeatUnansweredCall(request.params.id, access.userId)); }
+    catch (error) { return sendRepositoryError(reply, error); }
+  });
+
   app.post<{ Params: { id: string }; Body: unknown }>(
     "/api/call-briefs/:id/approve",
     async (request, reply) => {
@@ -3339,7 +3399,7 @@ function sendRepositoryError(
         ? 404
       : error.code === "OUTBOUND_CALLS_DISABLED"
         ? 503
-        : error.code === "RECIPIENT_SUPPRESSED"
+        : error.code === "RECIPIENT_SUPPRESSED" || error.code === "EMAIL_VERIFICATION_REQUIRED"
           ? 403
           : [
               "CREDIT_ADMIN_ACTION_FORBIDDEN",

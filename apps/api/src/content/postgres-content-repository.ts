@@ -1,3 +1,4 @@
+import { resolveUiLocale, uiLocaleRegistry } from "@callassist/contracts";
 import { canUpgradeSeedLocales } from "./seed-locale-upgrade";
 import {
   adminEditorialRevisionSchema,
@@ -550,6 +551,11 @@ export class PostgresContentRepository implements ContentRepository {
     acceptedAt: string
   ) {
     await this.#sql.begin(async (transaction) => {
+      await transaction`LOCK TABLE content_page_revisions IN SHARE MODE`;
+      if (input.privacyRevisionId || input.privacyLocale) {
+        const privacy = input.privacyLocale ? await new PostgresContentRepository("", transaction).getPublishedPage(input.privacyLocale, uiLocaleRegistry[resolveUiLocale(input.privacyLocale)].slugs.privacy) : null;
+        if (!privacy || privacy.revision.id !== input.privacyRevisionId || privacy.locale !== input.privacyLocale) throw new ContentRepositoryError("LEGAL_REVISION_CHANGED");
+      }
       const references = await this.#legalReferences(transaction, input.locale);
       if (
         references.terms.id !== input.termsRevisionId ||
@@ -563,13 +569,13 @@ export class PostgresContentRepository implements ContentRepository {
             id, user_id, terms_revision_id, acceptable_use_revision_id,
             accepted_locale, accepted_terms, accepted_acceptable_use,
             acknowledged_consent, acknowledged_retention,
-            acknowledged_use_limits, acknowledged_credits, accepted_at
+            acknowledged_use_limits, acknowledged_credits, privacy_revision_id, privacy_locale, accepted_at
           ) VALUES (
             ${randomUUID()}, ${userId}, ${input.termsRevisionId},
             ${input.acceptableUseRevisionId}, ${references.terms.locale},
             ${input.acceptTerms}, ${input.acceptAcceptableUse},
             ${input.acknowledgeConsent}, ${input.acknowledgeRetention},
-            ${input.acknowledgeUseLimits}, ${input.acknowledgeCredits},
+            ${input.acknowledgeUseLimits}, ${input.acknowledgeCredits}, ${input.privacyRevisionId ?? null}, ${input.privacyLocale ?? null},
             ${new Date(acceptedAt)}
           )
           ON CONFLICT (user_id, terms_revision_id, acceptable_use_revision_id)
@@ -597,6 +603,7 @@ export class PostgresContentRepository implements ContentRepository {
         acknowledged_retention AS "acknowledgedRetention",
         acknowledged_use_limits AS "acknowledgedUseLimits",
         acknowledged_credits AS "acknowledgedCredits",
+        privacy_revision_id AS "privacyRevisionId", privacy_locale AS "privacyLocale",
         accepted_at AS "acceptedAt"
       FROM user_onboarding_acceptances
       WHERE user_id = ${userId}

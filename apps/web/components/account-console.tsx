@@ -1,4 +1,5 @@
 "use client";
+import { PhoneInput } from "./phone-input";
 import { formatLocale } from "@callassist/contracts";
 
 import {
@@ -583,20 +584,8 @@ export function AccountConsole() {
                           </label>
                           <label>
                             <span>{copy.phoneChangeNewPhone}</span>
-                            <input
-                              aria-describedby={phoneChangeError ? "new-mobile-hint phone-change-error" : "new-mobile-hint"}
-                              aria-invalid={phoneChangeError ? true : undefined}
-                              autoComplete="tel"
-                              id="new-mobile" ref={focusContactControl}
-                              inputMode="tel"
-                              maxLength={40}
-                              name="newPhoneE164"
-                              onChange={(event) => setNewPhoneE164(event.target.value)}
-                              placeholder="079 123 45 67"
-                              required
-                              type="tel"
-                              value={newPhoneE164}
-                            />
+                            <PhoneInput inputId="new-mobile" inputRef={focusContactControl} name="newPhoneE164" value={newPhoneE164} onChange={setNewPhoneE164}
+                              describedBy={phoneChangeError ? "new-mobile-hint phone-change-error" : "new-mobile-hint"} invalid={Boolean(phoneChangeError)} />
                             <small id="new-mobile-hint">{copy.phoneChangeFormatHint}</small>
                           </label>
                           <label>

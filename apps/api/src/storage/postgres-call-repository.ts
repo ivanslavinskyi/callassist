@@ -1,3 +1,6 @@
+import { historyObjective } from "./history-objective";
+import { assertRetryableCall } from "./call-retry";
+import { appointmentPlanExpired } from "@callassist/contracts";
 import { readProviderBilling } from "../billing/read-provider-billing";
 import { PostgresCallAssessmentStore, type FinalCreditEvidence } from "./postgres-call-assessment-store";
 import { PostgresRecipientOptOutStore } from "./postgres-recipient-opt-out-store";
@@ -161,6 +164,7 @@ type CallBriefRow = {
   recipientName: string;
   phoneNumber: string;
   objective: string;
+  retrySourceCallId: string | null;
   assistantProfileId: AssistantProfileId | null;
   agentName: string;
   representedPerson: string;
@@ -615,7 +619,22 @@ export class PostgresCallRepository implements CallRepository {
       for (const row of feedbackRows) feedback.set(row.callBriefId, summarizeCallFeedback(
         { ...row, createdAt: row.createdAt.toISOString() }, row.attemptStarts.map(at => at.toISOString()))!);
     }
+    const objectives = new Map<string, ReturnType<typeof historyObjective>>();
+    if (ids.length) {
+      const compilations = await sql<{ callId: string; ciphertext: string | null }[]>`SELECT c.call_brief_id AS "callId", c.compilation_ciphertext AS ciphertext
+        FROM call_compilations c JOIN call_briefs b ON b.current_compilation_id=c.id WHERE b.id IN ${sql(ids)}`;
+      const translations = await sql<{ callId: string; hash: string; language: string; ciphertext: string }[]>`SELECT a.call_brief_id AS "callId", a.source_hash AS hash, a.target_language AS language, a.payload_ciphertext AS ciphertext
+        FROM call_text_artifacts a JOIN call_briefs b ON b.current_compilation_id=a.compilation_id WHERE b.id IN ${sql(ids)}
+          AND a.kind='plan_review' AND a.status='ready' AND a.payload_ciphertext IS NOT NULL ORDER BY a.updated_at DESC`;
+      for (const row of compilations) {
+        const compilation = row.ciphertext ? callCompilationSchema.parse(decryptJson(row.ciphertext, this.#encryptionKey)) : null;
+        objectives.set(row.callId, historyObjective(compilation, translations.filter(t => t.callId === row.callId).map(t => ({
+          kind: "plan_review", status: "ready", sourceHash: t.hash, targetLanguage: t.language, payload: decryptJson(t.ciphertext, this.#encryptionKey)
+        }))));
+      }
+    }
     const items = selected.map((row) => ({ ...this.#mapBrief(row),
+      ...objectives.get(row.id),
       lifecycle: deriveCallLifecycle(row.status, events.get(row.id) ?? [], settlements.get(row.id), assessments.get(row.id)),
       feedback: feedback.get(row.id) ?? null }));
     const last = items.at(-1);
@@ -679,10 +698,11 @@ export class PostgresCallRepository implements CallRepository {
     compilation: CallCompilation,
     userId: string | null = null,
     creationIdempotencyKey: string = randomUUID(),
-    publication?: CallPreparationPublication
+    publication?: CallPreparationPublication,
+    retrySource?: import("./call-repository").CallRetrySource
   ) {
     assertCompilationIntegrity(compilation);
-    if (!publication) {
+    if (!publication && !retrySource) {
       const existing = await this.findByCreationRequest(
         userId,
         creationIdempotencyKey
@@ -742,11 +762,28 @@ export class PostgresCallRepository implements CallRepository {
         }
       }
       if (userId) await this.#lockActiveUser(transaction, userId);
+      if (retrySource) {
+        const [source] = await transaction<CallBriefRow[]>`${this.#briefSelect(true)} WHERE call_briefs.id=${retrySource.callId}
+          AND user_id IS NOT DISTINCT FROM ${userId}::uuid AND data_deleted_at IS NULL FOR UPDATE`;
+        if (!source) throw new CallRepositoryError("CALL_NOT_FOUND");
+        const sourceCompilation = this.#mapCurrentCompilation(source);
+        const attempt = await this.getLatestAttempt(retrySource.callId);
+        const events = await this.#selectTelemetryForCallIds([retrySource.callId], transaction);
+        assertRetryableCall({ brief: { ...this.#mapBrief(source), lifecycle: deriveCallLifecycle(source.status, events) },
+          compilation: sourceCompilation, executionPlanSource: "immutable", transcript: [], pendingApproval: null, recording: null, finalTranscript: null }, attempt);
+        if (attempt?.id !== retrySource.attemptId || sourceCompilation?.snapshotHash !== compilation.snapshotHash)
+          throw new CallRepositoryError("CALL_COMPILATION_STALE");
+        const [existing] = await transaction<{ id: string; deleted: boolean }[]>`SELECT id, data_deleted_at IS NOT NULL AS deleted FROM call_briefs WHERE retry_source_attempt_id=${retrySource.attemptId}`;
+        if (existing) {
+          if (existing.deleted) throw new CallRepositoryError("CALL_RETRY_NOT_AVAILABLE");
+          return existing.id;
+        }
+      }
       const insertedRows = await transaction<{ id: string }[]>`
         INSERT INTO call_briefs (
           id,
           user_id,
-          creation_idempotency_key,
+          creation_idempotency_key, retry_source_call_id, retry_source_attempt_id,
           recipient_name,
           phone_number,
           objective,
@@ -772,7 +809,7 @@ export class PostgresCallRepository implements CallRepository {
         ) VALUES (
           ${id},
           ${userId},
-          ${creationIdempotencyKey},
+          ${creationIdempotencyKey}, ${retrySource?.callId ?? null}, ${retrySource?.attemptId ?? null},
           ${parsed.recipientName},
           ${parsed.phoneNumber},
           ${runtime.objective},
@@ -809,6 +846,14 @@ export class PostgresCallRepository implements CallRepository {
           compilation,
           "native"
         );
+        if (retrySource) {
+          const artifacts = await transaction<{ id: string }[]>`SELECT id FROM call_text_artifacts WHERE call_brief_id=${retrySource.callId}
+            AND kind='plan_review' AND source_hash=${compilation.snapshotHash} AND status='ready' AND payload_ciphertext IS NOT NULL`;
+          for (const artifact of artifacts) await transaction`INSERT INTO call_text_artifacts
+            (id,call_brief_id,kind,compilation_id,source_hash,target_language,generator_version,status,payload_ciphertext,payload_hash)
+            SELECT ${randomUUID()},${resolvedId},kind,${compilationId},source_hash,target_language,generator_version,'ready',payload_ciphertext,payload_hash
+            FROM call_text_artifacts WHERE id=${artifact.id} ON CONFLICT DO NOTHING`;
+        }
         await transaction`
           UPDATE call_briefs
           SET
@@ -834,7 +879,7 @@ export class PostgresCallRepository implements CallRepository {
             }
           }
         });
-        await this.#appendCompilationTelemetry(
+        if (!retrySource) await this.#appendCompilationTelemetry(
           transaction,
           resolvedId,
           compilation,
@@ -847,6 +892,7 @@ export class PostgresCallRepository implements CallRepository {
           WHERE creation_idempotency_key = ${creationIdempotencyKey}
             AND user_id IS NOT DISTINCT FROM ${userId}::uuid
             AND data_deleted_at IS NULL
+            AND (${retrySource?.attemptId ?? null}::uuid IS NULL OR retry_source_attempt_id=${retrySource?.attemptId ?? null})
           FOR SHARE
         `;
         if (!raced) {
@@ -855,6 +901,8 @@ export class PostgresCallRepository implements CallRepository {
         resolvedId = raced.id;
       }
       await publishLanguageContext(transaction, resolvedId, compilation, publication?.preparationId);
+      if (retrySource) await transaction`UPDATE call_language_contexts SET context=source.context
+        FROM call_language_contexts source WHERE call_language_contexts.call_brief_id=${resolvedId} AND source.call_brief_id=${retrySource.callId}`;
       if (publication) {
         const updated = await transaction`
           UPDATE call_preparation_requests
@@ -1236,6 +1284,8 @@ export class PostgresCallRepository implements CallRepository {
       throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
     }
     await this.#sql.begin(async (transaction) => {
+      // Match status callbacks: brief before attempt, including the INSERT's FK locks.
+      await transaction`SELECT id FROM call_briefs WHERE id=${callBriefId} FOR KEY SHARE`;
       const attempt = await transaction`
         SELECT id
         FROM call_attempts
@@ -1267,6 +1317,7 @@ export class PostgresCallRepository implements CallRepository {
     input: RealtimeProviderOperationInput
   ) {
     await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT id FROM call_briefs WHERE id=${input.callBriefId} FOR KEY SHARE`;
       const attempt = await transaction`
         SELECT id
         FROM call_attempts
@@ -1465,6 +1516,7 @@ export class PostgresCallRepository implements CallRepository {
     input: TelephonyProviderOperationInput
   ) {
     await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT id FROM call_briefs WHERE id=${input.callBriefId} FOR KEY SHARE`;
       const attempt = await transaction`
         SELECT id
         FROM call_attempts
@@ -1493,6 +1545,7 @@ export class PostgresCallRepository implements CallRepository {
 
   async recordTelephonyLegUsage(input: TelephonyLegUsageInput) {
     await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT id FROM call_briefs WHERE id=${input.callBriefId} FOR KEY SHARE`;
       const [attempt] = await transaction<{ startedAt: DatabaseDate }[]>`
         SELECT created_at AS "startedAt"
         FROM call_attempts
@@ -1564,6 +1617,7 @@ export class PostgresCallRepository implements CallRepository {
   ) {
     await this.#sql.begin(async (transaction) => {
       await requirePostgresDurableJobLease(transaction, lease);
+      await transaction`SELECT id FROM call_briefs WHERE id=${input.callBriefId} FOR KEY SHARE`;
       const [attempt] = await transaction<{ startedAt: DatabaseDate }[]>`
         SELECT created_at AS "startedAt"
         FROM call_attempts
@@ -4501,6 +4555,10 @@ export class PostgresCallRepository implements CallRepository {
       if (userId) {
         await this.#lockCreditAccount(transaction, userId);
         await this.#lockActiveUser(transaction, userId);
+        if (beta?.registration.emailVerification === "required") {
+          const [owner] = await transaction<{ verified: boolean }[]>`SELECT email_verified_at IS NOT NULL AS verified FROM users WHERE id=${userId}`;
+          if (!owner?.verified) throw new CallRepositoryError("EMAIL_VERIFICATION_REQUIRED");
+        }
       }
       const [call] = await transaction<CallBriefRow[]>`
         ${this.#briefSelect(true)}
@@ -4533,6 +4591,7 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_COMPILATION_INTEGRITY_FAILED");
       }
       assertCompilationIntegrity(compilation);
+      if (appointmentPlanExpired(compilation)) throw new CallRepositoryError("CALL_APPOINTMENT_EXPIRED");
       const compilationId = call.currentCompilationId;
       const review=await requireReceiptForStart(transaction,id,compilationId);
       const [approval] = await transaction<{
@@ -6758,6 +6817,7 @@ export class PostgresCallRepository implements CallRepository {
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
         objective,
+        retry_source_call_id AS "retrySourceCallId",
         assistant_profile_id AS "assistantProfileId",
         agent_name AS "agentName",
         represented_person AS "representedPerson",
@@ -6825,6 +6885,7 @@ export class PostgresCallRepository implements CallRepository {
       recipientName: row.recipientName,
       phoneNumber: row.phoneNumber,
       objective: row.objective,
+      retrySourceCallId: row.retrySourceCallId ?? null,
       assistantProfileId: row.assistantProfileId,
       agentName: row.agentName,
       representedPerson: row.representedPerson,

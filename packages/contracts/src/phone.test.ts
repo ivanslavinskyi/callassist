@@ -3,6 +3,7 @@ import { accountPhoneSchema } from "./account";
 import {
   isSwissDestinationPhone,
   normalizeSwissDestinationPhone,
+  parseAccountPhoneNumber,
   swissDestinationPhoneSchema
 } from "./phone";
 
@@ -31,6 +32,20 @@ describe("Swiss destination phone policy", () => {
 });
 
 describe("account phone normalization", () => {
+  it.each([
+    ["CH", ["0790000001", "41790000001", "+41790000001", "0041790000001", "410790000001", "+410790000001"], "+41790000001"],
+    ["UA", ["0671234567", "380671234567", "+380671234567", "00380671234567", "3800671234567", "+3800671234567"], "+380671234567"]
+  ] as const)("normalizes equivalent %s prefixes without changing subscriber digits", (country, variants, expected) => {
+    for (const input of variants) expect(parseAccountPhoneNumber(input, country)).toBe(expected);
+  });
+  it.each(["+999123456789", "Call +41790000001", "+41790000001 ext 123", "+41+766058786"])("rejects invalid account number %s before registration", value => {
+    expect(accountPhoneSchema.safeParse(value).success).toBe(false);
+  });
+  it("uses the selected country only for national numbers", () => {
+    expect(parseAccountPhoneNumber("0671234567", "CH")).toBeNull();
+    expect(parseAccountPhoneNumber("+380671234567", "CH")).toBe("+380671234567");
+    expect(parseAccountPhoneNumber("0790000001", "invalid")).toBeNull();
+  });
   it.each([
     ["+380671234567", "+380671234567"],
     ["+380 (67) 123-45-67", "+380671234567"],

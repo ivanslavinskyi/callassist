@@ -119,7 +119,8 @@ export class AuthService {
       (() => String(randomInt(0, 1_000_000)).padStart(6, "0"));
   }
 
-  async register(input: RegistrationInput, context: AuthRequestContext) {
+  async register(input: RegistrationInput, context: AuthRequestContext, accept?: import("./auth-repository").RegistrationAcceptanceWriter) {
+    try { this.verificationProvider.validateDestination?.(input.phoneE164); } catch (error) { throw verificationServiceError(error); }
     await this.#limitMany([
       limitEntry("register:ip", context.ip, authHourlyLimit("AUTH_REGISTER_IP_PER_HOUR", 5), 60 * minute),
       limitEntry("register:email", input.email, authHourlyLimit("AUTH_REGISTER_IDENTITY_PER_HOUR", 3), 60 * minute),
@@ -131,7 +132,7 @@ export class AuthService {
     const { password: _password, ...profile } = input;
     let user: AuthUserRecord;
     try {
-      user = await this.repository.createUser({ ...profile, passwordHash });
+      user = await this.repository.createUser({ ...profile, passwordHash }, accept);
     } catch (error) {
       if (error instanceof AuthRepositoryError && error.code === "USER_ALREADY_EXISTS") {
         return { status: "verification_required" as const };
@@ -168,6 +169,7 @@ export class AuthService {
   }
 
   async correctUnverifiedPhone(input: UnverifiedPhoneCorrectionInput, context: AuthRequestContext) {
+    try { this.verificationProvider.validateDestination?.(input.newPhoneE164); } catch (error) { throw verificationServiceError(error); }
     await this.#limitMany([
       limitEntry("phone-correction:ip", context.ip, 10, 60 * minute),
       limitEntry("phone-correction:email", input.email, 3, 60 * minute)
@@ -357,6 +359,7 @@ export class AuthService {
     input: PhoneChangeStartInput,
     context: AuthRequestContext
   ) {
+    try { this.verificationProvider.validateDestination?.(input.newPhoneE164); } catch (error) { throw verificationServiceError(error); }
     await this.#limitMany([
       limitEntry("phone-change-start:ip", context.ip, 10, 60 * minute),
       limitEntry("phone-change-start:user", user.id, 3, 60 * minute),

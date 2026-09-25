@@ -1,3 +1,4 @@
+import { assertRetryableCall } from "./storage/call-retry";
 import { createHash, randomUUID } from "node:crypto";
 import {
   adminOperationsWindowBounds,
@@ -651,6 +652,15 @@ export class CallService {
 
   completeProviderOperation(input: CompleteProviderOperationInput) {
     return this.repository.completeProviderOperation(input);
+  }
+
+  async repeatUnansweredCall(id: string, userId: string | null) {
+    await this.assertOwned(id, userId);
+    const current = await this.#require(id);
+    const attempt = await this.repository.getLatestAttempt(id);
+    assertRetryableCall(current, attempt);
+    const compilation = { ...structuredClone(current.compilation!), approvedAt: null, compilerResponseId: null };
+    return this.repository.create(compilation.rawBrief, compilation, userId, attempt!.id, undefined, { callId: id, attemptId: attempt!.id });
   }
 
   async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {

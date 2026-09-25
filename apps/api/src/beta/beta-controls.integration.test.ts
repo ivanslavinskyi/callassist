@@ -17,6 +17,35 @@ import { TwilioVerificationProvider } from "../auth/twilio-verification-provider
 import { ResendEmailProvider } from "../auth/resend-email-provider";
 
 const closers: Array<() => Promise<unknown>> = [];
+it("revision-checks registration policies, rejects non-superadmins and preserves them for old beta clients", async () => {
+  const f = await fixture();
+  const view = await f.controls.getView();
+  const policy = { onboarding: "registration", emailVerification: "deferrable" } as const;
+  const owner = await f.owner();
+  await expect(f.controls.updateRegistration(policy, view.revision, owner.id, "Not authorized"))
+    .rejects.toMatchObject({ code: "BETA_ADMIN_FORBIDDEN" });
+  await f.controls.updateRegistration(policy, view.revision, f.admin.id, "Registration simplification");
+  await expect(f.controls.updateRegistration(policy, view.revision, f.admin.id, "Stale revision"))
+    .rejects.toMatchObject({ code: "BETA_SETTINGS_STALE" });
+  await f.controls.update(f.settings, (await f.controls.getView()).revision, f.admin.id, "Old settings client");
+  expect(await f.controls.getRegistrationPolicy()).toEqual(policy);
+  expect(await f.sql`SELECT action FROM beta_control_audit WHERE reason='Registration simplification'`).toHaveLength(1);
+}, 30_000);
+
+it("enforces the current email policy before reserving credits or starting an attempt", async () => {
+  const f = await fixture();
+  const owner = await f.owner();
+  const call = await f.ready(owner.id);
+  await f.sql`UPDATE users SET email_verified_at=NULL, email_verification_deferred_at=now() WHERE id=${owner.id}`;
+  const before = await f.repository.getCreditUsage(owner.id);
+  await expect(f.repository.startAttempt(call.id, { provider: "twilio", userId: owner.id }))
+    .rejects.toMatchObject({ code: "EMAIL_VERIFICATION_REQUIRED" });
+  expect(await f.repository.getLatestAttempt(call.id)).toBeNull();
+  expect(await f.repository.getCreditUsage(owner.id)).toEqual(before);
+  await f.controls.updateRegistration({ onboarding: "full", emailVerification: "deferrable" }, (await f.controls.getView()).revision, f.admin.id, "Allow deferred email");
+  expect((await f.repository.startAttempt(call.id, { provider: "twilio", userId: owner.id })).attempt.id).toEqual(expect.any(String));
+}, 30_000);
+
 it("persists analytics through the existing revisioned settings and preserves it for old beta clients", async () => {
   const f = await fixture();
   const before = await f.controls.getAnalytics();

@@ -14,6 +14,7 @@ import {
   switchContentLocale
 } from "@/lib/i18n/content-routing";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
+import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { LanguageSwitcher } from "./language-switcher";
 import { Brand } from "./brand";
 import { ThemeToggle } from "./theme-toggle";
@@ -145,7 +146,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     </header>
     {localeError ? <p className="form-error" role="alert">{languageMessages[locale].saveError}</p> : null}
     {emailVerified === false && pathname.includes("/app") && !pathname.includes("/app/account") ? <aside className="email-verification-banner">
-      <span>{emailVerificationMessages[locale].banner}</span>{" "}
+      <span>{registrationCallMessages[locale].emailReminder}</span>{" "}
       <Link href={localizeHref("/verify-email")}>{emailVerificationMessages[locale].title}</Link>
     </aside> : null}
     {children}

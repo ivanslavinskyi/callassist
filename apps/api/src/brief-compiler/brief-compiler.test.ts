@@ -102,6 +102,18 @@ describe("bounded semantic repair", () => {
     return { fetchImplementation, attempts: () => attempts };
   }
 
+  it("stores the source-language objective in the existing compilation response without changing the execution hash", async () => {
+    const sourceObjective = "Уточнить получение заявления";
+    const mock = provider([{ ...modelOutput, sourceObjective }]);
+    const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation: mock.fetchImplementation })
+      .compile(normalizeCreateCallBriefInput(rawInput), 1);
+    expect(result.displayObjective).toEqual({ text: sourceObjective, language: "ru" });
+    expect(result.compiledBrief?.localizedObjective).toBe(modelOutput.localizedObjective);
+    expect(mock.attempts()).toBe(1);
+    const request = mock.fetchImplementation.mock.calls.find(([url]) => String(url).endsWith("responses"))!;
+    expect(JSON.parse(String(request[1]?.body)).text.format.schema.required).toContain("sourceObjective");
+  });
+
   it.each(["fact", "settings"])("repairs a recoverable %s integrity failure once and accounts for every request", async (kind) => {
     const invalid = kind === "fact" ? { ...modelOutput, backgroundSummary: "Invented case SECRET-777-XYZ" }
       : { ...modelOutput, voicemailAction: "leave_neutral_message" };
