@@ -1,27 +1,34 @@
 # Documentation index
 
-Release status refreshed 2026-09-23, including expenses, notifications, seven-language localization, CMS completion, OG management and telemetry export. Public brand: SHPROHLI;
-internal package names, cookies and database identifiers still use callassist.
+Current-branch references refreshed **2026-09-25** for the GPT-Live pilot and
+registration/call improvements. Public brand: SHPROHLI; internal package names,
+cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
 proposed or verified at that time; they are not parallel backlogs or proof of today's
 deployment. [Reconciliation report](documentation-sync-2026-09-12.md) records the
-mismatches corrected and the source checks behind that update. The fresh
+mismatches corrected and the source checks behind that update. The dated
 [public-testing audit](public-testing-audit-2026-09-13.md) supersedes older readiness
 claims. Subsequent [B01/B02 remediation](b01-b02-remediation-2026-09-13.md) closes the dependency
 and Admin System defects locally; **NO-GO** remains for the other release gates.
 The [email/SMS checkpoint](email-sms-implementation-2026-09-14.md) records implemented
 verification and notices, CH/UA policy, Gmail/CH SMS user acceptance, revised email
-design, current automated checks and the remaining B03/B04/B12 boundaries.
+design, automated checks at that date and the remaining B03/B04/B12 boundaries.
 Use [mvp-plan.md](mvp-plan.md) for the minimum B01–B12 backlog; old R/W/C IDs are
 mapped there and are not separate work queues.
 
 ## Current references
 
-Latest checkpoint: [predeployment code, dependency and documentation audit, 23 September](release-audit-2026-09-23.md).
-Source migrations now run through **0080**. Earlier feature delivery is recorded in
-[17–22 September](delivery-2026-09-22.md). The [roadmap](mvp-plan.md) retains NO-GO
-for external release acceptance; local implementation and production rollout are distinct.
+Latest checkpoint: [registration/call improvements and validation, 25 September](registration-and-call-improvements-2026-09-25.md),
+on implementation commit `457c9b2`: 1,591 tests / 191 files, lint/types/build and
+seven-locale browser smoke passed. The [parallel Live pilot](gpt-live-pilot.md)
+records separate real-call evidence for both drivers. Source migrations run through
+**0083**. Realtime, full onboarding and mandatory email remain the defaults.
+Owner acceptance, merge and production deployment remain pending; external release
+gates are tracked in the [roadmap](mvp-plan.md). Start local manual checks with the
+[local testing runbook](local-testing.md).
+
+Earlier checkpoint: [23 September audit](release-audit-2026-09-23.md).
 
 Local implementation: [admin call telemetry export, 2026-09-22](admin-call-telemetry-export.md).
 ZIP/JSONL export, durable worker, encryption, deletion revocation and migration 0079.
@@ -51,6 +58,9 @@ EN/DE publications; current translation evidence is in the 21 September report a
 
 | Document | Purpose |
 | --- | --- |
+| [Local testing](local-testing.md) | Database, app/worker, scoped Twilio tunnel and manual acceptance |
+| [GPT-Live pilot](gpt-live-pilot.md) | Native protocol, application guardrails, accounting, fallback and real-call smoke |
+| [Registration and call improvements](registration-and-call-improvements-2026-09-25.md) | Approved behavior, seven locales, migrations 0082/0083 and final checks |
 | [Audit, 2026-09-23](release-audit-2026-09-23.md) | Dependency fixes, export pagination, current verification and deployment boundaries |
 | [Project README](../README.md) | Product scope, setup, commands and repository status |
 | [Delivery, 17–22 September](delivery-2026-09-22.md) | Recent implementation, migration 0079, verification limits and remaining release gates |
@@ -83,7 +93,7 @@ EN/DE publications; current translation evidence is in the 21 September report a
 | [Recipient opt-out](recipient-opt-out.md) | Proven-contact eligibility, dedicated Verify Service, one-use confirmation, retained fingerprints and safe legacy backfill |
 | [Rate limiting](rate-limit-policy.md) | Shared atomic endpoint limits, artifact budgets and operational boundaries |
 | [Real-provider drills](real-provider-drills.md) | Current UI procedure, CLI review-receipt limitation and dated supervised evidence |
-| [Admin architecture](admin-interface-architecture.md) | English-only admin surface, route/layout boundaries and roles |
+| [Admin architecture](admin-interface-architecture.md) | Admin route/layout boundaries and roles; new registration controls are localized |
 | [Superadmin notifications](superadmin-notifications.md) | Localized registration/call email reports, queue, recipient controls and delivery semantics |
 | [Public content staging](public-content-staging-2026-09-09.md) | Candidate/dry-run/staging procedure and dated unpublished drafts; source copy is not publication evidence |
 

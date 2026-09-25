@@ -1,5 +1,13 @@
 # Real-provider drills
 
+Current procedure, 2026-09-25: use the signed-in UI or the dedicated
+`drill:voice-runtime` prepare/start/verify runner. The latter implements current
+review evidence and passed short Realtime and Live calls on an isolated local DB.
+See [local app/tunnel setup](local-testing.md) and the
+[runtime-specific smoke and acceptance limits](gpt-live-pilot.md#local-real-call-smoke).
+This does not close the full provider/outage/appointment matrix.
+
+The following limitation applies only to the older `drill:real-call` runner.
 Reviewed 2026-09-12 against `ef36cfa`. For a new plan, use the signed-in UI to prepare,
 review the original or ready translation, and approve/start. The UI supplies the
 review evidence required by policy v2. The CLI below still sends only revision/hash

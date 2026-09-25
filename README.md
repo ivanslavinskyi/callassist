@@ -5,57 +5,33 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Repository status, 2026-09-23:** implemented supervised MVP with substantial beta
-infrastructure. **B01/B02 are remediated locally:** the recorded dependency audit was clean;
-Admin System supports nonempty jobs and independent outbound-call control.
-Initial email verification, localized security notices and bounded CH/UA SMS are implemented.
-The user confirmed EN email delivery in Gmail and SMS from SHPROHLI to a Swiss number.
-Open registration now has an admin-controlled cap of 30 plus additional one-use invitations,
-7-minute calls, 1 call/account and 2 globally, with shared conservative USD spending reservations.
-New environments require a monetary amount in Admin System before paid requests.
-The owner configured **20 USD per rolling 24 hours locally**; revision 3 uses a
-0.60 USD/minute call reservation and 0.15 USD paid-text reservation. Reported costs
-and measured usage replace eligible completed-operation reservations; unknown costs
-remain pending. See [budget accounting](docs/budget-accounting-2026-09-15.md).
-The recompile deadlock is fixed. Call credits are now used only after consent and a
-confirmed substantive task answer in the final transcript. Consented calls keep the
-reservation during the final summary/assessment (up to five minutes). No answer,
-busy or missing consent refunds immediately; failed or uncertain assessment also refunds.
-Conversation, AI goal achievement and manual user feedback are separate facts.
-The revised EN/DE landing and related policy copy are published locally. See the
-[conversation-credit checkpoint](docs/conversation-credit-2026-09-14.md).
-Plan preparation uses compact output with a 20,000-token ceiling and rejects
-incomplete responses and mock review translations in real-provider mode. See
-[preparation quality and dated timings](docs/plan-preparation-quality-2026-09-15.md).
-The [workflow feedback update](docs/workflow-feedback-2026-09-15.md) adds a persistent
-preparation panel, consistent review spacing and immediate, state-based call animation.
-The [2026-09-16 delivery record](docs/delivery-2026-09-16.md) covers the founder story
-and portrait, session-aware landing actions, simplified call-language choices and
-recipient opt-out restricted to proven Twilio contact. Validation includes 240 web
-tests, 115 contracts tests, a 1,013-test API checkpoint on a fresh isolated database,
-subsequent targeted regressions, typechecks and API/web builds. Browser checks use
-isolated fixtures; external provider and deployment acceptance remain open.
-The [17–22 September delivery record](docs/delivery-2026-09-22.md) adds unified
-expense accounting, superadmin notifications, seven-language UI/site/email,
-localized CMS r10, language medallions, managed homepage OG images and admin
-telemetry ZIP/JSONL exports. The current source migration catalog ends at **0080**.
-The [23 September audit](docs/release-audit-2026-09-23.md) supersedes the earlier
-verification checkpoint: dependency remediation, CI scope, contact-form behavior,
-export pagination and migration/rotation checks are recorded there. The target
-deployment database must still be checked explicitly.
-**NO-GO for public testing** remains: delivery scenarios,
-deployment and operational acceptance are open. See the
-[beta controls and stability report](docs/beta-controls-2026-09-14.md).
-See the [remediation evidence and browser-check boundary](docs/b01-b02-remediation-2026-09-13.md),
-[original audit](docs/public-testing-audit-2026-09-13.md),
-[single release roadmap](docs/mvp-plan.md) and [documentation index](docs/README.md).
-The public product copy uses “public beta”; that wording is not deployment evidence.
+**Current branch, 2026-09-25:** `feat/gpt-live-pilot` includes the parallel
+GPT-Live runtime and registration/call-flow improvements. Source migrations run
+through **0083**. Local checks on implementation commit `457c9b2` passed:
+**1,591 tests / 191 files** (API 1,182; web 281; contracts 128), full lint,
+typecheck, production build and the seven-locale browser smoke.
+
+Realtime remains the production default. Both Realtime and Live passed a short
+recipient-authorized Twilio smoke in an isolated local database; this is separate
+from broader conversational acceptance. Full onboarding and required email remain
+the default registration policy. A superadmin can enable registration-time legal
+agreement and optional email deferral independently in Admin > System.
+
+**Owner acceptance, merge and production deployment are pending.** Public-release
+operational and provider gates remain open in the [roadmap](docs/mvp-plan.md).
+See the [Live pilot](docs/gpt-live-pilot.md),
+[registration/call implementation and checks](docs/registration-and-call-improvements-2026-09-25.md),
+[local testing runbook](docs/local-testing.md) and [documentation index](docs/README.md).
+Earlier audits remain dated evidence, not proof of the current deployment.
 
 ## Implemented product
 
 - Authenticated DE/FR/IT/RM/EN/RU/UK customer application, account recovery, verified phone/email
   changes, session management, export, call deletion and queued account anonymization.
-- Initial email proof before starting calls; branded HTML/plain-text verification and
+- Configurable full onboarding or registration-time Terms/AUP/Privacy agreement.
+  After SMS, the email verification screen always appears; when enabled, users can
+  explicitly defer it. Deferral persists for that address without marking it verified.
+  Required-email policy blocks new call starts. Branded HTML/plain-text verification and
   security notices, explicit communication locales and shared SMS budgets. Account
   phone verification supports CH/UA; outbound calls and recipient opt-out remain CH.
 - Durable, retry-safe creation, editing and clarification of call plans; multilingual compilation, moderation,
@@ -67,7 +43,9 @@ The public product copy uses “public beta”; that wording is not deployment e
   meeting is implemented with approved date/time windows and a server permission
   check. Recipient confirmation establishes the result; there is no calendar integration,
   rescheduling, cancellation or permission to accept new financial terms.
-- Swiss-number outbound calls via Twilio and speech conversation via OpenAI Realtime.
+- Swiss-number outbound calls via Twilio, with selectable Realtime or native Live
+  conversation and Responses delegation. Both preserve PCMU/G.711 and application-owned
+  consent, authorization, appointment confirmation and playback-aware call control.
 - Six server-owned assistant profiles. Assistance reason defaults to `none`;
   `speech_impairment` and `language_barrier` add an optional controlled disclosure.
 - Spoken consent, one clarification, then keypad fallback. Before consent, recipient
@@ -76,6 +54,10 @@ The public product copy uses “public beta”; that wording is not deployment e
 - Dual-channel recording after consent and confirmed recording startup. Final
   transcription normally splits the recording into channel-labelled utterances;
   mono/unsupported audio falls back to a whole-recording plain-text transcript.
+- Repeat definitively unanswered calls into a new draft with the saved compilation,
+  fresh review/approval and current admission checks; unchanged plans incur no new
+  compiler request. History/recent calls show a truncated source-language objective.
+- Visible New call/History navigation on mobile; saved feedback is read-only until Edit.
 - Live SSE transcript, recording playback proxy, clipboard/PDF export, feedback,
   retention choices of 0/7/30 days and manual recording deletion.
 - Playback-aware agent hangup behind `REALTIME_AGENT_HANGUP_ENABLED`; interrupted
@@ -89,7 +71,7 @@ The public product copy uses “public beta”; that wording is not deployment e
 - Three signup credits, transactional reserve/charge/refund, quotas, recipient
   suppression, SMS-verified opt-out after proven outbound contact and an audited
   outbound-call kill switch. Staff can apply suppression without call history.
-- English-only `/admin` for content, SEO, users, calls, credits, safety and system
+- Primarily English `/admin` (registration policy controls support all seven locales) for content, SEO, users, calls, credits, safety and system
   operations; sensitive call reads require superadmin and an audited reason.
 - Versioned public pages in seven UI locales, Landing/FAQ/Navigation collections, drafts, previews,
   publication/history/rollback and Terms/AUP re-acceptance.
@@ -121,11 +103,15 @@ Next.js web -- HTTP/SSE --> Fastify main API -- PostgreSQL
                                   |                |
 Twilio-only ingress (same process) |       durable work + invalidation
               |                   |                |
-     Twilio Media Stream <--> Realtime bridge   standalone worker
+     Twilio Media Stream <--> voice runtime     standalone worker
               |                   |                |
        consented recording     OpenAI          compiler / ASR / text artifacts /
                                             retention / reconciliation
 ```
+
+The voice factory selects `OpenAIRealtimeBridge` (default) or `OpenAILiveBridge`.
+Live keeps bounded Realtime consent/opening/farewell speech and delegates its main
+conversation to native Live/Responses; both providers appear in the cost ledger.
 
 The Twilio listener is isolated from application routes but shares the API process.
 The worker is a separate entry point; development can run it embedded. PostgreSQL
@@ -200,17 +186,16 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog now extends through `0080_feedback_rotation_after_privacy_redaction.sql`.
+The migration catalog now extends through `0083_call_retry_sources.sql`.
 Public opt-out requires a separate `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` and a stable
 `RECIPIENT_CONTACT_HASH_KEY` shared by API/workers. Follow the
 [opt-out deployment and backfill procedure](docs/recipient-opt-out.md) and
 [deployment preflight](docs/deployment-preflight.md); pushing code does not configure them.
-Latest implementation checks and their limits
-are recorded in the [23 September audit](docs/release-audit-2026-09-23.md).
-That record distinguishes a full-suite run from subsequent targeted checks; it is
-not a claim of a fresh full-suite run on every commit. Older test counts are dated
-evidence, not the current suite size. See [documentation reconciliation](docs/documentation-sync-2026-09-12.md)
-for the source checks performed during this documentation update.
+Latest implementation checks and their limits are recorded in the
+[25 September acceptance record](docs/registration-and-call-improvements-2026-09-25.md).
+The source catalog and automated checks do not establish the migration or acceptance
+state of a deployment database. Never repair checksum mismatches by rewriting applied
+migrations; use a fresh disposable test database for isolated test runs.
 
 ## Real providers and deployment
 
@@ -223,10 +208,12 @@ reachable signed webhook/Media Stream listener. `pnpm tunnel:twilio` exposes onl
 the development Twilio gateway at `127.0.0.1:4001`; Quick Tunnel is development-only.
 Model IDs and voice settings are listed in [runtime reference](docs/runtime-reference.md).
 
-Use the signed-in UI for current supervised calls: it captures exact review evidence
-before starting. The two-stage CLI prepares before dialling and uses an existing
-verified account, but its start stage still lacks the v2 review evidence for a new
-plan. See [real-provider drills](docs/real-provider-drills.md) and remaining R06 work.
+Use the signed-in UI for supervised calls: it captures exact review evidence before
+starting. For repeatable Realtime/Live acceptance, `drill:voice-runtime` provides
+prepare/start/verify stages with the current review receipt, explicit authorization
+and an isolated test database. Follow the [Live smoke procedure](docs/gpt-live-pilot.md#local-real-call-smoke).
+The older `drill:real-call` start stage still lacks review-policy-v2 evidence;
+its limitation is documented in [real-provider drills](docs/real-provider-drills.md).
 Default unit/integration tests use mock providers. Explicit opt-in verification
 scripts such as `verify-general-call-results.ts --run-provider` make paid text-model
 requests using fictional fixtures; they do not place telephone calls.

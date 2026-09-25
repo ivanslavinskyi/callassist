@@ -42,8 +42,12 @@ Export has a separate queue and status/heartbeat in Calls; general System job
 diagnostics are not its queue monitor. Export selection uses attempt/preparation
 time independently of Calls table filters and requires an audited content-access reason.
 
-The administrative interface is a separate, English-only application surface
-under `/admin`.
+The administrative interface is a separate, primarily English application surface
+under `/admin`. Since 2026-09-25, the registration-policy controls in System use all
+seven UI locales. They independently select full/registration-time onboarding and
+required/deferrable email, with revision checks and an audit reason. This does not
+move admin routes under locale prefixes. See the
+[registration implementation](registration-and-call-improvements-2026-09-25.md).
 
 - Admin routes do not live below `[locale]`.
 - Admin routes never use `/en/admin` or `/de/admin`.

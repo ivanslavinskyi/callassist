@@ -1,9 +1,7 @@
 # SHPROHLI architecture
 
-Updated 2026-09-23 for seven-language UI/content/email, expenses, notifications,
-OG publication and telemetry exports, alongside the existing opt-out/session boundaries. This describes
-implemented behavior, including initial email proof, localized transactional delivery,
-appointments, compact results and live-transcript recovery.
+Updated 2026-09-25 for parallel voice runtimes, registration policy, phone parsing,
+unanswered-call retries and localized call UX. Source migrations run through 0083.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
 [dated audits and verification](README.md) retain the evidence available at their dates.
 
@@ -14,6 +12,37 @@ This architecture includes the integration of that mainline work with the audit 
 ## Runtime and repository boundaries
 
 The [call lifecycle/history checkpoint](call-lifecycle-history-2026-09-15.md) adds a shared latest-attempt read projection from durable events and the immutable credit ledger. Transport completion, no answer, consent refusal, missing consent and a confirmed conversation are distinct. Customer history is `/[locale]/app/history`; New call retains five recent calls. Admin lists and metrics use the same evidence, while goal feedback remains separate.
+
+### Voice runtime selection
+
+`VoiceRuntime` and its factory select `OpenAIRealtimeBridge` or `OpenAILiveBridge`
+from `VOICE_RUNTIME_DRIVER`; absent means `realtime`, invalid values fail startup.
+The Live pilot keeps the existing Realtime consent/opening/farewell controller and
+uses native Live for the main full-duplex conversation after opening playback.
+Responses delegation defaults to GPT-6 Luna with `parallel_tool_calls=false`.
+Twilio `mark`/`clear`, speech epochs and immutable approved execution snapshots
+remain application-owned. A model result never proves an external action completed.
+Native Live transcripts and duration plus delegated token usage feed existing
+transcript/ledger paths; recording-based post-call ASR is unchanged. Startup fallback
+can resume the prepared Realtime session, but failure after Live starts ends the
+conversation rather than replaying actions. See [protocol, billing and acceptance](gpt-live-pilot.md).
+
+### Retry and call-page behavior
+
+`POST /api/call-briefs/:id/repeat` clones a definitively unanswered, settled attempt
+into one new draft per source attempt. Ownership, lifecycle evidence and source
+availability are checked transactionally. It copies the validated compilation and
+ready review translations, clears approval and compiler-operation identity, and
+requires a fresh review receipt and execution snapshot. Consent, tool decisions,
+results, transcripts and feedback are not copied. Unchanged edits do not recompile;
+task changes do. Expired appointment windows require edits before a new start.
+Current email, destination, credit, quota and spending checks apply at admission.
+
+History/recent rows use `sourceObjective` from the original compiler response, or
+retained source-language text for older records, with UI truncation and no list-time
+LLM calls. Call pages expose New call/History on mobile. Saved feedback becomes
+read-only with explicit Edit/Save/Cancel; failed requests preserve the draft and
+idempotency key. All new customer flows support DE/FR/IT/RM/EN/RU/UK.
 
 ### Profile defaults and controlled call completion
 
@@ -72,7 +101,7 @@ The pnpm/Turbo monorepo has three packages:
 | Package | Responsibility | Main sources |
 | --- | --- | --- |
 | `@callassist/web` | Next.js 15 App Router, React 19, customer/admin UI, SSR session guards, SEO | [app](../apps/web/app), [components](../apps/web/components), [lib](../apps/web/lib) |
-| `@callassist/api` | Fastify 5, application services, Twilio ingress, Realtime bridge, SQL repositories, workers | [API entry](../apps/api/src/index.ts), [worker entry](../apps/api/src/worker.ts), [routes](../apps/api/src/app.ts) |
+| `@callassist/api` | Fastify 5, application services, Twilio ingress, Realtime/Live runtimes, SQL repositories, workers | [API entry](../apps/api/src/index.ts), [worker entry](../apps/api/src/worker.ts), [routes](../apps/api/src/app.ts) |
 | `@callassist/contracts` | Zod 4 schemas, public/domain DTOs and controlled vocabularies | [exports](../packages/contracts/src/index.ts) |
 
 ```text
@@ -89,7 +118,7 @@ Next.js SSR -- forwarded Cookie ----> private main-API origin
 
 Twilio PSTN <--> Media Stream <--> Twilio listener (127.0.0.1:4001)
                                       | same API process
-                                      +--> main OpenAI Realtime session
+                                      +--> Realtime or native Live/Responses conversation
                                       +--> isolated consent-recognition session
 
 Twilio consented WAV --> worker download --> channel utterances --> final ASR
@@ -113,7 +142,7 @@ mode. [Configuration and endpoints](runtime-reference.md) describe the actual in
 
 Customer/public routes live under `/de`, `/fr`, `/it`, `/rm`, `/en`, `/ru` and `/uk`: Landing, content slugs,
 register/verify/login/recover, onboarding, opt-out, redeem, `/app`, `/app/account`,
-`/app/history`, and `/app/calls/[id]`. Admin is English-only under `/admin`, with separate console
+`/app/history`, and `/app/calls/[id]`. Admin is primarily English under `/admin`, with separate console
 and preview route groups. Removed localized admin and old call routes have no
 compatibility redirects. See [admin architecture](admin-interface-architecture.md).
 
@@ -218,10 +247,23 @@ the old-address notice is best effort and only goes to a verified address. Compl
 of email/phone changes and password recovery sends security notices to verified
 addresses. Notification failure does not reverse a committed account change. There
 is no durable notification outbox, so a crash or final delivery failure can lose a notice.
-Initial email verification sets `email_verified_at`; HTTP call start requires this
-proof. Signup phone typos can be corrected using the registration password before
+Registration policy is revisioned in beta settings: `onboarding=full|registration`
+and `emailVerification=required|deferrable`, defaulting to full/required. Simplified
+registration requires a Terms/AUP/Privacy checkbox that starts unchecked and records
+accepted published revisions atomically with account admission. Stale documents roll back registration.
+After SMS, unverified users always see the email screen. Deferrable mode adds an
+explicit Later action before or after code sending. Deferral persists for the current
+address, clears on address change/verification and never sets `email_verified_at`.
+Required policy gates new call starts and is rechecked under the admission lock.
+Full mode still requires onboarding after email verification or allowed deferral.
+Migration 0082 stores deferral and Privacy revision evidence; 0083 stores retry provenance.
+Initial email verification sets `email_verified_at`. Signup phone typos can be corrected using the registration password before
 phone verification. The eventual OTP result is bound to the unchanged phone number.
-Account phones accept normalized international input; SMS delivery is limited to
+A shared `libphonenumber-js/max` parser accepts national input using an explicit
+country selector, or international `+`, `00` and bare country-code forms including
+the supported optional trunk-zero variants. It stores canonical E.164, rejects
+extensions/free-text extraction and never infers country from UI locale.
+The account selector follows `SMS_ALLOWED_COUNTRIES`; SMS delivery is limited to
 CH/UA by default, independently of Swiss-only call destinations. Replacement checks
 occupied numbers (including unverified registrations) before sending an OTP; a conflict
 after provider approval returns `PHONE_CHANGE_NOT_AVAILABLE`, not a wrong-code error.
@@ -650,7 +692,7 @@ role, expiry and privacy revision. Deletion/access changes globally revoke store
 archives; restored archives must be invalidated before reopening traffic. See
 [export data boundaries](admin-call-telemetry-export.md).
 
-UI/site/email use the seven-locale registry; the admin UI remains English. CMS
+UI/site/email use the seven-locale registry; the admin UI is primarily English; new registration-policy controls support all seven locales. CMS
 completion preserves existing authored translations and legal acceptance IDs.
 Analytics settings and privacy acknowledgement do not implicitly grant opt-in
 consent; current policy and its release review are documented in

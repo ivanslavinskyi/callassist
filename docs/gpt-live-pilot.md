@@ -67,8 +67,9 @@ subtotals are not added twice. These are list-price estimates, not invoices.
 ## Deployment and rollback
 
 1. Run the full repository test, lint, typecheck and build commands.
-2. Apply migration `0081_native_live_transcript_timing.sql` with the normal
-   `pnpm db:migrate` process before starting the new code. Its nullable JSON column
+2. Apply the complete current catalog through `0083_call_retry_sources.sql` with the normal
+   `pnpm db:migrate` process before starting the new code. Live migration
+   `0081_native_live_transcript_timing.sql` adds a nullable JSON column that
    preserves fragment timing across reloads. Old rows/writers remain compatible;
    no provider-ledger enum or destructive migration is required.
 3. Deploy with `VOICE_RUNTIME_DRIVER=realtime`. Existing defaults for recording,
@@ -80,7 +81,9 @@ subtotals are not added twice. These are list-price estimates, not invoices.
    Drain active calls before restarting the process.
 5. Require successful real-call evidence before changing a production driver.
    Roll back by draining calls, setting `VOICE_RUNTIME_DRIVER=realtime` and
-   restarting. Leave the additive column in place; no data rollback is needed.
+   restarting. Leave the additive column in place; switching the driver needs no
+   data rollback. For a code downgrade,
+   also follow the [registration-settings compatibility procedure](deployment-preflight.md).
 
 Allow outbound OpenAI WebSocket access and keep the existing signed Twilio
 webhooks/media-stream routing. No new public endpoint or client-side API key is
