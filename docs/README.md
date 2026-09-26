@@ -19,6 +19,10 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+[Unified Live runtime](live-unified-runtime.md) describes the 26 September follow-up:
+one voice session, language auditing, transcript scrolling and telemetry exports.
+Its rollout remains gated on local real-call acceptance.
+
 [AMD and voicemail beta](amd-voicemail-beta.md) documents the current implementation,
 callback safety, accounting, migration and new real-call acceptance profiles (26 September).
 

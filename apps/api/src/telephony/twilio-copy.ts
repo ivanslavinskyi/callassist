@@ -15,7 +15,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "fr-CH": {
     language: "fr-FR",
     introduction: (brief) =>
-      `Bonjour, je suis ${brief.voiceGender === "female" ? "une assistante IA" : "un assistant IA"} et j’appelle au nom de ${brief.representedPerson}. Puis-je enregistrer et transcrire automatiquement la conversation à des fins de documentation ?`,
+      `Bonjour, je suis ${brief.voiceGender === "female" ? "une assistante IA" : "un assistant IA"} et j’appelle au nom de ${brief.representedPerson}. Puis-je enregistrer et transcrire automatiquement la conversation ?`,
     clarification:
       "Pardon, puis-je enregistrer et transcrire automatiquement cette conversation ?",
     dtmfFallback:
@@ -28,7 +28,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "it-CH": {
     language: "it-IT",
     introduction: (brief) =>
-      `Buongiorno, sono ${brief.voiceGender === "female" ? "un’assistente IA" : "un assistente IA"} e chiamo per conto di ${brief.representedPerson}. Posso registrare e trascrivere automaticamente la conversazione a fini di documentazione?`,
+      `Buongiorno, sono ${brief.voiceGender === "female" ? "un’assistente IA" : "un assistente IA"} e chiamo per conto di ${brief.representedPerson}. Posso registrare e trascrivere automaticamente la conversazione?`,
     clarification:
       "Mi scusi, posso registrare e trascrivere automaticamente questa conversazione?",
     dtmfFallback:
@@ -43,7 +43,7 @@ const copy: Record<CallLocale, TwilioCopy> = {
   "ru-RU": {
     language: "ru-RU",
     introduction: (brief) =>
-      `Добрый день, я ${brief.voiceGender === "female" ? "ИИ-ассистентка" : "ИИ-ассистент"} и звоню от имени ${brief.representedPerson}. Разрешите записать и автоматически расшифровать этот разговор для документирования?`,
+      `Добрый день, я ${brief.voiceGender === "female" ? "ИИ-ассистентка" : "ИИ-ассистент"} и звоню от имени ${brief.representedPerson}. Разрешите записать и автоматически расшифровать этот разговор?`,
     clarification:
       "Извините, разрешите записать и автоматически расшифровать этот разговор?",
     dtmfFallback: "Если вы согласны, можете также нажать 1.",
@@ -62,7 +62,7 @@ function germanCopy(): TwilioCopy {
   return {
     language: "de-DE",
     introduction: (brief) =>
-      `Guten Tag, ich bin ${brief.voiceGender === "female" ? "eine KI-Assistentin" : "ein KI-Assistent"} und rufe im Auftrag von ${brief.representedPerson} an. Darf ich das Gespräch zur Dokumentation aufzeichnen und automatisch transkribieren?`,
+      `Guten Tag, ich bin ${brief.voiceGender === "female" ? "eine KI-Assistentin" : "ein KI-Assistent"} und rufe im Auftrag von ${brief.representedPerson} an. Darf ich das Gespräch aufnehmen und automatisch transkribieren?`,
     clarification:
       "Entschuldigung, darf ich das Gespräch aufzeichnen und automatisch transkribieren?",
     dtmfFallback:
@@ -78,7 +78,7 @@ function englishCopy(language: "en-GB" | "en-US"): TwilioCopy {
   return {
     language,
     introduction: (brief) =>
-      `Hello, I’m an AI assistant calling on behalf of ${brief.representedPerson}. May I record and automatically transcribe this conversation for documentation?`,
+      `Hello, I’m an AI assistant calling on behalf of ${brief.representedPerson}. May I record and automatically transcribe this conversation?`,
     clarification:
       "Sorry, may I record and automatically transcribe this conversation?",
     dtmfFallback: "If you consent, you can also press 1.",

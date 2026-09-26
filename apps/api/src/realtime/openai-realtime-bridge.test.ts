@@ -728,7 +728,7 @@ describe("OpenAIRealtimeBridge", () => {
     expect(openAISocket.sent[1]).toMatchObject({
       type: "response.create",
       response: {
-        instructions: expect.stringContaining("aufzeichnen und automatisch transkribieren")
+        instructions: expect.stringContaining("aufnehmen und automatisch transkribieren")
       }
     });
     expect(JSON.stringify(openAISocket.sent[1])).toContain(

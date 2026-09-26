@@ -21,7 +21,7 @@ export const exportSources: ExportSource[] = [
   source("call_compilation_review_policies", "compilation_id policy_version", "t.compilation_id IN (SELECT id FROM call_compilations WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))", "t.compilation_id"),
   source("call_plan_review_receipts", "id call_brief_id compilation_id revision snapshot_hash mode language selection_revision artifact_id artifact_hash payload_ciphertext created_at", calls),
   source("call_language_contexts", "call_brief_id context", calls, "t.call_brief_id"),
-  source("transcript_segments", "id call_brief_id role text locale final created_at", calls, "t.call_brief_id,t.created_at,t.id"),
+  source("transcript_segments", "id call_brief_id role text locale final native_timing created_at", calls, "t.call_brief_id,t.created_at,t.id"),
   source("call_recordings", "id call_brief_id call_attempt_id provider provider_call_id provider_recording_id status consent_granted_at started_at completed_at duration_seconds channels delete_after deleted_at failure_reason created_at updated_at", calls),
   source("final_transcripts", "id call_recording_id status model text_ciphertext segments_ciphertext failure_reason current_revision_id created_at updated_at completed_at", "t.call_recording_id IN (SELECT id FROM call_recordings WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))"),
   source("final_transcript_revisions", "id call_brief_id transcript_id call_attempt_id revision source_hash payload_ciphertext created_at", calls),

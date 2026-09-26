@@ -28,10 +28,10 @@ const dateTime = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle
 
 export function AdminTelemetryExports() {
   const user = useAdminSession();
-  return user.role === "superadmin" ? <ExportPanel /> : null;
+  return user.role === "superadmin" ? <ExportPanel /> : <p role="note">Telemetry exports are available to superadmins in Admin → Calls.</p>;
 }
 function ExportPanel() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [preset, setPreset] = useState<TelemetryExportInput["preset"]>("yesterday");
   const [items, setItems] = useState<TelemetryExportView[]>([]);
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -90,12 +90,12 @@ function ExportPanel() {
   }
   const rows = [...items, ...older.filter(row => !items.some(item => item.id === row.id))];
   const active = rows.some(row => row.status === "queued" || row.status === "running");
-  return <details className={styles.panel} onToggle={e => setOpen(e.currentTarget.open)}>
+  return <details id="telemetry-export" open={open} className={styles.panel} onToggle={e => setOpen(e.currentTarget.open)}>
     <summary className={styles.toggle}>Export telemetry <span>Transcripts, call history and diagnostics</span></summary>
     <div className={styles.content}>
       <p>Download all calls in a period as a ZIP with JSON Lines, a summary and a data guide. Includes original transcripts, approved plans, provider usage and processing history. Audio files are excluded.</p>
       <p className={styles.note}>Dates use Europe/Zurich. Includes calls started and preparation requests created in the period, including failed preparations. Associated history is included. Table filters do not restrict the export.</p>
-      {available === false ? <p role="status">{errors.EXPORT_UNAVAILABLE}</p> : <form onSubmit={create} className={styles.form}>
+      {available === false ? <div role="status"><p>Telemetry export is disabled on this server.</p><p>{errors.EXPORT_UNAVAILABLE} Contact the server administrator to enable exports for the API and worker.</p><button className="primary-button" disabled>Create export</button></div> : <form onSubmit={create} className={styles.form}>
         <label className="field"><span>Period</span><select value={preset} onChange={e => setPreset(e.target.value as TelemetryExportInput["preset"])}>{presets.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {preset === "custom" && <div className={styles.dates}>
           <label className="field"><span>From (inclusive)</span><input type="date" name="from" required /></label>

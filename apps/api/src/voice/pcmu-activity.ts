@@ -33,3 +33,13 @@ export function decodePcmu(payload: unknown): Buffer | null {
   const bytes = Buffer.from(payload, "base64");
   return bytes.length && bytes.toString("base64") === payload ? bytes : null;
 }
+
+export function pcmuHasSpeech(bytes: Buffer): boolean {
+  let energy = 0;
+  for (const byte of bytes) {
+    const value = (~byte) & 255;
+    const magnitude = (((value & 15) << 3) + 132) << ((value >> 4) & 7);
+    energy += (magnitude - 132) ** 2;
+  }
+  return bytes.length > 0 && Math.sqrt(energy / bytes.length) >= 600;
+}

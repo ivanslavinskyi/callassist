@@ -27,7 +27,7 @@ export function parseEndCallReason(argumentsJson: unknown): EndCallReason | null
   } catch { return null; }
 }
 
-const farewells: Record<CallLocale, string> = {
+export const farewells: Record<CallLocale, string> = {
   "de-CH": "Vielen Dank für Ihre Zeit. Auf Wiederhören.",
   "de-DE": "Vielen Dank für Ihre Zeit. Auf Wiederhören.",
   "fr-CH": "Merci pour votre temps. Au revoir.",

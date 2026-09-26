@@ -5,6 +5,8 @@ import {
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { describe, expect, it, vi } from "vitest";
+// Language/provider contracts have a dedicated suite; isolate existing compiler policy/request tests.
+vi.mock("./execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import {
   BriefCompilerError,
   DeterministicBriefCompiler,

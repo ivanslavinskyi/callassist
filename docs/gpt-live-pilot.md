@@ -1,5 +1,11 @@
 # GPT-Live pilot
 
+**26 September update:** with `VOICE_RUNTIME_LIVE_FALLBACK=false` (now the fallback
+default), the human conversation uses the [unified Live runtime](live-unified-runtime.md).
+The hybrid protocol description below applies only to explicit `fallback=true`.
+Production `915a8f6` predates the unified implementation; do not treat its acceptance
+as evidence for the new path.
+
 `VOICE_RUNTIME_DRIVER=realtime` remains the default. `live` selects native
 `gpt-live-1` with Responses delegation to `gpt-6-luna` and
 `parallel_tool_calls=false`. Invalid drivers fail startup.

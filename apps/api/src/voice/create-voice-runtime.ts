@@ -10,7 +10,7 @@ export function voiceRuntimeDriver(environment: NodeJS.ProcessEnv): "realtime" |
 
 export function createVoiceRuntime(options: OpenAILiveBridgeOptions, environment: NodeJS.ProcessEnv = process.env): VoiceRuntime {
   if (voiceRuntimeDriver(environment) === "realtime") return new OpenAIRealtimeBridge(options);
-  const fallback = environment.VOICE_RUNTIME_LIVE_FALLBACK?.trim() || "true";
+  const fallback = environment.VOICE_RUNTIME_LIVE_FALLBACK?.trim() || "false";
   if (!["true", "false"].includes(fallback)) throw new Error("VOICE_RUNTIME_LIVE_FALLBACK must be true or false");
   return new OpenAILiveBridge({ ...options,
     liveModel: environment.OPENAI_LIVE_MODEL?.trim() || "gpt-live-1",

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import { normalizeCreateCallBriefInput } from "@callassist/contracts";
 import { DeterministicBriefCompiler, OpenAIBriefCompiler, type BriefCompilerProviderRequestResult } from "./brief-compiler";
 import { createBriefCompilerFromEnv } from "./create-brief-compiler";

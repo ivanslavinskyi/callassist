@@ -50,12 +50,15 @@ export function assessVoiceSmoke(facts, driver, scenario = "human") {
   if (!facts.hangup) failures.push("application_hangup_missing");
   if (!facts.finalTranscript) failures.push("post_call_transcript_missing");
   if (!facts.retentionComplete) failures.push("recording_retention_pending");
-  if (!facts.realtimeUsage) failures.push("realtime_usage_missing");
   if (driver === "live") {
+    if (facts.realtimeSessions !== 0) failures.push("unexpected_realtime_session");
     if (!facts.liveFinalUsage) failures.push("live_final_usage_missing_or_fallback_used");
     if (!facts.backendUsage) failures.push("responses_usage_missing");
     if (!facts.nativeInput || !facts.nativeOutput) failures.push("native_transcripts_missing");
-  } else if (facts.liveSessions > 0) failures.push("unexpected_live_session");
+  } else {
+    if (!facts.realtimeUsage) failures.push("realtime_usage_missing");
+    if (facts.liveSessions > 0) failures.push("unexpected_live_session");
+  }
   if (facts.unfinishedOperations > 0) failures.push("provider_operations_unfinished");
   return failures;
 }
@@ -99,6 +102,8 @@ async function readFacts(databaseUrl, callId) {
         EXISTS(SELECT 1 FROM transcript_segments WHERE call_brief_id=${callId}::uuid AND role='recipient' AND native_timing IS NOT NULL) AS "nativeInput",
         EXISTS(SELECT 1 FROM transcript_segments WHERE call_brief_id=${callId}::uuid AND role='assistant' AND native_timing IS NOT NULL) AS "nativeOutput",
         (SELECT count(*)::integer FROM provider_operations WHERE call_brief_id=${callId}::uuid AND stage='live_conversation') AS "liveSessions",
+        (SELECT count(*)::integer FROM provider_operations WHERE call_brief_id=${callId}::uuid
+          AND operation_type='realtime_session' AND stage IN ('conversation','consent_transcription')) AS "realtimeSessions",
         (SELECT count(*)::integer FROM provider_operations o WHERE o.call_brief_id=${callId}::uuid
           AND NOT EXISTS(SELECT 1 FROM provider_operation_results r WHERE r.operation_id=o.id)) AS "unfinishedOperations"
     `;

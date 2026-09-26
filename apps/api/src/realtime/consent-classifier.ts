@@ -9,17 +9,17 @@ const phrases: Record<
   "de-CH": germanPhrases(),
   "de-DE": germanPhrases(),
   "fr-CH": {
-    affirmative: ["oui", "d accord", "bien sur", "vous pouvez"],
+    affirmative: ["oui", "d accord", "bien sur", "vous pouvez", "oui bien sur", "oui d accord", "oui vous pouvez"],
     negative: ["non", "je ne suis pas d accord", "n enregistrez pas"]
   },
   "it-CH": {
-    affirmative: ["si", "si certo", "va bene", "certo", "puo registrare"],
+    affirmative: ["si", "si certo", "va bene", "certo", "puo registrare", "si va bene", "si puo registrare"],
     negative: ["no", "non voglio", "non registrare"]
   },
   "en-GB": englishPhrases(),
   "en-US": englishPhrases(),
   "ru-RU": {
-    affirmative: ["да", "да конечно", "хорошо", "конечно", "можете", "согласен", "согласна"],
+    affirmative: ["да", "да конечно", "хорошо", "конечно", "можете", "согласен", "согласна", "да согласен", "да согласна", "да можете записывать"],
     negative: ["нет", "не записывайте", "не записывай", "я не согласен", "я не согласна"]
   }
 };
@@ -65,6 +65,16 @@ function germanPhrases() {
     affirmative: [
       "ja",
       "ja gerne",
+      "ja naturlich",
+      "ja das ist in ordnung",
+      "das ist in ordnung",
+      "einverstanden",
+      "ja einverstanden",
+      "ja sie durfen aufnehmen",
+      "sie durfen aufnehmen",
+      "ja sie konnen das gesprach aufzeichnen",
+      "ja konnen sie machen",
+      "ja durfen sie",
       "in ordnung",
       "okay",
       "naturlich",
@@ -77,7 +87,7 @@ function germanPhrases() {
 
 function englishPhrases() {
   return {
-    affirmative: ["yes", "yes that s fine", "sure", "okay", "that s fine", "you can"],
+    affirmative: ["yes", "yes that s fine", "sure", "okay", "that s fine", "you can", "yes of course", "yes please", "yes you can record", "i consent"],
     negative: ["no", "do not record", "don t record", "i do not consent"]
   } as const;
 }

@@ -1,5 +1,6 @@
 import { originalPlanReview } from "./test-helpers/original-plan-review";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("./brief-compiler/execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import { CallService } from "./call-service";
 import {
   BriefCompilerError,

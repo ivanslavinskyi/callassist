@@ -7,7 +7,7 @@ export interface VoiceRuntime {
   handleTwilioSocket(socket: WebSocket): void;
 }
 
-/** Entered only after consent, recording startup and the mandatory opening's mark. */
+/** Attempt-bound application controls; the runtime must gate model context and actions by call phase. */
 export interface VoiceConversationContext {
   brief: CallBrief;
   snapshot: ApprovedExecutionSnapshot;

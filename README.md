@@ -5,19 +5,21 @@ is a barrier. Users prepare a plan, review and approve it, follow a live transcr
 and receive a recording-based final transcript with optional translation and an
 evidence-linked summary.
 
-**Current branch, 2026-09-25:** `feat/gpt-live-pilot` includes the parallel
-GPT-Live runtime and registration/call-flow improvements. Source migrations run
-through **0083**. Local checks on implementation commit `457c9b2` passed:
-**1,591 tests / 191 files** (API 1,182; web 281; contracts 128), full lint,
-typecheck, production build and the seven-locale browser smoke.
+**Current work, 2026-09-26:** `codex/live-unified-runtime` replaces the hybrid Live
+voice path with one Live session for consent, opening, conversation and closing.
+It also adds execution-language auditing, clearer telemetry export access and
+document scrolling for completed provisional transcripts. The migration catalog
+remains **0084**. See [implementation and acceptance](docs/live-unified-runtime.md).
 
-Realtime remains the production default. Both Realtime and Live passed a short
+The owner reported production release `915a8f6` healthy with Live and fallback
+disabled on 26 September; it still uses the original hybrid speech path. This
+branch has not yet been deployed. Both Realtime and Live previously passed a short
 recipient-authorized Twilio smoke in an isolated local database; this is separate
 from broader conversational acceptance. Full onboarding and required email remain
 the default registration policy. A superadmin can enable registration-time legal
 agreement and optional email deferral independently in Admin > System.
 
-**Owner acceptance, merge and production deployment are pending.** Public-release
+**Acceptance and deployment of the unified voice path are pending.** Public-release
 operational and provider gates remain open in the [roadmap](docs/mvp-plan.md).
 See the [Live pilot](docs/gpt-live-pilot.md),
 [registration/call implementation and checks](docs/registration-and-call-improvements-2026-09-25.md),
@@ -27,7 +29,7 @@ Earlier audits remain dated evidence, not proof of the current deployment.
 The current branch also implements [AMD and voicemail beta](docs/amd-voicemail-beta.md):
 silent answer detection before consent, one approved neutral message after a beep,
 separate lifecycle results, repeat review and provider accounting. Its real-call
-acceptance is still required before production rollout.
+acceptance must be repeated when changing the answering policy.
 
 ## Implemented product
 
@@ -117,8 +119,10 @@ Twilio-only ingress (same process) |       durable work + invalidation
 ```
 
 The voice factory selects `OpenAIRealtimeBridge` (default) or `OpenAILiveBridge`.
-Live keeps bounded Realtime consent/opening/farewell speech and delegates its main
-conversation to native Live/Responses; both providers appear in the cost ledger.
+With fallback disabled, Live uses one native voice session for the human call,
+including consent and closing, with GPT-6 Luna Responses delegation. Application
+state, recording permission, tool authorization and Twilio playback remain outside
+the model. Explicit fallback opt-in retains the old hybrid pilot for rollback testing.
 
 The Twilio listener is isolated from application routes but shares the API process.
 The worker is a separate entry point; development can run it embedded. PostgreSQL

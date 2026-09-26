@@ -1136,6 +1136,7 @@ button:disabled { cursor: wait; opacity: .55; }
 @keyframes sound { 50% { transform: scaleY(.45); } }
 
 .transcript-list { max-height: clamp(420px, calc(100dvh - 260px), 720px); overflow-y: auto; overflow-anchor: none; scroll-behavior: auto; padding: 12px 30px 30px; }
+.transcript-list-completed { max-height: none; overflow: visible; overflow-anchor: auto; }
 .jump-to-latest {
   background: var(--ink);
   border: 0;

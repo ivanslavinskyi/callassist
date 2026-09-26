@@ -20,6 +20,15 @@ describe("classifyConsent", () => {
   });
   it.each([
     ["Ja, gerne.", "de-CH"],
+    ["Ja, natürlich.", "de-CH"],
+    ["Ja, das ist in Ordnung.", "de-DE"],
+    ["Einverstanden.", "de-DE"],
+    ["Ja, Sie dürfen aufnehmen.", "de-CH"],
+    ["Oui, bien sûr.", "fr-CH"],
+    ["Sì, va bene.", "it-CH"],
+    ["Yes, of course.", "en-GB"],
+    ["Yes, you can record.", "en-US"],
+    ["Да, согласна.", "ru-RU"],
     ["Oui.", "fr-CH"],
     ["Sì, certo.", "it-CH"],
     ["Yes, that's fine.", "en-GB"],

@@ -149,12 +149,12 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | `TEXT_ARTIFACT_DIRECTIONS` | Comma-separated `kind:source:target`, e.g. `plan_review:de:ru,transcript_translation:*:ru,call_summary:*:ru`. Real provider has no enabled directions when empty. Final transcripts can contain mixed/unknown languages, so transcript translation and summary use source `*`; do not infer it from the call locale |
 | `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
 | `VOICE_RUNTIME_DRIVER` | `realtime`; accepts `realtime` or `live`, invalid values fail startup; API restart required |
-| `VOICE_RUNTIME_LIVE_FALLBACK` | `true`; startup-only fallback to the prepared Realtime session; set `false` for Live acceptance |
-| `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live conversation, with bounded Realtime consent/opening/farewell retained |
+| `VOICE_RUNTIME_LIVE_FALLBACK` | `false`; one Live voice session with no Realtime sockets. Explicit `true` retains the legacy hybrid pilot and startup fallback |
+| `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live consent, opening, conversation and closing when fallback is disabled |
 | `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; Responses delegation with `parallel_tool_calls=false` |
 | `OPENAI_LIVE_MALE_VOICE`, `OPENAI_LIVE_FEMALE_VOICE` | `cedar`, `marin` |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-2.1` |
-| `OPENAI_TRANSCRIPTION_MODEL` | `gpt-realtime-whisper` for live/consent recognition |
+| `OPENAI_TRANSCRIPTION_MODEL` | `gpt-realtime-whisper` for the Realtime driver/legacy hybrid only; unified Live uses native transcripts |
 | `OPENAI_TRANSCRIPTION_DELAY` | `high`; accepts minimal/low/medium/high/xhigh |
 | `OPENAI_POST_CALL_TRANSCRIPTION_MODEL` | `gpt-transcribe`, full-file fallback |
 | `OPENAI_POST_CALL_UTTERANCE_TRANSCRIPTION_MODEL` | Runtime default `gpt-4o-transcribe`, normal stereo path |

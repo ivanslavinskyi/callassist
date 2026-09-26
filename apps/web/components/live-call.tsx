@@ -138,7 +138,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const [connectionStatus, setConnectionStatus] = useState<
     "connecting" | "connected" | "reconnecting"
   >("connecting");
-  const { following: followLiveTranscript, listRef: transcriptListRef, follow: followTranscript } = useTranscriptFollowing();
+  const { following: followLiveTranscript, listRef: transcriptListRef, follow: followTranscript } = useTranscriptFollowing(Boolean(snapshot && activeStatuses.has(snapshot.brief.status)));
   const [showFullObjective, setShowFullObjective] = useState(false);
   const [transcriptView, setTranscriptView] = useState<"final" | "provisional">("final");
   const transcriptCardRef = useRef<HTMLElement>(null);
@@ -722,9 +722,9 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
 
             {activityPhase ? <CallActivityStatus phase={activityPhase} recipientName={brief.recipientName} compact={hasTranscript} /> : null}
             <div
-              className="transcript-list"
-              aria-live="polite"
-              tabIndex={0}
+              className={`transcript-list${isTerminal ? " transcript-list-completed" : ""}`}
+              aria-live={isActive ? "polite" : "off"}
+              tabIndex={isActive ? 0 : undefined}
               ref={transcriptListRef}
             >
               {!hasTranscript ? activityPhase ? null : (
@@ -785,7 +785,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                 </>
               )}
             </div>
-            {!followLiveTranscript &&
+            {isActive && !followLiveTranscript &&
             (transcript.length > 0 || Object.keys(partialTranscript).length > 0) ? (
               <button
                 className="jump-to-latest"

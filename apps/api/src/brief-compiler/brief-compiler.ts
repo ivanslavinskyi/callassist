@@ -18,6 +18,7 @@ import { deterministicMockAppointmentIntent, appointmentClarification, canonical
   isAuthorizedAppointmentDateIdentifier, modelAppointmentAuthorizationJsonSchema, modelSchedulingInterpretationJsonSchema,
   prepareAppointmentModelOutput, type AppointmentCompilationContext } from "./appointment-compilation";
 import { createCompilationSnapshotHash } from "./compilation-integrity";
+import { verifyExecutionLanguage } from "./execution-language";
 
 const defaultCompilerModel = "gpt-5.6";
 const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
@@ -220,6 +221,23 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             question: appointmentClarification(rawBrief, compiledBrief.sourceLanguage) }] };
         }
         localPolicy = evaluateCompiledBrief(rawBrief, compiledBrief, parsed.context);
+        if (localPolicy.status === "ready_for_review") {
+          let languageIssues: string[];
+          try {
+            languageIssues = await verifyExecutionLanguage(compiledBrief, rawBrief, body => this.#request(
+              this.#responsesEndpoint, body, compilationDeadline, "compilation", this.model, requestBudget), this.model);
+          } catch (cause) {
+            if (cause instanceof BriefCompilerError) throw cause;
+            throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "compilation", validationPaths: ["execution_language_audit"] });
+          }
+          if (languageIssues.length) {
+            if (attempt === 0) {
+              validationFeedback = languageIssues.map(path => `Language mismatch at ${path}: regenerate all runtime text in ${rawBrief.locale}, including dates, conditions and approved facts. Preserve identity names, addresses and reference IDs. Do not copy source-language prose into runtime fields.`);
+              continue;
+            }
+            localPolicy = blockedDecision("plan_constraint_failure");
+          }
+        }
         const recoverable = compiledBrief.taskType !== "unsupported" && compiledBrief.riskCategories.length === 0 &&
           !parsed.context.missingSchedulingConstraints && compiledBrief.blockingIssues.length === 0 &&
           localPolicy.status === "blocked" && localPolicy.reasonCodes.some((reason) =>

@@ -120,7 +120,7 @@ describe("voice runtime selection and consent gate integration", () => {
     expect(h.realtime.sent.filter(e => e.type === "response.create").at(-1).response.instructions).toContain("mandatory opening already played");
   });
   it("can disable startup fallback; never silently restarts a running Live conversation", async () => {
-    const startup = await harness("live", false, "valid", "false"); await startup.accept(); startup.live.receive({ type: "error" }); await flush();
+    const startup = await harness("live", false, "valid", "false"); startup.live.emit("open"); startup.live.receive({ type: "error" }); await flush();
     expect(startup.twilio.readyState).toBe(3);
     const active = await harness(); await active.ready(); active.live.close(); await flush();
     expect(active.twilio.readyState).toBe(3);

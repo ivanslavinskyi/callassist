@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+vi.mock("./execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import { readFileSync } from "node:fs";
 import { appointmentAuthorizationSchema, createApprovedExecutionPlan, getAppointmentAuthorization, normalizeCreateCallBriefInput,
   type AppointmentAuthorization, type CurrentCompiledCallBrief } from "@callassist/contracts";

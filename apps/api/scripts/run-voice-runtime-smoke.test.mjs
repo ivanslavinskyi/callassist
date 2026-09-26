@@ -2,11 +2,13 @@ import { it as test } from "vitest";
 import assert from "node:assert/strict";
 import { assessVoiceSmoke, runVoiceRuntimeSmoke } from "./run-voice-runtime-smoke.mjs";
 const facts = { answering: { answeredBy: "human", streamAdmitted: true }, completed:true,consent:true,hangup:true,finalTranscript:true,retentionComplete:true,realtimeUsage:true,
-  liveFinalUsage:true,backendUsage:true,nativeInput:true,nativeOutput:true,liveSessions:1,unfinishedOperations:0 };
+  liveFinalUsage:true,backendUsage:true,nativeInput:true,nativeOutput:true,liveSessions:1,realtimeSessions:0,unfinishedOperations:0 };
 test("live smoke requires native evidence and never passes on fallback",()=>{
   assert.deepEqual(assessVoiceSmoke(facts,"live"),[]);
   assert.ok(assessVoiceSmoke({...facts,liveFinalUsage:false},"live").includes("live_final_usage_missing_or_fallback_used"));
   assert.ok(assessVoiceSmoke({...facts,backendUsage:false},"live").includes("responses_usage_missing"));
+  assert.deepEqual(assessVoiceSmoke({...facts,realtimeUsage:false},"live"),[]);
+  assert.ok(assessVoiceSmoke({...facts,realtimeSessions:1},"live").includes("unexpected_realtime_session"));
 });
 test("realtime smoke must contain no Live session and both require the retained post-call pipeline",()=>{
   assert.deepEqual(assessVoiceSmoke({...facts,liveSessions:0},"realtime"),[]);
