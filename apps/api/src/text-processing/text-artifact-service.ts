@@ -1,6 +1,6 @@
 import { uncertainAssessment } from "../credits/final-assessment";
 import {
-  TEXT_LANGUAGES, callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema,
+  TEXT_LANGUAGES, callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema, isPlanPreparationFailure,
   type CallCompilation, type CallTextArtifact, type TextArtifactKind, type TextLanguage,
   type PlanReviewPayload, type CallSummaryPayload
 } from "@callassist/contracts";
@@ -51,6 +51,9 @@ export class TextArtifactService {
   async ensureAutomaticPlan(callId: string) {
     const snapshot = await this.repository.get(callId);
     if (!snapshot?.compilation || !snapshot.languageContext || snapshot.compilation.approvedAt) return;
+    // A failed preparation has no reviewable plan. Do not bill a translation or
+    // make its availability a prerequisite for displaying the preparation retry.
+    if (isPlanPreparationFailure(snapshot.compilation.policyDecision)) return;
     const targetLanguage = snapshot.languageContext.taskContentLanguage;
     const sourceLanguage = reviewSourceLanguage(snapshot.compilation, snapshot.languageContext.detectedInputLanguage);
     const kind = reviewKind(snapshot.compilation);

@@ -1,13 +1,15 @@
 import type { AppointmentAuthorization, CompiledCallBrief } from "@callassist/contracts";
 import { messages, type UiLocale } from "@/lib/i18n/messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
+import { planReviewMessages } from "@/lib/i18n/plan-review-messages";
 
 /** Display-only projection: deliberately has no IDs, approval state or actions. */
 export type CallPlanPresentationData = Pick<CompiledCallBrief,
   "localizedObjective" | "successCriteria" | "tone" | "addressingStyle" |
   "resultHandling" | "opening" | "orderedQuestions" | "approvedFacts" |
   "prohibitedActions"
-> & { appointmentAuthorization?: AppointmentAuthorization | null };
+> & Partial<Pick<CompiledCallBrief, "backgroundSummary" | "conditionalFollowUps" | "unresolvedCriteria" | "stopConditions">>
+  & { appointmentAuthorization?: AppointmentAuthorization | null };
 
 export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
   plan: CallPlanPresentationData;
@@ -16,10 +18,14 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
 }) {
   const copy = messages[uiLocale].review;
   const appointmentCopy = appointmentMessages[uiLocale];
+  const details = planReviewMessages[uiLocale];
   const authorization = plan.appointmentAuthorization;
   const Heading = headingLevel === 4 ? "h4" : "h2";
   return <>
     <p className="call-plan-lead">{plan.localizedObjective}</p>
+    {plan.backgroundSummary ? <section className="review-questions">
+      <Heading>{details.context}</Heading><p>{plan.backgroundSummary}</p>
+    </section> : null}
     <div className="review-questions review-success-criteria">
       <Heading>{copy.successMeans}</Heading>
       <ul>{plan.successCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
@@ -49,8 +55,26 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
     </div>
     <div className="review-questions">
       <Heading>{copy.questions}</Heading>
-      <ol>{plan.orderedQuestions.map((question, index) => <li key={index}>{question.text}</li>)}</ol>
+      <ol>{plan.orderedQuestions.map((question, index) => <li key={index}>
+        <p>{question.text}</p>
+        <p className="muted-text">{question.required ? details.required : details.optional}
+          {question.purpose ? <> · {details.purpose}: {question.purpose}</> : null}</p>
+      </li>)}</ol>
     </div>
+    {plan.conditionalFollowUps?.length ? <section className="review-questions">
+      <Heading>{details.followUps}</Heading>
+      <ul>{plan.conditionalFollowUps.map((followUp, index) => <li key={index}>
+        <p>{details.condition}: {followUp.condition}</p><p>{followUp.question}</p>
+      </li>)}</ul>
+    </section> : null}
+    {plan.unresolvedCriteria?.length ? <section className="review-questions">
+      <Heading>{details.unresolved}</Heading>
+      <ul>{plan.unresolvedCriteria.map((criterion, index) => <li key={index}>{criterion}</li>)}</ul>
+    </section> : null}
+    {plan.stopConditions?.length ? <section className="review-questions">
+      <Heading>{details.stop}</Heading>
+      <ul>{plan.stopConditions.map((condition, index) => <li key={index}>{condition}</li>)}</ul>
+    </section> : null}
     <div className="compiled-plan-grid">
       <div>
         <Heading>{copy.approvedInformation}</Heading>

@@ -15,6 +15,7 @@ export function currentPlanReviewArtifact(items: CallTextArtifact[], compilation
 
 /** Only text leaves can change. IDs, codes, policy, scope and source facts remain authoritative. */
 export function projectPlanReview(compilation: CallCompilation, source: PlanSource, artifact: CallTextArtifact): CallCompilation | null {
+  if (compilation.snapshotHash !== source.snapshotHash || compilation.revision !== source.revision) return null;
   if (isMockPlanReview(artifact)) return null;
   if (artifact.status !== "ready" || !artifact.payloadHash || artifact.compilationId !== source.compilationId || artifact.sourceHash !== source.snapshotHash ||
     !["plan_review", "clarification_review"].includes(artifact.kind)) return null;

@@ -119,5 +119,7 @@ describe("translated plan projection", () => {
       { ...ready, payload: { fields: [...fields, { id: "policyDecision.status", text: "ready_for_review" }] } },
       { ...ready, payload: { fields: [...fields, { id: "__proto__.polluted", text: "yes" }] } }
     ]) expect(projectPlanReview(compilation, source, candidate)).toBeNull();
+    expect(projectPlanReview({ ...compilation, revision: 2 }, source, ready)).toBeNull();
+    expect(projectPlanReview({ ...compilation, snapshotHash: "d".repeat(64) }, source, ready)).toBeNull();
   });
 });

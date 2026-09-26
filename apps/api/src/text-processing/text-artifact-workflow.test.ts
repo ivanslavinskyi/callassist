@@ -35,6 +35,16 @@ async function fixture(textArtifactLimit?: number) {
 }
 
 describe("plan translation and review API workflow", () => {
+  it("does not translate a failed compiler plan or hide its preparation recovery behind translation", async () => {
+    const { service, repository, call } = await fixture();
+    const current = (await repository.get(call.id))!;
+    vi.spyOn(repository, "get").mockResolvedValue({ ...current, compilation: { ...current.compilation!,
+      policyDecision: { ...current.compilation!.policyDecision, status: "blocked", reasonCodes: ["plan_constraint_failure"] }
+    } });
+    const enqueue = vi.spyOn(repository, "enqueueTextArtifact");
+    await service.preparePlanReview(call.id);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
   it("shares the generation budget with automatic translation on language changes", async () => {
     const { repository, app, call, source } = await fixture(1);
     const before = await repository.getLanguageContext(call.id);

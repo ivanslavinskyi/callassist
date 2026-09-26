@@ -75,6 +75,30 @@ Additional generations/audits incur usage only when needed.
 Previously approved immutable plans are not silently rewritten: recreate/review any
 known mixed-language historical plan before repeating it.
 
+The review uses the existing automatic text-artifact workflow: detect the objective's
+language (any recognized text language, not just UI presets), compile and audit the
+execution plan in the selected call language, then translate that exact plan for review.
+Mixed input context is interpreted during compilation; it is never copied into the
+voice runtime. Existing explicit text-language choices remain respected.
+The reader now includes background/constraints, question purposes and priority,
+conditional follow-ups, unresolved criteria and stop conditions alongside the objective,
+opening, approved facts, prohibited actions and appointment permissions. All seven UI
+locales have labels; the plan's translated text can use other languages.
+Original and translated views remain available. Approval binds the compilation hash,
+translation payload hash and language-selection revision. Translation changes only text
+for display; execution always uses the immutable call-language snapshot. An incomplete,
+foreign or stale translation cannot be shown as the current translated plan. Compiler
+integrity failures bypass translation and display the localized preparation retry;
+the user is never asked to repair a language mismatch. No database migration is needed.
+
+For automatic reviews, configure API and worker with `TEXT_PROCESSOR_DRIVER=openai`,
+`TEXT_ARTIFACT_GENERATION_ENABLED=true` and include `plan_review:*:*,clarification_review:*:*`
+in `TEXT_ARTIFACT_DIRECTIONS`, preserving any existing transcript/summary directions.
+Translation requests use the existing `text_translation` provider ledger and admin costs.
+The current production environment must be checked during deployment; this branch does
+not change it remotely. A real synthetic RU/PL → German → RU/PL probe checks detection,
+all translated fields, conditions and unchanged execution without making a phone call.
+
 Admin → Calls now opens the telemetry export panel by default and explains disabled
 server configuration or missing superadmin permissions. Enable
 `ADMIN_TELEMETRY_EXPORT_ENABLED=true` in both API and worker environments; PostgreSQL
@@ -96,8 +120,9 @@ check its native timing, operation stages and recorded costs.
 A real synthetic OpenAI probe on 26 September established the session and streamed
 the first voiced disclosure audio in about 4.1 seconds from connection initiation; full native
 text matched and the completion gate passed. This excludes Twilio/AMD delay and does
-not replace recipient acceptance. Automated checks passed: **1,686 tests in 197 files**
-(API 1,259, web 291, contracts 136), full lint, typecheck and production build. The
+not replace recipient acceptance. After the review-language follow-up, automated checks
+passed: **1,707 tests in 200 files** (API 1,272, web 299, contracts 136), full lint,
+typecheck and production build. The
 real-provider probe also accepted the Responses update and spoke a second controlled
 utterance in the same session. A synthetic Russian task compiled to German and passed
 the language audit (3,737 generation tokens and 580 audit tokens in that sample).
@@ -108,7 +133,7 @@ Rollback can restore the prior release/environment or explicitly select realtime
 never replay a running conversation across providers.
 
 Self-review covered signed/attempt-bound stream admission, canonical caller identity,
-pre-consent transcript retention, unsupported/duplicate/stale tools, paraphrased recap and whole-turn evidence
+pre-consent transcript retention, unsupported/duplicate/stale tools, paraphrased recap and whole-turn
 evidence (including negation), interrupted marks, bounded playback/recording startup,
 provider finalization and compiler request accounting. A focused 101-test runtime /
 consent / smoke regression and API typecheck/build passed after final review adjustments.

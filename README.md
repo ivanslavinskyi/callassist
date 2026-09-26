@@ -101,9 +101,16 @@ the interface locale.
 New tasks use the detected input language for plan/result text, with a compact
 correction before approval. The account preference is a fallback. Results use that
 saved task language; transcript translation is on demand, with original/translation
-views. The UI has no separate result-language menus. Text languages are currently
-`en`, `de`, `fr`, `it`, `ru`, `uk`; UI dictionaries are DE/FR/IT/RM/EN/RU/UK. Enabling another UI
-dictionary does not change call contracts or enable a text-provider direction.
+views. The UI has no separate result-language menus. Text processing accepts recognized
+language tags, including languages outside the quick presets `en`, `de`, `fr`, `it`, `ru`, `uk`;
+UI dictionaries are DE/FR/IT/RM/EN/RU/UK. The original task can contain mixed-language
+context. Compilation produces the execution plan in the selected call language and
+automatically translates that plan back for review, including conditions, constraints
+and follow-up questions. Approval binds both versions; the display translation never
+enters the voice runtime or changes its call language or permissions.
+Enable `plan_review:*:*,clarification_review:*:*` in `TEXT_ARTIFACT_DIRECTIONS` on API and
+worker for automatic reviews in the input language. Preserve existing summary/transcript
+directions. Enabling another UI dictionary alone does not enable a provider direction.
 
 ## Architecture
 

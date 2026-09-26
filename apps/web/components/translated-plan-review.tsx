@@ -13,8 +13,19 @@ import { useUiLocale } from "./ui-locale-provider";
 import { useCallTextArtifacts } from "./use-call-text-artifacts";
 import { useCallDraftStore } from "./call-draft-provider";
 import { canGenerateText, useTextCapabilities } from "./use-text-capabilities";
+import { isPlanPreparationFailure } from "@/lib/plan-preparation-failure";
+import { planReviewMessages } from "@/lib/i18n/plan-review-messages";
 
-export function TranslatedPlanReview({ callId, userId, compilation, source, languageContext, initialArtifacts, reuseExistingOnly = false, ...reviewProps }: {
+export function TranslatedPlanReview(props: Parameters<typeof PlanReviewReader>[0]) {
+  // Technical preparation failure is already localized by CompilationReview.
+  // It must not disappear behind a translation spinner or ask users to fix language.
+  if (isPlanPreparationFailure(props.compilation.policyDecision)) return <CompilationReview {...props}
+    onApproveAndCall={() => props.onApproveAndCall({ mode: "original", language: props.compilation.rawBrief.locale,
+      selectionRevision: props.languageContext.selectionRevision })} />;
+  return <PlanReviewReader {...props} />;
+}
+
+function PlanReviewReader({ callId, userId, compilation, source, languageContext, initialArtifacts, reuseExistingOnly = false, ...reviewProps }: {
   callId: string; userId: string; compilation: CallCompilation; source: PlanSource;
   languageContext: CallLanguageContext; initialArtifacts?: CallTextArtifact[]; reuseExistingOnly?: boolean;
   busy: boolean; recipientName: string; showActions?: boolean; callDetails?: Array<{ label: string; value: string }>;
@@ -73,6 +84,9 @@ export function TranslatedPlanReview({ callId, userId, compilation, source, lang
       {needsTranslation ? <button type="button" aria-pressed={view === "translated"} onClick={() => select("translated")}>{getTextLanguageLabel(languageContext.taskContentLanguage, locale)}</button> : null}
       <button type="button" aria-pressed={view === "original"} onClick={() => select("original")}>{copy.originalPlan} — {getCallLanguageLabel(callLocale, locale)}</button>
     </div>
+    {view === "translated" && ready ? <p className="muted-text">
+      {planReviewMessages[locale].translated} {getCallLanguageLabel(callLocale, locale)}.
+    </p> : null}
     {!ready ? <div className="final-transcript-state" role={error || artifact?.status === "failed" ? "alert" : "status"}>
       <p>{error ?? (artifact?.status === "stale" ? copy.stale : artifact?.status === "ready" ? copy.failed
         : availabilityStatus === "loading" && !artifact ? copy.checkingAvailability
