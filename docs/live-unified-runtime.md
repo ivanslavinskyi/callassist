@@ -39,10 +39,15 @@ Neither a Responses completion nor an append acknowledgment finishes voice outpu
 There is no claimed provider guarantee of exact spoken wording; real-call acceptance
 must test pronunciation, interruption, latency and transcription fidelity.
 
-Successful closing requires informative whole recipient turns, quoted verbatim from
-the current session. The application reads them back as what the person said,
-leaves 1.5 seconds for corrections, then reads the farewell. Excerpts cannot prove
-external action completion. Existing appointment authorization and subsequent
+Successful closing uses a natural paraphrase of the outcome and essential agreed
+details: one or two short sentences, bounded to 400 characters. The existing Responses
+backend supplies the recap and separate whole recipient turns as supporting evidence;
+only the recap is spoken. The application verifies evidence provenance, not semantic
+equivalence. Instructions require preserving uncertainty, negations, conditions and
+the latest corrections. Short answers may be interpreted in their conversation context;
+the recipient need not repeat information just to produce a quotable sentence.
+The application leaves 1.5 seconds for corrections, then reads the farewell.
+Neither the recap nor its evidence proves external action completion. Existing appointment authorization and subsequent
 confirmation fences still apply. Recipient stop requests skip the recap. New speech
 cancels closing and its pending marks; a fresh interrupted-closing decision is needed.
 Tools, provider disconnects and timers cannot silently restart the call in another model.
@@ -97,7 +102,7 @@ Rollback can restore the prior release/environment or explicitly select realtime
 never replay a running conversation across providers.
 
 Self-review covered signed/attempt-bound stream admission, canonical caller identity,
-pre-consent transcript retention, unsupported/duplicate/stale tools, whole-turn recap
+pre-consent transcript retention, unsupported/duplicate/stale tools, paraphrased recap and whole-turn evidence
 evidence (including negation), interrupted marks, bounded playback/recording startup,
 provider finalization and compiler request accounting. A focused 101-test runtime /
 consent / smoke regression and API typecheck/build passed after final review adjustments.

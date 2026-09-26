@@ -145,21 +145,23 @@ describe("one Live session, application-owned lifecycle", () => {
     const h = await harness("human", false, true); await h.accept();
     expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["You are booked for tomorrow."] })).toMatchObject({ ok: false });
     h.transcript("input", "Your appointment is confirmed for tomorrow.");
-    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["Your appointment is confirmed for tomorrow."] }, "tool-2"))
+    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["The appointment is tomorrow."], evidence: ["Your appointment is confirmed for tomorrow."] }, "tool-2"))
       .toMatchObject({ ok: false, reason: "appointment_confirmation_required" });
     expect(h.hangup).not.toHaveBeenCalled();
   });
-  it("cannot remove a negation by selecting a substring of recipient evidence", async () => {
+  it("rejects a substring that removes a negation from the cited evidence", async () => {
     const h = await harness(); await h.accept();
     h.transcript("input", "It is not true that your appointment is confirmed for tomorrow.");
-    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["your appointment is confirmed for tomorrow."] }))
+    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["The appointment is tomorrow."], evidence: ["your appointment is confirmed for tomorrow."] }))
       .toMatchObject({ ok: false, reason: "recipient_evidence_required" });
   });
   it.each([false, true])("reads the recap before farewell; an interruption cancels every pending mark (interrupt=%s)", async interrupted => {
     const h = await harness(); await h.accept();
     h.transcript("input", "We received your application yesterday.");
-    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["We received your application yesterday."] })).toMatchObject({ ok: true });
+    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["The application arrived yesterday."], evidence: ["We received your application yesterday."] })).toMatchObject({ ok: true });
     expect(h.requestedSpeech()).toContain("I have noted");
+    expect(h.requestedSpeech()).toContain("The application arrived yesterday.");
+    expect(h.requestedSpeech()).not.toContain("We received your application yesterday.");
     const mark = await h.play(!interrupted);
     if (interrupted) {
       h.twilio.receive({ event: "media", media: { payload: speech } });
@@ -172,6 +174,33 @@ describe("one Live session, application-owned lifecycle", () => {
       expect(h.hangup).not.toHaveBeenCalled();
       await h.play(); expect(h.hangup).toHaveBeenCalledOnce();
     }
+  });
+  it("accepts a short contextual answer as evidence without demanding a repeated statement", async () => {
+    const h = await harness(); await h.accept();
+    h.transcript("output", "Did the application arrive yesterday?");
+    h.transcript("input", "Yes.");
+    expect(await h.tool("end_call", { reason: "objective_resolved", recap: ["The application arrived yesterday."], evidence: ["Yes."] })).toMatchObject({ ok: true });
+    expect(h.requestedSpeech()).toContain("The application arrived yesterday.");
+  });
+  it.each([
+    { recap: [], evidence: ["We received it yesterday."], reason: "informative_recipient_recap_required" },
+    { recap: ["It arrived yesterday."], evidence: [], reason: "recipient_evidence_required" },
+    { recap: ["a".repeat(201), "b".repeat(200)], evidence: ["We received it yesterday."], reason: "recap_too_long" },
+    { recap: ["One.", "Two.", "Three."], evidence: ["We received it yesterday."], reason: "invalid_closing_request" }
+  ])("rejects incomplete or excessive closing payloads: $reason", async ({ recap, evidence, reason }) => {
+    const h = await harness(); await h.accept(); h.transcript("input", "We received it yesterday.");
+    expect(await h.tool("end_call", { reason: "objective_resolved", recap, evidence })).toMatchObject({ ok: false, reason });
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("instructs the backend to preserve corrections and uncertainty in a concise paraphrase", async () => {
+    const h = await harness(); await h.accept();
+    const backend = h.live.sent.find(e => e.type === "session.update").session.delegation.responses;
+    const closing = backend.tools.find((tool: { name: string }) => tool.name === "end_call");
+    expect(closing.description).toContain("one or two short sentences");
+    expect(closing.description).toContain("Preserve negations, conditions and uncertainty");
+    expect(closing.description).toContain("latest corrected details");
+    expect(closing.description).toContain("Do not turn a proposal, caller authorization or pending action into a completed agreement");
+    expect(closing.parameters.required).toContain("evidence");
   });
   it("closes on disconnect instead of opening a second runtime", async () => {
     const h = await harness(); await h.accept(); h.live.close(); await flush();
