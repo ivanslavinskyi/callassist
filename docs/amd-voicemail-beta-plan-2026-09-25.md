@@ -1,6 +1,6 @@
 # AMD, voicemail и GPT-Live: план реализации для беты
 
-Статус: согласованный объём беты, реализация ещё не начата. Ветка: `feat/gpt-live-pilot`.
+Статус: реализовано на ветке `feat/gpt-live-pilot`, 26 сентября 2026; автоматические проверки и локальная приёмка описаны в [implementation record](amd-voicemail-beta.md). Реальные звонки с AMD ещё требуют ручной приёмки.
 Проверенная исходная ревизия: `2d7ae0d`. Дата: 25 сентября 2026.
 Merge и production deploy — после локальных проверок и утверждения владельцем.
 
@@ -158,10 +158,14 @@ SSE reconnect обозначает состояние обновлений, а �
 - При изменении задачи применяется существующая компиляция; смену только voicemail policy
   реализовать детерминированно с новой проверкой/approval, не запускать LLM ради фиксированного текста.
 
-Убрать имя заказчика из начального consent announcement; разрешённое представление перенести
-в mandatory opening после согласия. Проверить, что оно не теряется и не дублируется.
-Нейтральная первая реплика снижает последствия false-human; абсолютной защиты от записи
-на чужой стороне она не даёт. Существующий consent classifier не считать проверкой личности.
+Уточнение владельца от 26 сентября: сохранить утверждённое имя заказчика в начальном consent
+announcement, чтобы получатель сразу понимал, от чьего имени звонит ИИ-ассистент. Этот запрос
+запускается только после допуска AMD. Не добавлять в него цель звонка или другие детали плана.
+Не переносить представление в mandatory opening и не добавлять там повторное представление
+заказчика. Проверить сохранение имени в consent во всех поддерживаемых языках звонка.
+Нейтральный voicemail-шаблон остаётся без имени заказчика. При ошибке AMD false-human начальный
+consent с именем всё же может попасть на автоответчик; это ограничение определения, а не обещание
+полной защиты от записи на принимающей стороне. Consent classifier не считать проверкой личности.
 
 ## 6. Backend и безопасность доставки
 
@@ -276,7 +280,7 @@ contracts/snapshot. Точные тексты хранить в существу
 | Пользователь отклонил, оператор включил voicemail, policy hang_up | Ни одного assistant media/consent запроса при machine; refund |
 | Не взяли, линия занята, отменили до ответа, ошибка номера | Старые provider results сохраняются; AMD не выдумывается |
 | SIP-код отказа/занятости, отсутствующий или невалидный SipResponseCode | Диагностика не утверждает намеренный отказ; валидный status callback обрабатывается |
-| Короткое voicemail hello с паузой | Измерить false-human; generic disclosure без имени, никакого ложного human/goal статуса |
+| Короткое voicemail hello с паузой | Измерить false-human; consent содержит утверждённое имя, но не цель/детали; никакого ложного human/goal статуса |
 | Длинное/многоязычное приветствие, beep | Только разрешённое сообщение после допустимого результата |
 | Silence-ending / нестандартный тон / timeout greeting | Сообщение пропущено с причиной, не «успешно оставлено» |
 | IVR / call screening / fax / ошибочный machine | Без утверждения, что почтовый ящик существует; понятный технический результат |
@@ -309,7 +313,8 @@ Web tests: result card, transcript/feedback visibility, repeat, translations, ad
 1. Contracts и чистая policy/state projection, versioned review/snapshot, таблица тестов.
 2. Durable repository operations, idempotency, additive migrations, cost operation contracts.
 3. Twilio AMD + подписанные callbacks + terminal/recovery + runtime admission.
-4. Message branch, exact template review, нейтральный pre-consent disclosure, caller identity в opening.
+4. Message branch, exact template review; сохранить имя заказчика в initial consent после AMD,
+   без переноса/добавления повторного представления в opening; voicemail остаётся без имени.
 5. UI/history/repeat/admin/notifications/exports и семь локалей.
 6. Billing/admission/reconciliation, read compatibility и security/privacy review.
 7. Unit/integration/regression tests; исправить обнаруженные ошибки до ручного теста.

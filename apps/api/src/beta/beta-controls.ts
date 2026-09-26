@@ -53,7 +53,7 @@ export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendK
   if (policy.rollingDayBudgetMicros === null) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
   const existing = await tx`SELECT reservation_key FROM beta_spend_reservations WHERE reservation_key=${key} AND kind=${kind}`;
   if (existing.count) return;
-  const amount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros :
+  const amount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros + 10_000 :
     kind === "text" ? policy.textRequestReserveMicros : kind === "transcription" ? policy.transcriptionRequestReserveMicros :
     kind === "sms" ? policy.smsReserveMicros : policy.emailReserveMicros;
   const { reservedMicros: total } = await readBetaSpend(tx);
@@ -114,7 +114,7 @@ export class PostgresBetaControls implements BetaControls {
     if (!s.spendingEnabled) throw new BetaControlError("BETA_SPENDING_PAUSED");
     if (s.rollingDayBudgetMicros === null) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
     const amount = kind === "text" ? s.textRequestReserveMicros : kind === "sms" ? s.smsReserveMicros :
-      kind === "email" ? s.emailReserveMicros : kind === "transcription" ? s.transcriptionRequestReserveMicros : Math.ceil(s.maxDurationSeconds / 60) * s.callMinuteReserveMicros;
+      kind === "email" ? s.emailReserveMicros : kind === "transcription" ? s.transcriptionRequestReserveMicros : Math.ceil(s.maxDurationSeconds / 60) * s.callMinuteReserveMicros + 10_000;
     if (view.reservedMicros + amount > s.rollingDayBudgetMicros) throw new BetaControlError("BETA_BUDGET_EXHAUSTED");
   }
   async getView(): Promise<BetaControlsView> {

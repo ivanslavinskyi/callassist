@@ -47,7 +47,13 @@ describe("classifyConsent", () => {
     ["Vielleicht", "de-CH"],
     ["Je ne sais pas", "fr-CH"],
     ["What is this about?", "en-US"],
-    ["Кто вы?", "ru-RU"]
+    ["Кто вы?", "ru-RU"],
+    ["Yes, you've reached our voicemail", "en-GB"],
+    ["Okay, leave a message after the beep", "en-US"],
+    ["Ja, hinterlassen Sie eine Nachricht", "de-CH"],
+    ["Oui, laissez un message après le bip", "fr-CH"],
+    ["Sì, lasciate un messaggio dopo il segnale", "it-CH"],
+    ["Да, оставьте сообщение после сигнала", "ru-RU"]
   ] as const)("fails closed for unclear phrase %s", (text, locale) => {
     expect(classifyConsent(text, locale)).toBe("unclear");
   });

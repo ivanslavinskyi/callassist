@@ -1,3 +1,5 @@
+import { createApprovedExecutionSnapshot, normalizeCreateCallBriefInput } from "@callassist/contracts";
+import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import type { CallBrief } from "@callassist/contracts";
 import twilio from "twilio";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +28,14 @@ const brief: CallBrief = {
   createdAt: "2026-07-14T12:00:00.000Z",
   updatedAt: "2026-07-14T12:00:00.000Z"
 };
+
+async function approvedOptions(maxDurationSeconds = 900) {
+  const compilation = await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput({ ...brief, assistantProfileId: "sebastian", representedPersonFirstName: "Ivan", representedPersonLastName: "Slavinskyi", assistanceReason: "speech_impairment" }));
+  compilation.approvedAt = new Date().toISOString();
+  const executionSnapshot = createApprovedExecutionSnapshot({ brief, compilation });
+  return { maxDurationSeconds, executionSnapshot, binding: { callBriefId: brief.id,
+    callAttemptId: "00000000-0000-4000-a000-000000000001", compilationSnapshotHash: compilation.snapshotHash } };
+}
 
 function createProvider() {
   const update = vi.fn().mockResolvedValue({ sid: "CA123" });
@@ -86,7 +96,7 @@ describe("TwilioTelephonyProvider", () => {
 
   it("enforces the admitted seven-minute duration at the provider even if the API stops", async () => {
     const { provider, calls } = createProvider();
-    await provider.startCall(brief, { maxDurationSeconds: 420 });
+    await provider.startCall(brief, await approvedOptions(420));
     expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({ timeLimit: 420, timeout: 30, record: false }));
   });
 
@@ -104,7 +114,7 @@ describe("TwilioTelephonyProvider", () => {
 
   it("creates a non-recorded call with voice and status webhooks", async () => {
     const { calls, provider } = createProvider();
-    const result = await provider.startCall(brief);
+    const result = await provider.startCall(brief, await approvedOptions());
 
     expect(result).toEqual({ providerCallId: "CA123", providerStatus: "queued" });
     expect(calls.create).toHaveBeenCalledWith(
@@ -112,12 +122,9 @@ describe("TwilioTelephonyProvider", () => {
         from: "+41710000001",
         to: brief.phoneNumber,
         record: false,
-        statusCallback:
-          "https://calls.example.test/webhooks/twilio/status?callBriefId=" +
-          brief.id,
-        url:
-          "https://calls.example.test/webhooks/twilio/voice?callBriefId=" +
-          brief.id
+        statusCallback: expect.stringContaining("https://calls.example.test/webhooks/twilio/status?callBriefId=" + brief.id),
+        url: expect.stringContaining("https://calls.example.test/webhooks/twilio/voice?callBriefId=" + brief.id),
+        machineDetection: "Enable", asyncAmd: "false"
       })
     );
   });

@@ -97,6 +97,7 @@ export async function runRealCallDrill(environment = process.env, dependencies =
       throw new Error("Current original-plan review context is unavailable");
     }
     const { body: started } = await request(`/api/call-briefs/${callId}/approve-and-start`, { method: "POST", body: {
+      answeringPolicyVersion: "twilio-sync-beep-v1",
       revision: reviewedRevision,
       snapshotHash: reviewedHash,
       review: { mode: "original", language: snapshot.compilation.rawBrief.locale,

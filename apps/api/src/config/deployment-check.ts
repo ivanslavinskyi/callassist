@@ -1,6 +1,7 @@
 import { RuntimeConfigurationError, validateRuntimeEnvironment, type RuntimeProcess } from "./runtime-environment";
 import { emailBrandingFromEnv } from "../auth/email-branding";
 import { textCapabilitiesFromEnv } from "../text-processing/text-capabilities";
+import { ANSWERING_POLICY_VERSION } from "@callassist/contracts";
 
 export function checkDeployment(environment: NodeJS.ProcessEnv) {
   const issues: string[] = [];
@@ -35,6 +36,7 @@ export function checkDeployment(environment: NodeJS.ProcessEnv) {
   try { textCapabilitiesFromEnv({ driver: "openai" }, environment); }
   catch { issues.push("TEXT_ARTIFACT_DIRECTIONS or its generation flag is invalid"); }
   return { configurationValid: issues.length === 0, issues: [...new Set(issues)],
+    answeringPolicy: environment.TELEPHONY_DRIVER === "twilio" ? ANSWERING_POLICY_VERSION : null,
     providerTraffic: false, databaseChecked: false, publicReleaseApproved: false,
     remaining: ["Apply/check migrations", "Set USD budget and review provider allocations", "Verify edge header stripping, TLS, secure cookies, SSE and Twilio WS externally",
       "Verify API/worker deployment parity and restart recovery", "Complete provider, alert, backup/restore and support acceptance"] };

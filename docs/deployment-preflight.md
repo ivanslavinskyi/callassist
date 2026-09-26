@@ -1,11 +1,17 @@
 # Deployment preflight and first release
 
-## Candidate on `feat/gpt-live-pilot` (25 September)
+## Candidate on `feat/gpt-live-pilot` (26 September)
 
 After local acceptance and explicit owner approval, apply additive migrations through
-0083 before updating API/workers/web to the same revision. Migration 0081 adds native Live transcript timing; 0082 adds email
+0084 before updating API/workers/web to the same revision. Migration 0081 adds native Live transcript timing; 0082 adds email
 deferral and Privacy Notice version evidence; 0083 adds retry provenance and a unique
 source-attempt constraint. Historical data and compilation hashes are not rewritten.
+Migration 0084 adds AMD event/job/operation values and deduplicates per-attempt
+provider add-ons. Drain active calls before updating all processes together.
+New attempts require v3 approval; older ready plans return to review without an
+LLM request. Runtime rollback to Realtime in this revision retains AMD. Old binaries
+cannot read the new strict event/snapshot variants; do not downgrade them after
+writing new data. See [AMD acceptance and costs](amd-voicemail-beta.md).
 Keep the added columns when rolling application code back; do not reverse migrations
 or modify historical migration checksums. Older code validates beta settings strictly:
 before starting an older API/worker revision, preserve the current settings/audit and
@@ -13,7 +19,18 @@ remove the new `registration` JSON key from `beta_controls.settings` in the cont
 rollback. Older code then resumes full onboarding and mandatory email. Do not run old
 and new workers concurrently after the new policy key has been saved.
 
-Keep `VOICE_RUNTIME_DRIVER=realtime`. New registration policies default to the current
+The owner accepted local Live testing on 26 September and authorized merge/push
+and production rollout with `VOICE_RUNTIME_DRIVER=live` and
+`VOICE_RUNTIME_LIVE_FALLBACK=false`. Set these explicitly in the protected runtime
+environment shared by API and worker; keep repository defaults unchanged.
+The existing VPS release helper deliberately rejects a changed migration catalog.
+Do not run its ordinary `deploy` or disable that guard for this release. Prepare
+and CI-check the exact target SHA, drain calls, stop old writers, verify a fresh
+backup, run the new migrations and switch all three services together. Verify
+effective process settings and health before reopening calls. Keep the same new
+code and switch only the driver if an operational Realtime rollback is needed.
+
+New registration policies default to the current
 full onboarding and mandatory email verification. A superadmin can independently
 enable agreement at registration and deferrable email under Admin > System. Users
 still see email verification after SMS and choose whether to defer. Changing email
@@ -23,8 +40,8 @@ remain configured by `SMS_ALLOWED_COUNTRIES`; outbound destinations remain CH-on
 No SMS, email, OpenAI or Twilio call is triggered by changing these settings.
 
 See the [implementation and local acceptance record](registration-and-call-improvements-2026-09-25.md)
-and the [GPT-Live pilot instructions](gpt-live-pilot.md). This candidate has not been authorized
-for merge or production deployment yet.
+and the [GPT-Live pilot instructions](gpt-live-pilot.md). Authorization is recorded;
+production deployment and post-deploy verification are still pending.
 
 Updated 2026-09-25. B06 remains open. The owner chose `shprohli.ch` for the first
 deployment with temporary restricted access, on an existing VPS that already serves

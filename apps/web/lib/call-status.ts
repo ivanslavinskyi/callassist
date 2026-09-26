@@ -1,3 +1,4 @@
+import { answeringMessages } from "./i18n/answering-messages";
 import { lifecycleMessages } from "./i18n/lifecycle-messages";
 import type { UiLocale as ProductUiLocale } from "@callassist/contracts";
 import { extendMessages } from "./i18n/extend-messages";
@@ -6,7 +7,7 @@ import { callPresentationCopy } from "./i18n/call-presentation";
 export const terminalCallStatuses = new Set<CallBrief["status"]>(["completed", "stopped", "failed"]);
 export function isTerminalCallStatus(status: CallBrief["status"]) { return terminalCallStatuses.has(status); }
 
-export const callResultCopy = extendMessages({
+const legacyResultCopy = extendMessages({
   en: {
     assessment_pending: ["Checking the result", "We are checking the final transcript against your task. Your credit remains reserved."],
     assessment_unavailable: ["Result could not be verified", "We could not reliably confirm a substantive answer from the final transcript."],
@@ -35,7 +36,10 @@ export const callResultCopy = extendMessages({
     stopped: ["Anruf gestoppt", "Die Anwendung hat den Anruf gestoppt, bevor eine inhaltliche Antwort bestätigt wurde."],
     ended: ["Anruf beendet", "Die vorhandenen Ereignisse belegen nicht, ob ein Gespräch stattgefunden hat."]
   }
-}) satisfies Record<ProductUiLocale, Record<CallResult, readonly [string, string]>>;
+});
+const resultCopy = (locale: ProductUiLocale) => ({ ...legacyResultCopy[locale], ...answeringMessages[locale].results });
+export const callResultCopy = { en: resultCopy("en"), de: resultCopy("de"), fr: resultCopy("fr"),
+  it: resultCopy("it"), rm: resultCopy("rm"), ru: resultCopy("ru"), uk: resultCopy("uk") } satisfies Record<ProductUiLocale, Record<CallResult, readonly string[]>>;
 
 type StatusBrief = Pick<CallBrief, "status" | "lifecycle">;
 export function callStatusLabel(brief: StatusBrief, locale: ProductUiLocale) {
@@ -51,5 +55,5 @@ export function callResultLabel(brief: StatusBrief, locale: ProductUiLocale) {
 export function callConsentLabel(lifecycle: CallBrief["lifecycle"], locale: ProductUiLocale, fallback: string) {
   if (!lifecycle) return fallback;
   const labels = lifecycleMessages[locale].consent;
-  return labels[lifecycle.consent];
+  return lifecycle.consent === "not_requested" ? answeringMessages[locale].notRequested : labels[lifecycle.consent];
 }

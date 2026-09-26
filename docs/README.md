@@ -19,6 +19,10 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+[AMD and voicemail beta](amd-voicemail-beta.md) documents the current implementation,
+callback safety, accounting, migration and new real-call acceptance profiles (26 September).
+
+
 Manual acceptance follow-up: [pre-consent connection and repeat correction](pre-consent-retry-2026-09-25.md)
 distinguishes telephone connection from human response and enables fresh review
 after a settled call without consent, including possible voicemail answers.

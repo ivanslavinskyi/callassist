@@ -183,6 +183,7 @@ export function AdminSystemConsole() {
                 <h2>{copy.runtimeTitle}</h2>
                 <dl className="admin-operations-list">
                   <Fact label={copy.uptime} value={formatSeconds(status.runtime.uptimeSeconds)} />
+                  <Fact label="Twilio AMD policy" value={status.runtime.answeringPolicy ?? copy.notAvailable} />
                   <Fact
                     label={copy.durableWorkerMode}
                     value={copy.durableWorkerModes[status.runtime.durableWorkerMode]}

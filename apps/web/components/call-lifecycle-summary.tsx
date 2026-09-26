@@ -1,3 +1,4 @@
+import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { formatLocale } from "@callassist/contracts";
 import { lifecycleMessages } from "@/lib/i18n/lifecycle-messages";
 import type { UiLocale } from "@callassist/contracts";
@@ -5,7 +6,7 @@ import type { CallLifecycle } from "@callassist/contracts";
 import { callResultCopy, callResultLabel } from "@/lib/call-status";
 import { callPresentationCopy } from "@/lib/i18n/call-presentation";
 
-export function CallLifecycleSummary({ lifecycle, locale }: { lifecycle?: CallLifecycle; locale: UiLocale }) {
+export function CallLifecycleSummary({ lifecycle, locale, message }: { lifecycle?: CallLifecycle; locale: UiLocale; message?: string | null }) {
   if (!lifecycle?.result) return null;
   const label = callResultLabel({ status: "completed", lifecycle }, locale)!;
   const help = callResultCopy[locale][lifecycle.result][1];
@@ -23,6 +24,11 @@ export function CallLifecycleSummary({ lifecycle, locale }: { lifecycle?: CallLi
   return <section className={`call-lifecycle-summary result-${lifecycle.result}`} aria-label={label}>
     <div className="lifecycle-heading"><h2>{callPresentationCopy[locale].result}: {label}</h2>{credit ? <span className="lifecycle-credit">{credit}</span> : null}</div>
     <p>{help}</p>
+    {lifecycle.answering && lifecycle.answering.decision !== "consent" ? <>
+      <p>{answeringMessages[locale].message[lifecycle.answering.message === "issued" ? "unknown" : lifecycle.answering.message]}</p>
+      {message ? <><p>{answeringMessages[locale].approvedMessage}</p><blockquote>{message}</blockquote></> : null}
+      <p className="muted-text">{answeringMessages[locale].uncertainty}</p>
+    </> : null}
     {lifecycle.assessment?.status === "unavailable" && lifecycle.credit === "returned" ? <p>{lifecycleMessages[locale].assessmentUnavailable}</p> : null}
     {lifecycle.substantiveAnswerConfirmed && lifecycle.credit === "returned" ? <p>{lifecycleMessages[locale].lateAssessment}</p> : null}
     <details><summary>{lifecycleMessages[locale].details}</summary>

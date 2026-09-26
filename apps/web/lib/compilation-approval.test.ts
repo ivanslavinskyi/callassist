@@ -9,14 +9,14 @@ const viewedTranslation: ReviewEvidence = { mode: "translated", language: "ru", 
 describe("review and start retry authority", () => {
   it("binds first approval to the exact displayed translation", () => {
     expect(compilationApprovalInput(source, viewedTranslation)).toEqual({
-      revision: source.revision, snapshotHash: source.snapshotHash, review: viewedTranslation
+      answeringPolicyVersion: "twilio-sync-beep-v1", revision: source.revision, snapshotHash: source.snapshotHash, review: viewedTranslation
     });
   });
 
   it("does not replace an existing receipt when another reader is viewed before retrying start", () => {
     const approved = { ...source, approvedAt: "2026-09-09T12:00:00Z" };
     for (const view of [viewedTranslation, { mode: "original" as const, language: "de-CH", selectionRevision: 2 }]) {
-      expect(compilationApprovalInput(approved, view)).toEqual({ revision: source.revision, snapshotHash: source.snapshotHash });
+      expect(compilationApprovalInput(approved, view)).toEqual({ answeringPolicyVersion: "twilio-sync-beep-v1", revision: source.revision, snapshotHash: source.snapshotHash });
     }
   });
 });

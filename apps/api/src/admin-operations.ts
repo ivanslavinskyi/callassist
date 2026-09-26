@@ -207,28 +207,28 @@ function buildProviderUsageCost(
   for (const bucket of usage.buckets) {
     const destinations = providerUsageDestinations(bucket);
     if (destinations.length === 0) continue;
-    if (bucket.provider === "openai") relevantBuckets += 1;
+    if (bucket.operationType !== "telephony_leg") relevantBuckets += 1;
     const cost = calculateProviderUsageCost(bucket);
     const incomplete = (
       !cost.matched ||
       cost.calculatedUsdMicros === null ||
       cost.unpricedMetrics.length > 0
     );
-    if (bucket.provider === "openai") {
+    if (bucket.operationType !== "telephony_leg") {
       versions.add(cost.pricingVersion);
       if (incomplete) unpricedBuckets += bucket.usageRecords;
     }
     if (bucket.operationId && bucket.startedAt) records.push({
       id: bucket.operationId, startedAt: bucket.startedAt, operationType: bucket.operationType,
       stage: bucket.stage, model: bucket.model, outcome: bucket.outcome ?? null,
-      costBasis: bucket.provider === "twilio" ? "provider_reported" : "usage_estimate",
-      calculatedUsdMicros: bucket.provider === "twilio" ? bucket.reportedUsdMicros ?? null : cost.calculatedUsdMicros,
-      missingMetrics: bucket.provider === "twilio" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics
+      costBasis: bucket.operationType === "telephony_leg" ? "provider_reported" : "usage_estimate",
+      calculatedUsdMicros: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros ?? null : cost.calculatedUsdMicros,
+      missingMetrics: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics
     });
     for (const destination of destinations) {
       const component = components[destination.name];
       addProviderUsage(component, bucket);
-      if (incomplete && bucket.provider === "openai") component.incompleteRecords += bucket.usageRecords;
+      if (incomplete && bucket.operationType !== "telephony_leg") component.incompleteRecords += bucket.usageRecords;
       const amount = destination.cost(cost);
       if (amount !== null) {
         component.calculatedUsdMicros =
@@ -285,6 +285,9 @@ function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
   if (bucket.operationType === "text_translation" || bucket.operationType === "call_summary") {
     return [{ name: bucket.operationType === "text_translation" ? "textTranslation" as const : "callSummary" as const,
       cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.calculatedUsdMicros }];
+  }
+  if (["answering_detection", "voicemail_tts"].includes(bucket.operationType)) {
+    return [{ name: "telephony" as const, cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.calculatedUsdMicros }];
   }
   if (bucket.operationType === "telephony_leg") {
     return [{

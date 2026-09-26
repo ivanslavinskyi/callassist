@@ -1,3 +1,4 @@
+import { answeringApproval, answeringApprovalSchema } from "./call-answering";
 import { z } from "zod";
 import { callLifecycleSchema } from "./call-lifecycle";
 import { appointmentAuthorizationSchema } from "./appointment";
@@ -510,7 +511,7 @@ export const compiledCallBriefSchema = z.discriminatedUnion("schemaVersion", [le
 export type CompiledCallBrief = z.infer<typeof compiledCallBriefSchema>;
 export type CurrentCompiledCallBrief = z.infer<typeof currentCompiledCallBriefSchema>;
 
-export const APPROVED_EXECUTION_SNAPSHOT_VERSION = 2 as const;
+export const APPROVED_EXECUTION_SNAPSHOT_VERSION = 3 as const;
 
 /**
  * The task-specific contract accepted by Realtime after preparation approval.
@@ -565,13 +566,22 @@ export const legacyApprovedExecutionSnapshotSchema = z.object({
   plan: legacyApprovedExecutionPlanSchema,
   runtime: approvedExecutionRuntimeSchema
 }).strict();
-export const currentApprovedExecutionSnapshotSchema = legacyApprovedExecutionSnapshotSchema.extend({
+export const previousApprovedExecutionSnapshotSchema = legacyApprovedExecutionSnapshotSchema.extend({
+  version: z.literal(2), plan: currentApprovedExecutionPlanSchema
+}).strict();
+export const currentApprovedExecutionSnapshotSchema = previousApprovedExecutionSnapshotSchema.extend({
   version: z.literal(APPROVED_EXECUTION_SNAPSHOT_VERSION),
-  plan: currentApprovedExecutionPlanSchema
+  answering: answeringApprovalSchema
 }).strict();
 export const approvedExecutionSnapshotSchema = z.discriminatedUnion("version", [
-  legacyApprovedExecutionSnapshotSchema, currentApprovedExecutionSnapshotSchema
+  legacyApprovedExecutionSnapshotSchema, previousApprovedExecutionSnapshotSchema, currentApprovedExecutionSnapshotSchema
 ]).superRefine((snapshot, context) => {
+  if (snapshot.version === 3) {
+    const expected = answeringApproval(snapshot.plan.voicemailAction, snapshot.plan.callLocale);
+    if (JSON.stringify(expected) !== JSON.stringify(snapshot.answering)) context.addIssue({
+      code: "custom", message: "Answering policy does not match the approved plan", path: ["answering"]
+    });
+  }
   const { allowLanguageSwitch, fallbackLocale } = snapshot.runtime;
   if (allowLanguageSwitch && !fallbackLocale) {
     context.addIssue({
@@ -834,12 +844,13 @@ export function createApprovedExecutionSnapshot(
   }
 
   return approvedExecutionSnapshotSchema.parse({
-    version: compiled.schemaVersion === "3" ? 1 : APPROVED_EXECUTION_SNAPSHOT_VERSION,
+    version: APPROVED_EXECUTION_SNAPSHOT_VERSION,
     callBriefId: snapshot.brief.id,
     compilationRevision: compilation.revision,
     compilationSnapshotHash: compilation.snapshotHash,
     approvedAt: compilation.approvedAt,
-    plan: createApprovedExecutionPlan(compiled),
+    plan: { appointmentAuthorization: null, ...createApprovedExecutionPlan(compiled) },
+    answering: answeringApproval(compiled.voicemailAction, compiled.callLocale),
     runtime: {
       agentName: snapshot.brief.agentName,
       voiceGender: snapshot.brief.voiceGender,

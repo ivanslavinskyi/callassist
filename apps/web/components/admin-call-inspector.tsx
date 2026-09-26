@@ -125,6 +125,14 @@ export function AdminCallInspector({ callId }: { callId: string }) {
             </section>
 
             <CallLifecycleSummary lifecycle={summary.lifecycle} locale={locale} />
+            {summary.lifecycle?.answering ? <dl>
+              <Fact label="AnsweredBy" value={summary.lifecycle.answering.answeredBy ?? copy.notAvailable} />
+              <Fact label="MachineDetection" value={summary.lifecycle.answering.mode} />
+              <Fact label="MachineDetectionDuration (ms)" value={summary.lifecycle.answering.durationMs?.toString() ?? copy.notAvailable} />
+              <Fact label="policyVersion" value={summary.lifecycle.answering.policyVersion} />
+              <Fact label="failure" value={summary.lifecycle.answering.failure ?? copy.notAvailable} />
+              <Fact label="SipResponseCode" value={summary.lifecycle.sipResponseCode?.toString() ?? copy.notAvailable} />
+            </dl> : null}
             <CallAssessments brief={summary} locale={locale} admin
                 feedback={summary.feedback ? { ...summary.feedback, scope: summary.feedback.scope ?? "call" } : null} />
             <div id="cost-breakdown">{cost ? <AdminCostBreakdown cost={cost.cost} locale={locale} /> : null}</div>

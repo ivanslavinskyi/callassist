@@ -22,11 +22,11 @@ afterEach(async () => {
 function createHarness() {
   const calls = Object.assign(
     vi.fn(() => ({
-      update: vi.fn().mockResolvedValue({ sid: "CA123" }),
-      fetch: vi.fn().mockResolvedValue({ sid: "CA123", status: "completed", duration: "1", price: "-0.01", priceUnit: "USD" })
+      update: vi.fn().mockResolvedValue({ sid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }),
+      fetch: vi.fn().mockResolvedValue({ sid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", status: "completed", duration: "1", price: "-0.01", priceUnit: "USD" })
     })),
     {
-      create: vi.fn().mockResolvedValue({ sid: "CA123", status: "queued" })
+      create: vi.fn().mockResolvedValue({ sid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", status: "queued" })
     }
   );
   const provider = new TwilioTelephonyProvider({
@@ -118,7 +118,7 @@ describe("Twilio webhooks", () => {
       method: "POST",
       url: `/webhooks/twilio/voice?callBriefId=${brief.id}`,
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      payload: "CallSid=CA123"
+      payload: "CallSid=CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     });
     expect(response.statusCode).toBe(403);
     expect((await webhookFacts(service)).voice).toMatchObject({
@@ -134,8 +134,9 @@ describe("Twilio webhooks", () => {
     vi.spyOn(service, "recordProviderWebhookDelivery").mockRejectedValueOnce(
       new Error("evidence store unavailable")
     );
-    const parameters = { CallSid: "CA123" };
-    const path = `/webhooks/twilio/voice?callBriefId=${brief.id}`;
+    const parameters = { CallSid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", AnsweredBy: "human" };
+    const attempt = (await service.getLatestAttempt(brief.id))!;
+    const path = `/webhooks/twilio/voice?callBriefId=${brief.id}&callAttemptId=${attempt.id}&compilationSnapshotHash=${attempt.compilationSnapshotHash}`;
     const signature = twilio.getExpectedTwilioSignature(
       "test-auth-token",
       `https://calls.example.test${path}`,
@@ -161,7 +162,7 @@ describe("Twilio webhooks", () => {
     const brief = await createBrief(service);
     await service.repository.startAttempt(brief.id, { provider: "twilio" });
     const parameters = {
-      CallSid: "CA123",
+      CallSid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       CallStatus: "initiated"
     };
     const path = `/webhooks/twilio/status?callBriefId=${brief.id}`;
@@ -218,8 +219,9 @@ describe("Twilio webhooks", () => {
       provider: "twilio"
     });
 
-    const voiceParameters = { CallSid: "CA123" };
-    const voicePath = `/webhooks/twilio/voice?callBriefId=${brief.id}`;
+    const voiceParameters = { AnsweredBy: "human", CallSid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+    const voiceAttempt = (await service.getLatestAttempt(brief.id))!;
+    const voicePath = `/webhooks/twilio/voice?callBriefId=${brief.id}&callAttemptId=${voiceAttempt.id}&compilationSnapshotHash=${voiceAttempt.compilationSnapshotHash}`;
     const voiceSignature = twilio.getExpectedTwilioSignature(
       "test-auth-token",
       `https://calls.example.test${voicePath}`,
@@ -249,7 +251,7 @@ describe("Twilio webhooks", () => {
     expect((await webhookFacts(service)).voice.accepted).toBe(1);
 
     const statusParameters = {
-      CallSid: "CA123",
+      CallSid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       CallStatus: "in-progress"
     };
     const statusPath = `/webhooks/twilio/status?callBriefId=${brief.id}`;
@@ -274,11 +276,11 @@ describe("Twilio webhooks", () => {
 
     await service.repository.attachProviderCall(
       reserved.attempt.id,
-      "CA123",
+      "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "queued"
     );
     const attempt = await service.repository.getLatestAttempt(brief.id);
-    expect(attempt?.providerCallId).toBe("CA123");
+    expect(attempt?.providerCallId).toBe("CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(attempt?.providerStatus).toBe("in-progress");
   });
 
@@ -290,12 +292,12 @@ describe("Twilio webhooks", () => {
     });
     await service.repository.attachProviderCall(
       reserved.attempt.id,
-      "CA123",
+      "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "in-progress"
     );
     const begun = await service.repository.beginRecording(brief.id);
     const parameters = {
-      CallSid: "CA123",
+      CallSid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       RecordingSid: "RE123",
       RecordingStatus: "completed",
       RecordingDuration: "37",

@@ -1,4 +1,4 @@
-import type { CallBrief } from "@callassist/contracts";
+import type { CallBrief, ApprovedExecutionSnapshot } from "@callassist/contracts";
 
 export const TWILIO_CALL_RESOURCE_STATUSES = [
   "queued",
@@ -30,6 +30,7 @@ export type TwilioCallStatusCallbackValue =
   (typeof TWILIO_CALL_STATUS_CALLBACK_VALUES)[number];
 
 export type TwilioCallStatusUsage = {
+  sipResponseCode?: number;
   durationSeconds?: number;
   billableMinutes?: number;
   occurredAt?: string;
@@ -54,6 +55,12 @@ export type MediaStreamBinding = {
   callBriefId: string;
   callAttemptId: string;
   compilationSnapshotHash: string;
+};
+
+export type StartTelephonyCallOptions = {
+  maxDurationSeconds: number;
+  binding?: MediaStreamBinding;
+  executionSnapshot?: ApprovedExecutionSnapshot;
 };
 
 export type StartCallRecordingInput = {
@@ -95,7 +102,7 @@ export type ProviderRecordingStatus = {
 
 export interface TelephonyProvider {
   readonly mode: "mock" | "twilio";
-  startCall(brief: CallBrief, options?: { maxDurationSeconds: number }): Promise<StartTelephonyCallResult>;
+  startCall(brief: CallBrief, options?: StartTelephonyCallOptions): Promise<StartTelephonyCallResult>;
   stopCall(providerCallId: string): Promise<void>;
   startRecording(
     providerCallId: string,

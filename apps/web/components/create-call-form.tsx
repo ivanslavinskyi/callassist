@@ -1,5 +1,6 @@
 "use client";
 
+import { answeringMessages } from "@/lib/i18n/answering-messages";
 import {
   ASSISTANT_PROFILES,
   CALL_BRIEF_INPUT_LIMITS,
@@ -546,7 +547,7 @@ export function CreateCallForm({
                 )
               }
             >
-              <option value="do_not_leave_details">{copy.noCallDetails}</option>
+              <option value="do_not_leave_details">{answeringMessages[uiLocale].silent}</option>
               <option value="leave_neutral_message">{copy.neutralMessage}</option>
             </select>
           </label>

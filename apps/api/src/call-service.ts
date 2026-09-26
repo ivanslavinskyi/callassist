@@ -1,6 +1,9 @@
+import type { AnsweringTransitionInput } from "./telephony/answering-policy";
 import { assertRetryableCall } from "./storage/call-retry";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  ANSWERING_POLICY_VERSION,
+  answeringMode,
   adminOperationsWindowBounds,
   adminCallCostBreakdownSchema,
   adminCallPreparationInspectorSchema,
@@ -204,6 +207,7 @@ export class CallService {
         ) => this.#processRecordingRetention(job, lease),
         ...(telephonyProvider.getCallStatus
           ? {
+              answer_detection_timeout: (job: DurableJob, lease: DurableJobLease) => this.#checkAnsweringDeadline(job, lease),
               provider_call_reconciliation: (
                 job: DurableJob,
                 lease: DurableJobLease
@@ -423,6 +427,7 @@ export class CallService {
       },
       outboundCalls: facts.outboundCalls,
       runtime: {
+        answeringPolicy: this.telephonyProvider.mode === "twilio" ? ANSWERING_POLICY_VERSION : null,
         uptimeSeconds: Math.max(0, Math.floor(process.uptime())),
         backgroundTasks: this.#durableJobWorker.runningCount + this.#textJobWorker.runningCount,
         processingRecordings: this.#processingRecordings.size,
@@ -664,10 +669,12 @@ export class CallService {
   }
 
   async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {
+    if (this.telephonyProvider.mode === "twilio" && expected && expected.answeringPolicyVersion !== ANSWERING_POLICY_VERSION) throw new CallRepositoryError("CALL_REVIEW_STALE");
     if (this.textArtifacts.processor.driver === "openai" && expected?.review?.mode === "translated") {
       const artifact = await this.repository.getTextArtifact(id, expected.review.artifactId);
       if (artifact?.generatorVersion.endsWith(":mock")) throw new CallRepositoryError("CALL_REVIEW_STALE");
     }
+    if (await this.repository.refreshAnsweringApproval(id)) throw new CallRepositoryError("CALL_COMPILATION_STALE");
     const snapshot = await this.repository.approveCompilation(id, expected);
     this.#publish(id, { type: "call.updated", brief: snapshot.brief });
     return snapshot;
@@ -678,6 +685,7 @@ export class CallService {
     userId: string | null = null,
     expected?: CompilationReviewApprovalInput
   ) {
+    if (await this.repository.refreshAnsweringApproval(id)) throw new CallRepositoryError("CALL_COMPILATION_STALE");
     const current = await this.#require(id);
     if (
       expected &&
@@ -704,6 +712,7 @@ export class CallService {
   }
 
   async start(id: string, userId: string | null = null) {
+    if (await this.repository.refreshAnsweringApproval(id)) throw new CallRepositoryError("CALL_COMPILATION_STALE");
     const current = await this.#require(id);
     if (!isSwissDestinationPhone(current.brief.phoneNumber)) {
       throw new CallServiceError("SWISS_DESTINATION_REQUIRED");
@@ -745,7 +754,29 @@ export class CallService {
           startedAt: reserved.attempt.startedAt
         });
       }
-      started = await this.telephonyProvider.startCall(current.brief, { maxDurationSeconds });
+      const execution = reserved.attempt.executionSnapshot;
+      if (this.telephonyProvider.mode === "twilio" && execution?.version === 3) {
+        await this.recordTelemetry(id, {
+          callAttemptId: reserved.attempt.id, idempotencyKey: `answering:${reserved.attempt.id}:pending`,
+          payload: { name: "answering.updated", metadata: {
+            phase: "pending", policyVersion: ANSWERING_POLICY_VERSION,
+            mode: answeringMode(execution.answering.action), answeredBy: null, decision: null,
+            streamAdmitted: false, observedAt: new Date().toISOString(), durationMs: null,
+            message: execution.answering.action === "hang_up" ? "not_requested" : "not_attempted", failure: null
+          } }
+        });
+        await this.repository.enqueueDurableJob({ type: "answer_detection_timeout",
+          callAttemptId: reserved.attempt.id, runAfter: new Date(Date.now() + 80_000).toISOString(),
+          maxAttempts: durableJobMaxAttempts.answer_detection_timeout });
+        this.#durableJobWorker.wake();
+      }
+      started = await this.telephonyProvider.startCall(current.brief, {
+        maxDurationSeconds, executionSnapshot: execution ?? undefined,
+        binding: reserved.attempt.compilationSnapshotHash ? {
+          callBriefId: id, callAttemptId: reserved.attempt.id,
+          compilationSnapshotHash: reserved.attempt.compilationSnapshotHash
+        } : undefined
+      });
     } catch (error) {
       await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
       this.#onBackgroundError(error);
@@ -861,11 +892,34 @@ export class CallService {
     return snapshot;
   }
 
-  /** Persist an attempt-bound recovery job BEFORE the bridge closes its stream.
-   * TwiML Hangup is the immediate path; reconciliation checks and stops the same
-   * provider leg after two seconds if that path or its status callback was lost.
-   * This deliberately does not use the user's Stop / stopped status transition.
-   */
+  async transitionAnswering(id: string, input: AnsweringTransitionInput) {
+    const result = await this.repository.transitionAnswering(id, input);
+    if (result.applied) {
+      const snapshot = await this.#require(id);
+      this.#publish(id, { type: "call.updated", brief: snapshot.brief });
+    }
+    return result;
+  }
+
+  async #checkAnsweringDeadline(job: DurableJob, lease: DurableJobLease) {
+    if (!job.callId || !job.callAttemptId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    const attempt = await this.repository.getAttempt(job.callId, job.callAttemptId);
+    const snapshot = await this.#require(job.callId);
+    if (!attempt || attempt.executionSnapshot?.version !== 3 || terminalStatuses.has(attempt.status)) return;
+    const state = snapshot.brief.lifecycle?.answering;
+    // A human conversation has its own consent and maximum duration deadlines.
+    if (state?.decision === "consent" && state.streamAdmitted) return;
+    if (!attempt.providerCallId) throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
+    if (!state || state.phase === "pending" || (state.decision === "consent" && !state.streamAdmitted)) await this.transitionAnswering(job.callId, {
+      attemptId: attempt.id, providerCallId: attempt.providerCallId,
+      snapshotHash: attempt.compilationSnapshotHash!, kind: "timeout", now: new Date().toISOString()
+    });
+    await this.#reconcileProviderCall(job, lease);
+  }
+
+  /** Persist recovery before closing the stream. TwiML Hangup is the immediate
+   * path; reconciliation stops the same leg after two seconds if it was lost.
+   * This does not use the user's Stop / stopped status transition. */
   async prepareAgentHangup(id: string, attemptId: string, providerCallId: string) {
     const attempt = await this.repository.getAttempt(id, attemptId);
     const latest = await this.repository.getLatestAttempt(id);
@@ -901,6 +955,11 @@ export class CallService {
       if (
         ["completed", "failed", "busy", "no-answer", "canceled"].includes(status)
       ) {
+        if (usage?.sipResponseCode && usage.sipResponseCode >= 100 && usage.sipResponseCode <= 699) {
+          await this.repository.appendCallTelemetryEvent(result.callId, { callAttemptId: result.attemptId,
+            idempotencyKey: `sip:${result.attemptId}:${usage.sipResponseCode}`,
+            payload: { name: "provider.sip_response", metadata: { code: usage.sipResponseCode } } });
+        }
         await this.repository.recordTelephonyLegUsage({
           fallbackOperationId: randomUUID(),
           callBriefId: result.callId,

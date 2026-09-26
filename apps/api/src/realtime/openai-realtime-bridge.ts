@@ -61,6 +61,7 @@ type TwilioMessage = {
   dtmf?: { digit?: string; track?: string };
   mark?: { name?: string };
   start?: {
+    callSid?: string;
     streamSid?: string;
     customParameters?: Record<string, string>;
   };
@@ -407,7 +408,10 @@ export class OpenAIRealtimeBridge implements VoiceRuntime {
       consentSocket.send(JSON.stringify(payload));
     };
 
+    const pendingPlaybackMarks = new Map<string, string>();
+    const playbackGenerations = new Map<string, number>();
     const sendTwilio = (payload: object) => {
+      if ("event" in payload && payload.event === "clear") pendingPlaybackMarks.clear();
       if (twilioSocket.readyState !== WebSocket.OPEN) return;
       twilioSocket.send(JSON.stringify(payload));
     };
@@ -434,7 +438,12 @@ export class OpenAIRealtimeBridge implements VoiceRuntime {
 
     const sendPlaybackMark = (name: string) => {
       if (!streamSid) return;
-      sendTwilio({ event: "mark", streamSid, mark: { name } });
+      const guarded = [consentPromptMark, openingMark, noConsentMark, recordingFailureMark].includes(name);
+      const generation = (playbackGenerations.get(name) ?? 0) + 1;
+      if (guarded) playbackGenerations.set(name, generation);
+      const wireName = guarded && generation > 1 ? `${name}:${generation}` : name;
+      if (guarded) pendingPlaybackMarks.set(wireName, name);
+      sendTwilio({ event: "mark", streamSid, mark: { name: wireName } });
     };
 
     const recordToolResult = (tool: "end_call" | "check_appointment" | "route_interrupted_closing", requestId: string, accepted: boolean, reason: string, rawProposal?: string) => {
@@ -1056,6 +1065,9 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
           } else if (pendingKeypadResponse && consentGranted) {
             pendingKeypadResponse = false;
             createAudioResponse(keypadResponseInstructions);
+          } else if ((completedPurpose === "opening" || completedPurpose?.startsWith("consent_")) &&
+              event.response?.status && event.response.status !== "completed") {
+            close("openai_error");
           } else if (completedPurpose === "opening") {
             sendPlaybackMark(openingMark);
           } else if (
@@ -1296,6 +1308,14 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
         );
         close();
         return;
+      }
+
+      if (executionSnapshot.version === 3) {
+        const admitted = message.start?.callSid && await this.#service.transitionAnswering(candidateCallBriefId, {
+          attemptId: attempt.id, providerCallId: message.start.callSid,
+          snapshotHash: candidateCompilationSnapshotHash, kind: "admit", now: new Date().toISOString()
+        });
+        if (closed || !admitted || !admitted.applied || admitted.decision !== "consent") { close(); return; }
       }
 
       callBriefId = candidateCallBriefId;
@@ -1632,15 +1652,18 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
         }
       } else if (message.event === "mark" && message.mark?.name) {
         if (agentHangup?.acknowledge(message.mark.name)) return;
+        const acknowledgedMark = pendingPlaybackMarks.get(message.mark.name);
+        pendingPlaybackMarks.delete(message.mark.name);
+        if (!acknowledgedMark) return;
         if (
-          message.mark.name === consentPromptMark &&
+          acknowledgedMark === consentPromptMark &&
           !consentStarting &&
           !consentGranted
         ) {
           consentListening =
             consentSocketReady && consentFlow.stage !== "dtmf_fallback";
           scheduleConsentTimeout(this.#consentTimeoutMs);
-        } else if (message.mark.name === openingMark && consentGranted) {
+        } else if (acknowledgedMark === openingMark && consentGranted) {
           if (this.#createConversation && !openingPlaybackComplete && !conversationStarting && currentExecutionSnapshot && callAttemptId) {
             conversationStarting = true;
             openingPlaybackComplete = true;
@@ -1703,9 +1726,9 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
             if (tools.length) sendOpenAI({ type: "session.update", session: { type: "realtime", tools, tool_choice: "auto" } });
           }
           openingPlaybackComplete = true;
-        } else if (message.mark.name === noConsentMark && !consentGranted) {
+        } else if (acknowledgedMark === noConsentMark && !consentGranted) {
           close("no_consent");
-        } else if (message.mark.name === recordingFailureMark) {
+        } else if (acknowledgedMark === recordingFailureMark) {
           close("recording_failure");
         }
       } else if (message.event === "stop") {

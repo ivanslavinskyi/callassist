@@ -198,6 +198,7 @@ export const adminDurableJobTypeSchema = z.enum([
   "brief_compilation",
   "final_transcription",
   "recording_retention",
+  "answer_detection_timeout",
   "provider_call_reconciliation",
   "provider_call_cost_reconciliation",
   "text_artifact_generation",
@@ -298,6 +299,7 @@ export const adminSystemStatusSchema = z.strictObject({
   }),
   outboundCalls: adminOutboundCallControlSchema,
   runtime: z.strictObject({
+    answeringPolicy: z.string().max(80).nullable().optional(),
     uptimeSeconds: secondsSchema,
     backgroundTasks: countSchema,
     processingRecordings: countSchema,

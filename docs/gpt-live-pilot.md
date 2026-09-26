@@ -4,6 +4,10 @@
 `gpt-live-1` with Responses delegation to `gpt-6-luna` and
 `parallel_tool_calls=false`. Invalid drivers fail startup.
 
+New calls now pass [synchronous AMD](amd-voicemail-beta.md) before this runtime.
+The real-call results from 25 September below predate AMD and do not certify the
+new detection/message branches. Retest both runtimes with the AMD smoke profiles.
+
 ## Protocol and safety boundary
 
 The shared `VoiceRuntime` interface owns the authenticated Twilio Media Stream.
@@ -66,15 +70,25 @@ subtotals are not added twice. These are list-price estimates, not invoices.
 
 ## Deployment and rollback
 
+On 26 September the owner reported that local testing works and that Live improves
+dialogue quality, and authorized merge/push to main and production rollout with
+`VOICE_RUNTIME_DRIVER=live` and `VOICE_RUNTIME_LIVE_FALLBACK=false`.
+This is owner acceptance, not an independently collected result for every carrier
+scenario. The production cutover and post-deploy checks must still be recorded.
+Repository defaults remain Realtime; the approved production environment overrides
+them explicitly. Use [the deployment preflight](deployment-preflight.md).
+
 1. Run the full repository test, lint, typecheck and build commands.
-2. Apply the complete current catalog through `0083_call_retry_sources.sql` with the normal
+2. Apply the complete current catalog through `0084_answering_detection.sql` with the normal
    `pnpm db:migrate` process before starting the new code. Live migration
    `0081_native_live_transcript_timing.sql` adds a nullable JSON column that
-   preserves fragment timing across reloads. Old rows/writers remain compatible;
-   no provider-ledger enum or destructive migration is required.
-3. Deploy with `VOICE_RUNTIME_DRIVER=realtime`. Existing defaults for recording,
+   preserves fragment timing across reloads. Migration 0084 adds AMD event, job and
+   provider-operation values. Drain calls and stop old writers before migration;
+   strict old readers must not handle newly written v3 snapshots or AMD events.
+3. For the owner-approved rollout set `VOICE_RUNTIME_DRIVER=live` and
+   `VOICE_RUNTIME_LIVE_FALLBACK=false`. Existing defaults for recording,
    post-call transcription and `REALTIME_AGENT_HANGUP_ENABLED` are preserved.
-4. On a pilot instance set `VOICE_RUNTIME_DRIVER=live`,
+4. Explicitly set
    `OPENAI_LIVE_MODEL=gpt-live-1`, `OPENAI_LIVE_DELEGATION_MODEL=gpt-6-luna`,
    `OPENAI_LIVE_MALE_VOICE=cedar`, `OPENAI_LIVE_FEMALE_VOICE=marin`.
    Enable `REALTIME_AGENT_HANGUP_ENABLED=true` when testing application hangup.
@@ -82,8 +96,8 @@ subtotals are not added twice. These are list-price estimates, not invoices.
 5. Require successful real-call evidence before changing a production driver.
    Roll back by draining calls, setting `VOICE_RUNTIME_DRIVER=realtime` and
    restarting. Leave the additive column in place; switching the driver needs no
-   data rollback. For a code downgrade,
-   also follow the [registration-settings compatibility procedure](deployment-preflight.md).
+   data rollback. A downgrade to pre-AMD binaries is not a safe runtime rollback;
+   follow the [compatibility procedure](deployment-preflight.md).
 
 Allow outbound OpenAI WebSocket access and keep the existing signed Twilio
 webhooks/media-stream routing. No new public endpoint or client-side API key is

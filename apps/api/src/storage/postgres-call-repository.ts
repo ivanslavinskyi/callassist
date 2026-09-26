@@ -1,3 +1,7 @@
+import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
+import { answeringUsage } from "../telephony/answering-usage";
+import { answeringStateSchema } from "@callassist/contracts";
+import { transitionAnswering, type AnsweringTransitionInput } from "../telephony/answering-policy";
 import { historyObjective } from "./history-objective";
 import { assertRetryableCall } from "./call-retry";
 import { appointmentPlanExpired } from "@callassist/contracts";
@@ -2786,6 +2790,38 @@ export class PostgresCallRepository implements CallRepository {
     };
   }
 
+  async transitionAnswering(id: string, input: AnsweringTransitionInput) {
+    return this.#sql.begin(async tx => {
+      const [brief] = await tx<{ status: string }[]>`SELECT status FROM call_briefs WHERE id=${id} FOR UPDATE`;
+      if (!brief) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const [row] = await tx`SELECT * FROM call_attempts WHERE id=${input.attemptId} AND call_brief_id=${id} FOR UPDATE`;
+      if (!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      const [latest] = await tx`SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC, id DESC LIMIT 1`;
+      const [event] = await tx`SELECT metadata FROM call_events WHERE call_attempt_id=${input.attemptId}
+        AND event_name='answering.updated' ORDER BY sequence DESC LIMIT 1`;
+      const stops = await tx`SELECT id FROM call_events WHERE call_attempt_id=${input.attemptId} AND event_name='call.stop' AND metadata->>'phase'='requested' LIMIT 1`;
+      const attempt: CallAttemptRecord = { id: row.id, callBriefId: id, compilationId: row.compilation_id,
+        provider: row.provider, providerCallId: row.provider_call_id, status: row.status, providerStatus: row.provider_status,
+        startedAt: new Date(row.started_at).toISOString(), endedAt: row.ended_at ? new Date(row.ended_at).toISOString() : null,
+        failureReason: row.failure_reason, compilationRevision: row.compilation_revision, compilationSnapshotHash: row.compilation_snapshot_hash,
+        executionSnapshot: row.execution_snapshot_ciphertext ? approvedExecutionSnapshotSchema.parse(decryptJson(row.execution_snapshot_ciphertext, this.#encryptionKey)) : null };
+      const result = transitionAnswering(attempt, event ? answeringStateSchema.parse(event.metadata) : null, input,
+        latest?.id === attempt.id && ["dialing", "in_progress"].includes(brief.status) && stops.length === 0);
+      if (result.applied && result.state) {
+        await tx`UPDATE call_attempts SET provider_call_id=COALESCE(provider_call_id,${input.providerCallId}) WHERE id=${attempt.id}`;
+        if (input.kind === "resolve" || input.kind === "timeout") for (const op of answeringUsage(attempt, result.state)) {
+          await tx`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,call_attempt_id,started_at)
+            VALUES (${op.id},${op.provider},${op.operationType},${op.stage},${op.requestedModel},${op.clientRequestId},${id},${attempt.id},${op.startedAt}::timestamptz)
+            ON CONFLICT DO NOTHING`;
+          await this.#insertProviderOperationResult(tx, op.id, op.result!);
+        }
+        await this.#appendTelemetry(tx, id, { callAttemptId: attempt.id, idempotencyKey: `answering:${attempt.id}:${input.kind}`,
+          occurredAt: input.now, payload: { name: "answering.updated", metadata: result.state } });
+      }
+      return result;
+    });
+  }
+
   async appendCallTelemetryEvent(
     id: string,
     input: CallTelemetryEventInput
@@ -4057,6 +4093,38 @@ export class PostgresCallRepository implements CallRepository {
       if (batch.length < 200) break;
     }
     return callOutcomeMetricsSchema.parse(metrics);
+  }
+
+  async refreshAnsweringApproval(id: string) {
+    return this.#sql.begin(async tx => {
+      const [brief] = await tx`SELECT status,current_compilation_id FROM call_briefs WHERE id=${id} FOR UPDATE`;
+      if (!brief || brief.status !== "ready") return false;
+      const attempts = await tx`SELECT id FROM call_attempts WHERE call_brief_id=${id} LIMIT 1`;
+      if (attempts.length) return false;
+      const [row] = await tx`SELECT c.compilation_ciphertext,a.execution_snapshot_ciphertext
+        FROM call_compilations c JOIN call_compilation_approvals a ON a.compilation_id=c.id WHERE c.id=${brief.current_compilation_id}`;
+      if (!row?.execution_snapshot_ciphertext || !row.compilation_ciphertext) return false;
+      const old = approvedExecutionSnapshotSchema.parse(decryptJson(row.execution_snapshot_ciphertext, this.#encryptionKey));
+      if (old.version === 3) return false;
+      const compilation = callCompilationSchema.parse(decryptJson(row.compilation_ciphertext, this.#encryptionKey));
+      compilation.revision += 1;
+      compilation.approvedAt = null;
+      compilation.compiledAt = new Date().toISOString();
+      compilation.snapshotHash = createCompilationSnapshotHash(compilation);
+      const next = await this.#insertCompilationRecord(tx,id,compilation,"native");
+      const readers = await tx`SELECT id FROM call_text_artifacts WHERE compilation_id=${brief.current_compilation_id}
+        AND kind='plan_review' AND status='ready' AND payload_ciphertext IS NOT NULL`;
+      for (const reader of readers) await tx`INSERT INTO call_text_artifacts
+        (id,call_brief_id,kind,compilation_id,source_hash,target_language,generator_version,status,payload_ciphertext,payload_hash)
+        SELECT ${randomUUID()},${id},kind,${next},${compilation.snapshotHash},target_language,generator_version,'ready',payload_ciphertext,payload_hash
+        FROM call_text_artifacts WHERE id=${reader.id} ON CONFLICT DO NOTHING`;
+      await tx`INSERT INTO call_compilation_review_policies(compilation_id,policy_version)
+        VALUES (${next},2) ON CONFLICT DO NOTHING`;
+      await tx`UPDATE call_briefs SET current_compilation_id=${next},status='review_required',updated_at=now() WHERE id=${id}`;
+      await publishLanguageContext(tx,id,compilation);
+      await this.#appendCompilationTelemetry(tx,id,compilation,compilation.compiledAt);
+      return true;
+    });
   }
 
   async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {
@@ -6027,7 +6095,7 @@ export class PostgresCallRepository implements CallRepository {
   async enqueueDurableJob(input: EnqueueDurableJobInput) {
     const now = new Date();
     const jobId = await this.#sql.begin(async (transaction) => {
-      const callTarget = input.type === "provider_call_reconciliation" ||
+      const callTarget = input.type === "answer_detection_timeout" || input.type === "provider_call_reconciliation" ||
         input.type === "provider_call_cost_reconciliation";
       const preparationTarget = input.type === "brief_compilation";
       const textTarget = input.type === "text_artifact_generation";

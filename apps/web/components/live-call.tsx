@@ -1,8 +1,10 @@
 "use client";
-import { canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
+import { answeringMessages } from "@/lib/i18n/answering-messages";
+import { answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { systemMessages } from "@/lib/i18n/system-messages";
 import { callStatusClass, callStatusLabel } from "@/lib/call-status";
+import { PreviousCallResult } from "./previous-call-result";
 import { CallLifecycleSummary } from "./call-lifecycle-summary";
 import { betaErrorMessage, betaMessages } from "@/lib/i18n/beta-messages";
 import { emailVerificationMessages } from "@/lib/i18n/email-verification-messages";
@@ -263,6 +265,12 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
       setSnapshot((current) => currentCallSnapshot(current, next));
       onSuccess?.();
     } catch (error) {
+      if (error instanceof ApiError && ["CALL_COMPILATION_STALE", "CALL_REVIEW_STALE"].includes(error.code)) {
+        const refreshed = await getCallSnapshot(callId).catch(() => null);
+        if (refreshed) setSnapshot(refreshed);
+        setActionError(answeringMessages[uiLocale].reviewAgain);
+        return;
+      }
       setActionError(
         betaErrorMessage(error, uiLocale) ?? (
         error instanceof ApiError && error.code === "CALL_LANGUAGE_FORBIDDEN"
@@ -488,8 +496,9 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const isActive = activeStatuses.has(brief.status);
   const isTerminal = isTerminalCallStatus(brief.status);
   const pendingCallStart = startingCall && !isActive && !isTerminal;
-  const activityPhase = callActivityPhase(brief.status, startingCall, connectionStatus);
+  const activityPhase = callActivityPhase(brief.status, startingCall, connectionStatus, brief.lifecycle);
   const hasTranscript = transcript.length > 0 || Object.keys(partialTranscript).length > 0;
+  const silentAutomatedCall = isTerminal && !!brief.lifecycle?.answering && brief.lifecycle.answering.decision !== "consent" && !recording && !hasTranscript;
   const callLanguageForbidden = !isCallLanguageAvailable(brief.locale, userRole) ||
     Boolean(brief.fallbackLocale && !isCallLanguageAvailable(brief.fallbackLocale, userRole));
   const preparationFailed = compilation ? isPlanPreparationFailure(compilation.policyDecision) : false;
@@ -618,10 +627,10 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           </div>
         </section>
 
-        {brief.retrySourceCallId && !isTerminal && !isActive ? <p className="inline-notice">{registrationCallMessages[uiLocale].retryHelp}</p> : null}
+        {brief.retrySourceCallId && !isTerminal && !isActive ? <><p className="inline-notice">{registrationCallMessages[uiLocale].retryHelp}</p><PreviousCallResult callId={brief.retrySourceCallId} locale={uiLocale} /></> : null}
         {compilation && !isTerminal && !isActive && appointmentPlanExpired(compilation) ? <p role="alert" className="inline-notice">{registrationCallMessages[uiLocale].appointmentExpired}</p> : null}
         {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
-        {isTerminal ? <CallLifecycleSummary lifecycle={brief.lifecycle} locale={uiLocale} /> : null}
+        {isTerminal ? <CallLifecycleSummary lifecycle={brief.lifecycle} locale={uiLocale} message={compilation?.compiledBrief ? answeringApproval(compilation.compiledBrief.voicemailAction, compilation.compiledBrief.callLocale).message : null} /> : null}
         {preparationProgress ? <CallPreparationStatus progress={preparationProgress} /> : null}
         {callLanguageForbidden && !isTerminal && !isActive ? (
           <div className="inline-notice" role="alert">
@@ -688,12 +697,12 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           }`}
         >
           <div className="transcript-column">
-            {isTerminal && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
+            {isTerminal && !silentAutomatedCall && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
               <button type="button" aria-pressed={transcriptView === "final"} onClick={() => setTranscriptView("final")}>{copy.finalTitle}</button>
               <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{systemMessages[uiLocale].provisionalTranscript}</button>
               <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
             </nav> : null}
-            <section className="transcript-card" tabIndex={-1} hidden={isTerminal && transcriptView !== "provisional"} ref={transcriptCardRef}>
+            <section className="transcript-card" tabIndex={-1} hidden={silentAutomatedCall || (isTerminal && transcriptView !== "provisional")} ref={transcriptCardRef}>
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">{copy.liveTranscriptEyebrow}</span>
@@ -788,7 +797,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
             ) : null}
             </section>
 
-            <section className="final-transcript-card" hidden={!isTerminal || transcriptView !== "final"}>
+            <section className="final-transcript-card" hidden={silentAutomatedCall || !isTerminal || transcriptView !== "final"}>
               <div className="final-transcript-heading">
                 <div>
                   <span className="eyebrow">

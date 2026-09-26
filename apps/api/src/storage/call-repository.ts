@@ -1,3 +1,4 @@
+import type { AnsweringTransitionInput, AnsweringTransitionResult } from "../telephony/answering-policy";
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
 import type { BetaControls } from "../beta/beta-controls";
 import type { RecipientOptOutStore } from "../safety/recipient-opt-out-store";
@@ -364,9 +365,9 @@ export type TelephonyProviderOperationInput = {
   callBriefId: string;
   callAttemptId: string;
   provider: "twilio";
-  operationType: "telephony_leg";
-  stage: "outbound_call";
-  requestedModel: "programmable_voice";
+  operationType: "telephony_leg" | "answering_detection" | "voicemail_tts";
+  stage: string;
+  requestedModel: string;
   clientRequestId: string;
   startedAt: string;
 };
@@ -861,6 +862,7 @@ export interface CallRepository extends CallTextRepository {
   get(id: string): Promise<CallSnapshot | null>;
   expireCallAssessments(now: string): Promise<void>;
   getCallAssessment(callId: string, attemptId: string): Promise<import("@callassist/contracts").CallAssessmentRecord | null>;
+  transitionAnswering(id: string, input: AnsweringTransitionInput): Promise<AnsweringTransitionResult>;
   appendCallTelemetryEvent(
     id: string,
     input: CallTelemetryEventInput
@@ -903,6 +905,7 @@ export interface CallRepository extends CallTextRepository {
     input: OwnerCallFeedbackInput
   ): Promise<CallOutcomeView>;
   getCallOutcomeMetrics(): Promise<CallOutcomeMetrics>;
+  refreshAnsweringApproval(id: string): Promise<boolean>;
   approveCompilation(
     id: string,
     expected?: CompilationReviewApprovalInput

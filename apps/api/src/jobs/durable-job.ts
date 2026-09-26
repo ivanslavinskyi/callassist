@@ -3,6 +3,7 @@ export const durableJobTypes = [
   "brief_compilation",
   "final_transcription",
   "recording_retention",
+  "answer_detection_timeout",
   "provider_call_reconciliation",
   "provider_call_cost_reconciliation",
   "provider_recording_reconciliation"
@@ -88,6 +89,7 @@ export const durableJobMaxAttempts: Record<DurableJobType, number> = {
   brief_compilation: 3,
   final_transcription: 3,
   recording_retention: 5,
+  answer_detection_timeout: 5,
   provider_call_reconciliation: 5,
   provider_call_cost_reconciliation: 20,
   provider_recording_reconciliation: 5

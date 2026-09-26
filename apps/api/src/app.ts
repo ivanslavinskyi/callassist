@@ -3047,7 +3047,7 @@ export function buildWebhookApp({
     await routes.register(websocket);
     await routes.register(formbody);
 
-    routes.post<{ Querystring: { callBriefId?: string } }>(
+    routes.post<{ Querystring: { callBriefId?: string; callAttemptId?: string; compilationSnapshotHash?: string } }>(
       "/webhooks/twilio/voice",
       async (request, reply) => {
         const receivedAt = new Date().toISOString();
@@ -3093,11 +3093,32 @@ export function buildWebhookApp({
             });
             return reply.status(409).send({ error: "CALL_ATTEMPT_NOT_FOUND" });
           }
-          const twiml = twilioProvider.createVoiceTwiml(snapshot.brief, {
-            callBriefId,
-            callAttemptId: attempt.id,
-            compilationSnapshotHash: attempt.compilationSnapshotHash
-          });
+          const binding = { callBriefId, callAttemptId: attempt.id, compilationSnapshotHash: attempt.compilationSnapshotHash };
+          let twiml = twilioProvider.createHangupTwiml();
+          if (attempt.executionSnapshot.version === 3) {
+            if (request.query.callAttemptId === attempt.id &&
+                request.query.compilationSnapshotHash === attempt.compilationSnapshotHash &&
+                parameters.CallSid && /^CA[0-9a-f]{32}$/i.test(parameters.CallSid)) {
+              const result = await service.transitionAnswering(callBriefId, {
+                attemptId: attempt.id, providerCallId: parameters.CallSid,
+                snapshotHash: attempt.compilationSnapshotHash, kind: "resolve",
+                answeredBy: parameters.AnsweredBy,
+                durationMs: optionalNonNegativeInteger(parameters.MachineDetectionDuration), now: receivedAt
+              });
+              if (result.applied && result.decision === "consent") {
+                twiml = twilioProvider.createVoiceTwiml(snapshot.brief, binding);
+              } else if (result.applied && result.decision === "message" && attempt.executionSnapshot.answering.message) {
+                twiml = twilioProvider.createVoicemailTwiml(attempt.executionSnapshot.answering.message,
+                  attempt.executionSnapshot.plan.callLocale, binding);
+              }
+              if (result.applied && result.decision === "hang_up") {
+                await service.prepareAgentHangup(callBriefId, attempt.id, parameters.CallSid);
+              }
+            }
+          } else if (attempt.providerCallId === parameters.CallSid && ["dialing", "in_progress"].includes(snapshot.brief.status)) {
+            // Already-started calls from an older deployment can finish unchanged.
+            twiml = twilioProvider.createVoiceTwiml(snapshot.brief, binding);
+          }
           await recordWebhookDelivery(request, {
             kind: "voice",
             outcome: "accepted",
@@ -3111,6 +3132,33 @@ export function buildWebhookApp({
             receivedAt,
             errorCode: webhookProcessingErrorCode(error)
           });
+          throw error;
+        }
+      }
+    );
+
+    routes.post<{ Querystring: { callBriefId?: string; callAttemptId?: string; compilationSnapshotHash?: string } }>(
+      "/webhooks/twilio/voicemail-complete", async (request, reply) => {
+        const receivedAt = new Date().toISOString();
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          await recordWebhookDelivery(request, { kind: "voice", outcome: "rejected", receivedAt, errorCode: "INVALID_TWILIO_SIGNATURE" });
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+        const { callBriefId, callAttemptId, compilationSnapshotHash } = request.query;
+        try {
+          if (!callBriefId || !callAttemptId || !compilationSnapshotHash || !parameters.CallSid) {
+            await recordWebhookDelivery(request, { kind: "voice", outcome: "rejected", receivedAt, errorCode: "CALL_BINDING_REQUIRED" });
+            return reply.status(400).send({ error: "CALL_BINDING_REQUIRED" });
+          }
+          const result = await service.transitionAnswering(callBriefId, { attemptId: callAttemptId,
+            providerCallId: parameters.CallSid, snapshotHash: compilationSnapshotHash,
+            kind: "complete", now: receivedAt });
+          if (result.applied) await service.prepareAgentHangup(callBriefId, callAttemptId, parameters.CallSid);
+          await recordWebhookDelivery(request, { kind: "voice", outcome: result.applied ? "accepted" : "unmatched", receivedAt });
+          return reply.type("text/xml; charset=utf-8").send(twilioProvider.createHangupTwiml());
+        } catch (error) {
+          await recordWebhookDelivery(request, { kind: "voice", outcome: "failed", receivedAt, errorCode: webhookProcessingErrorCode(error) });
           throw error;
         }
       }
@@ -3131,7 +3179,7 @@ export function buildWebhookApp({
       (socket) => realtimeBridge.handleTwilioSocket(socket)
     );
 
-    routes.post<{ Querystring: { callBriefId?: string } }>(
+    routes.post<{ Querystring: { callBriefId?: string; callAttemptId?: string; compilationSnapshotHash?: string } }>(
       "/webhooks/twilio/status",
       async (request, reply) => {
         const receivedAt = new Date().toISOString();
@@ -3163,12 +3211,22 @@ export function buildWebhookApp({
         }
 
         try {
+          const { callBriefId, callAttemptId, compilationSnapshotHash } = request.query;
+          if (callAttemptId || compilationSnapshotHash) {
+            if (!callBriefId || !callAttemptId || !compilationSnapshotHash) return reply.status(400).send({ error: "CALL_BINDING_REQUIRED" });
+            const bound = await service.transitionAnswering(callBriefId, {
+              attemptId: callAttemptId, providerCallId, snapshotHash: compilationSnapshotHash,
+              kind: "bind", now: receivedAt
+            });
+            if (!bound.applied) return reply.status(409).send({ error: "CALL_BINDING_MISMATCH" });
+          }
           const snapshot = await service.handleTwilioStatus(
             providerCallId,
             status,
             request.query.callBriefId,
             undefined,
             {
+              sipResponseCode: optionalNonNegativeInteger(parameters.SipResponseCode),
               durationSeconds: optionalNonNegativeInteger(
                 parameters.CallDuration
               ),

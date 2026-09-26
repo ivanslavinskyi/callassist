@@ -5,6 +5,7 @@ export async function originalPlanReview(reader: { get(id: string): Promise<Call
   const snapshot = await reader.get(id);
   if (!snapshot?.compilation) throw new Error("Fixture plan source is unavailable");
   return {
+    answeringPolicyVersion: "twilio-sync-beep-v1",
     revision: snapshot.compilation.revision, snapshotHash: snapshot.compilation.snapshotHash,
     review: { mode: "original", language: snapshot.compilation.rawBrief.locale,
       selectionRevision: snapshot.languageContext?.selectionRevision ?? 1 }

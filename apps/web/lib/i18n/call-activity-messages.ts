@@ -1,9 +1,10 @@
+import { answeringMessages } from "./answering-messages";
 import { extendMessages } from "./extend-messages";
 import type { UiLocale } from "./registry";
 import type { CallActivityPhase } from "../call-activity";
 
 type ActivityCopy = Record<CallActivityPhase, { label: string; title: (recipient: string) => string; help: string }>;
-export const callActivityMessages: Record<UiLocale, ActivityCopy> = extendMessages({
+const legacyActivityMessages = extendMessages({
   en: {
     starting: { label: "Starting your call", title: (name: string) => `Connecting to ${name}`, help: "Your call request is being sent. We'll show you when dialing begins." },
     dialing: { label: "Dialing", title: (name: string) => `Calling ${name}`, help: "Waiting for an answer. The transcript will appear after the recipient agrees to the conversation." },
@@ -19,3 +20,12 @@ export const callActivityMessages: Record<UiLocale, ActivityCopy> = extendMessag
     reconnecting: { label: "Anrufstatus wird aktualisiert", title: () => "Live-Verbindung wird wiederhergestellt", help: "Der Anruf läuft möglicherweise weiter. Wir stellen die Verbindung wieder her, um den aktuellen Status zu prüfen." }
   }
 });
+
+export const callActivityMessages = Object.fromEntries(Object.entries(legacyActivityMessages).map(([key, copy]) => {
+  const messages = answeringMessages[key as UiLocale];
+  return [key, { ...copy,
+    checking: { label: messages.checking, title: () => messages.checking, help: messages.checkingHelp },
+    consent: { label: messages.consent, title: () => messages.consent, help: messages.consentHelp },
+    machine: { label: messages.results.automated_answer[0], title: () => messages.results.automated_answer[0], help: messages.uncertainty }
+  }];
+})) as unknown as Record<UiLocale, ActivityCopy>;

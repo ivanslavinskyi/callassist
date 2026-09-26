@@ -249,6 +249,7 @@ const en = {
     final_transcription: "Final transcription",
     text_artifact_generation: "Text translation and call summary",
     recording_retention: "Recording retention",
+    answer_detection_timeout: "Answer detection recovery",
     provider_call_reconciliation: "Provider call reconciliation",
     provider_call_cost_reconciliation: "Provider call cost reconciliation",
     provider_recording_reconciliation: "Provider recording reconciliation"
@@ -553,6 +554,7 @@ const de: AdminOperationsCopy = {
     final_transcription: "Finale Transkription",
     text_artifact_generation: "Textübersetzung und Gesprächszusammenfassung",
     recording_retention: "Aufzeichnungsaufbewahrung",
+    answer_detection_timeout: "Antwortprüfung wiederherstellen",
     provider_call_reconciliation: "Anbieterabgleich für Anruf",
     provider_call_cost_reconciliation: "Anbieterkostenabgleich für Anruf",
     provider_recording_reconciliation: "Anbieterabgleich für Aufzeichnung"

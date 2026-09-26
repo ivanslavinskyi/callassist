@@ -1,6 +1,6 @@
 # Local testing on `feat/gpt-live-pilot`
 
-Updated 2026-09-25. Start from the existing local `.env`; keep credentials and
+Updated 2026-09-26. Start from the existing local `.env`; keep credentials and
 temporary tunnel URLs out of Git. This procedure does not authorize a production
 rollout. The implementation checkpoint is `457c9b2`; see the
 [validation record](registration-and-call-improvements-2026-09-25.md).
@@ -16,11 +16,16 @@ readiness; the next user-driven call is still the manual acceptance step.
 
 ## Database and processes
 
+The 26 September AMD implementation requires fresh real-call acceptance. Follow
+[AMD/voicemail acceptance](amd-voicemail-beta.md) for the human, silent voicemail,
+neutral-message, unknown, fax and no-answer verifier profiles. The September 25
+calls predate AMD. Keep Live fallback disabled during this acceptance session.
+
 1. Install the locked dependencies with Node.js 22.19+ and pnpm 10.12.4.
    For a new checkout, `corepack pnpm env:init` creates local keys without replacing
    an existing `.env`. Check the database host/name before running migrations.
 2. Run `corepack pnpm db:up`, then `corepack pnpm db:migrate`. The current catalog
-   ends at `0083_call_retry_sources.sql`. Preserve existing accounts and keys.
+   ends at `0084_answering_detection.sql`. Preserve existing accounts and keys.
    Automated integration tests require a separate disposable `*_test` database;
    never point `TEST_DATABASE_URL` at the application database.
 3. For real calls, configure `TELEPHONY_DRIVER=twilio`, `BRIEF_COMPILER_DRIVER=openai`,

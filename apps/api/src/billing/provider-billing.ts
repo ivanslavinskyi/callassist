@@ -12,7 +12,7 @@ export type BillingSnapshot = {
 };
 
 // These are independent categories. Never sum parent + child (e.g. SMS/Authy).
-export const twilioBillingCategories = ["calls-outbound", "calls-inbound", "calls-media-stream-minutes", "sms", "authy-phone-verifications", "phonenumbers", "recordingstorage"] as const;
+export const twilioBillingCategories = ["calls-outbound", "calls-inbound", "calls-media-stream-minutes", "answering-machine-detection", "amazon-polly", "sms", "authy-phone-verifications", "phonenumbers", "recordingstorage"] as const;
 export function twilioBillingComponents(totalMicros: number, amounts: Map<string, number>): BillingComponent[] {
   const components = twilioBillingCategories.filter(key => amounts.has(key)).map(key => ({ key, amountMicros: amounts.get(key)! }));
   const remainder = totalMicros - components.reduce((sum, item) => sum + item.amountMicros, 0);

@@ -7,6 +7,8 @@ export async function runVoiceRuntimeSmoke(environment = process.env, dependenci
   if (!["realtime", "live"].includes(driver)) throw new Error("VOICE_SMOKE_DRIVER must be realtime or live");
   const url = new URL(environment.REAL_CALL_DRILL_API_URL || "http://127.0.0.1:4000");
   if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Voice smoke requires a local API");
+  const scenario = environment.VOICE_SMOKE_SCENARIO || "human";
+  if (!["human", "voicemail_silent", "voicemail_message", "unknown", "fax", "no_answer"].includes(scenario)) throw new Error("VOICE_SMOKE_SCENARIO is invalid");
   const mode = environment.VOICE_SMOKE_MODE || "prepare";
   if (mode !== "verify") {
     if (!["prepare", "start"].includes(mode)) throw new Error("VOICE_SMOKE_MODE must be prepare, start or verify");
@@ -16,15 +18,33 @@ export async function runVoiceRuntimeSmoke(environment = process.env, dependenci
   const callId = environment.REAL_CALL_DRILL_CALL_ID;
   if (!/^[a-f0-9-]{36}$/i.test(callId ?? "")) throw new Error("A prepared call UUID is required");
   const facts = await (dependencies.readFacts ?? readFacts)(environment.DATABASE_URL, callId);
-  const failures = assessVoiceSmoke(facts, driver);
-  const report = { driver, callId, passed: failures.length === 0, failures, facts };
+  const failures = assessVoiceSmoke(facts, driver, scenario);
+  const report = { driver, scenario, callId, passed: failures.length === 0, failures, facts };
   (dependencies.write ?? (value => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)))(report);
   if (failures.length) throw new Error(`VOICE_SMOKE_FAILED: ${failures.join(",")}`);
   return report;
 }
 
-export function assessVoiceSmoke(facts, driver) {
+export function assessVoiceSmoke(facts, driver, scenario = "human") {
   const failures = [];
+  if (scenario !== "human") {
+    if (!facts.terminal) failures.push("provider_not_terminal");
+    if (facts.consent || facts.recording || facts.finalTranscript || facts.openaiOperations > 0 || facts.toolResults > 0) failures.push("unexpected_conversation_side_effect");
+    if (facts.creditReturned !== true) failures.push("credit_not_returned");
+    if (facts.unfinishedOperations > 0) failures.push("provider_operations_unfinished");
+    const answer = facts.answering;
+    if (scenario === "no_answer") {
+      if (!["busy", "no-answer", "canceled"].includes(facts.providerStatus)) failures.push("unexpected_provider_status");
+    } else {
+      if (!answer || answer.phase !== "resolved") failures.push("amd_result_missing");
+      if (scenario === "voicemail_silent" && (!["machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other"].includes(answer?.answeredBy) || answer?.decision !== "hang_up" || facts.voicemailOperations > 0)) failures.push("silent_voicemail_policy_failed");
+      if (scenario === "voicemail_message" && (answer?.answeredBy !== "machine_end_beep" || answer?.message !== "playback_completed" || facts.voicemailOperations !== 1)) failures.push("voicemail_playback_not_confirmed");
+      if (scenario === "unknown" && (answer?.answeredBy !== "unknown" || facts.voicemailOperations > 0)) failures.push("unknown_not_silent");
+      if (scenario === "fax" && (answer?.answeredBy !== "fax" || facts.voicemailOperations > 0)) failures.push("fax_not_silent");
+    }
+    return failures;
+  }
+  if (facts.answering?.answeredBy !== "human" || !facts.answering?.streamAdmitted) failures.push("amd_human_admission_missing");
   if (!facts.completed) failures.push("call_not_completed");
   if (!facts.consent) failures.push("consent_missing");
   if (!facts.hangup) failures.push("application_hangup_missing");
@@ -51,6 +71,15 @@ async function readFacts(databaseUrl, callId) {
   try {
     const [facts] = await sql`
       SELECT
+        (SELECT metadata FROM call_events WHERE call_brief_id=${callId}::uuid AND event_name='answering.updated' ORDER BY sequence DESC LIMIT 1) AS answering,
+        (SELECT provider_status FROM call_attempts WHERE call_brief_id=${callId}::uuid ORDER BY created_at DESC LIMIT 1) AS "providerStatus",
+        EXISTS(SELECT 1 FROM call_attempts WHERE call_brief_id=${callId}::uuid AND ended_at IS NOT NULL
+          AND provider_status IN ('completed','failed','busy','no-answer','canceled')) AS terminal,
+        EXISTS(SELECT 1 FROM call_events WHERE call_brief_id=${callId}::uuid AND event_name='credit.settled' AND metadata->>'settlement'='refund') AS "creditReturned",
+        EXISTS(SELECT 1 FROM call_recordings WHERE call_brief_id=${callId}::uuid) AS recording,
+        (SELECT count(*)::integer FROM provider_operations WHERE call_brief_id=${callId}::uuid AND provider='openai') AS "openaiOperations",
+        (SELECT count(*)::integer FROM provider_operations WHERE call_brief_id=${callId}::uuid AND operation_type='voicemail_tts') AS "voicemailOperations",
+        (SELECT count(*)::integer FROM call_events WHERE call_brief_id=${callId}::uuid AND event_name='conversation.tool_result') AS "toolResults",
         EXISTS(SELECT 1 FROM call_attempts WHERE call_brief_id=${callId}::uuid AND provider_status='completed') AS completed,
         EXISTS(SELECT 1 FROM call_recordings WHERE call_brief_id=${callId}::uuid AND consent_granted_at IS NOT NULL) AS consent,
         (EXISTS(SELECT 1 FROM call_events WHERE call_brief_id=${callId}::uuid AND event_name='conversation.hangup'

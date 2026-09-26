@@ -51,6 +51,7 @@ export function priceBudgetOperation(operation: BudgetOperation): number | null 
   };
   const priced = calculateProviderUsageCost(bucket);
   if (!priced.matched || priced.calculatedUsdMicros === null || priced.unpricedMetrics.length) return null;
+  if (operation.provider === "twilio" && ["answering_detection", "voicemail_tts"].includes(operation.operationType)) return priced.calculatedUsdMicros;
   if (priced.durationUsdMicros !== null) return priced.calculatedUsdMicros;
   // Token totals and all billable input/output modalities must be present.
   const audio = operation.operationType === "realtime_response" && operation.stage !== "live_delegation";
@@ -86,7 +87,8 @@ export function accountBudgetReservation(reservation: BudgetReservation): Amount
   }
   // Successful session closure follows queued response writes. Missing sessions
   // on a connected call or uncertain transport termination keep the reservation.
-  if (reservation.call?.providerStatus === "completed" && sessions.length === 0) complete = false;
+  const silentAnswer = operations.some(o => o.operationType === "answering_detection" && o.outcome === "succeeded" && o.stage !== "answer.human");
+  if (reservation.call?.providerStatus === "completed" && sessions.length === 0 && !silentAnswer) complete = false;
   if (sessions.some(o => o.outcome !== "succeeded")) complete = false;
   for (const operation of operations) {
     if (legs.includes(operation) || (sessions.includes(operation) && operation.stage !== "live_conversation")) continue;

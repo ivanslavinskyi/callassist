@@ -4,6 +4,8 @@ import { formatLocale } from "@callassist/contracts";
 import { AdminCostBreakdown } from "./admin-cost-breakdown";
 import { AdminGoalAssessments } from "./admin-goal-assessments";
 import { callResultCopy } from "@/lib/call-status";
+import { answeringMessages } from "@/lib/i18n/answering-messages";
+import type { AnsweringState } from "@callassist/contracts";
 import type { CallResult } from "@callassist/contracts";
 
 import type {
@@ -124,6 +126,12 @@ export function AdminOperationsDashboard() {
               </tbody></table>
             </OperationsSection> : null}
             <AdminGoalAssessments overview={overview} locale={locale} />
+            {overview.lifecycle?.messages ? <OperationsSection title="Voicemail playback · latest attempt">
+              <p>{answeringMessages[locale].uncertainty}</p>
+              <table className="admin-volume-table"><thead><tr><th scope="col">Message state</th><th scope="col">Calls</th></tr></thead><tbody>
+                {Object.entries(overview.lifecycle.messages).map(([state, count]) => <tr key={state}><th scope="row">{answeringMessages[locale].message[state as AnsweringState["message"]]}</th><td>{count}</td></tr>)}
+              </tbody></table>
+            </OperationsSection> : null}
             <OperationsSection title={copy.ratesTitle}>
               <div className="admin-metric-grid admin-rate-grid">
                 <RatioCard copy={copy} label={copy.connectionRate} locale={locale} ratio={overview.rates.connection} />

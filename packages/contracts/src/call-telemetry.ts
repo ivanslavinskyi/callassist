@@ -1,3 +1,4 @@
+import { answeringStateSchema } from "./call-answering";
 import { z } from "zod";
 import {
   callBriefStatusSchema,
@@ -31,6 +32,8 @@ export const consentEvidenceSchema = z.discriminatedUnion("method", [
 export type ConsentEvidence = z.infer<typeof consentEvidenceSchema>;
 
 export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
+  z.strictObject({ name: z.literal("answering.updated"), metadata: answeringStateSchema }),
+  z.strictObject({ name: z.literal("provider.sip_response"), metadata: z.strictObject({ code: z.number().int().min(100).max(699) }) }),
   z.strictObject({
     name: z.literal("call.stop"),
     metadata: z.strictObject({
@@ -326,6 +329,8 @@ export function describeCallTelemetryEvent(
     case "compilation.approved":
       return { source: "api", stage: "approval", severity: "info" };
     case "attempt.started":
+    case "answering.updated":
+    case "provider.sip_response":
     case "provider.call_created":
     case "provider.status_changed":
       return { source: "telephony", stage: "provider", severity: "info" };

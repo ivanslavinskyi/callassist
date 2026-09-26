@@ -24,6 +24,11 @@ See the [Live pilot](docs/gpt-live-pilot.md),
 [local testing runbook](docs/local-testing.md) and [documentation index](docs/README.md).
 Earlier audits remain dated evidence, not proof of the current deployment.
 
+The current branch also implements [AMD and voicemail beta](docs/amd-voicemail-beta.md):
+silent answer detection before consent, one approved neutral message after a beep,
+separate lifecycle results, repeat review and provider accounting. Its real-call
+acceptance is still required before production rollout.
+
 ## Implemented product
 
 - Authenticated DE/FR/IT/RM/EN/RU/UK customer application, account recovery, verified phone/email

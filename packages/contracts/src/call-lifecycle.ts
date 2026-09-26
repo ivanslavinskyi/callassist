@@ -1,3 +1,4 @@
+import { answeringResult, answeringStateSchema, answeringResultSchema } from "./call-answering";
 import { callAssessmentSummarySchema, goalAssessmentCountsSchema, emptyGoalAssessmentCounts, countGoalAssessment, type CallAssessmentRecord } from "./call-assessment";
 import { z } from "zod";
 import type { CallBriefStatus } from "./call-brief";
@@ -5,20 +6,22 @@ import type { DurableCallEvent } from "./call-telemetry";
 
 export const callResultSchema = z.enum([
   "conversation_completed", "no_answer", "busy", "canceled", "consent_declined",
-  "consent_not_received", "no_substantive_answer", "assessment_pending", "assessment_unavailable", "technical_failure", "stopped", "ended"
+  "consent_not_received", "no_substantive_answer", "assessment_pending", "assessment_unavailable", "technical_failure", "stopped", "ended", ...answeringResultSchema.options
 ]);
 export type CallResult = z.infer<typeof callResultSchema>;
 
 export const callLifecycleSchema = z.strictObject({
   result: callResultSchema.nullable(),
   assessment: callAssessmentSummarySchema.optional(),
+  answering: answeringStateSchema.optional(),
+  sipResponseCode: z.number().int().min(100).max(699).optional(),
   eventSequence: z.number().int().nonnegative(),
   attemptedAt: z.iso.datetime().nullable(),
   ringingAt: z.iso.datetime().nullable(),
   connected: z.boolean(),
   connectedAt: z.iso.datetime().nullable(),
   disclosureAt: z.iso.datetime().nullable(),
-  consent: z.enum(["not_recorded", "granted", "declined", "not_received"]),
+  consent: z.enum(["not_recorded", "granted", "declined", "not_received", "not_requested"]),
   consentAt: z.iso.datetime().nullable(),
   conversationStartedAt: z.iso.datetime().nullable(),
   substantiveAnswerConfirmed: z.boolean(),
@@ -58,6 +61,8 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
   for (const event of current) {
     const { payload, occurredAt } = event;
     switch (payload.name) {
+      case "answering.updated": value.answering = payload.metadata; break;
+      case "provider.sip_response": value.sipResponseCode = payload.metadata.code; break;
       case "attempt.started": value.attemptedAt = occurredAt; break;
       case "provider.status_changed":
         if (!payload.metadata.applied) break;
@@ -114,7 +119,10 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
   const assessment = assessments.find(a=>a.callAttemptId === current.find(e=>e.payload.name === "attempt.started")?.callAttemptId)?.summary;
   if (assessment) value.assessment = assessment;
   value.substantiveAnswerConfirmed = value.consent === "granted" && (assessment?.status === "ready" ? assessment.conversation === "confirmed" : qualifiedCharge);
+  if (value.answering && !value.disclosureAt && value.consent === "not_recorded") value.consent = "not_requested";
   if (!terminal) return value;
+  if (value.answering?.message === "issued") value.answering = { ...value.answering,
+    message: value.stopRequestedBy ? "interrupted" : "unknown" };
   if (value.connected && value.consent === "not_recorded") value.consent = "not_received";
   if (providerResult === "no-answer" && !value.connected) value.result = "no_answer";
   else if (providerResult === "busy" && !value.connected) value.result = "busy";
@@ -124,6 +132,9 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
   else if (value.consent === "granted" && (assessment?.status === "unavailable" || assessment?.conversation === "uncertain")) value.result = "assessment_unavailable";
   else if (status === "stopped" || value.endedBy === "user" || value.endedBy === "system") value.result = "stopped";
   else if (value.consent === "declined") value.result = "consent_declined";
+  else if (technicalFailure || providerResult === "failed") value.result = "technical_failure";
+  else if (value.answering?.phase === "pending" && value.connected) value.result = "answer_detection_failed";
+  else if (value.answering && answeringResult(value.answering) && !value.conversationStartedAt && value.consent !== "granted") value.result = answeringResult(value.answering);
   else if (technicalFailure || providerResult === "failed" || status === "failed") value.result = "technical_failure";
   else if (value.consent === "granted") value.result = "no_substantive_answer";
   else if (value.connected) value.result = "consent_not_received";
@@ -134,13 +145,16 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
 export const callLifecycleCountsSchema = z.strictObject({
   results: z.record(callResultSchema, z.number().int().nonnegative()),
   conversations: z.number().int().nonnegative(),
+  messages: z.record(answeringStateSchema.shape.message, z.number().int().nonnegative()).optional(),
   goals: goalAssessmentCountsSchema.optional()
 });
 export type CallLifecycleCounts = z.infer<typeof callLifecycleCountsSchema>;
 export function emptyCallLifecycleCounts(): CallLifecycleCounts {
-  return { results: Object.fromEntries(callResultSchema.options.map((key) => [key, 0])) as Record<CallResult, number>, conversations: 0, goals: emptyGoalAssessmentCounts() };
+  return { results: Object.fromEntries(callResultSchema.options.map((key) => [key, 0])) as Record<CallResult, number>, conversations: 0, goals: emptyGoalAssessmentCounts(),
+    messages: Object.fromEntries(answeringStateSchema.shape.message.options.map(key => [key, 0])) as NonNullable<CallLifecycleCounts["messages"]> };
 }
 export function countCallLifecycle(counts: CallLifecycleCounts, lifecycle: CallLifecycle) {
+  if (counts.messages && lifecycle.answering) counts.messages[lifecycle.answering.message] += 1;
   if (counts.goals) countGoalAssessment(counts.goals,lifecycle.assessment);
   if (lifecycle.result) counts.results[lifecycle.result] += 1;
   if (lifecycle.substantiveAnswerConfirmed) counts.conversations += 1;

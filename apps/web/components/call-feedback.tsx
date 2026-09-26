@@ -99,6 +99,7 @@ export function CallFeedback({
     }
   }
 
+  if (brief.lifecycle?.answering && brief.lifecycle.answering.decision !== "consent" && !hasCompletedTranscript && !view?.latestFeedback) return null;
   return (
     <section id="call-feedback" className="call-feedback-card" aria-labelledby="call-feedback-title">
       <span className="eyebrow">{copy.feedbackEyebrow}</span>

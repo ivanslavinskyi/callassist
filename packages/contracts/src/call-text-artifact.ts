@@ -76,6 +76,6 @@ export const reviewEvidenceSchema = z.discriminatedUnion("mode", [
 ]);
 export type ReviewEvidence = z.infer<typeof reviewEvidenceSchema>;
 export const compilationReviewApprovalInputSchema = z.strictObject({
-  revision: z.number().int().positive(), snapshotHash: hashSchema, review: reviewEvidenceSchema.optional()
+  revision: z.number().int().positive(), snapshotHash: hashSchema, answeringPolicyVersion: z.string().max(80).optional(), review: reviewEvidenceSchema.optional()
 });
 export type CompilationReviewApprovalInput = z.infer<typeof compilationReviewApprovalInputSchema>;

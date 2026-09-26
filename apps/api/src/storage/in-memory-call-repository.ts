@@ -1,3 +1,6 @@
+import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
+import { answeringUsage } from "../telephony/answering-usage";
+import { transitionAnswering, type AnsweringTransitionInput } from "../telephony/answering-policy";
 import { historyObjective } from "./history-objective";
 import { assertRetryableCall } from "./call-retry";
 import { appointmentPlanExpired } from "@callassist/contracts";
@@ -1650,6 +1653,28 @@ export class InMemoryCallRepository implements CallRepository {
     return copy(context);
   }
 
+  async transitionAnswering(id: string, input: AnsweringTransitionInput) {
+    const brief = this.#require(id).brief;
+    const attempt = this.#attempts.get(id)?.find(a => a.id === input.attemptId);
+    if (!attempt) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    const latest = this.#attempts.get(id)?.at(-1);
+    const events = (this.#callTelemetryEvents.get(id) ?? []).map(e => e.event).filter(e => e.callAttemptId === input.attemptId);
+    const event = events.findLast(e => e.payload.name === "answering.updated");
+    const current = event?.payload.name === "answering.updated" ? event.payload.metadata : null;
+    const active = latest?.id === attempt.id && ["dialing", "in_progress"].includes(brief.status) &&
+      !events.some(e => e.payload.name === "call.stop" && e.payload.metadata.phase === "requested");
+    const result = transitionAnswering(attempt, current, input, active);
+    if (result.applied && result.state) {
+      attempt.providerCallId ??= input.providerCallId;
+      if (input.kind === "resolve" || input.kind === "timeout") for (const op of answeringUsage(attempt, result.state!)) {
+        if (!this.#providerOperations.has(op.id)) this.#providerOperations.set(op.id, op);
+      }
+      this.#appendTelemetry(id, { callAttemptId: attempt.id, idempotencyKey: `answering:${attempt.id}:${input.kind}`,
+        occurredAt: input.now, payload: { name: "answering.updated", metadata: result.state } });
+    }
+    return copy(result);
+  }
+
   async appendCallTelemetryEvent(
     id: string,
     input: CallTelemetryEventInput
@@ -2198,7 +2223,7 @@ export class InMemoryCallRepository implements CallRepository {
           ({ type }) => type === "recording_retention"
         ).length,
         providerReconciliationQueued: queued.filter(({ type }) =>
-          type === "provider_call_reconciliation" ||
+          type === "answer_detection_timeout" || type === "provider_call_reconciliation" ||
           type === "provider_call_cost_reconciliation" ||
           type === "provider_recording_reconciliation"
         ).length,
@@ -2441,6 +2466,23 @@ export class InMemoryCallRepository implements CallRepository {
       if (stage) metrics.technicalFailures[stage] += 1;
     }
     return callOutcomeMetricsSchema.parse(metrics);
+  }
+
+  async refreshAnsweringApproval(id: string) {
+    const snapshot = this.#require(id);
+    if (snapshot.brief.status !== "ready" || !snapshot.compilation || (this.#attempts.get(id)?.length ?? 0) > 0) return false;
+    if (this.#currentCompilation(id).executionSnapshot?.version === 3) return false;
+    const compilation = { ...copy(snapshot.compilation), revision: snapshot.compilation.revision + 1,
+      approvedAt: null, compiledAt: new Date().toISOString() };
+    compilation.snapshotHash = createCompilationSnapshotHash(compilation);
+    const readers = this.#callText.listTextArtifacts(id).filter(a => a.kind === "plan_review" && a.status === "ready" && a.sourceHash === snapshot.compilation!.snapshotHash);
+    await this.recompile(id, compilation.rawBrief, compilation);
+    for (const reader of readers) {
+      const readerId = randomUUID();
+      this.#callText.artifacts.set(readerId, { ...copy(reader), id: readerId, compilationId: this.#currentCompilation(id).id,
+        sourceHash: compilation.snapshotHash, createdAt: compilation.compiledAt, updatedAt: compilation.compiledAt, retryable: false });
+    }
+    return true;
   }
 
   async approveCompilation(
@@ -4116,7 +4158,7 @@ export class InMemoryCallRepository implements CallRepository {
       };
     }
     if (
-      input.type === "provider_call_reconciliation" ||
+      input.type === "answer_detection_timeout" || input.type === "provider_call_reconciliation" ||
       input.type === "provider_call_cost_reconciliation"
     ) {
       if (!input.callAttemptId || input.recordingId || input.callPreparationId) {

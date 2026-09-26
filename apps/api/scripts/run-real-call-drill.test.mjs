@@ -58,7 +58,7 @@ describe("non-billable drill harness", () => {
     expect(h.requests.some((r) => r.path.startsWith("/api/call-preparations"))).toBe(false);
     expect(h.requests.filter((r) => r.path.endsWith("approve-and-start"))).toHaveLength(1);
     expect(JSON.parse(h.requests.find((r) => r.path.endsWith("approve-and-start")).body))
-      .toEqual({ revision: 1, snapshotHash, review: { mode: "original", language: "ru-RU", selectionRevision: 1 } });
+      .toEqual({ answeringPolicyVersion: "twilio-sync-beep-v1", revision: 1, snapshotHash, review: { mode: "original", language: "ru-RU", selectionRevision: 1 } });
   });
   it("refuses to approve a changed plan after the prepare/review boundary", async () => {
     const h = harness();

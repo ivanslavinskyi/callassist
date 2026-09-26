@@ -155,16 +155,16 @@ it("admits two global calls, enforces per-account limits, and reserves the admit
   expect(admitted).toHaveLength(2);
   expect(attempts.find(r=>r.status==="rejected")).toMatchObject({reason:{code:"BETA_CONCURRENCY_LIMIT"}});
   expect(admitted.every(a=>a.attempt.maxDurationSeconds===420)).toBe(true);
-  expect(await f.controls.getView()).toMatchObject({activeCalls:2,reservedMicros:28_000_000});
+  expect(await f.controls.getView()).toMatchObject({activeCalls:2,reservedMicros:28_020_000});
   await f.controls.update({...f.settings,maxConcurrentCalls:3,maxDurationSeconds:300},2,f.admin.id,"Changed limits for new starts");
   const sameOwner = await f.ready(admitted[0].owner.id);
   await expect(f.repository.startAttempt(sameOwner.id,{provider:"twilio",userId:admitted[0].owner.id})).rejects.toMatchObject({code:"CONCURRENT_CALL_LIMIT"});
-  expect(await f.controls.getView()).toMatchObject({reservedMicros:28_000_000});
+  expect(await f.controls.getView()).toMatchObject({reservedMicros:28_020_000});
   await f.repository.attachProviderCall(admitted[0].attempt.id,"CA-beta-one","queued");
   await f.repository.applyProviderStatus("CA-beta-one","busy","failed");
   const fresh = await f.repository.startAttempt(sameOwner.id,{provider:"twilio",userId:admitted[0].owner.id});
   expect(fresh.attempt.maxDurationSeconds).toBe(300);
-  expect(await f.controls.getView()).toMatchObject({reservedMicros:38_000_000});
+  expect(await f.controls.getView()).toMatchObject({reservedMicros:38_030_000});
   const stored = await f.sql`SELECT max_duration_seconds FROM call_attempts WHERE id=${admitted[0].attempt.id}`;
   expect(stored[0].max_duration_seconds).toBe(420);
   await f.repository.setOutboundCallsEnabled(false,{actorUserId:f.admin.id,reason:"Stop drill"});
@@ -188,7 +188,7 @@ it("keeps uncertain provider calls in concurrency counts and recipient limits su
   // Redaction of the original destination must not free the global recipient slot.
   await f.sql`UPDATE call_briefs SET phone_number='+41000000000' WHERE id=${first.id}`;
   await expect(f.repository.startAttempt(next.id, { provider: "twilio", userId: nextOwner.id })).rejects.toMatchObject({ code: "BETA_RECIPIENT_LIMIT" });
-  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 14_000_000 });
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 14_010_000 });
   await f.sql`UPDATE beta_recipient_starts SET created_at=now()-interval '25 hours'`;
   await expect(f.repository.startAttempt(next.id, { provider: "twilio", userId: nextOwner.id })).resolves.toBeDefined();
   expect((await f.sql`SELECT * FROM beta_recipient_starts`).count).toBe(1);
@@ -283,7 +283,7 @@ it("accounts for a terminal call only after its provider cost arrives; late cost
   await f.sql`INSERT INTO provider_usage_records(id,operation_id,schema_version,input_text_tokens,output_text_tokens,input_audio_tokens,output_audio_tokens,total_tokens,raw_usage,observed_at)
     VALUES(${randomUUID()},${response},1,1000,100,500,1000,2600,'{}',now())`;
   await f.sql`UPDATE call_attempts SET ended_at=now(),provider_status='completed' WHERE id=${attempt.id}`;
-  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 4_200_000 });
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 4_210_000 });
   await f.sql`INSERT INTO provider_cost_records(id,operation_id,provider,provider_cost_id,cost_basis,component,amount_micros,currency,raw_cost,observed_at)
     VALUES(${randomUUID()},${leg},'twilio',${leg},'provider_reported_actual','connectivity',360400,'USD','{}',now())`;
   expect(await f.controls.getView()).toMatchObject({ reservedMicros: 466_800, reportedCostMicros: 360_400, usageCostMicros: 86_400, pendingReserveMicros: 20_000 });

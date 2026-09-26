@@ -288,25 +288,6 @@ describe("OpenAIRealtimeBridge", () => {
     };
     emitJson(harness.openAISocket, responseDone);
     emitJson(harness.openAISocket, responseDone);
-    emitJson(harness.openAISocket, {
-      type: "response.created",
-      response: { id: "resp_usage_cancelled", status: "in_progress" }
-    });
-    emitJson(harness.openAISocket, {
-      event_id: "evt_response_done_cancelled",
-      type: "response.done",
-      response: {
-        id: "resp_usage_cancelled",
-        status: "cancelled",
-        usage: {
-          input_tokens: 3,
-          output_tokens: 1,
-          total_tokens: 4,
-          input_token_details: { text_tokens: 3, audio_tokens: 0 },
-          output_token_details: { text_tokens: 0, audio_tokens: 1 }
-        }
-      }
-    });
     const mainTranscription = {
       event_id: "evt_transcription_main_1",
       type: "conversation.item.input_audio_transcription.completed",
@@ -328,6 +309,25 @@ describe("OpenAIRealtimeBridge", () => {
       item_id: "item_consent_1",
       transcript: "Vielleicht",
       usage: { type: "duration", seconds: 1.25 }
+    });
+    emitJson(harness.openAISocket, {
+      type: "response.created",
+      response: { id: "resp_usage_cancelled", status: "in_progress" }
+    });
+    emitJson(harness.openAISocket, {
+      event_id: "evt_response_done_cancelled",
+      type: "response.done",
+      response: {
+        id: "resp_usage_cancelled",
+        status: "cancelled",
+        usage: {
+          input_tokens: 3,
+          output_tokens: 1,
+          total_tokens: 4,
+          input_token_details: { text_tokens: 3, audio_tokens: 0 },
+          output_token_details: { text_tokens: 0, audio_tokens: 1 }
+        }
+      }
     });
     emitJson(harness.twilioSocket, { event: "stop" });
     await new Promise((resolve) => setImmediate(resolve));
@@ -430,6 +430,7 @@ describe("OpenAIRealtimeBridge", () => {
     emitJson(twilioSocket, {
       event: "start",
       start: {
+        callSid: "CA-HANGUP",
         streamSid: "MZ-UNAPPROVED",
         customParameters: {
           callBriefId: created.id,
@@ -463,6 +464,7 @@ describe("OpenAIRealtimeBridge", () => {
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
+    await service.repository.transitionAnswering(created.id, { attemptId: reserved.attempt.id, providerCallId: "CA-HANGUP", snapshotHash: reserved.attempt.compilationSnapshotHash!, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
     vi.spyOn(service, "startRealtimeProviderSessions").mockRejectedValue(
       new Error("ledger unavailable")
     );
@@ -481,6 +483,7 @@ describe("OpenAIRealtimeBridge", () => {
     emitJson(twilioSocket, {
       event: "start",
       start: {
+        callSid: "CA-HANGUP",
         streamSid: "MZ-LEDGER-FAILURE",
         customParameters: {
           callBriefId: created.id,
@@ -516,6 +519,7 @@ describe("OpenAIRealtimeBridge", () => {
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
+    await service.repository.transitionAnswering(created.id, { attemptId: reserved.attempt.id, providerCallId: "CA-HANGUP", snapshotHash: reserved.attempt.compilationSnapshotHash!, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
     const twilioSocket = new FakeSocket();
     let providerSocketCount = 0;
     const bridge = new OpenAIRealtimeBridge({
@@ -532,6 +536,7 @@ describe("OpenAIRealtimeBridge", () => {
     emitJson(twilioSocket, {
       event: "start",
       start: {
+        callSid: "CA-HANGUP",
         streamSid: "MZ-MISMATCHED",
         customParameters: {
           callBriefId: created.id,
@@ -594,6 +599,7 @@ describe("OpenAIRealtimeBridge", () => {
     emitJson(twilioSocket, {
       event: "start",
       start: {
+        callSid: "CA-HANGUP",
         streamSid: "MZ-LEGACY",
         customParameters: {
           callBriefId: created.id,
@@ -626,6 +632,7 @@ describe("OpenAIRealtimeBridge", () => {
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
+    await service.repository.transitionAnswering(created.id, { attemptId: reserved.attempt.id, providerCallId: "CA-HANGUP", snapshotHash: reserved.attempt.compilationSnapshotHash!, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -655,6 +662,7 @@ describe("OpenAIRealtimeBridge", () => {
         JSON.stringify({
           event: "start",
           start: {
+        callSid: "CA-HANGUP",
             streamSid: "MZ123",
             customParameters: {
               callBriefId: created.id,
@@ -999,6 +1007,7 @@ describe("OpenAIRealtimeBridge", () => {
     const reserved = await service.repository.startAttempt(created.id, {
       provider: "twilio"
     });
+    await service.repository.transitionAnswering(created.id, { attemptId: reserved.attempt.id, providerCallId: "CA-HANGUP", snapshotHash: reserved.attempt.compilationSnapshotHash!, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
     const twilioSocket = new FakeSocket();
     const openAISocket = new FakeSocket();
     const consentSocket = new FakeSocket();
@@ -1018,6 +1027,7 @@ describe("OpenAIRealtimeBridge", () => {
         JSON.stringify({
           event: "start",
           start: {
+        callSid: "CA-HANGUP",
             streamSid: "MZ456",
             customParameters: {
               callBriefId: created.id,
@@ -1072,7 +1082,7 @@ describe("OpenAIRealtimeBridge", () => {
       Buffer.from(
         JSON.stringify({
           event: "mark",
-          mark: { name: "callassist-consent-prompt-complete" }
+          mark: { name: "callassist-consent-prompt-complete:2" }
         })
       )
     );
@@ -1094,7 +1104,7 @@ describe("OpenAIRealtimeBridge", () => {
       Buffer.from(
         JSON.stringify({
           event: "mark",
-          mark: { name: "callassist-consent-prompt-complete" }
+          mark: { name: "callassist-consent-prompt-complete:3" }
         })
       )
     );
@@ -1283,6 +1293,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
   const reserved = await service.repository.startAttempt(created.id, {
     provider: "twilio", userId: creditOwner
   });
+    await service.repository.transitionAnswering(created.id, { attemptId: reserved.attempt.id, providerCallId: "CA-HANGUP", snapshotHash: reserved.attempt.compilationSnapshotHash!, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
   if (agentHangupEnabled || creditOwner) {
     await repository.attachProviderCall(reserved.attempt.id, "CA-HANGUP", "in-progress");
   }
@@ -1311,6 +1322,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
   emitJson(twilioSocket, {
     event: "start",
     start: {
+        callSid: "CA-HANGUP",
       streamSid: "MZ-HARNESS",
       customParameters: {
         callBriefId: created.id,
@@ -1349,6 +1361,11 @@ function completeConsentPlayback(harness: {
 }
 
 function emitJson(socket: FakeSocket, payload: object) {
+  if ("event" in payload && payload.event === "mark" && "mark" in payload) {
+    const mark = payload.mark as { name: string };
+    const sent = socket.sent.findLast(e => e.event === "mark" && (e.mark as { name: string }).name.startsWith(`${mark.name}:`));
+    if (sent) payload = { ...payload, mark: sent.mark };
+  }
   socket.emit("message", Buffer.from(JSON.stringify(payload)));
 }
 

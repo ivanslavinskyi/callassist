@@ -1,3 +1,4 @@
+import { neutralVoicemailText, type CallLocale } from "@callassist/contracts";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 
 export const openAIPublicPricingVersion = "openai-public-2026-09-25";
@@ -93,6 +94,17 @@ const liveRateCards: ProviderRateCard[] = [
 export function calculateProviderUsageCost(
   usage: AdminProviderUsageBucket
 ): ProviderUsageCost {
+  // Twilio public list prices, checked 2026-09-26. Estimates, never invoices.
+  if (usage.provider === "twilio" && ["answering_detection", "voicemail_tts"].includes(usage.operationType)) {
+    const locale = usage.model.replace("polly-standard-voicemail-v1:", "") as CallLocale;
+    const text = neutralVoicemailText[locale];
+    const unit = usage.model === "twilio-amd-v1" ? 7_500 :
+      usage.model.startsWith("polly-standard-voicemail-v1:") && text ? Math.ceil([...text].length / 100) * 800 : null;
+    return { pricingVersion: "twilio-answering-public-2026-09-26", matched: unit !== null,
+      calculatedUsdMicros: unit === null || !usage.usageRecords ? null : unit * usage.requestCount,
+      textUsdMicros: null, audioUsdMicros: null, durationUsdMicros: null,
+      unpricedMetrics: unit === null ? ["unknown_answering_model"] : [] };
+  }
   const version = usage.pricingVersion ?? openAIPublicPricingVersion;
   return { ...calculateUsageCost(usage, version), pricingVersion: version };
 }

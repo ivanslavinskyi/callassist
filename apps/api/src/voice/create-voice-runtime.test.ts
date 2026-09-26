@@ -7,8 +7,11 @@ import { approvedCall, TestSocket, flush, silence, speech } from "./voice-test-h
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 
-async function harness(driver = "live", recordingFailure = false, token = "valid", fallback = "true") {
+async function harness(driver = "live", recordingFailure = false, token = "valid", fallback = "true", answer: string | null = "human") {
   const call = await approvedCall();
+  if (answer) await call.service.repository.transitionAnswering(call.brief.id, { attemptId: call.attempt.id,
+    providerCallId: "CA-LIVE", snapshotHash: call.attempt.compilationSnapshotHash!,
+    kind: "resolve", answeredBy: answer, now: new Date().toISOString() });
   const twilio = new TestSocket(), realtime = new TestSocket(), consent = new TestSocket(), live = new TestSocket();
   const startRecording = vi.spyOn(call.service, "startRecordingAfterConsent").mockImplementation(async () => {
     if (recordingFailure) throw new Error("recording failed");
@@ -21,20 +24,20 @@ async function harness(driver = "live", recordingFailure = false, token = "valid
     createConsentSocket: () => consent.ws, createLiveSocket: connect },
     { VOICE_RUNTIME_DRIVER: driver, VOICE_RUNTIME_LIVE_FALLBACK: fallback });
   bridge.handleTwilioSocket(twilio.ws);
-  const start = { event: "start", start: { streamSid: "MZ-LIVE", customParameters: {
+  const start = { event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ-LIVE", customParameters: {
     callBriefId: call.brief.id, callAttemptId: call.attempt.id, compilationSnapshotHash: call.attempt.compilationSnapshotHash, streamToken: token } } };
   twilio.receive(start); await flush();
   realtime.emit("open"); consent.emit("open");
   realtime.receive({ type: "session.updated" }); consent.receive({ type: "session.updated" });
   async function accept() {
     realtime.receive({ type: "response.done" });
-    twilio.receive({ event: "mark", mark: { name: "callassist-consent-prompt-complete" } });
+    twilio.receive({ event: "mark", mark: { name: twilio.sent.findLast(e => e.event === "mark" && e.mark.name.startsWith("callassist-consent-prompt-complete")).mark.name } });
     consent.receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "Yes" });
     await flush();
     if (!recordingFailure) {
       realtime.receive({ type: "response.created", response: { id: "opening" } });
       realtime.receive({ type: "response.done", response: { id: "opening", status: "completed" } });
-      twilio.receive({ event: "mark", mark: { name: "callassist-opening-complete" } }); await flush();
+      twilio.receive({ event: "mark", mark: { name: twilio.sent.findLast(e => e.event === "mark" && e.mark.name.startsWith("callassist-opening-complete")).mark.name } }); await flush();
     }
   }
   async function ready() {
@@ -50,6 +53,27 @@ describe("voice runtime selection and consent gate integration", () => {
     expect((await harness("realtime")).bridge).toBeInstanceOf(OpenAIRealtimeBridge);
     expect((await harness()).bridge).toBeInstanceOf(OpenAILiveBridge);
     expect(() => voiceRuntimeDriver({ VOICE_RUNTIME_DRIVER: "typo" })).toThrow("VOICE_RUNTIME_DRIVER");
+  });
+  it.each(["live", "realtime"])("%s cannot open audio or provider sessions without human AMD admission", async driver => {
+    for (const answer of [null, "machine_start", "unknown", "fax"]) {
+      const h = await harness(driver, false, "valid", "true", answer);
+      expect(h.twilio.readyState).toBe(3);
+      expect(h.realtime.sent).toEqual([]);
+      expect(h.consent.sent).toEqual([]);
+      expect(h.connect).not.toHaveBeenCalled();
+      expect(h.startRecording).not.toHaveBeenCalled();
+    }
+  });
+  it("does not accept a fabricated opening mark or a cancelled disclosure as completed playback", async () => {
+    const h = await harness();
+    h.twilio.receive({ event: "mark", mark: { name: "callassist-opening-complete" } });
+    expect(h.connect).not.toHaveBeenCalled();
+    h.realtime.receive({ type: "response.created", response: { id: "failed-consent" } });
+    h.realtime.receive({ type: "response.done", response: { id: "failed-consent", status: "cancelled" } });
+    h.twilio.receive({ event: "mark", mark: { name: "callassist-consent-prompt-complete" } });
+    expect(h.twilio.readyState).toBe(3);
+    expect(h.startRecording).not.toHaveBeenCalled();
+    expect(h.connect).not.toHaveBeenCalled();
   });
   it("never connects Live or forwards caller audio before consent, recording and opening playback", async () => {
     const h = await harness();
@@ -71,7 +95,7 @@ describe("voice runtime selection and consent gate integration", () => {
   it("keeps consent failure and recording failure out of Live", async () => {
     const h = await harness();
     h.realtime.receive({ type: "response.done" });
-    h.twilio.receive({ event: "mark", mark: { name: "callassist-consent-prompt-complete" } });
+    h.twilio.receive({ event: "mark", mark: { name: h.twilio.sent.findLast(e => e.event === "mark" && e.mark.name.startsWith("callassist-consent-prompt-complete")).mark.name } });
     h.consent.receive({ type: "conversation.item.input_audio_transcription.completed", transcript: "No" });
     expect(h.startRecording).not.toHaveBeenCalled(); expect(h.connect).not.toHaveBeenCalled();
     const failure = await harness("live", true); await failure.accept();

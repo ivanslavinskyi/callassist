@@ -2,10 +2,12 @@
 
 import {
   CALL_BRIEF_INPUT_LIMITS,
+  answeringApproval,
   callBriefTaskTextLength,
   type CallCompilation,
   type ClarificationAnswer
 } from "@callassist/contracts";
+import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { useState, type FormEvent } from "react";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUiLocale } from "./ui-locale-provider";
@@ -60,6 +62,15 @@ export function CompilationReview({
       </div>
 
       {compiled && !preparationFailed ? <CallPlanPresentation plan={compiled} uiLocale={locale} /> : null}
+
+      {compiled && isReady && showActions ? <section>
+        <h3>{answeringMessages[locale].policy}</h3>
+        <p>{compiled.voicemailAction === "hang_up" ? answeringMessages[locale].silent : answeringMessages[locale].neutral}</p>
+        {compiled.voicemailAction === "leave_neutral_message" ? <blockquote lang={compiled.callLocale}>
+          {answeringApproval(compiled.voicemailAction, compiled.callLocale).message}
+        </blockquote> : null}
+        <p className="muted-text">{answeringMessages[locale].uncertainty}</p>
+      </section> : null}
 
       {decision.status === "needs_clarification" ? (
         <div className="clarification-panel">

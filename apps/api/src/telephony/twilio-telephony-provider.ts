@@ -1,11 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   isSwissDestinationPhone,
+  answeringMode,
+  type CallLocale,
   type CallBrief
 } from "@callassist/contracts";
 import twilio from "twilio";
 import type {
   MediaStreamBinding,
+  StartTelephonyCallOptions,
   StartCallRecordingInput,
   TelephonyProvider
 } from "./telephony-provider";
@@ -44,16 +47,26 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       options.client ?? twilio(options.accountSid, options.authToken, { timeout: 10_000 });
   }
 
-  async startCall(brief: CallBrief, options?: { maxDurationSeconds: number }) {
+  async startCall(brief: CallBrief, options?: StartTelephonyCallOptions) {
     if (!isSwissDestinationPhone(brief.phoneNumber)) {
       throw new Error("SWISS_DESTINATION_REQUIRED");
     }
+    const binding = options?.binding;
+    const snapshot = options?.executionSnapshot;
+    if (!binding || snapshot?.version !== 3 || binding.callBriefId !== brief.id ||
+        binding.compilationSnapshotHash !== snapshot.compilationSnapshotHash) {
+      throw new Error("ANSWERING_APPROVAL_REQUIRED");
+    }
+    const query = new URLSearchParams(binding).toString();
     const call = await this.#client.calls.create({
+      machineDetection: answeringMode(snapshot.answering.action),
+      machineDetectionTimeout: 30,
+      asyncAmd: "false",
       from: this.#fromNumber,
       method: "POST",
       record: false,
       statusCallback: this.webhookUrl(
-        `/webhooks/twilio/status?callBriefId=${encodeURIComponent(brief.id)}`
+        `/webhooks/twilio/status?${query}`
       ),
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
@@ -61,7 +74,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       timeLimit: options?.maxDurationSeconds ?? 900,
       to: brief.phoneNumber,
       url: this.webhookUrl(
-        `/webhooks/twilio/voice?callBriefId=${encodeURIComponent(brief.id)}`
+        `/webhooks/twilio/voice?${query}`
       )
     });
 
@@ -211,6 +224,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     rawRequestUrl: string,
     parameters: Record<string, string>
   ) {
+    if (parameters.AccountSid && parameters.AccountSid !== this.#accountSid) return false;
     const requestUrl = this.webhookUrl(rawRequestUrl);
     return twilio.validateRequest(
       this.#authToken,
@@ -248,6 +262,29 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       name: "streamToken",
       value: this.createMediaStreamToken(binding)
     });
+    response.hangup();
+    return response.toString();
+  }
+
+  createHangupTwiml() {
+    const response = new twilio.twiml.VoiceResponse();
+    response.hangup();
+    return response.toString();
+  }
+
+  createVoicemailTwiml(text: string, locale: CallLocale, binding: MediaStreamBinding) {
+    const voices = {
+      "de-CH": ["de-DE", "Polly.Marlene"], "de-DE": ["de-DE", "Polly.Marlene"],
+      "fr-CH": ["fr-FR", "Polly.Celine"], "it-CH": ["it-IT", "Polly.Carla"],
+      "en-GB": ["en-GB", "Polly.Amy"], "en-US": ["en-US", "Polly.Joanna"],
+      "ru-RU": ["ru-RU", "Polly.Tatyana"]
+    } as const;
+    const [language, voice] = voices[locale];
+    const response = new twilio.twiml.VoiceResponse();
+    response.say({ language, voice, loop: 1 }, text);
+    response.redirect({ method: "POST" }, this.webhookUrl(
+      `/webhooks/twilio/voicemail-complete?${new URLSearchParams(binding)}`
+    ));
     response.hangup();
     return response.toString();
   }
