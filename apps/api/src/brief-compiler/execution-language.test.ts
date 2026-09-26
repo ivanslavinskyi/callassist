@@ -27,7 +27,7 @@ describe("execution language audit", () => {
   it.each([{}, { violations: ["rawBrief"] }, { violations: "okay" }])("fails closed for malformed verdict %j", async verdict => {
     await expect(verifyExecutionLanguage(await fixture(), raw, async () => ({ output_text: JSON.stringify(verdict) }), "model")).rejects.toThrow();
   });
-  it.each([false, true])("repairs mixed-language content once and accounts for audit requests (persistent=%s)", async persistent => {
+  it.each([0, 1, 2, 3, 4])("allows three language repairs, stops on success and accounts for every request (failed audits=%s)", async failedAudits => {
     const output = await fixture();
     let compilations = 0, audits = 0;
     const fetchImplementation = vi.fn<typeof fetch>(async (url, init) => {
@@ -35,18 +35,54 @@ describe("execution language audit", () => {
       if (String(url).endsWith("moderations")) return new Response(JSON.stringify({ results: [{ flagged: false }] }));
       if (body.text.format.name === "execution_language_audit") {
         audits++;
-        return new Response(JSON.stringify({ output_text: JSON.stringify({ violations: audits === 1 || persistent ? ["backgroundSummary"] : [] }), usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 } }));
+        return new Response(JSON.stringify({ output_text: JSON.stringify({ violations: audits <= failedAudits ? ["backgroundSummary"] : [] }), usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 } }));
       }
       compilations++;
       return new Response(JSON.stringify({ id: `plan-${compilations}`, output_text: JSON.stringify({ ...output,
-        backgroundSummary: compilations === 1 || persistent ? "Уточнить получение заявления" : "Ask whether the application arrived" }) }));
+        backgroundSummary: compilations <= failedAudits ? "Уточнить получение заявления" : "Ask whether the application arrived" }) }));
     });
-    const beforeProviderRequest = vi.fn(async () => true), afterProviderRequest = vi.fn(async () => undefined);
+    const beforeProviderRequest = vi.fn(async () => true), afterProviderRequest = vi.fn(async (_result: unknown) => undefined);
     const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(raw, 1, { beforeProviderRequest, afterProviderRequest });
-    expect(result.policyDecision.status).toBe(persistent ? "blocked" : "ready_for_review");
-    expect(compilations).toBe(2); expect(audits).toBe(2);
-    expect(beforeProviderRequest).toHaveBeenCalledTimes(6); expect(afterProviderRequest).toHaveBeenCalledTimes(6);
-    const repair = JSON.parse(String(fetchImplementation.mock.calls[3]?.[1]?.body));
-    expect(repair.input[0].content).toContain("Language mismatch at backgroundSummary");
+    expect(result.policyDecision.status).toBe(failedAudits > 3 ? "blocked" : "ready_for_review");
+    const versions = Math.min(failedAudits + 1, 4);
+    expect(compilations).toBe(versions); expect(audits).toBe(versions);
+    expect(beforeProviderRequest).toHaveBeenCalledTimes(versions * 2 + 2);
+    expect(afterProviderRequest).toHaveBeenCalledTimes(versions * 2 + 2);
+    for (let repairIndex = 1; repairIndex < versions; repairIndex++) {
+      const repair = JSON.parse(String(fetchImplementation.mock.calls[repairIndex * 2 + 1]?.[1]?.body));
+      expect(repair.input[0].content).toContain("Language mismatch at backgroundSummary");
+    }
+    expect(afterProviderRequest.mock.calls.filter(([result]) =>
+      (result as { usage?: { totalTokens?: number } }).usage?.totalTokens === 120)).toHaveLength(versions);
+  });
+  it("retains all three language repairs after the initial schema repair", async () => {
+    const output = await fixture();
+    let generations = 0, audits = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (String(url).endsWith("moderations")) return new Response(JSON.stringify({ results: [{ flagged: false }] }));
+      if (body.text.format.name === "execution_language_audit") {
+        audits++;
+        return new Response(JSON.stringify({ output_text: JSON.stringify({ violations: audits < 4 ? ["backgroundSummary"] : [] }) }));
+      }
+      generations++;
+      return new Response(JSON.stringify({ output_text: JSON.stringify(generations === 1 ? {} : output) }));
+    });
+    const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(raw);
+    expect(result.policyDecision.status).toBe("ready_for_review");
+    expect(generations).toBe(5); expect(audits).toBe(4);
+    expect(fetchImplementation).toHaveBeenCalledTimes(11);
+  });
+  it("honors a lower request budget instead of bypassing it for language repairs", async () => {
+    const output = await fixture();
+    const fetchImplementation = vi.fn<typeof fetch>(async (url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (String(url).endsWith("moderations")) return new Response(JSON.stringify({ results: [{ flagged: false }] }));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(body.text.format.name === "execution_language_audit"
+        ? { violations: ["backgroundSummary"] } : output) }));
+    });
+    await expect(new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(raw, 1, { maxProviderRequests: 5 }))
+      .rejects.toMatchObject({ code: "OPENAI_REQUEST_BUDGET_EXHAUSTED" });
+    expect(fetchImplementation).toHaveBeenCalledTimes(5);
   });
 });

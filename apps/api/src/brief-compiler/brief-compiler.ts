@@ -27,7 +27,10 @@ const defaultCompilationTimeoutMs = 120_000;
 const defaultGenerationRequestTimeoutMs = 60_000;
 const defaultModerationRequestTimeoutMs = 25_000;
 
-export const briefCompilationProviderRequestBudget = 8;
+const executionLanguageRepairLimit = 3;
+// Two additional language repairs each need generation + audit. Shared with the
+// durable reservation ledger; transport retries still consume this same budget.
+export const briefCompilationProviderRequestBudget = 12;
 
 export type BriefCompilerStage =
   | "input_moderation"
@@ -188,8 +191,11 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     let displayObjective: CallCompilation["displayObjective"];
     let localPolicy: PolicyDecision | null = null;
     let validationFeedback: string[] = [];
+    let languageRepairs = 0;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    // Keep the existing single initial schema/policy repair, independently of
+    // language repairs. Every pass still shares the original deadline and budget.
+    for (let attempt = 0; attempt < 2 + executionLanguageRepairLimit; attempt += 1) {
       response = await this.#requestCompilation(
         rawBrief,
         validationFeedback,
@@ -231,7 +237,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "compilation", validationPaths: ["execution_language_audit"] });
           }
           if (languageIssues.length) {
-            if (attempt === 0) {
+            if (languageRepairs < executionLanguageRepairLimit) {
+              languageRepairs += 1;
               validationFeedback = languageIssues.map(path => `Language mismatch at ${path}: regenerate all runtime text in ${rawBrief.locale}, including dates, conditions and approved facts. Preserve identity names, addresses and reference IDs. Do not copy source-language prose into runtime fields.`);
               continue;
             }
@@ -252,7 +259,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       }
 
       validationFeedback = parsed.validationFeedback;
-      if (attempt === 1) {
+      if (attempt >= 1) {
         throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", {
           cause: parsed.cause,
           responseId: stringOrNull(response.id),

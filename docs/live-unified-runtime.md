@@ -62,10 +62,16 @@ the follow/pause behavior. No transcript is translated to disguise a language er
 The compiler audits the execution projection in a separate bounded Responses request
 before approval. All natural-language fields, including dates, question purposes,
 conditions and appointment service descriptions, must use the selected call locale.
-Identity names, addresses and identifiers are preserved. One repair is allowed;
-an invalid audit fails preparation, persistent mismatch blocks approval. Source-language
+Identity names, addresses and identifiers are preserved. Up to three language repairs
+are allowed after the initial generation and audit (four language-audited versions);
+the first passing version stops the cycle. An invalid audit fails preparation,
+persistent mismatch after the third repair blocks approval. The existing single initial
+schema/policy repair remains separate. Source-language
 UI objectives and sourceText are excluded from execution context. This audit is billed
-through the existing compiler request reservation/usage hooks and eight-request budget.
+through the existing compiler request reservation/usage hooks and twelve-request budget,
+including moderation and transport retries. The shared preparation deadline is unchanged;
+deadline or request-budget exhaustion can stop preparation before all repairs are used.
+Additional generations/audits incur usage only when needed.
 Previously approved immutable plans are not silently rewritten: recreate/review any
 known mixed-language historical plan before repeating it.
 
