@@ -149,7 +149,7 @@ default **1381 мс**, low **1405,5 мс**; максимумы 2466 и 2940 мс
 существовавших SQL-файлов. Перед запуском установить проверенную версию release script
 как `/usr/local/sbin/shprohli-release` по существующему deployment runbook.
 Актуальная исполняемая процедура и recovery описаны в
-[deployment preflight](deployment-preflight.md#schema-release-0085-0088); текущие контракты —
+[deployment preflight](deployment-preflight.md#schema-release-0085-0089); текущие контракты —
 в [architecture](architecture.md#saved-conversation-transcript-and-recording-fallback),
 [runtime reference](runtime-reference.md#saved-transcript-source) и
 [local testing](local-testing.md#native-transcript-checkpoint-28-september).

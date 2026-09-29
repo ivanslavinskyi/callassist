@@ -7925,6 +7925,17 @@ export class PostgresCallRepository implements CallRepository {
     input: CallTelemetryEventInput
   ): Promise<DurableCallEvent> {
     const parsed = callTelemetryEventInputSchema.parse(input);
+    // Keep one lock order for every call-event writer: brief before sequence.
+    // Without this fence, a standalone telemetry transaction can hold the
+    // advisory sequence lock while its event FK waits for a provider callback
+    // that already holds the brief row and is itself waiting for the sequence.
+    const [call] = await transaction<{ userId: string | null }[]>`
+      SELECT user_id AS "userId"
+      FROM call_briefs
+      WHERE id = ${callBriefId}
+      FOR KEY SHARE
+    `;
+    if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
     await transaction`
       SELECT pg_advisory_xact_lock(
         hashtextextended(${`call-event:${callBriefId}`}, 0)
@@ -7951,12 +7962,6 @@ export class PostgresCallRepository implements CallRepository {
     `;
     if (existingRows[0]) return mapCallTelemetryEvent(existingRows[0]);
 
-    const [call] = await transaction<{ userId: string | null }[]>`
-      SELECT user_id AS "userId"
-      FROM call_briefs
-      WHERE id = ${callBriefId}
-    `;
-    if (!call) throw new CallRepositoryError("CALL_NOT_FOUND");
     if (parsed.callAttemptId) {
       const attempt = await transaction`
         SELECT id

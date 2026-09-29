@@ -2,6 +2,8 @@
 
 > 28 September update: this document describes the original synchronous policy.
 > New native Live approvals use [asynchronous AMD](async-amd-live-2026-09-28.md).
+> The 29 September v3 policy treats `unknown` as inconclusive and continues the
+> disclosure/consent gate; the terminal `unknown` row below remains historical v1/v2 behavior.
 > Initial disclosure, including the represented person's name, may reach voicemail.
 > Recording starts on consent without waiting for AMD. Old approvals remain readable
 > and retain synchronous execution; no immutable approval or historical event is rewritten.
@@ -90,10 +92,10 @@ export, call ownership and deletion machinery includes the new call events.
 
 1. Apply migrations before starting the new API, gateway and worker. Use the same
    revision on all processes; keep old binaries from handling new v3 calls.
-2. Keep production `VOICE_RUNTIME_DRIVER=realtime` until acceptance and approval.
-   Local Live acceptance uses `VOICE_RUNTIME_DRIVER=live` and
-   `VOICE_RUNTIME_LIVE_FALLBACK=false` on the gateway. Realtime rollback changes
-   the driver, retaining AMD and the new schema; do not downgrade the binaries.
+2. Live is the repository default. Pin production to `VOICE_RUNTIME_DRIVER=live`
+   and `VOICE_RUNTIME_LIVE_FALLBACK=false` rather than relying on that default.
+   Realtime rollback explicitly changes the driver to `realtime`, retaining AMD
+   and the new schema; do not downgrade the binaries.
 3. Start the local app and HTTPS tunnel as described in [the Live pilot guide](gpt-live-pilot.md).
    Never reset the development DB for testing; use a dedicated local `*_test` DB
    and a consenting test recipient. Provider secrets stay in local environment.

@@ -12,6 +12,7 @@ export interface LiveLifecycle {
   transcriptCaptureComplete?(): boolean;
   startup(): { instructions: string; input: unknown[] };
   backendFailed?(): void;
+  consentDecisionUnavailable?(): void;
   decisionReady?(): boolean;
   closingBackendCompleted?(): void;
   ready(): void;
@@ -24,9 +25,11 @@ export interface LiveLifecycle {
 export type OpenAILiveBridgeOptions = OpenAIRealtimeBridgeOptions & {
   liveModel?: string;
   delegationModel?: string;
+  speechModel?: string;
   createLiveSocket?: (url: string, apiKey: string) => WebSocket;
   liveStartupTimeoutMs?: number;
   semanticFetch?: typeof fetch;
+  speechFetch?: typeof fetch;
 };
 
 /** Native Live lifecycle by default; explicit legacy fallback retains the hybrid pilot. */

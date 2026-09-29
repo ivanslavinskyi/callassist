@@ -15,6 +15,9 @@ describe("provider pricing policy", () => {
     expect(calculateProviderUsageCost(bucket({ model: "gpt-live-1", pricingVersion: "openai-public-2026-09-15", durationSeconds: 90, durationSamples: 1 })).matched).toBe(false);
     expect(calculateProviderUsageCost(bucket({ model: "gpt-transcribe", pricingVersion: "openai-public-2026-09-15", durationSeconds: 90, durationSamples: 1 })))
       .toMatchObject({ pricingVersion: "openai-public-2026-09-15", calculatedUsdMicros: 6_750 });
+    expect(calculateProviderUsageCost(bucket({ model: "gpt-4o-mini-tts", operationType: "realtime_response",
+      stage: "live_disclosure_synthesis", durationSeconds: 60, durationSamples: 1 })))
+      .toMatchObject({ calculatedUsdMicros: 15_000, durationUsdMicros: 15_000, unpricedMetrics: [] });
   });
   it("prices compiler text tokens without charging cached input twice", () => {
     expect(calculateProviderUsageCost(bucket({

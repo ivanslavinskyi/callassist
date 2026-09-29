@@ -7,21 +7,25 @@ The repository default is Realtime; deployment state must be checked separately.
 
 ## Current checkpoint, 29 September
 
-The API/embedded worker was restarted at 10:53:42 Europe/Zurich with Live,
+The API/embedded worker was restarted at 18:43 Europe/Zurich with Live,
 fallback=false, and agent hangup enabled. Zero calls were active before restart;
-liveness and database readiness passed. Schema remains at 0088 (89 ledger entries).
+liveness and database readiness passed. Migration 0089 is applied and the source
+catalog check reports 89 contiguous migrations with 0089 latest.
 The web dev server subsequently compiled the voice/brand display changes. Earlier
 process checkpoints below are historical, not instructions to revert this state.
 
 The [implementation report](live-progress-fix-2026-09-29.md) records automated tests
 and real-API synthetic probes; no handset call was placed for that verification.
+The later [stable checkpoint](live-stable-checkpoint-2026-09-29.md) records the successful
+18:50 CEST real handset call and supersedes the open handset-acceptance note for this runtime.
 For the next local acceptance:
 
 1. Create/review a plan: only male/female voice choices should appear. Confirmation
    and call details must display the selected voice, without a persona name.
-2. Say a clear consent answer while disclosure is still playing. It must be retained
-   without another yes; recording must wait for the completed disclosure. Also test
-   a correction to refusal and ensure no recording starts.
+2. Interrupt the disclosure once: queued playback must clear and the complete cached
+   disclosure must replay after you stop. Give consent only after the uninterrupted
+   playback mark; a pre-mark answer must not silently unlock recording. Also test a
+   correction to refusal and ensure no recording starts.
 3. Answer the task, then wait: the application should process an answer even if Live
    does not delegate it. Verify accepted end_call, completed farewell playback and
    automatic hangup. Correct the answer during farewell in a separate call and check
@@ -43,8 +47,10 @@ if Turbo cannot locate the pnpm binary on Windows.
 
 New native Live approvals now use [background AMD](async-amd-live-2026-09-28.md).
 Restart API/gateway/worker with this revision and create a new approval for manual
-testing. Recording starts on consent without waiting for AMD. Previously approved
-calls retain the synchronous policy.
+testing. Recording starts on consent without waiting for AMD. Current v3 treats
+`unknown` as inconclusive and continues the disclosure/consent flow; it does not grant
+consent. Previously approved calls retain their saved v1/v2 behavior, so reapprove or
+repeat the plan before testing this correction.
 
 The form offers two voices: male (`cedar`) and female (`marin`). New approvals
 freeze the voice ID; existing approvals resolve it from their saved gender.
@@ -115,7 +121,7 @@ calls predate AMD. Keep Live fallback disabled during this acceptance session.
    For a new checkout, `corepack pnpm env:init` creates local keys without replacing
    an existing `.env`. Check the database host/name before running migrations.
 2. Run `corepack pnpm db:up`, then `corepack pnpm db:migrate`. The current catalog
-   ends at `0088_conversation_transcript_copy.sql`. Preserve existing accounts and keys.
+   ends at `0089_realtime_error_telemetry.sql`. Preserve existing accounts and keys.
    Automated integration tests require a separate disposable `*_test` database;
    never point `TEST_DATABASE_URL` at the application database.
 3. For real calls, configure `TELEPHONY_DRIVER=twilio`, `BRIEF_COMPILER_DRIVER=openai`,

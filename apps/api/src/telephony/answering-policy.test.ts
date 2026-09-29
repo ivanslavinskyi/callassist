@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import twilio from "twilio";
-import { ANSWERING_POLICY_VERSION, approvedExecutionSnapshotSchema, canRepeatUnansweredCall } from "@callassist/contracts";
+import { ANSWERING_POLICY_VERSION, approvedExecutionSnapshotSchema, canRepeatUnansweredCall, decideAnswering } from "@callassist/contracts";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
@@ -40,6 +40,18 @@ describe("answering policy and repository admission", () => {
     expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" })).applied).toBe(true);
     expect((await f.repository.beginRecording(f.brief.id)).recording.status).toBe("starting");
     expect((await f.transition("machine_start")).state).toMatchObject({ streamAdmitted: true, execution: "async" });
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "dispatch" })).applied).toBe(false);
+  });
+  it("continues current consent flow for inconclusive AMD without changing the previous policy", () => {
+    expect(decideAnswering("hang_up", "unknown", ANSWERING_POLICY_VERSION)).toBe("consent");
+    expect(decideAnswering("hang_up", "unknown", "twilio-async-live-beep-v2")).toBe("hang_up");
+    expect(decideAnswering("hang_up", "machine_start", ANSWERING_POLICY_VERSION)).toBe("hang_up");
+  });
+  it("does not dispatch an asynchronous hangup for an inconclusive result", async () => {
+    const f = await asyncFixture();
+    await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" });
+    expect(await f.transition("unknown")).toMatchObject({ applied: true, decision: "consent",
+      state: { answeredBy: "unknown", streamAdmitted: true } });
     expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "dispatch" })).applied).toBe(false);
   });
   it.each([true, false])("claims voicemail once with AMD before stream=%s and records TTS only when dispatched", async beforeStream => {
@@ -126,7 +138,7 @@ describe("answering policy and repository admission", () => {
     ["leave_neutral_message", "machine_end_beep", "message", "voicemail_detected"],
     ["leave_neutral_message", "machine_end_silence", "hang_up", "voicemail_detected"],
     ["leave_neutral_message", "machine_end_other", "hang_up", "automated_answer"],
-    ["hang_up", "fax", "hang_up", "fax_detected"], ["hang_up", "unknown", "hang_up", "answer_unknown"],
+    ["hang_up", "fax", "hang_up", "fax_detected"], ["hang_up", "unknown", "consent", "answer_unknown"],
     ["hang_up", "machine_end_beep", "hang_up", "answer_detection_failed"], ["hang_up", "bad", "hang_up", "answer_detection_failed"]
   ] as const)("%s / %s -> %s", async (action, answer, decision, result) => {
     const f = await fixture(action);
@@ -210,7 +222,7 @@ describe("signed Twilio AMD webhook", () => {
         "x-twilio-signature": twilio.getExpectedTwilioSignature("test-key", `https://voice.example.test${path}`, body) }, payload: new URLSearchParams(body).toString() });
       const response = await request();
       expect(response.statusCode).toBe(200);
-      expect(response.body.includes("<Connect>")).toBe(answer === "human");
+      expect(response.body.includes("<Connect>")).toBe(answer === "human" || answer === "unknown");
       expect(response.body.includes("<Say ")).toBe(answer === "machine_end_beep");
       expect(response.body).not.toContain("Test Owner");
       expect(response.body).not.toContain("office opens");

@@ -39,6 +39,22 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     phase: z.enum(["startup", "consent", "conversation"]),
     result: z.enum(["requested", "confirmed", "mismatch", "unconfirmed"])
   }) }),
+  z.strictObject({ name: z.literal("realtime.error"), metadata: z.strictObject({
+    phase: z.enum(["startup", "consent", "conversation"]),
+    disposition: z.enum(["retrying", "continued", "consent_recovery", "fatal"]),
+    code: safeTokenSchema,
+    type: safeTokenSchema.nullable(),
+    param: safeTokenSchema.nullable(),
+    command: z.enum([
+      "session.update",
+      "session.instructions.append",
+      "session.thinking.append",
+      "session.commentary.append",
+      "response.create"
+    ]).nullable(),
+    clientEventId: safeTokenSchema.nullable(),
+    attempt: z.number().int().min(0).max(2)
+  }) }),
   z.strictObject({ name: z.literal("conversation.task"), metadata: z.strictObject({
     runtimeVersion: z.literal("live-client-v1"), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
     revision: z.number().int().nonnegative(), requestId: z.uuid().optional()
@@ -368,6 +384,8 @@ export function describeCallTelemetryEvent(
       return { source: "realtime", stage: "realtime", severity: "info" };
     case "realtime.voice":
       return { source: "realtime", stage: "realtime", severity: "info" };
+    case "realtime.error":
+      return { source: "realtime", stage: "realtime", severity: "warning" };
     case "conversation.started":
     case "conversation.first_audio":
     case "conversation.ended":

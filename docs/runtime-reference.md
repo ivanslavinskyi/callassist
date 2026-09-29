@@ -22,7 +22,8 @@ result artifacts and schedules retention even when no ASR request occurs.
 The [implementation report](live-transcript-implementation-2026-09-28.md) defines
 fallback, historical compatibility, CMS rollout and verification limits.
 Migration 0088 updates versioned public CMS copy in all seven locales; it introduces
-no new runtime flag. See the [schema release procedure](deployment-preflight.md#schema-release-0085-0088).
+no new runtime flag. Migration 0089 adds bounded Live-error telemetry. See the
+[schema release procedure](deployment-preflight.md#schema-release-0085-0089).
 
 ## Registration policy and call retries
 
@@ -167,10 +168,11 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | `TEXT_ARTIFACT_GENERATION_ENABLED` | Explicit `true`/`false`; absent means enabled for mock and disabled for OpenAI. Disabling generation preserves reads of retained artifacts |
 | `TEXT_ARTIFACT_DIRECTIONS` | Comma-separated `kind:source:target`, e.g. `plan_review:de:ru,transcript_translation:*:ru,call_summary:*:ru`. Real provider has no enabled directions when empty. Final transcripts can contain mixed/unknown languages, so transcript translation and summary use source `*`; do not infer it from the call locale |
 | `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
-| `VOICE_RUNTIME_DRIVER` | `realtime`; accepts `realtime` or `live`, invalid values fail startup; API restart required |
+| `VOICE_RUNTIME_DRIVER` | `live`; accepts `realtime` or `live`, invalid values fail startup; API restart required. Set `realtime` explicitly only for rollback. |
 | `VOICE_RUNTIME_LIVE_FALLBACK` | `false`; one Live voice session with no Realtime sockets. Explicit `true` retains the legacy hybrid pilot and startup fallback |
-| `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live consent, opening, conversation and closing when fallback is disabled |
-| `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; native Responses consent/task delegation and semantic speech checks; `parallel_tool_calls=false` |
+| `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live listening, consent interpretation, opening, conversation and closing when fallback is disabled |
+| `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; native Responses consent/task delegation plus appointment/closing semantic checks; `parallel_tool_calls=false` |
+| `OPENAI_SPEECH_MODEL` | `gpt-4o-mini-tts`; application-owned exact disclosure synthesis. Raw 24 kHz PCM is converted locally to Twilio PCMU and cached per call. |
 | `OPENAI_LIVE_MALE_VOICE`, `OPENAI_LIVE_FEMALE_VOICE` | Fixed `cedar`, `marin`; optional legacy settings must match. Approved snapshots freeze the concrete voice ID. |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-2.1` |
 | `OPENAI_TRANSCRIPTION_MODEL` | `gpt-realtime-whisper` for the Realtime driver/legacy hybrid only; unified Live uses native transcripts |
@@ -179,20 +181,33 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | `OPENAI_POST_CALL_UTTERANCE_TRANSCRIPTION_MODEL` | Runtime default `gpt-4o-transcribe`, normal stereo path |
 | `OPENAI_REALTIME_MALE_VOICE`, `OPENAI_REALTIME_FEMALE_VOICE` | `cedar`, `marin` |
 
-Unified Live first exposes only `report_consent` with a strict decision enum. Task
-tools (`end_call`, and authorized appointment tools) become available after recording
+Unified Live starts with no tools while the application plays the exact Speech API
+disclosure. Recipient audio still reaches Live immediately; barge-in clears playback and
+causes a complete cached replay after the recipient stops. Only an uninterrupted matching
+Twilio mark exposes `report_consent` with a strict decision enum; pre-mark speech is not
+reused as affirmative consent. A post-mark `unclear` decision also replays the complete
+cached disclosure once before the shorter DTMF recovery. A delayed native transcript is
+compared with the same audio-time boundary. Task tools (`end_call`, and authorized appointment tools)
+become available after recording
 startup and playback of any optional assistance disclosure. Live then receives a
 purpose/readiness instruction; the ordinary opening has no exact-script playback
 gate. `end_call` accepts a reason only, not a recap. Consent
 uses `live_delegation`; no new `live_consent_classification` operations are created.
-Controlled disclosure and appointment checks remain separate. Closing uses the
+Speech synthesis is accounted under `live_disclosure_synthesis`; only protected
+appointment speech retains semantic pre-playback verification. Closing uses the
 normal tool-result/backend continuation, followed by a bounded completion check
 and playback confirmation; it does not verify business truth after speech.
 The historical consent
 stage stays readable for accounting. See [runtime details](live-unified-runtime.md)
-and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0088.
+and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0089.
 See [voice continuity](live-voice-continuity-2026-09-28.md) for the two-voice catalog,
 provider confirmation checks and manual acoustic acceptance.
+
+Live protocol errors are command-scoped. The runtime correlates `error.client_event_id`, retries
+an explicit rejection once, does not retry ambiguous acknowledgement timeouts, and continues past
+late or uncorrelated command errors. Only a closed connection/session or an exhausted active
+command/delegation enters the bounded failure-close path. Safe protocol fields are persisted as
+`realtime.error`; provider messages and conversational content are not stored in that event.
 
 The [28 September simplification report](live-simplification-implementation-2026-09-28.md)
 records shared approved context, grounded next-step statements, compiler version 6
@@ -247,9 +262,9 @@ were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
 ## Recent configuration and workers
 
-Apply the complete source catalog through **0088** before starting the new API and
+Apply the complete source catalog through **0089** before starting the new API and
 worker. Source catalog availability is not deployment evidence; verify the target's
-applied checksums. See [current schema rollout](deployment-preflight.md#schema-release-0085-0088).
+applied checksums. See [current schema rollout](deployment-preflight.md#schema-release-0085-0089).
 
 | Setting / subsystem | Current behavior |
 | --- | --- |

@@ -51,7 +51,7 @@ export function transitionAnswering(attempt: CallAttemptRecord, current: Answeri
   const compatible = answer === "human" || answer === "unknown" || answer === "fax" ||
     (mode === "Enable" ? answer === "machine_start" : answer?.startsWith("machine_end_"));
   const failure = input.kind === "timeout" ? "timeout" : !answer || !compatible ? "invalid_result" : null;
-  const decision = failure ? "hang_up" : decideAnswering(snapshot.answering.action, answer);
+  const decision = failure ? "hang_up" : decideAnswering(snapshot.answering.action, answer, snapshot.answering.policyVersion);
   return { applied: true, decision, state: {
     policyVersion: snapshot.answering.policyVersion, phase: failure ? "failed" : "resolved", mode,
     ...(current?.execution ? { execution: current.execution } : {}),

@@ -1,0 +1,10 @@
+-- Persist bounded Live protocol error diagnostics without provider messages or conversation text.
+ALTER TABLE call_events DROP CONSTRAINT call_events_event_name_check;
+ALTER TABLE call_events ADD CONSTRAINT call_events_event_name_check CHECK (event_name IN (
+  'brief.created','compilation.completed','policy.evaluated','compilation.approved','attempt.started',
+  'credit.reserved','provider.call_created','provider.status_changed','connection.confirmed','credit.settled',
+  'disclosure.started','consent.granted','consent.failed','recording.started','recording.completed','recording.failed',
+  'realtime.ready','realtime.voice','realtime.error','conversation.started','conversation.first_audio','conversation.ended','conversation.hangup',
+  'conversation.tool_result','conversation.task','transcription.started','transcription.completed','transcription.failed',
+  'call.recovered','call.stop','answering.updated','provider.sip_response'
+));

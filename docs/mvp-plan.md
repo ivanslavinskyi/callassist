@@ -177,7 +177,7 @@ Cap/длительность/USD согласованы и реализован�
 - [ ] **B03:** первичный email и смена контакта доставляются, ошибки/retry/уведомления приняты.
 - [ ] **B04:** реальный Verify/recovery и отдельный opt-out Verify Service, доставка/fraud controls приняты.
 - [ ] **B05:** реализация локально проверена, 20 USD / 24 ч установлен локально; перенести настройку во внешний контур, принять ставки резервов и staging exhaustion/complaint/stop drill.
-- [ ] **B06:** выпуск текущего кандидата на VPS, миграции до 0088 (включая opt-out backfill и CMS publications), общий recipient HMAC/keyring, proxy/cookies/SSR/SSE, worker/notification/export consumers и effective flags проверены.
+- [ ] **B06:** выпуск текущего кандидата на VPS, миграции до 0089 (включая opt-out backfill, CMS publications и Live-error telemetry), общий recipient HMAC/keyring, proxy/cookies/SSR/SSE, worker/notification/export consumers и effective flags проверены.
 - [ ] **B07:** фактические опубликованные revisions и семь локалей на целевом домене, OG/Twitter, обещания и privacy/Analytics policy сверены; RM review принят.
 - [ ] **B08:** staff-защита, support, suppression, grant/deletion/audit workflow приняты.
 - [ ] **B09:** текущая provider/language/outage матрица без блокирующих дефектов.
@@ -194,7 +194,7 @@ Cap/длительность/USD согласованы и реализован�
 | Release owner / оператор / резервный | Не назначены в этом аудите |
 | Evidence | [Реализация 28.09](live-transcript-implementation-2026-09-28.md): 1880 тестов / 211 файлов, lint/types/build, CMS семи локалей и PDF; локальные миграции и API restart. [Аудит 23.09](release-audit-2026-09-23.md), [поставка 17–22.09](delivery-2026-09-22.md) и прочие датированные отчёты сохраняют прежние проверки. CI итогового коммита, новый реальный звонок и приёмка выпуска на VPS ещё требуются |
 | Исключения P1 | ID, compensating control, владелец, дата пересмотра |
-| Следующий шаг | Новый реальный звонок: native source, summary, перевод на язык задания, PDF и естественность речи. Затем выпуск проверенного кандидата по [schema runbook](deployment-preflight.md#schema-release-0085-0088) через 0088 и проверка CMS семи локалей на VPS; остальные внешние provider/operational gates остаются открыты |
+| Следующий шаг | Новый реальный звонок: native source, summary, перевод на язык задания, PDF и естественность речи. Затем выпуск проверенного кандидата по [schema runbook](deployment-preflight.md#schema-release-0085-0089) через 0089 и проверка CMS семи локалей на VPS; остальные внешние provider/operational gates остаются открыты |
 
 ## 10. Как не разнести backlog снова
 

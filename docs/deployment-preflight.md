@@ -1,10 +1,10 @@
 # Deployment preflight and first release
 
-## Schema release 0085-0088
+## Schema release 0085-0089
 
 Обновлено 28 сентября 2026 для `codex/live-unified-runtime`. Последнее подтверждение
 production — отчёт владельца от 26 сентября (`915a8f6`, каталог до 0084).
-Это не свежая проверка сервера. Реализация до 0088 проверена и применена **локально**;
+Это не свежая проверка сервера. Реализация до 0089 проверена и применена **локально**;
 её server cutover ещё не выполнялся. Полные результаты и ограничения — в
 [отчёте реализации](live-transcript-implementation-2026-09-28.md).
 
@@ -18,7 +18,7 @@ production — отчёт владельца от 26 сентября (`915a8f6`
    предыдущий helper. Существующая установленная версия не обновляется одним push.
 2. Выполнить `sudo shprohli-release status`, затем
    `sudo shprohli-release deploy-schema`. Helper получает CI-проверенный `main`,
-   собирает отдельный release и разрешает только новые 0085–0088 при неизменных
+   собирает отдельный release и разрешает только новые 0085–0089 при неизменных
    прежних SQL. Rollback-only CMS preflight выполняется до изменения допуска звонков.
 3. Helper закрывает допуск, дожидается текущих звонков и worker jobs, создаёт и
    проверяет backup, останавливает SHPROHLI worker/API/web и запускает обычный
@@ -42,8 +42,11 @@ acceptances; `requires_reacceptance=false`. Неизвестная правка 
 миграциями, проверить migration/CMS в release environment, запустить согласованные
 службы и проверить runtime перед открытием звонков. Не удалять ledger, колонки,
 revisions или jobs и не восстанавливать старую БД поверх новых звонков. Обычный
-`rollback` к каталогу до 0088 будет отклонён. Bash-синтаксис и миграционная часть
+`rollback` к каталогу до 0089 будет отклонён. Bash-синтаксис и миграционная часть
 проверены локально; Linux/systemd cutover требует серверной приёмки.
+
+Migration 0089 only adds `realtime.error` to the allowed call telemetry names. Its
+contract excludes provider messages and conversation content.
 
 The dated preparation sections below retain their original checkpoints. Their old
 candidate numbers and pending-first-deploy assumptions are historical; use the schema

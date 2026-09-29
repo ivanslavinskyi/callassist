@@ -4,7 +4,7 @@ import type { VoiceRuntime } from "./voice-runtime";
 import { LIVE_VOICES } from "@callassist/contracts";
 
 export function voiceRuntimeDriver(environment: NodeJS.ProcessEnv): "realtime" | "live" {
-  const driver = environment.VOICE_RUNTIME_DRIVER?.trim() || "realtime";
+  const driver = environment.VOICE_RUNTIME_DRIVER?.trim() || "live";
   if (driver !== "realtime" && driver !== "live") throw new Error("VOICE_RUNTIME_DRIVER must be realtime or live");
   return driver;
 }
@@ -22,6 +22,7 @@ export function createVoiceRuntime(options: OpenAILiveBridgeOptions, environment
   return new OpenAILiveBridge({ ...options,
     liveModel: environment.OPENAI_LIVE_MODEL?.trim() || "gpt-live-1",
     delegationModel: environment.OPENAI_LIVE_DELEGATION_MODEL?.trim() || "gpt-6-luna",
+    speechModel: environment.OPENAI_SPEECH_MODEL?.trim() || "gpt-4o-mini-tts",
     conversationFallback: fallback === "true"
   });
 }

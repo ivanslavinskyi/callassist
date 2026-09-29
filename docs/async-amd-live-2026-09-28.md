@@ -1,6 +1,6 @@
 # Background AMD with native Live — 28 September 2026
 
-New approvals carry `twilio-async-live-beep-v2`. With `VOICE_RUNTIME_DRIVER=live`,
+New approvals now carry `twilio-async-live-inconclusive-v3`. With `VOICE_RUNTIME_DRIVER=live`,
 `VOICE_RUNTIME_LIVE_FALLBACK=false` and `TWILIO_ASYNC_AMD=true` (default for native
 Live), outbound calls request Async AMD and its signed, attempt-bound `/webhooks/twilio/amd`
 callback. The voice webhook immediately returns the authenticated bidirectional stream.
@@ -14,11 +14,20 @@ an accepted conversation, start voicemail playback or cause its recovery job to 
 No recording or transcript retention starts before consent. Automated greetings can
 still be mistaken for consent; carrier and consent-classifier accuracy require real tests.
 
-Before consent, human detection leaves Live running. Non-human detection clears queued
-speech and cancels consent playback, then claims one provider action durably. Only the
-approved `machine_end_beep` branch plays the fixed neutral message through Twilio Say.
-Other non-human/invalid results end the call. Silence-ending greetings do not authorize
-a message. An initial disclosure may already have been heard or recorded in either policy.
+Before consent, `human` and the inconclusive `unknown` result leave Live and its consent
+flow running. Only explicit machine/fax classifications clear queued speech and claim one
+provider action durably. The approved `machine_end_beep` branch alone plays the fixed
+neutral message through Twilio Say; other explicit machine/fax or invalid results end the
+call. Silence-ending greetings do not authorize a message. An initial disclosure may
+already have been heard or recorded in either policy.
+
+`unknown` is not evidence of an automated answer. Twilio can return it after the initial
+silence threshold while a person quietly listens to the disclosure. Treating it as a
+terminal machine result caused a confirmed human call on 29 September to be cut off about
+five seconds into the disclosure. The current policy therefore fails open only into the
+privacy-gated consent stage: recording and task context remain unavailable until semantic
+consent is accepted. The previous `twilio-async-live-beep-v2` remains readable and keeps
+its historical terminal handling; reapprove or repeat a plan to obtain v3.
 
 The callback only persists classification; its returned HTTP body does not control Twilio.
 The admitted stream observes the result through service notifications and a one-second
@@ -39,7 +48,9 @@ After consent, these AMD deadlines cannot end the conversation. Existing consent
 recording startup and maximum-call-duration limits remain in force.
 
 No new SQL migration is required by this change; additive fields use existing event JSON.
-Readers accept both policy versions. Previously approved v3 calls keep synchronous AMD;
+Readers accept all policy versions. Previously approved v3 execution snapshots keep their
+saved policy; `twilio-async-live-beep-v2` remains asynchronous but retains its historical
+`unknown` decision. Earlier synchronous approvals remain synchronous;
 v1/v2 approval refresh remains unchanged. Realtime and explicit Live legacy fallback stay
 synchronous. All processes must use matching code/configuration before new attempts start.
 Set `TWILIO_ASYNC_AMD=false` on the calling service to compare synchronous behavior with
@@ -60,9 +71,12 @@ Admin call details should show `AMD execution: async` and the new policy version
    speech stops, call ends, no fixed voicemail message or task execution, credit returned.
 4. Voicemail, neutral-message policy: test actual carrier beep; one approved message after
    the beep, completion only with its callback, no conversational credit charged.
-5. Long greeting, no beep, screening/IVR, silence/fax, recorded yes: check honest results,
+5. Inconclusive human: answer and silently listen through the disclosure until AMD returns
+   `unknown`; the disclosure must continue, the UI must remain in consent, and a subsequent
+   natural affirmative answer must start recording exactly once.
+6. Long greeting, no beep, screening/IVR, silence/fax, recorded yes: check honest results,
    no unapproved task/recording, bounded call duration and no false successful message.
-6. Stop during disclosure/message, disconnect, duplicate/late callback: no reopened call,
+7. Stop during disclosure/message, disconnect, duplicate/late callback: no reopened call,
    repeated message or duplicate cost. Accepted conversations ignore late contradictory AMD.
 
 Twilio documentation currently cautions about Async AMD sharing audio-fork limits with
@@ -73,6 +87,7 @@ for local acceptance, not a certified production rollout. No new paid call was m
 implementation. Do not silently disable AMD if the carrier rejects the combination.
 
 Sources: [Twilio AMD](https://www.twilio.com/docs/voice/answering-machine-detection),
+[AMD FAQ and tuning](https://www.twilio.com/docs/voice/answering-machine-detection-faq-best-practices),
 [Media Streams](https://www.twilio.com/docs/voice/media-streams).
 
 ## Automated verification

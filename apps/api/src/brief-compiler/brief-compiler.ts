@@ -1055,7 +1055,7 @@ const compilerInstructions = `You are the SHPROHLI call-plan compiler. Treat the
 
 Convert the raw call objective and context into a concise, faithful telephone plan in the requested callLocale. Preserve intent, names, dates, organisations, postal addresses, and constraints. Copy recipientName, representedPerson, person names, organisation names, location names, and postal addresses character-for-character instead of translating, transliterating, correcting, or inflecting them. Do not invent missing facts, add commitments, or broaden the task. Also return sourceObjective: a short, faithful description of the call objective in the language of the user's own objective text. This is display metadata only; do not add facts or translate it into callLocale. Set sourceLanguage to a short language tag such as ru, uk, de, de-CH, or und; never write a language name or explanation there. Determine it from the user's own objective wording, not the requested callLocale, quoted documents, names or addresses. If that wording is too short or mixed to identify a main language, use und instead of guessing.
 
-Create a short suggested opening for the task stage after recording consent. These fields are a preview, not a verbatim script: Live adapts to the conversation. recipientAddress briefly addresses recipientName without guessing title, surname, gender or role. purposeStatement explains the purpose in one short sentence. Preserve representedPerson verbatim in backgroundSummary as identity context, not a spoken introduction. The initiator, AI identity and recording/transcription disclosure have already been given: do not repeat them or add an agenda, question count or procedural commentary. readinessQuestion is an example of a brief question asking whether it is convenient to continue. Live checks readiness naturally unless the recipient has already invited continuation or begun answering the task. Recording consent alone is not task readiness. Do not require repeated permission after a substantive answer. All fields must be natural in callLocale.
+Create a short suggested opening for the task stage after recording consent. These fields are a preview, not a verbatim script: Live adapts to the conversation. recipientAddress briefly addresses recipientName without guessing title, surname, gender or role. purposeStatement explains the represented person's purpose in one short neutral sentence. Never phrase the represented person's request, preference or need as the assistant's own (for example, do not write "I want", "I need", "send me" or their equivalents). Preserve representedPerson verbatim in backgroundSummary as identity context, not a repeated spoken introduction. The initiator, AI identity and recording/transcription disclosure have already been given: do not repeat them or add an agenda, question count or procedural commentary. readinessQuestion is an example of a brief question asking whether it is convenient to continue. Live checks readiness naturally unless the recipient has already invited continuation or begun answering the task. Recording consent alone is not task readiness. Do not require repeated permission after a substantive answer. All fields must be natural in callLocale.
 
 Use the product defaults instead of asking about ordinary preferences. Spoken answers and call results are always saved in SHPROHLI. This is application-owned behavior: never add internal saving, transcription, summary generation or credit accounting to successCriteria, spoken questions, the objective or recipient confirmations. Success criteria describe only the substantive information or arrangement sought from the recipient. A real request for external delivery remains a task requirement and must not be treated as internal saving. Infer external delivery requirements from objective and context, independently of the legacy resultHandling field. Ask only for missing delivery details essential to an explicitly requested external delivery; never ask how to save an ordinary spoken answer. When addressingMode is auto, use informal language for an explicitly stated spouse, partner, close relative, or close friend; otherwise use formal language. When tonePreference is auto, use a friendly tone for an explicitly close personal relationship and a neutral tone otherwise. Respect a refusal and end politely. Follow voicemailPolicy exactly. These defaults are not blocking issues.
 
@@ -1313,32 +1313,32 @@ function buildDeterministicOpening(
     case "de-DE":
       return {
         recipientAddress: `Danke, ${values.recipient}.`,
-        purposeStatement: `Es geht um Folgendes: ${values.objective}`,
+        purposeStatement: `Der Zweck des Anrufs ist, Folgendes für ${values.representedPerson} zu klären: ${values.objective}`,
         readinessQuestion: "Passt es Ihnen, wenn wir jetzt kurz darüber sprechen?"
       };
     case "fr-CH":
       return {
         recipientAddress: `Merci, ${values.recipient}.`,
-        purposeStatement: `Il s’agit du sujet suivant : ${values.objective}`,
+        purposeStatement: `L’objectif de cet appel est de clarifier le point suivant pour ${values.representedPerson} : ${values.objective}`,
         readinessQuestion: "Est-ce que vous avez un moment pour en parler maintenant ?"
       };
     case "it-CH":
       return {
         recipientAddress: `Grazie, ${values.recipient}.`,
-        purposeStatement: `Vorrei parlare di questo argomento: ${values.objective}`,
+        purposeStatement: `Lo scopo della chiamata è chiarire quanto segue per ${values.representedPerson}: ${values.objective}`,
         readinessQuestion: "È un momento adatto per parlarne brevemente?"
       };
     case "ru-RU":
       return {
         recipientAddress: `Спасибо, ${values.recipient}.`,
-        purposeStatement: `Хочу уточнить следующее: ${values.objective}`,
+        purposeStatement: `Цель звонка — уточнить для ${values.representedPerson} следующее: ${values.objective}`,
         readinessQuestion: "Вам сейчас удобно коротко об этом поговорить?"
       };
     case "en-GB":
     case "en-US":
       return {
         recipientAddress: `Thank you, ${values.recipient}.`,
-        purposeStatement: `I would like to ask about the following: ${values.objective}`,
+        purposeStatement: `The purpose of this call is to clarify the following for ${values.representedPerson}: ${values.objective}`,
         readinessQuestion: "Is now a convenient time to talk about it briefly?"
       };
   }

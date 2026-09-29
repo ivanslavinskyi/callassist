@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { LiveControlledSpeech } from "./live-controlled-speech";
-import { speech } from "./voice-test-helpers";
+import { silence, speech } from "./voice-test-helpers";
 import type { SemanticDecision } from "./live-semantic-gate";
 afterEach(() => vi.useRealTimers());
 it("withholds critical PCMU until text verification, then requires the matching playback mark", async () => {
@@ -64,9 +64,35 @@ it("requires mark acknowledgement even on exact text and diagnoses its timeout",
   expect(h.verify).not.toHaveBeenCalled(); await vi.advanceTimersByTimeAsync(3_001);
   expect(h.fail).toHaveBeenCalledWith("LIVE_SPEECH_PLAYBACK_TIMEOUT"); expect(h.played).not.toHaveBeenCalled();
 });
-it("does not wait indefinitely for an incomplete transcript", async () => {
-  const h = setup(); h.gate.transcript("Elena,"); await vi.advanceTimersByTimeAsync(25_001);
-  expect(h.fail).toHaveBeenCalledWith("LIVE_SPEECH_DEADLINE");
+it("never accepts a playback mark after Twilio cleared the controlled utterance", async () => {
+  const h = setup();
+  h.gate.transcript("Elena, may I continue?");
+  await vi.advanceTimersByTimeAsync(501);
+  h.gate.playbackCleared();
+  expect(h.gate.acknowledge(h.gate.mark)).toBe(false);
+  expect(h.fail).toHaveBeenCalledWith("LIVE_SPEECH_PLAYBACK_CLEARED");
+  expect(h.played).not.toHaveBeenCalled();
+});
+it("recovers an incomplete exact prefix after Live output becomes idle", async () => {
+  const h = setup(); h.gate.transcript("Elena,");
+  await vi.advanceTimersByTimeAsync(1_199); expect(h.fail).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(2);
+  expect(h.fail).toHaveBeenCalledWith("LIVE_SPEECH_OUTPUT_STALLED");
+});
+it("treats every output audio delta as progress while an incomplete utterance is pending", async () => {
+  const h = setup(); h.gate.transcript("Elena,");
+  await vi.advanceTimersByTimeAsync(1_000); h.gate.audio(silence);
+  await vi.advanceTimersByTimeAsync(1_000); expect(h.fail).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(201);
+  expect(h.fail).toHaveBeenCalledWith("LIVE_SPEECH_OUTPUT_STALLED");
+});
+it("does not recover stalled output while the recipient is speaking", async () => {
+  const h = setup(); h.gate.transcript("Elena,"); h.gate.inputActivity("started");
+  await vi.advanceTimersByTimeAsync(5_000); expect(h.fail).not.toHaveBeenCalled();
+  h.gate.inputActivity("stopped");
+  await vi.advanceTimersByTimeAsync(1_199); expect(h.fail).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(2);
+  expect(h.fail).toHaveBeenCalledWith("LIVE_SPEECH_OUTPUT_STALLED");
 });
 it("bounds paid semantic checks during repeatedly interrupted output", async () => {
   const h = setup(); h.verify.mockResolvedValue("incomplete");
@@ -86,4 +112,20 @@ it("recognizes complete required streaming suffix without approving prefixes of 
   protectedGate.audio(speech); protectedGate.transcript("Wednesday is booked. Please confirm Tuesday.");
   await vi.advanceTimersByTimeAsync(501);
   expect(release).not.toHaveBeenCalled(); expect(fail).toHaveBeenCalled();
+});
+
+it("requires the whole generated utterance for a dynamic disclosure", async () => {
+  vi.useFakeTimers();
+  const release = vi.fn(), fail = vi.fn();
+  const gate = new LiveControlledSpeech("Nina Keller, may I continue?", release, vi.fn(), fail,
+    async () => "different", false, undefined, true);
+  gate.audio(speech);
+  gate.transcript("Unapproved preface. Nina Keller, may I continue?");
+  await vi.advanceTimersByTimeAsync(501);
+  // Dynamic disclosure audio is intentionally streamed for natural latency.
+  // The accepted compromise is that a mismatch blocks the consent transition;
+  // already-played audio cannot be recalled.
+  expect(release).toHaveBeenCalledWith([speech], null);
+  expect(release).not.toHaveBeenCalledWith([], gate.mark);
+  expect(fail).toHaveBeenCalledWith("LIVE_SPEECH_MEANING_UNVERIFIED");
 });

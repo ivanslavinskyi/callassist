@@ -16,10 +16,11 @@ import { useUiLocale } from "./ui-locale-provider";
 import { useCallDraftStore } from "./call-draft-provider";
 import { canGenerateText, useTextCapabilities } from "./use-text-capabilities";
 import { canRequestTextArtifact } from "@/lib/text-artifact-retry";
+import { needsTranscriptTranslation } from "@/lib/text-capabilities";
 
-export function CallResultPanel({ brief, userId, revision, taskLanguage, initialArtifacts }: {
+export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts }: {
   brief: CallBrief; userId: string; revision: FinalTranscriptRevision; taskLanguage: TextLanguage;
-  initialArtifacts?: CallTextArtifact[];
+  promptLanguage: string | null; initialArtifacts?: CallTextArtifact[];
 }) {
   const { locale, messages } = useUiLocale();
   const copy = textArtifactMessages[locale];
@@ -31,19 +32,21 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, initial
   const [error, setError] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<"idle" | "copied" | "exporting" | "failed">("idle");
   const { items, remember, refresh, pollingPaused } = useCallTextArtifacts(brief.id, initialArtifacts);
-  const translationArtifact = currentResultArtifact(items, revision, "transcript_translation", taskLanguage);
+  const translationNeeded = needsTranscriptTranslation(promptLanguage, brief.locale);
+  const translationArtifact = translationNeeded ? currentResultArtifact(items, revision, "transcript_translation", taskLanguage) : undefined;
   const summaryArtifact = currentResultArtifact(items, revision, "call_summary", taskLanguage);
   const summary = evidencedSummary(summaryArtifact, revision);
-  const { translation, transcript: displayed, view: displayedView } = displayedResultTranscript(revision, translationArtifact, view);
+  const { translation, transcript: displayed, view: displayedView } = displayedResultTranscript(revision, translationArtifact,
+    translationNeeded ? view : "original");
   const waitingTranslation = busy === "translation" || translationArtifact?.status === "queued" || translationArtifact?.status === "processing";
   const waitingSummary = busy === "summary" || summaryArtifact?.status === "queued" || summaryArtifact?.status === "processing";
   // A transcript may contain several spoken languages, regardless of the selected voice locale.
-  const canTranslate = availabilityStatus === "ready" && canGenerateText(capabilities, "transcript_translation", "*", taskLanguage);
+  const canTranslate = translationNeeded && availabilityStatus === "ready" && canGenerateText(capabilities, "transcript_translation", "*", taskLanguage);
   const canSummarize = availabilityStatus === "ready" && canGenerateText(capabilities, "call_summary", "*", taskLanguage);
   const availabilityMessage = availabilityStatus === "loading" ? copy.checkingAvailability
     : availabilityStatus === "error" ? copy.availabilityError
     : capabilities?.textGenerationEnabled === false ? copy.generationDisabled : null;
-  const translationStatusMessage = waitingTranslation ? (pollingPaused ? copy.pending : copy.loading)
+  const translationStatusMessage = !translationNeeded ? null : waitingTranslation ? (pollingPaused ? copy.pending : copy.loading)
     : translationArtifact?.status === "stale" ? copy.stale
     : translationArtifact ? (translationArtifact.status === "failed" && !translationArtifact.retryable ? copy.retryUnavailable : copy.translationUnavailable)
     : availabilityMessage ?? (!canTranslate ? copy.unsupported : null);

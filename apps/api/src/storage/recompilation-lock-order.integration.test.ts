@@ -48,6 +48,36 @@ it.each(["telephony operation", "leg usage", "voice session"])("locks the brief 
   } finally { await pending.catch(() => undefined); }
 });
 
+it("locks the brief before the call-event sequence", async () => {
+  const input = normalizeCreateCallBriefInput({ recipientName: "Telemetry lock test", phoneNumber: "+41523686688",
+    objective: "Ask about office opening hours", assistantProfileId: "sebastian", representedPersonFirstName: "Test",
+    representedPersonLastName: "Owner", locale: "en-GB", allowedFacts: [] });
+  const brief = await repository.create(input, await new DeterministicBriefCompiler().compile(input));
+  let pending: Promise<unknown> = Promise.resolve();
+  await sql.begin(async tx => {
+    const [{ pid }] = await tx<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+    await tx`SELECT id FROM call_briefs WHERE id=${brief.id} FOR UPDATE`;
+    pending = repository.appendCallTelemetryEvent(brief.id, {
+      idempotencyKey: `lock-order:${randomUUID()}`,
+      payload: { name: "realtime.voice", metadata: {
+        requestedVoice: "cedar", confirmedVoice: "cedar", sessionId: "live_lock_order_test",
+        model: "gpt-live-1", phase: "startup", result: "confirmed"
+      } }
+    });
+    void pending.catch(() => undefined);
+    await vi.waitFor(async () => {
+      const [waiting] = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM pg_stat_activity
+        WHERE datname=current_database() AND ${pid}=ANY(pg_blocking_pids(pid))`;
+      expect(waiting.count).toBeGreaterThan(0);
+    }, { timeout: 5000 });
+    // A provider callback appends status telemetry while holding this row.
+    // The standalone writer must still be waiting for the row here; otherwise
+    // it owns the advisory lock and this statement forms a deadlock.
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`call-event:${brief.id}`},0))`;
+  });
+  await expect(pending).resolves.toMatchObject({ callBriefId: brief.id });
+});
+
 it("takes the owner lock before the brief, allowing an owner-first text mutation to finish", async () => {
   const owner = randomUUID();
   await sql`INSERT INTO users(id,email,password_hash,phone_e164,phone_verified_at,first_name,last_name,role,status,ui_locale,created_at)

@@ -4,6 +4,7 @@ import { assertRetryableCall } from "./storage/call-retry";
 import { createHash, randomUUID } from "node:crypto";
 import {
   ANSWERING_POLICY_VERSION,
+  isAsyncAnsweringPolicyVersion,
   answeringMode,
   adminOperationsWindowBounds,
   adminCallCostBreakdownSchema,
@@ -762,7 +763,7 @@ export class CallService {
           callAttemptId: reserved.attempt.id, idempotencyKey: `answering:${reserved.attempt.id}:pending`,
           payload: { name: "answering.updated", metadata: {
             phase: "pending", policyVersion: execution.answering.policyVersion,
-            execution: this.telephonyProvider.asyncAnswering && execution.answering.policyVersion === ANSWERING_POLICY_VERSION ? "async" : "sync",
+            execution: this.telephonyProvider.asyncAnswering && isAsyncAnsweringPolicyVersion(execution.answering.policyVersion) ? "async" : "sync",
             mode: answeringMode(execution.answering.action), answeredBy: null, decision: null,
             streamAdmitted: false, observedAt: new Date().toISOString(), durationMs: null,
             message: execution.answering.action === "hang_up" ? "not_requested" : "not_attempted", failure: null

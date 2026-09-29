@@ -6,6 +6,20 @@ import {
 } from "./call-telemetry";
 
 describe("durable call telemetry contracts", () => {
+  it("persists only bounded Live error diagnostics", () => {
+    const payload = { name: "realtime.error", metadata: {
+      phase: "conversation", disposition: "retrying", code: "invalid_request_error",
+      type: "invalid_request_error", param: "session.delegation", command: "session.update",
+      clientEventId: "8c5909ef-2bb3-4f19-b78d-cda54fcd3b20", attempt: 1
+    } };
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "live:error:1", payload }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "live:error:1", payload: {
+      ...payload, metadata: { ...payload.metadata, message: "private provider text" }
+    } }).success).toBe(false);
+    expect(describeCallTelemetryEvent("realtime.error")).toEqual({
+      source: "realtime", stage: "realtime", severity: "warning"
+    });
+  });
   it("retains speech failure codes without allowing spoken text in end metadata", () => {
     const payload = { name: "conversation.ended", metadata: { reason: "openai_error", failureCode: "LIVE_SPEECH_MEANING_UNVERIFIED", failurePhase: "disclosure" } };
     expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "end:1", payload }).success).toBe(true);

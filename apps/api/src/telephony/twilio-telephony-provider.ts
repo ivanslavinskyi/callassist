@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   isSwissDestinationPhone,
   answeringMode,
-  ANSWERING_POLICY_VERSION,
+  isAsyncAnsweringPolicyVersion,
   type CallLocale,
   type CallBrief
 } from "@callassist/contracts";
@@ -62,7 +62,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       throw new Error("ANSWERING_APPROVAL_REQUIRED");
     }
     const query = new URLSearchParams(binding).toString();
-    const asyncAmd = this.asyncAnswering && snapshot.answering.policyVersion === ANSWERING_POLICY_VERSION;
+    const asyncAmd = this.asyncAnswering && isAsyncAnsweringPolicyVersion(snapshot.answering.policyVersion);
     const call = await this.#client.calls.create({
       machineDetection: answeringMode(snapshot.answering.action),
       machineDetectionTimeout: 30,

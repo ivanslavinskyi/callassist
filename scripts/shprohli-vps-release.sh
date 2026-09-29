@@ -126,7 +126,7 @@ catalog_gate() {
     name=$(basename "$file")
     [[ -f $active_path/apps/api/src/db/migrations/$name ]] && continue
     case $name in
-      0085_voice_action_intents.sql|0086_live_voice_telemetry.sql|0087_native_transcript_source.sql|0088_conversation_transcript_copy.sql) ;;
+      0085_voice_action_intents.sql|0086_live_voice_telemetry.sql|0087_native_transcript_source.sql|0088_conversation_transcript_copy.sql|0089_realtime_error_telemetry.sql) ;;
       *) die "Unreviewed schema rollout migration: $name" ;;
     esac
   done

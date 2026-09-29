@@ -86,6 +86,10 @@ const openAIPublicRateCards: ProviderRateCard[] = [
 const liveRateCards: ProviderRateCard[] = [
   { provider: "openai", model: /^gpt-live-1(?:-\d{4}-\d{2}-\d{2})?$/, billing: "duration",
     rates: { durationUsdMicrosPerMinute: 50_000 } },
+  // The Speech endpoint does not return token usage. Persisted PCM duration is
+  // priced with the public $0.015/minute audio estimate; it is not an invoice.
+  { provider: "openai", model: /^gpt-4o-mini-tts(?:-\d{4}-\d{2}-\d{2})?$/, billing: "duration",
+    rates: { durationUsdMicrosPerMinute: 15_000 } },
   { provider: "openai", model: /^gpt-6-luna(?:-\d{4}-\d{2}-\d{2})?$/, billing: "tokens",
     rates: { inputTextUsdMicrosPerMillion: 100_000, cachedInputTextUsdMicrosPerMillion: 10_000,
       cacheWriteInputTextUsdMicrosPerMillion: 125_000, outputTextUsdMicrosPerMillion: 500_000 } }

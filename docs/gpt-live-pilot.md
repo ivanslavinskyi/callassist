@@ -13,9 +13,10 @@ The hybrid protocol description below applies only to explicit `fallback=true`.
 Production `915a8f6` predates the unified implementation; do not treat its acceptance
 as evidence for the new path.
 
-`VOICE_RUNTIME_DRIVER=realtime` remains the default. `live` selects native
+`VOICE_RUNTIME_DRIVER=live` is the repository default and selects native
 `gpt-live-1` with Responses delegation to `gpt-6-luna` and
-`parallel_tool_calls=false`. Invalid drivers fail startup.
+`parallel_tool_calls=false`. Set `realtime` explicitly only for rollback. Invalid
+drivers fail startup.
 
 The hybrid runtime described below retains [synchronous AMD](amd-voicemail-beta.md).
 New native Live approvals instead use [background AMD](async-amd-live-2026-09-28.md),
@@ -24,6 +25,12 @@ The real-call results from 25 September below predate AMD and do not certify the
 new detection/message branches. Retest both runtimes with the AMD smoke profiles.
 
 ## Protocol and safety boundary
+
+Historical hybrid note: Live output was tracked by application-owned text/audio progress
+because the primary WebSocket stream has no output-audio completion event. The current
+unified runtime no longer uses that path for disclosure: it renders exact application
+text through the Speech API and requires an uninterrupted Twilio playback mark. The
+hybrid fallback retains the behavior documented in this pilot.
 
 The shared `VoiceRuntime` interface owns the authenticated Twilio Media Stream.
 `OpenAIRealtimeBridge` retains the existing runtime. `OpenAILiveBridge` reuses its
@@ -56,9 +63,11 @@ requires a fresh routing decision. Duplicate, concurrent, unauthorized and faile
 tool calls cannot trigger execution. Live does not write external business state.
 
 `VOICE_RUNTIME_LIVE_FALLBACK=true` allows startup failures to resume the already
-prepared Realtime session without repeating consent. Once Live has started, a
-provider failure closes the conversation; it never replays an action through a
-second runtime. Set fallback to `false` for acceptance tests.
+prepared Realtime session without repeating consent. Once Live has started, it
+never replays an action through a second runtime: fatal connection/startup failures
+close the conversation, while recoverable task-command rejections use one bounded
+spoken failure and the normal hangup path. Set fallback to `false` for acceptance
+tests.
 
 ## Transcripts and accounting
 
@@ -90,8 +99,9 @@ dialogue quality, and authorized merge/push to main and production rollout with
 `VOICE_RUNTIME_DRIVER=live` and `VOICE_RUNTIME_LIVE_FALLBACK=false`.
 This is owner acceptance, not an independently collected result for every carrier
 scenario. The production cutover and post-deploy checks must still be recorded.
-Repository defaults remain Realtime; the approved production environment overrides
-them explicitly. Use [the deployment preflight](deployment-preflight.md).
+Repository defaults now select Live. Production must still pin the driver and
+fallback explicitly so deployment does not depend on an implicit default. Use
+[the deployment preflight](deployment-preflight.md).
 
 1. Run the full repository test, lint, typecheck and build commands.
 2. Apply the complete current catalog through `0084_answering_detection.sql` with the normal
@@ -105,6 +115,7 @@ them explicitly. Use [the deployment preflight](deployment-preflight.md).
    post-call transcription and `REALTIME_AGENT_HANGUP_ENABLED` are preserved.
 4. Explicitly set
    `OPENAI_LIVE_MODEL=gpt-live-1`, `OPENAI_LIVE_DELEGATION_MODEL=gpt-6-luna`,
+   `OPENAI_SPEECH_MODEL=gpt-4o-mini-tts`,
    `OPENAI_LIVE_MALE_VOICE=cedar`, `OPENAI_LIVE_FEMALE_VOICE=marin`.
    Enable `REALTIME_AGENT_HANGUP_ENABLED=true` when testing application hangup.
    Drain active calls before restarting the process.

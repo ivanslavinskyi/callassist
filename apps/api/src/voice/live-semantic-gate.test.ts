@@ -58,6 +58,9 @@ describe("Live semantic safety classifier transport", () => {
       expect(init?.signal?.aborted).toBe(true); throw new Error("aborted");
     }));
     controller.abort(); expect(await h.run(controller.signal)).toBe("unclear");
-    expect(h.service.completeProviderOperation).toHaveBeenCalledWith(expect.objectContaining({ usage: null, outcome: "provider_error" }));
+    expect(h.service.completeProviderOperation).toHaveBeenCalledWith(expect.objectContaining({ usage: null,
+      outcome: "network_error", errorCode: "LIVE_CLASSIFICATION_CANCELLED" }));
+    expect(h.logger.warn).not.toHaveBeenCalled();
+    expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({ outcome: "cancelled" }), "Live semantic decision");
   });
 });

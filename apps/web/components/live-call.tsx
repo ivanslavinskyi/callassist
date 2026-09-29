@@ -861,6 +861,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                 key={snapshot.finalTranscriptRevision.id}
                 brief={brief} userId={userId} revision={snapshot.finalTranscriptRevision}
                 taskLanguage={snapshot.languageContext?.taskContentLanguage ?? supportedTextLanguage(brief.locale) ?? "en"}
+                promptLanguage={snapshot.languageContext?.detectedInputLanguage ?? snapshot.compilation?.compiledBrief?.sourceLanguage ?? null}
                 initialArtifacts={snapshot.textArtifacts}
               /> : finalTranscript?.status === "completed" &&
               (finalTranscript.text || finalSegments.length > 0) ? (

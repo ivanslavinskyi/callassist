@@ -29,6 +29,11 @@ settings and SHPROHLI transcript labels consistent across the UI and exports.
 Use the [current local checkpoint](local-testing.md#current-checkpoint-29-september)
 for the next manual test.
 
+The [29 September stable Live checkpoint](live-stable-checkpoint-2026-09-29.md) records
+the accepted real handset call after command-scoped error recovery: continuous Live session,
+semantic consent, native task completion, playback-confirmed hangup, native transcript and
+an achieved goal. It is the local regression baseline, not a production deployment claim.
+
 [Live transcript implementation, 28 September](live-transcript-implementation-2026-09-28.md)
 records the implemented follow-up: native-first saved transcripts shared by results,
 translations and PDF, versioned seven-locale CMS publications, shorter prompts and
@@ -53,7 +58,7 @@ recording/playback gates, task tools and a Live-authored closing without a recap
 The [28 September call review](live-call-review-2026-09-28.md) confirms initial voice
 consent, recording after consent and playback-confirmed hangup in a real local Twilio
 call; it also records the remaining short filler before closing. Broader manual
-acceptance and production deployment remain open. The source catalog ends at **0088**.
+acceptance and production deployment remain open. The source catalog ends at **0089**.
 
 The [voice continuity and pace follow-up](live-voice-continuity-2026-09-28.md) records
 the two-voice form, frozen voice IDs and provider confirmation diagnostics. The owner
@@ -72,7 +77,9 @@ superseded custom controller, not an alternative current architecture.
 callback safety, accounting and acceptance profiles. The [28 September async AMD
 follow-up](async-amd-live-2026-09-28.md) removes detection from the disclaimer's
 startup gate for new native Live approvals; recording depends on consent independently
-of AMD. The owner reports AMD working locally; the broader carrier matrix remains open.
+of AMD. The [29 September inconclusive-AMD correction](live-amd-unknown-fix-2026-09-29.md)
+prevents `unknown` from interrupting a human who silently listens to the disclosure.
+The broader carrier matrix remains open.
 
 
 Manual acceptance follow-up: [pre-consent connection and repeat correction](pre-consent-retry-2026-09-25.md)
@@ -125,6 +132,7 @@ revisions must be verified on the target database.
 | [Unified Live runtime](live-unified-runtime.md) | Current consent/task tools, recording/playback gates, transcript and accounting contracts |
 | [Live voice continuity and pace](live-voice-continuity-2026-09-28.md) | Two voices, immutable IDs, provider diagnostics, manual continuity feedback and pending pace acceptance |
 | [Async AMD for Live](async-amd-live-2026-09-28.md) | Immediate disclosure with background detection, consent-based recording and callback acceptance |
+| [Inconclusive AMD correction](live-amd-unknown-fix-2026-09-29.md) | Real-call failure evidence, v3 decision boundary, regression coverage and manual retest |
 | [Initial voice-change investigation](live-voice-review-2026-09-28.md) | Historical diagnosis before voice confirmation telemetry and the two-voice implementation |
 | [28 September real-call review](live-call-review-2026-09-28.md) | Voice consent on the first question, natural closing, evidence and remaining limitations |
 | [GPT-Live pilot](gpt-live-pilot.md) | Historical hybrid implementation, fallback compatibility and original smoke procedure |
@@ -138,7 +146,7 @@ revisions must be verified on the target database.
 | [Delivery, 2026-09-16](delivery-2026-09-16.md) | Founder story, session-aware CTAs, simplified call languages, opt-out eligibility, checks and deployment requirements |
 | [Architecture](architecture.md) | Current languages, appointments, consent, call control, summary schema, live state, privacy and limits |
 | [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and registered API route inventory |
-| [Deployment preflight](deployment-preflight.md) | Explicit 0085–0088 schema release, CMS upgrade and recovery; historical first-deployment preparation |
+| [Deployment preflight](deployment-preflight.md) | Explicit 0085–0089 schema release, CMS upgrade, Live-error telemetry and recovery; historical first-deployment preparation |
 | [Landing checkpoint, 2026-09-14](landing-checkpoint-2026-09-14.md) | Before/after screenshots, six EN/DE task groups and local publication results |
 | [Conversation credits, 2026-09-14](conversation-credit-2026-09-14.md) | Substantive-answer policy, atomic settlement, classification limits, migration 0071 and verification |
 | [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Admin cap/invitations, 7-minute calls, concurrency, conservative USD budget and recompile deadlock fix |

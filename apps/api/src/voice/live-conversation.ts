@@ -3,7 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { getAppointmentAuthorization, LIVE_VOICES } from "@callassist/contracts";
 import type { VoiceConversation, VoiceConversationContext } from "./voice-runtime";
 import type { LiveLifecycle, OpenAILiveBridgeOptions } from "./openai-live-bridge";
-import { liveManagedTools, managedBackendInstructions, liveExecutionContext, liveConsentTools, consentBackendInstructions } from "./live-managed-tools";
+import { liveManagedTools, managedBackendInstructions, liveExecutionContext, liveConsentTools, consentBackendInstructions,
+  type LiveExecutionParties } from "./live-managed-tools";
 import { createProviderEventOperationId } from "../realtime/openai-realtime-usage";
 
 import { decodePcmu, PcmuActivity } from "./pcmu-activity";
@@ -11,6 +12,12 @@ import { liveDurationUsage, liveResponsesUsage, object } from "./live-usage";
 
 type FunctionCall = { call_id: string; name: string; arguments: string };
 type BackendRun = { closingEpoch?: number; settled?: boolean; rejected?: boolean; id: string; operationId: string; epoch: number; answerRevision: number; backendRevision: number; consent: boolean; startedAt: number; calls: FunctionCall[]; completed: boolean; timer: ReturnType<typeof setTimeout> };
+type LiveCommandPhase = "startup" | "consent" | "conversation";
+type LiveCommandType = "session.update" | "session.instructions.append" | "session.thinking.append" |
+  "session.commentary.append" | "response.create";
+type LiveCommand = { type: LiveCommandType; phase: LiveCommandPhase; timer: ReturnType<typeof setTimeout> | null;
+  payload: object; retries: number };
+type LiveErrorFields = { code: string; type: string | null; param: string | null; clientEventId: string | null };
 
 /** Native Live transport with bounded recovery for an unprocessed recipient answer. */
 export class OpenAILiveConversation implements VoiceConversation {
@@ -21,26 +28,32 @@ export class OpenAILiveConversation implements VoiceConversation {
   #voiceChecks = 0;
   readonly #activity = new PcmuActivity();
   readonly #seen = new Set<string>();
-  readonly #commands = new Map<string, { type: string; timer: ReturnType<typeof setTimeout> }>();
+  readonly #commands = new Map<string, LiveCommand>();
   readonly #runs = new Map<string, BackendRun>();
   readonly #delegations = new Map<string, string>();
   readonly #toolResults = new Map<string, { signature: string; result: Promise<Record<string, unknown>> }>();
+  readonly #activityWaiters = new Set<() => void>();
   #epoch = 0;
   #answerRevision = 0;
   #toolBusy = false;
   #backendEnabled = false;
   #consentBackend = false;
   #backendRevision = 0;
-  #requestedDecision = "";
-  #coveredDecision = "";
+  #requestedConsentDecision = "";
+  #coveredConsentDecision = "";
+  #consentNoToolKey = "";
+  #consentNoToolCount = 0;
   #socket: WebSocket | null = null;
   #ready = false;
   #closing = false;
   #finalized = false;
   #reserved = false;
+  #reservation: Promise<void> | null = null;
   #sessionId: string | null = null;
   #sessionStartedAt = new Date().toISOString();
   #seconds: number | null = null;
+  #inputAudioMs = 0;
+  #consentTranscriptBoundaryMs = Number.POSITIVE_INFINITY;
   #queue: string[] = [];
   #queuedBytes = 0;
   #writes = Promise.resolve();
@@ -52,6 +65,11 @@ export class OpenAILiveConversation implements VoiceConversation {
   #rejectStart: ((error: Error) => void) | null = null;
   #failureCode: string | null = null;
 
+  get #parties(): LiveExecutionParties {
+    return { representedPerson: this.context.brief.representedPerson,
+      recipientName: this.context.brief.recipientName };
+  }
+
   constructor(private readonly options: OpenAILiveBridgeOptions, private readonly context: VoiceConversationContext,
     private readonly lifecycle?: LiveLifecycle) {
     this.#model = options.liveModel ?? "gpt-live-1";
@@ -61,10 +79,11 @@ export class OpenAILiveConversation implements VoiceConversation {
     // The opt-in legacy hybrid adapter has no buffered action playback gate.
     // Leave such calls with its already prepared Realtime runtime, before Live starts.
     if (!this.lifecycle && getAppointmentAuthorization(this.context.snapshot.plan)) throw new Error("LIVE_ACTION_PLAYBACK_GATE_REQUIRED");
-    await this.options.service.startRealtimeProviderSessions([{ id: this.operationId, callBriefId: this.context.brief.id,
+    this.#reservation ??= this.options.service.startRealtimeProviderSessions([{ id: this.operationId, callBriefId: this.context.brief.id,
       callAttemptId: this.context.attemptId, provider: "openai", operationType: "realtime_session", stage: "live_conversation",
-      requestedModel: this.#model, clientRequestId: this.operationId, startedAt: new Date(this.#startedAt).toISOString() }]);
-    this.#reserved = true;
+      requestedModel: this.#model, clientRequestId: this.operationId, startedAt: new Date(this.#startedAt).toISOString() }])
+      .then(() => { this.#reserved = true; });
+    await this.#reservation;
     if (this.#closing) { this.#finalize(false); throw new Error("LIVE_START_CANCELLED"); }
     return new Promise<void>((resolve, reject) => {
       this.#resolveStart = resolve; this.#rejectStart = reject;
@@ -90,17 +109,20 @@ export class OpenAILiveConversation implements VoiceConversation {
       this.#socket.on("close", () => { if (!this.#finalized) this.#fail("LIVE_SOCKET_CLOSED"); });
     });
   }
+  whenReserved() {
+    return this.#reservation ?? Promise.reject(new Error("LIVE_SESSION_NOT_STARTED"));
+  }
   inputAudio(payload: string) {
     if (this.#closing) return;
     const bytes = decodePcmu(payload);
     if (!bytes) { this.#fail("LIVE_INVALID_INPUT_AUDIO"); return; }
+    this.#inputAudioMs += bytes.length / 8;
     const activity = this.#activity.push(bytes);
-    if (activity === "started") this.#epoch++;
     this.lifecycle?.activity(activity);
     if (activity === "started") {
       if (!this.lifecycle) this.context.clearPlayback();
-      if (this.context.interruptFarewell()) this.instruct("Closing authorization cancelled. Interpret the latest recipient input in context, respond if useful, and request a fresh end_call when ready. Do not restart completed work.");
     }
+    if (activity === "stopped") this.#releaseActivityWaiters();
     if (!this.#ready) {
       this.#queuedBytes += bytes.length;
       if (this.#queuedBytes > 128_000) { this.#fail("LIVE_INPUT_QUEUE_LIMIT"); return; }
@@ -120,7 +142,8 @@ export class OpenAILiveConversation implements VoiceConversation {
   #backendConfiguration(enabled: boolean) {
     return { model: this.options.delegationModel ?? "gpt-6-luna", parallel_tool_calls: false,
       tool_choice: enabled ? "auto" : "none", tools: enabled ? liveManagedTools(this.context.snapshot, !!this.options.agentHangupEnabled) : [],
-      max_output_tokens: 2048, instructions: enabled ? managedBackendInstructions(this.context.snapshot) :
+      reasoning: { effort: "low" }, max_output_tokens: 512,
+      instructions: enabled ? managedBackendInstructions(this.context.snapshot, this.#parties) :
         "Consent has not been granted. No task is authorized. Do not perform work, ask task questions, infer consent or use tools." };
   }
   configureBackend(recordingStartedAt?: string) {
@@ -130,34 +153,36 @@ export class OpenAILiveConversation implements VoiceConversation {
     this.#consentBackend = false;
     this.#backendRevision++;
     this.#send({ type: "session.update", session: { delegation: { type: "responses", responses: this.#backendConfiguration(true) } } });
-    for (const data of liveExecutionContext(this.context.snapshot)) this.#append("session.thinking.append", data);
-    this.instruct("Task stage enabled. Recording has started after consent; consent-only silence and delegation restrictions have ended. Use the approved task fields; consecutive fragments with the same path form one value. Introduce the topic and naturally check whether now is convenient before asking substantive questions. Opening fields are guidance, not a script. Recording consent alone is not readiness to discuss the task. If already invited to continue or given a task answer, continue from it. Do not repeat the greeting, initiator or disclosures. Follow the task delegation policy.");
+    for (const data of liveExecutionContext(this.context.snapshot, this.#parties)) this.#append("session.thinking.append", data);
+    this.instruct("Task stage enabled. Recording has started. Use the approved task context and continue naturally on behalf of the represented person. Introduce the purpose and check readiness only if the recipient has not already invited continuation or answered the task. Do not repeat the greeting, identity or disclosures. Do not read internal task fields aloud.");
   }
   configureConsent() {
     if (this.#backendEnabled) return;
+    this.#consentTranscriptBoundaryMs = this.#inputAudioMs;
     this.#consentBackend = true;
     this.#backendRevision++;
     this.#send({ type: "session.update", session: { delegation: { type: "responses", responses: {
       model: this.options.delegationModel ?? "gpt-6-luna", parallel_tool_calls: false,
-      tool_choice: "auto", tools: liveConsentTools(), max_output_tokens: 2048,
+      tool_choice: "auto", tools: liveConsentTools(), reasoning: { effort: "low" }, max_output_tokens: 128,
       instructions: consentBackendInstructions(this.context.snapshot.plan.callLocale)
     } } } });
   }
-  /** One request for an observed, settled answer not covered by native work. */
-  requestDecision() {
+  /** One consent decision for an observed, settled answer not covered by native work. */
+  requestConsentDecision() {
     if (!this.#ready || this.#closing || this.context.isClosing() || this.#activity.speaking || this.#toolBusy ||
-        (!this.#backendEnabled && !this.#consentBackend) || !this.lifecycle?.decisionReady?.()) return;
+        this.#backendEnabled || !this.#consentBackend || !this.lifecycle?.decisionReady?.()) return;
     const key = `${this.#backendRevision}:${this.#answerRevision}`;
-    if (key === this.#requestedDecision || key === this.#coveredDecision ||
+    if (key === this.#requestedConsentDecision || key === this.#coveredConsentDecision ||
         [...this.#commands.values()].some(command => command.type === "response.create") ||
         [...this.#delegations.values()].some(id => !this.#runs.get(id)?.settled)) return;
-    this.#requestedDecision = key;
+    this.#requestedConsentDecision = key;
     this.options.logger?.info({ callAttemptId: this.context.attemptId, generation: this.#epoch,
-      answerRevision: this.#answerRevision, backendRevision: this.#backendRevision }, "Live answer decision requested");
+      answerRevision: this.#answerRevision, backendRevision: this.#backendRevision }, "Live consent decision requested");
     this.#send({ type: "response.create" });
   }
   suspendConsent() {
     if (this.#backendEnabled || !this.#consentBackend) return;
+    this.#consentTranscriptBoundaryMs = Number.POSITIVE_INFINITY;
     this.#consentBackend = false;
     this.#backendRevision++;
     this.#send({ type: "session.update", session: { delegation: { type: "responses", responses: this.#backendConfiguration(false) } } });
@@ -167,12 +192,21 @@ export class OpenAILiveConversation implements VoiceConversation {
   #append(type: string, content: string) {
     if (this.#ready && !this.#closing) this.#send({ type, delegation_id: null, content });
   }
-  #send(payload: object) {
+  #send(payload: object, retries = 0) {
     if (this.#socket?.readyState !== WebSocket.OPEN) return;
     const event_id = randomUUID(), type = String(object(payload).type);
-    if ((type.endsWith(".append") && type !== "session.input_audio.append") || type === "session.update" || type === "response.create") {
-      const timer = setTimeout(() => this.#fail("LIVE_CONTEXT_ACK_TIMEOUT"), 15_000); timer.unref?.();
-      this.#commands.set(event_id, { type, timer });
+    if (isTrackedCommand(type)) {
+      const command: LiveCommand = { type, phase: this.#commandPhase(), timer: null, payload, retries };
+      command.timer = setTimeout(() => {
+        if (this.#commands.get(event_id) !== command) return;
+        this.#commands.delete(event_id);
+        command.timer = null;
+        this.#handleCommandFailure(command, {
+          code: "ack_timeout", type: "client_timeout", param: null, clientEventId: event_id
+        }, randomUUID());
+      }, 15_000);
+      command.timer.unref?.();
+      this.#commands.set(event_id, command);
     }
     this.#socket.send(JSON.stringify({ event_id, ...payload }));
   }
@@ -185,7 +219,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       if (this.#seen.size > 50_000) { this.#fail("LIVE_EVENT_LIMIT"); return; }
     }
     const ack = typeof event.client_event_id === "string" ? this.#commands.get(event.client_event_id) : undefined;
-    if (ack && event.type === `${ack.type}ed`) { clearTimeout(ack.timer); this.#commands.delete(String(event.client_event_id)); return; }
+    if (ack && event.type === `${ack.type}ed`) { this.#forgetCommand(String(event.client_event_id), ack); return; }
     if (event.type === "session.usage.updated" || event.type === "session.closed") {
       const seconds = object(event.usage).seconds;
       if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0) this.#seconds = seconds;
@@ -222,7 +256,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       if (this.lifecycle) this.lifecycle.ready(); else this.#backendEnabled = true;
     } else if (event.type === "session.updated") {
       if (!this.#ready || !this.#checkVoice(object(event.session))) return;
-      if (ack?.type === "session.update") { clearTimeout(ack.timer); this.#commands.delete(String(event.client_event_id)); }
+      if (ack?.type === "session.update") this.#forgetCommand(String(event.client_event_id), ack);
     } else if (event.type === "session.delegation.created") {
       const delegation = object(event.delegation);
       if (typeof delegation.id === "string" && typeof delegation.response_id === "string")
@@ -234,10 +268,59 @@ export class OpenAILiveConversation implements VoiceConversation {
     } else if ((event.type === "session.input_transcript.delta" || event.type === "session.output_transcript.delta") && this.#ready) this.#transcript(event);
     else if (event.type === "error") {
       const error = object(event.error);
-      const code = typeof error.code === "string" && /^[a-z0-9_.-]{1,120}$/i.test(error.code) ? error.code : "unknown";
-      this.options.logger?.warn({ callBriefId: this.context.brief.id, code }, "Live command failed");
-      this.#fail("LIVE_COMMAND_REJECTED");
+      const token = (value: unknown) => typeof value === "string" && /^[a-z0-9_.:/-]{1,160}$/i.test(value) ? value : null;
+      const clientEventId = token(error.client_event_id), command = clientEventId ? this.#commands.get(clientEventId) : undefined;
+      if (clientEventId && command) this.#forgetCommand(clientEventId, command);
+      const fields: LiveErrorFields = { code: token(error.code) ?? "unknown", type: token(error.type),
+        param: token(error.param), clientEventId };
+      const providerEventId = typeof event.event_id === "string" ? event.event_id : randomUUID();
+      if (command) { this.#handleCommandFailure(command, fields, providerEventId); return; }
+      const phase = this.#commandPhase(), disposition = this.#ready ? "continued" : "fatal";
+      this.#recordLiveError(fields, phase, null, disposition, 0, providerEventId);
+      // An active Live error is not itself proof that the session or transport
+      // failed. The provider reports those terminal conditions separately via
+      // session.closed or the WebSocket. This also covers moderation events that
+      // interrupt only the current output and late errors for settled commands.
+      if (!this.#ready) this.#fail("LIVE_COMMAND_REJECTED");
     }
+  }
+  #commandPhase(): LiveCommandPhase {
+    return this.#backendEnabled ? "conversation" : this.#consentBackend ? "consent" : "startup";
+  }
+  #forgetCommand(id: string, command: LiveCommand) {
+    if (command.timer) clearTimeout(command.timer);
+    command.timer = null;
+    if (this.#commands.get(id) === command) this.#commands.delete(id);
+  }
+  #handleCommandFailure(command: LiveCommand, fields: LiveErrorFields, providerEventId: string) {
+    // An explicit provider rejection proves the command was not applied, so one
+    // retry is safe. An acknowledgement timeout is ambiguous: retrying an append
+    // or response.create could duplicate work the provider already accepted.
+    if (!this.#closing && this.#socket?.readyState === WebSocket.OPEN && fields.code !== "ack_timeout" && command.retries < 1) {
+      this.#recordLiveError(fields, command.phase, command.type, "retrying", command.retries + 1, providerEventId);
+      this.#send(command.payload, command.retries + 1);
+      return;
+    }
+    if (command.phase === "consent" && command.type === "response.create" && this.lifecycle?.consentDecisionUnavailable) {
+      this.#recordLiveError(fields, command.phase, command.type, "consent_recovery", command.retries + 1, providerEventId);
+      this.lifecycle.consentDecisionUnavailable();
+      return;
+    }
+    this.#recordLiveError(fields, command.phase, command.type, "fatal", command.retries + 1, providerEventId);
+    if (this.#backendEnabled && this.lifecycle?.backendFailed) {
+      this.#clearCommands();
+      this.lifecycle.backendFailed();
+      return;
+    }
+    this.#fail("LIVE_COMMAND_REJECTED");
+  }
+  #recordLiveError(fields: LiveErrorFields, phase: LiveCommandPhase, command: LiveCommandType | null,
+    disposition: "retrying" | "continued" | "consent_recovery" | "fatal", attempt: number, providerEventId: string) {
+    const fingerprint = createHash("sha256").update(`${providerEventId}:${fields.clientEventId ?? ""}:${fields.code}:${attempt}`).digest("hex");
+    const metadata = { phase, disposition, code: fields.code, type: fields.type, param: fields.param,
+      command, clientEventId: fields.clientEventId, attempt: Math.min(2, attempt) };
+    this.context.telemetry(`live:${this.operationId}:error:${fingerprint}`, { name: "realtime.error", metadata });
+    this.options.logger?.warn({ callBriefId: this.context.brief.id, ...metadata }, "Live command failed");
   }
   #voiceTelemetry(sessionId: string | null, confirmedVoice: string | null,
     result: "requested" | "confirmed" | "mismatch" | "unconfirmed") {
@@ -263,6 +346,11 @@ export class OpenAILiveConversation implements VoiceConversation {
       typeof event.end_ms !== "number" || !Number.isFinite(event.start_ms) || !Number.isFinite(event.end_ms) ||
       event.start_ms < 0 || event.end_ms < event.start_ms) { this.#fail("LIVE_INVALID_TRANSCRIPT"); return; }
     const role = event.type === "session.input_transcript.delta" ? "recipient" : "assistant";
+    // Transcription can arrive after application-rendered playback. Never let
+    // an utterance that started before the latest complete disclosure mark
+    // become consent merely because its transcript was delayed.
+    if (this.lifecycle && this.#consentBackend && role === "recipient" &&
+        event.start_ms < this.#consentTranscriptBoundaryMs) return;
     // A late pre-consent answer must not become persistable after the phase changes.
     if (this.lifecycle && this.#backendEnabled && event.start_ms < this.#transcriptBoundaryMs) return;
     if (!drainOnly && role === "recipient" && event.delta.trim()) {
@@ -284,7 +372,7 @@ export class OpenAILiveConversation implements VoiceConversation {
 
   close() {
     if (this.#closing) return;
-    this.#closing = true;  this.#queue = []; this.#clearCommands();
+    this.#closing = true;  this.#queue = []; this.#clearCommands(); this.#releaseActivityWaiters();
     if (this.#startTimer) clearTimeout(this.#startTimer);
     this.#rejectStart?.(new Error("LIVE_START_CANCELLED")); this.#rejectStart = null;
     if (this.#ready && this.#socket?.readyState === WebSocket.OPEN) {
@@ -298,9 +386,8 @@ export class OpenAILiveConversation implements VoiceConversation {
     if (typeof delegation !== "string") { this.#fail(); return; }
     const response = object(event.response);
     if (event.type === "response.created") {
-      for (const [id, command] of this.#commands) if (command.type === "response.create") {
-        clearTimeout(command.timer); this.#commands.delete(id);
-      }
+      for (const [id, command] of this.#commands)
+        if (command.type === "response.create") this.#forgetCommand(id, command);
       if (typeof response.id !== "string" || this.#runs.size >= 128) { this.#fail(); return; }
       if (this.#runs.has(response.id)) return;
       const previous = this.#runs.get(this.#delegations.get(delegation) ?? "");
@@ -367,8 +454,21 @@ export class OpenAILiveConversation implements VoiceConversation {
           return;
         }
         if (run.closingEpoch !== undefined && !run.calls.length) this.lifecycle?.closingBackendCompleted?.();
-        if (!run.calls.length && !run.rejected && run.backendRevision === this.#backendRevision && run.epoch === this.#epoch)
-          this.#coveredDecision = `${run.backendRevision}:${run.answerRevision}`;
+        if (run.consent && !run.calls.length && !run.rejected && this.#consentBackend && !this.context.isClosing() &&
+            run.backendRevision === this.#backendRevision && run.epoch === this.#epoch) {
+          const key = `${run.backendRevision}:${run.answerRevision}`;
+          if (this.#consentNoToolKey !== key) { this.#consentNoToolKey = key; this.#consentNoToolCount = 0; }
+          this.#consentNoToolCount++;
+          if (this.#consentNoToolCount >= 2) {
+            this.#coveredConsentDecision = key;
+            this.options.logger?.warn({ callAttemptId: this.context.attemptId, backendRevision: run.backendRevision,
+              answerRevision: run.answerRevision }, "Live consent backend returned without report_consent");
+            this.lifecycle?.consentDecisionUnavailable?.();
+          } else this.#requestedConsentDecision = "";
+        } else if (run.consent && run.calls.length) {
+          this.#consentNoToolKey = "";
+          this.#consentNoToolCount = 0;
+        }
         for (const call of run.calls) {
           const signature = createHash("sha256").update(call.name + "\n" + call.arguments).digest("hex");
           let cached = this.#toolResults.get(call.call_id);
@@ -396,12 +496,16 @@ export class OpenAILiveConversation implements VoiceConversation {
         if (run.calls.length) this.#send({ type: "response.create" });
       }).catch(() => this.#fail("LIVE_TOOL_FAILURE")).finally(() => {
         run.settled = true;
-        this.requestDecision();
+        if (run.consent) this.requestConsentDecision();
       });
     }
   }
 
   async #executeTool(call: FunctionCall, epoch: number, backendRevision: number, single: boolean): Promise<Record<string, unknown>> {
+    // Acoustic activity is a pending semantic boundary, not evidence by itself.
+    // Wait for silence so a real transcript can advance the epoch; pure noise then
+    // leaves the already-completed backend work current.
+    if (this.#activity.speaking) await this.#waitForActivityBoundary();
     const current = () => single && !this.#closing && epoch === this.#epoch && backendRevision === this.#backendRevision && !this.#activity.speaking;
     const authorized = this.#backendEnabled ? call.name !== "report_consent" : this.#consentBackend && call.name === "report_consent";
     if (!authorized || !current()) return { ok: false, reason: "stale_or_unauthorized_request" };
@@ -431,7 +535,23 @@ export class OpenAILiveConversation implements VoiceConversation {
     return { ok: false, reason: "unsupported_tool" };
   }
 
-  #clearCommands() { for (const command of this.#commands.values()) clearTimeout(command.timer); this.#commands.clear(); }
+  #waitForActivityBoundary() {
+    if (!this.#activity.speaking || this.#closing) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      let timer: ReturnType<typeof setTimeout>;
+      const done = () => { clearTimeout(timer); this.#activityWaiters.delete(done); resolve(); };
+      timer = setTimeout(done, 10_000); timer.unref?.();
+      this.#activityWaiters.add(done);
+    });
+  }
+  #releaseActivityWaiters() {
+    for (const done of [...this.#activityWaiters]) done();
+  }
+
+  #clearCommands() {
+    for (const command of this.#commands.values()) if (command.timer) clearTimeout(command.timer);
+    this.#commands.clear();
+  }
   async #capture(status: "collecting" | "complete" | "incomplete") {
     if(!this.#sessionId) return;
     await this.options.service.setNativeTranscriptCapture(this.context.brief.id,this.context.attemptId,{
@@ -450,7 +570,7 @@ export class OpenAILiveConversation implements VoiceConversation {
     this.#failureCode = code;
     this.options.logger?.warn({ callBriefId: this.context.brief.id, code }, "Live session failed");
     this.#rejectStart?.(new Error("LIVE_START_FAILED")); this.#rejectStart = null;
-    this.#closing = true;  this.#queue = [];
+    this.#closing = true;  this.#queue = []; this.#releaseActivityWaiters();
     this.#finalize(false); this.#socket?.terminate();
     if (this.#ready) this.context.fail();
   }
@@ -475,19 +595,37 @@ export class OpenAILiveConversation implements VoiceConversation {
   }
 }
 
+function isTrackedCommand(type: string): type is LiveCommandType {
+  return ["session.update", "session.instructions.append", "session.thinking.append",
+    "session.commentary.append", "response.create"].includes(type);
+}
+
 export function buildLiveInstructions(context: VoiceConversationContext, consentComplete = true) {
   const { plan, runtime } = context.snapshot;
-  const identity = `You are ${runtime.agentName}, an AI telephone assistant. Speak ${plan.callLocale} with ${plan.addressingStyle} address and ${plan.tone} tone. ${plan.addressingStyle === "formal" ? "Keep formal address even with first names." : "Use the approved addressing style."} ${runtime.allowLanguageSwitch ? `Switch only to ${runtime.fallbackLocale} on explicit request.` : "Do not change language."}`;
-  return identity + `
-Speaking pace: Speak calmly, slightly slower than ordinary conversation, with natural pauses and clear names, dates and numbers.
-Voice continuity: Keep the same ${runtime.voiceGender === "male" ? "masculine" : "feminine"} voice, identity and accent through every stage, including application text and backend results. Do not imitate the recipient.
-${consentComplete ? "Consent and opening are complete. Listen for the opening answer, or act on it if received. Do not greet again." : "Stay silent until application disclosure/opening instructions. Do not ask task questions, infer permission or perform task work until the application enables the task stage. During consent, delegate the complete recipient answer and disclosure context to report_consent when the application enables that tool. Natural spoken permission needs no keypad press. Wait silently for the application's next instruction after the decision. These consent-only restrictions end when the application enables the task stage."}
-Address the called recipient on the customer's behalf. Follow the approved task; accept unknown answers and refusals. Preserve uncertainty and corrections. Repeat important details only when useful to catch an error. Explain constraints only when they affect the recipient's request or expectations.
-Backchannel policy: Only after the application enables the task stage, brief natural acknowledgments of received information are allowed, including while the backend works. During disclosure and consent, speak only the application's explicitly requested utterance; no filler, acknowledgments or processing commentary. During the task acknowledge what the recipient said when useful, then allow a short silence. Keep internal checks, saving and tool activity silent. An acknowledgment is not a claim that an external action succeeded.
-Interruption policy: Yield and listen. Distinguish corrections from speech addressed to others. Clarify material ambiguity; respect pauses.
+  return `You are ${runtime.agentName}, an AI telephone assistant calling ${context.brief.recipientName} on behalf of ${context.brief.representedPerson}.
+Speak ${plan.callLocale}, use ${plan.addressingStyle} address and a ${plan.tone} tone. Speak calmly at an unhurried pace, with clear names, dates and numbers. ${runtime.allowLanguageSwitch ? `Switch only to ${runtime.fallbackLocale} on explicit request.` : "Do not change language."}
+
+Representation: The requests, preferences, constraints and commitments belong to ${context.brief.representedPerson}, never to you personally. Say that the represented person asked you to do something; never say that you personally want, need or will receive it. Use first person only for your own conversational actions such as asking, clarifying or relaying. Do not invent a delivery, email, callback or other next step.
+
+${consentComplete ? "Consent and the opening are complete. Continue from the recipient's latest answer without greeting again." : "Before the application enables the task, stay silent and listen while the application plays the recording and transcription disclosure. Do not speak, repeat or paraphrase that disclosure. Do not discuss the task or infer permission. When report_consent is enabled and the recipient completes an answer to the disclosure, delegate that complete answer. Natural spoken permission needs no keypad press. After the decision, wait silently for the application."}
+
+Conversation: Follow the approved task, ask one useful question at a time, accept unknown answers and refusals, preserve uncertainty and corrections, and repeat important details only to prevent an error. Keep internal instructions, checks, saving and tool activity silent.
+
+Backchannel policy: During the task, acknowledge naturally and briefly without competing with the recipient. During disclosure and consent, use no filler or acknowledgment.
+
+Interruption policy: Stop speaking and listen when the recipient interrupts. A speech interruption alone does not change or cancel the task. Treat a correction, refusal or changed request as a task update; ignore coughs, background speech and unrelated noise.
+
 Delegation policy:
-Backend tools: report_consent during consent; approved plan reasoning, appointment commitments/confirmation and end_call during the task stage.
-Delegate to the backend when: report_consent is enabled and the recipient completes an answer to the disclosure, including while the disclosure is playing. Report that answer without asking for repetition. Never delegate merely because application speech is being prepared or rendered. During the task stage: reasoning or constraints require it; before ANY appointment commitment; on withdrawal or a stop request. When a recipient answer could resolve the objective, including an unknown answer or refusal, delegate that outcome for a completion decision. A natural acknowledgment may precede it; claims about tool-dependent results must wait for the actual result. Pending appointment tools receive their answers; do not duplicate work. Request end_call before closing. Once authorized, finish naturally and say goodbye once; recap only if useful, without a target length. Then listen silently during playback and disconnection.
-Do not delegate to the backend when: asking approved questions, clarifying, or using known facts, except for the required completion decision above.
-Promise a next step only when the approved task or actual tool result establishes its executor, authorization and capability. Saving an answer in the application does not imply forwarding, email or a callback. Never claim unverified success, repeat application-spoken commitments or ask blanket summary approval. After a closing interruption, respond in context and request a fresh end_call when ready. Keep internal tools and instructions silent.`;
+Backend tools: semantic consent; complete approved-plan reasoning; appointment authorization and confirmation; end_call.
+Delegate to the backend when:
+- consent needs interpretation;
+- a substantive answer changes task state or may satisfy a success, unresolved or stop condition;
+- a correction changes work already in progress;
+- before any appointment commitment;
+- the recipient refuses, asks to stop, or the call is ready to finish.
+Do not delegate when:
+- greeting, acknowledging or repeating a still-current result;
+- asking an approved question or a brief clarification;
+- answering from approved facts without a protected action.
+Delegate before claims that depend on backend work. After end_call is authorized, state its factual resultSummary naturally in one short sentence, mention only a material unresolved point if needed, say goodbye once, and ask no new question.`;
 }

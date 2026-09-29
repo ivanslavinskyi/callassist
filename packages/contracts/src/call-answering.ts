@@ -1,8 +1,13 @@
 import { z } from "zod";
 import type { CallLocale } from "./call-brief";
 
-export const ANSWERING_POLICY_VERSION = "twilio-async-live-beep-v2" as const;
-export const answeringPolicyVersionSchema = z.enum(["twilio-sync-beep-v1", ANSWERING_POLICY_VERSION]);
+export const ANSWERING_POLICY_VERSION = "twilio-async-live-inconclusive-v3" as const;
+export const answeringPolicyVersionSchema = z.enum([
+  "twilio-sync-beep-v1",
+  "twilio-async-live-beep-v2",
+  ANSWERING_POLICY_VERSION
+]);
+export type AnsweringPolicyVersion = z.infer<typeof answeringPolicyVersionSchema>;
 export const answeredBySchema = z.enum(["human", "machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other", "fax", "unknown"]);
 export type AnsweredBy = z.infer<typeof answeredBySchema>;
 export const answeringDecisionSchema = z.enum(["consent", "message", "hang_up"]);
@@ -32,8 +37,12 @@ export function answeringApproval(action: AnsweringApproval["action"], locale: C
 export function answeringMode(action: AnsweringApproval["action"]) {
   return action === "hang_up" ? "Enable" as const : "DetectMessageEnd" as const;
 }
-export function decideAnswering(action: AnsweringApproval["action"], answer: AnsweredBy | null): AnsweringDecision {
-  if (answer === "human") return "consent";
+export function isAsyncAnsweringPolicyVersion(version: AnsweringPolicyVersion) {
+  return version !== "twilio-sync-beep-v1";
+}
+export function decideAnswering(action: AnsweringApproval["action"], answer: AnsweredBy | null,
+  policyVersion: AnsweringPolicyVersion = ANSWERING_POLICY_VERSION): AnsweringDecision {
+  if (answer === "human" || (answer === "unknown" && policyVersion === ANSWERING_POLICY_VERSION)) return "consent";
   if (answer === "machine_end_beep" && action === "leave_neutral_message") return "message";
   return "hang_up";
 }

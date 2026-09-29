@@ -56,13 +56,13 @@ describe("voice runtime selection and consent gate integration", () => {
     expect(createVoiceRuntime(options, { VOICE_RUNTIME_DRIVER: "live", OPENAI_LIVE_MALE_VOICE: "cedar", OPENAI_LIVE_FEMALE_VOICE: "marin" })).toBeInstanceOf(OpenAILiveBridge);
   });
   it("defaults to unchanged Realtime and explicitly selects Live", async () => {
-    expect(voiceRuntimeDriver({})).toBe("realtime");
+    expect(voiceRuntimeDriver({})).toBe("live");
     expect((await harness("realtime")).bridge).toBeInstanceOf(OpenAIRealtimeBridge);
     expect((await harness()).bridge).toBeInstanceOf(OpenAILiveBridge);
     expect(() => voiceRuntimeDriver({ VOICE_RUNTIME_DRIVER: "typo" })).toThrow("VOICE_RUNTIME_DRIVER");
   });
-  it.each(["live", "realtime"])("%s cannot open audio or provider sessions without human AMD admission", async driver => {
-    for (const answer of [null, "machine_start", "unknown", "fax"]) {
+  it.each(["live", "realtime"])("%s cannot open audio or provider sessions without an admissible AMD result", async driver => {
+    for (const answer of [null, "machine_start", "fax"]) {
       const h = await harness(driver, false, "valid", "true", answer);
       expect(h.twilio.readyState).toBe(3);
       expect(h.realtime.sent).toEqual([]);
@@ -70,6 +70,11 @@ describe("voice runtime selection and consent gate integration", () => {
       expect(h.connect).not.toHaveBeenCalled();
       expect(h.startRecording).not.toHaveBeenCalled();
     }
+  });
+  it.each(["live", "realtime"])("%s continues to consent when current-policy AMD is inconclusive", async driver => {
+    const h = await harness(driver, false, "valid", "true", "unknown");
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.startRecording).not.toHaveBeenCalled();
   });
   it("does not accept a fabricated opening mark or a cancelled disclosure as completed playback", async () => {
     const h = await harness();
@@ -144,7 +149,9 @@ describe("voice runtime selection and consent gate integration", () => {
     h.live.receive({ type: "session.input_transcript.delta", delta: "Please end the call.", start_ms: 1000, end_ms: 1500 });
     const backend = (event: object) => h.live.receive({ type: "response.event", delegation_id: "d", event });
     backend({ type: "response.created", response: { id: "r" } });
-    backend({ type: "response.output_item.done", item: { type: "function_call", call_id: "c", name: "end_call", arguments: JSON.stringify({ reason: "recipient_requested_end" }) } });
+    backend({ type: "response.output_item.done", item: { type: "function_call", call_id: "c", name: "end_call", arguments: JSON.stringify({
+      reason: "recipient_requested_end", resultSummary: "The recipient asked to end the call."
+    }) } });
     backend({ type: "response.completed", response: { id: "r", status: "completed", output: [] } }); await flush();
     const farewell = h.realtime.sent.filter(e => e.type === "response.create").at(-1);
     expect(farewell.response.metadata.farewell_generation).toBe("1");
@@ -153,7 +160,8 @@ describe("voice runtime selection and consent gate integration", () => {
     h.realtime.receive({ type: "response.done", response: { id: "farewell", status: "completed" } });
     const mark = h.twilio.sent.filter(e => e.event === "mark").at(-1).mark.name;
     expect(h.prepareHangup).not.toHaveBeenCalled();
-    if (interrupted) h.twilio.receive({ event: "media", media: { payload: speech } });
+    if (interrupted) h.live.receive({ type: "session.input_transcript.delta", event_id: "late-correction",
+      delta: "Wait, one correction.", start_ms: 1_600, end_ms: 2_000 });
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
     expect(h.prepareHangup).toHaveBeenCalledTimes(interrupted ? 0 : 1);
     if (interrupted) expect(h.twilio.sent.filter(e => e.event === "clear").length).toBeGreaterThan(0);

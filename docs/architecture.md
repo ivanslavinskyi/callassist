@@ -2,7 +2,7 @@
 
 Voice architecture updated 2026-09-29 for native consent delegation, background AMD,
 voice continuity, calm pacing, natural closing and native-first saved transcripts on
-`codex/live-unified-runtime`. Source migrations run through 0088.
+`codex/live-unified-runtime`. Source migrations run through 0089.
 Other feature checkpoints retain their original dates.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
 [dated audits and verification](README.md) retain the evidence available at their dates.
@@ -36,7 +36,10 @@ pending native work suppressing duplicates. No new classifier is introduced.
 
 New native Live approvals run AMD asynchronously alongside the disclosure. Recording
 does not wait for an AMD human classification, and a contradictory late result cannot
-redirect a consented conversation. Old approvals retain their saved answering policy.
+redirect a consented conversation. Under `twilio-async-live-inconclusive-v3`, `unknown`
+is an inconclusive admission into the existing disclosure/consent gate, not evidence of
+an automated answer; only explicit machine/fax classifications terminate or select the
+approved voicemail action before consent. Old approvals retain their saved answering policy.
 
 The form exposes male `cedar` and female `marin`. New approval snapshots freeze
 `runtime.liveVoice`; historical snapshots resolve from saved gender without rewriting
@@ -453,7 +456,10 @@ turn its stale answer into fresh evidence.
 
 Unclear decisions trigger a controlled repeated permission question, then optional
 keypad fallback. Voice remains valid at each stage; `1` grants only in fallback and
-`2` refuses. Backend failure fails closed. The app persists method/locale/time, starts
+`2` refuses. Live command errors are correlated by `client_event_id`: explicit rejections
+receive one bounded retry, while late or uncorrelated errors are recorded without terminating
+a healthy session. A closed socket/session or an exhausted active command/delegation still fails
+closed through the existing call-ending path after current output reaches a quiet boundary. The app persists method/locale/time, starts
 dual-channel recording, plays the approved opening, then enables task context/tools.
 Fixed assistant speech is persisted after verified playback; recipient consent words
 are not saved. This is not a claim about provider-side retention or perfect semantics.
@@ -658,7 +664,9 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 ## Persistence and encryption
 
 The current catalog extends from `0001` through
-`0088_conversation_transcript_copy.sql`. The catalog is contiguous/checksummed; advisory locking and
+`0088_conversation_transcript_copy.sql` and `0089_realtime_error_telemetry.sql`. The latter only
+adds the bounded Live error event name; it stores no provider message or conversation text.
+The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases

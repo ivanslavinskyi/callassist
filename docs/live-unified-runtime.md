@@ -2,9 +2,12 @@
 
 Branch: `codex/live-unified-runtime`. Production last reported by the owner:
 `915a8f6`, Live, fallback=false, migrations through 0084 (owner report on 26 September,
-not a fresh deployment inspection). The current branch extends through migration 0088.
+not a fresh deployment inspection). The current branch extends through migration 0089.
 No production deployment was performed. A local real Twilio information call passed on
 28 September; see [evidence and remaining observations](live-call-review-2026-09-28.md).
+The corrected runtime then passed a real Russian handset call on 29 September with continuous
+Live session, semantic consent, achieved task, natural playback-confirmed closing and no Live
+errors; this is the [stable local regression checkpoint](live-stable-checkpoint-2026-09-29.md).
 That call predates the [three simplification changes](live-simplification-implementation-2026-09-28.md).
 Those changes are active locally after the 28 September, 17:56 CEST API restart:
 Live, fallback=false, embedded worker, liveness/readiness passed. Their automated
@@ -27,11 +30,14 @@ The UI exposes voice only and labels the assistant SHPROHLI in all transcripts a
 exports; stored legacy persona identifiers are not rewritten.
 
 `VOICE_RUNTIME_DRIVER=live` and `VOICE_RUNTIME_LIVE_FALLBACK=false` create exactly
-one native Live WebSocket per admitted human stream. No Realtime or separate
-transcription socket is created. One selected Live voice reads the AI/name/recording/
-transcription disclosure, opening, ordinary conversation and natural closing. Responses
+one native Live WebSocket per admitted stream. Admission accepts AMD `human` and, under
+the current policy, inconclusive `unknown`; neither result itself authorizes recording.
+No Realtime or separate
+transcription socket is created. The application renders the exact AI/name/recording/
+transcription disclosure with the Speech API in the same selected voice; Live owns the
+opening, ordinary conversation and natural closing. Responses
 uses native managed Responses delegation with GPT-6 Luna and parallel_tool_calls=false. The default driver
-in `.env.example` remains realtime; fallback defaults false. Explicit fallback=true
+in `.env.example` is live; fallback defaults false. Explicit fallback=true
 retains the older hybrid pilot for compatibility, including its Realtime speech.
 
 The form offers male `cedar` and female `marin`. New approvals freeze the ID;
@@ -49,6 +55,7 @@ VOICE_RUNTIME_DRIVER=live
 VOICE_RUNTIME_LIVE_FALLBACK=false
 OPENAI_LIVE_MODEL=gpt-live-1
 OPENAI_LIVE_DELEGATION_MODEL=gpt-6-luna
+OPENAI_SPEECH_MODEL=gpt-4o-mini-tts
 REALTIME_AGENT_HANGUP_ENABLED=true
 ```
 The existing hangup switch retains its historical name and applies to both drivers.
@@ -56,15 +63,17 @@ Without it, `end_call` is intentionally unavailable. Example-file defaults remai
 
 Newly approved native Live calls use [asynchronous AMD](async-amd-live-2026-09-28.md)
 alongside the disclosure. Recording starts on consent independently of AMD. A late
-non-human result never redirects an accepted conversation. Before consent, the
-voicemail/fax/unknown branches retain the approved Twilio policy. A declined handset call cannot reliably be distinguished from carrier
+non-human result never redirects an accepted conversation. Before consent, explicit
+machine/fax results retain the approved Twilio policy. `unknown` is inconclusive and
+continues the consent flow; it never starts recording or the task by itself. A declined handset call cannot reliably be distinguished from carrier
 voicemail routing. No change to recording retention or post-call gpt-transcribe /
 gpt-4o-transcribe processing.
 
 ## Startup preparation
 
-Signed, attempt-bound ringing/answered callbacks prepare a minimal Live session on
-the webhook process during ringing. It contains no task or action tools,
+Signed, attempt-bound ringing/answered callbacks prepare a minimal Live session and
+render the localized disclosure on the webhook process in parallel during ringing. The
+session contains no task or action tools,
 sends only synthetic PCMU silence, and never plays audio before authenticated stream admission.
 The incoming stream revalidates attempt/SID/snapshot/token and adopts that session.
 At most 64 unadmitted sessions are retained per process, for at most 45 seconds;
@@ -74,10 +83,13 @@ uses an ordinary cold Live startup, never another voice runtime. On multi-instan
 hosting, use affinity for callbacks and Media Streams to benefit from preparation;
 unadopted sessions still expire and are accounted for.
 
-All prepared session usage, including waiting and unsuccessful calls, goes through
-the existing provider ledger. Preparation trades potentially billable waiting time
+All prepared session and Speech API usage, including waiting and unsuccessful calls,
+goes through the existing provider ledger. Disclosure synthesis is recorded as
+`live_disclosure_synthesis` and cached in memory for replay within that call.
+Preparation trades potentially billable waiting time
 for overlap of setup with ringing/AMD. AMD thresholds remain unchanged, but detection
-does not block the new native Live disclosure. Old approvals, Realtime and explicit
+does not block the new native Live disclosure. The preceding v2 async policy remains
+readable with its historical `unknown` handling; older approvals, Realtime and explicit
 legacy fallback remain synchronous. Compare connection-to-disclosure, AMD duration
 and consent-to-recording on real calls; native disclosure evidence
 is committed after its verified playback mark. New compiled openings avoid filler;
@@ -85,29 +97,38 @@ previously approved openings are not silently rewritten or shortened.
 
 ## Application gates
 
-During preparation no tools are enabled. After human admission, before consent,
-Live receives language/disclosure instructions and only the strict
+During preparation and application-owned disclosure playback no tools are enabled.
+Live receives recipient audio continuously but is instructed to listen silently while
+the application plays the disclosure. Only after the complete clip's matching, uncleared
+Twilio mark does the application enable the strict
 `report_consent({ decision: affirmative | negative | unclear })` tool. The task plan
-and its tools remain unavailable. Live delegates the complete answer in its native
+and its tools remain unavailable. Live delegates a subsequent complete answer in its native
 conversation context; the application no longer assembles recipient text or calls
 a separate consent classifier. There are no phrase lists or scenario-specific rules.
-Natural contextual permission is accepted without a keypad press. Unclear decisions
-lead to a repeated disclosure, then optional keypad recovery; spoken consent remains
+Natural contextual permission is accepted without a keypad press. The first unclear
+decision replays the complete cached disclosure; a second adds a localized clarification
+and optional keypad recovery. Spoken consent remains
 available throughout. Silence times out without becoming consent. Backend failure
 fails closed.
 
-Update 29 September: consent tools are enabled as the disclosure begins, without a
-competing speech instruction. An answer overlapping the disclosure counts; later
-assistant fragments do not erase it. Acceptance still waits for verified playback,
-and corrections invalidate an earlier decision. Acoustic activity can extend the
-initial consent wait only up to 20 seconds from playback completion, not indefinitely.
+Update 29 September: the disclosure is no longer a Live speech instruction. The Speech
+API receives the exact application text and returns PCM while Live prewarms. Recipient
+audio is never buffered: acoustic barge-in immediately clears Twilio playback and Live
+continues listening. A partially heard clip cannot unlock consent and is replayed in full
+from memory after the recipient stops. Speech made before a complete disclosure mark is
+not reused as affirmative consent. After the mark, a request to repeat or explain is
+interpreted semantically as `unclear` and replays the complete disclosure from memory.
+Native transcript timestamps enforce the same boundary if a pre-mark transcript arrives late.
+Acoustic activity can extend the consent wait only
+up to 20 seconds from playback completion, not indefinitely.
 
 Input audio is continuously forwarded in PCMU at 8 kHz without transcoding or
 pre-consent recording. Pre-consent recipient text is neither retained by the application
 nor published as conversation history. The app keeps timing evidence only. Fixed
-assistant disclosure text is retained after semantic verification and its matching
-Twilio playback mark. A native decision arriving before the mark waits for playback;
-new speech, corrections, phase changes or disconnect invalidate pending effects.
+assistant disclosure text is retained only after its matching, uninterrupted Twilio
+playback mark; no transcript-based disclosure classifier is involved. Consent delegation
+does not exist before that mark. New speech, corrections, phase changes or disconnect
+invalidate pending effects.
 A continuation of an old consent delegation cannot refresh its evidence: corrected
 answers require a fresh Live delegation. Only an accepted affirmative after verified
 disclosure playback can start recording. Successful recording enables task context/tools;
@@ -124,37 +145,33 @@ verbatim recipient answer. Model interpretation remains probabilistic.
 | Stage | Available backend tools | Application transition |
 | --- | --- | --- |
 | Preparation / AMD | None | Validate human admission and signed attempt/snapshot binding |
-| Disclosure / consent | `report_consent` only | Verify disclosure meaning, matching playback mark, recipient timing and current decision |
+| Disclosure playback | None | Render exact application text; clear immediately on barge-in; require an uninterrupted matching playback mark |
+| Consent | `report_consent` only | Interpret the post-disclosure answer semantically and apply the current decision |
 | Recording startup / optional assistance disclosure | Consent calls rejected; task tools unavailable | Recording must succeed; play a nonempty approved assistance disclosure once |
 | Native opening / conversation | `end_call` when enabled; appointment tools only for approved scope | Validate current evidence/authorization and serialize effects |
 | Closing | Task tools remain configured; new effects are gated by phase | Continue accepted `end_call` through Responses; inspect farewell after its terminal result and verify playback; interruption returns to conversation |
 
-The app's consent retries still use controlled localized permission questions;
+The app's consent retries use application-rendered localized permission questions;
 `unclear` does not yet enable a free-form explanation of every disclosure/privacy
 question. DTMF is recovery, not a requirement for spoken agreement. Speech verification
 and closing classification remain separate from consent interpretation.
 
-Controlled disclosures and native conversation/closing stream immediately. This is **not a pre-playback content filter**:
-partial native output text does not have to match character for character. Complete
-exact text takes the fast path; a settled variant requires semantic equivalence
-(including names, facts and disclosure permissions) from the silent classifier.
-Incomplete text waits; changed meaning or unverifiable output fails closed with a
-content-free diagnostic code. A quiet interval alone never allows a transition.
-Only verified complete meaning plus an output-quiet candidate allows a Twilio mark.
-Continuous silent Live packets do not reset that candidate.
-Only its matching, uncleared playback acknowledgment advances the application.
-Neither a Responses completion nor an append acknowledgment finishes voice output.
-There is no claimed provider guarantee of exact spoken wording; real-call acceptance
-must test pronunciation, interruption, latency and transcription fidelity.
+The disclosure has no native-text verification path. Its source of truth is the exact
+text sent to the Speech API; the application converts returned raw 24 kHz PCM locally to
+8 kHz PCMU, sends it to Twilio and advances only on the matching, uncleared mark. A Speech
+API error, invalid audio or missing mark fails closed before recording. This removes the
+old Live paraphrase/retry/watchdog stack while retaining a real playback boundary.
+Real-call acceptance must still test pronunciation, interruption and latency.
 
 The classifier uses `store=false`, no tools, a strict enum schema, a six-second
 request deadline, and only the question/utterance plus native text held in memory.
 This does not promise zero provider retention.
-Speech verification uses `live_speech_classification`; consent now uses the existing
+Controlled appointment speech verification uses `live_speech_classification`; consent uses the existing
 `live_delegation` ledger stage. Consent diagnostics contain decisions and rejection
 reasons, never recipient words. Historical `live_consent_classification` accounting
 remains readable but new Live calls do not use that path. Cancellation
-without provider usage remains unconfirmed cost. Appointment speech uses an additional `live_action_speech_classification` check and
+without provider usage remains unconfirmed cost. Disclosure synthesis uses
+`live_disclosure_synthesis` with PCM-derived duration accounting. Appointment speech uses an additional `live_action_speech_classification` check and
 buffers original PCMU until its native output text is verified, then submits audio and
 a mark together. Ordinary speech, including appointment questions, is not pre-screened.
 The prompt requires delegation before a commitment; this is not a guarantee that
@@ -197,6 +214,25 @@ The semantic check is probabilistic and adds text-model latency/cost at closing;
 it is not a pre-playback filter or proof of task success. Existing appointment
 authorization and subsequent confirmation fences still apply.
 Tools, provider disconnects and timers cannot silently restart the call in another model.
+
+Live protocol errors are command-scoped rather than globally fatal. The runtime correlates
+`error.client_event_id` with tracked `session.update`, context-append and `response.create`
+commands. An explicit provider rejection is retried once because the rejected command was not
+applied. An acknowledgement timeout is not retried because acceptance is ambiguous and resending
+could duplicate context or create a second response. A repeated consent-response failure returns
+to the existing semantic consent recovery; a repeated task-stage command failure uses the existing
+`cannot_proceed` closing path. Late, uncorrelated or already superseded command errors are recorded
+and the active conversation continues. A closed Live session/socket or an exhausted active
+command/delegation remains fatal.
+
+Task-stage failure speech waits until queued model audio has drained and a short quiet boundary has
+been observed. It is never started on top of the model's current utterance or the recipient's
+speech; if the recipient is still speaking at the bounded deadline, the runtime closes without
+adding overlapping fallback speech. Every handled Live error emits durable `realtime.error`
+telemetry with bounded protocol fields only: phase, disposition, code/type/param, command, client
+event id and attempt. Provider messages and conversation text are excluded. An aborted semantic
+classifier request is accounted as `network_error` with `LIVE_CLASSIFICATION_CANCELLED`; a real
+provider failure remains `provider_error` with `LIVE_CLASSIFICATION_UNAVAILABLE`.
 
 Native Responses delegation replaces the custom client task controller. Live normally decides
 when reasoning/tools are needed and handles ordinary questions itself. Nested response
@@ -350,10 +386,11 @@ Current source ownership:
 | Speech/action/closing verification; no consent classification | [live-semantic-gate.ts](../apps/api/src/voice/live-semantic-gate.ts) |
 | Canonical native transcript assembly and provenance | [native-transcript.ts](../apps/api/src/storage/native-transcript.ts) |
 
-Apply additive migrations through 0088 before starting the new API/worker. Migration
+Apply additive migrations through 0089 before starting the new API/worker. Migration
 0087 adds transcript provenance without rewriting historical payloads/hashes; 0088
 creates updated CMS publications in seven locales while preserving legal acceptances
-and publication history. Use the [schema release procedure](deployment-preflight.md#schema-release-0085-0088).
+and publication history; 0089 allows the bounded `realtime.error` telemetry event. Use the
+[schema release procedure](deployment-preflight.md#schema-release-0085-0089).
 Run the full test, lint, typecheck, build and migration-catalog
 checks. Start the local API with live/fallback=false and the existing webhook tunnel.
 Check the human call, negative/unclear/early consent, DTMF, recording failure, natural
@@ -364,7 +401,7 @@ check its native timing, operation stages and recorded costs.
 
 Latest implementation verification: [1880 tests / 211 files, lint/types/build,
 CMS and PDF checks](live-transcript-implementation-2026-09-28.md). Migrations through
-0088 and API restart are verified locally; production and a new real-call check of
+0089 and API restart are verified locally; production and a new real-call check of
 native result/summary/translation/PDF consistency remain open. No new voice classifier,
 queue or lower-reasoning setting was introduced by that follow-up.
 

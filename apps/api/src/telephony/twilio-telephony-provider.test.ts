@@ -100,6 +100,9 @@ describe("TwilioTelephonyProvider", () => {
     expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "true", machineDetection: "Enable",
       asyncAmdStatusCallbackMethod: "POST", asyncAmdStatusCallback: expect.stringContaining(`/webhooks/twilio/amd?callBriefId=${brief.id}&callAttemptId=`) }));
     if (options.executionSnapshot.version !== 3) throw new Error("Expected current snapshot");
+    options.executionSnapshot.answering.policyVersion = "twilio-async-live-beep-v2";
+    await provider.startCall(brief, options);
+    expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "true" }));
     options.executionSnapshot.answering.policyVersion = "twilio-sync-beep-v1";
     await provider.startCall(brief, options);
     expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "false" }));

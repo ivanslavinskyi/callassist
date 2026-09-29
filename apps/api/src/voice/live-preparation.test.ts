@@ -9,8 +9,9 @@ async function fixture() {
   const call = await approvedCall(); const live = new TestSocket(); const twilio = new TestSocket();
   const connect = vi.fn(() => live.ws);
   const complete = vi.spyOn(call.service, "completeProviderOperation");
+  const speechFetch = vi.fn<typeof fetch>(async () => new Response(Buffer.alloc(4_800)));
   const runtime = new OpenAILiveBridge({ apiKey: "test", service: call.service, agentHangupEnabled: true,
-    createLiveSocket: connect, validateStreamToken: (_binding, token) => token === "valid" });
+    createLiveSocket: connect, speechFetch, validateStreamToken: (_binding, token) => token === "valid" });
   const binding = { callBriefId: call.brief.id, callAttemptId: call.attempt.id,
     compilationSnapshotHash: call.snapshot.compilationSnapshotHash, providerCallId: "CA-LIVE" };
   cleanup.push(async () => { twilio.close(); runtime.close(); live.receive({ type: "session.closed", reason: "close_requested", usage: { seconds: 5 } }); await flush(); await call.service.close(); });
@@ -32,21 +33,33 @@ describe("attempt-bound Live preparation", () => {
       kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
     h.attach(); await flush();
     expect(h.connect).toHaveBeenCalledOnce();
-    expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(1);
+    expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(0);
+    const mark = h.twilio.sent.find(e => e.event === "mark")?.mark.name;
+    expect(mark).toMatch(/^rendered-disclosure:/);
+    h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
     expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
     const count = h.live.sent.filter(e => e.type === "session.input_audio.append").length;
     await vi.advanceTimersByTimeAsync(100);
     expect(h.live.sent.filter(e => e.type === "session.input_audio.append")).toHaveLength(count);
     await h.runtime.prepareCall(h.binding); expect(h.connect).toHaveBeenCalledOnce();
   });
-  it.each(["machine_start", "unknown", "fax"])("never speaks or admits prepared audio for %s", async answer => {
+  it.each(["machine_start", "fax"])("never speaks or admits prepared audio for explicit non-human result %s", async answer => {
     const h = await fixture(); await h.warm();
     await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE", snapshotHash: h.snapshot.compilationSnapshotHash,
       kind: "resolve", answeredBy: answer, now: new Date().toISOString() });
     h.attach(); await flush();
     expect(h.twilio.readyState).toBe(3);
     expect(h.live.sent.some(e => e.type === "session.instructions.append")).toBe(false);
-    expect(h.live.sent.some(e => e.type === "session.close")).toBe(true);
+      expect(h.live.sent.some(e => e.type === "session.close")).toBe(true);
+  });
+  it("admits prepared audio and starts disclosure for an inconclusive current-policy result", async () => {
+    const h = await fixture(); await h.warm();
+    await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE", snapshotHash: h.snapshot.compilationSnapshotHash,
+      kind: "resolve", answeredBy: "unknown", now: new Date().toISOString() });
+    h.attach(); await flush();
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.live.sent.some(e => e.type === "session.close")).toBe(false);
+    expect(h.twilio.sent.some(e => e.event === "mark" && String(e.mark.name).startsWith("rendered-disclosure:"))).toBe(true);
   });
   it("does not consume a prepared session for a forged binding", async () => {
     const h = await fixture(); await h.warm(); h.attach("invalid"); await flush();

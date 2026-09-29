@@ -36,7 +36,10 @@ async function harness(appointment = false, start = true) {
   const backend = (event: object, delegation = "delegation-1") => socket.receive({ type: "response.event", delegation_id: delegation, event });
   const begin = (id = `response-${++sequence}`) => { backend({ type: "response.created", response: { id } }); return id; };
   const item = (name: string, args: unknown, callId = `tool-${++sequence}`) => {
-    backend({ type: "response.output_item.done", item: { type: "function_call", name, call_id: callId, arguments: JSON.stringify(args) } });
+    const toolArgs = name === "end_call" && args && typeof args === "object" && !("resultSummary" in args)
+      ? { ...args, resultSummary: "The recipient asked to end the call." }
+      : args;
+    backend({ type: "response.output_item.done", item: { type: "function_call", name, call_id: callId, arguments: JSON.stringify(toolArgs) } });
     return callId;
   };
   const finish = (id: string, status = "completed") => backend({ type: `response.${status}`, response: { id, status, output: [], model: "gpt-6-luna",
@@ -113,16 +116,61 @@ describe("native Live protocol and full duplex", () => {
     const stored = await h.repository.get(h.brief.id);
     expect(stored!.transcript.map(t => t.text)).toContain(" to change");
   });
-  it("fails closed on malformed audio, provider error or disconnect", async () => {
-    for (const failure of ["audio", "error", "disconnect"]) {
+  it("fails closed on malformed audio or disconnect", async () => {
+    for (const failure of ["audio", "disconnect"]) {
       const h = await harness();
       if (failure === "audio") h.runtime.inputAudio("invalid");
-      else if (failure === "error") h.socket.receive({ type: "error", error: { message: "private provider data" } });
       else h.socket.close();
       expect(h.context.fail).toHaveBeenCalled();
       await flush();
       expect(h.completion).toHaveBeenCalledWith(expect.objectContaining({ usage: null }));
     }
+  });
+  it("keeps an active session alive for an unattributed or late command error and stores no provider message", async () => {
+    const h = await harness();
+    h.runtime.instruct("Listen.");
+    const command = h.socket.sent.at(-1);
+    h.socket.receive({ type: "session.instructions.appended", client_event_id: command.event_id });
+    h.socket.receive({ type: "error", event_id: "provider-error-1", error: {
+      type: "server_error", code: "output_interrupted", client_event_id: command.event_id,
+      message: "private provider data"
+    } });
+    expect(h.context.fail).not.toHaveBeenCalled();
+    expect(h.socket.readyState).toBe(1);
+    expect(h.context.telemetry).toHaveBeenCalledWith(expect.any(String), { name: "realtime.error", metadata: expect.objectContaining({
+      disposition: "continued", command: null, clientEventId: command.event_id
+    }) });
+    expect(JSON.stringify(h.context.telemetry.mock.calls)).not.toContain("private provider data");
+  });
+  it("retries one rejected command and fails only when the retry is also rejected", async () => {
+    const h = await harness();
+    h.runtime.instruct("Listen.");
+    const first = h.socket.sent.at(-1);
+    h.socket.receive({ type: "error", event_id: "provider-error-1", error: {
+      type: "invalid_request_error", code: "temporary_rejection", client_event_id: first.event_id
+    } });
+    const retry = h.socket.sent.at(-1);
+    expect(retry).toMatchObject({ type: first.type, content: first.content });
+    expect(retry.event_id).not.toBe(first.event_id);
+    expect(h.context.fail).not.toHaveBeenCalled();
+    h.socket.receive({ type: "error", event_id: "provider-error-2", error: {
+      type: "invalid_request_error", code: "temporary_rejection", client_event_id: retry.event_id
+    } });
+    expect(h.context.fail).toHaveBeenCalledOnce();
+    expect(h.context.telemetry.mock.calls.map(([, payload]) => payload.metadata.disposition)).toEqual(expect.arrayContaining(["retrying", "fatal"]));
+  });
+  it("does not duplicate an ambiguously accepted command after its acknowledgement times out", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const h = await harness();
+    h.runtime.instruct("Listen once.");
+    const commandsBeforeTimeout = h.socket.sent.filter(event => event.type === "session.instructions.append");
+    expect(commandsBeforeTimeout).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(h.socket.sent.filter(event => event.type === "session.instructions.append")).toHaveLength(1);
+    expect(h.context.fail).toHaveBeenCalledOnce();
+    expect(h.context.telemetry).toHaveBeenCalledWith(expect.any(String), { name: "realtime.error", metadata: expect.objectContaining({
+      disposition: "fatal", code: "ack_timeout", command: "session.instructions.append", attempt: 1
+    }) });
   });
   it("rejects startup safely and never runs a conversation after cancellation", async () => {
     const h = await harness(false, false);
@@ -181,6 +229,17 @@ describe("managed backend tools", () => {
     h.socket.receive({ type: "session.input_transcript.delta", event_id: "answer", delta: "It arrived.", start_ms: 0, end_ms: 100 }); await flush();
     expect(h.socket.sent.some(e => e.type === "response.create")).toBe(false);
   });
+  it("does not invalidate backend work from acoustic activity without recipient semantics", async () => {
+    const h = await harness();
+    const id = h.begin();
+    h.item("end_call", { reason: "recipient_requested_end" });
+    h.runtime.inputAudio(speech);
+    h.finish(id); await flush();
+    expect(h.context.requestFarewell).not.toHaveBeenCalled();
+    for (let index = 0; index < 30; index++) h.runtime.inputAudio(silence);
+    await flush();
+    expect(h.context.requestFarewell).toHaveBeenCalledOnce();
+  });
   it("collects completed function items despite empty response.output, returns all results then continues", async () => {
     const h = await harness(); await h.tool("end_call", { reason: "recipient_requested_end" });
     expect(h.context.requestFarewell).toHaveBeenCalledOnce();
@@ -226,7 +285,10 @@ describe("managed backend tools", () => {
     expect(h.completion).toHaveBeenCalledWith(expect.objectContaining({ providerResponseId: id, outcome: "provider_error" }));
   });
   it("rejects stale actions after recipient speech", async () => {
-    const h = await harness(); const id = h.begin(); h.item("end_call", { reason: "recipient_requested_end" }); h.recipientTurn(); h.finish(id); await flush();
+    const h = await harness(); const id = h.begin(); h.item("end_call", { reason: "recipient_requested_end" });
+    h.recipientTurn();
+    h.socket.receive({ type: "session.input_transcript.delta", event_id: "correction", delta: "Wait.", start_ms: 0, end_ms: 100 });
+    h.finish(id); await flush();
     expect(h.context.requestFarewell).not.toHaveBeenCalled();
   });
   it("does not execute tools if ledger persistence failed", async () => {

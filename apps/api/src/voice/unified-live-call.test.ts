@@ -25,9 +25,15 @@ async function harness(answer: string | null = "human", recordingFailure = false
     if (recordingFailure) throw new Error("recording failed");
     return (await call.service.get(call.brief.id))!;
   });
+  const providerOperation = vi.spyOn(call.service, "recordRealtimeProviderOperation");
   const hangup = vi.spyOn(call.service, "prepareAgentHangup").mockResolvedValue(true);
   const dispatch = vi.spyOn(call.service, "dispatchAsyncAnswering").mockResolvedValue(true);
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  const speechRequests: Array<{ input: string; voice: string; model: string }> = [];
+  const speechFetch = vi.fn<typeof fetch>(async (_url, init) => {
+    speechRequests.push(JSON.parse(init!.body as string));
+    return new Response(Buffer.alloc(4_800), { status: 200, headers: { "x-request-id": "speech-test" } });
+  });
   const semanticFetch = vi.fn<typeof fetch>(async (_url, init) => {
     const request = JSON.parse(init!.body as string);
     const input = JSON.parse(request.input[0].content);
@@ -39,7 +45,7 @@ async function harness(answer: string | null = "human", recordingFailure = false
   });
   const bridge = createVoiceRuntime({ apiKey: "test", service: call.service, agentHangupEnabled: true,
     validateStreamToken: (_binding, token) => token === "valid", createLiveSocket: connect,
-    createOpenAISocket: legacy, createConsentSocket: legacy, semanticFetch, logger }, { VOICE_RUNTIME_DRIVER: "live" });
+    createOpenAISocket: legacy, createConsentSocket: legacy, semanticFetch, speechFetch, logger }, { VOICE_RUNTIME_DRIVER: "live" });
   bridge.handleTwilioSocket(twilio.ws);
   const start = { event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ", customParameters: { callBriefId: call.brief.id,
     callAttemptId: call.attempt.id, compilationSnapshotHash: call.snapshot.compilationSnapshotHash, streamToken: "valid" } } };
@@ -47,13 +53,30 @@ async function harness(answer: string | null = "human", recordingFailure = false
   live.emit("open"); if (connect.mock.calls.length) live.startLive("one-live"); await flush();
   let time = 0;
   function transcript(role: "input" | "output", text: string) {
+    if (role === "input") {
+      const forwardedMs = live.sent.filter(e => e.type === "session.input_audio.append")
+        .reduce((total, e) => total + Buffer.from(e.audio as string, "base64").length / 8, 0);
+      time = Math.max(time, forwardedMs);
+    }
     live.receive({ type: `session.${role}_transcript.delta`, delta: text, start_ms: time, end_ms: time += 100 });
   }
   function requestedSpeech() {
     const instruction = live.sent.filter(e => e.type === "session.instructions.append").at(-1)?.content as string;
-    return instruction.match(/<speech>([\s\S]*)<\/speech>/)?.[1] ?? "";
+    const controlled = instruction?.match(/<speech>([\s\S]*)<\/speech>/)?.[1];
+    if (controlled) return controlled;
+    const rendered = twilio.sent.filter(e => e.event === "mark" && String(e.mark.name).startsWith("rendered-disclosure:")).at(-1)?.mark.name;
+    return rendered && rendered !== lastPlayedMark ? speechRequests.at(-1)?.input ?? "" : "";
   }
+  let lastPlayedMark = "";
   async function play(acknowledge = true) {
+    await flush();
+    const rendered = twilio.sent.filter(e => e.event === "mark" && String(e.mark.name).startsWith("rendered-disclosure:")).at(-1)?.mark.name;
+    if (rendered && rendered !== lastPlayedMark) {
+      lastPlayedMark = rendered;
+      if (acknowledge) twilio.receive({ event: "mark", mark: { name: rendered } });
+      await flush();
+      return rendered as string;
+    }
     const text = requestedSpeech();
     expect(text).not.toBe("");
     transcript("output", text);
@@ -73,7 +96,7 @@ async function harness(answer: string | null = "human", recordingFailure = false
   async function closeNaturally(acknowledge = true, text = "Thank you for your help. Goodbye.") {
     transcript("output", text);
     live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(701); await flush();
+    await vi.advanceTimersByTimeAsync(1_001); await flush();
     const mark = twilio.sent.filter(e => e.event === "mark").at(-1)?.mark.name;
     expect(mark).toMatch(/^live-closing:/);
     if (acknowledge) twilio.receive({ event: "mark", mark: { name: mark } });
@@ -90,8 +113,11 @@ async function harness(answer: string | null = "human", recordingFailure = false
     if (text) { transcript("input", text); await vi.advanceTimersByTimeAsync(601); await flush(); }
     const id = "response-" + ++sequence;
     const backend = (event: object) => live.receive({ type: "response.event", delegation_id: id, event });
+    const toolArgs = name === "end_call" && args && typeof args === "object" && !("resultSummary" in args)
+      ? { ...args, resultSummary: "The recipient's answer was recorded." }
+      : args;
     backend({ type: "response.created", response: { id } });
-    backend({ type: "response.output_item.done", item: { type: "function_call", call_id: id, name, arguments: JSON.stringify(args) } });
+    backend({ type: "response.output_item.done", item: { type: "function_call", call_id: id, name, arguments: JSON.stringify(toolArgs) } });
     backend({ type: "response.completed", response: { id, status: "completed", output: [], usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } } });
     await flush(); await flush();
     if (settlePlayback && name === "end_call" && result(id).ok) await continueClosing(id);
@@ -103,7 +129,8 @@ async function harness(answer: string | null = "human", recordingFailure = false
   const resolveAnswer = async (answeredBy: string) => { await call.service.transitionAnswering(call.brief.id, {
     attemptId: call.attempt.id, providerCallId: "CA-LIVE", snapshotHash: call.snapshot.compilationSnapshotHash,
     kind: "resolve", answeredBy, now: new Date().toISOString() }); await flush(); await flush(); };
-  return { ...call, twilio, live, legacy, connect, recording, hangup, dispatch, resolveAnswer, semanticFetch, logger, transcript, requestedSpeech, play, accept, closeNaturally, tool, continueClosing, result, start };
+  return { ...call, twilio, live, legacy, connect, recording, hangup, dispatch, resolveAnswer, semanticFetch, speechFetch,
+    speechRequests, providerOperation, logger, transcript, requestedSpeech, play, accept, closeNaturally, tool, continueClosing, result, start };
 }
 
 describe("asynchronous answering alongside the disclosure", () => {
@@ -163,7 +190,7 @@ describe("asynchronous answering alongside the disclosure", () => {
     expect(h.result(id)).toMatchObject({ ok: true });
     expect(h.connect).toHaveBeenCalledOnce();
   });
-  it.each(["machine_start", "fax", "unknown"])("cancels pre-consent speech on %s without closing Twilio before handoff", async answer => {
+  it.each(["machine_start", "fax"])("cancels pre-consent speech on %s without closing Twilio before handoff", async answer => {
     const h = await harness(null, false, false, "en-GB", true);
     await h.play();
     await h.resolveAnswer(answer);
@@ -173,6 +200,23 @@ describe("asynchronous answering alongside the disclosure", () => {
     h.live.receive({ type: "session.output_audio.delta", delta: speech });
     expect(h.twilio.sent.filter(e => e.event === "media")).toHaveLength(audioCount);
     await h.resolveAnswer(answer); expect(h.dispatch).toHaveBeenCalledOnce();
+  });
+  it("keeps the disclosure and accepts consent when AMD is inconclusive while the recipient listens", async () => {
+    const h = await harness(null, false, false, "en-GB", true);
+    const mark = await h.play(false);
+    const clears = h.twilio.sent.filter(e => e.event === "clear").length;
+    await h.resolveAnswer("unknown");
+    expect(h.dispatch).not.toHaveBeenCalled();
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.twilio.sent.filter(e => e.event === "clear")).toHaveLength(clears);
+    expect((await h.service.get(h.brief.id))!.brief.lifecycle?.answering).toMatchObject({
+      phase: "resolved", answeredBy: "unknown", decision: "consent", streamAdmitted: true
+    });
+    h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
+    h.transcript("input", "Yes");
+    const id = await h.tool("report_consent", { decision: "affirmative" });
+    expect(h.recording).toHaveBeenCalledOnce();
+    expect(h.result(id)).toMatchObject({ ok: true });
   });
   it("handles AMD before the stream without opening Live or losing the non-human action", async () => {
     const h = await harness("machine_start", false, false, "en-GB", true);
@@ -189,7 +233,8 @@ describe("asynchronous answering alongside the disclosure", () => {
   it("bounds missing AMD and blocks a late human result", async () => {
     const h = await harness(null, false, false, "en-GB", true);
     await h.play(); // No affirmative consent; clarification may run during detection.
-    await vi.advanceTimersByTimeAsync(35_001); await flush();
+    for (let index = 0; index < 2; index++) { await vi.advanceTimersByTimeAsync(12_001); await flush(); await h.play(); }
+    await vi.advanceTimersByTimeAsync(11_001); await flush(); await flush();
     expect(h.dispatch).toHaveBeenCalledOnce();
     expect((await h.service.get(h.brief.id))!.brief.lifecycle?.answering).toMatchObject({ phase: "failed", failure: "timeout" });
     await h.resolveAnswer("human"); expect(h.recording).not.toHaveBeenCalled();
@@ -211,9 +256,15 @@ describe("one Live session, application-owned lifecycle", () => {
     expect(h.live.sent.some(e => e.type === "session.update")).toBe(true);
     expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(1);
   });
-  it.each([null, "machine_start", "unknown", "fax"])("rejects non-human AMD %s before provider startup", async answer => {
+  it.each([null, "machine_start", "fax"])("rejects missing or explicit non-human AMD %s before provider startup", async answer => {
     const h = await harness(answer);
     expect(h.connect).not.toHaveBeenCalled(); expect(h.twilio.readyState).toBe(3);
+  });
+  it("admits an inconclusive current-policy result before provider startup", async () => {
+    const h = await harness("unknown");
+    expect(h.connect).toHaveBeenCalledOnce();
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.requestedSpeech()).toContain("Nina Keller");
   });
   it("does not grant for pre-playback speech or fabricated marks and never persists pre-consent transcripts", async () => {
     const h = await harness();
@@ -225,37 +276,26 @@ describe("one Live session, application-owned lifecycle", () => {
     h.live.receive({ type: "session.delegation.created", delegation: { id: "early", target: "client" }, offset_ms: 0 });
     expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(0);
   });
-  it("requires complete expected text and a real playback mark, not backend completion", async () => {
-    const h = await harness();
-    h.transcript("output", h.requestedSpeech().slice(0, 20));
+  it("plays application-rendered disclosure and suppresses unrelated Live output before its real mark", async () => {
+    const h = await harness(); await flush();
+    const media = h.twilio.sent.filter(e => e.event === "media").length;
+    const mark = h.twilio.sent.findLast(e => e.event === "mark")?.mark.name;
+    expect(mark).toMatch(/^rendered-disclosure:/);
+    expect(h.live.sent.filter(e => e.type === "session.update")).toHaveLength(0);
+    h.transcript("output", "I booked your appointment.");
     h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(900);
-    expect(h.twilio.sent.filter(e => e.event === "media")).toHaveLength(1);
-    expect(h.twilio.sent.filter(e => e.event === "mark")).toEqual([]);
-  });
-  it("retries divergent disclosure once without authorizing the task", async () => {
-    const h = await harness(); h.transcript("output", "I booked your appointment.");
-    h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(501); await flush();
-    expect(h.twilio.readyState).toBe(1); expect(h.recording).not.toHaveBeenCalled();
-    expect((await h.repository.listCallTelemetryEvents(h.brief.id)).some(e => e.payload.name === "disclosure.started")).toBe(false);
-    h.transcript("output", "The required disclosure is still missing.");
-    h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(501); await flush();
-    expect(h.twilio.readyState).toBe(3); expect(h.recording).not.toHaveBeenCalled();
-    expect((await h.repository.listCallTelemetryEvents(h.brief.id)).find(e => e.payload.name === "conversation.ended")?.payload.metadata)
-      .toMatchObject({ reason: "openai_error", failureCode: "LIVE_SPEECH_MEANING_UNVERIFIED", failurePhase: "disclosure" });
-  });
-  it("completes controlled speech despite continuous native silence packets", async () => {
-    const h = await harness();
-    h.transcript("output", h.requestedSpeech());
-    h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    for (let i = 0; i < 30; i++) {
-      h.live.receive({ type: "session.output_audio.delta", delta: silence });
-      await vi.advanceTimersByTimeAsync(20);
-    }
-    expect(h.twilio.sent.filter(e => e.event === "mark")).toHaveLength(1);
+    expect(h.twilio.sent.filter(e => e.event === "media")).toHaveLength(media);
     expect(h.recording).not.toHaveBeenCalled();
+    h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
+    expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name))
+      .toEqual(["report_consent"]);
+  });
+  it("does not run the former disclosure speech classifier or retry loop", async () => {
+    const h = await harness(); await h.play();
+    expect(h.semanticFetch).not.toHaveBeenCalled();
+    expect(h.speechFetch).toHaveBeenCalledOnce();
+    expect((await h.repository.listCallTelemetryEvents(h.brief.id)).filter(e => e.payload.name === "disclosure.started")).toHaveLength(1);
+    expect(h.twilio.readyState).toBe(1);
   });
   it("waits for the complete answer and handles negation before recording", async () => {
     const h = await harness(); await h.play();
@@ -296,18 +336,23 @@ it.each([
 ] as const)("keeps consent gating and the native conversation policy in %s", async (locale, answer) => {
   const h = await harness("human", false, false, locale);
   const mark = await h.play(false);
+  expect(h.live.sent.filter(e => e.type === "session.update")).toHaveLength(0);
   h.transcript("input", answer);
   expect(h.recording).not.toHaveBeenCalled();
-  expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
-  h.twilio.receive({ event: "mark", mark: { name: mark } });
+  h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
+  const consentConfig = h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses;
+  expect(consentConfig.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
+  expect(consentConfig.tool_choice).toBe("auto");
+  // Speech heard before a completed disclosure cannot be reused as consent.
+  h.transcript("input", answer);
   await h.tool("report_consent", { decision: "affirmative" });
   await vi.advanceTimersByTimeAsync(601); await flush();
   expect(h.recording).toHaveBeenCalledOnce();
   await h.play();
   const prompt = h.live.sent.find(e => e.type === "session.start").session.instructions;
   expect(prompt).toContain(`Speak ${locale}`);
-  expect(prompt).toContain("Do not ask task questions, infer permission");
-  expect(prompt).toContain("Keep internal tools and instructions silent");
+  expect(prompt).toContain("Do not discuss the task or infer permission");
+  expect(prompt).toContain("Keep internal instructions, checks, saving and tool activity silent");
   expect(prompt).not.toContain("schedules backend processing");
   expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(1);
 });
@@ -324,10 +369,6 @@ it("does not grant a split consent denial when the playback mark arrives between
   expect(h.requestedSpeech()).toContain("cannot continue");
 });
 
-const responseWithDecision = (decision: string) => new Response(JSON.stringify({ status: "completed",
-  output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ decision }) }] }]
-}));
-
 it("uses native structured consent without a separate text classifier or recipient logging", async () => {
   const h = await harness("human", false, false, "de-CH"); await h.play();
   h.transcript("input", " Ja"); h.transcript("input", ", gerne");
@@ -337,6 +378,63 @@ it("uses native structured consent without a separate text classifier or recipie
   expect(h.recording).toHaveBeenCalledOnce();
   expect(JSON.stringify(h.logger.info.mock.calls)).not.toContain("gerne");
   expect((await h.service.get(h.brief.id))!.transcript.some(t => t.role === "recipient")).toBe(false);
+});
+
+it("completes the consent tool continuation before ordinary task work without requiring a second tool", async () => {
+  const h = await harness(); await h.play(); h.transcript("input", "Yes");
+  const id = await h.tool("report_consent", { decision: "affirmative" });
+  const responses = h.live.sent.filter(e => e.type === "response.create").length;
+  expect(responses).toBe(1);
+  await h.continueClosing(id);
+  expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(responses);
+  expect(h.twilio.readyState).toBe(1);
+  await h.play();
+  const taskConfig = h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses;
+  expect(taskConfig.tool_choice).toBe("auto");
+  expect(taskConfig.tools.map((tool: {name: string}) => tool.name)).toContain("end_call");
+});
+
+it("retries one consent response without report_consent, then uses the normal clarification", async () => {
+  const h = await harness(); await h.play(); h.transcript("input", "Yes");
+  await vi.advanceTimersByTimeAsync(601); await flush();
+  const initial = h.live.sent.filter(e => e.type === "response.create").length;
+  expect(initial).toBe(1);
+  const miss = async (delegation: string, id: string) => {
+    h.live.receive({ type: "response.event", delegation_id: delegation, event: { type: "response.created", response: { id } } });
+    h.live.receive({ type: "response.event", delegation_id: delegation, event: {
+      type: "response.completed", response: { id, status: "completed", output: [] }
+    } });
+    await flush(); await flush();
+  };
+  await miss("consent-miss-1", "consent-miss-response-1");
+  expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(initial + 1);
+  await miss("consent-miss-2", "consent-miss-response-2");
+  expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(initial + 1);
+  expect(h.requestedSpeech()).toContain("Nina Keller");
+  expect(h.recording).not.toHaveBeenCalled();
+});
+
+it("retries one task-stage Live command rejection before a bounded spoken failure", async () => {
+  const h = await harness(); await h.accept();
+  await h.tool("delete_account", { evidence: [] });
+  const command = h.live.sent.findLast(e => e.type === "response.create");
+  expect(command?.event_id).toEqual(expect.any(String));
+  h.live.receive({ type: "error", event_id: "command-error-1", error: { type: "invalid_request_error", code: "invalid_request_error",
+    message: "Responses handoff incomplete.", param: "session.delegation.responses", client_event_id: command.event_id } });
+  await flush();
+  const retry = h.live.sent.findLast(e => e.type === "response.create");
+  expect(retry.event_id).not.toBe(command.event_id);
+  expect(h.requestedSpeech()).toBe("");
+  h.live.receive({ type: "error", event_id: "command-error-2", error: { type: "invalid_request_error", code: "invalid_request_error",
+    message: "Responses handoff incomplete.", param: "session.delegation.responses", client_event_id: retry.event_id } });
+  await vi.advanceTimersByTimeAsync(501); await flush();
+  expect(h.twilio.readyState).toBe(1);
+  expect(h.requestedSpeech()).toContain("can't reliably continue this call");
+  expect(h.logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+    code: "invalid_request_error", type: "invalid_request_error", param: "session.delegation.responses",
+    clientEventId: retry.event_id, command: "response.create", phase: "conversation", disposition: "fatal"
+  }), "Live command failed");
+  expect(JSON.stringify(h.logger.warn.mock.calls)).not.toContain("Responses handoff incomplete.");
 });
 
 it("keeps spoken consent available after clarification and keypad fallback", async () => {
@@ -428,14 +526,17 @@ it("does not start a recovery while Live already processes a newer consent deleg
   expect(h.requestedSpeech()).toContain("cannot continue");
 });
 
-it("rejects affirmative while the recipient is still speaking", async () => {
+it("waits for the semantic boundary and rejects an affirmative made stale by a correction", async () => {
   const h = await harness(); await h.play();
   for (let i = 0; i < 5; i++) h.twilio.receive({ event: "media", media: { payload: speech } });
   h.transcript("input", "Yes");
-  expect(h.result(await h.tool("report_consent", { decision: "affirmative" }))).toMatchObject({ ok: false });
+  const pending = await h.tool("report_consent", { decision: "affirmative" });
+  expect(h.live.sent.some(e => e.type === "response.item.create" && e.item.call_id === pending)).toBe(false);
   expect(h.recording).not.toHaveBeenCalled();
   h.transcript("input", ", but don't record.");
   for (let i = 0; i < 30; i++) h.twilio.receive({ event: "media", media: { payload: silence } });
+  await flush(); await flush();
+  expect(h.result(pending)).toMatchObject({ ok: false, reason: "stale_or_unauthorized_request" });
   await h.tool("report_consent", { decision: "negative" });
   expect(h.recording).not.toHaveBeenCalled();
 });
@@ -454,39 +555,47 @@ it("waits for disclosure playback and rechecks corrections before applying the d
   const h = await harness(); const mark = await h.play(false);
   h.transcript("input", "Yes");
   const id = await h.tool("report_consent", { decision: "affirmative" });
-  expect(h.recording).not.toHaveBeenCalled();
-  h.transcript("input", ", but no recording");
-  h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush(); await flush();
   expect(h.result(id)).toMatchObject({ ok: false }); expect(h.recording).not.toHaveBeenCalled();
+  h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush(); await flush();
+  h.transcript("input", "No, do not record");
   await h.tool("report_consent", { decision: "negative" });
   expect(h.requestedSpeech()).toContain("cannot continue");
 });
 
-it.each(["during", "recipient_transcript_first", "corrected", "before"])("handles %s disclosure answers without requiring repetition", async order => {
+it("keeps Live input full-duplex and replays a disclosure interrupted by recipient speech", async () => {
   const h = await harness("human", false, false, "en-GB", false, "sebastian", "none");
-  const text = h.requestedSpeech(), split = Math.floor(text.length / 2);
-  const input = () => h.live.receive({ type: "session.input_transcript.delta", delta: "Yes, I agree",
-    start_ms: order === "before" ? 800 : 1200, end_ms: order === "before" ? 900 : 1400 });
-  if (order === "recipient_transcript_first" || order === "before") input();
-  h.live.receive({ type: "session.output_transcript.delta", delta: text.slice(0, split), start_ms: 1000, end_ms: 1500 });
-  if (order !== "recipient_transcript_first" && order !== "before") input();
-  h.live.receive({ type: "session.output_transcript.delta", delta: text.slice(split), start_ms: 1500, end_ms: 2000 });
-  if (order === "corrected") h.live.receive({ type: "session.input_transcript.delta", delta: "Actually, no recording.", start_ms: 1600, end_ms: 1900 });
-  h.live.receive({ type: "session.output_audio.delta", delta: speech });
-  await vi.advanceTimersByTimeAsync(501); await flush();
-  expect(h.recording).not.toHaveBeenCalled();
-  expect(h.live.sent.some(e => e.type === "response.create")).toBe(false);
-  expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
-  const mark = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
-  h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
+  const oldMark = await h.play(false);
+  const before = h.live.sent.filter(e => e.type === "session.input_audio.append").length;
+  h.twilio.receive({ event: "media", media: { payload: speech } });
+  expect(h.live.sent.filter(e => e.type === "session.input_audio.append")).toHaveLength(before + 1);
+  expect(h.twilio.sent.at(-1).event).toBe("clear");
+  h.twilio.receive({ event: "mark", mark: { name: oldMark } }); await flush();
+  expect(h.live.sent.filter(e => e.type === "session.update")).toHaveLength(0);
+  for (let index = 0; index < 30; index++) h.twilio.receive({ event: "media", media: { payload: silence } });
+  await flush(); await flush();
+  const newMark = h.twilio.sent.filter(e => e.event === "mark").at(-1)?.mark.name;
+  expect(newMark).toMatch(/^rendered-disclosure:/); expect(newMark).not.toBe(oldMark);
+  h.twilio.receive({ event: "mark", mark: { name: oldMark } });
+  expect(h.live.sent.filter(e => e.type === "session.update")).toHaveLength(0);
+  h.twilio.receive({ event: "mark", mark: { name: newMark } }); await flush();
+  h.transcript("input", "Yes, I agree"); await h.tool("report_consent", { decision: "affirmative" });
+  expect(h.recording).toHaveBeenCalledOnce();
+});
+
+it("does not treat a delayed transcript from before the completed replay as consent", async () => {
+  const h = await harness("human", false, false, "en-GB", false, "sebastian", "none");
+  await h.play(false);
+  h.twilio.receive({ event: "media", media: { payload: speech } });
+  for (let index = 0; index < 30; index++) h.twilio.receive({ event: "media", media: { payload: silence } });
+  await flush(); await flush(); await h.play();
+  const decisions = h.live.sent.filter(e => e.type === "response.create").length;
+  h.live.receive({ type: "session.input_transcript.delta", delta: "Yes", start_ms: 0, end_ms: 100 });
   await vi.advanceTimersByTimeAsync(601); await flush();
-  expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(order === "before" ? 0 : 1);
-  const id = await h.tool("report_consent", { decision: order === "corrected" ? "negative" : "affirmative" });
-  if (order === "before") expect(h.result(id)).toMatchObject({ ok: false, reason: "awaiting_recipient_answer" });
-  else expect(h.result(id)).toMatchObject({ ok: true });
-  if (order === "corrected" || order === "before") expect(h.recording).not.toHaveBeenCalled();
-  else expect(h.recording).toHaveBeenCalledOnce();
-  expect((await h.repository.get(h.brief.id))!.transcript.some(s => s.role === "recipient")).toBe(false);
+  expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(decisions);
+  expect(h.recording).not.toHaveBeenCalled();
+  h.transcript("input", "Yes, I agree");
+  await h.tool("report_consent", { decision: "affirmative" });
+  expect(h.recording).toHaveBeenCalledOnce();
 });
 
 it("keeps keypad recovery after unanswered disclosure attempts", async () => {
@@ -498,120 +607,78 @@ it("keeps keypad recovery after unanswered disclosure attempts", async () => {
   expect(h.recording).toHaveBeenCalledOnce(); expect(h.connect).toHaveBeenCalledOnce();
 });
 
-describe("disclosure recovery without conversation-specific rules", () => {
-  it.each(["ru-RU", "de-CH", "fr-CH", "it-CH", "en-GB"] as const)("recovers an unrelated first utterance in %s in the same session", async locale => {
+describe("rendered disclosure recovery without conversation-specific rules", () => {
+  it.each(["ru-RU", "de-CH", "fr-CH", "it-CH", "en-GB"] as const)("renders the localized exact application text in %s", async locale => {
     const h = await harness("human", false, false, locale, true, "sebastian", "none");
-    const required = h.requestedSpeech();
-    h.transcript("output", "An unrelated complete utterance.");
-    h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    h.transcript("input", "Yes");
-    await vi.advanceTimersByTimeAsync(501); await flush();
-    expect(h.requestedSpeech()).toBe(required);
-    expect(h.twilio.readyState).toBe(1);
-    expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
-    expect(h.recording).not.toHaveBeenCalled();
-    await h.play();
-    // The yes for the abandoned output cannot authorize the replacement.
-    expect(h.result(await h.tool("report_consent", { decision: "affirmative" }))).toMatchObject({ ok: false });
-    h.transcript("input", "Yes");
-    await h.tool("report_consent", { decision: "affirmative" });
-    expect(h.recording).toHaveBeenCalledOnce();
-    expect(h.connect).toHaveBeenCalledOnce();
-    expect((await h.repository.get(h.brief.id))!.transcript.some(s => s.text.includes("unrelated"))).toBe(false);
-  });
-  it("retries incomplete disclosure on its existing deadline, but never retries uncertain playback", async () => {
-    const h = await harness();
-    h.transcript("output", h.requestedSpeech().slice(0, 12));
-    h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(25_001); await flush();
-    expect(h.twilio.readyState).toBe(1);
-    expect(h.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ code: "LIVE_SPEECH_DEADLINE", retried: false }), expect.any(String));
-    await h.play(false);
-    await vi.advanceTimersByTimeAsync(3_101); await flush();
-    expect(h.twilio.readyState).toBe(3);
-    expect(h.recording).not.toHaveBeenCalled();
-  });
-  it("does not revive a pre-disclosure delegation through a later continuation", async () => {
-    const h = await harness();
-    const backend = (event: object) => h.live.receive({ type: "response.event", delegation_id: "early", event });
-    backend({ type: "response.created", response: { id: "early-1" } });
-    backend({ type: "response.completed", response: { id: "early-1", status: "completed", output: [] } });
+    expect(h.speechRequests).toHaveLength(1);
+    expect(h.speechRequests[0]).toMatchObject({ input: h.requestedSpeech(), voice: "cedar", model: "gpt-4o-mini-tts" });
+    expect(h.speechRequests[0].input).toContain("Nina Keller");
+    expect(h.semanticFetch).not.toHaveBeenCalled();
+    expect(h.providerOperation).toHaveBeenCalledWith(expect.objectContaining({
+      parentOperationId: expect.any(String), operationType: "realtime_response", stage: "live_disclosure_synthesis",
+      requestedModel: "gpt-4o-mini-tts", result: expect.objectContaining({ outcome: "succeeded",
+        providerResponseId: "speech-test", usage: expect.objectContaining({ requestCount: 1, durationSeconds: 0.1 }) })
+    }));
     await h.play(); h.transcript("input", "Yes");
-    backend({ type: "response.created", response: { id: "early-2" } });
-    backend({ type: "response.completed", response: { id: "early-2", status: "completed", output: [
-      { type: "function_call", call_id: "stale-consent", name: "report_consent", arguments: '{"decision":"affirmative"}' }
-    ] } });
-    await flush(); await flush();
-    expect(h.result("stale-consent")).toMatchObject({ ok: false });
-    expect(h.recording).not.toHaveBeenCalled();
     await h.tool("report_consent", { decision: "affirmative" });
     expect(h.recording).toHaveBeenCalledOnce();
   });
-  it("keeps consent interpretation available during clarification but rejects old playback marks", async () => {
+  it("keeps consent interpretation available after an unclear answer and rejects an old mark", async () => {
     const h = await harness(); const oldMark = await h.play();
     h.transcript("input", "What does that mean?");
     await h.tool("report_consent", { decision: "unclear" });
-    expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
     h.twilio.receive({ event: "mark", mark: { name: oldMark } });
     expect(h.recording).not.toHaveBeenCalled();
-    await h.play(); h.transcript("input", "Yes");
-    await h.tool("report_consent", { decision: "affirmative" });
+    await h.play();
+    expect(h.speechRequests).toHaveLength(1);
+    expect(h.speechRequests[0].input).toContain("Nina Keller");
+    expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name))
+      .toEqual(["report_consent"]);
+    h.transcript("input", "Yes"); await h.tool("report_consent", { decision: "affirmative" });
     expect(h.recording).toHaveBeenCalledOnce();
   });
 });
 
-it("accepts a semantic speech variant only after verification and the matching playback mark", async () => {
-  const h = await harness();
-  h.semanticFetch.mockResolvedValueOnce(responseWithDecision("equivalent"));
-  h.transcript("output", "I'm an AI assistant calling for Nina Keller. May I record and transcribe this conversation?");
-  h.live.receive({ type: "session.output_audio.delta", delta: speech });
-  h.transcript("input", "Yes");
-  await h.tool("report_consent", { decision: "affirmative" });
-  await vi.advanceTimersByTimeAsync(501); await flush();
-  expect(h.recording).not.toHaveBeenCalled();
-  const mark = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
-  h.twilio.receive({ event: "mark", mark: { name: mark } });
-  await h.tool("report_consent", { decision: "affirmative" });
-  await vi.advanceTimersByTimeAsync(601); await flush();
-  expect(h.recording).toHaveBeenCalledOnce();
-});
-
 describe("bounded answer processing", () => {
-  it.each([false, true])("holds a native consent decision until playback and respects a later correction (%s)", async corrected => {
+  it.each([false, true])("rejects pre-playback consent and uses only a post-disclosure answer (%s)", async corrected => {
     const h = await harness(); const mark = await h.play(false);
     h.transcript("input", "Yes, I agree.");
     const id = await h.tool("report_consent", { decision: "affirmative" });
-    expect(h.live.sent.some(e => e.type === "response.item.create" && e.item.call_id === id)).toBe(false);
+    expect(h.result(id)).toMatchObject({ ok: false });
     expect(h.recording).not.toHaveBeenCalled();
-    if (corrected) h.transcript("input", "No, do not record.");
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush(); await flush();
+    h.transcript("input", corrected ? "No, do not record." : "Yes, I agree.");
     if (corrected) {
-      expect(h.result(id)).toMatchObject({ ok: false });
+      await h.tool("report_consent", { decision: "negative" });
       expect(h.recording).not.toHaveBeenCalled();
-    } else expect(h.recording).toHaveBeenCalledOnce();
+    } else {
+      await h.tool("report_consent", { decision: "affirmative" });
+      expect(h.recording).toHaveBeenCalledOnce();
+    }
   });
   it("caps consent waiting even when acoustic activity repeatedly restarts", async () => {
     const h = await harness(); await h.play();
-    const instructions = h.live.sent.filter(e => e.type === "session.instructions.append").length;
+    const renderings = h.speechRequests.length;
     for (let n = 0; n < 2; n++) {
       await vi.advanceTimersByTimeAsync(9_000);
       for (let i = 0; i < 5; i++) h.twilio.receive({ event: "media", media: { payload: speech } });
       for (let i = 0; i < 30; i++) h.twilio.receive({ event: "media", media: { payload: silence } });
     }
     await vi.advanceTimersByTimeAsync(1_999);
-    expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(instructions);
+    expect(h.speechRequests).toHaveLength(renderings);
     await vi.advanceTimersByTimeAsync(2); await flush();
-    expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(instructions + 1);
+    expect(h.speechRequests).toHaveLength(renderings);
+    expect(h.requestedSpeech()).toContain("Nina Keller");
     expect(h.recording).not.toHaveBeenCalled();
   });
-  it("requests a task decision when native delegation is absent, then uses the normal verified closing", async () => {
+  it("does not create a second task response when native delegation is absent", async () => {
     const h = await harness(); await h.accept(); await h.continueClosing("response-1");
     const before = h.live.sent.filter(e => e.type === "response.create").length;
     h.transcript("input", "I like pizza."); h.transcript("output", "Noted, thank you.");
     await vi.advanceTimersByTimeAsync(601); await flush();
-    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before + 1);
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before);
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before + 1);
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before);
     await h.tool("end_call", { reason: "objective_resolved" });
     expect(h.hangup).not.toHaveBeenCalled();
     await h.closeNaturally();
@@ -637,14 +704,48 @@ describe("bounded answer processing", () => {
 });
 
 describe("autonomous conversation and protected effects", () => {
+  it("continues the task after an unattributed Live error and persists bounded diagnostics", async () => {
+    const h = await harness("human", false, false, "en-GB", false, "anna", "none");
+    await h.accept();
+    h.live.receive({ type: "error", event_id: "live-error-1", error: {
+      type: "server_error", code: "output_interrupted", message: "private provider data"
+    } });
+    await flush();
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.requestedSpeech()).toBe("");
+    expect(h.hangup).not.toHaveBeenCalled();
+    const errors = (await h.repository.listCallTelemetryEvents(h.brief.id)).filter(e => e.payload.name === "realtime.error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload.metadata).toMatchObject({ disposition: "continued", code: "output_interrupted",
+      command: null, phase: "conversation" });
+    expect(JSON.stringify(errors)).not.toContain("private provider data");
+  });
+  it("waits for current model audio to drain before starting a fatal fallback", async () => {
+    const h = await harness("human", false, false, "en-GB", false, "anna", "none");
+    await h.accept();
+    h.transcript("output", "What would you like for dinner?");
+    h.live.receive({ type: "session.output_audio.delta", delta: Buffer.alloc(8_000, 128).toString("base64") });
+    const id = "failed-task-response";
+    h.live.receive({ type: "response.event", delegation_id: "failed-task", event: { type: "response.created", response: { id } } });
+    h.live.receive({ type: "response.event", delegation_id: "failed-task", event: {
+      type: "response.failed", response: { id, status: "failed", output: [] }
+    } });
+    await flush(); await flush();
+    expect(h.requestedSpeech()).toBe("");
+    expect(h.hangup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_149);
+    expect(h.requestedSpeech()).toBe("");
+    await vi.advanceTimersByTimeAsync(851); await flush();
+    expect(h.requestedSpeech()).toContain("can't reliably continue this call");
+  });
   it("enables a native opening after recording without a script mark and preserves immediate task answers", async () => {
     const h = await harness("human", false, false, "en-GB", false, "anna", "none");
     await h.accept();
     expect(h.requestedSpeech()).toBe("");
     expect(h.twilio.sent.filter(e => e.event === "mark")).toHaveLength(1);
     const opening = h.live.sent.filter(e => e.type === "session.instructions.append").at(-1).content;
-    expect(opening).toContain("Recording consent alone is not readiness");
-    expect(opening).toContain("given a task answer, continue from it");
+    expect(opening).toContain("check readiness only if the recipient has not already invited continuation or answered the task");
+    expect(opening).toContain("continue naturally on behalf of the represented person");
     h.transcript("input", "It arrived yesterday.");
     h.transcript("output", "Thank you."); h.live.receive({ type: "session.output_audio.delta", delta: speech });
     await vi.advanceTimersByTimeAsync(601); await flush();
@@ -665,34 +766,32 @@ describe("autonomous conversation and protected effects", () => {
     await h.continueClosing(id); await h.closeNaturally();
     expect(h.hangup).toHaveBeenCalledOnce();
   });
-  it.each(["unclear", "incomplete", "backend_failed", "backend_missing"])("recovers %s with one bounded exact farewell and no extra classifier", async failure => {
+  it.each(["backend_failed", "backend_missing"])("recovers %s with one bounded exact farewell", async failure => {
     const h = await harness(); await h.accept();
     const id = await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
     if (failure === "backend_missing") await vi.advanceTimersByTimeAsync(8_001);
-    else if (failure === "backend_failed") await h.continueClosing(id, "failed");
-    else {
-      await h.continueClosing(id);
-      h.semanticFetch.mockResolvedValueOnce(responseWithDecision(failure));
-      h.transcript("output", "Thank you."); h.live.receive({ type: "session.output_audio.delta", delta: speech });
-      await vi.advanceTimersByTimeAsync(701); await flush();
-      if (failure === "incomplete") await vi.advanceTimersByTimeAsync(2_001);
-    }
+    else await h.continueClosing(id, "failed");
     expect(h.requestedSpeech()).toBe("Thank you. Goodbye.");
-    const checks = h.semanticFetch.mock.calls.length;
     await h.play(false);
     expect(h.hangup).not.toHaveBeenCalled();
     const mark = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
-    expect(h.hangup).toHaveBeenCalledOnce(); expect(h.semanticFetch).toHaveBeenCalledTimes(checks);
+    expect(h.hangup).toHaveBeenCalledOnce();
   });
-  it("finishes an authorized closing when a late assistant question contaminates the farewell", async () => {
+  it("uses the authorized structured summary and tracks closing playback without reclassification", async () => {
     const h = await harness(); await h.accept();
-    await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.");
-    h.semanticFetch.mockResolvedValueOnce(responseWithDecision("different"));
-    h.transcript("output", "When did it arrive?"); h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(701); await flush();
-    expect(h.requestedSpeech()).toBe("Thank you. Goodbye."); expect(h.hangup).not.toHaveBeenCalled();
-    const mark = await h.play(false);
+    const id = await h.tool("end_call", {
+      reason: "objective_resolved", resultSummary: "The application arrived yesterday."
+    }, "It arrived yesterday.", false);
+    expect(h.result(id)).toMatchObject({ ok: true, resultSummary: "The application arrived yesterday." });
+    await h.continueClosing(id);
+    const checks = h.semanticFetch.mock.calls.length;
+    h.transcript("output", "The application arrived yesterday. Thank you, goodbye.");
+    h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(1_001); await flush();
+    const mark = h.twilio.sent.filter(e => e.event === "mark").at(-1)?.mark.name;
+    expect(mark).toMatch(/^live-closing:/);
+    expect(h.semanticFetch).toHaveBeenCalledTimes(checks);
     expect(h.hangup).not.toHaveBeenCalled();
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
     expect(h.hangup).toHaveBeenCalledOnce();
@@ -753,6 +852,18 @@ describe("autonomous conversation and protected effects", () => {
     expect(h.hangup).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(601); await flush();
     await h.tool("end_call", { reason: "recipient_requested_end" }); await h.closeNaturally();
+    expect(h.hangup).toHaveBeenCalledOnce();
+  });
+  it("recovers cleared closing playback without reopening the task on acoustic noise alone", async () => {
+    const h = await harness(); await h.accept();
+    await h.tool("end_call", { reason: "recipient_requested_end" }, "Goodbye.");
+    const staleMark = await h.closeNaturally(false);
+    h.twilio.receive({ event: "media", media: { payload: speech } });
+    expect(h.requestedSpeech()).toBe("Thank you. Goodbye.");
+    h.twilio.receive({ event: "mark", mark: { name: staleMark } }); await flush();
+    expect(h.hangup).not.toHaveBeenCalled();
+    const fallbackMark = await h.play(false);
+    h.twilio.receive({ event: "mark", mark: { name: fallbackMark } }); await flush();
     expect(h.hangup).toHaveBeenCalledOnce();
   });
   it("rejects unsupported tools and invented evidence", async () => {

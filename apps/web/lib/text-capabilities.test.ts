@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LanguageCapabilities } from "./api";
-import { canGenerateText } from "./text-capabilities";
+import { canGenerateText, needsTranscriptTranslation } from "./text-capabilities";
 
 const enabled: LanguageCapabilities = {
   textLanguages: ["ru"], selectableCallLanguages: ["de-CH"], textGenerationEnabled: true, processorMode: "openai",
@@ -25,5 +25,13 @@ describe("text generation capability boundaries", () => {
   it("accepts a configured wildcard for a manually selected language outside the presets", () => {
     expect(canGenerateText({ ...enabled, operations: [{ kind: "transcript_translation", sourceLanguage: "*", targetLanguage: "*" }] },
       "transcript_translation", "de", "pt-BR")).toBe(true);
+  });
+
+  it("offers transcript translation only when the detected prompt and call languages differ", () => {
+    expect(needsTranscriptTranslation("ru", "ru-RU")).toBe(false);
+    expect(needsTranscriptTranslation("de", "de-CH")).toBe(false);
+    expect(needsTranscriptTranslation("ru", "de-CH")).toBe(true);
+    expect(needsTranscriptTranslation("und", "ru-RU")).toBe(false);
+    expect(needsTranscriptTranslation(null, "ru-RU")).toBe(false);
   });
 });
