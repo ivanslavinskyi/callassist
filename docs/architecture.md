@@ -1,7 +1,9 @@
 # SHPROHLI architecture
 
-Updated 2026-09-25 for parallel voice runtimes, registration policy, phone parsing,
-unanswered-call retries and localized call UX. Source migrations run through 0083.
+Voice architecture updated 2026-09-29 for native consent delegation, background AMD,
+voice continuity, calm pacing, natural closing and native-first saved transcripts on
+`codex/live-unified-runtime`. Source migrations run through 0088.
+Other feature checkpoints retain their original dates.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
 [dated audits and verification](README.md) retain the evidence available at their dates.
 
@@ -17,15 +19,54 @@ The [call lifecycle/history checkpoint](call-lifecycle-history-2026-09-15.md) ad
 
 `VoiceRuntime` and its factory select `OpenAIRealtimeBridge` or `OpenAILiveBridge`
 from `VOICE_RUNTIME_DRIVER`; absent means `realtime`, invalid values fail startup.
-The Live pilot keeps the existing Realtime consent/opening/farewell controller and
-uses native Live for the main full-duplex conversation after opening playback.
-Responses delegation defaults to GPT-6 Luna with `parallel_tool_calls=false`.
-Twilio `mark`/`clear`, speech epochs and immutable approved execution snapshots
-remain application-owned. A model result never proves an external action completed.
-Native Live transcripts and duration plus delegated token usage feed existing
-transcript/ledger paths; recording-based post-call ASR is unchanged. Startup fallback
-can resume the prepared Realtime session, but failure after Live starts ends the
-conversation rather than replaying actions. See [protocol, billing and acceptance](gpt-live-pilot.md).
+With `VOICE_RUNTIME_LIVE_FALLBACK=false` (the default), Live uses one native voice
+session from disclosure through closing, optionally prepared during ringing/AMD.
+Native Responses delegation uses GPT-6 Luna with `parallel_tool_calls=false`.
+The admitted consent stage exposes only `report_consent(affirmative|negative|unclear)`;
+there is no separate consent socket, application consent-transcript assembly or consent
+classifier. The backend interprets the answer in Live's conversation context.
+Recording waits for accepted consent and verified disclosure playback; task context
+and tools wait for successful recording startup and any required assistance disclosure.
+The ordinary task opening is native speech, without an application playback gate.
+Consent tools are available during disclosure; overlapping answers wait for its
+verified playback without requiring repetition. Acoustic extensions cannot keep
+consent waiting beyond 20 seconds after playback. After existing turn settlement,
+one managed decision request covers an answer missed by native delegation, with
+pending native work suppressing duplicates. No new classifier is introduced.
+
+New native Live approvals run AMD asynchronously alongside the disclosure. Recording
+does not wait for an AMD human classification, and a contradictory late result cannot
+redirect a consented conversation. Old approvals retain their saved answering policy.
+
+The form exposes male `cedar` and female `marin`. New approval snapshots freeze
+`runtime.liveVoice`; historical snapshots resolve from saved gender without rewriting
+the approval. Live sets voice at startup and verifies voice/session identity in
+`session.started` and `session.updated`. Missing or conflicting confirmation clears
+playback and fails the session. `realtime.voice` events (migration 0086) retain the
+requested/confirmed identity and phase; the admin inspector displays the latest check.
+The common prompt requests a calm pace slightly slower than ordinary conversation,
+brief sentence pauses and clear names, dates and numbers. Controlled speech reinforces
+that pace. No form or environment speed control is implemented. See
+[voice continuity, user feedback and verification limits](live-voice-continuity-2026-09-28.md).
+
+Live chooses ordinary speech and closing words. `end_call` supplies only a reason;
+there is no required recap or backend-authored farewell. The application validates
+state/evidence, checks completion of Live's farewell and waits for its matching,
+uncleared Twilio mark before hangup. Recipient speech cancels pending closure.
+Late assistant questions cannot cancel an accepted end_call; the existing short
+farewell recovery completes the authorized closing. See the
+[29 September repair and evidence](live-progress-fix-2026-09-29.md).
+Appointment tools retain approved-scope checks, an encrypted action journal
+(migration 0085), protected commitment playback and subsequent confirmation.
+Model output does not independently prove external booking or other business effects.
+
+`VOICE_RUNTIME_LIVE_FALLBACK=true` explicitly selects the older hybrid adapter with
+Realtime consent/opening/farewell; startup fallback applies only there. Unified Live
+never switches runtime after failure. Native transcript timing and provider usage feed
+the existing storage/ledger. Complete native capture becomes the saved result source;
+recording-based post-call ASR remains the fallback for missing or incomplete capture.
+See the [current Live contract](live-unified-runtime.md) and
+[28 September local real-call evidence](live-call-review-2026-09-28.md).
 
 ### Retry and call-page behavior
 
@@ -57,7 +98,11 @@ do not overwrite edits. Recompilation/approval still creates immutable snapshots
 Root App Router icon assets use the supplied portal geometry with `#222B25` and
 `#138553`; metadata resources bypass locale redirects.
 
-With `REALTIME_AGENT_HANGUP_ENABLED=true`, the bridge exposes `end_call` only after
+The hangup flag applies to both drivers. The preceding Live contract owns the
+unified path; the following response-ID controller describes **Realtime and the
+legacy hybrid adapter only**.
+
+With `REALTIME_AGENT_HANGUP_ENABLED=true`, the Realtime bridge exposes `end_call` only after
 consent and opening playback. The function's validated reason requests a separate
 farewell audio response. A controller correlates response IDs, speech epochs and
 playback generations: a completed generation is not itself proof of playback.
@@ -122,8 +167,8 @@ Next.js SSR -- forwarded Cookie ----> private main-API origin
 
 Twilio PSTN <--> Media Stream <--> Twilio listener (127.0.0.1:4001)
                                       | same API process
-                                      +--> Realtime or native Live/Responses conversation
-                                      +--> isolated consent-recognition session
+                                      +--> unified Live + managed Responses (consent and task tools)
+                                      +--> or Realtime + isolated consent recognizer
 
 Twilio consented WAV --> worker download --> channel utterances --> final ASR
                                             mono/unsupported --> full-file ASR
@@ -390,16 +435,33 @@ of the spoken language. Unrestricted automatic language selection is not impleme
 
 ## Consent, audio and transcription
 
-Twilio creates calls with recording disabled and connects a signed Media Stream with
-an attempt-scoped HMAC token bound to the approved snapshot hash. Two OpenAI sockets are opened. The **main audio
-session** speaks the short AI identity/represented-person/recording question. The
-separate text-output session recognizes recipient consent speech with automatic
-response creation disabled. It does not generate the spoken disclosure. By the user's
-decision on 2026-09-09, every localized spoken notice uses the previous short text:
-AI identity, the represented person and the request to record and automatically
-transcribe. It does not include the two added sentences about AI recognition of the
-reply and audio retention. Public privacy/FAQ/onboarding copy still describes actual
-processing and retention. Zero-day retention involves temporary recording after consent.
+Both drivers create Twilio calls with recording disabled and connect a signed Media
+Stream using an attempt-scoped HMAC token bound to the approved snapshot. The short
+spoken notice identifies the AI and represented person and asks permission to record
+and automatically transcribe. Public privacy/FAQ/onboarding copy describes processing
+and retention. Zero-day retention still involves temporary recording after consent.
+
+### Unified Live
+
+Before consent, the admitted Live session processes recipient audio for the disclosure
+dialogue but the application does not store recipient audio or text. The app retains
+only timing/freshness evidence; native `report_consent` supplies the semantic decision.
+Only verified disclosure plus its playback mark and a current affirmative result can
+start recording. A result arriving before playback waits; corrected speech, phase
+changes and disconnect fence stale effects. An old delegation's continuation cannot
+turn its stale answer into fresh evidence.
+
+Unclear decisions trigger a controlled repeated permission question, then optional
+keypad fallback. Voice remains valid at each stage; `1` grants only in fallback and
+`2` refuses. Backend failure fails closed. The app persists method/locale/time, starts
+dual-channel recording, plays the approved opening, then enables task context/tools.
+Fixed assistant speech is persisted after verified playback; recipient consent words
+are not saved. This is not a claim about provider-side retention or perfect semantics.
+
+### Realtime and explicit legacy hybrid
+
+These paths open a main audio session for disclosure and a separate text-output
+consent-recognition session with automatic response creation disabled.
 
 After the disclosure playback mark, recipient media can enter only the consent
 recognizer. A deterministic locale-aware classifier returns affirmative, negative or
@@ -420,7 +482,23 @@ consent. The opening asks whether it is convenient to continue; later conversati
 readiness and fact limits depend partly on model instructions. Realtime disconnects
 end the call; reconnecting that model session is unsupported.
 
-The final-transcription worker downloads authenticated Twilio media (browser playback
+### Saved conversation transcript and recording fallback
+
+For new unified Live calls, `final_transcription` first checks the persisted native
+capture. A gracefully closed, fully persisted capture is assembled from post-consent
+fragments with native timing and published through the existing encrypted transcript
+revision. Source `live_native` flows to summaries, assessment, translations, UI and
+PDF. Late deltas drain through `session.closed` and the persistence queue before
+capture is marked complete. The existing durable job waits at most 120 seconds from
+job creation for a collecting capture; ready native text does not wait for media.
+The same completion transaction schedules audio retention, and a later ready-recording
+callback can re-enqueue deletion. Missing/incomplete captures use `recording_asr`;
+old completed transcripts keep their source and hash. Native assembly requires a
+known recording boundary and valid timings; it excludes pre-recording fragments,
+including fragments crossing that boundary, without inventing word timestamps.
+See [implementation and rollout](live-transcript-implementation-2026-09-28.md).
+
+The recording fallback downloads authenticated Twilio media (browser playback
 uses a separate owner-authorized proxy). For supported stereo WAV it extracts speech
 regions: channel 1 recipient, channel 2 assistant. It transcribes assistant utterances
 first, then recipient utterances using the nearest preceding recording-derived
@@ -445,7 +523,12 @@ clarification review, transcript translation and call summary. Dedupe binds call
 kind, immutable source identity/hash, target language and generator/model version.
 Original final transcripts have encrypted immutable revisions and stable segment IDs.
 Unsegmented historical text is split without losing characters; speaker/timing remain
-unknown. Source ASR processing/failure does not expose an older revision as current.
+unknown. Source processing/failure does not expose an older revision as current.
+The canonical source is `live_native` or `recording_asr`; all derived artifacts use
+the same immutable revision/hash. Native hashes include provenance; historical ASR
+hashes remain unchanged. The UI does not duplicate a saved native transcript as a
+second provisional result. Translation and summary follow the saved task language,
+independently of UI and call locale; transcript translation remains on demand.
 
 Translations retain source segment IDs and times. Summaries use the original final
 transcript plus the exact executed compilation (objective, success criteria and
@@ -458,7 +541,7 @@ questions). The only supported summary payload is strict `schemaVersion: 2`:
 - `unresolved`: remaining limitations as text, not a separate source-bearing object.
 
 The validator requires evidence for non-unknown findings and all next steps; it
-checks references, not truth independently of the recording. Negative, partial,
+checks references, not truth independently of the source conversation. Negative, partial,
 conditional and conflicting answers are valid outcomes. The compact view has
 expandable detail/evidence; if compaction is unavailable it shows validated findings.
 Summary generation uses its own `summary-v3` namespace, separate from the
@@ -575,7 +658,7 @@ metrics have 30-day retention. [Rate-limit policy](rate-limit-policy.md) lists l
 ## Persistence and encryption
 
 The current catalog extends from `0001` through
-`0080_feedback_rotation_after_privacy_redaction.sql`. The catalog is contiguous/checksummed; advisory locking and
+`0088_conversation_transcript_copy.sql`. The catalog is contiguous/checksummed; advisory locking and
 per-file transactions protect forward migration/replay. The legacy
 `0013_final_transcript_quality.sql` tombstone is accepted only as a pre-catalog record.
 Applied files must never be edited to resolve drift. Before 0061, populated databases
@@ -590,7 +673,7 @@ migration runner enforces the gate; see the [rollout sequence](approved-call-pla
 | Preparation requests | Encrypted normalized input while pending; retained fingerprint/idempotency/status; erased input on terminal state |
 | Attempts, recordings | Immutable approved execution snapshot/hash; provider IDs/status, consent/time/duration/channels/deadline; audio held at Twilio |
 | Live transcript and approvals | Relational plaintext transcript and proposed disclosure text, access-controlled |
-| Final transcript | Encrypted text/segments and resumable encrypted transcription chunks; model/status/error/usage metadata |
+| Final transcript | Encrypted text/segments and resumable encrypted ASR chunks; source (`live_native` / `recording_asr`), model/status/error/usage metadata; technical native capture state on the attempt |
 | Text results and review evidence | Encrypted immutable transcript revisions, generated payloads/chunks and review receipts; source hashes, language and lease/accounting metadata are separate |
 | Language preferences and task context | Account UI/content preferences and captured preparation/call selection metadata, outside the execution hash |
 | Provider accounting | Deduplicated operations, request results, raw usage and reported costs; versioned calculated rates separate from actual/fallback/unknown |

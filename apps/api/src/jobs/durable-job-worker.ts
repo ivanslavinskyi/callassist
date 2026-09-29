@@ -224,7 +224,8 @@ export class DurableJobWorker {
         new Date(
           now.getTime() + Math.max(durableJobRetryDelayMs(job.attemptCount), error instanceof DurableJobExecutionError ? error.retryAfterMs : 0)
         ).toISOString(),
-        durableJobErrorIsRetryable(error)
+        durableJobErrorIsRetryable(error),
+        error instanceof DurableJobExecutionError && error.defer
       );
       if (failed && failed.status !== "cancelled") this.onError(error);
     } finally {

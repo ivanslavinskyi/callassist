@@ -43,6 +43,7 @@ import {
   emailVerificationStartResponseSchema,
   emailVerificationConfirmResponseSchema,
   createCallBriefInputSchema,
+  applyCallBriefDefaults,
   loginInputSchema,
   contentLocaleSchema,
   contentPageKeySchema,
@@ -2330,7 +2331,10 @@ export function buildApp({
         issues: parsed.error.flatten()
       });
     }
-    const briefInput = "requestVersion" in parsed.data ? parsed.data.brief : parsed.data;
+    const normalizedInput = createCallBriefInputSchema.safeParse(applyCallBriefDefaults(
+        "requestVersion" in parsed.data ? parsed.data.brief : parsed.data, access.user?.role));
+      if (!normalizedInput.success) return reply.status(400).send({ error: "INVALID_CALL_BRIEF", issues: normalizedInput.error.flatten() });
+      const briefInput = normalizedInput.data;
     if (!authorizeCallLanguages(reply, briefInput, access.user)) return;
     if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") return reply.status(422).send({ error: "CALL_LANGUAGE_NOT_SELECTABLE" });
     const language = "requestVersion" in parsed.data ? {
@@ -2477,7 +2481,10 @@ export function buildApp({
           issues: parsed.error.flatten()
         });
       }
-      const briefInput = "requestVersion" in parsed.data ? parsed.data.brief : parsed.data;
+      const normalizedInput = createCallBriefInputSchema.safeParse(applyCallBriefDefaults(
+        "requestVersion" in parsed.data ? parsed.data.brief : parsed.data, access.user?.role));
+      if (!normalizedInput.success) return reply.status(400).send({ error: "INVALID_CALL_BRIEF", issues: normalizedInput.error.flatten() });
+      const briefInput = normalizedInput.data;
       if (!authorizeCallLanguages(reply, briefInput, access.user)) return;
       if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") {
         const previous = await service.get(request.params.id);
@@ -2663,7 +2670,7 @@ export function buildApp({
     const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
     if (!access) return;
     if (!(await enforceEndpointRateLimit(request, reply, access.userId, "call-start", endpointRateLimitPolicy.callStart))) return;
-    try { return reply.send(await service.repeatUnansweredCall(request.params.id, access.userId)); }
+    try { return reply.send(await service.repeatUnansweredCall(request.params.id, access.userId, access.user?.role)); }
     catch (error) { return sendRepositoryError(reply, error); }
   });
 
@@ -3031,6 +3038,7 @@ export function buildWebhookApp({
     requestTimeout: requestTimeoutMs,
     connectionTimeout: connectionTimeoutMs
   });
+  app.addHook("onClose", async () => { realtimeBridge.close?.(); });
   if (logger) registerPiiSafeRequestLogging(app);
   registerHttpSecurity(app, { production });
   async function recordWebhookDelivery(
@@ -3101,17 +3109,20 @@ export function buildWebhookApp({
                 parameters.CallSid && /^CA[0-9a-f]{32}$/i.test(parameters.CallSid)) {
               const result = await service.transitionAnswering(callBriefId, {
                 attemptId: attempt.id, providerCallId: parameters.CallSid,
-                snapshotHash: attempt.compilationSnapshotHash, kind: "resolve",
+                snapshotHash: attempt.compilationSnapshotHash,
+                kind: snapshot.brief.lifecycle?.answering?.execution === "async" ? "bind" : "resolve",
                 answeredBy: parameters.AnsweredBy,
                 durationMs: optionalNonNegativeInteger(parameters.MachineDetectionDuration), now: receivedAt
               });
-              if (result.applied && result.decision === "consent") {
+              const asyncAnswering = result.state?.execution === "async";
+              if (result.applied && (result.decision === "consent" || (asyncAnswering && ["dialing", "in_progress"].includes(snapshot.brief.status)))) {
                 twiml = twilioProvider.createVoiceTwiml(snapshot.brief, binding);
               } else if (result.applied && result.decision === "message" && attempt.executionSnapshot.answering.message) {
                 twiml = twilioProvider.createVoicemailTwiml(attempt.executionSnapshot.answering.message,
                   attempt.executionSnapshot.plan.callLocale, binding);
               }
-              if (result.applied && result.decision === "hang_up") {
+              if (!asyncAnswering && result.applied && result.decision !== "consent") realtimeBridge.releasePrepared?.(attempt.id);
+              if (!asyncAnswering && result.applied && result.decision === "hang_up") {
                 await service.prepareAgentHangup(callBriefId, attempt.id, parameters.CallSid);
               }
             }
@@ -3134,6 +3145,30 @@ export function buildWebhookApp({
           });
           throw error;
         }
+      }
+    );
+
+    routes.post<{ Querystring: { callBriefId?: string; callAttemptId?: string; compilationSnapshotHash?: string } }>(
+      "/webhooks/twilio/amd", async (request, reply) => {
+        const receivedAt = new Date().toISOString();
+        const parameters = normalizeTwilioParameters(request.body);
+        if (!isValidTwilioWebhook(request, twilioProvider, parameters)) {
+          await recordWebhookDelivery(request, { kind: "voice", outcome: "rejected", receivedAt, errorCode: "INVALID_TWILIO_SIGNATURE" });
+          return reply.status(403).send({ error: "INVALID_TWILIO_SIGNATURE" });
+        }
+        const { callBriefId, callAttemptId, compilationSnapshotHash } = request.query;
+        if (!callBriefId || !callAttemptId || !compilationSnapshotHash || !/^CA[0-9a-f]{32}$/i.test(parameters.CallSid ?? "")) {
+          return reply.status(400).send({ error: "CALL_BINDING_REQUIRED" });
+        }
+        const snapshot = await service.get(callBriefId);
+        if (snapshot?.brief.lifecycle?.answering?.execution !== "async") return reply.status(409).send({ error: "ASYNC_AMD_NOT_REQUESTED" });
+        const result = await service.transitionAnswering(callBriefId, { attemptId: callAttemptId,
+          providerCallId: parameters.CallSid, snapshotHash: compilationSnapshotHash, kind: "resolve",
+          answeredBy: parameters.AnsweredBy, durationMs: optionalNonNegativeInteger(parameters.MachineDetectionDuration), now: receivedAt });
+        // Async callback TwiML is not executed. The admitted stream observes this durable
+        // result and claims the provider update once, including when AMD beats stream start.
+        await recordWebhookDelivery(request, { kind: "voice", outcome: result.applied ? "accepted" : "unmatched", receivedAt });
+        return reply.status(204).send();
       }
     );
 
@@ -3237,6 +3272,15 @@ export function buildWebhookApp({
               )
             }
           );
+          if (snapshot && request.query.callAttemptId && request.query.compilationSnapshotHash) {
+            if (["ringing", "in-progress"].includes(status) && ["dialing", "in_progress"].includes(snapshot.brief.status)) {
+              void realtimeBridge.prepareCall?.({ callBriefId: snapshot.brief.id,
+                callAttemptId: request.query.callAttemptId, compilationSnapshotHash: request.query.compilationSnapshotHash,
+                providerCallId }).catch(error => request.log.error(error, "Live preparation failed"));
+            } else if (["completed", "busy", "no-answer", "canceled", "failed"].includes(status)) {
+              realtimeBridge.releasePrepared?.(request.query.callAttemptId);
+            }
+          }
           await recordWebhookDelivery(request, snapshot
             ? { kind: "call_status", outcome: "accepted", receivedAt }
             : {

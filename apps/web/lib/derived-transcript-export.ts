@@ -1,3 +1,5 @@
+import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
+import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
 import type { CallBrief, FinalTranscriptRevision, SourceSegment, TextLanguage } from "@callassist/contracts";
 import type { TDocumentDefinitions } from "pdfmake/interfaces";
 import { messages, type UiLocale } from "./i18n/messages";
@@ -17,7 +19,7 @@ export type DerivedTranscriptExport = {
 
 export function buildDerivedTranscriptCopyText(input: DerivedTranscriptExport) {
   const copy = textArtifactMessages[input.uiLocale];
-  return [...exportHeader(input), "", ...input.segments.map((segment) => {
+  return [...exportHeader(input), "", transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
     const timestamp = segment.startSeconds === null ? "" : `[~${formatTranscriptOffset(segment.startSeconds)}] `;
     return `${timestamp}[${segment.id}] ${speaker(input, segment)}: ${segment.text}`;
   }), ...(input.segments.length ? [] : [input.text]), "", input.translationLanguage ? copy.translationNote : "", messages[input.uiLocale].live.aiWarning].filter((value, index, values) => value || values[index - 1]).join("\n");
@@ -25,19 +27,19 @@ export function buildDerivedTranscriptCopyText(input: DerivedTranscriptExport) {
 
 export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExport, logoSvg?: string): TDocumentDefinitions {
   const copy = textArtifactMessages[input.uiLocale];
-  const common = transcriptExportCopy[input.uiLocale];
+  const common = {...transcriptExportCopy[input.uiLocale],title:transcriptSourceCopy[input.uiLocale].title,created:transcriptSourceDescription(input.uiLocale,input.revision.source)};
   const translationLabel = input.translationLanguage ? getTextLanguageLabel(input.translationLanguage, input.uiLocale) : null;
   const created = formatTranscriptPdfDate(input.revision.createdAt, input.uiLocale);
   return buildTranscriptPdfLayout({
     logoSvg,
     title: input.translationLanguage ? common.translationTitle : common.title,
-    description: input.translationLanguage ? copy.translationNote : common.created,
+    description: input.translationLanguage ? `${copy.translationNote} ${common.created}` : common.created,
     variant: translationLabel ? `${copy.translated} · ${translationLabel}` : copy.originalSource,
     recipient: input.brief.recipientName,
     language: input.translationLanguage ?? input.brief.locale,
     metadata: [
       { label: common.recipient, value: input.brief.recipientName },
-      { label: common.assistant, value: input.brief.agentName },
+      { label: common.assistant, value: ASSISTANT_DISPLAY_NAME },
       { label: common.callLanguage, value: getCallLanguageLabel(input.brief.locale, input.uiLocale) },
       ...(translationLabel ? [{ label: common.textLanguage, value: translationLabel }] : []),
       ...(created ? [{ label: common.sourceCreated, value: created }] : [])
@@ -72,5 +74,5 @@ function exportHeader(input: DerivedTranscriptExport) {
 }
 
 function speaker(input: DerivedTranscriptExport, segment: SourceSegment) {
-  return segment.role === "assistant" ? input.brief.agentName : segment.role === "recipient" ? input.brief.recipientName : "?";
+  return segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? input.brief.recipientName : "?";
 }

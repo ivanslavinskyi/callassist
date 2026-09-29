@@ -65,6 +65,7 @@ export function CompilationReview({
 
       {compiled && isReady && showActions ? <section>
         <h3>{answeringMessages[locale].policy}</h3>
+        <p>{answeringMessages[locale].earlyDisclosure}</p>
         <p>{compiled.voicemailAction === "hang_up" ? answeringMessages[locale].silent : answeringMessages[locale].neutral}</p>
         {compiled.voicemailAction === "leave_neutral_message" ? <blockquote lang={compiled.callLocale}>
           {answeringApproval(compiled.voicemailAction, compiled.callLocale).message}

@@ -102,6 +102,8 @@ export type ProviderRecordingStatus = {
 
 export interface TelephonyProvider {
   readonly mode: "mock" | "twilio";
+  readonly asyncAnswering?: boolean;
+  playVoicemail?(providerCallId: string, text: string, locale: CallBrief["locale"], binding: MediaStreamBinding): Promise<void>;
   startCall(brief: CallBrief, options?: StartTelephonyCallOptions): Promise<StartTelephonyCallResult>;
   stopCall(providerCallId: string): Promise<void>;
   startRecording(

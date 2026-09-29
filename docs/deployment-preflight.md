@@ -1,5 +1,54 @@
 # Deployment preflight and first release
 
+## Schema release 0085-0088
+
+Обновлено 28 сентября 2026 для `codex/live-unified-runtime`. Последнее подтверждение
+production — отчёт владельца от 26 сентября (`915a8f6`, каталог до 0084).
+Это не свежая проверка сервера. Реализация до 0088 проверена и применена **локально**;
+её server cutover ещё не выполнялся. Полные результаты и ограничения — в
+[отчёте реализации](live-transcript-implementation-2026-09-28.md).
+
+Этот выпуск использует явный `deploy-schema` из
+[`scripts/shprohli-vps-release.sh`](../scripts/shprohli-vps-release.sh).
+Обычные `deploy` и `rollback` сохраняют запрет на изменение каталога SQL.
+
+1. Подготовить итоговый commit в `main` с успешным CI. Сверить фактические SHA,
+   ledger/checksums и службы VPS. Установить проверенную новую версию helper в
+   `/usr/local/sbin/shprohli-release` с прежними root ownership/mode 0750, сохранив
+   предыдущий helper. Существующая установленная версия не обновляется одним push.
+2. Выполнить `sudo shprohli-release status`, затем
+   `sudo shprohli-release deploy-schema`. Helper получает CI-проверенный `main`,
+   собирает отдельный release и разрешает только новые 0085–0088 при неизменных
+   прежних SQL. Rollback-only CMS preflight выполняется до изменения допуска звонков.
+3. Helper закрывает допуск, дожидается текущих звонков и worker jobs, создаёт и
+   проверяет backup, останавливает SHPROHLI worker/API/web и запускает обычный
+   candidate `dist/db/migrate.js`. Затем проверяет ledger и CMS через
+   `scripts/preflight-transcript-copy.mjs --verify`, переключает release, запускает
+   все три службы и проверяет health/parity. При успехе возвращает прежний call gate.
+4. Сверить фактические публикации privacy/terms/FAQ и FAQ/landing collections во всех
+   семи локалях. ID/номера локальных revisions не являются ожидаемыми production ID.
+   Проверить новый согласованный звонок: сохранённый источник, summary, перевод на
+   язык задания, PDF, кредит/расходы и retention. Зафиксировать SHA, ledger, backup,
+   публикации и результат приёмки в release record.
+
+0088 создаёт версии из текущих публикаций, сохраняет остальные поля и старые legal
+acceptances; `requires_reacceptance=false`. Неизвестная правка целевого опубликованного
+поля вызывает `TRANSCRIPT_COPY_PREFLIGHT` и rollback транзакции. Согласовать такой текст
+до повторного запуска, не обходить проверку. Существующие drafts не публикуются:
+известные старые строки обновляются, неизвестные авторские правки остаются редактору.
+
+После начала schema-шага ошибка оставляет допуск закрытым и службы остановленными.
+Автоматического запуска старого worker нет. Восстановить совместимую сборку с теми же
+миграциями, проверить migration/CMS в release environment, запустить согласованные
+службы и проверить runtime перед открытием звонков. Не удалять ledger, колонки,
+revisions или jobs и не восстанавливать старую БД поверх новых звонков. Обычный
+`rollback` к каталогу до 0088 будет отклонён. Bash-синтаксис и миграционная часть
+проверены локально; Linux/systemd cutover требует серверной приёмки.
+
+The dated preparation sections below retain their original checkpoints. Their old
+candidate numbers and pending-first-deploy assumptions are historical; use the schema
+release procedure above for the current candidate.
+
 ## Candidate on `feat/gpt-live-pilot` (26 September)
 
 After local acceptance and explicit owner approval, apply additive migrations through

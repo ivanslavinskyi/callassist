@@ -39,7 +39,7 @@ describe("execution language audit", () => {
       }
       compilations++;
       return new Response(JSON.stringify({ id: `plan-${compilations}`, output_text: JSON.stringify({ ...output,
-        backgroundSummary: compilations <= failedAudits ? "Уточнить получение заявления" : "Ask whether the application arrived" }) }));
+        backgroundSummary: raw.representedPerson + ": " + (compilations <= failedAudits ? "Уточнить получение заявления" : "Ask whether the application arrived") }) }));
     });
     const beforeProviderRequest = vi.fn(async () => true), afterProviderRequest = vi.fn(async (_result: unknown) => undefined);
     const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(raw, 1, { beforeProviderRequest, afterProviderRequest });

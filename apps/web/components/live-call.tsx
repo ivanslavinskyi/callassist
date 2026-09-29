@@ -1,4 +1,9 @@
 "use client";
+import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
+import { transcriptSourceCopy, transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
+
+import { consentTimeline } from "@/lib/i18n/consent-timeline";
+import { isTranscriptionBudgetBlocked, transcriptionBudgetMessages } from "@/lib/i18n/transcription-budget";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
@@ -45,7 +50,7 @@ import { useCallDraftStore } from "./call-draft-provider";
 import { getCallLanguageLabel, getTextLanguageLabel, languageMessages } from "@/lib/i18n/language-messages";
 import { isTerminalCallStatus } from "@/lib/call-status";
 import { useTranscriptFollowing } from "./use-transcript-following";
-import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments, groupNativeTranscriptSegments } from "@/lib/live-transcript-state";
+import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments, liveTranscriptRows } from "@/lib/live-transcript-state";
 import { currentCallSnapshot } from "@/lib/current-call-snapshot";
 import { compilationApprovalInput } from "@/lib/compilation-approval";
 import { isPlanPreparationFailure } from "@/lib/plan-preparation-failure";
@@ -106,7 +111,7 @@ function editableInputFromStoredBrief(brief: CallBrief): CreateCallBriefInput {
     allowedFacts: brief.allowedFacts,
     resultHandling: "capture_in_callassist",
     addressingMode: "formal",
-    tonePreference: "auto",
+    tonePreference: "neutral",
     voicemailPolicy: "do_not_leave_details",
     deliveryInstruction: "",
     clarificationAnswers: []
@@ -116,10 +121,16 @@ function editableInputFromStoredBrief(brief: CallBrief): CreateCallBriefInput {
 export function LiveCall({ callId, userId, userRole }: { callId: string; userId: string; userRole: UserRole }) {
   const router = useRouter();
   const { locale: uiLocale, localizeHref, messages } = useUiLocale();
-  const copy = messages.live;
+
   const languageCopy = languageMessages[uiLocale];
   const draftStore = useCallDraftStore();
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
+  const sourceCopy=transcriptSourceCopy[uiLocale];
+  const copy={...messages.live, finalTitle:sourceCopy.title,
+    finalHelp:snapshot?.finalTranscript?.status === "completed" ? transcriptSourceDescription(uiLocale,snapshot.finalTranscript.source) : sourceCopy.pending,
+    creatingFinal:sourceCopy.preparing,creatingFinalHelp:sourceCopy.pending,availableAfterCallHelp:sourceCopy.pending,
+    structuredTranscriptNote:transcriptSourceDescription(uiLocale,snapshot?.finalTranscript?.source),
+    plainTranscriptNote:transcriptSourceDescription(uiLocale,snapshot?.finalTranscript?.source)};
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [startingCall, setStartingCall] = useState(false);
@@ -142,6 +153,15 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const [showFullObjective, setShowFullObjective] = useState(false);
   const [transcriptView, setTranscriptView] = useState<"final" | "provisional">("final");
   const transcriptCardRef = useRef<HTMLElement>(null);
+  const actionErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!actionError || startingCall) return;
+    const frame = window.requestAnimationFrame(() => {
+      actionErrorRef.current?.focus({ preventScroll: true });
+      actionErrorRef.current?.scrollIntoView({ block: "center", behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [actionError, startingCall]);
   const deletionRequestIdRef = useRef<string | null>(null);
   const clarificationAttemptRef = useRef<CallPreparationAttempt | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
@@ -204,6 +224,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         setLiveTranscript(current => applyLiveTranscriptEvent(current, event));
         eventSegments.current = mergeTranscriptSegments(eventSegments.current, [event.segment]);
         setSnapshot(current => current ? { ...current, transcript: mergeTranscriptSegments(current.transcript, [event.segment]) } : current);
+        return;
       }
       void refresh(false);
     };
@@ -218,6 +239,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   }, [copyStatus]);
 
   useEffect(() => setCopyStatus("idle"), [snapshot?.finalTranscript?.updatedAt]);
+  useEffect(() => { if(snapshot?.finalTranscript?.source === "live_native") setTranscriptView("final"); },[snapshot?.finalTranscript?.source]);
   useEffect(() => {
     const terminal = ["completed","failed","stopped"].includes(snapshot?.brief.status ?? "");
     if (snapshot?.brief.lifecycle?.assessment?.status !== "pending" && !(terminal && snapshot?.brief.lifecycle?.credit === "reserved")) return;
@@ -517,7 +539,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
       { label: designMessages[uiLocale].recipient, value: brief.recipientName },
       { label: designMessages[uiLocale].phoneNumber, value: brief.phoneNumber },
       { label: copy.primaryLanguage, value: language?.label ?? brief.locale },
-      { label: copy.assistant, value: brief.agentName },
+      { label: copy.voice, value: brief.voiceGender === "female" ? copy.female : copy.male },
       { label: copy.audioRetention, value: brief.audioRetentionDays === 0 ? copy.untilFinalTranscript : copy.retentionDays(brief.audioRetentionDays) }
     ],
     showActions: !isTerminal && !isActive
@@ -629,7 +651,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
 
         {brief.retrySourceCallId && !isTerminal && !isActive ? <><p className="inline-notice">{registrationCallMessages[uiLocale].retryHelp}</p><PreviousCallResult callId={brief.retrySourceCallId} locale={uiLocale} /></> : null}
         {compilation && !isTerminal && !isActive && appointmentPlanExpired(compilation) ? <p role="alert" className="inline-notice">{registrationCallMessages[uiLocale].appointmentExpired}</p> : null}
-        {actionError ? <div className="inline-notice" role="alert">{actionError}</div> : null}
+        {actionError ? <div className="inline-notice" role="alert" tabIndex={-1} ref={actionErrorRef}>{actionError}</div> : null}
         {isTerminal ? <CallLifecycleSummary lifecycle={brief.lifecycle} locale={uiLocale} message={compilation?.compiledBrief ? answeringApproval(compilation.compiledBrief.voicemailAction, compilation.compiledBrief.callLocale).message : null} /> : null}
         {preparationProgress ? <CallPreparationStatus progress={preparationProgress} /> : null}
         {callLanguageForbidden && !isTerminal && !isActive ? (
@@ -699,7 +721,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           <div className="transcript-column">
             {isTerminal && !silentAutomatedCall && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
               <button type="button" aria-pressed={transcriptView === "final"} onClick={() => setTranscriptView("final")}>{copy.finalTitle}</button>
-              <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{systemMessages[uiLocale].provisionalTranscript}</button>
+              {snapshot.finalTranscript?.source !== "live_native" ? <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{sourceCopy.raw}</button> : null}
               <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
             </nav> : null}
             <section className="transcript-card" tabIndex={-1} hidden={silentAutomatedCall || (isTerminal && transcriptView !== "provisional")} ref={transcriptCardRef}>
@@ -737,18 +759,21 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                 </div>
               ) : (
                 <>
-                  {groupNativeTranscriptSegments(transcript).map((segment) => (
+                  {[...liveTranscriptRows(transcript, liveTranscript), ...(brief.lifecycle?.consent === "granted" && brief.lifecycle.consentAt ? [{
+                    id: "consent-event", role: "system" as const, text: consentTimeline[uiLocale].granted + (brief.lifecycle.consentMethod ? ` - ${consentTimeline[uiLocale][brief.lifecycle.consentMethod]}` : ""),
+                    createdAt: brief.lifecycle.consentAt, locale: brief.locale, final: true
+                  }] : [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((segment) => (
                   <article className={`transcript-line role-${segment.role}`} key={segment.id}>
                     <div className="speaker-mark">
-                      {segment.role === "assistant" ? "AI" : "RE"}
+                      {segment.role === "system" ? "i" : segment.role === "assistant" ? "AI" : "RE"}
                     </div>
                     <div>
                       <div className="speaker-row">
                         <strong>
-                          {segment.role === "assistant" ? "SHPROHLI" : brief.recipientName}
+                          {segment.role === "system" ? consentTimeline[uiLocale].system : segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : brief.recipientName}
                         </strong>
                         <time>
-                          {new Date(segment.createdAt).toLocaleTimeString(uiLocale, {
+                          {!segment.final ? copy.liveTime : new Date(segment.createdAt).toLocaleTimeString(uiLocale, {
                             hour: "2-digit",
                             minute: "2-digit",
                             second: "2-digit"
@@ -756,32 +781,11 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                         </time>
                       </div>
                       <p>{segment.text}</p>
-                      <span className="locale-tag">{segment.locale}</span>
+                      {segment.role !== "system" ? <span className="locale-tag">{segment.locale}</span> : null}
                     </div>
                   </article>
                   ))}
-                  {Object.entries(partialTranscript).map(([key, segment]) => (
-                    <article
-                      className={`transcript-line role-${segment.role}`}
-                      key={key}
-                    >
-                      <div className="speaker-mark">
-                        {segment.role === "assistant" ? "AI" : "RE"}
-                      </div>
-                      <div>
-                        <div className="speaker-row">
-                          <strong>
-                            {segment.role === "assistant"
-                              ? brief.agentName
-                              : brief.recipientName}
-                          </strong>
-                          <time>{copy.liveTime}</time>
-                        </div>
-                        <p>{segment.text}…</p>
-                        <span className="locale-tag">{segment.locale}</span>
-                      </div>
-                    </article>
-                  ))}
+
                 </>
               )}
             </div>
@@ -848,7 +852,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                   <span
                     className={`processing-badge final-${finalTranscript.status}`}
                   >
-                    {copy.finalTranscriptStatus[finalTranscript.status]}
+                    {isTranscriptionBudgetBlocked(finalTranscript.failureReason) ? transcriptionBudgetMessages[uiLocale].title : copy.finalTranscriptStatus[finalTranscript.status]}
                   </span>
                 ) : null}
               </div>
@@ -880,7 +884,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                             <div className="speaker-row">
                               <strong>
                                 {segment.role === "assistant"
-                                  ? brief.agentName
+                                  ? ASSISTANT_DISPLAY_NAME
                                   : segment.role === "recipient"
                                     ? brief.recipientName
                                     : copy.unassignedSpeaker}
@@ -919,6 +923,11 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                       {copy.regenerateTranscript}
                     </button>
                   ) : null}
+                </div>
+              ) : finalTranscript?.status === "failed" && isTranscriptionBudgetBlocked(finalTranscript.failureReason) ? (
+                <div className="final-transcript-state" role="status">
+                  <strong>{transcriptionBudgetMessages[uiLocale].title}</strong>
+                  <p>{transcriptionBudgetMessages[uiLocale].help}</p>
                 </div>
               ) : finalTranscript?.status === "failed" ? (
                 <div className="final-transcript-state state-error">
@@ -1111,7 +1120,6 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                       : copy.retentionDays(brief.audioRetentionDays)}
                   </dd>
                 </div>
-                <div><dt>{copy.assistant}</dt><dd>{brief.agentName}</dd></div>
               </dl>
             </section>
             {isTerminalCallStatus(brief.status) || brief.status === "blocked" ? (

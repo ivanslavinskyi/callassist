@@ -1,7 +1,8 @@
 # Documentation index
 
-Current-branch references refreshed **2026-09-25** for the GPT-Live pilot and
-registration/call improvements. Public brand: SHPROHLI; internal package names,
+Current-branch references refreshed **2026-09-29** for unified Live, native consent
+delegation, background AMD, native-first saved transcripts, seven-locale CMS migration
+and the schema release procedure. Public brand: SHPROHLI; internal package names,
 cookies and database identifiers still use callassist.
 
 Start with the references below. Dated plans, audits and test reports record what was
@@ -19,23 +20,69 @@ mapped there and are not separate work queues.
 
 ## Current references
 
-[Unified Live runtime](live-unified-runtime.md) describes the 26 September follow-up:
-one voice session, language auditing, transcript scrolling and telemetry exports.
-Its rollout remains gated on local real-call acceptance.
+[Consent and completion fixes, 29 September](live-progress-fix-2026-09-29.md)
+records the fixes following [two failed calls](live-two-calls-review-2026-09-29.md):
+overlapping consent, bounded waiting, recovery when native delegation is absent,
+and farewell recovery after late assistant speech. It distinguishes synthetic API
+evidence from the outstanding handset acceptance. The same follow-up makes voice
+settings and SHPROHLI transcript labels consistent across the UI and exports.
+Use the [current local checkpoint](local-testing.md#current-checkpoint-29-september)
+for the next manual test.
 
-[AMD and voicemail beta](amd-voicemail-beta.md) documents the current implementation,
-callback safety, accounting, migration and new real-call acceptance profiles (26 September).
+[Live transcript implementation, 28 September](live-transcript-implementation-2026-09-28.md)
+records the implemented follow-up: native-first saved transcripts shared by results,
+translations and PDF, versioned seven-locale CMS publications, shorter prompts and
+measured closing verification. Low reasoning did not improve latency, so the existing
+setting remains. Migrations 0087/0088 are applied locally; 1880 tests passed. The
+[original plan](live-transcript-and-conversation-plan-2026-09-28.md) and report distinguish
+the completed work from real-call acceptance and supervised production rollout.
+
+[Live simplification implementation plan, 28 September](live-simplification-implementation-plan-2026-09-28.md)
+records three implemented changes: reliable closing, grounded speech with simpler
+plan settings, and a natural readiness question. It incorporates the
+[prompt audit and owner clarifications](live-prompt-audit-2026-09-28.md).
+See the [implementation and verification report](live-simplification-implementation-2026-09-28.md).
+The changes were checked in the local API after its 28 September, 17:56 CEST restart;
+liveness and database readiness passed. See the [local testing checkpoint](local-testing.md#live-simplification-checkpoint-28-september).
+The later transcript report above supersedes that process/schema checkpoint.
+Full handset acceptance of the combined follow-up remains open.
+
+[Unified Live runtime](live-unified-runtime.md) is the current source of truth for
+`codex/live-unified-runtime`: one voice session, native `report_consent`, application
+recording/playback gates, task tools and a Live-authored closing without a recap script.
+The [28 September call review](live-call-review-2026-09-28.md) confirms initial voice
+consent, recording after consent and playback-confirmed hangup in a real local Twilio
+call; it also records the remaining short filler before closing. Broader manual
+acceptance and production deployment remain open. The source catalog ends at **0088**.
+
+The [voice continuity and pace follow-up](live-voice-continuity-2026-09-28.md) records
+the two-voice form, frozen voice IDs and provider confirmation diagnostics. The owner
+reported the voice change fixed in a manual call; coverage of both voices/languages
+was not specified. A calmer pace was then implemented and checked with 97 Live tests
+and API type checking; its acoustic acceptance is still pending. Local migration
+0086 was applied and the API restarted. This does not establish production state.
+
+The [27 September managed-delegation report](live-managed-delegation-2026-09-27.md)
+and [plan](live-managed-delegation-plan-2026-09-27.md) are historical checkpoints.
+The [client implementation](live-client-implementation-2026-09-27.md) and
+[orchestration plan](live-runtime-orchestration-plan-2026-09-27.md) describe the
+superseded custom controller, not an alternative current architecture.
+
+[AMD and voicemail beta](amd-voicemail-beta.md) documents the implementation,
+callback safety, accounting and acceptance profiles. The [28 September async AMD
+follow-up](async-amd-live-2026-09-28.md) removes detection from the disclaimer's
+startup gate for new native Live approvals; recording depends on consent independently
+of AMD. The owner reports AMD working locally; the broader carrier matrix remains open.
 
 
 Manual acceptance follow-up: [pre-consent connection and repeat correction](pre-consent-retry-2026-09-25.md)
 distinguishes telephone connection from human response and enables fresh review
 after a settled call without consent, including possible voicemail answers.
 
-Latest checkpoint: [registration/call improvements and validation, 25 September](registration-and-call-improvements-2026-09-25.md),
+Earlier checkpoint: [registration/call improvements and validation, 25 September](registration-and-call-improvements-2026-09-25.md),
 on implementation commit `457c9b2`: 1,591 tests / 191 files, lint/types/build and
 seven-locale browser smoke passed. The [parallel Live pilot](gpt-live-pilot.md)
-records separate real-call evidence for both drivers. Source migrations run through
-**0083**. Realtime, full onboarding and mandatory email remain the defaults.
+records separate real-call evidence for both drivers. At that checkpoint, source migrations ran through **0083**. Realtime, full onboarding and mandatory email remain the defaults.
 Owner acceptance, merge and production deployment remain pending; external release
 gates are tracked in the [roadmap](mvp-plan.md). Start local manual checks with the
 [local testing runbook](local-testing.md).
@@ -63,15 +110,24 @@ records cover migrations 0073/0074. Final summary and settlement publish atomica
 admin separates AI goal achievement from latest user feedback. Real-call release
 acceptance remains under B05/B09/B10.
 
-The local CMS landing is now **r10, seven locales**, with the English r9 layout
-preserved. The earlier [delivery record](delivery-2026-09-16.md) and
+The latest verified local CMS landing is **r11, seven locales**, following migration
+0088's transcript-copy update; the authored layout and unrelated content are preserved.
+The earlier [delivery record](delivery-2026-09-16.md) and
 [interactive demo record](interactive-landing-2026-09-14.md) describe historical
-EN/DE publications; current translation evidence is in the 21 September report above.
+EN/DE publications; r10 translation evidence is in the 21 September report above,
+and current publication IDs are in the 28 September transcript report. Production
+revisions must be verified on the target database.
 
 | Document | Purpose |
 | --- | --- |
 | [Local testing](local-testing.md) | Database, app/worker, scoped Twilio tunnel and manual acceptance |
-| [GPT-Live pilot](gpt-live-pilot.md) | Native protocol, application guardrails, accounting, fallback and real-call smoke |
+| [Saved transcript implementation](live-transcript-implementation-2026-09-28.md) | Three implemented changes, canonical source, CMS migration, checks and remaining acceptance |
+| [Unified Live runtime](live-unified-runtime.md) | Current consent/task tools, recording/playback gates, transcript and accounting contracts |
+| [Live voice continuity and pace](live-voice-continuity-2026-09-28.md) | Two voices, immutable IDs, provider diagnostics, manual continuity feedback and pending pace acceptance |
+| [Async AMD for Live](async-amd-live-2026-09-28.md) | Immediate disclosure with background detection, consent-based recording and callback acceptance |
+| [Initial voice-change investigation](live-voice-review-2026-09-28.md) | Historical diagnosis before voice confirmation telemetry and the two-voice implementation |
+| [28 September real-call review](live-call-review-2026-09-28.md) | Voice consent on the first question, natural closing, evidence and remaining limitations |
+| [GPT-Live pilot](gpt-live-pilot.md) | Historical hybrid implementation, fallback compatibility and original smoke procedure |
 | [Registration and call improvements](registration-and-call-improvements-2026-09-25.md) | Approved behavior, seven locales, migrations 0082/0083 and final checks |
 | [Audit, 2026-09-23](release-audit-2026-09-23.md) | Dependency fixes, export pagination, current verification and deployment boundaries |
 | [Project README](../README.md) | Product scope, setup, commands and repository status |
@@ -82,7 +138,7 @@ EN/DE publications; current translation evidence is in the 21 September report a
 | [Delivery, 2026-09-16](delivery-2026-09-16.md) | Founder story, session-aware CTAs, simplified call languages, opt-out eligibility, checks and deployment requirements |
 | [Architecture](architecture.md) | Current languages, appointments, consent, call control, summary schema, live state, privacy and limits |
 | [Runtime/API reference](runtime-reference.md) | Actual configuration defaults, process topology and registered API route inventory |
-| [Deployment preflight](deployment-preflight.md) | Proxy/env preparation and first release on shprohli.ch after landing completion; actual VPS deployment remains open |
+| [Deployment preflight](deployment-preflight.md) | Explicit 0085–0088 schema release, CMS upgrade and recovery; historical first-deployment preparation |
 | [Landing checkpoint, 2026-09-14](landing-checkpoint-2026-09-14.md) | Before/after screenshots, six EN/DE task groups and local publication results |
 | [Conversation credits, 2026-09-14](conversation-credit-2026-09-14.md) | Substantive-answer policy, atomic settlement, classification limits, migration 0071 and verification |
 | [Beta controls and stability, 2026-09-14](beta-controls-2026-09-14.md) | Admin cap/invitations, 7-minute calls, concurrency, conservative USD budget and recompile deadlock fix |
@@ -113,6 +169,7 @@ EN/DE publications; current translation evidence is in the 21 September report a
 
 | Record | What it establishes |
 | --- | --- |
+| [Native transcript and conversation, 2026-09-28](live-transcript-implementation-2026-09-28.md) | 1880 tests / 211 files, lint/types/build, CMS seven-locale and PDF checks; local migrations/restart; new real-call and schema-release acceptance remain open |
 | [Delivery, 2026-09-16](delivery-2026-09-16.md) | API checkpoint: 1,013 tests on fresh PostgreSQL, followed by targeted final regressions; web 240, contracts 115, typechecks/builds and EN/DE browser checks. No external deployment or real SMS/calls |
 | [Workflow feedback, 2026-09-15](workflow-feedback-2026-09-15.md) | Dated web checkpoint: 216 tests, lint/types/build; EN/DE desktop/mobile fixture checks. Real-provider and full assistive-technology acceptance remain open |
 | [Budget accounting, 2026-09-15](budget-accounting-2026-09-15.md) | 47 targeted accounting/admin/migration checks; recorded local migration 0072 and revision 3; no new paid calls |
@@ -151,7 +208,7 @@ after remediation on its candidate commit.
 | [Remediation](remediation-2026-09-07.md) / [project audit](project-audit-2026-09-07.md) | Original defects, fixes and dated dependency/test/recovery evidence |
 | [Account improvements](account-profile-improvement-plan.md) | Delivered profile/contact workflows, current operational limits and outstanding browser/notification work |
 | [Voice consent](outbound-voice-consent-implementation-plan.md) | Implemented recognition/playback boundary and short spoken notice decision |
-| [Post-call transcription](post-call-transcription-plan.md) / [channel-aware decision](channel-aware-final-transcription-plan.md) | Recording-derived utterance ASR and full-file fallback; dated experiments are not current quality guarantees |
+| [Post-call transcription](post-call-transcription-plan.md) / [channel-aware decision](channel-aware-final-transcription-plan.md) | Historical design of the recording ASR path, now fallback to canonical native capture; dated experiments are not current quality guarantees |
 | [UI stabilization](ui-ux-stabilization-plan.md) | Earlier design checklist; remaining accessibility work is R13 |
 
 ## Design baseline

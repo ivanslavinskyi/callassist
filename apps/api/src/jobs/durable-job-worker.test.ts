@@ -75,6 +75,24 @@ async function repositoryWithAvailableRecording() {
 }
 
 describe("durable job worker", () => {
+  it("defers budget admission without exhausting attempts and resumes after capacity returns", async () => {
+    const { repository } = await repositoryWithAvailableRecording();
+    let now = new Date("2099-02-01T00:00:00.000Z");
+    const handler = vi.fn().mockRejectedValue(new DurableJobExecutionError("BETA_BUDGET_EXHAUSTED", { defer: true, retryAfterMs: 300_000 }));
+    const worker = new DurableJobWorker(repository, { final_transcription: handler }, vi.fn(), { now: () => now });
+    for (let index = 0; index < 5; index++) {
+      await worker.runOnce();
+      const job = (await repository.listDurableJobs()).find(j => j.type === "final_transcription")!;
+      expect(job).toMatchObject({ status: "queued", attemptCount: 0, generation: 1, lastErrorCode: "BETA_BUDGET_EXHAUSTED" });
+      await worker.runOnce(); expect(handler).toHaveBeenCalledTimes(index + 1);
+      now = new Date(now.getTime() + 300_000);
+    }
+    handler.mockResolvedValue(undefined); await worker.runOnce();
+    const job = (await repository.listDurableJobs()).find(j => j.type === "final_transcription")!;
+    expect(job).toMatchObject({ status: "succeeded", attemptCount: 1, generation: 1 });
+    expect(await repository.listDurableJobAttempts(job.id)).toHaveLength(1);
+    await worker.close();
+  });
   it("records superseded text work as cancelled without retrying or reporting a background failure", async () => {
     const repository = new InMemoryCallRepository();
     const compilation = await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input));

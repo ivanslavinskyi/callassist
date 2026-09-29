@@ -2,14 +2,54 @@
 
 SHPROHLI helps people make everyday phone calls when speaking or the local language
 is a barrier. Users prepare a plan, review and approve it, follow a live transcript,
-and receive a recording-based final transcript with optional translation and an
+and receive a saved conversation transcript with optional translation and an
 evidence-linked summary.
 
-**Current work, 2026-09-26:** `codex/live-unified-runtime` replaces the hybrid Live
+**Current work, 2026-09-29:** `codex/live-unified-runtime` replaces the hybrid Live
 voice path with one Live session for consent, opening, conversation and closing.
 It also adds execution-language auditing, clearer telemetry export access and
 document scrolling for completed provisional transcripts. The migration catalog
-remains **0084**. See [implementation and acceptance](docs/live-unified-runtime.md).
+extends through **0088** (native transcript provenance and published CMS copy).
+Healthy native Live calls save their existing transcript as the result source;
+recording transcription remains the fallback. See the
+[implementation report](docs/live-transcript-implementation-2026-09-28.md).
+The 28 September local checkpoint was **1880 tests / 211 files**, lint/types/build and
+CMS/PDF checks. Production schema rollout and a new real-call acceptance check of
+this follow-up remain open. The [documentation index](docs/README.md) links current
+runtime, local testing and deployment procedures.
+The form offers two voices, fixed across the call, with a calm speaking pace.
+Call details show the selected voice; all transcript speaker labels and text/PDF
+exports use SHPROHLI, including historical calls. Legacy profile IDs remain internal.
+The [29 September follow-up](docs/live-progress-fix-2026-09-29.md) accepts consent
+during disclosure, bounds noise-driven waiting and requests a managed backend
+decision when native delegation misses an answer. Recipient interruption still
+cancels closing; late assistant speech uses bounded farewell recovery.
+Its branch verification passed 1,899 tests across 211 files after rerunning six suites
+on a fresh test database, plus workspace lint and typechecking; see the report for
+the historical test-database checksum issue and limits of synthetic call evidence.
+See [implementation and acceptance](docs/live-unified-runtime.md).
+
+The current implementation uses native Live **Responses delegation** with GPT-6 Luna
+and `parallel_tool_calls=false`. Live handles ordinary conversation independently;
+the application validates tool effects, consent, recording and playback at required
+transitions. Settled answers not covered by native work receive one managed decision
+request, without a separate task controller or ordinary-reply classifier.
+Spoken appointment requests are journaled before protected playback and require later
+contextual confirmation. Consent uses the restricted native `report_consent` tool
+with `affirmative / negative / unclear`, without an application-assembled answer or
+separate consent classifier. `end_call` takes a reason only; Live chooses a natural
+closing, and the app verifies completion and playback before hanging up.
+See the [current runtime](docs/live-unified-runtime.md) and
+[28 September real-call review](docs/live-call-review-2026-09-28.md).
+The [transcription recovery follow-up](docs/live-transcription-recovery-2026-09-27.md)
+adds protected post-call budget capacity, automatic deferral on budget blocks,
+correct text-only Live usage accounting. Ordinary speech now streams directly.
+
+The previous follow-ups retain stable transcript cards, a played-disclosure/consent
+timeline, preparation during ringing/AMD, native consent delegation, and
+an automatic assessment grounded in persisted transcript facts. New native Live approvals
+run AMD in the background so detection does not gate the disclaimer. The voice remains GPT-Live-1 throughout the human conversation;
+silent reasoning and consent checks use GPT-6 Luna.
 
 The owner reported production release `915a8f6` healthy with Live and fallback
 disabled on 26 September; it still uses the original hybrid speech path. This
@@ -19,7 +59,10 @@ from broader conversational acceptance. Full onboarding and required email remai
 the default registration policy. A superadmin can enable registration-time legal
 agreement and optional email deferral independently in Admin > System.
 
-**Acceptance and deployment of the unified voice path are pending.** Public-release
+**A local real Twilio information call passed on 28 September.** Voice consent was
+accepted at the initial question, recording followed consent, and natural closing
+completed after its playback mark. Broader acceptance and production deployment
+remain pending; this single call is not a reliability rate. Public-release
 operational and provider gates remain open in the [roadmap](docs/mvp-plan.md).
 See the [Live pilot](docs/gpt-live-pilot.md),
 [registration/call implementation and checks](docs/registration-and-call-improvements-2026-09-25.md),
@@ -27,9 +70,10 @@ See the [Live pilot](docs/gpt-live-pilot.md),
 Earlier audits remain dated evidence, not proof of the current deployment.
 
 The current branch also implements [AMD and voicemail beta](docs/amd-voicemail-beta.md):
-silent answer detection before consent, one approved neutral message after a beep,
+background answer detection alongside the native Live disclosure, one approved neutral message after a beep,
 separate lifecycle results, repeat review and provider accounting. Its real-call
 acceptance must be repeated when changing the answering policy.
+See [asynchronous AMD and manual checks](docs/async-amd-live-2026-09-28.md). Recording starts on consent independently of AMD.
 
 ## Implemented product
 
@@ -53,13 +97,20 @@ acceptance must be repeated when changing the answering policy.
 - Swiss-number outbound calls via Twilio, with selectable Realtime or native Live
   conversation and Responses delegation. Both preserve PCMU/G.711 and application-owned
   consent, authorization, appointment confirmation and playback-aware call control.
-- Six server-owned assistant profiles. Assistance reason defaults to `none`;
+- Two assistant voice choices: male Cedar and female Marin for native Live. New
+  approvals freeze the voice ID; historical profile names remain readable. The same
+  session retains voice identity from disclaimer to farewell and uses a calm,
+  slightly slower speaking pace. See [voice behavior and verification](docs/live-voice-continuity-2026-09-28.md).
+  Assistance reason defaults to `none`;
   `speech_impairment` and `language_barrier` add an optional controlled disclosure.
-- Spoken consent, one clarification, then keypad fallback. Before consent, recipient
-  audio can reach a separate OpenAI session **only to recognize the consent answer**;
-  it is not recorded by the application or forwarded to the main conversation.
-- Dual-channel recording after consent and confirmed recording startup. Final
-  transcription normally splits the recording into channel-labelled utterances;
+- Spoken consent, one clarification, then optional keypad fallback; voice remains
+  available after clarification. Unified Live uses native managed consent delegation;
+  Realtime/legacy hybrid uses its separate consent-recognition session. Neither
+  path stores recipient audio or words before consent; only the legacy path
+  isolates that audio from a separate main conversation socket.
+- Dual-channel recording after consent and confirmed recording startup. Healthy
+  native Live calls preserve the transcript produced during the conversation.
+  Recording fallback splits supported audio into channel-labelled utterances;
   mono/unsupported audio falls back to a whole-recording plain-text transcript.
 - Repeat definitively unanswered calls into a new draft with the saved compilation,
   fresh review/approval and current admission checks; unchanged plans incur no new
@@ -127,7 +178,7 @@ Twilio-only ingress (same process) |       durable work + invalidation
 
 The voice factory selects `OpenAIRealtimeBridge` (default) or `OpenAILiveBridge`.
 With fallback disabled, Live uses one native voice session for the human call,
-including consent and closing, with GPT-6 Luna Responses delegation. Application
+including consent and closing, with native managed Responses delegation to GPT-6 Luna. Application
 state, recording permission, tool authorization and Twilio playback remain outside
 the model. Explicit fallback opt-in retains the old hybrid pilot for rollback testing.
 
@@ -204,13 +255,14 @@ rotation/retention tests require a test database role with CREATEDB, as in CI.
 After a route removal, rebuild Next.js to regenerate stale `.next/types` before
 interpreting missing-route type errors as source failures.
 
-The migration catalog now extends through `0083_call_retry_sources.sql`.
+The migration catalog now extends through `0088_conversation_transcript_copy.sql` (including native transcript provenance and the CMS publication upgrade).
 Public opt-out requires a separate `TWILIO_OPT_OUT_VERIFY_SERVICE_SID` and a stable
 `RECIPIENT_CONTACT_HASH_KEY` shared by API/workers. Follow the
 [opt-out deployment and backfill procedure](docs/recipient-opt-out.md) and
 [deployment preflight](docs/deployment-preflight.md); pushing code does not configure them.
-Latest implementation checks and their limits are recorded in the
-[25 September acceptance record](docs/registration-and-call-improvements-2026-09-25.md).
+Latest voice implementation checks, user-reported continuity acceptance and pending
+pace listening checks are recorded in the [28 September voice follow-up](docs/live-voice-continuity-2026-09-28.md).
+The [25 September acceptance record](docs/registration-and-call-improvements-2026-09-25.md) retains its earlier results.
 The source catalog and automated checks do not establish the migration or acceptance
 state of a deployment database. Never repair checksum mismatches by rewriting applied
 migrations; use a fresh disposable test database for isolated test runs.

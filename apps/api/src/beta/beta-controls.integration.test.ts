@@ -6,7 +6,7 @@ import { betaControlsViewSchema, defaultBetaSettings, type BetaSettings } from "
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresAuthRepository } from "../auth/postgres-auth-repository";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
-import { PostgresBetaControls } from "./beta-controls";
+import { PostgresBetaControls, lockBetaControls, reservePostCallProviderSpend } from "./beta-controls";
 import { AuthService } from "../auth/auth-service";
 import { hashPassword } from "../auth/password";
 import { MockVerificationProvider } from "../auth/verification-provider";
@@ -17,6 +17,54 @@ import { TwilioVerificationProvider } from "../auth/twilio-verification-provider
 import { ResendEmailProvider } from "../auth/resend-email-provider";
 
 const closers: Array<() => Promise<unknown>> = [];
+it("persists deferred budget jobs without losing the provider retry budget", async () => {
+  const f = await fixture();
+  const owner = await f.owner(), call = await f.ready(owner.id);
+  const { attempt } = await f.repository.startAttempt(call.id, { provider: "twilio", userId: owner.id });
+  await f.repository.attachProviderCall(attempt.id, "CA-defer", "in-progress");
+  const begun = await f.repository.beginRecording(call.id);
+  await f.repository.attachProviderRecording(begun.recording.id, "RE-defer", "in-progress");
+  await f.repository.applyRecordingStatus({ callBriefId: call.id, recordingId: begun.recording.id,
+    providerCallId: "CA-defer", providerRecordingId: "RE-defer", providerStatus: "completed", durationSeconds: 30, channels: 2 });
+  for (let index = 0; index < 5; index++) {
+    const now = new Date(Date.now() + index * 300_000).toISOString();
+    const job = await f.repository.claimDueDurableJob({ types: ["final_transcription"], workerId: "defer-test", now,
+      leaseExpiresAt: new Date(Date.parse(now) + 120_000).toISOString() });
+    expect(job).not.toBeNull();
+    const result = await f.repository.failDurableJob(job!.id, "defer-test", "BETA_BUDGET_EXHAUSTED", now,
+      new Date(Date.parse(now) + 300_000).toISOString(), true, true);
+    expect(result).toMatchObject({ status: "queued", attemptCount: 0, generation: 1 });
+    expect(await f.repository.listDurableJobAttempts(job!.id)).toHaveLength(0);
+  }
+}, 30000);
+it("reserves post-call capacity atomically at admission and rolls back an unaffordable call", async () => {
+  const f = await fixture({ rollingDayBudgetMicros: 14_010_000 });
+  const owner = await f.owner(), call = await f.ready(owner.id);
+  await expect(f.repository.startAttempt(call.id, { provider: "twilio", userId: owner.id })).rejects.toMatchObject({ code: "BETA_BUDGET_EXHAUSTED" });
+  expect(await f.repository.getLatestAttempt(call.id)).toBeNull();
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 0 });
+}, 30000);
+
+it("uses protected post-call capacity at a full budget and does not release uncertain requests", async () => {
+  const f = await fixture({ rollingDayBudgetMicros: 18_010_000 });
+  const owner = await f.owner(), call = await f.ready(owner.id);
+  const { attempt } = await f.repository.startAttempt(call.id, { provider: "twilio", userId: owner.id });
+  const request = async (id: string) => f.sql.begin(async tx => {
+    const policy = (await lockBetaControls(tx)).settings;
+    await reservePostCallProviderSpend(tx, attempt.id, id, policy);
+    await tx`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_attempt_id,started_at)
+      VALUES(${id},'openai','transcription','assistant_utterance','gpt-4o-transcribe',${id},${attempt.id},now()) ON CONFLICT DO NOTHING`;
+  });
+  const ids = Array.from({ length: 5 }, () => randomUUID());
+  const admitted = await Promise.allSettled(ids.map(request));
+  expect(admitted.filter(r => r.status === "fulfilled")).toHaveLength(4);
+  expect(admitted.find(r => r.status === "rejected")).toMatchObject({ reason: { code: "BETA_BUDGET_EXHAUSTED" } });
+  const existing = (await f.sql`SELECT id FROM provider_operations WHERE call_attempt_id=${attempt.id}`)[0].id;
+  await request(existing); // Retrying the same operation cannot spend the pool twice.
+  await f.repository.attachProviderCall(attempt.id, "CA-pool", "queued");
+  await f.repository.applyProviderStatus("CA-pool", "busy", "failed");
+  expect(await f.controls.getView()).toMatchObject({ reservedMicros: 18_010_000 });
+}, 30000);
 it("revision-checks registration policies, rejects non-superadmins and preserves them for old beta clients", async () => {
   const f = await fixture();
   const view = await f.controls.getView();
@@ -155,16 +203,16 @@ it("admits two global calls, enforces per-account limits, and reserves the admit
   expect(admitted).toHaveLength(2);
   expect(attempts.find(r=>r.status==="rejected")).toMatchObject({reason:{code:"BETA_CONCURRENCY_LIMIT"}});
   expect(admitted.every(a=>a.attempt.maxDurationSeconds===420)).toBe(true);
-  expect(await f.controls.getView()).toMatchObject({activeCalls:2,reservedMicros:28_020_000});
+  expect(await f.controls.getView()).toMatchObject({activeCalls:2,reservedMicros:36_020_000});
   await f.controls.update({...f.settings,maxConcurrentCalls:3,maxDurationSeconds:300},2,f.admin.id,"Changed limits for new starts");
   const sameOwner = await f.ready(admitted[0].owner.id);
   await expect(f.repository.startAttempt(sameOwner.id,{provider:"twilio",userId:admitted[0].owner.id})).rejects.toMatchObject({code:"CONCURRENT_CALL_LIMIT"});
-  expect(await f.controls.getView()).toMatchObject({reservedMicros:28_020_000});
+  expect(await f.controls.getView()).toMatchObject({reservedMicros:36_020_000});
   await f.repository.attachProviderCall(admitted[0].attempt.id,"CA-beta-one","queued");
   await f.repository.applyProviderStatus("CA-beta-one","busy","failed");
   const fresh = await f.repository.startAttempt(sameOwner.id,{provider:"twilio",userId:admitted[0].owner.id});
   expect(fresh.attempt.maxDurationSeconds).toBe(300);
-  expect(await f.controls.getView()).toMatchObject({reservedMicros:38_030_000});
+  expect(await f.controls.getView()).toMatchObject({reservedMicros:46_030_000});
   const stored = await f.sql`SELECT max_duration_seconds FROM call_attempts WHERE id=${admitted[0].attempt.id}`;
   expect(stored[0].max_duration_seconds).toBe(420);
   await f.repository.setOutboundCallsEnabled(false,{actorUserId:f.admin.id,reason:"Stop drill"});
@@ -192,6 +240,34 @@ it("keeps uncertain provider calls in concurrency counts and recipient limits su
   await f.sql`UPDATE beta_recipient_starts SET created_at=now()-interval '25 hours'`;
   await expect(f.repository.startAttempt(next.id, { provider: "twilio", userId: nextOwner.id })).resolves.toBeDefined();
   expect((await f.sql`SELECT * FROM beta_recipient_starts`).count).toBe(1);
+}, 30000);
+
+it("raises the recipient cap through admin API and immediately admits a blocked recipient without resetting history", async () => {
+  const f = await fixture({ maxStartsPerRecipientPerDay: 1 });
+  const owner = await f.owner(), recipient = "+41790009887";
+  const first = await f.ready(owner.id, recipient), next = await f.ready(owner.id, recipient);
+  const admitted = await f.repository.startAttempt(first.id, { provider: "twilio", userId: owner.id });
+  await f.repository.attachProviderCall(admitted.attempt.id, "CA-recipient-limit", "queued");
+  await f.repository.applyProviderStatus("CA-recipient-limit", "busy", "failed");
+  await expect(f.repository.startAttempt(next.id, { provider: "twilio", userId: owner.id }))
+    .rejects.toMatchObject({ code: "BETA_RECIPIENT_LIMIT" });
+  const url = "/api/admin/system/beta", headers = { cookie: f.cookie };
+  const view = await f.controls.getView();
+  const payload = { settings: { ...view.settings, maxStartsPerRecipientPerDay: 20 },
+    expectedRevision: view.revision, reason: "Raise recipient cap for manual testing" };
+  for (const value of [0, 101, 20.5]) {
+    expect((await f.app.inject({ method: "PUT", url, headers,
+      payload: { ...payload, settings: { ...payload.settings, maxStartsPerRecipientPerDay: value } } })).statusCode).toBe(400);
+  }
+  expect((await f.app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(200);
+  const saved = betaControlsViewSchema.parse((await f.app.inject({ method: "GET", url, headers })).json());
+  expect(saved).toMatchObject({ revision: view.revision + 1, settings: { maxStartsPerRecipientPerDay: 20 } });
+  expect(await f.sql`SELECT id FROM beta_control_audit WHERE reason=${payload.reason}`).toHaveLength(1);
+  await expect(f.repository.startAttempt(next.id, { provider: "twilio", userId: owner.id })).resolves.toBeDefined();
+  expect(await f.sql`SELECT * FROM beta_recipient_starts`).toHaveLength(2);
+  expect((await f.app.inject({ method: "PUT", url, headers,
+    payload: { ...payload, expectedRevision: saved.revision,
+      settings: { ...saved.settings, maxStartsPerRecipientPerDay: 100 } } })).statusCode).toBe(200);
 }, 30000);
 
 it("preserves idempotent preparation lookup while spending is paused and rejects new registrations before occupying a place", async () => {

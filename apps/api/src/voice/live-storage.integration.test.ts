@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
-import { approvedCall } from "./voice-test-helpers";
+import { approvedCall, authorization, proposal } from "./voice-test-helpers";
+import { decryptJson } from "../security/encryption";
+import { genericCiphertextColumns } from "../db/encrypted-columns";
+import { exportSources } from "../telemetry-export/sources";
 import { liveDurationUsage, liveResponsesUsage } from "./live-usage";
 import { buildAdminCostOverview } from "../admin-operations";
 import { unavailableOperationalCostPolicy } from "../config/operational-cost-policy";
@@ -22,6 +25,51 @@ beforeAll(async () => {
 afterAll(async () => { await call?.service.close(); await repository?.close(); await sql?.end(); await fixture.teardown(); });
 
 describe("native Live persisted evidence", () => {
+  it("persists the approved voice and content-free confirmations for the same attempt", async () => {
+    expect((await repository.getLatestAttempt(call.brief.id))?.executionSnapshot?.runtime.liveVoice).toBe("marin");
+    await repository.appendCallTelemetryEvent(call.brief.id, { callAttemptId: call.attempt.id, idempotencyKey: "voice-confirmed", payload: {
+      name: "realtime.voice", metadata: { requestedVoice: "marin", confirmedVoice: "marin", sessionId: "live-storage",
+        model: "gpt-live-1", phase: "consent", result: "confirmed" }
+    } });
+    expect((await repository.listCallTelemetryEvents(call.brief.id)).find(e => e.payload.name === "realtime.voice")?.payload.metadata)
+      .toMatchObject({ requestedVoice: "marin", confirmedVoice: "marin", sessionId: "live-storage" });
+  });
+  it("journals one immutable action per attempt, uses versioned transitions, and redacts its encrypted content", async () => {
+    const fixtureCall = await approvedCall(authorization, repository, "en-GB", "CA-ACTION");
+    const input = { callBriefId: fixtureCall.brief.id, callAttemptId: fixtureCall.attempt.id,
+      snapshotHash: fixtureCall.snapshot.compilationSnapshotHash, proposal: { ...proposal, operation: "book" as const },
+      content: "Please confirm the approved appointment.", evidence: ["turn-1"] };
+    expect(await repository.beginVoiceAction({ ...input, snapshotHash: "stale" })).toBeNull();
+    const raced = await Promise.all([repository.beginVoiceAction(input), repository.beginVoiceAction(input)]);
+    expect(raced.filter(Boolean)).toHaveLength(1);
+    const action = raced.find(value => value)!;
+    const [row] = await sql`SELECT * FROM call_voice_actions WHERE id=${action.id}`;
+    expect(row!.payload_ciphertext).not.toContain(input.content);
+    expect(decryptJson(row!.payload_ciphertext, Buffer.alloc(32, 7))).toEqual(input);
+    expect(genericCiphertextColumns).toContainEqual(["call_voice_actions", "payload_ciphertext"]);
+    expect(exportSources.find(source => source.table === "call_voice_actions")?.fields).not.toContain("payload_ciphertext");
+    expect(await repository.transitionVoiceAction({ id: action.id, version: 1, state: "confirmed", evidence: ["invented"] })).toBeNull();
+    const delivered = await repository.transitionVoiceAction({ id: action.id, version: 1, state: "delivered", evidence: [] });
+    expect(delivered?.version).toBe(2);
+    expect(await repository.transitionVoiceAction({ id: action.id, version: 1, state: "uncertain", evidence: [] })).toBeNull();
+    const confirmed = await repository.transitionVoiceAction({ id: action.id, version: 2, state: "confirmed", evidence: ["turn-2"] });
+    expect(confirmed).toMatchObject({ version: 3, state: "confirmed", evidence: ["turn-1", "turn-2"] });
+    expect((await repository.exportCallTextData(input.callBriefId)).voiceActions).toEqual([confirmed]);
+    const owner = randomUUID();
+    await sql`INSERT INTO users(id,email,password_hash,phone_e164,phone_verified_at,first_name,last_name,role,status,ui_locale,created_at)
+      VALUES (${owner},${`${owner}@example.com`},'test-only','+41710000002',now(),'Test','Owner','user','active','en',now())`;
+    await sql`UPDATE call_briefs SET user_id=${owner},status='completed' WHERE id=${input.callBriefId}`;
+    await repository.setNativeTranscriptCapture(input.callBriefId, input.callAttemptId, {
+      version: 1, status: "complete", sessionId: "deleted-session", model: "gpt-live-1", updatedAt: new Date().toISOString()
+    });
+    await repository.deleteCallData({ callId: input.callBriefId, userId: owner, requestId: randomUUID(),
+      providerRecordingDisposition: "not_present", deletedAt: new Date().toISOString() });
+    expect((await sql`SELECT payload_ciphertext FROM call_voice_actions WHERE id=${action.id}`)[0]?.payload_ciphertext).toBeNull();
+    expect((await sql`SELECT native_transcript_capture FROM call_attempts WHERE id=${input.callAttemptId}`)[0]?.native_transcript_capture).toBeNull();
+    expect(await repository.beginVoiceAction(input)).toBeNull();
+    expect(await repository.transitionVoiceAction({ id: action.id, version: 3, state: "confirmed", evidence: [] })).toBeNull();
+    await expect(repository.exportCallTextData(input.callBriefId)).rejects.toThrow("CALL_NOT_FOUND");
+  });
   it("roundtrips exact, late fragments with native timing and retains legacy transcripts", async () => {
     const timing = { sessionId: "live-storage", eventId: "late", sessionStartedAt: "2026-09-25T00:00:00.000Z", startMs: 1000, endMs: 1500 };
     await call.service.addRealtimeTranscript(call.brief.id, "assistant", "Legacy opening", "opening");

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { CallLocale } from "./call-brief";
 
-export const ANSWERING_POLICY_VERSION = "twilio-sync-beep-v1" as const;
+export const ANSWERING_POLICY_VERSION = "twilio-async-live-beep-v2" as const;
+export const answeringPolicyVersionSchema = z.enum(["twilio-sync-beep-v1", ANSWERING_POLICY_VERSION]);
 export const answeredBySchema = z.enum(["human", "machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other", "fax", "unknown"]);
 export type AnsweredBy = z.infer<typeof answeredBySchema>;
 export const answeringDecisionSchema = z.enum(["consent", "message", "hang_up"]);
@@ -20,13 +21,13 @@ export const neutralVoicemailText: Record<CallLocale, string> = {
 };
 
 export const answeringApprovalSchema = z.strictObject({
-  policyVersion: z.literal(ANSWERING_POLICY_VERSION),
+  policyVersion: answeringPolicyVersionSchema,
   action: z.enum(["hang_up", "leave_neutral_message"]),
   message: z.string().max(1000).nullable()
 });
 export type AnsweringApproval = z.infer<typeof answeringApprovalSchema>;
-export function answeringApproval(action: AnsweringApproval["action"], locale: CallLocale): AnsweringApproval {
-  return { policyVersion: ANSWERING_POLICY_VERSION, action, message: action === "leave_neutral_message" ? neutralVoicemailText[locale] : null };
+export function answeringApproval(action: AnsweringApproval["action"], locale: CallLocale, policyVersion: AnsweringApproval["policyVersion"] = ANSWERING_POLICY_VERSION): AnsweringApproval {
+  return { policyVersion, action, message: action === "leave_neutral_message" ? neutralVoicemailText[locale] : null };
 }
 export function answeringMode(action: AnsweringApproval["action"]) {
   return action === "hang_up" ? "Enable" as const : "DetectMessageEnd" as const;
@@ -39,7 +40,9 @@ export function decideAnswering(action: AnsweringApproval["action"], answer: Ans
 
 export const answeringStateSchema = z.strictObject({
   phase: z.enum(["pending", "resolved", "failed"]),
-  policyVersion: z.literal(ANSWERING_POLICY_VERSION),
+  policyVersion: answeringPolicyVersionSchema,
+  execution: z.enum(["sync", "async"]).optional(),
+  actionDispatched: z.boolean().optional(),
   mode: answeringModeSchema,
   answeredBy: answeredBySchema.nullable(),
   decision: answeringDecisionSchema.nullable(),

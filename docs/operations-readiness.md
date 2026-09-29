@@ -36,7 +36,7 @@ These local values do not configure the external deployment.
 
 ## Call result diagnosis
 
-Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply the current migration catalog through 0080 before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
+Use the shared lifecycle shown in History, call detail and Admin Inspector. `completed` is an orchestration state, not proof of a conversation. Provider `no-answer` differs from a connected call ending before consent. Explicit refusal has its own result. A substantive answer requires consent and validated final-transcript evidence. Conversation outcome can be corrected after a refund without reversing it. The canonical AI goal assessment and latest user feedback are independent statistics; existing user/staff classification remains explicitly manual. Do not overwrite stored status or infer who hung up from stream closure. Apply the current migration catalog through 0088 using the [schema release procedure](deployment-preflight.md) before restarting all updated API/workers; see [assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
 
 ## Preparation and call UI diagnosis
 
@@ -243,13 +243,28 @@ Verify the immutable attempt history and final canonical call state.
 
 ### Result generation failure
 
+The `final_transcription` job publishes the canonical saved transcript from a complete
+native Live capture before considering recording ASR. Inspect source (`live_native` /
+`recording_asr`) and attempt capture state (`collecting`, `complete`, `incomplete`)
+alongside job status. A collecting capture can wait up to 120 seconds from job creation;
+missing/incomplete capture uses the existing recording path. Ready native text does
+not wait for audio or create an ASR provider operation. A later callback must not
+replace that result. Completion schedules retention; a ready-recording callback can
+re-enqueue it.
+
+Summary, assessment, translation and PDF use the same immutable source revision/hash.
+Historical ASR calls are not bulk-converted by migration. Do not force an ASR retry
+merely because a native result has no transcription charge. See
+[source lifecycle and verification](live-transcript-implementation-2026-09-28.md).
+
 Inspect the artifact and its durable job together: source revision/hash, kind,
 status, generation, attempt count, provider-request count, run-after and controlled
 failure code. `queued` during backoff is not terminal failure. `processing` is an
 active lease; source replacement or deletion may make an artifact stale/cancelled.
 
 The owner text-artifact retry route is bounded to three generations total and 24
-provider requests across them, with three automatic attempts per generation. Retry
+provider requests across them, with three automatic attempts for translations/reviews
+and two for summaries per generation. Retry
 only when `retryable` is true and the current source/direction still permits it.
 Timeout, 429 and provider 5xx are distinct from permanent request rejection. Provider
 `Retry-After` is scheduled, capped at 15 minutes; summary timeout defaults to 90 seconds

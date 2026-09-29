@@ -581,7 +581,7 @@ function buildUtteranceTranscriptionPrompt(
   const context = previousAssistant
     ? ` The preceding AI assistant utterance was: "${sanitizePromptText(previousAssistant, 500)}". This is context only and is not proof of the words in the attached audio.`
     : "";
-  return `${buildPostCallTranscriptionPrompt(brief)} This file contains one isolated ${utterance.role} utterance from that conversation.${context} Transcribe only speech audible in this file.`
+  return `${buildPostCallTranscriptionPrompt(brief, true)} This file contains one isolated ${utterance.role} utterance from that conversation.${context} Transcribe only speech audible in this file.`
     .slice(0, maximumPromptCharacters);
 }
 
@@ -628,10 +628,12 @@ function clampTime(value: number, timing?: FinalTranscriptTiming) {
   return Math.round(clamped * 100) / 100;
 }
 
-export function buildPostCallTranscriptionPrompt(brief: CallBrief) {
+export function buildPostCallTranscriptionPrompt(brief: CallBrief, isolatedUtterance = false) {
   const context = sanitizePromptText(brief.context, maximumContextCharacters);
   const prompt = [
-    "This audio is the complete consented recording of one telephone conversation. Transcribe every audible utterance faithfully and in chronological order.",
+    isolatedUtterance
+      ? "This audio is one isolated utterance from a consented telephone conversation. Transcribe the audible speech faithfully."
+      : "This audio is the complete consented recording of one telephone conversation. Transcribe every audible utterance faithfully and in chronological order.",
     "Do not translate, add, infer, reconstruct, complete, or summarise unclear speech. Omit speech that is not intelligible.",
     languageInstruction(brief),
     `Use ${preferredWritingSystem(brief)}. Do not render speech phonetically in another alphabet.`,

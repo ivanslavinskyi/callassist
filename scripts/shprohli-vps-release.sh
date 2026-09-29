@@ -13,8 +13,8 @@ action=${1:-}
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ $(id -u) == 0 ]] || die 'Run as root (sudo shprohli-release ...).'
-[[ $# == 1 && ( $action == status || $action == check || $action == deploy || $action == rollback ) ]] ||
-  die 'Usage: shprohli-release <status|check|deploy|rollback>'
+[[ $# == 1 && ( $action == status || $action == check || $action == deploy || $action == deploy-schema || $action == rollback ) ]] ||
+  die 'Usage: shprohli-release <status|check|deploy|deploy-schema|rollback>'
 exec 9>/run/lock/shprohli-release.lock
 flock -n 9 || die 'Another Shprohli release operation is running.'
 
@@ -110,16 +110,46 @@ NODE
   rm -f -- "$response"
 }
 
+catalog_gate() {
+  local path=$1 file name
+  if [[ $action != deploy-schema ]]; then
+    diff -qr -- "$active_path/apps/api/src/db/migrations" "$path/apps/api/src/db/migrations" ||
+      die 'Migration catalog changed; use a supervised schema rollout.'
+    return
+  fi
+  # Explicitly scoped rollout for this Live release. Applied SQL stays immutable.
+  for file in "$active_path"/apps/api/src/db/migrations/*.sql; do
+    name=$(basename "$file")
+    cmp -s -- "$file" "$path/apps/api/src/db/migrations/$name" || die "Changed applied migration: $name"
+  done
+  for file in "$path"/apps/api/src/db/migrations/*.sql; do
+    name=$(basename "$file")
+    [[ -f $active_path/apps/api/src/db/migrations/$name ]] && continue
+    case $name in
+      0085_voice_action_intents.sql|0086_live_voice_telemetry.sql|0087_native_transcript_source.sql|0088_conversation_transcript_copy.sql) ;;
+      *) die "Unreviewed schema rollout migration: $name" ;;
+    esac
+  done
+}
+
 candidate_gate() {
   local path=$1
   [[ -s $path/apps/api/dist/index.js && -s $path/apps/api/dist/worker.js &&
      -s $path/apps/web/.next/BUILD_ID &&
      -f $path/apps/web/node_modules/next/dist/bin/next ]] ||
     die 'Candidate build artifacts missing.'
-  if ! diff -qr -- "$active_path/apps/api/src/db/migrations" \
-      "$path/apps/api/src/db/migrations"; then
-    die 'Migration catalog changed; use a supervised schema rollout.'
-  fi
+  catalog_gate "$path"
+}
+
+candidate_db() {
+  local path=$1 script=$2
+  shift 2
+  systemd-run --quiet --unit="shprohli-schema-$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM" --wait --collect \
+    -p Type=exec -p User=shprohli -p Group=shprohli -p Slice=shprohli.slice \
+    -p WorkingDirectory="$path/apps/api" -p Environment=HOME=/opt/shprohli -p Environment=NODE_ENV=production \
+    -p EnvironmentFile=/etc/shprohli/database.env -p EnvironmentFile=/etc/shprohli/runtime.env \
+    -p EnvironmentFile=/etc/shprohli/provider.env -p LogNamespace=shprohli -p RuntimeMaxSec=300s \
+    /usr/bin/node "$script" "$@"
 }
 
 run_call_toggle() {
@@ -220,6 +250,7 @@ runtime_ok() {
 }
 
 cutover_switched=0
+cutover_schema_started=0
 cutover_worker_stopped=0
 cutover_pause_attempted=0
 cutover_recovery_ok=0
@@ -230,6 +261,12 @@ recover_cutover() {
   trap - EXIT INT TERM
   set +e
   if (( rc != 0 )); then
+    if (( cutover_schema_started == 1 )); then
+      run_call_toggle disable "Schema rollout recovery: keep admission closed"
+      systemctl stop shprohli-api.service shprohli-web.service shprohli-worker.service
+      printf 'Schema rollout stopped. Call admission remains disabled. Keep the database and new revisions; recover with a compatible release. Automatic downgrade is disabled.\n' >&2
+      exit "$rc"
+    fi
     printf 'Release change failed; restoring %s\n' "$active_sha" >&2
     if (( cutover_switched == 1 )); then
       replace_link current "$active_path"
@@ -262,6 +299,9 @@ cutover() {
   candidate_gate "$target_path"
   ledger_gate "$active_path"
   service_gate || die 'Services are not ready before cutover.'
+  if [[ $action == deploy-schema ]]; then
+    candidate_db "$target_path" scripts/preflight-transcript-copy.mjs
+  fi
   cutover_original_gate=$(db "SELECT enabled::text FROM system_controls WHERE key='outbound_calls'")
   [[ $cutover_original_gate == true || $cutover_original_gate == false ]] ||
     die 'Call gate unavailable.'
@@ -280,6 +320,13 @@ cutover() {
   fresh_backup
   systemctl stop shprohli-worker.service
   cutover_worker_stopped=1
+  if [[ $action == deploy-schema ]]; then
+    cutover_schema_started=1
+    systemctl stop shprohli-api.service shprohli-web.service
+    candidate_db "$target_path" dist/db/migrate.js
+    ledger_gate "$target_path"
+    candidate_db "$target_path" scripts/preflight-transcript-copy.mjs --verify
+  fi
   replace_link current "$target_path"
   cutover_switched=1
   [[ $(readlink -f "$current") == "$target_path" ]] || die 'Release switch failed.'
@@ -313,7 +360,7 @@ case $action in
     [[ $(git_source rev-parse --is-shallow-repository) == false ]] || die 'Git history is shallow.'
     printf 'Release prerequisites passed for %s\n' "$active_sha"
     ;;
-  deploy)
+  deploy|deploy-schema)
     service_gate || die 'Services are not ready.'
     ledger_gate "$active_path"
     [[ -z $(git_source status --porcelain=v1) ]] || die 'Source checkout has local changes.'
@@ -339,9 +386,7 @@ case $action in
       sudo -u shprohli -H mkdir -m 0750 -- "$target_path"
       git_source archive "$target" | sudo -u shprohli -H tar -x -C "$target_path"
       printf '%s\n' "$target" | sudo -u shprohli -H tee "$target_path/.release-sha" >/dev/null
-      diff -qr -- "$active_path/apps/api/src/db/migrations" \
-        "$target_path/apps/api/src/db/migrations" ||
-        die 'Migration catalog changed; use a supervised schema rollout.'
+      catalog_gate "$target_path"
       timeout --signal=TERM --kill-after=30s 20m sudo -u shprohli -H env -i \
         HOME=/opt/shprohli USER=shprohli LOGNAME=shprohli \
         PATH=/opt/shprohli/.local/bin:/usr/local/bin:/usr/bin:/bin \

@@ -11,7 +11,6 @@ describe("call brief input limits", () => {
     for (const limit of [
       "objective",
       "context",
-      "deliveryInstruction",
       "representedPersonNamePart",
       "allowedFact",
       "allowedFacts"

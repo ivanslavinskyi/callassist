@@ -168,7 +168,7 @@ describe("preapproved appointment compilation", () => {
       ? { results: [{ flagged: false }] } : { id: "resp_appointment", output_text: JSON.stringify(modelResponse(compiled, raw.objective)) }), { status: 200 }));
     const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation, now: () => new Date("2026-09-10T08:00:00Z") }).compile(raw);
     expect(result.policyDecision.status).toBe("ready_for_review");
-    expect(result.compilerVersion).toBe("brief-compiler-5");
+    expect(result.compilerVersion).toBe("brief-compiler-6");
     const body = JSON.parse(String(fetchImplementation.mock.calls.find(([url]) => String(url).endsWith("responses"))![1]!.body));
     expect(body.input[0].content).toContain("Trusted current date/time: 2026-09-10T08:00:00.000Z");
     expect(body.input[0].content).toContain("Administrative appointment booking");

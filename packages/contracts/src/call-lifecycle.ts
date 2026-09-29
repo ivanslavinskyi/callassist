@@ -23,6 +23,7 @@ export const callLifecycleSchema = z.strictObject({
   disclosureAt: z.iso.datetime().nullable(),
   consent: z.enum(["not_recorded", "granted", "declined", "not_received", "not_requested"]),
   consentAt: z.iso.datetime().nullable(),
+  consentMethod: z.enum(["voice", "dtmf"]).optional(),
   conversationStartedAt: z.iso.datetime().nullable(),
   substantiveAnswerConfirmed: z.boolean(),
   endedAt: z.iso.datetime().nullable(),
@@ -82,7 +83,7 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
         if (payload.metadata.providerStatus === "in-progress") value.connectedAt ??= occurredAt;
         break;
       case "disclosure.started": value.disclosureAt ??= occurredAt; break;
-      case "consent.granted": value.connected = true; value.consent = "granted"; value.consentAt = occurredAt; break;
+      case "consent.granted": value.connected = true; value.consent = "granted"; value.consentAt = occurredAt; value.consentMethod = payload.metadata.method === "dtmf_1" ? "dtmf" : payload.metadata.method; break;
       case "consent.failed":
         if (["recording_start_failed", "recognition_failed"].includes(payload.metadata.reason)) technicalFailure = true;
         if (payload.metadata.reason === "negative") value.connected = true;
@@ -133,7 +134,7 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
   else if (status === "stopped" || value.endedBy === "user" || value.endedBy === "system") value.result = "stopped";
   else if (value.consent === "declined") value.result = "consent_declined";
   else if (technicalFailure || providerResult === "failed") value.result = "technical_failure";
-  else if (value.answering?.phase === "pending" && value.connected) value.result = "answer_detection_failed";
+  else if (value.answering?.phase === "pending" && value.connected && value.consent !== "granted" && !value.conversationStartedAt) value.result = "answer_detection_failed";
   else if (value.answering && answeringResult(value.answering) && !value.conversationStartedAt && value.consent !== "granted") value.result = answeringResult(value.answering);
   else if (technicalFailure || providerResult === "failed" || status === "failed") value.result = "technical_failure";
   else if (value.consent === "granted") value.result = "no_substantive_answer";

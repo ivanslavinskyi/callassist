@@ -13,6 +13,7 @@ import { OpenAITextProcessor } from "./text-processing/openai-text-processor";
 import { InMemoryCallRepository } from "./storage/in-memory-call-repository";
 import type { TelephonyProvider } from "./telephony/telephony-provider";
 import type { PostCallTranscriber } from "./transcription/openai-post-call-transcriber";
+import { BetaControlError } from "./beta/beta-controls";
 
 const services: CallService[] = [];
 
@@ -1309,6 +1310,33 @@ describe("CallService", () => {
     expect(stopCall).toHaveBeenCalledWith("CA-late");
     expect(snapshot.brief.status).toBe("stopped");
     expect((await service.get(brief.id))?.brief.status).toBe("stopped");
+  });
+
+  it("preserves a budget block in the final transcript and queues automatic recovery without immediate provider retries", async () => {
+    const repository = new InMemoryCallRepository();
+    const transcribe = vi.fn().mockRejectedValue(new BetaControlError("BETA_BUDGET_EXHAUSTED"));
+    const provider: TelephonyProvider = { mode: "twilio",
+      async startCall() { return { providerCallId: "CA-budget", providerStatus: "queued" }; },
+      async stopCall() {},
+      async startRecording() { return { providerRecordingId: "RE-budget", providerStatus: "in-progress" }; },
+      async getRecordingMedia() { return { bytes: new Uint8Array([1]), contentType: "audio/wav", fileName: "test.wav" }; },
+      async deleteRecording() {} };
+    const service = new CallService(repository, provider, () => undefined, { model: "gpt-4o-transcribe", transcribe });
+    services.push(service);
+    const brief = await service.create({ recipientName: "Office", phoneNumber: "+41523686688",
+      objective: "Ask for opening hours", assistantProfileId: "sebastian", representedPersonFirstName: "Nina",
+      representedPersonLastName: "Keller", locale: "en-GB", allowedFacts: [] });
+    await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id)); await service.start(brief.id);
+    const started = await service.startRecordingAfterConsent(brief.id);
+    await service.handleTwilioRecordingStatus({ callBriefId: brief.id, recordingId: started.recording!.id,
+      providerCallId: "CA-budget", providerRecordingId: "RE-budget", providerStatus: "completed", durationSeconds: 30, channels: 2 });
+    await vi.waitFor(async () => {
+      expect((await service.get(brief.id))!.finalTranscript).toMatchObject({ status: "failed", failureReason: "BETA_BUDGET_EXHAUSTED" });
+      const job = (await repository.listDurableJobs()).find(j => j.type === "final_transcription")!;
+      expect(job).toMatchObject({ status: "queued", attemptCount: 0, lastErrorCode: "BETA_BUDGET_EXHAUSTED" });
+      expect(Date.parse(job.runAfter) - Date.now()).toBeGreaterThan(290_000);
+    });
+    expect(transcribe).toHaveBeenCalledOnce();
   });
 
   it("records only after consent and creates an idempotent final transcript", async () => {

@@ -7,6 +7,17 @@ import {
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput
 } from "./call-brief";
+import { approvedExecutionRuntimeSchema, LIVE_VOICES, ASSISTANT_PROFILES } from "./call-brief";
+
+it("keeps legacy persona genders and rejects conflicting frozen Live voices", () => {
+  for (const profile of ASSISTANT_PROFILES) {
+    const runtime = { agentName: profile.displayName, voiceGender: profile.voiceGender,
+      assistanceDisclosure: "", audioRetentionDays: 0, allowLanguageSwitch: false };
+    expect(approvedExecutionRuntimeSchema.safeParse(runtime).success).toBe(true);
+    expect(approvedExecutionRuntimeSchema.safeParse({ ...runtime, liveVoice: LIVE_VOICES[profile.voiceGender] }).success).toBe(true);
+    expect(approvedExecutionRuntimeSchema.safeParse({ ...runtime, liveVoice: LIVE_VOICES[profile.voiceGender === "male" ? "female" : "male"] }).success).toBe(false);
+  }
+});
 
 const validBrief = {
   recipientName: "Gemeinde Aadorf",
@@ -51,7 +62,7 @@ describe("createCallBriefInputSchema", () => {
       expect(result.data).toMatchObject({
         resultHandling: "capture_in_callassist",
         addressingMode: "formal",
-        tonePreference: "auto",
+        tonePreference: "neutral",
         voicemailPolicy: "do_not_leave_details",
         deliveryInstruction: "",
         clarificationAnswers: []

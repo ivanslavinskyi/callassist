@@ -21,6 +21,26 @@ const call = (overrides: Partial<BudgetReservation> = {}): BudgetReservation => 
 });
 
 describe("beta spending from provider evidence", () => {
+  it.each(["live_consent_classification", "live_speech_classification", "live_action_speech_classification", "live_closing_classification"])("prices %s as text without retaining an entire call's audio reserve", stage => {
+    const c = call();
+    const op = operation({ operationType: "realtime_response", stage, model: "gpt-6-luna" });
+    expect(priceBudgetOperation(op)).not.toBeNull();
+    c.operations.push(op);
+    expect(accountBudgetReservation(c).pendingReserveMicros).toBe(20_000);
+  });
+  it("keeps post-call capacity through processing and releases only unused capacity after completion", () => {
+    const pool = reservation({ key: "postcall:attempt", kind: "transcription", amount: 4_000_000, postCallPending: true });
+    expect(accountBudgetReservation(pool)).toEqual({ reportedCostMicros: 0, usageCostMicros: 20_000, pendingReserveMicros: 3_980_000 });
+    pool.operations.push(operation({ outcome: "network_error", usage: null }));
+    pool.postCallPending = false;
+    expect(accountBudgetReservation(pool)).toEqual({ reportedCostMicros: 0, usageCostMicros: 20_000, pendingReserveMicros: 1_000_000 });
+    pool.operations.pop();
+    expect(accountBudgetReservation(pool).pendingReserveMicros).toBe(0);
+  });
+  it("does not double count separately reserved post-call overruns", () => {
+    expect(accountBudgetReservation(reservation({ key: "postcall:attempt", amount: 4_000_000, postCallPending: false,
+      operations: [operation({ separatelyReserved: true })] }))).toEqual({ reportedCostMicros: 0, usageCostMicros: 0, pendingReserveMicros: 0 });
+  });
   it("replaces a 50-cent text reserve with a 2-cent usage calculation", () => {
     expect(accountBudgetReservation(reservation())).toEqual({ reportedCostMicros: 0, usageCostMicros: 20_000, pendingReserveMicros: 0 });
   });

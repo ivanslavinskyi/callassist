@@ -6,6 +6,21 @@
 
 ## UI, authentication, validation, demo и экспорт
 
+- **The phone connection is open. The provider is checking who answered.**
+  La colliaziun è stabilida. Il purschider controlla tgi che ha respundì.
+
+- **The assistant asks for consent before recording and starting the task.**
+  L’assistent dumonda il consentiment avant che la registraziun e l’incumbensa cumenzan.
+
+- **Other language (language code)**
+  Autra lingua (code da lingua)
+
+- **Apply language**
+  Applitgar la lingua
+
+- **Enter a valid language code, such as es or pt-BR.**
+  Endatescha in code da lingua valid, per exempel es u pt-BR.
+
 - **Account**
   Conto
 
@@ -593,6 +608,18 @@
 
 - **Password**
   Pled-clav
+
+- **Password length (12 characters required)**
+  Lunghezza dal pled-clav (almain 12 segns)
+
+- **Show password**
+  Mussar il pled-clav
+
+- **Hide password**
+  Zuppentar il pled-clav
+
+- **Back to top**
+  Enavos sisum
 
 - **Use at least 12 characters.**
   Dovra almain 12 segns.
@@ -2817,6 +2844,186 @@
 - **Provisional transcript**
   Transcripziun provisorica
 
+- **Confirm later**
+  Confermar pli tard
+
+- **Confirm your email now, or continue and confirm it later in account settings.**
+  Confermai ussa Vossa adressa dad e-mail u cuntinuai e confermai ella pli tard en las configuraziuns dal conto.
+
+- **Your email is not confirmed yet. You can confirm it in account settings.**
+  Vossa adressa dad e-mail n’è anc betg confermada. Vus pudais la confermar en las configuraziuns dal conto.
+
+- **I accept the Terms of Use and Acceptable Use Policy and acknowledge the Privacy Notice.**
+  Jau accept las cundiziuns d’utilisaziun e las reglas d’utilisaziun acceptabla ed hai prendì enconuschientscha da las infurmaziuns davart la protecziun da datas.
+
+- **Registration options could not be loaded. Please try again.**
+  Las opziuns da registraziun n’han betg pudì vegnir chargiadas. Empruvai anc ina giada.
+
+- **The documents or registration settings changed. Review the current documents and try again.**
+  Ils documents u las configuraziuns da registraziun èn sa midads. Legiai ils documents actuals ed empruvai anc ina giada.
+
+- **Phone country**
+  Pajais dal numer da telefon
+
+- **Number to verify**
+  Numer da confermar
+
+- **Enter a valid phone number for the selected country, or include its international country code.**
+  Endatai in numer da telefon valid per il pajais tschernì u inditgai il prefix internaziunal.
+
+- **Registration and verification**
+  Registraziun e conferma
+
+- **Onboarding**
+  Introducziun
+
+- **Full onboarding**
+  Introducziun cumpletta
+
+- **Agreement at registration**
+  Consentiment tar la registraziun
+
+- **Email verification**
+  Conferma da l’e-mail
+
+- **Required before calls**
+  Obligatorica avant ils cloms
+
+- **Can be deferred**
+  Po vegnir spustada
+
+- **Reason for change**
+  Motiv da la midada
+
+- **Save registration settings**
+  Memorisar las configuraziuns da registraziun
+
+- **Registration settings saved.**
+  Las configuraziuns da registraziun èn memorisadas.
+
+- **The settings could not be saved. Refresh and check the current settings before trying again.**
+  Las configuraziuns n’han betg pudì vegnir memorisadas. Actualisai e controllai las valurs actualas avant d’empruvar anc ina giada.
+
+- **Repeat call**
+  Clamar anc ina giada
+
+- **Preparing another call…**
+  Preparaziun d’in ulteriur clom…
+
+- **This call cannot be repeated yet. Refresh to check its latest status.**
+  Quest clom na po anc betg vegnir repetì. Actualisai per controllar ses stadi.
+
+- **The appointment dates in this plan have expired. Edit the plan before calling.**
+  Las datas da l’appuntament en quest plan èn passadas. Modifitgai il plan avant da clamar.
+
+- **Review the saved plan before calling again. Changes to the task may require preparing a new plan.**
+  Controllai il plan memorisà avant da clamar anc ina giada. Midadas da l’incumbensa pon pretender la preparaziun d’in nov plan.
+
+- **Edit feedback**
+  Modificar il resun
+
+- **Your feedback has been sent.**
+  Voss resun è vegnì tramess.
+
+- **Save changes**
+  Memorisar las midadas
+
+- **Your feedback could not be loaded. Try again before editing it.**
+  Voss resun n’ha betg pudì vegnir chargià. Empruvai anc ina giada avant da modificar el.
+
+- **Switzerland**
+  Svizra
+
+- **Ukraine**
+  Ucraina
+
+- **A phone connection does not confirm who answered. Recording starts only after consent.**
+  Ina colliaziun telefonica na conferma betg tgi che ha respundì. La registraziun cumenza pir suenter il consentiment.
+
+- **Answer detection recovery**
+  Restabilir la controlla da la resposta
+
+- **Voicemail detected**
+  Chascha vocala identifitgada
+
+- **The provider detected the end of a voicemail greeting. No conversation with a person was confirmed.**
+  Il purschider ha identifitgà la fin dal salid da la chascha vocala. In discurs cun ina persuna n’è betg confermà.
+
+- **Automated answer detected**
+  Resposta automatica identifitgada
+
+- **An automated answer was detected. This does not establish that a voicemail inbox was reached.**
+  Ina resposta automatica è vegnida identifitgada. Ina chascha vocala n’è betg confermada.
+
+- **Answer could not be identified**
+  Resposta betg identifitgada
+
+- **The call ended silently because the answering party could not be identified.**
+  Il telefonat è vegnì terminà senza discurrer, perquai che la resposta n’ha betg pudì vegnir identifitgada.
+
+- **Fax detected**
+  Fax identifitgà
+
+- **The provider detected a fax. The call ended without speaking.**
+  Il purschider ha identifitgà in fax. Il telefonat è vegnì terminà senza discurrer.
+
+- **Answer check failed**
+  Controlla da la resposta betg reussida
+
+- **The answering party could not be checked. The call was ended safely.**
+  La resposta n’ha betg pudì vegnir controllada. Il telefonat è vegnì terminà per segirezza.
+
+- **Checking who answered**
+  La resposta vegn controllada
+
+- **The phone connection is open. The assistant waits silently while the provider checks the answer.**
+  La colliaziun è stabilida. L’assistent spetga en silenzi durant la controlla dal purschider.
+
+- **Waiting for consent**
+  Spetgar il consentiment
+
+- **The provider classified the answer as human. The assistant asks for consent before starting the conversation.**
+  Il purschider ha classifitgà la resposta sco umana. L’assistent dumonda il consentiment avant il discurs.
+
+- **Not requested**
+  Betg dumandà
+
+- **If voicemail answers**
+  Sche la chascha vocala respunda
+
+- **End without leaving a message.**
+  Terminar senza laschar ina communicaziun.
+
+- **After a detected beep, attempt this exact neutral message once:**
+  Suenter in signal sonor identifitgà, empruvar ina suletta giada questa communicaziun neutrala exacta:
+
+- **Detection can be wrong. Playback completion does not confirm that voicemail saved the message or that anyone heard it.**
+  L’identificaziun po sbagliar. La reproducziun cumpletta na conferma betg che la communicaziun saja memorisada u tadlada.
+
+- **No message requested.**
+  Nagina communicaziun dumandada.
+
+- **Message not attempted: no confirmed beep.**
+  Communicaziun betg empruvada: nagin signal confermà.
+
+- **Playing the neutral message.**
+  La communicaziun neutrala vegn reproducida.
+
+- **Message playback completed.**
+  Reproducziun da la communicaziun terminada.
+
+- **Message playback interrupted.**
+  Reproducziun interrutta.
+
+- **Message playback completion could not be confirmed.**
+  Fin da la reproducziun betg confermada.
+
+- **Approved message text**
+  Text da la communicaziun approvà
+
+- **The call policy changed. Review and approve the updated plan before calling.**
+  Las reglas dal telefonat èn sa midadas. Controlla ed approvescha il plan actualisà avant da telefonar.
+
 ## Landing, FAQ, About, Support и юридические страницы
 
 - **Privacy Notice**
@@ -3427,6 +3634,70 @@
 
 - **A monitored public support address has not yet been configured for this local pre-beta build. This page must be updated with reviewed operator identity and contact details before launch.**
   Per questa versiun locala da test n’è anc betg endrizzada in’adressa publica d’agid che vegn controllada regularmain. Avant il lanciamant sto questa pagina cuntegnair l’identitad e las indicaziuns da contact verifitgadas da la persuna responsabla dal servetsch.
+
+- **After consent, SHPROHLI shows the conversation transcript during the call and saves it afterwards. When this transcript is unavailable or incomplete, the recording may be transcribed instead. The saved transcript is the source for translations, summaries and PDF exports. AI can make mistakes. Check important names, dates, numbers and commitments against the recording while it is available.**
+  Suenter il consentiment mussa SHPROHLI la transcripziun durant il discurs e la memorisescha suenter. Sch’ella manca u n’è betg cumpletta, po la registraziun vegnir transcritta empè. La transcripziun memorisada è la basa per translaziuns, resumaziuns ed exports PDF. L’IA po far sbagls. Controllai nums, datas, cifras ed empermischuns impurtantas cun la registraziun uschè ditg ch’ella è disponibla.
+
+- **Audio retention is selected for each call: delete the recording after the conversation transcript is saved, keep it for 7 days, or keep it for 30 days. The first option still involves temporary recording; it does not delete the transcript. Translation or summary processing does not extend audio retention. Other account and call data, including saved translations and summaries where enabled, is retained while it is needed to provide the service, meet the selected settings, protect the service and comply with applicable obligations.**
+  Per mintga telefonat tschernas ti sche l’audio vegn stizzà suenter la memorisaziun da la transcripziun dal discurs u conservà durant 7 u 30 dis. L’emprima opziun cumpiglia tuttina ina registraziun temporara e na stizza betg la transcripziun. Translaziuns e resumaziuns na prolungheschan betg la conservaziun da l’audio. Autras datas dal conto e dals telefonats, inclus translaziuns e resumaziuns memorisadas, restan conservadas uschè ditg sco necessari per porscher e proteger il servetsch, respectar tes parameters ed ademplir las obligaziuns applicablas.
+
+- **Before the call, you review the plan and the information the assistant may share. During the conversation, SHPROHLI uses that information as needed. You can follow the transcript and stop the call. SHPROHLI identifies itself as an AI assistant and asks the recipient whether the conversation may be recorded and transcribed. Their answer is processed by AI to recognise the choice. The main conversation and recording start only after consent. SHPROHLI shows the conversation transcript and saves it after the call, using transcription of the recording as a fallback. With your explicit approval of the service and date/time limits, SHPROHLI may either book or confirm one appointment with the called recipient. Confirming an existing appointment requires its exact date and time. A new booking uses the first offered time that meets your limits. Rescheduling, cancellations, payments, deposits and new financial or cancellation terms are excluded. The recipient must confirm the appointment during the call; a proposed time alone is not a confirmed booking. SHPROHLI has no access to the recipient's calendar.**
+  Avant il telefonat controllas ti il plan e las infurmaziuns che l'assistent dastga cundivider. Durant il discurs dovra SHPROHLI questas infurmaziuns tenor basegn. Ti pos suandar la transcripziun e terminar il telefonat. SHPROHLI sa preschenta sco assistent d'IA e dumonda la persuna sche il discurs dastga vegnir registrà e transcrit. L'IA analisescha la resposta per renconuscher la decisiun. Il discurs principal e la registraziun cumenzan pir suenter il consentiment. SHPROHLI mussa la transcripziun dal discurs e la memorisescha suenter il telefonat; la transcripziun da la registraziun serva sco alternativa. Cun tia permissiun explicita per la prestaziun e per ils cunfins da data ed ura po SHPROHLI fixar u confermar in sulet termin cun la persuna telefonada. Per confermar in termin existent dovri la data e l'ura exactas. Per in nov termin vegn tschernida l'emprima proposta che correspunda a tes cunfins. Spustaments, annullaziuns, pajaments, acunts e novas cundiziuns finanzialas u d'annullaziun èn exclus. La persuna telefonada sto confermar il termin durant il telefonat; ina proposta suletta n'è betg ina conferma. SHPROHLI n'ha nagin access a ses chalender.
+
+- **AI conversations and transcripts can be incomplete, inaccurate or unexpected. Check important names, dates, numbers, instructions and commitments. Do not rely on SHPROHLI for urgent or high-risk decisions.**
+  Discurs e transcripziuns d’IA pon esser incumplets, nunprecis u nunspetgads. Controllescha nums, datas, cifras, instrucziuns ed empermischuns impurtantas. Na ta fida betg da SHPROHLI per decisiuns urgentas u cun grond ristg.
+
+- **No. AI transcripts can contain errors. SHPROHLI normally saves the transcript produced during the conversation; if it is unavailable or incomplete, the recording may be transcribed instead. Translations, summaries and PDF exports use the saved transcript. Check important details against the recording while it is available.**
+  Na. Transcripziuns d’IA pon cuntegnair sbagls. SHPROHLI memorisescha normalmain la transcripziun creada durant il discurs. Sch’ella manca u n’è betg cumpletta, po la registraziun vegnir transcritta empè. Translaziuns, resumaziuns ed exports PDF dovran la transcripziun memorisada. Controllai detagls impurtants cun la registraziun disponibla.
+
+- **Follow the conversation transcript and read it again after the call.**
+  Suandai la transcripziun dal discurs e legiai ella anc ina giada suenter il telefonat.
+
+- **You choose whether the recording is deleted after the conversation transcript is saved or kept for 7 or 30 days.**
+  Vus tschernis sche la registraziun vegn stizzada suenter la memorisaziun da la transcripziun dal discurs u conservada durant 7 u 30 dis.
+
+## Transcript source UI and PDF
+
+- **title**
+  Transcripziun dal discurs
+
+- **native**
+  Memorisada a partir da la transcripziun creada durant il discurs.
+
+- **recording**
+  Transcritta a partir da la registraziun dal clom.
+
+- **preparing**
+  La transcripziun vegn preparada
+
+- **pending**
+  La transcripziun è disponibla suenter che il discurs è memorisà.
+
+- **raw**
+  Transcripziun en direct
+
+## Conversation transcript CMS publication
+
+- **page:privacy.transcript**
+  Suenter il consentiment mussa SHPROHLI la transcripziun durant il discurs e la memorisescha suenter. Sch’ella manca u n’è betg cumpletta, po la registraziun vegnir transcritta empè. La transcripziun memorisada è la basa per translaziuns, resumaziuns ed exports PDF. L’IA po far sbagls. Controllai nums, datas, cifras ed empermischuns impurtantas cun la registraziun uschè ditg ch’ella è disponibla.
+
+- **page:privacy.retention**
+  Per mintga telefonat tschernas ti sche l’audio vegn stizzà suenter la memorisaziun da la transcripziun dal discurs u conservà durant 7 u 30 dis. L’emprima opziun cumpiglia tuttina ina registraziun temporara e na stizza betg la transcripziun. Translaziuns e resumaziuns na prolungheschan betg la conservaziun da l’audio. Autras datas dal conto e dals telefonats, inclus translaziuns e resumaziuns memorisadas, restan conservadas uschè ditg sco necessari per porscher e proteger il servetsch, respectar tes parameters ed ademplir las obligaziuns applicablas.
+
+- **page:terms.service**
+  Avant il telefonat controllas ti il plan e las infurmaziuns che l'assistent dastga cundivider. Durant il discurs dovra SHPROHLI questas infurmaziuns tenor basegn. Ti pos suandar la transcripziun e terminar il telefonat. SHPROHLI sa preschenta sco assistent d'IA e dumonda la persuna sche il discurs dastga vegnir registrà e transcrit. L'IA analisescha la resposta per renconuscher la decisiun. Il discurs principal e la registraziun cumenzan pir suenter il consentiment. SHPROHLI mussa la transcripziun dal discurs e la memorisescha suenter il telefonat; la transcripziun da la registraziun serva sco alternativa. Cun tia permissiun explicita per la prestaziun e per ils cunfins da data ed ura po SHPROHLI fixar u confermar in sulet termin cun la persuna telefonada. Per confermar in termin existent dovri la data e l'ura exactas. Per in nov termin vegn tschernida l'emprima proposta che correspunda a tes cunfins. Spustaments, annullaziuns, pajaments, acunts e novas cundiziuns finanzialas u d'annullaziun èn exclus. La persuna telefonada sto confermar il termin durant il telefonat; ina proposta suletta n'è betg ina conferma. SHPROHLI n'ha nagin access a ses chalender.
+
+- **page:faq.accuracy**
+  Na. Transcripziuns d’IA pon cuntegnair sbagls. SHPROHLI memorisescha normalmain la transcripziun creada durant il discurs. Sch’ella manca u n’è betg cumpletta, po la registraziun vegnir transcritta empè. Translaziuns, resumaziuns ed exports PDF dovran la transcripziun memorisada. Controllai detagls impurtants cun la registraziun disponibla.
+
+- **collection:faq.accuracy**
+  Na. Transcripziuns d’IA pon cuntegnair sbagls. SHPROHLI memorisescha normalmain la transcripziun creada durant il discurs. Sch’ella manca u n’è betg cumpletta, po la registraziun vegnir transcritta empè. Translaziuns, resumaziuns ed exports PDF dovran la transcripziun memorisada. Controllai detagls impurtants cun la registraziun disponibla.
+
+- **collection:landing.step**
+  Suandai la transcripziun dal discurs e legiai ella anc ina giada suenter il telefonat.
+
+- **collection:landing.retention**
+  Vus tschernis sche la registraziun vegn stizzada suenter la memorisaziun da la transcripziun dal discurs u conservada durant 7 u 30 dis.
 
 ## Account emails
 

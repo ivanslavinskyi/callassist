@@ -1,5 +1,11 @@
 # AMD and voicemail beta
 
+> 28 September update: this document describes the original synchronous policy.
+> New native Live approvals use [asynchronous AMD](async-amd-live-2026-09-28.md).
+> Initial disclosure, including the represented person's name, may reach voicemail.
+> Recording starts on consent without waiting for AMD. Old approvals remain readable
+> and retain synchronous execution; no immutable approval or historical event is rewritten.
+
 Implemented on `feat/gpt-live-pilot`. Real-call acceptance and production rollout
 are separate gates; implementation does not certify carrier detection accuracy.
 The agreed scope is in [the beta plan](amd-voicemail-beta-plan-2026-09-25.md).

@@ -1,7 +1,9 @@
+import type { NativeTranscriptCapture } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { answeringUsage } from "../telephony/answering-usage";
 import { transitionAnswering, type AnsweringTransitionInput } from "../telephony/answering-policy";
 import { historyObjective } from "./history-objective";
+import { voiceActionTransitionAllowed, type VoiceActionInput, type VoiceActionRecord, type VoiceActionTransition } from "./voice-action";
 import { assertRetryableCall } from "./call-retry";
 import { appointmentPlanExpired } from "@callassist/contracts";
 import { assessmentDeadlineMs, assessmentVersion, validateFinalAssessment } from "../credits/final-assessment";
@@ -217,6 +219,22 @@ function callPreparationFailureCode(
 }
 
 export class InMemoryCallRepository implements CallRepository {
+  readonly #voiceActions = new Map<string, VoiceActionRecord>();
+  async beginVoiceAction(input: VoiceActionInput) {
+    const attempt = (this.#attempts.get(input.callBriefId) ?? []).at(-1);
+    if (!attempt || attempt.id !== input.callAttemptId || attempt.compilationSnapshotHash !== input.snapshotHash ||
+      !attempt.executionSnapshot || !["dialing", "in_progress"].includes(attempt.status) ||
+      [...this.#voiceActions.values()].some(action => action.callAttemptId === input.callAttemptId)) return null;
+    const record: VoiceActionRecord = { ...structuredClone(input), id: randomUUID(), version: 1, state: "sending" };
+    this.#voiceActions.set(record.id, record); return structuredClone(record);
+  }
+  async transitionVoiceAction(input: VoiceActionTransition) {
+    const record = this.#voiceActions.get(input.id);
+    if (!record || record.version !== input.version || !voiceActionTransitionAllowed(record.state, input.state)) return null;
+    record.state = input.state; record.version++; record.evidence = [...new Set([...record.evidence, ...input.evidence])];
+    if (input.observations) record.observations = [...new Map([...(record.observations ?? []), ...structuredClone(input.observations)].map(turn => [turn.id, turn])).values()];
+    return structuredClone(record);
+  }
   readonly #callText = new InMemoryCallTextStore({
     snapshot: id => {
       if(this.#callDataDeletions.has(id)) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -1187,6 +1205,7 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: input.deletedAt
     };
     this.#callText.redact(input.callId);
+    for (const [id, action] of this.#voiceActions) if (action.callBriefId === input.callId) this.#voiceActions.delete(id);
     for (const attempt of this.#attempts.get(input.callId) ?? []) { const a=this.#assessments.get(attempt.id); if(a) a.decision=null; }
     snapshot.compilation = null;
     snapshot.languageContext = null;
@@ -1217,6 +1236,7 @@ export class InMemoryCallRepository implements CallRepository {
     }
     const attempts = this.#attempts.get(input.callId) ?? [];
     for (const attempt of attempts) {
+      this.#nativeCaptures.delete(attempt.id);
       attempt.providerCallId = null;
       delete attempt.recipientContactHash;
       attempt.failureReason = null;
@@ -1636,7 +1656,8 @@ export class InMemoryCallRepository implements CallRepository {
   async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) {
     const text = this.#callText.exportCallTextData(...args);
     const attempts = new Set((this.#attempts.get(args[0]) ?? []).map(a=>a.id));
-    return {...text, assessments: copy([...this.#assessments.values()].filter(a=>attempts.has(a.callAttemptId)))};
+    return {...text, assessments: copy([...this.#assessments.values()].filter(a=>attempts.has(a.callAttemptId))),
+      voiceActions: copy([...this.#voiceActions.values()].filter(a => a.callBriefId === args[0])) };
   }
 
   async getLanguageContext(id: string) {
@@ -1662,11 +1683,12 @@ export class InMemoryCallRepository implements CallRepository {
     const event = events.findLast(e => e.payload.name === "answering.updated");
     const current = event?.payload.name === "answering.updated" ? event.payload.metadata : null;
     const active = latest?.id === attempt.id && ["dialing", "in_progress"].includes(brief.status) &&
-      !events.some(e => e.payload.name === "call.stop" && e.payload.metadata.phase === "requested");
+      !events.some(e => e.payload.name === "call.stop" && e.payload.metadata.phase === "requested") &&
+      !(["dispatch", "expire"].includes(input.kind) && events.some(e => e.payload.name === "consent.granted"));
     const result = transitionAnswering(attempt, current, input, active);
     if (result.applied && result.state) {
       attempt.providerCallId ??= input.providerCallId;
-      if (input.kind === "resolve" || input.kind === "timeout") for (const op of answeringUsage(attempt, result.state!)) {
+      if (["resolve", "timeout", "dispatch"].includes(input.kind)) for (const op of answeringUsage(attempt, result.state!).filter(op => input.kind !== "dispatch" || op.operationType === "voicemail_tts")) {
         if (!this.#providerOperations.has(op.id)) this.#providerOperations.set(op.id, op);
       }
       this.#appendTelemetry(id, { callAttemptId: attempt.id, idempotencyKey: `answering:${attempt.id}:${input.kind}`,
@@ -2958,6 +2980,13 @@ export class InMemoryCallRepository implements CallRepository {
     if (snapshot.recording) {
       throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
     }
+    const events = (this.#callTelemetryEvents.get(id) ?? []).map(e => e.event).filter(e => e.callAttemptId === attempt.id);
+    const answeringEvent = events.findLast(e => e.payload.name === "answering.updated");
+    const answering = answeringEvent?.payload.name === "answering.updated" ? answeringEvent.payload.metadata : undefined;
+    if (answering?.execution === "async" && (answering.actionDispatched ||
+        events.some(e => e.payload.name === "call.stop" && e.payload.metadata.phase === "requested"))) {
+      throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    }
     const consentGrantedAt = new Date().toISOString();
     const recording: CallRecording = {
       id: randomUUID(),
@@ -3163,6 +3192,19 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
+  readonly #nativeCaptures = new Map<string, NativeTranscriptCapture>();
+  async setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture) {
+    const snapshot = this.#require(callId);
+    if (!snapshot || !(this.#attempts.get(callId) ?? []).some(a => a.id === attemptId)) return;
+    const previous=this.#nativeCaptures.get(attemptId);
+    if(!previous || (previous.sessionId===capture.sessionId && previous.status==="collecting")) this.#nativeCaptures.set(attemptId,copy(capture));
+  }
+  async getNativeTranscriptWork(recordingId: string) {
+    const {callId,snapshot}=this.#requireRecording(recordingId);
+    const attempt=(this.#attempts.get(callId)??[]).at(-1);
+    return {capture:copy(this.#nativeCaptures.get(attempt?.id??"")??null),snapshot:copy(snapshot)};
+  }
+
   async claimFinalTranscript(
     recordingId: string,
     model: string,
@@ -3171,7 +3213,8 @@ export class InMemoryCallRepository implements CallRepository {
   ) {
     this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
-    if (recording.status !== "available") return null;
+    const native = await this.getNativeTranscriptWork(recordingId);
+    if (recording.status !== "available" && !(model.startsWith("live-native:") && native.capture?.status === "complete")) return null;
     if (snapshot.finalTranscript?.status === "completed" && !force) return null;
     if (snapshot.finalTranscript?.status === "processing" && !lease) return null;
     const retry = Boolean(snapshot.finalTranscript);
@@ -3203,6 +3246,7 @@ export class InMemoryCallRepository implements CallRepository {
           updatedAt: now,
           completedAt: null
         };
+    finalTranscript.source = model.startsWith("live-native:") ? "live_native" : "recording_asr";
     snapshot.finalTranscript = finalTranscript;
     const attempt = (this.#attempts.get(callId) ?? []).at(-1);
     this.#appendTelemetry(callId, {
@@ -3229,7 +3273,7 @@ export class InMemoryCallRepository implements CallRepository {
     text: string,
     segments: FinalTranscriptSegment[],
     lease?: DurableJobLease,
-    options?: {summaryGeneratorVersion?:string}
+    options?: {summaryGeneratorVersion?:string; source?: "recording_asr" | "live_native"}
   ) {
     this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
@@ -3239,6 +3283,8 @@ export class InMemoryCallRepository implements CallRepository {
     }
     const now = new Date();
     finalTranscript.status = "completed";
+    finalTranscript.source = options?.source ?? "recording_asr";
+    finalTranscript.model = finalTranscript.model.replace(/^live-native:/, "");
     finalTranscript.text = text;
     finalTranscript.segments = copy(segments);
     finalTranscript.failureReason = null;
@@ -3583,10 +3629,18 @@ export class InMemoryCallRepository implements CallRepository {
     errorCode: string,
     now: string,
     retryAt: string,
-    retryable = true
+    retryable = true,
+    defer = false
   ) {
     const job = this.#findDurableJob(jobId);
     if (!job || !durableJobLeaseIsValid(job, workerId, now)) return null;
+    if (defer && job.type === "final_transcription" && /^BETA_(BUDGET_EXHAUSTED|BUDGET_UNCONFIGURED|SPENDING_PAUSED)$/.test(errorCode)) {
+      job.attemptCount = Math.max(0, job.attemptCount - 1);
+      job.status = "queued"; job.runAfter = retryAt; job.lastErrorCode = errorCode;
+      job.leaseOwner = null; job.leasedAt = null; job.leaseExpiresAt = null;
+      job.updatedAt = now; job.completedAt = null;
+      return copy(job);
+    }
     const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
     const cancelled = job.type === "text_artifact_generation" && errorCode === "TEXT_ARTIFACT_STALE";
     this.#durableJobAttempts.push({

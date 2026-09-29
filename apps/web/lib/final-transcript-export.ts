@@ -1,3 +1,5 @@
+import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
+import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
 import { extendMessages } from "./i18n/extend-messages";
 import type {
   CallBrief,
@@ -50,11 +52,11 @@ export const transcriptExportCopy = extendMessages({
 
 export function buildFinalTranscriptCopyText(input: ExportInput) {
   const { brief, finalTranscript, languageLabel, uiLocale } = input;
-  const copy = transcriptExportCopy[uiLocale];
+  const copy = {...transcriptExportCopy[uiLocale], title:transcriptSourceCopy[uiLocale].title, created:transcriptSourceDescription(uiLocale,finalTranscript.source)};
   const header = [
     `SHPROHLI — ${copy.title}`,
     `${copy.recipient}: ${brief.recipientName}`,
-    `${copy.assistant}: ${brief.agentName}`,
+    `${copy.assistant}: ${ASSISTANT_DISPLAY_NAME}`,
     `${copy.language}: ${languageLabel}`,
     `${copy.completed}: ${formatExportDate(finalTranscript.completedAt ?? finalTranscript.updatedAt, uiLocale)}`
   ];
@@ -76,7 +78,7 @@ export function buildFinalTranscriptPdfDefinition(
   logoSvg?: string
 ): TDocumentDefinitions {
   const { brief, finalTranscript, languageLabel, uiLocale } = input;
-  const copy = transcriptExportCopy[uiLocale];
+  const copy = {...transcriptExportCopy[uiLocale], title:transcriptSourceCopy[uiLocale].title, created:transcriptSourceDescription(uiLocale,finalTranscript.source)};
   return buildTranscriptPdfLayout({
     logoSvg,
     title: copy.title,
@@ -86,7 +88,7 @@ export function buildFinalTranscriptPdfDefinition(
     language: brief.locale,
     metadata: [
       { label: copy.recipient, value: brief.recipientName },
-      { label: copy.assistant, value: brief.agentName },
+      { label: copy.assistant, value: ASSISTANT_DISPLAY_NAME },
       { label: copy.language, value: languageLabel },
       { label: copy.completed, value: formatExportDate(finalTranscript.completedAt ?? finalTranscript.updatedAt, uiLocale) }
     ],
@@ -145,7 +147,7 @@ function speakerName(
   role: FinalTranscriptSegment["role"],
   unassigned: string
 ) {
-  if (role === "assistant") return brief.agentName;
+  if (role === "assistant") return ASSISTANT_DISPLAY_NAME;
   if (role === "recipient") return brief.recipientName;
   return unassigned;
 }

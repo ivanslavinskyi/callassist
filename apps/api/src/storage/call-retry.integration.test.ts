@@ -14,7 +14,7 @@ import { originalPlanReview } from "../test-helpers/original-plan-review";
 
 const closers: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); vi.restoreAllMocks(); });
-async function fixture(driver: "memory" | "postgres", status = "no-answer") {
+async function fixture(driver: "memory" | "postgres", status = "no-answer", legacy = false) {
   const db = driver === "postgres" ? isolatedTestDatabase() : null;
   if (db) { closers.push(() => db.teardown()); await db.setup(); }
   const repository: CallRepository = db ? new PostgresCallRepository(db.url, Buffer.alloc(32, 15)) : new InMemoryCallRepository();
@@ -30,7 +30,8 @@ async function fixture(driver: "memory" | "postgres", status = "no-answer") {
   closers.push(() => service.close());
   await repository.grantSignupCredits(owner);
   const input = normalizeCreateCallBriefInput({ recipientName: "Office", phoneNumber: "+41523686688", objective: "Ask when the office opens tomorrow",
-    assistantProfileId: "sebastian", representedPersonFirstName: "Test", representedPersonLastName: "Owner", locale: "en-GB", allowedFacts: [] });
+    assistantProfileId: "sebastian", representedPersonFirstName: "Test", representedPersonLastName: "Owner", locale: "en-GB", allowedFacts: [],
+    ...(legacy ? { addressingMode: "informal", tonePreference: "friendly", resultHandling: "request_external_delivery", deliveryInstruction: "Ask for delivery to test@example.com." } as const : {}) });
   const source = await service.create(input, owner);
   await repository.approveCompilation(source.id, await originalPlanReview(repository, source.id));
   const started = await repository.startAttempt(source.id, { provider: "twilio", userId: owner });
@@ -41,6 +42,21 @@ async function fixture(driver: "memory" | "postgres", status = "no-answer") {
 }
 
 describe.each(["memory", "postgres"] as const)("repeat unanswered calls on %s", driver => {
+  it("prepares a normalized legacy copy while preserving its source approval and delivery intent", async () => {
+    const f = await fixture(driver, "no-answer", true);
+    const source = await f.repository.get(f.source.id);
+    const enqueue = vi.spyOn(f.repository, "enqueueCallRecompilation");
+    const repeated = await f.service.repeatUnansweredCall(f.source.id, f.owner);
+    expect(repeated.status).toBe("queued");
+    const request = enqueue.mock.calls[0][0];
+    expect(request.input).toMatchObject({ addressingMode: "formal", tonePreference: "neutral", resultHandling: "capture_in_callassist", deliveryInstruction: "" });
+    expect(request.input.context).toContain("test@example.com");
+    expect(request.callBriefId).not.toBe(f.source.id);
+    expect(await f.repository.getLatestAttempt(request.callBriefId)).toBeNull();
+    expect((await f.repository.get(f.source.id))!.compilation).toEqual(source!.compilation);
+    const replay = await f.service.repeatUnansweredCall(f.source.id, f.owner);
+    expect(replay.id).toBe(repeated.id);
+  });
   it("reuses a completed pre-consent connection without copying disclosure or dialing automatically", async () => {
     const f = await fixture(driver, "in-progress");
     await f.repository.appendCallTelemetryEvent(f.source.id, { callAttemptId: f.started.attempt.id,
@@ -80,6 +96,7 @@ describe.each(["memory", "postgres"] as const)("repeat unanswered calls on %s", 
     expect(first.id).toBe(second.id);
     expect(first.id).not.toBe(f.source.id);
     expect(first.status).toBe("review_required");
+    if ("failureCode" in first) throw new Error("Unchanged retry should reuse its compilation");
     expect(first.retrySourceCallId).toBe(f.source.id);
     expect(f.compile).toHaveBeenCalledTimes(compilationCalls);
     const next = (await f.repository.get(first.id))!;

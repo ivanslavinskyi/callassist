@@ -14,7 +14,7 @@ const raw = normalizeCreateCallBriefInput({ recipientName: "Office", phoneNumber
   assistantProfileId: "sebastian", representedPersonFirstName: "Anna", representedPersonLastName: "Example", locale: "en-GB",
   audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: [] });
 
-async function setup(long = false, failCompaction = false, override?: TextProcessor) {
+async function setup(long = false, failCompaction = false, override?: TextProcessor, automatic = false) {
   const repository = new InMemoryCallRepository();
   const compilation = await new DeterministicBriefCompiler().compile(raw);
   const brief = await repository.create(raw, compilation);
@@ -27,22 +27,49 @@ async function setup(long = false, failCompaction = false, override?: TextProces
   await repository.applyRecordingStatus({ callBriefId: brief.id, recordingId: recording.id, providerCallId: "CA-test", providerRecordingId: "RE-test", providerStatus: "completed", durationSeconds: 60, channels: 2 });
   await repository.claimFinalTranscript(recording.id, "test-model");
   const segments = (long ? [0, 1, 2] : [0]).map(index => ({ role: "recipient" as const, text: long ? "Open on weekdays. ".repeat(900) : "Open on weekdays.", startSeconds: index * 10, endSeconds: index * 10 + 9 }));
-  await repository.completeFinalTranscript(recording.id, segments.map(s => s.text).join("\n"), segments);
   const mock = new MockTextProcessor();
   const process = vi.fn(async (input: TextProcessingInput) => {
     if (failCompaction && input.kind === "call_summary" && input.extraction) throw new TextProcessingError("TEXT_REQUEST_FAILED");
     return mock.process(input);
   });
   const processor: TextProcessor = override ?? { ...mock, driver: "mock", model: mock.model, generatorVersion: mock.generatorVersion, process };
+  await repository.completeFinalTranscript(recording.id, segments.map(s => s.text).join("\n"), segments, undefined,
+    automatic ? { summaryGeneratorVersion: textGeneratorVersion(processor, "call_summary") } : undefined);
   const service = new TextArtifactService(repository, processor, { enabled: true, directions: allTextDirections() });
   const revision = (await repository.getCurrentTranscriptRevision(brief.id))!;
-  const artifact = await service.requestTranscriptArtifact(brief.id, "call_summary", { sourceRevisionId: revision.id, targetLanguage: "en" });
+  const artifact = automatic ? (await repository.listTextArtifacts(brief.id)).find(a => a.kind === "call_summary")!
+    : await service.requestTranscriptArtifact(brief.id, "call_summary", { sourceRevisionId: revision.id, targetLanguage: "en" });
   const job = (await repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: randomUUID(), now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }))!;
   const lease = { jobId: job.id, workerId: job.leaseOwner!, checkedAt: new Date().toISOString(), generation: job.generation, attemptNumber: job.attemptCount };
   return { repository, service, job, lease, artifact, process, compilation, revision };
 }
 
 describe("summary execution", () => {
+  it("automatically queues the stored transcript, retries invalid output and publishes without a user request", async () => {
+    let count = 0;
+    const processor = new OpenAITextProcessor({ apiKey: "test", fetchImplementation: async (_url, init) => {
+      const input = JSON.parse(JSON.parse(String(init!.body)).input[1].content);
+      expect(input.applicationFacts).toEqual({ transcriptPersisted: true, resultHandling: "capture_in_callassist" });
+      count++;
+      const valid = { schemaVersion: 2, overview: [], findings: input.checks.map((check: {id:string}) => ({
+        id: check.id, label: "Opening hours", text: "Open on weekdays.", certainty: "reported", sourceSegmentIds: [input.segments[0].id]
+      })), nextSteps: [], unresolved: [], assessment: {
+        conversation: { status: "uncertain", category: "uncertain", questionSegmentId: null, answerSegmentId: null, answerQuote: "" },
+        goal: { status: "uncertain", sourceSegmentIds: [] },
+        criteria: input.checks.filter((c:{id:string}) => c.id.startsWith("criterion.")).map((c:{id:string}) => ({ id:c.id,status:"uncertain",sourceSegmentIds:[] }))
+      } };
+      return Response.json({ output_text: JSON.stringify(count === 1 ? { ...valid, findings: [] } : valid) });
+    } });
+    const h = await setup(false, false, processor, true);
+    expect(h.artifact).toBeDefined();
+    await expect(h.service.process(h.job, h.lease)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID", retryable: true });
+    await h.repository.failDurableJob(h.job.id, h.job.leaseOwner!, "TEXT_RESPONSE_INVALID", new Date().toISOString(), new Date().toISOString(), true);
+    const next = (await h.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: h.lease.workerId,
+      now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }))!;
+    await h.service.process(next, { ...h.lease, generation: next.generation, attemptNumber: next.attemptCount });
+    expect(await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id)).toMatchObject({ status: "ready" });
+    expect(count).toBe(2);
+  });
   it("recovers an information result after 503, timeouts and a manual retry without resetting accounting", async () => {
     let requests = 0;
     const fetchImplementation = vi.fn<typeof fetch>(async (_url, init) => {
@@ -87,7 +114,7 @@ describe("summary execution", () => {
     const processor = new MockTextProcessor();
     expect(textGeneratorVersion(processor, "plan_review")).toBe(processor.generatorVersion);
     expect(textGeneratorVersion(processor, "transcript_translation")).toBe(processor.generatorVersion);
-    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v3:${processor.generatorVersion}`);
+    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v3:grounded-v2:${processor.generatorVersion}`);
   });
 
   it("uses one request for an ordinary transcript, persists new format and never regenerates a ready result", async () => {
@@ -97,6 +124,7 @@ describe("summary execution", () => {
     expect(saved.status).toBe("ready");
     expect(callSummaryPayloadSchema.parse(saved.payload).findings[0]?.id).toBe("goal");
     expect(h.process).toHaveBeenCalledTimes(1);
+    expect(h.process.mock.calls[0]![0]).toMatchObject({ applicationFacts: { transcriptPersisted: true, resultHandling: "capture_in_callassist" } });
     expect(await h.service.requestTranscriptArtifact(h.artifact.callId, "call_summary", { sourceRevisionId: h.revision.id, targetLanguage: "en" })).toEqual(saved);
   });
 

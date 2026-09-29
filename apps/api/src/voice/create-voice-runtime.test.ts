@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenAIRealtimeBridge } from "../realtime/openai-realtime-bridge";
 import { OpenAILiveBridge } from "./openai-live-bridge";
 import { createVoiceRuntime, voiceRuntimeDriver } from "./create-voice-runtime";
-import { approvedCall, TestSocket, flush, silence, speech } from "./voice-test-helpers";
+import { approvedCall, authorization, TestSocket, flush, silence, speech } from "./voice-test-helpers";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 
-async function harness(driver = "live", recordingFailure = false, token = "valid", fallback = "true", answer: string | null = "human") {
-  const call = await approvedCall();
+async function harness(driver = "live", recordingFailure = false, token = "valid", fallback = "true", answer: string | null = "human", appointment = false) {
+  const call = await approvedCall(appointment ? authorization : undefined);
   if (answer) await call.service.repository.transitionAnswering(call.brief.id, { attemptId: call.attempt.id,
     providerCallId: "CA-LIVE", snapshotHash: call.attempt.compilationSnapshotHash!,
     kind: "resolve", answeredBy: answer, now: new Date().toISOString() });
@@ -21,7 +21,8 @@ async function harness(driver = "live", recordingFailure = false, token = "valid
   const connect = vi.fn(() => live.ws);
   const bridge = createVoiceRuntime({ apiKey: "test", service: call.service, agentHangupEnabled: true,
     validateStreamToken: (_binding, value) => value === "valid", createOpenAISocket: () => realtime.ws,
-    createConsentSocket: () => consent.ws, createLiveSocket: connect },
+    createConsentSocket: () => consent.ws, createLiveSocket: connect,
+  },
     { VOICE_RUNTIME_DRIVER: driver, VOICE_RUNTIME_LIVE_FALLBACK: fallback });
   bridge.handleTwilioSocket(twilio.ws);
   const start = { event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ-LIVE", customParameters: {
@@ -41,13 +42,19 @@ async function harness(driver = "live", recordingFailure = false, token = "valid
     }
   }
   async function ready() {
-    await accept(); live.emit("open"); live.receive({ type: "session.started", session: { id: "live-integration" } }); await flush();
+    await accept(); live.emit("open"); live.startLive("live-integration"); await flush();
   }
   cleanup.push(async () => { twilio.close(); live.receive({ type: "session.closed", usage: { seconds: 12 } }); await flush(); await call.service.close(); });
   return { ...call, bridge, twilio, realtime, consent, live, connect, startRecording, prepareHangup, accept, ready, start };
 }
 
 describe("voice runtime selection and consent gate integration", () => {
+  it("rejects deployment overrides that change either product voice", () => {
+    const options = { apiKey: "test", service: {} as any, validateStreamToken: () => true };
+    expect(() => createVoiceRuntime(options, { VOICE_RUNTIME_DRIVER: "live", OPENAI_LIVE_MALE_VOICE: "marin" })).toThrow("OPENAI_LIVE_MALE_VOICE must be cedar");
+    expect(() => createVoiceRuntime(options, { VOICE_RUNTIME_DRIVER: "live", OPENAI_LIVE_FEMALE_VOICE: "cedar" })).toThrow("OPENAI_LIVE_FEMALE_VOICE must be marin");
+    expect(createVoiceRuntime(options, { VOICE_RUNTIME_DRIVER: "live", OPENAI_LIVE_MALE_VOICE: "cedar", OPENAI_LIVE_FEMALE_VOICE: "marin" })).toBeInstanceOf(OpenAILiveBridge);
+  });
   it("defaults to unchanged Realtime and explicitly selects Live", async () => {
     expect(voiceRuntimeDriver({})).toBe("realtime");
     expect((await harness("realtime")).bridge).toBeInstanceOf(OpenAIRealtimeBridge);
@@ -126,13 +133,19 @@ describe("voice runtime selection and consent gate integration", () => {
     expect(active.twilio.readyState).toBe(3);
     expect(active.realtime.sent.filter(e => e.type === "response.create")).toHaveLength(2);
   });
+  it("keeps appointment guards in Realtime when explicitly opting into the legacy hybrid adapter", async () => {
+    const h = await harness("live", false, "valid", "true", "human", true); await h.accept(); await flush();
+    expect(h.connect).not.toHaveBeenCalled();
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.realtime.sent.some(e => e.type === "session.update" && e.session.tools?.some((t: any) => t.name === "check_appointment"))).toBe(true);
+  });
   it.each([false, true])("requires an uncleared Twilio farewell mark to disconnect (interrupted=%s)", async (interrupted) => {
     const h = await harness(); await h.ready();
+    h.live.receive({ type: "session.input_transcript.delta", delta: "Please end the call.", start_ms: 1000, end_ms: 1500 });
     const backend = (event: object) => h.live.receive({ type: "response.event", delegation_id: "d", event });
-    backend({ type: "response.created", response: { id: "end" } });
-    backend({ type: "response.output_item.done", item: { type: "function_call", name: "end_call", call_id: "end-tool", arguments: '{"reason":"recipient_requested_end"}' } });
-    backend({ type: "response.completed", response: { id: "end", status: "completed", output: [] } });
-    await flush();
+    backend({ type: "response.created", response: { id: "r" } });
+    backend({ type: "response.output_item.done", item: { type: "function_call", call_id: "c", name: "end_call", arguments: JSON.stringify({ reason: "recipient_requested_end" }) } });
+    backend({ type: "response.completed", response: { id: "r", status: "completed", output: [] } }); await flush();
     const farewell = h.realtime.sent.filter(e => e.type === "response.create").at(-1);
     expect(farewell.response.metadata.farewell_generation).toBe("1");
     h.realtime.receive({ type: "response.created", response: { id: "farewell", metadata: { farewell_generation: "1" } } });

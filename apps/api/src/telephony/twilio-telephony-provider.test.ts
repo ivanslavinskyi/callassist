@@ -37,7 +37,7 @@ async function approvedOptions(maxDurationSeconds = 900) {
     callAttemptId: "00000000-0000-4000-a000-000000000001", compilationSnapshotHash: compilation.snapshotHash } };
 }
 
-function createProvider() {
+function createProvider(asyncAnswering = false) {
   const update = vi.fn().mockResolvedValue({ sid: "CA123" });
   const fetchCall = vi.fn().mockResolvedValue({
     sid: "CA123",
@@ -77,6 +77,7 @@ function createProvider() {
     authToken: "test-auth-token",
     fromNumber: "+41710000001",
     publicBaseUrl: "https://calls.example.test",
+    asyncAnswering,
     client: { calls, recordings } as unknown as ReturnType<typeof twilio>
   });
   return {
@@ -92,6 +93,25 @@ function createProvider() {
 }
 
 describe("TwilioTelephonyProvider", () => {
+  it("uses an attempt-bound async callback only for the new approved policy", async () => {
+    const { provider, calls } = createProvider(true);
+    const options = await approvedOptions();
+    await provider.startCall(brief, options);
+    expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "true", machineDetection: "Enable",
+      asyncAmdStatusCallbackMethod: "POST", asyncAmdStatusCallback: expect.stringContaining(`/webhooks/twilio/amd?callBriefId=${brief.id}&callAttemptId=`) }));
+    if (options.executionSnapshot.version !== 3) throw new Error("Expected current snapshot");
+    options.executionSnapshot.answering.policyVersion = "twilio-sync-beep-v1";
+    await provider.startCall(brief, options);
+    expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "false" }));
+    expect(calls.create.mock.calls.at(-1)![0]).not.toHaveProperty("asyncAmdStatusCallback");
+  });
+  it("replaces the active stream with exact voicemail TwiML and its signed completion route", async () => {
+    const { provider, update } = createProvider(true);
+    await provider.playVoicemail("CA123", "Approved message", "en-GB", (await approvedOptions()).binding);
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0][0].twiml).toContain("Approved message</Say>");
+    expect(update.mock.calls[0][0].twiml).toContain("voicemail-complete?");
+  });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("enforces the admitted seven-minute duration at the provider even if the API stops", async () => {

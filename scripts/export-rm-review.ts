@@ -1,3 +1,5 @@
+import { transcriptSourceCopy } from "../apps/web/lib/i18n/transcript-source-copy";
+import transcriptRules from "../apps/api/src/content/transcript-copy-migration.json";
 /** Regenerate the complete editorial handoff after changing Romansh resources. */
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -21,6 +23,8 @@ function section(title: string, values: unknown, prefix = "") {
 }
 section("UI, authentication, validation, demo и экспорт", ui);
 section("Landing, FAQ, About, Support и юридические страницы", pages);
+section("Transcript source UI and PDF", transcriptSourceCopy.rm);
+section("Conversation transcript CMS publication", Object.fromEntries(transcriptRules.filter(r => r.locale === "rm").map(r => [`${r.group}.${r.semantic}`, r.next])));
 section("Account emails", emailMessages.rm);
 section("Автоматические административные письма", notificationMessages.rm);
 section("Состояния и расходы в письмах", notificationDetailMessages.rm);

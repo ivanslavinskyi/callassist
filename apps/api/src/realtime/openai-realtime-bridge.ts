@@ -1852,7 +1852,7 @@ Exact announcement JSON string:
 ${JSON.stringify(announcement)}`;
 }
 
-export function buildRealtimeInstructions(snapshot: ApprovedExecutionSnapshot, agentHangupEnabled = false, consentComplete = false) {
+export function buildRealtimeInstructions(snapshot: ApprovedExecutionSnapshot, agentHangupEnabled = false, consentComplete = false, applicationRecap = false) {
   const { plan, runtime } = snapshot;
   const appointmentAuthorization = getAppointmentAuthorization(plan);
   const approvedFacts = plan.approvedFacts.length
@@ -1979,8 +1979,8 @@ ${retention} If the recipient directly asks about retention, answer with this ex
 ${agentHangupEnabled ? `
 # Ending the telephone call
 - When the objective is resolved, the recipient declines or asks to end, or an approved stop condition applies, call end_call silently with the appropriate reason BEFORE saying goodbye. A brief farewell follows automatically; never explain how disconnection works.
-- You may briefly summarize confirmed results before calling the tool, but do not say a separate goodbye or promise to wait for the recipient to hang up.
-- If a recap adds useful information, state the actual confirmed outcome directly in one short sentence. Skip it if the outcome was just confirmed. Never announce a future recap instead of giving it. For a refusal, stop without asking the remaining questions; for an unresolved task, acknowledge only the unresolved point and end politely.
+${applicationRecap ? "- Supply the concise outcome only in end_call.recap. The application speaks it once. Never speak a separate recap or request general agreement with it." : `- You may briefly summarize confirmed results before calling the tool, but do not say a separate goodbye or promise to wait for the recipient to hang up.
+- If a recap adds useful information, state the actual confirmed outcome directly in one short sentence. Skip it if the outcome was just confirmed. Never announce a future recap instead of giving it. For a refusal, stop without asking the remaining questions; for an unresolved task, acknowledge only the unresolved point and end politely.`}
 - Do not call end_call for silence, hold music, a transfer, a question awaiting an answer, an intermediate thank-you or a quoted goodbye. If intent is unclear, clarify first.
 - Respect the approved voicemail policy; never leave details when it says hang_up.
 - If the farewell is interrupted, address the recipient's new question without restarting the objective. When ready to end again, make a new end_call request. An explicit refusal means stop pursuing the objective.

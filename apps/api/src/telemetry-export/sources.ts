@@ -15,6 +15,7 @@ const jobs = "t.job_id IN (SELECT id FROM export_jobs)";
 export const exportSources: ExportSource[] = [
   source("call_briefs", "id user_id recipient_name phone_number objective locale allow_language_switch fallback_locale allowed_facts_ciphertext status created_at updated_at context_ciphertext represented_person represented_person_first_name represented_person_last_name agent_name assistant_profile_id assistance_reason_ciphertext assistance_disclosure_ciphertext voice_gender audio_retention_days current_compilation_id data_deleted_at", "t.id IN (SELECT id FROM export_calls)"),
   source("call_attempts", "id call_brief_id user_id provider provider_call_id provider_status status started_at ended_at failure_reason compilation_id compilation_revision compilation_snapshot_hash execution_snapshot_ciphertext review_receipt_id content_language max_duration_seconds created_at", calls),
+  source("call_voice_actions", "id call_brief_id call_attempt_id snapshot_hash version state created_at updated_at", calls),
   source("call_events", "id call_brief_id call_attempt_id user_id sequence schema_version event_name source stage severity metadata occurred_at created_at", "t.call_brief_id IN (SELECT id FROM export_calls)", "t.call_brief_id,t.sequence"),
   source("call_compilations", "id call_brief_id revision snapshot_hash compilation_ciphertext origin created_at", calls),
   source("call_compilation_approvals", "id call_brief_id compilation_id revision snapshot_hash approved_at execution_snapshot_ciphertext", calls),
@@ -23,7 +24,7 @@ export const exportSources: ExportSource[] = [
   source("call_language_contexts", "call_brief_id context", calls, "t.call_brief_id"),
   source("transcript_segments", "id call_brief_id role text locale final native_timing created_at", calls, "t.call_brief_id,t.created_at,t.id"),
   source("call_recordings", "id call_brief_id call_attempt_id provider provider_call_id provider_recording_id status consent_granted_at started_at completed_at duration_seconds channels delete_after deleted_at failure_reason created_at updated_at", calls),
-  source("final_transcripts", "id call_recording_id status model text_ciphertext segments_ciphertext failure_reason current_revision_id created_at updated_at completed_at", "t.call_recording_id IN (SELECT id FROM call_recordings WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))"),
+  source("final_transcripts", "id call_recording_id status source model text_ciphertext segments_ciphertext failure_reason current_revision_id created_at updated_at completed_at", "t.call_recording_id IN (SELECT id FROM call_recordings WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))"),
   source("final_transcript_revisions", "id call_brief_id transcript_id call_attempt_id revision source_hash payload_ciphertext created_at", calls),
   source("post_call_transcription_chunks", "id recording_id durable_job_generation stage chunk_key input_fingerprint requested_model provider_operation_id text_ciphertext created_at", recordings),
   source("call_text_artifacts", "id call_brief_id kind compilation_id transcript_revision_id source_hash target_language generator_version status payload_ciphertext payload_hash failure_code provider_request_count created_at updated_at", calls),

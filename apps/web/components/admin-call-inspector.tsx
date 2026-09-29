@@ -79,6 +79,8 @@ export function AdminCallInspector({ callId }: { callId: string }) {
   }
 
   const summary = inspector?.summary;
+  const voiceEvent = inspector?.timeline.findLast(event => event.payload.name === "realtime.voice")?.payload;
+  const voice = voiceEvent?.name === "realtime.voice" ? voiceEvent.metadata : null;
   return (
     <main className="admin-inspector-page" id="main-content">
         <Link className="auth-inline-link" href="/admin/calls">
@@ -125,9 +127,16 @@ export function AdminCallInspector({ callId }: { callId: string }) {
             </section>
 
             <CallLifecycleSummary lifecycle={summary.lifecycle} locale={locale} />
+            {voice ? <dl>
+              <Fact label="Live requested voice" value={voice.requestedVoice} />
+              <Fact label="Live confirmed voice" value={voice.confirmedVoice ?? copy.notAvailable} />
+              <Fact label="Live voice verification" value={voice.result} />
+              <Fact label="Live session" value={voice.sessionId ?? copy.notAvailable} />
+            </dl> : null}
             {summary.lifecycle?.answering ? <dl>
               <Fact label="AnsweredBy" value={summary.lifecycle.answering.answeredBy ?? copy.notAvailable} />
               <Fact label="MachineDetection" value={summary.lifecycle.answering.mode} />
+              <Fact label="AMD execution" value={summary.lifecycle.answering.execution ?? "sync"} />
               <Fact label="MachineDetectionDuration (ms)" value={summary.lifecycle.answering.durationMs?.toString() ?? copy.notAvailable} />
               <Fact label="policyVersion" value={summary.lifecycle.answering.policyVersion} />
               <Fact label="failure" value={summary.lifecycle.answering.failure ?? copy.notAvailable} />

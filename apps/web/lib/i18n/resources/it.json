@@ -1,4 +1,6 @@
 {
+  "The phone connection is open. The provider is checking who answered.": "La connessione è stabilita. Il fornitore verifica chi ha risposto.",
+  "The assistant asks for consent before recording and starting the task.": "L’assistente chiede il consenso prima di registrare e iniziare l’attività.",
   "Other language (language code)": "Altra lingua (codice lingua)",
   "Apply language": "Applica lingua",
   "Enter a valid language code, such as es or pt-BR.": "Inserisci un codice lingua valido, ad esempio es o pt-BR.",

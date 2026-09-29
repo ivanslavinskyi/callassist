@@ -47,10 +47,9 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
     <div className="plan-setting-chips" aria-label={copy.callSettings}>
       <span>{copy.tone[plan.tone]}</span>
       <span>{copy.addressing[plan.addressingStyle]}</span>
-      <span>{copy.result[plan.resultHandling]}</span>
     </div>
     <div className="review-opening">
-      <Heading>{copy.opening}</Heading>
+      <Heading>{details.openingExample}</Heading>
       <p>{plan.opening.recipientAddress} {plan.opening.purposeStatement} {plan.opening.readinessQuestion}</p>
     </div>
     <div className="review-questions">

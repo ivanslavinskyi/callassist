@@ -2,6 +2,7 @@ import { analyticsSettingsSchema, defaultAnalyticsSettings } from "./analytics";
 import { z } from "zod";
 
 const micros = z.number().int().min(1).max(1_000_000_000);
+export const MAX_STARTS_PER_RECIPIENT_PER_DAY = 100;
 export const registrationPolicySchema = z.strictObject({
   onboarding: z.enum(["full", "registration"]),
   emailVerification: z.enum(["required", "deferrable"])
@@ -19,7 +20,7 @@ export const betaSettingsSchema = z.strictObject({
   maxConcurrentCalls: z.number().int().min(1).max(20),
   maxStartsPerHour: z.number().int().min(1).max(100),
   maxStartsPerDay: z.number().int().min(1).max(500),
-  maxStartsPerRecipientPerDay: z.number().int().min(1).max(10),
+  maxStartsPerRecipientPerDay: z.number().int().min(1).max(MAX_STARTS_PER_RECIPIENT_PER_DAY),
   spendingEnabled: z.boolean(),
   currency: z.literal("USD"),
   rollingDayBudgetMicros: micros.nullable(),

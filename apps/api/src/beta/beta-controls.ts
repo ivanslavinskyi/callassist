@@ -2,7 +2,7 @@ import { registrationPolicySchema, type RegistrationPolicy, analyticsSettingsSch
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import { betaSettingsSchema, type BetaSettings, type BetaControlsView } from "@callassist/contracts";
-import { readBetaSpend } from "./beta-spend-accounting";
+import { readBetaSpend, readBetaReservations, postCallCommittedMicros, postCallReserveSlots } from "./beta-spend-accounting";
 
 export type SpendKind = "call" | "text" | "transcription" | "sms" | "email";
 export class BetaControlError extends Error {
@@ -54,7 +54,7 @@ export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendK
   const existing = await tx`SELECT reservation_key FROM beta_spend_reservations WHERE reservation_key=${key} AND kind=${kind}`;
   if (existing.count) return;
   const amount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros + 10_000 :
-    kind === "text" ? policy.textRequestReserveMicros : kind === "transcription" ? policy.transcriptionRequestReserveMicros :
+    kind === "text" ? policy.textRequestReserveMicros : kind === "transcription" ? policy.transcriptionRequestReserveMicros * (key.startsWith("postcall:") ? postCallReserveSlots : 1) :
     kind === "sms" ? policy.smsReserveMicros : policy.emailReserveMicros;
   const { reservedMicros: total } = await readBetaSpend(tx);
   if (total + amount > policy.rollingDayBudgetMicros) {
@@ -65,6 +65,17 @@ export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendK
   if (total < policy.rollingDayBudgetMicros * .8 && total + amount >= policy.rollingDayBudgetMicros * .8) {
     budgetSignal("beta_budget_threshold_reached", total + amount, policy.rollingDayBudgetMicros, policy.currency);
   }
+}
+export async function reservePostCallProviderSpend(tx: postgres.TransactionSql, attemptId: string, operationId: string, policy: BetaSettings) {
+  if (!policy.spendingEnabled) throw new BetaControlError("BETA_SPENDING_PAUSED");
+  if (policy.rollingDayBudgetMicros === null) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
+  const pool = (await readBetaReservations(tx)).find(r => r.key === `postcall:${attemptId}`);
+  // The original pool fixes the size of each unknown request's allowance even if
+  // an administrator changes settings later. Existing ledger rows make retries idempotent.
+  if (pool?.postCallPending && (pool.operations.some(o => o.id === operationId) ||
+      postCallCommittedMicros(pool) + pool.amount / postCallReserveSlots <= pool.amount)) return;
+  // Legacy calls and overruns still pass the normal monetary admission gate.
+  await reserveBetaSpend(tx, "transcription", `provider:${operationId}`, policy);
 }
 function budgetSignal(event: string, reservedMicros: number, limitMicros: number, currency: string) {
   process.stderr.write(`${JSON.stringify({ level: "warn", time: new Date().toISOString(), event, reservedMicros, limitMicros, currency })}\n`);
@@ -114,7 +125,7 @@ export class PostgresBetaControls implements BetaControls {
     if (!s.spendingEnabled) throw new BetaControlError("BETA_SPENDING_PAUSED");
     if (s.rollingDayBudgetMicros === null) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
     const amount = kind === "text" ? s.textRequestReserveMicros : kind === "sms" ? s.smsReserveMicros :
-      kind === "email" ? s.emailReserveMicros : kind === "transcription" ? s.transcriptionRequestReserveMicros : Math.ceil(s.maxDurationSeconds / 60) * s.callMinuteReserveMicros + 10_000;
+      kind === "email" ? s.emailReserveMicros : kind === "transcription" ? s.transcriptionRequestReserveMicros : Math.ceil(s.maxDurationSeconds / 60) * s.callMinuteReserveMicros + 10_000 + postCallReserveSlots * s.transcriptionRequestReserveMicros;
     if (view.reservedMicros + amount > s.rollingDayBudgetMicros) throw new BetaControlError("BETA_BUDGET_EXHAUSTED");
   }
   async getView(): Promise<BetaControlsView> {

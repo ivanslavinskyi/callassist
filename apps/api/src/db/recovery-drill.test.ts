@@ -51,6 +51,7 @@ describe("database recovery drill", () => {
       "superadmin_notification_audit",
       "audit_events",
       "call_briefs",
+      "call_voice_actions",
       "call_assessments",
       "call_compilations",
       "call_compilation_approvals",

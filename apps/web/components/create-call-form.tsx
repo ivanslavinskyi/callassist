@@ -2,7 +2,8 @@
 
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import {
-  ASSISTANT_PROFILES,
+  getAssistantProfile,
+  applyCallBriefDefaults,
   CALL_BRIEF_INPUT_LIMITS,
   selectableCallLanguagesForRole,
   isCallLanguageAvailable,
@@ -10,7 +11,6 @@ import {
   formatPersonName,
   getAssistanceDisclosure,
   type AssistanceReason,
-  type AssistantProfileId,
   type CallBrief,
   type CallLocale,
   type CreateCallBriefInput,
@@ -57,7 +57,7 @@ const emptyForm: CreateCallBriefInput = {
   allowedFacts: [],
   resultHandling: "capture_in_callassist",
   addressingMode: "formal",
-  tonePreference: "auto",
+  tonePreference: "neutral",
   voicemailPolicy: "do_not_leave_details",
   deliveryInstruction: "",
   clarificationAnswers: []
@@ -114,16 +114,16 @@ export function CreateCallForm({
   const [draft, setDraft] = useState<CallDraft>(() => {
     const previous = draftStore.forOwner(owner).get(owner, draftId);
     if (previous) {
-      const form = normalizeCallFormLanguages(previous.form);
-      return form === previous.form ? previous : { ...previous, form, preparationAttempt: null };
+      const form = applyCallBriefDefaults(normalizeCallFormLanguages(previous.form), userRole);
+      return JSON.stringify(form) === JSON.stringify(previous.form) ? previous : { ...previous, form, preparationAttempt: null };
     }
-    const initialForm = normalizeCallFormLanguages({
+    const initialForm = applyCallBriefDefaults(normalizeCallFormLanguages({
       ...emptyForm,
       ...initialValue,
       ...representedPersonDefaults(initialValue, profileName),
       allowedFacts: cleanLegacyDemoFacts(initialValue?.allowedFacts),
       clarificationAnswers: initialValue?.clarificationAnswers ?? []
-    });
+    }), userRole);
     return {
       form: initialForm,
       factsText: cleanLegacyDemoFacts(initialValue?.allowedFacts).join("\n"),
@@ -230,11 +230,11 @@ export function CreateCallForm({
     setPreparationProgress("preparing");
     setError(null);
 
-    const input = {
+    const input = applyCallBriefDefaults({
       ...form,
       phoneNumber: normalizePhoneNumber(form.phoneNumber),
       allowedFacts
-    };
+    }, userRole);
     if (taskTextOverLimit) {
       setError(messages.form.taskTextTooLong);
       setSubmitting(false);
@@ -409,23 +409,15 @@ export function CreateCallForm({
 
         <div className="form-section-title">{design.assistant}</div>
         <label className="field">
-          <span>{copy.assistant}</span>
+          <span>{messages.live.voice}</span>
           <select
-            value={form.assistantProfileId}
+            value={getAssistantProfile(form.assistantProfileId).voiceGender}
             onChange={(event) =>
-              update("assistantProfileId", event.target.value as AssistantProfileId)
+              update("assistantProfileId", event.target.value === "male" ? "sebastian" : "anna")
             }
           >
-            <optgroup label={copy.maleVoice}>
-              {ASSISTANT_PROFILES.filter(({ voiceGender }) => voiceGender === "male").map(
-                ({ id, displayName }) => <option key={id} value={id}>{displayName}</option>
-              )}
-            </optgroup>
-            <optgroup label={copy.femaleVoice}>
-              {ASSISTANT_PROFILES.filter(({ voiceGender }) => voiceGender === "female").map(
-                ({ id, displayName }) => <option key={id} value={id}>{displayName}</option>
-              )}
-            </optgroup>
+            <option value="male">{copy.maleVoice}</option>
+            <option value="female">{copy.femaleVoice}</option>
           </select>
         </label>
 
@@ -484,23 +476,7 @@ export function CreateCallForm({
         <p>{copy.optionsHelp}</p>
 
         <div className="form-grid call-options-grid">
-          <label className="field">
-            <span>{copy.result}</span>
-            <select
-              value={form.resultHandling ?? "capture_in_callassist"}
-              onChange={(event) =>
-                update(
-                  "resultHandling",
-                  event.target.value as NonNullable<CreateCallBriefInput["resultHandling"]>
-                )
-              }
-            >
-              <option value="capture_in_callassist">{copy.captureResult}</option>
-              <option value="request_external_delivery">{copy.externalDelivery}</option>
-              <option value="message_only">{copy.messageOnly}</option>
-            </select>
-          </label>
-
+          {userRole === "superadmin" ? <>
           <label className="field">
             <span>{copy.addressing}</span>
             <select
@@ -521,7 +497,7 @@ export function CreateCallForm({
           <label className="field">
             <span>{copy.tone}</span>
             <select
-              value={form.tonePreference ?? "auto"}
+              value={form.tonePreference ?? "neutral"}
               onChange={(event) =>
                 update(
                   "tonePreference",
@@ -535,6 +511,8 @@ export function CreateCallForm({
               <option value="friendly">{copy.friendly}</option>
             </select>
           </label>
+
+          </> : null}
 
           <label className="field">
             <span>{copy.voicemail}</span>
@@ -552,17 +530,7 @@ export function CreateCallForm({
             </select>
           </label>
 
-          {form.resultHandling === "request_external_delivery" ? (
-            <label className="field field-wide">
-              <span>{copy.deliveryInstruction}</span>
-              <input
-                value={form.deliveryInstruction ?? ""}
-                onChange={(event) => update("deliveryInstruction", event.target.value)}
-                maxLength={CALL_BRIEF_INPUT_LIMITS.deliveryInstruction}
-                placeholder={copy.deliveryPlaceholder}
-              />
-            </label>
-          ) : null}
+
 
           <label className="field">
             <span>{copy.audioRetention}</span>

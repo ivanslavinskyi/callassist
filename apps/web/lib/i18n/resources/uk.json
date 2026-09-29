@@ -1,4 +1,6 @@
 {
+  "The phone connection is open. The provider is checking who answered.": "Телефонне з’єднання встановлено. Провайдер перевіряє, хто відповів.",
+  "The assistant asks for consent before recording and starting the task.": "Асистент запитує згоду перед початком запису й виконанням завдання.",
   "Other language (language code)": "Інша мова (код мови)",
   "Apply language": "Застосувати мову",
   "Enter a valid language code, such as es or pt-BR.": "Введіть правильний код мови, наприклад es або pt-BR.",

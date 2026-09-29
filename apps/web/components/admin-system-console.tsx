@@ -1,4 +1,5 @@
 "use client";
+import { isTranscriptionBudgetBlocked, transcriptionBudgetMessages } from "@/lib/i18n/transcription-budget";
 import { formatLocale } from "@callassist/contracts";
 import { AdminAnalyticsSettings } from "./admin-analytics-settings";
 
@@ -310,7 +311,9 @@ export function AdminSystemConsole() {
                       <Fact label={copy.jobAttempt} value={`${job.attemptCount} / ${job.maxAttempts}`} />
                       <Fact label={copy.jobRunAfter} value={formatDate(job.runAfter, locale)} />
                       <Fact label={copy.jobLeaseUntil} value={job.leaseExpiresAt ? formatDate(job.leaseExpiresAt, locale) : copy.notAvailable} />
-                      <Fact label={copy.jobError} value={job.lastErrorCode ?? copy.notAvailable} />
+                      <Fact label={copy.jobError} value={isTranscriptionBudgetBlocked(job.lastErrorCode)
+                        ? `${transcriptionBudgetMessages[locale].title} (${job.lastErrorCode})`
+                        : job.lastErrorCode ?? copy.notAvailable} />
                     </dl>
                     {job.status === "dead_letter" && job.type !== "brief_compilation" ? (
                       <form onSubmit={(event) => void retryJob(event, job.id)}>

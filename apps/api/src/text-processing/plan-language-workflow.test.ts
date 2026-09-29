@@ -15,7 +15,7 @@ it("automatically prepares an input-language review and executes only the unchan
   const sourceFact = "Номер заявления A-17";
   const generated = {
     sourceLanguage: "pl", sourceObjective: "Sprawdzić odbiór wniosku.",
-    taskType: "receipt_confirmation", tone: "formal", addressingStyle: "formal", resultHandling: "capture_in_callassist",
+    taskType: "receipt_confirmation", tone: "neutral", addressingStyle: "formal", resultHandling: "capture_in_callassist",
     voicemailAction: "hang_up", refusalBehavior: "respect_and_end",
     localizedObjective: "Den Eingang des Antrags klären.",
     opening: { recipientAddress: "Guten Tag, Testbüro.", purposeStatement: "Ich rufe im Auftrag von Nina Keller wegen eines Antrags an.", readinessQuestion: "Haben Sie kurz Zeit?" },

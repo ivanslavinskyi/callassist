@@ -8,6 +8,19 @@ const answering: AnsweringState = { phase: "pending", policyVersion: "twilio-syn
   answeredBy: null, decision: null, streamAdmitted: false, observedAt: "2026-09-26T12:00:00Z",
   durationMs: null, message: "not_requested", failure: null };
 describe("answering presentation", () => {
+  it("shows early disclosure as consent and keeps accepted conversations connected despite AMD", () => {
+    const lifecycle = { ...deriveCallLifecycle("in_progress", []), disclosureAt: answering.observedAt, answering };
+    expect(callActivityPhase("in_progress", false, "connected", lifecycle)).toBe("consent");
+    expect(callActivityPhase("in_progress", false, "connected", { ...lifecycle, consent: "granted",
+      answering: { ...answering, phase: "resolved", answeredBy: "machine_start", decision: "hang_up" } })).toBe("connected");
+  });
+  it("does not turn a completed consented call into an AMD failure when its callback is missing", () => {
+    const lifecycle = deriveCallLifecycle("completed", [
+      { callAttemptId: "attempt", sequence: 1, occurredAt: answering.observedAt, payload: { name: "answering.updated", metadata: answering } },
+      { callAttemptId: "attempt", sequence: 2, occurredAt: answering.observedAt, payload: { name: "consent.granted", metadata: { method: "dtmf_1" } } }
+    ]);
+    expect(lifecycle.result).toBe("no_substantive_answer");
+  });
   it("does not turn missing AMD into missing consent, and preserves no-answer", () => {
     const events = [{ callAttemptId: "attempt", sequence: 1, occurredAt: answering.observedAt,
       payload: { name: "answering.updated" as const, metadata: answering } }];

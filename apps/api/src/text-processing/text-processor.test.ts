@@ -51,6 +51,15 @@ function setup(payload: unknown) {
 }
 
 describe("OpenAI text transformations", () => {
+  it("sends summary contract limits and exposes content-free validation diagnostics", async () => {
+    const fixture = setup({ ...summaryOutput, overview: Array.from({ length: 5 }, () => ({ label: "Hours", text: "Open until 17:00.", findingIds: ["question.0"] })) });
+    await expect(fixture.processor.process(summary, fixture.options)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
+    expect(fixture.completed[0]).toMatchObject({ outcome: "invalid_response", validationCode: "TEXT_INVALID_SCHEMA" });
+    const body = JSON.parse(String(fixture.fetchImplementation.mock.calls[0]![1]!.body));
+    expect(body.text.format.schema.properties.overview.maxItems).toBe(4);
+    expect(body.text.format.schema.properties.findings).toMatchObject({ minItems: 1, maxItems: 1 });
+    expect(body.text.format.schema.properties.findings.items.properties.sourceSegmentIds.items.enum).toEqual(segments.map(s => s.id));
+  });
   it("uses explicit target language, strict structured output, and bills one validated result", async () => {
     const fixture = setup(translatedPlan);
     expect(await fixture.processor.process(plan, fixture.options)).toEqual(translatedPlan);

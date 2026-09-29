@@ -60,6 +60,7 @@ export const callTextArtifactSchema = z.object({
 });
 export type CallTextArtifact = z.infer<typeof callTextArtifactSchema>;
 export const finalTranscriptRevisionSchema = z.object({
+  source: z.enum(["recording_asr", "live_native"]).optional(),
   id: z.string().uuid(), transcriptId: z.string().uuid(), callAttemptId: z.string().uuid().nullable(),
   revision: z.number().int().positive(), sourceHash: hashSchema, text: z.string(),
   segments: z.array(sourceSegmentSchema), createdAt: z.string().datetime()

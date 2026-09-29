@@ -36,7 +36,7 @@ const originalSegments: SourceSegment[] = [
 function revisionFor(segments: SourceSegment[], text = segments.map((segment) => segment.text).join("\n")): FinalTranscriptRevision {
   return {
     id: "00000000-0000-4000-8000-000000000002", transcriptId: "00000000-0000-4000-8000-000000000003",
-    callAttemptId: null, revision: 2, sourceHash: createHash("sha256").update(text).digest("hex"), text, segments, createdAt
+    callAttemptId: null, source: "live_native", revision: 2, sourceHash: createHash("sha256").update(text).digest("hex"), text, segments, createdAt
   };
 }
 const revision = revisionFor(originalSegments);
@@ -89,7 +89,7 @@ const fixtures: Fixture[] = [
   {
     file: "01-legacy-en.pdf",
     definition: buildFinalTranscriptPdfDefinition({ brief: { ...brief, locale: "en-GB" }, finalTranscript: legacy, languageLabel: "English", uiLocale: "en" }, logoSvg),
-    expectedText: ["Final transcript", "Synthetic Example Office", "The document has not arrived yet.", "CHF 25.00", "No deadline was confirmed.", "01:05"]
+    expectedText: ["Conversation transcript", "Synthetic Example Office", "The document has not arrived yet.", "CHF 25.00", "No deadline was confirmed.", "01:05"]
   },
   {
     file: "02-derived-original-de.pdf",

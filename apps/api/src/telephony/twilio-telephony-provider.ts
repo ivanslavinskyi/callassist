@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   isSwissDestinationPhone,
   answeringMode,
+  ANSWERING_POLICY_VERSION,
   type CallLocale,
   type CallBrief
 } from "@callassist/contracts";
@@ -25,17 +26,20 @@ type TwilioTelephonyOptions = {
   fromNumber: string;
   publicBaseUrl: string;
   client?: TwilioClient;
+  asyncAnswering?: boolean;
 };
 
 export class TwilioTelephonyProvider implements TelephonyProvider {
   readonly #accountSid: string;
   readonly mode = "twilio" as const;
+  readonly asyncAnswering: boolean;
   readonly #authToken: string;
   readonly #client: TwilioClient;
   readonly #fromNumber: string;
   readonly #publicBaseUrl: URL;
 
   constructor(options: TwilioTelephonyOptions) {
+    this.asyncAnswering = options.asyncAnswering ?? false;
     this.#accountSid = options.accountSid;
     this.#authToken = options.authToken;
     this.#fromNumber = options.fromNumber;
@@ -58,10 +62,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       throw new Error("ANSWERING_APPROVAL_REQUIRED");
     }
     const query = new URLSearchParams(binding).toString();
+    const asyncAmd = this.asyncAnswering && snapshot.answering.policyVersion === ANSWERING_POLICY_VERSION;
     const call = await this.#client.calls.create({
       machineDetection: answeringMode(snapshot.answering.action),
       machineDetectionTimeout: 30,
-      asyncAmd: "false",
+      asyncAmd: asyncAmd ? "true" : "false",
+      ...(asyncAmd ? { asyncAmdStatusCallback: this.webhookUrl(`/webhooks/twilio/amd?${query}`), asyncAmdStatusCallbackMethod: "POST" } : {}),
       from: this.#fromNumber,
       method: "POST",
       record: false,
@@ -86,6 +92,10 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
 
   async stopCall(providerCallId: string) {
     await this.#client.calls(providerCallId).update({ status: "completed" });
+  }
+
+  async playVoicemail(providerCallId: string, text: string, locale: CallLocale, binding: MediaStreamBinding) {
+    await this.#client.calls(providerCallId).update({ twiml: this.createVoicemailTwiml(text, locale, binding) });
   }
 
   async getCallStatus(providerCallId: string) {

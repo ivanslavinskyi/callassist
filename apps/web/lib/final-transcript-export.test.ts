@@ -43,11 +43,21 @@ const input = {
 };
 
 describe("final transcript export", () => {
+  it("describes the actual source in copied text and PDF, including legacy defaults", () => {
+    const native = { ...input, finalTranscript: { ...finalTranscript, source: "live_native" as const } };
+    const nativeText = buildFinalTranscriptCopyText(native);
+    const nativePdf = JSON.stringify(buildFinalTranscriptPdfDefinition(native));
+    expect(nativeText).toContain("during the conversation");
+    expect(nativePdf).toContain("during the conversation");
+    expect(nativeText).not.toContain("from the call recording");
+    expect(buildFinalTranscriptCopyText(input)).toContain("from the call recording");
+  });
   it("copies the structured transcript with speakers and timestamps", () => {
     const text = buildFinalTranscriptCopyText(input);
 
     expect(text).toContain("Recipient: Иван Müller");
-    expect(text).toContain("[~00:01] Sebastian: Здравствуйте.");
+    expect(text).toContain("[~00:01] SHPROHLI: Здравствуйте.");
+    expect(text).not.toContain("Sebastian");
     expect(text).toContain("[~01:05] Иван Müller: Добрый день.");
     expect(text).toContain("AI-generated. Check important names");
   });
@@ -71,7 +81,8 @@ describe("final transcript export", () => {
 
     expect(definition.defaultStyle).toMatchObject({ font: "Roboto" });
     expect(JSON.stringify(definition.content)).toContain("Здравствуйте.");
-    expect(definition.info?.title).toBe("Final transcript — Иван Müller");
+    expect(JSON.stringify(definition.content)).not.toContain("Sebastian");
+    expect(definition.info?.title).toBe("Conversation transcript — Иван Müller");
     expect(definition.language).toBe("ru-RU");
   });
 
@@ -82,7 +93,7 @@ describe("final transcript export", () => {
       uiLocale: "de"
     });
 
-    expect(text).toContain("SHPROHLI — Endtranskript");
+    expect(text).toContain("SHPROHLI — Gesprächstranskript");
     expect(text).toContain("Angerufene Person: Иван Müller");
   });
 

@@ -391,13 +391,22 @@ export const accountExportReviewReceiptSchema = z.strictObject({
 });
 
 import { callAssessmentRecordSchema } from "./call-assessment";
+export const accountExportVoiceActionSchema = z.strictObject({
+  id: z.uuid(), callBriefId: z.uuid(), callAttemptId: z.uuid(), snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  version: z.number().int().positive(), state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
+  content: z.string(), evidence: z.array(z.string()),
+  observations: z.array(z.strictObject({ id: z.string(), text: z.string() })).optional(),
+  proposal: z.strictObject({ operation: z.enum(["book", "confirm_existing"]), date: z.string(), startTime: z.string(), timeZone: z.string(),
+    serviceMatches: z.boolean(), recipientMatches: z.boolean(), requiresPaymentOrNewTerms: z.boolean(), detailsConfirmed: z.boolean() })
+});
 export const accountExportCallTextDataSchema = z.strictObject({
   languageContext: callLanguageContextSchema.nullable(),
   compilations: z.array(z.strictObject({ id: z.uuid(), compilation: callCompilationSchema })),
   transcriptRevisions: z.array(finalTranscriptRevisionSchema),
   artifacts: z.array(callTextArtifactSchema),
   reviewReceipts: z.array(accountExportReviewReceiptSchema),
-  assessments: z.array(callAssessmentRecordSchema).optional()
+  assessments: z.array(callAssessmentRecordSchema).optional(),
+  voiceActions: z.array(accountExportVoiceActionSchema).optional()
 });
 
 const legacyAccountDataExportCallSchema = z.strictObject({

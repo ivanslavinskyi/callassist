@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import twilio from "twilio";
-import { approvedExecutionSnapshotSchema, canRepeatUnansweredCall } from "@callassist/contracts";
+import { ANSWERING_POLICY_VERSION, approvedExecutionSnapshotSchema, canRepeatUnansweredCall } from "@callassist/contracts";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
@@ -26,6 +26,70 @@ async function fixture(action: "hang_up" | "leave_neutral_message" = "hang_up") 
 }
 
 describe("answering policy and repository admission", () => {
+  async function asyncFixture(action: "hang_up" | "leave_neutral_message" = "hang_up") {
+    const f = await fixture(action);
+    await f.repository.appendCallTelemetryEvent(f.brief.id, { callAttemptId: f.attempt.id, idempotencyKey: "pending-async",
+      payload: { name: "answering.updated", metadata: { phase: "pending", policyVersion: ANSWERING_POLICY_VERSION,
+        execution: "async", mode: action === "hang_up" ? "Enable" : "DetectMessageEnd", answeredBy: null, decision: null,
+        streamAdmitted: false, observedAt: f.input.now, durationMs: null,
+        message: action === "hang_up" ? "not_requested" : "not_attempted", failure: null } } });
+    return f;
+  }
+  it("admits asynchronous audio and recording on consent without a classification", async () => {
+    const f = await asyncFixture();
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" })).applied).toBe(true);
+    expect((await f.repository.beginRecording(f.brief.id)).recording.status).toBe("starting");
+    expect((await f.transition("machine_start")).state).toMatchObject({ streamAdmitted: true, execution: "async" });
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "dispatch" })).applied).toBe(false);
+  });
+  it.each([true, false])("claims voicemail once with AMD before stream=%s and records TTS only when dispatched", async beforeStream => {
+    const f = await asyncFixture("leave_neutral_message");
+    if (!beforeStream) await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" });
+    expect((await f.transition("machine_end_beep")).state?.message).toBe("not_attempted");
+    expect(f.repository.providerOperationsForTest().map(o => o.operationType)).toEqual(["answering_detection"]);
+    if (beforeStream) await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" });
+    const results = await Promise.all([1, 2].map(() => f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "dispatch" })));
+    expect(results.filter(r => r.applied)).toHaveLength(1);
+    expect(f.repository.providerOperationsForTest().map(o => o.operationType).sort()).toEqual(["answering_detection", "voicemail_tts"]);
+    await expect(f.repository.beginRecording(f.brief.id)).rejects.toThrow("RECORDING_NOT_AVAILABLE");
+  });
+  it("does not let a durable AMD deadline terminate consent accepted after its initial read", async () => {
+    const f = await asyncFixture();
+    await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" });
+    await f.repository.beginRecording(f.brief.id);
+    await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "timeout" });
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "expire" })).applied).toBe(false);
+    expect((await f.repository.get(f.brief.id))?.recording?.status).toBe("starting");
+  });
+  it("excludes late recording and media admission once the durable deadline claims termination", async () => {
+    const f = await asyncFixture();
+    await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "timeout" });
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "expire" })).applied).toBe(true);
+    await expect(f.repository.beginRecording(f.brief.id)).rejects.toThrow("RECORDING_NOT_AVAILABLE");
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" })).applied).toBe(false);
+  });
+  it("blocks an asynchronous message claim after Stop", async () => {
+    const f = await asyncFixture("leave_neutral_message");
+    await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" }); await f.transition("machine_end_beep");
+    await f.repository.appendCallTelemetryEvent(f.brief.id, { callAttemptId: f.attempt.id, idempotencyKey: "stop",
+      payload: { name: "call.stop", metadata: { actor: "user", phase: "requested" } } });
+    expect((await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "dispatch" })).applied).toBe(false);
+    expect(f.repository.providerOperationsForTest().map(o => o.operationType)).toEqual(["answering_detection"]);
+  });
+  it.each([false, true])("does not replay an async voicemail REST update after uncertain failure=%s", async fail => {
+    const f = await asyncFixture("leave_neutral_message");
+    const playVoicemail = vi.fn(async () => { if (fail) throw new Error("uncertain provider update"); });
+    Object.assign(f.service.telephonyProvider, { playVoicemail });
+    const recovery = vi.spyOn(f.service, "prepareAgentHangup").mockResolvedValue(true);
+    await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "admit" }); await f.transition("machine_end_beep");
+    const first = f.service.dispatchAsyncAnswering(f.brief.id, f.input);
+    if (fail) await expect(first).rejects.toThrow("uncertain provider update"); else expect(await first).toBe(true);
+    expect(await f.service.dispatchAsyncAnswering(f.brief.id, f.input)).toBe(false);
+    expect(playVoicemail).toHaveBeenCalledOnce();
+    expect(recovery).toHaveBeenCalledTimes(fail ? 1 : 0);
+    await f.repository.applyProviderStatus(f.input.providerCallId, "completed", "completed", f.brief.id);
+    expect((await f.service.get(f.brief.id))?.brief.lifecycle?.answering?.message).toBe("unknown");
+  });
   it.each(["busy", "no-answer"] as const)("keeps repeat available for %s before AMD runs", async providerStatus => {
     const f = await fixture();
     await f.repository.transitionAnswering(f.brief.id, { ...f.input, kind: "bind" });

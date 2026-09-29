@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CallEvent, CallSnapshot, TranscriptSegment } from "@callassist/contracts";
-import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments } from "./live-transcript-state";
+import { applyLiveTranscriptEvent, emptyLiveTranscript, mergeTranscriptSegments, liveTranscriptRows } from "./live-transcript-state";
 import { currentCallSnapshot } from "./current-call-snapshot";
 
 const segment = (id: string, seconds = "01"): TranscriptSegment => ({ id, role: "assistant", text: id, locale: "en-GB", final: true, createdAt: `2026-09-11T00:00:${seconds}.000Z` });
@@ -31,4 +31,23 @@ describe("streaming transcript continuity", () => {
     expect(Object.keys(state.partials)).toEqual(["new"]);
     expect(applyLiveTranscriptEvent(state,delta("cancelled"," check"))).toBe(state);
   });
+});
+
+
+it("keeps the 28-fragment opening in one stable card across every persistence acknowledgment", () => {
+  let state = emptyLiveTranscript(); const saved: TranscriptSegment[] = [];
+  const parts = Array.from({ length: 28 }, (_, i) => ({ ...segment(`id-${i}`), text: ` word${i}`,
+    createdAt: new Date(Date.parse("2026-09-27T10:00:00Z") + i * 200).toISOString(),
+    nativeTiming: { sessionId: "session", eventId: `event-${i}`, sessionStartedAt: "2026-09-27T10:00:00.000Z", startMs: i * 200, endMs: (i + 1) * 200 } }));
+  for (const [i, part] of parts.entries()) state = applyLiveTranscriptEvent(state, { ...delta(`key-${i}`, part.text), type: "transcript.delta", nativeTiming: part.nativeTiming } as CallEvent);
+  const initial = liveTranscriptRows(saved, state);
+  expect(initial).toHaveLength(1);
+  for (const [i, part] of parts.entries()) {
+    saved.push(part);
+    // HTTP snapshot can arrive before the SSE acknowledgment.
+    expect(liveTranscriptRows(saved, state)[0].text).toBe(initial[0].text);
+    state = applyLiveTranscriptEvent(state, { type: "transcript.added", key: `key-${i}`, segment: part });
+    const rows = liveTranscriptRows(saved, state);
+    expect(rows).toHaveLength(1); expect(rows[0].id).toBe(initial[0].id); expect(rows[0].text).toBe(initial[0].text);
+  }
 });

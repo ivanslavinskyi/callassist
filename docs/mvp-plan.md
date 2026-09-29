@@ -1,14 +1,16 @@
 # SHPROHLI — минимальный roadmap публичного тестирования
 
-Актуально на **25 сентября 2026**. **Публичный релиз: NO-GO до приёмки и deployment.**
-Текущая ветка `feat/gpt-live-pilot` включает [параллельный Live runtime](gpt-live-pilot.md)
-и [регистрацию, повтор звонка и локализованные UI-улучшения](registration-and-call-improvements-2026-09-25.md).
-Каталог — до **0083**. На `457c9b2` прошли 1 591 тест / 191 файл, lint/typecheck/build
-и браузерный smoke семи локалей. Отдельные короткие реальные звонки Realtime/Live
-прошли локально; полная сценарная приёмка остаётся открытой. Realtime, полный
-онбординг и обязательный email остаются defaults. Merge и production deployment —
-только после локальных тестов и утверждения владельцем. Исторические доказательства
-сохраняются в [аудите 23.09](release-audit-2026-09-23.md).
+Актуально на **28 сентября 2026**. **Публичный релиз: NO-GO до закрытия оставшихся условий приёмки.**
+Текущая ветка `codex/live-unified-runtime` включает [единый Live runtime](live-unified-runtime.md)
+и [реализацию трёх улучшений](live-transcript-implementation-2026-09-28.md): сохранённый
+native-транскрипт для всех результатов, короткие согласованные инструкции и проверенное
+завершение без новой оркестрации. Каталог — до **0088**; локально применены миграции и
+CMS-публикации семи локалей. Прошли **1880 тестов / 211 файлов**, lint/typecheck/build,
+CMS и PDF проверки. Новый реальный звонок после этой реализации ещё не проводился.
+Последний подтверждённый владельцем VPS cutover — 26.09, `915a8f6`, Live/fallback=false,
+каталог до 0084; см. [VPS operations](deployment-preflight.md). Текущий follow-up
+на production не выкатывался. Realtime, полный онбординг и обязательный email остаются
+repository defaults. Исторические проверки сохраняются с исходными датами.
 Это **единственный текущий backlog и список условий запуска**. Факты, причины, исходники и снимки — в [полном аудите](public-testing-audit-2026-09-13.md). Предыдущий текст с R01–R21 сохранён в [историческом снимке](release-roadmap-history-2026-09-12.md).
 
 ## 1. Цель ближайшего релиза
@@ -89,9 +91,9 @@
 | --- | --- | --- | --- | --- |
 | **B05 Admission / расходы** | P0 · реализация проверена, 15.09 локально задано 20 USD / 24 ч; внешняя приёмка открыта | Админка: cap 30, дополнительные one-use приглашения, 7 минут, 2 глобально/1 на аккаунт, USD budget/пауза/резервы. Общий recipient cap сохраняется при удалении данных. [Семантика и отчёт](beta-controls-2026-09-14.md) | Сумма перенесена во внешний контур, оценки сверены с B09; exhaustion/stop/complaint/suppression drill пройден на staging; сигналы 80%/отказа доставлены оператору через B12 | Backend + operations |
 | **B06 Deployment / proxy** | P0 · следующий этап после локальной публикации B07 | [Preflight и доверенные proxy IP](deployment-preflight.md) реализованы и локально проверены. Первый деплой сразу на shprohli.ch с временно ограниченным доступом, существующий VPS. Остались topology/packaging/DB, HTTPS, cookies/SSR/CORS/CSRF, Twilio ingress/SSE/WS и фактические API/worker settings | Login/SSR/SSE работают снаружи; разные IP не делят registration limit, spoofed headers не обходят его; restart не теряет jobs; canonical не localhost; обязательные drivers реальные | Platform |
-| **B07 Landing / CMS** | P0 · семь локалей, локальный Landing r10 и OG реализованы; конечный домен не принят | [CMS completion](cms-localization-completion-2026-09-21.md): шесть опубликованных страниц × семь локалей, сохранены authored EN/DE и legal revision IDs. [OG](home-og-images.md): draft/upload/crop/publish/rollback. Проверить RM с редактором и Analytics/privacy policy | На shprohli.ch проверены локали, гостевые/авторизованные CTA, support/legal, фактические revision IDs и OG/Twitter. Disclosures соответствуют принятому runtime; нет неподтверждённых обещаний о звонках | Product/content + ответственный за данные |
+| **B07 Landing / CMS** | P0 · семь локалей, локальный Landing r11 и OG реализованы; публикации нового выпуска на VPS не проверены | [Миграция CMS 0088](live-transcript-implementation-2026-09-28.md): новые версии privacy/terms/FAQ/landing, история и legal acceptances сохранены. [OG](home-og-images.md): draft/upload/crop/publish/rollback. Проверить RM с редактором и Analytics/privacy policy | На shprohli.ch проверены локали, гостевые/авторизованные CTA, support/legal, фактические revision IDs и OG/Twitter. Disclosures соответствуют принятому runtime; нет неподтверждённых обещаний о звонках | Product/content + ответственный за данные |
 | **B08 Admin / support** | P0 · расходы, уведомления и экспорт реализованы; staff/support приёмка открыта | [Notifications](superadmin-notifications.md) и [telemetry export](admin-call-telemetry-export.md): только superadmin, audit и content lifecycle. Осталось: защищённый staff-вход, lookup/stop, reason+confirm+evidence для lift, жалобы и deletion retry | Оператор разбирает failed call/credit/жалобу/needs_support deletion; реальная доставка отчётов принята; экспорт используется с ограниченным доступом; инциденты имеют владельца | Backend/web + operations |
-| **B11 Данные / recovery** | P0 · локальные механизмы и тесты обновлены до 0083; внешний restore открыт | Backup/ключи/RPO/RTO, 20 ciphertext columns, 29 critical tables, OG assets, notification lifecycle; перед открытием восстановленной БД отозвать все telemetry archives, затем deletion/suppression replay | Restore выполнен на выбранном контуре; удалённое не возвращается через архивы/очереди; ключи доступны; export/delete/provider failures приняты; Privacy соответствует retention | Platform/security |
+| **B11 Данные / recovery** | P0 · локальные механизмы и тесты обновлены до 0088; приёмка recovery нового выпуска открыта | Backup/ключи/RPO/RTO, encrypted content, OG assets, notification lifecycle и native capture; перед открытием восстановленной БД отозвать все telemetry archives, затем deletion/suppression replay | Restore выполнен на выбранном контуре; удалённое не возвращается через архивы/очереди; ключи доступны; export/delete/provider failures приняты; Privacy соответствует retention | Platform/security |
 
 Допустимые упрощения B08: один оператор и резервный, защищённый ручной журнал вместо CRM, существующий audited grant вместо новой refund-панели, read-only audit tooling вместо большого admin/audit. Промокампании не запускать до deactivation/limits; signup credits и ручные grants достаточны.
 
@@ -128,7 +130,7 @@ staging-домен/сервер не обязателен; ниже «staging dr
 opt-out: EN/DE desktop/mobile до 320 px, ошибка/повтор и пустой OTP-ввод при смене
 шага. Полная клавиатурная/screen-reader приёмка и нативная смена сессии в другой
 вкладке не закрыты этими проверками. B12 должен проверить кандидата с миграцией
-0083 и новой конфигурацией, затем выполнить внешний opt-out/stop/recovery drill.
+0088 и новой конфигурацией, затем выполнить внешний opt-out/stop/recovery drill.
 
 Старый CLI start можно явно исключить, если приёмка/бета используют UI. Бесшовный Realtime reconnect не нужен: допустимо безопасное завершение, понятный partial result и корректный кредит. SSE reconnect и durable recovery проверяются отдельно.
 
@@ -175,7 +177,7 @@ Cap/длительность/USD согласованы и реализован�
 - [ ] **B03:** первичный email и смена контакта доставляются, ошибки/retry/уведомления приняты.
 - [ ] **B04:** реальный Verify/recovery и отдельный opt-out Verify Service, доставка/fraud controls приняты.
 - [ ] **B05:** реализация локально проверена, 20 USD / 24 ч установлен локально; перенести настройку во внешний контур, принять ставки резервов и staging exhaustion/complaint/stop drill.
-- [ ] **B06:** внешний deploy, миграции до 0083 (включая opt-out backfill), общий recipient HMAC/keyring, proxy/cookies/SSR/SSE, worker/notification/export consumers и effective flags проверены.
+- [ ] **B06:** выпуск текущего кандидата на VPS, миграции до 0088 (включая opt-out backfill и CMS publications), общий recipient HMAC/keyring, proxy/cookies/SSR/SSE, worker/notification/export consumers и effective flags проверены.
 - [ ] **B07:** фактические опубликованные revisions и семь локалей на целевом домене, OG/Twitter, обещания и privacy/Analytics policy сверены; RM review принят.
 - [ ] **B08:** staff-защита, support, suppression, grant/deletion/audit workflow приняты.
 - [ ] **B09:** текущая provider/language/outage матрица без блокирующих дефектов.
@@ -185,14 +187,14 @@ Cap/длительность/USD согласованы и реализован�
 
 | Поле release record | Сейчас |
 | --- | --- |
-| Решение / дата | **NO-GO / 2026-09-25** |
-| Код | Текущая реализация `457c9b2`, Live — `0f673b1`; документация обновляется в той же ветке. При deployment записать итоговые commit/artifact IDs web/API/worker |
-| Schema/config | Catalog 0001–0083; локальная БД приложения обновлена до 0083 25.09. Проверка ротации — в аудите 23.09; это не подтверждение миграции внешнего контура. Проверить opt-out Verify/HMAC, billing settings, email recipients, export flag/worker/keyring. Бюджетный checkpoint 15.09: 20 USD / 24 ч, revision 3; целевые значения подтвердить в админке |
+| Решение / дата | **NO-GO / 2026-09-28** — оставшиеся условия приёмки не закрыты |
+| Код | Рабочая ветка `codex/live-unified-runtime`; последний owner-reported production SHA — `915a8f6` (26.09). При deployment записать итоговые commit/artifact IDs web/API/worker |
+| Schema/config | Catalog 0001–0088; локально применён 28.09, 89 ledger entries с историческим tombstone. CMS: privacy r6, terms r5, FAQ page r5 / collection r7, landing r11. Это не production IDs/версии. Проверить opt-out Verify/HMAC, billing settings, email recipients, export flag/worker/keyring. Бюджетный checkpoint 15.09: 20 USD / 24 ч, revision 3; целевые значения подтвердить в админке |
 | Scope | Открытый cap 30 + дополнительные приглашения, 7 минут, 1/account и 2 globally; денежная сумма в админке; приёмка языков/внешнего контура открыта |
 | Release owner / оператор / резервный | Не назначены в этом аудите |
-| Evidence | [Поставка 17–22.09](delivery-2026-09-22.md), [телеметрия](admin-call-telemetry-export.md), [CMS](cms-localization-completion-2026-09-21.md), [локализация](localization-and-analytics.md), [расходы](cost-audit-2026-09-17/implementation.md), [уведомления](superadmin-notifications.md), [OG](home-og-images.md) и датированные ранние отчёты. CI исходного `ee34a42` зелёный; локальные проверки последующих исправлений — в [аудите 23.09](release-audit-2026-09-23.md). CI нового итогового коммита и внешняя приёмка ещё требуются |
+| Evidence | [Реализация 28.09](live-transcript-implementation-2026-09-28.md): 1880 тестов / 211 файлов, lint/types/build, CMS семи локалей и PDF; локальные миграции и API restart. [Аудит 23.09](release-audit-2026-09-23.md), [поставка 17–22.09](delivery-2026-09-22.md) и прочие датированные отчёты сохраняют прежние проверки. CI итогового коммита, новый реальный звонок и приёмка выпуска на VPS ещё требуются |
 | Исключения P1 | ID, compensating control, владелец, дата пересмотра |
-| Следующий шаг | Ручная локальная приёмка Live с отключённым fallback и новых UI-функций, затем утверждение владельцем. После него B06: [preflight](deployment-preflight.md), merge и deployment с миграциями через 0083; затем остальные внешние provider/operational gates перед публичным доступом |
+| Следующий шаг | Новый реальный звонок: native source, summary, перевод на язык задания, PDF и естественность речи. Затем выпуск проверенного кандидата по [schema runbook](deployment-preflight.md#schema-release-0085-0088) через 0088 и проверка CMS семи локалей на VPS; остальные внешние provider/operational gates остаются открыты |
 
 ## 10. Как не разнести backlog снова
 

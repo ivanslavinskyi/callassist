@@ -1098,6 +1098,9 @@ export function updateRegistrationPolicy(settings: import("@callassist/contracts
   return apiRequest("/api/admin/system/registration", { method: "PUT", body: JSON.stringify({ settings, expectedRevision, reason }) });
 }
 
-export function repeatUnansweredCall(id: string) {
-  return apiRequest<CallBrief>(`/api/call-briefs/${id}/repeat`, { method: "POST" });
+export async function repeatUnansweredCall(id: string) {
+  const result = await apiRequest<CallBrief | CallPreparation>(`/api/call-briefs/${id}/repeat`, { method: "POST" });
+  if (!("failureCode" in result)) return result;
+  const preparation = await waitForCallPreparation(async () => result);
+  return (await getCallSnapshot(preparation.callBriefId!)).brief;
 }

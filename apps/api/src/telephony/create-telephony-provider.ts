@@ -7,6 +7,8 @@ export function createTelephonyProviderFromEnv(): TelephonyProvider {
   if (driver === "mock") return new MockTelephonyProvider();
 
   if (driver === "twilio") {
+    const asyncAmd = process.env.TWILIO_ASYNC_AMD?.trim() || "true";
+    if (!["true", "false"].includes(asyncAmd)) throw new Error("TWILIO_ASYNC_AMD must be true or false");
     const accountSid = requireEnvironmentValue("TWILIO_ACCOUNT_SID");
     const authToken = requireEnvironmentValue("TWILIO_AUTH_TOKEN");
     const fromNumber = requireEnvironmentValue("TWILIO_PHONE_NUMBER");
@@ -15,7 +17,8 @@ export function createTelephonyProviderFromEnv(): TelephonyProvider {
       accountSid,
       authToken,
       fromNumber,
-      publicBaseUrl
+      publicBaseUrl,
+      asyncAnswering: asyncAmd === "true" && process.env.VOICE_RUNTIME_DRIVER?.trim() === "live" && process.env.VOICE_RUNTIME_LIVE_FALLBACK?.trim() !== "true"
     });
   }
 

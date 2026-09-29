@@ -93,6 +93,10 @@ export function isSelectableCallLocale(locale: CallLocale, role?: string | null)
 export const callVoiceGenderSchema = z.enum(["male", "female"]);
 export type CallVoiceGender = z.infer<typeof callVoiceGenderSchema>;
 
+/** Versioned product choice, independent of deployment environment and persona names. */
+export const LIVE_VOICES = { male: "cedar", female: "marin" } as const;
+export const liveVoiceSchema = z.enum(["cedar", "marin"]);
+
 export const ASSISTANT_PROFILE_IDS = [
   "sebastian",
   "daniel",
@@ -300,7 +304,7 @@ const callBriefInputBaseSchema = callBriefStoredFieldsSchema
     representedPersonLastName: personNamePartSchema,
     resultHandling: callResultHandlingSchema.default("capture_in_callassist"),
     addressingMode: callAddressingModeSchema.default("formal"),
-    tonePreference: callTonePreferenceSchema.default("auto"),
+    tonePreference: callTonePreferenceSchema.default("neutral"),
     voicemailPolicy: voicemailPolicySchema.default("do_not_leave_details"),
     deliveryInstruction: z.string().trim()
       .max(CALL_BRIEF_INPUT_LIMITS.deliveryInstruction).default(""),
@@ -365,6 +369,19 @@ export const createCallBriefInputSchema = callBriefInputBaseSchema.superRefine(
 export type CreateCallBriefInput = z.input<typeof createCallBriefInputSchema>;
 export type RawCallBrief = z.output<typeof createCallBriefInputSchema>;
 
+/** Apply current product settings to a new/editable brief, never an approved snapshot. */
+export function applyCallBriefDefaults<T extends CreateCallBriefInput>(input: T, role = "user"): T {
+  const delivery = input.deliveryInstruction?.trim();
+  const context = input.context ?? "";
+  return { ...input,
+    resultHandling: "capture_in_callassist",
+    deliveryInstruction: "",
+    context: delivery && !context.includes(delivery) ? [context, delivery].filter(Boolean).join("\n\n") : context,
+    addressingMode: role === "superadmin" ? input.addressingMode ?? "formal" : "formal",
+    tonePreference: role === "superadmin" ? input.tonePreference ?? "neutral" : "neutral"
+  };
+}
+
 export function normalizeCreateCallBriefInput(input: CreateCallBriefInput) {
   const parsed = createCallBriefInputSchema.parse(input);
   const profile = getAssistantProfile(parsed.assistantProfileId);
@@ -385,12 +402,12 @@ export type NormalizedCallBriefInput = ReturnType<
 >;
 
 export const CALL_BRIEF_SCHEMA_VERSION = "4" as const;
-export const BRIEF_COMPILER_VERSION = "brief-compiler-5" as const;
-export const PREVIOUS_BRIEF_COMPILER_VERSION = "brief-compiler-4" as const;
+export const BRIEF_COMPILER_VERSION = "brief-compiler-6" as const;
+export const PREVIOUS_BRIEF_COMPILER_VERSION = "brief-compiler-5" as const;
 export const CALL_POLICY_VERSION = "callassist-policy-3" as const;
 export const LEGACY_BRIEF_COMPILER_VERSION = "brief-compiler-3" as const;
 export function isSupportedBriefCompilerVersion(value: unknown) {
-  return value === BRIEF_COMPILER_VERSION || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === LEGACY_BRIEF_COMPILER_VERSION;
+  return value === BRIEF_COMPILER_VERSION || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === "brief-compiler-4" || value === LEGACY_BRIEF_COMPILER_VERSION;
 }
 
 export const callTaskTypeSchema = z.enum([
@@ -548,11 +565,15 @@ export type ApprovedExecutionPlan = z.infer<
 export const approvedExecutionRuntimeSchema = z.object({
   agentName: z.string().trim().min(2),
   voiceGender: callVoiceGenderSchema,
+  // Optional only for historical immutable approvals.
+  liveVoice: liveVoiceSchema.optional(),
   assistanceDisclosure: z.string().trim(),
   audioRetentionDays: audioRetentionDaysSchema,
   allowLanguageSwitch: z.boolean(),
   fallbackLocale: callLocaleSchema.optional()
-}).strict();
+}).strict().refine(runtime => !runtime.liveVoice || runtime.liveVoice === LIVE_VOICES[runtime.voiceGender], {
+  message: "Live voice must match the approved voice gender", path: ["liveVoice"]
+});
 export type ApprovedExecutionRuntime = z.infer<
   typeof approvedExecutionRuntimeSchema
 >;
@@ -577,7 +598,7 @@ export const approvedExecutionSnapshotSchema = z.discriminatedUnion("version", [
   legacyApprovedExecutionSnapshotSchema, previousApprovedExecutionSnapshotSchema, currentApprovedExecutionSnapshotSchema
 ]).superRefine((snapshot, context) => {
   if (snapshot.version === 3) {
-    const expected = answeringApproval(snapshot.plan.voicemailAction, snapshot.plan.callLocale);
+    const expected = answeringApproval(snapshot.plan.voicemailAction, snapshot.plan.callLocale, snapshot.answering.policyVersion);
     if (JSON.stringify(expected) !== JSON.stringify(snapshot.answering)) context.addIssue({
       code: "custom", message: "Answering policy does not match the approved plan", path: ["answering"]
     });
@@ -674,7 +695,7 @@ export const callCompilationSchema = z.object({
   compiledBrief: compiledCallBriefSchema.nullable(),
   policyDecision: policyDecisionSchema,
   compilerModel: z.string().trim().min(1).max(120),
-  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, PREVIOUS_BRIEF_COMPILER_VERSION, BRIEF_COMPILER_VERSION]),
+  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, "brief-compiler-4", PREVIOUS_BRIEF_COMPILER_VERSION, BRIEF_COMPILER_VERSION]),
   compilerResponseId: z.string().trim().min(1).max(160).nullable(),
   revision: z.number().int().positive(),
   compiledAt: z.string().datetime(),
@@ -784,6 +805,7 @@ export type FinalTranscriptSegment = z.infer<
 >;
 
 export const finalTranscriptSchema = z.object({
+  source: z.enum(["recording_asr", "live_native"]).optional(),
   id: z.string().uuid(),
   status: finalTranscriptStatusSchema,
   text: z.string().nullable(),
@@ -854,6 +876,7 @@ export function createApprovedExecutionSnapshot(
     runtime: {
       agentName: snapshot.brief.agentName,
       voiceGender: snapshot.brief.voiceGender,
+      liveVoice: LIVE_VOICES[snapshot.brief.voiceGender],
       assistanceDisclosure: snapshot.brief.assistanceDisclosure,
       audioRetentionDays: snapshot.brief.audioRetentionDays,
       allowLanguageSwitch: snapshot.brief.allowLanguageSwitch,

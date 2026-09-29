@@ -1,5 +1,12 @@
 # GPT-Live pilot
 
+> Historical hybrid-pilot reference. Current `live` with `fallback=false` uses one
+> Live session, native consent delegation and a Live-authored closing. The hybrid
+> architecture below applies only to explicit legacy fallback. Use the
+> [current runtime](live-unified-runtime.md), [local runbook](local-testing.md) and
+> [28 September call evidence](live-call-review-2026-09-28.md) for this branch.
+
+
 **26 September update:** with `VOICE_RUNTIME_LIVE_FALLBACK=false` (now the fallback
 default), the human conversation uses the [unified Live runtime](live-unified-runtime.md).
 The hybrid protocol description below applies only to explicit `fallback=true`.
@@ -10,7 +17,9 @@ as evidence for the new path.
 `gpt-live-1` with Responses delegation to `gpt-6-luna` and
 `parallel_tool_calls=false`. Invalid drivers fail startup.
 
-New calls now pass [synchronous AMD](amd-voicemail-beta.md) before this runtime.
+The hybrid runtime described below retains [synchronous AMD](amd-voicemail-beta.md).
+New native Live approvals instead use [background AMD](async-amd-live-2026-09-28.md),
+with recording authorized by consent independently of the detection result.
 The real-call results from 25 September below predate AMD and do not certify the
 new detection/message branches. Retest both runtimes with the AMD smoke profiles.
 

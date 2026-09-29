@@ -22,6 +22,7 @@ export type TextProcessingInput = (
   | { kind: "call_summary"; segments: SourceSegment[]; checks: Array<{ id: string; text: string }>;
       context: { objective: string; taskType: string; recipient: string; representedPerson: string };
       extraction?: CallSummaryPayload;
+      applicationFacts?: { transcriptPersisted: true; resultHandling: "capture_in_callassist" | "request_external_delivery" | "message_only" };
       assessmentMode?: "evaluate" | "preserve"; fixedAssessment?: CallAssessmentDecision }
 ) & { targetLanguage: TextLanguage };
 
@@ -46,6 +47,7 @@ export type TextProcessingProviderRequestResult = {
   durationMs: number;
   usage: OpenAITextTokenUsage | null;
   errorCode?: TextProcessingError["code"] | null;
+  validationCode?: string;
 };
 export type TextProcessingRunOptions = {
   maxProviderRequests?: number;
@@ -63,7 +65,7 @@ export interface TextProcessor {
 
 /** Summary changes must not invalidate queued translations or their reusable chunks. */
 export function textGeneratorVersion(processor: Pick<TextProcessor, "generatorVersion">, kind: TextArtifactKind) {
-  return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:${processor.generatorVersion}` : processor.generatorVersion;
+  return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:grounded-v2:${processor.generatorVersion}` : processor.generatorVersion;
 }
 
 export class TextProcessingError extends Error {
@@ -88,6 +90,12 @@ export class TextProcessingError extends Error {
     super(code, options);
     this.name = "TextProcessingError";
     this.retryAfterMs = options?.retryAfterMs;
+  }
+}
+
+export class TextValidationError extends TextProcessingError {
+  constructor(readonly validationCode: "TEXT_INVALID_SCHEMA" | "TEXT_INVALID_ASSESSMENT" | "TEXT_INVALID_FIXED_ASSESSMENT" | "TEXT_INVALID_REFERENCES" | "TEXT_INVALID_GROUNDING") {
+    super("TEXT_RESPONSE_INVALID");
   }
 }
 

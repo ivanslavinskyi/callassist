@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   callBriefStatusSchema,
   callLocaleSchema,
+  liveVoiceSchema,
   policyDecisionStatusSchema,
   policyReasonCodeSchema
 } from "./call-brief";
@@ -32,6 +33,16 @@ export const consentEvidenceSchema = z.discriminatedUnion("method", [
 export type ConsentEvidence = z.infer<typeof consentEvidenceSchema>;
 
 export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
+  z.strictObject({ name: z.literal("realtime.voice"), metadata: z.strictObject({
+    requestedVoice: liveVoiceSchema, confirmedVoice: safeTokenSchema.nullable(),
+    sessionId: safeTokenSchema.nullable(), model: safeTokenSchema,
+    phase: z.enum(["startup", "consent", "conversation"]),
+    result: z.enum(["requested", "confirmed", "mismatch", "unconfirmed"])
+  }) }),
+  z.strictObject({ name: z.literal("conversation.task"), metadata: z.strictObject({
+    runtimeVersion: z.literal("live-client-v1"), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
+    revision: z.number().int().nonnegative(), requestId: z.uuid().optional()
+  }) }),
   z.strictObject({ name: z.literal("answering.updated"), metadata: answeringStateSchema }),
   z.strictObject({ name: z.literal("provider.sip_response"), metadata: z.strictObject({ code: z.number().int().min(100).max(699) }) }),
   z.strictObject({
@@ -152,7 +163,8 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     name: z.literal("realtime.ready"),
     metadata: z.strictObject({
       model: safeTokenSchema,
-      transcriptionModel: safeTokenSchema
+      transcriptionModel: safeTokenSchema,
+      runtimeVersion: z.literal("live-managed-v1").optional()
     })
   }),
   z.strictObject({
@@ -168,6 +180,8 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("conversation.ended"),
     metadata: z.strictObject({
+      failureCode: safeTokenSchema.optional(),
+      failurePhase: safeTokenSchema.optional(),
       reason: z.enum([
         "stream_stopped",
         "socket_closed",
@@ -192,7 +206,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("conversation.tool_result"),
     metadata: z.strictObject({
-      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing"]),
+      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing", "request_appointment", "confirm_appointment"]),
       outcome: z.enum(["accepted", "rejected"]),
       reason: safeTokenSchema,
       requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
@@ -352,11 +366,14 @@ export function describeCallTelemetryEvent(
       return { source: "recording", stage: "recording", severity: "error" };
     case "realtime.ready":
       return { source: "realtime", stage: "realtime", severity: "info" };
+    case "realtime.voice":
+      return { source: "realtime", stage: "realtime", severity: "info" };
     case "conversation.started":
     case "conversation.first_audio":
     case "conversation.ended":
     case "conversation.hangup":
     case "conversation.tool_result":
+    case "conversation.task":
       return { source: "realtime", stage: "conversation", severity: "info" };
     case "transcription.started":
     case "transcription.completed":

@@ -4,6 +4,7 @@ import type {
   TextArtifactKind, TextLanguage, ReviewEvidence, CallCompilation, CallAssessmentRecord
 } from "@callassist/contracts";
 import type { DurableJob, DurableJobLease } from "../jobs/durable-job";
+import type { VoiceActionRecord } from "./voice-action";
 
 export type EnqueueTextArtifactInput = {
   callId: string; kind: TextArtifactKind; compilationId?: string; transcriptRevisionId?: string;
@@ -40,6 +41,7 @@ export interface CallTextRepository {
   exportCallTextData(callId: string): Promise<{
     compilations: Array<{ id: string; compilation: CallCompilation }>;
     assessments?: CallAssessmentRecord[];
+    voiceActions?: VoiceActionRecord[];
     transcriptRevisions: FinalTranscriptRevision[]; artifacts: CallTextArtifact[]; reviewReceipts: CallPlanReviewReceipt[];
   }>;
 }
@@ -75,7 +77,7 @@ export function textPayloadHash(value: unknown) {
 
 export function createTranscriptRevision(input: {
   transcriptId: string; callAttemptId: string | null; revision: number;
-  text: string; segments: FinalTranscriptSegment[]; createdAt: string;
+  text: string; segments: FinalTranscriptSegment[]; createdAt: string; source?: "recording_asr" | "live_native";
 }): FinalTranscriptRevision {
   const id = randomUUID();
   const segments = input.segments.length ? input.segments.map((segment) => ({
@@ -85,7 +87,8 @@ export function createTranscriptRevision(input: {
   return {
     id, transcriptId: input.transcriptId, callAttemptId: input.callAttemptId,
     revision: input.revision,
-    sourceHash: textPayloadHash({ text: input.text, segments }),
+    source: input.source ?? "recording_asr",
+    sourceHash: textPayloadHash({ text: input.text, segments, ...(input.source === "live_native" ? { source: input.source } : {}) }),
     text: input.text,
     segments: segments.map((segment, index) => ({ id: `${id}:${index}`, ...segment })),
     createdAt: input.createdAt

@@ -103,13 +103,15 @@ export function durableJobRetryDelayMs(attemptNumber: number) {
 export class DurableJobExecutionError extends Error {
   readonly retryable: boolean;
   readonly retryAfterMs: number;
+  readonly defer: boolean;
 
   constructor(
     readonly code: string,
-    options?: { cause?: unknown; retryable?: boolean; retryAfterMs?: number }
+    options?: { cause?: unknown; retryable?: boolean; retryAfterMs?: number; defer?: boolean }
   ) {
     super(code, options);
     this.name = "DurableJobExecutionError";
+    this.defer = options?.defer ?? false;
     this.retryAfterMs = Number.isFinite(options?.retryAfterMs) ? Math.min(24 * 60 * 60_000, Math.max(0, options!.retryAfterMs!)) : 0;
     this.retryable =
       options?.retryable ?? code !== "DURABLE_JOB_TARGET_INVALID";

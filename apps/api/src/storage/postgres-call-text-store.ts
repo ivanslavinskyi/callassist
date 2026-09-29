@@ -50,7 +50,7 @@ export class PostgresCallTextStore {
   async getCurrentTranscriptRevision(callId: string) {
     return this.sql.begin(async tx => {
       await requireAvailableCall(tx,callId,true);
-      const [row] = await tx<{ id:string; current_revision_id:string|null; text_ciphertext:string|null; segments_ciphertext:string|null; call_attempt_id:string|null; completed_at:Date }[]>`
+      const [row] = await tx<{ id:string; source:"recording_asr"|"live_native"; current_revision_id:string|null; text_ciphertext:string|null; segments_ciphertext:string|null; call_attempt_id:string|null; completed_at:Date }[]>`
         SELECT f.*,r.call_attempt_id FROM final_transcripts f JOIN call_recordings r ON r.id=f.call_recording_id
         WHERE r.call_brief_id=${callId} AND f.status='completed' ORDER BY f.completed_at DESC LIMIT 1 FOR UPDATE OF f`;
       if (!row?.text_ciphertext) return null;
@@ -59,7 +59,7 @@ export class PostgresCallTextStore {
         callId,transcriptId:row.id,callAttemptId:row.call_attempt_id,
         text:decryptJson<string>(row.text_ciphertext,this.key),
         segments:row.segments_ciphertext ? decryptJson<FinalTranscriptSegment[]>(row.segments_ciphertext,this.key) : [],
-        createdAt:row.completed_at.toISOString()
+        createdAt:row.completed_at.toISOString(), source:row.source
       });
     });
   }
@@ -279,7 +279,7 @@ export async function enqueueArtifact(tx:postgres.TransactionSql,key:DataEncrypt
 }
 
 export async function persistTranscriptRevision(tx:postgres.TransactionSql,key:DataEncryptionMaterial,input:{
-  callId:string;transcriptId:string;callAttemptId:string|null;text:string;segments:FinalTranscriptSegment[];createdAt:string;
+  callId:string;transcriptId:string;callAttemptId:string|null;text:string;segments:FinalTranscriptSegment[];createdAt:string;source?:"recording_asr"|"live_native";
 },summaryGeneratorVersion?:string) {
   const [latest]=await tx<{revision:number}[]>`SELECT COALESCE(max(revision),0)::integer AS revision FROM final_transcript_revisions WHERE transcript_id=${input.transcriptId}`;
   let revision=createTranscriptRevision({...input,revision:(latest?.revision??0)+1});

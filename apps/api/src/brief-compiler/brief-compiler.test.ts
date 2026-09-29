@@ -38,7 +38,7 @@ const modelOutput = {
   appointmentAuthorization: null,
   sourceLanguage: "ru",
   taskType: "receipt_confirmation",
-  tone: "formal",
+  tone: "neutral",
   addressingStyle: "formal",
   resultHandling: "capture_in_callassist",
   voicemailAction: "hang_up",
@@ -344,7 +344,7 @@ describe("deterministic brief policy", () => {
       raw,
       compiled({
         addressingStyle: "formal",
-        tone: "friendly",
+        tone: "neutral",
         opening: {
           ...modelOutput.opening,
           recipientAddress: "Danke, Elena."
@@ -429,7 +429,7 @@ describe("OpenAIBriefCompiler", () => {
     expect(JSON.parse(body.input[1].content)).toMatchObject({
       resultHandling: "capture_in_callassist",
       addressingMode: "formal",
-      tonePreference: "auto",
+      tonePreference: "neutral",
       voicemailPolicy: "do_not_leave_details"
     });
     expect(body.text.format.schema.required).toContain("blockingIssues");
@@ -631,7 +631,7 @@ describe("OpenAIBriefCompiler", () => {
     });
   });
 
-  it("ignores an external-delivery blocker when spoken answers are captured", async () => {
+  it("preserves an essential external-delivery blocker inferred from context with the default result mode", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -664,10 +664,10 @@ describe("OpenAIBriefCompiler", () => {
     const result = await new OpenAIBriefCompiler({
       apiKey: "test-key",
       fetchImplementation: fetchMock
-    }).compile(normalizeCreateCallBriefInput(rawInput));
+    }).compile(normalizeCreateCallBriefInput({ ...rawInput, context: "Ask the office to email the document; the destination is unspecified." }));
 
-    expect(result.compiledBrief?.blockingIssues).toEqual([]);
-    expect(result.policyDecision.status).toBe("ready_for_review");
+    expect(result.compiledBrief?.blockingIssues).toHaveLength(1);
+    expect(result.policyDecision.status).toBe("needs_clarification");
   });
 
   it("blocks moderated input without invoking the compiler model", async () => {

@@ -3,6 +3,7 @@ import { formatAdminMoney } from "@/lib/admin-costs";
 import { RegistrationPolicyControls } from "./registration-policy-controls";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { BetaControlsView, BetaSettings, UserRole } from "@callassist/contracts";
+import { MAX_STARTS_PER_RECIPIENT_PER_DAY } from "@callassist/contracts";
 import { ApiError, getBetaControls, updateBetaControls, createBetaInvitation, revokeBetaInvitation } from "@/lib/api";
 
 export function AdminBetaControls({ role }: { role: UserRole }) {
@@ -79,7 +80,7 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
             {field("Concurrent calls across the service", "maxConcurrentCalls", view.settings.maxConcurrentCalls, 1, 20)}
             {field("Starts per account / hour", "maxStartsPerHour", view.settings.maxStartsPerHour, 1, 100)}
             {field("Starts per account / UTC day", "maxStartsPerDay", view.settings.maxStartsPerDay, 1, 500)}
-            {field("Starts to one recipient / 24 hours (all accounts)", "maxStartsPerRecipientPerDay", view.settings.maxStartsPerRecipientPerDay, 1, 10)}
+            {field("Starts to one recipient / 24 hours (all accounts)", "maxStartsPerRecipientPerDay", view.settings.maxStartsPerRecipientPerDay, 1, MAX_STARTS_PER_RECIPIENT_PER_DAY)}
           </div>
           <p>Failed and refunded calls still count toward attempt limits. Lowering a cap does not delete accounts or interrupt existing calls.</p>
           <p>Budget currency: USD</p>

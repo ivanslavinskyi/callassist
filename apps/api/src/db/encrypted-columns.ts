@@ -1,6 +1,7 @@
 // Keep rotation and restore verification on the same inventory. Feedback also
 // needs special fingerprint handling in the rotation command.
 export const genericCiphertextColumns = [
+  ["call_voice_actions", "payload_ciphertext"],
   ["admin_telemetry_export_parts", "payload_ciphertext"],
   ["superadmin_notifications", "payload_ciphertext"],
   ["call_briefs", "allowed_facts_ciphertext"],

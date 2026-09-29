@@ -19,7 +19,7 @@ afterEach(async () => {
   expect(backgroundErrors.splice(0)).toEqual([]);
 });
 
-function createHarness() {
+function createHarness(asyncAnswering = false) {
   const calls = Object.assign(
     vi.fn(() => ({
       update: vi.fn().mockResolvedValue({ sid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }),
@@ -34,6 +34,7 @@ function createHarness() {
     authToken: "test-auth-token",
     fromNumber: "+41710000001",
     publicBaseUrl: "https://calls.example.test",
+    asyncAnswering,
     client: { calls } as unknown as ReturnType<typeof twilio>
   });
   const repository = new InMemoryCallRepository();
@@ -42,17 +43,19 @@ function createHarness() {
     (socket: { close: () => void; on: (...args: unknown[]) => unknown }) =>
       socket.close()
   );
+  const prepareCall = vi.fn().mockResolvedValue(undefined);
+  const releasePrepared = vi.fn();
   const app = buildWebhookApp({
     service,
     twilioProvider: provider,
     realtimeBridge: {
-      handleTwilioSocket
+      handleTwilioSocket, prepareCall, releasePrepared
     } as unknown as OpenAIRealtimeBridge,
     logger: false
   });
   apps.push(app);
   services.push(service);
-  return { app, handleTwilioSocket, repository, service };
+  return { app, handleTwilioSocket, repository, service, prepareCall, releasePrepared };
 }
 
 async function createBrief(service: CallService) {
@@ -81,6 +84,32 @@ async function webhookFacts(service: CallService) {
 }
 
 describe("Twilio webhooks", () => {
+  it.each([true, false])("handles asynchronous AMD before voice=%s, duplicates and invalid callback bindings", async amdFirst => {
+    const { app, service } = createHarness(true);
+    const brief = await createBrief(service); await service.start(brief.id);
+    const attempt = (await service.getLatestAttempt(brief.id))!;
+    const query = new URLSearchParams({ callBriefId: brief.id, callAttemptId: attempt.id, compilationSnapshotHash: attempt.compilationSnapshotHash! });
+    const post = (kind: string, parameters: Record<string, string>, valid = true, suffix = query.toString()) => {
+      const path = `/webhooks/twilio/${kind}?${suffix}`;
+      return app.inject({ method: "POST", url: path, headers: { "content-type": "application/x-www-form-urlencoded",
+        "x-twilio-signature": valid ? twilio.getExpectedTwilioSignature("test-auth-token", `https://calls.example.test${path}`, parameters) : "invalid" },
+        payload: new URLSearchParams(parameters).toString() });
+    };
+    const payload = { CallSid: attempt.providerCallId!, AnsweredBy: "machine_start", MachineDetectionDuration: "4900" };
+    expect((await post("amd", payload, false)).statusCode).toBe(403);
+    expect((await post("amd", { ...payload, AccountSid: "ACwrong" })).statusCode).toBe(403);
+    const wrongQuery = new URLSearchParams(query); wrongQuery.set("compilationSnapshotHash", "b".repeat(64));
+    expect((await post("amd", payload, true, wrongQuery.toString())).statusCode).toBe(204);
+    expect((await service.get(brief.id))!.brief.lifecycle?.answering?.phase).toBe("pending");
+    if (amdFirst) expect((await post("amd", payload)).statusCode).toBe(204);
+    const voice = await post("voice", { CallSid: attempt.providerCallId! });
+    expect(voice.statusCode).toBe(200); expect(voice.body).toContain("<Connect>");
+    if (!amdFirst) expect((await post("amd", payload)).statusCode).toBe(204);
+    expect((await post("amd", payload)).statusCode).toBe(204);
+    expect((await service.get(brief.id))!.brief.lifecycle?.answering).toMatchObject({ phase: "resolved", answeredBy: "machine_start", execution: "async" });
+    expect((await service.repository.listCallTelemetryEvents(brief.id)).filter(e => e.payload.name === "answering.updated" && e.payload.metadata.phase === "resolved"))
+      .toHaveLength(amdFirst ? 2 : 1); // An early result is also present in the idempotent bind snapshot.
+  });
   it("does not expose internal API routes", async () => {
     const { app } = createHarness();
     const response = await app.inject({
@@ -422,4 +451,25 @@ describe("Twilio webhooks", () => {
       lastProblemCode: "DURABLE_JOB_LEASE_LOST"
     });
   });
+});
+
+
+it("prepares Live only for a signed bound active attempt and releases it on busy", async () => {
+  const { app, service, prepareCall, releasePrepared } = createHarness();
+  const brief = await createBrief(service);
+  const { attempt } = await service.repository.startAttempt(brief.id, { provider: "twilio" });
+  const path = `/webhooks/twilio/status?callBriefId=${brief.id}&callAttemptId=${attempt.id}&compilationSnapshotHash=${attempt.compilationSnapshotHash}`;
+  async function status(CallStatus: string, valid = true) {
+    const payload = { CallSid: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CallStatus };
+    return app.inject({ method: "POST", url: path, headers: { "content-type": "application/x-www-form-urlencoded",
+      "x-twilio-signature": valid ? twilio.getExpectedTwilioSignature("test-auth-token", `https://calls.example.test${path}`, payload) : "invalid" },
+      payload: new URLSearchParams(payload).toString() });
+  }
+  expect((await status("ringing", false)).statusCode).toBe(403);
+  expect(prepareCall).not.toHaveBeenCalled();
+  expect((await status("ringing")).statusCode).toBe(204);
+  expect(prepareCall).toHaveBeenCalledWith({ callBriefId: brief.id, callAttemptId: attempt.id,
+    compilationSnapshotHash: attempt.compilationSnapshotHash, providerCallId: "CAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
+  expect((await status("busy")).statusCode).toBe(204);
+  expect(releasePrepared).toHaveBeenCalledWith(attempt.id);
 });

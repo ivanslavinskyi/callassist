@@ -119,7 +119,7 @@ export class TextArtifactService {
             operationId: result.clientRequestId, outcome: result.outcome, providerRequestId: result.providerRequestId,
             providerResponseId: result.providerResponseId, providerModel: result.providerModel, statusCode: result.statusCode,
             completedAt: result.completedAt, durationMs: result.durationMs, usage: result.usage,
-            errorCode: result.outcome === "succeeded" ? null : result.errorCode ?? "TEXT_PROVIDER_REQUEST_FAILED"
+            errorCode: result.outcome === "succeeded" ? null : result.validationCode ?? result.errorCode ?? "TEXT_PROVIDER_REQUEST_FAILED"
           })
         });
         await this.repository.saveTextArtifactChunk(artifact.id, index, output, lease());
@@ -169,7 +169,10 @@ export class TextArtifactService {
     if (artifact.kind === "transcript_translation") return chunkBySize(source.segments).map((segments) => ({ kind: "transcript_translation", targetLanguage: artifact.targetLanguage, segments }));
     const compilation = artifact.compilationId ? await this.repository.getTextArtifactSourceCompilation(artifact.callId, artifact.compilationId) : null;
     if (!compilation?.compiledBrief) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
-    const inputs = chunkBySize(source.segments).map(segments => summaryInput(compilation, segments, artifact.targetLanguage));
+    // These are committed original segments retrieved from storage, never a claim
+    // taken from the brief, recipient speech or a model/tool authorization.
+    const inputs = chunkBySize(source.segments).map(segments => ({ ...summaryInput(compilation, segments, artifact.targetLanguage),
+      applicationFacts: { transcriptPersisted: true as const, resultHandling: compilation.compiledBrief!.resultHandling } }));
     return inputs.length === 1 ? [await this.#assessmentInput(artifact, inputs[0]!)] : inputs;
   }
 

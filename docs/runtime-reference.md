@@ -1,9 +1,28 @@
 # Runtime and API reference
 
-Updated 2026-09-25 for Live, registration policy and unanswered-call retries.
+Voice runtime and transcript references updated 2026-09-29; registration/route inventory checkpoint remains 2026-09-25.
 The route inventory below was regenerated from source. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
+
+## Saved transcript source
+
+Display labels are independent of the stored legacy assistant profile: SHPROHLI is
+used for assistant turns in live, saved and translated transcripts and their text/PDF
+exports. Call settings show voice gender. Historical utterance text and immutable
+approvals are preserved; this is not a data migration.
+
+Migration 0087 introduces `final_transcripts.source`
+(`live_native` / `recording_asr`, old rows default to the latter) and technical
+`call_attempts.native_transcript_capture`. No new environment flag, queue or provider
+is required. Native capture drains until `session.closed` through the existing write
+queue. A collecting capture waits at most 120 seconds from durable-job creation; incomplete capture
+uses the existing recording transcriber. Completion preserves one revision for all
+result artifacts and schedules retention even when no ASR request occurs.
+The [implementation report](live-transcript-implementation-2026-09-28.md) defines
+fallback, historical compatibility, CMS rollout and verification limits.
+Migration 0088 updates versioned public CMS copy in all seven locales; it introduces
+no new runtime flag. See the [schema release procedure](deployment-preflight.md#schema-release-0085-0088).
 
 ## Registration policy and call retries
 
@@ -122,7 +141,7 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | Variable | Repository default / requirement |
 | --- | --- |
 | `TELEPHONY_DRIVER` | `mock`; production requires `twilio` |
-| `REALTIME_AGENT_HANGUP_ENABLED` | `false` by default; apply migration 0062 first. Exact `true` enables ordinary-call `end_call` after opening playback. Read at API startup; restart required. Does not affect consent/error hangup. |
+| `REALTIME_AGENT_HANGUP_ENABLED` | `false` by default; apply migration 0062 first. Exact `true` enables ordinary-call `end_call` in the task stage. Unified Live enters this stage after recording starts and any optional assistance disclosure finishes playing; its ordinary opening is native. Read at API startup; restart required. Does not affect consent/error hangup. |
 | `DURABLE_WORKER_MODE` | `embedded`; production requires `external` |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Required for real outbound telephony |
 | `VERIFICATION_DRIVER` | Example `mock`; factory infers Twilio from real telephony if unset; production API requires explicit `twilio` |
@@ -151,14 +170,44 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | `VOICE_RUNTIME_DRIVER` | `realtime`; accepts `realtime` or `live`, invalid values fail startup; API restart required |
 | `VOICE_RUNTIME_LIVE_FALLBACK` | `false`; one Live voice session with no Realtime sockets. Explicit `true` retains the legacy hybrid pilot and startup fallback |
 | `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live consent, opening, conversation and closing when fallback is disabled |
-| `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; Responses delegation with `parallel_tool_calls=false` |
-| `OPENAI_LIVE_MALE_VOICE`, `OPENAI_LIVE_FEMALE_VOICE` | `cedar`, `marin` |
+| `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; native Responses consent/task delegation and semantic speech checks; `parallel_tool_calls=false` |
+| `OPENAI_LIVE_MALE_VOICE`, `OPENAI_LIVE_FEMALE_VOICE` | Fixed `cedar`, `marin`; optional legacy settings must match. Approved snapshots freeze the concrete voice ID. |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-2.1` |
 | `OPENAI_TRANSCRIPTION_MODEL` | `gpt-realtime-whisper` for the Realtime driver/legacy hybrid only; unified Live uses native transcripts |
 | `OPENAI_TRANSCRIPTION_DELAY` | `high`; accepts minimal/low/medium/high/xhigh |
 | `OPENAI_POST_CALL_TRANSCRIPTION_MODEL` | `gpt-transcribe`, full-file fallback |
 | `OPENAI_POST_CALL_UTTERANCE_TRANSCRIPTION_MODEL` | Runtime default `gpt-4o-transcribe`, normal stereo path |
 | `OPENAI_REALTIME_MALE_VOICE`, `OPENAI_REALTIME_FEMALE_VOICE` | `cedar`, `marin` |
+
+Unified Live first exposes only `report_consent` with a strict decision enum. Task
+tools (`end_call`, and authorized appointment tools) become available after recording
+startup and playback of any optional assistance disclosure. Live then receives a
+purpose/readiness instruction; the ordinary opening has no exact-script playback
+gate. `end_call` accepts a reason only, not a recap. Consent
+uses `live_delegation`; no new `live_consent_classification` operations are created.
+Controlled disclosure and appointment checks remain separate. Closing uses the
+normal tool-result/backend continuation, followed by a bounded completion check
+and playback confirmation; it does not verify business truth after speech.
+The historical consent
+stage stays readable for accounting. See [runtime details](live-unified-runtime.md)
+and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0088.
+See [voice continuity](live-voice-continuity-2026-09-28.md) for the two-voice catalog,
+provider confirmation checks and manual acoustic acceptance.
+
+The [28 September simplification report](live-simplification-implementation-2026-09-28.md)
+records shared approved context, grounded next-step statements, compiler version 6
+and neutral/formal defaults with superadmin-only overrides. The local API was
+restarted at 17:56 CEST with Live/fallback=false; health and database readiness passed.
+See [local testing](local-testing.md#live-simplification-checkpoint-28-september)
+for new-plan versus historical-approval behavior and the remaining manual checks.
+
+Native Live speaking pace is defined in `buildLiveInstructions`, with a reminder
+in `UnifiedLiveCall` controlled speech: calm, slightly slower than ordinary
+conversation, brief sentence pauses and clear names/dates/numbers. It applies to
+both voices and all call stages. There is no speed environment variable, numeric
+playback-rate setting or form control. Restart API/embedded worker after prompt
+changes so subsequent sessions use the new instructions; no database migration or
+new plan approval is required for a pace-only change.
 
 Model strings are configurable identifiers in this code snapshot. Verify access and
 behavior with approved live-provider evidence before deployment; the automated audit
@@ -198,9 +247,9 @@ were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
 ## Recent configuration and workers
 
-Apply the complete source catalog through **0083** before starting the new API and
+Apply the complete source catalog through **0088** before starting the new API and
 worker. Source catalog availability is not deployment evidence; verify the target's
-applied checksums. See [delivery and rollout](delivery-2026-09-22.md).
+applied checksums. See [current schema rollout](deployment-preflight.md#schema-release-0085-0088).
 
 | Setting / subsystem | Current behavior |
 | --- | --- |

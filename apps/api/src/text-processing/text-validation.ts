@@ -10,6 +10,7 @@ import { protectedIdentifiers } from "../brief-compiler/brief-compiler";
 import {
   MAX_TEXT_PROCESSING_SOURCE_CHARACTERS,
   TextProcessingError,
+  TextValidationError,
   type TextProcessingInput,
   type TextProcessingPayload
 } from "./text-processor";
@@ -19,7 +20,7 @@ function record(value: unknown): JsonRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
   return value as JsonRecord;
 }
-function invalid(): never { throw new TextProcessingError("TEXT_RESPONSE_INVALID"); }
+function invalid(code: TextValidationError["validationCode"] = "TEXT_INVALID_SCHEMA"): never { throw new TextValidationError(code); }
 function keys(value: JsonRecord, expected: string[]) {
   if (Object.keys(value).length !== expected.length || expected.some((key) => !(key in value))) invalid();
 }
@@ -90,19 +91,19 @@ export function validateTextProcessingOutput(
   if (input.assessmentMode) {
     if (!summary.assessment) invalid();
     try { validateFinalAssessment(summary.assessment, input.segments, input.checks.filter(c => c.id.startsWith("criterion.")).map(c => c.id)); }
-    catch { invalid(); }
-    if (input.assessmentMode === "preserve" && JSON.stringify(summary.assessment) !== JSON.stringify(input.fixedAssessment)) invalid();
+    catch { invalid("TEXT_INVALID_ASSESSMENT"); }
+    if (input.assessmentMode === "preserve" && JSON.stringify(summary.assessment) !== JSON.stringify(input.fixedAssessment)) invalid("TEXT_INVALID_FIXED_ASSESSMENT");
   } else if (summary.assessment) invalid();
   if (input.extraction && ["findings", "nextSteps", "unresolved"].some(key =>
     JSON.stringify(summary[key as keyof typeof summary]) !== JSON.stringify(input.extraction![key as keyof typeof summary]))) invalid();
   const sourceIds = new Set(input.segments.map((segment) => segment.id));
   const sourceTexts = new Map(input.segments.map((segment) => [segment.id, segment.text]));
   const evidence = (ids: string[]) => {
-    if (ids.some(id => !sourceIds.has(id))) invalid();
+    if (ids.some(id => !sourceIds.has(id))) invalid("TEXT_INVALID_REFERENCES");
     return ids.map(id => sourceTexts.get(id)!).join("\n");
   };
   for (const [index, finding] of summary.findings.entries()) {
-    if (finding.id !== input.checks[index]!.id) invalid();
+    if (finding.id !== input.checks[index]!.id) invalid("TEXT_INVALID_REFERENCES");
     const cited = evidence(finding.sourceSegmentIds);
     const unknownContext = finding.certainty === "unknown" ? input.checks[index]!.text : "";
     assertGroundedIdentifiers(`${finding.label}\n${finding.text}`, `${cited}\n${unknownContext}`);
@@ -140,11 +141,10 @@ function assertGroundedIdentifiers(text: string, evidence: string) {
   const numbers = (value: string) => value.match(/\d+(?:[.,:/-]\d+)*/g) ?? [];
   const sourceNumbers = new Set(numbers(evidence));
   if (numbers(text).some((number) => !sourceNumbers.has(number)) ||
-    protectedIdentifiers(text).some((identifier) => !evidence.includes(identifier))) invalid();
+    protectedIdentifiers(text).some((identifier) => !evidence.includes(identifier))) invalid("TEXT_INVALID_GROUNDING");
 }
 
 const text = { type: "string" };
-const stringList = { type: "array", items: text };
 function object(properties: JsonRecord) {
   return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
 }
@@ -152,23 +152,38 @@ const translatedItems = { type: "array", items: object({ id: text, text }) };
 export function textOutputJsonSchema(input: TextProcessingInput) {
   if (input.kind === "plan_review" || input.kind === "clarification_review") return object({ fields: translatedItems });
   if (input.kind === "transcript_translation") return object({ segments: translatedItems });
+  // Mirror local contract limits in Structured Outputs. Previously the provider
+  // could satisfy its schema while returning (for example) >4 overview entries,
+  // and the automatic job would repeatedly reject an otherwise useful result.
+  const bounded = (maxLength: number) => ({ type: "string", minLength: 1, maxLength });
+  // Repeated enum values count towards the API's 1,000-value schema limit.
+  // Large compactions retain the same exact local citation validation.
+  const enumerateSources = input.segments.length > 0 && input.segments.length <= 120;
+  const sourceId = { ...bounded(160), ...(enumerateSources ? { enum: input.segments.map(s => s.id) } : {}) };
+  const citations = { type: "array", items: sourceId, maxItems: input.segments.length ? 30 : 0 };
+  const checkId = { ...bounded(160), enum: input.checks.map(c => c.id) };
+  const criteriaIds = input.checks.filter(c => c.id.startsWith("criterion.")).map(c => c.id);
   return object({
     schemaVersion: { type: "integer", enum: [2] },
     ...(input.assessmentMode ? { assessment: object({
       conversation: object({ status: { type: "string", enum: ["confirmed", "absent", "uncertain"] },
         category: { type: "string", enum: ["task_answer", "cannot_answer", "referral", "message_acknowledged", "none", "uncertain"] },
-        questionSegmentId: { type: ["string", "null"] }, answerSegmentId: { type: ["string", "null"] }, answerQuote: text }),
-      goal: object({ status: { type: "string", enum: ["achieved", "partial", "not_achieved", "uncertain"] }, sourceSegmentIds: stringList }),
-      criteria: { type: "array", items: object({ id: text, status: { type: "string", enum: ["achieved", "partial", "not_achieved", "uncertain"] }, sourceSegmentIds: stringList }) }
+        questionSegmentId: { type: ["string", "null"], ...(enumerateSources ? { enum: [null, ...input.segments.filter(s => s.role === "assistant").map(s => s.id)] } : {}) },
+        answerSegmentId: { type: ["string", "null"], ...(enumerateSources ? { enum: [null, ...input.segments.filter(s => s.role === "recipient").map(s => s.id)] } : {}) }, answerQuote: { type: "string", maxLength: 600 } }),
+      goal: object({ status: { type: "string", enum: ["achieved", "partial", "not_achieved", "uncertain"] }, sourceSegmentIds: citations }),
+      criteria: { type: "array", minItems: criteriaIds.length, maxItems: criteriaIds.length, items: object({
+        id: { ...bounded(160), ...(criteriaIds.length ? { enum: criteriaIds } : {}) },
+        status: { type: "string", enum: ["achieved", "partial", "not_achieved", "uncertain"] }, sourceSegmentIds: citations }) }
     }) } : {}),
-    overview: { type: "array", items: object({ label: { type: ["string", "null"] }, text, findingIds: stringList }) },
-    findings: { type: "array", items: object({
-      id: text, label: text, text,
+    overview: { type: "array", maxItems: 4, items: object({ label: { type: ["string", "null"], minLength: 1, maxLength: 160 }, text: bounded(1200),
+      findingIds: { type: "array", items: checkId, minItems: 1, maxItems: 30 } }) },
+    findings: { type: "array", minItems: input.checks.length, maxItems: input.checks.length, items: object({
+      id: checkId, label: bounded(160), text: bounded(4000),
       certainty: { type: "string", enum: ["reported", "conditional", "unknown"] },
-      sourceSegmentIds: stringList
+      sourceSegmentIds: citations
     }) },
-    nextSteps: { type: "array", items: object({ text, sourceSegmentIds: stringList }) },
-    unresolved: stringList
+    nextSteps: { type: "array", maxItems: 30, items: object({ text: bounded(2000), sourceSegmentIds: { ...citations, minItems: 1 } }) },
+    unresolved: { type: "array", maxItems: 30, items: bounded(4000) }
   });
 }
 

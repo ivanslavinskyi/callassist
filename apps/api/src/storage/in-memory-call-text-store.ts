@@ -51,7 +51,7 @@ export class InMemoryCallTextStore {
   async persistRevision(callId:string,transcriptId:string,text:string,segments:FinalTranscriptSegment[],createdAt:string,summaryGeneratorVersion?:string) {
     const history=[...this.revisions.values()].filter(r=>r.callId===callId&&r.revision.transcriptId===transcriptId);
     const attempt=this.hooks.attempt(callId);
-    const proposed=createTranscriptRevision({transcriptId,callAttemptId:attempt?.id??null,text,segments,createdAt,revision:history.length+1});
+    const proposed=createTranscriptRevision({transcriptId,callAttemptId:attempt?.id??null,text,segments,createdAt,source:this.hooks.snapshot(callId).finalTranscript?.source,revision:history.length+1});
     const revision=history.find(row=>row.revision.sourceHash===proposed.sourceHash)?.revision??proposed;
     if(!this.revisions.has(revision.id)) this.revisions.set(revision.id,{callId,revision});
     if(summaryGeneratorVersion && attempt?.compilationId && this.hooks.textAllowed(callId)) {
@@ -88,7 +88,7 @@ export class InMemoryCallTextStore {
     const revision=this.revisions.get(artifact.transcriptRevisionId??"")?.revision;
     const final=snapshot.finalTranscript;
     if(!revision||final?.status!=="completed"||final.text===null) return false;
-    const current=createTranscriptRevision({transcriptId:final.id,callAttemptId:revision.callAttemptId,text:final.text,segments:final.segments,revision:1,createdAt:final.updatedAt});
+    const current=createTranscriptRevision({transcriptId:final.id,callAttemptId:revision.callAttemptId,text:final.text,segments:final.segments,source:final.source,revision:1,createdAt:final.updatedAt});
     return revision.sourceHash===current.sourceHash&&artifact.sourceHash===revision.sourceHash&&
       (artifact.kind!=="call_summary"||this.hooks.attempt(artifact.callId,revision.callAttemptId)?.compilationId===artifact.compilationId);
   }

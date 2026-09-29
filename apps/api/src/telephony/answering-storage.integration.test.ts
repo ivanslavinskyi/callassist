@@ -6,7 +6,7 @@ import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
 import { CallService } from "../call-service";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
-import { createApprovedExecutionSnapshot } from "@callassist/contracts";
+import { ANSWERING_POLICY_VERSION, createApprovedExecutionSnapshot } from "@callassist/contracts";
 import { encryptJson } from "../security/encryption";
 
 it("persists AMD admission, one-time voicemail, usage and late completion across processes", async () => {
@@ -66,5 +66,61 @@ it("persists AMD admission, one-time voicemail, usage and late completion across
     expect((await sql`SELECT id FROM call_compilation_approvals WHERE compilation_id=${compilation.id}`)).toHaveLength(1);
     await repository.approveCompilation(repeated.id, await originalPlanReview(repository,repeated.id));
     expect(await repository.refreshAnsweringApproval(repeated.id)).toBe(false);
+  } finally { await service.close(); await second.close(); await sql.end(); await db.teardown(); }
+}, 60_000);
+
+it("serializes async voicemail claims against consent across PostgreSQL connections", async () => {
+  const db = isolatedTestDatabase(); await db.setup();
+  const key = Buffer.alloc(32, 47);
+  const repository = new PostgresCallRepository(db.url, key), second = new PostgresCallRepository(db.url, key);
+  const sql = postgres(db.url, { max: 1 });
+  const service = new CallService(repository, undefined, undefined, undefined, undefined, undefined, undefined, { durableWorkerEnabled: false });
+  try {
+    async function fixture() {
+      const brief = await service.create({ recipientName: "Office", phoneNumber: "+41523686688", objective: "Ask when the office opens",
+        assistantProfileId: "sebastian", representedPersonFirstName: "Test", representedPersonLastName: "Owner", locale: "en-GB", allowedFacts: [], voicemailPolicy: "leave_neutral_message" });
+      await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
+      const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
+      const providerCallId = `CA${randomUUID().replaceAll("-", "")}`;
+      await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
+      const input = { attemptId: attempt.id, providerCallId, snapshotHash: attempt.compilationSnapshotHash!, now: new Date().toISOString() };
+      await repository.appendCallTelemetryEvent(brief.id, { callAttemptId: attempt.id, idempotencyKey: "pending",
+        payload: { name: "answering.updated", metadata: { phase: "pending", policyVersion: ANSWERING_POLICY_VERSION, execution: "async",
+          mode: "DetectMessageEnd", answeredBy: null, decision: null, streamAdmitted: false,
+          observedAt: input.now, durationMs: null, message: "not_attempted", failure: null } } });
+      await repository.transitionAnswering(brief.id, { ...input, kind: "admit" });
+      return { brief, attempt, input };
+    }
+    const human = await fixture();
+    // No classification at all is required to accept recording consent.
+    await second.beginRecording(human.brief.id, { method: "voice", decision: "affirmative", locale: "en-GB" });
+    await repository.transitionAnswering(human.brief.id, { ...human.input, kind: "resolve", answeredBy: "machine_end_beep" });
+    expect((await second.transitionAnswering(human.brief.id, { ...human.input, kind: "dispatch" })).applied).toBe(false);
+    expect((await second.transitionAnswering(human.brief.id, { ...human.input, kind: "expire" })).applied).toBe(false);
+    expect((await repository.get(human.brief.id))?.brief.lifecycle?.consent).toBe("granted");
+
+    const machine = await fixture();
+    await repository.transitionAnswering(machine.brief.id, { ...machine.input, kind: "resolve", answeredBy: "machine_end_beep" });
+    const claims = await Promise.all([repository, second].map(r => r.transitionAnswering(machine.brief.id, { ...machine.input, kind: "dispatch" })));
+    expect(claims.filter(r => r.applied)).toHaveLength(1);
+    await expect(second.beginRecording(machine.brief.id)).rejects.toThrow("RECORDING_NOT_AVAILABLE");
+    const usage = await sql`SELECT operation_type FROM provider_operations WHERE call_attempt_id=${machine.attempt.id}`;
+    expect(usage.map(r => r.operation_type).sort()).toEqual(["answering_detection", "voicemail_tts"]);
+
+    const raced = await fixture();
+    await repository.transitionAnswering(raced.brief.id, { ...raced.input, kind: "resolve", answeredBy: "machine_end_beep" });
+    const [recording, dispatch] = await Promise.allSettled([
+      repository.beginRecording(raced.brief.id), second.transitionAnswering(raced.brief.id, { ...raced.input, kind: "dispatch" })
+    ]);
+    expect(dispatch.status).toBe("fulfilled");
+    if (dispatch.status === "fulfilled") expect(dispatch.value.applied).toBe(recording.status === "rejected");
+
+    const deadline = await fixture();
+    await repository.transitionAnswering(deadline.brief.id, { ...deadline.input, kind: "timeout" });
+    const [lateRecording, expiry] = await Promise.allSettled([
+      repository.beginRecording(deadline.brief.id), second.transitionAnswering(deadline.brief.id, { ...deadline.input, kind: "expire" })
+    ]);
+    expect(expiry.status).toBe("fulfilled");
+    if (expiry.status === "fulfilled") expect(expiry.value.applied).toBe(lateRecording.status === "rejected");
   } finally { await service.close(); await second.close(); await sql.end(); await db.teardown(); }
 }, 60_000);

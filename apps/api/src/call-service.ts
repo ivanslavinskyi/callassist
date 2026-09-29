@@ -1,3 +1,4 @@
+import { assembleNativeTranscript, type NativeTranscriptCapture } from "./storage/native-transcript";
 import type { AnsweringTransitionInput } from "./telephony/answering-policy";
 import { assertRetryableCall } from "./storage/call-retry";
 import { createHash, randomUUID } from "node:crypto";
@@ -9,6 +10,7 @@ import {
   adminCallPreparationInspectorSchema,
   adminSystemStatusSchema,
   normalizeCreateCallBriefInput,
+  applyCallBriefDefaults,
   isSwissDestinationPhone,
   type AdminCallListFilters,
   type AdminOperationsWindow,
@@ -193,14 +195,7 @@ export class CallService {
           job: DurableJob,
           lease: DurableJobLease
         ) => this.#processCallPreparation(job, lease),
-        ...(postCallTranscriber
-          ? {
-              final_transcription: (
-                job: DurableJob,
-                lease: DurableJobLease
-              ) => this.#processRecording(job, lease)
-            }
-          : {}),
+        final_transcription: (job: DurableJob, lease: DurableJobLease) => this.#processRecording(job, lease),
         recording_retention: (
           job: DurableJob,
           lease: DurableJobLease
@@ -659,13 +654,20 @@ export class CallService {
     return this.repository.completeProviderOperation(input);
   }
 
-  async repeatUnansweredCall(id: string, userId: string | null) {
+  async repeatUnansweredCall(id: string, userId: string | null, role = "user") {
     await this.assertOwned(id, userId);
     const current = await this.#require(id);
     const attempt = await this.repository.getLatestAttempt(id);
     assertRetryableCall(current, attempt);
     const compilation = { ...structuredClone(current.compilation!), approvedAt: null, compilerResponseId: null };
-    return this.repository.create(compilation.rawBrief, compilation, userId, attempt!.id, undefined, { callId: id, attemptId: attempt!.id });
+    const input = applyCallBriefDefaults(compilation.rawBrief, role);
+    // Validate the visible legacy delivery text without truncation before creating a copy.
+    normalizeCreateCallBriefInput(input);
+    const copy = await this.repository.create(compilation.rawBrief, compilation, userId, attempt!.id, undefined, { callId: id, attemptId: attempt!.id });
+    if (JSON.stringify(input) !== JSON.stringify(compilation.rawBrief)) {
+      return this.recompile(copy.id, input, userId, attempt!.id);
+    }
+    return copy;
   }
 
   async approveCompilation(id: string, expected?: CompilationReviewApprovalInput) {
@@ -759,7 +761,8 @@ export class CallService {
         await this.recordTelemetry(id, {
           callAttemptId: reserved.attempt.id, idempotencyKey: `answering:${reserved.attempt.id}:pending`,
           payload: { name: "answering.updated", metadata: {
-            phase: "pending", policyVersion: ANSWERING_POLICY_VERSION,
+            phase: "pending", policyVersion: execution.answering.policyVersion,
+            execution: this.telephonyProvider.asyncAnswering && execution.answering.policyVersion === ANSWERING_POLICY_VERSION ? "async" : "sync",
             mode: answeringMode(execution.answering.action), answeredBy: null, decision: null,
             streamAdmitted: false, observedAt: new Date().toISOString(), durationMs: null,
             message: execution.answering.action === "hang_up" ? "not_requested" : "not_attempted", failure: null
@@ -901,6 +904,30 @@ export class CallService {
     return result;
   }
 
+  /** Claim before changing live TwiML. An uncertain update must never replay a message. */
+  async dispatchAsyncAnswering(id: string, input: Omit<AnsweringTransitionInput, "kind">) {
+    const result = await this.transitionAnswering(id, { ...input, kind: "dispatch" });
+    if (!result.applied) return false;
+    const attempt = await this.repository.getLatestAttempt(id);
+    const current = await this.#require(id);
+    if (!attempt || attempt.id !== input.attemptId || terminalStatuses.has(attempt.status) ||
+        current.brief.lifecycle?.stopRequestedBy || attempt.executionSnapshot?.version !== 3) return false;
+    try {
+      if (result.decision === "message") {
+        if (!this.telephonyProvider.playVoicemail || !attempt.executionSnapshot.answering.message) throw new Error("VOICEMAIL_UNAVAILABLE");
+        await this.telephonyProvider.playVoicemail(input.providerCallId, attempt.executionSnapshot.answering.message,
+          attempt.executionSnapshot.plan.callLocale, { callBriefId: id, callAttemptId: attempt.id, compilationSnapshotHash: input.snapshotHash });
+      } else {
+        await this.prepareAgentHangup(id, attempt.id, input.providerCallId);
+        await this.telephonyProvider.stopCall(input.providerCallId);
+      }
+      return true;
+    } catch (error) {
+      await this.prepareAgentHangup(id, attempt.id, input.providerCallId);
+      throw error;
+    }
+  }
+
   async #checkAnsweringDeadline(job: DurableJob, lease: DurableJobLease) {
     if (!job.callId || !job.callAttemptId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     const attempt = await this.repository.getAttempt(job.callId, job.callAttemptId);
@@ -908,12 +935,19 @@ export class CallService {
     if (!attempt || attempt.executionSnapshot?.version !== 3 || terminalStatuses.has(attempt.status)) return;
     const state = snapshot.brief.lifecycle?.answering;
     // A human conversation has its own consent and maximum duration deadlines.
-    if (state?.decision === "consent" && state.streamAdmitted) return;
+    if (state?.streamAdmitted && (state.decision === "consent" || snapshot.brief.lifecycle?.consent === "granted")) return;
     if (!attempt.providerCallId) throw new DurableJobExecutionError("PROVIDER_CALL_TARGET_MISSING");
     if (!state || state.phase === "pending" || (state.decision === "consent" && !state.streamAdmitted)) await this.transitionAnswering(job.callId, {
       attemptId: attempt.id, providerCallId: attempt.providerCallId,
       snapshotHash: attempt.compilationSnapshotHash!, kind: "timeout", now: new Date().toISOString()
     });
+    if (state?.execution === "async") {
+      const termination = await this.transitionAnswering(job.callId, {
+        attemptId: attempt.id, providerCallId: attempt.providerCallId,
+        snapshotHash: attempt.compilationSnapshotHash!, kind: "expire", now: new Date().toISOString()
+      });
+      if (!termination.applied) return;
+    }
     await this.#reconcileProviderCall(job, lease);
   }
 
@@ -1014,6 +1048,16 @@ export class CallService {
     return (await this.#persistTranscript(id, role, text.trim(), sourceKey)).segment;
   }
 
+  async setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture) {
+    await this.repository.setNativeTranscriptCapture(callId,attemptId,capture);
+    if(capture.status === "collecting") return;
+    const snapshot=await this.repository.get(callId);
+    if(!snapshot?.recording || snapshot.finalTranscript?.status === "completed") return;
+    await this.repository.enqueueDurableJob({ type:"final_transcription",recordingId:snapshot.recording.id,
+      runAfter:new Date().toISOString(),maxAttempts:durableJobMaxAttempts.final_transcription,restartTerminal:true });
+    this.#durableJobWorker.wake();
+  }
+
   async addNativeLiveTranscript(id: string, role: "recipient" | "assistant", text: string, sourceKey: string, nativeTiming: NonNullable<TranscriptSegment["nativeTiming"]>) {
     if (!text.length) return null;
     return (await this.#persistTranscript(id, role, text, sourceKey, nativeTiming)).segment;
@@ -1081,6 +1125,10 @@ export class CallService {
       this.#postCallTranscriber
     ) {
       this.#durableJobWorker.wake();
+    }
+    if (result.recording.status === "available" && result.recording.deleteAfter) {
+      await this.repository.enqueueDurableJob({ type: "recording_retention", recordingId: result.recording.id,
+        runAfter: result.recording.deleteAfter, maxAttempts: durableJobMaxAttempts.recording_retention, restartTerminal: true });
     }
     if (["available", "failed"].includes(result.recording.status)) {
       await this.#syncSystemOutcome(result.callId);
@@ -1153,10 +1201,11 @@ export class CallService {
     key: string,
     role: "assistant" | "recipient",
     delta: string,
-    locale: CallBrief["locale"]
+    locale: CallBrief["locale"],
+    nativeTiming?: TranscriptSegment["nativeTiming"]
   ) {
     if (!delta) return;
-    this.#publish(id, { type: "transcript.delta", key, role, delta, locale });
+    this.#publish(id, { type: "transcript.delta", key, role, delta, locale, ...(nativeTiming ? { nativeTiming } : {}) });
   }
 
   discardTranscriptPartial(id: string, key: string) {
@@ -1272,13 +1321,25 @@ export class CallService {
     if (!recordingId) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
-    if (!this.#postCallTranscriber) return;
+    const work=await this.repository.getNativeTranscriptWork(recordingId);
+    if(work.snapshot.finalTranscript?.status === "completed" && work.snapshot.finalTranscript.source === "live_native") return;
+    if(work.capture?.status === "collecting" && Date.now()-Date.parse(job.createdAt)<120_000) {
+      throw new DurableJobExecutionError("NATIVE_TRANSCRIPT_DRAINING",{retryAfterMs:60_000});
+    }
+    const native=work.capture ? assembleNativeTranscript(work.snapshot,work.capture) : null;
+    if (!native && !this.#postCallTranscriber) {
+      if (!work.capture) return; // Preserve installations without post-call transcription.
+      throw new DurableJobExecutionError("TRANSCRIPTION_UNAVAILABLE", { retryable: false });
+    }
+    if(!native && work.snapshot.recording?.status !== "available") {
+      throw new DurableJobExecutionError("TRANSCRIPT_RECORDING_PENDING",{retryAfterMs:30_000});
+    }
     this.#processingRecordings.add(recordingId);
     let callId: string | null = null;
     try {
       const claimed = await this.repository.claimFinalTranscript(
         recordingId,
-        this.#postCallTranscriber.model,
+        native ? `live-native:${native.model}` : this.#postCallTranscriber!.model,
         job.forceRequested,
         currentLease(lease)
       );
@@ -1288,6 +1349,16 @@ export class CallService {
         type: "final_transcript.updated",
         finalTranscript: claimed.finalTranscript
       });
+      if(native) {
+        const completed=await this.repository.completeFinalTranscript(recordingId,native.text,native.segments,currentLease(lease),{
+          source:"live_native",
+          ...(textDirectionEnabled(this.textArtifacts.capabilities,"call_summary","*",claimed.snapshot.languageContext?.taskContentLanguage??"en")
+            ? {summaryGeneratorVersion:textGeneratorVersion(this.textArtifacts.processor,"call_summary")} : {}) });
+        this.wakeTextJobs();
+        this.#publish(completed.callId,{type:"final_transcript.updated",finalTranscript:completed.finalTranscript});
+        await this.#syncSystemOutcome(completed.callId);
+        return;
+      }
       const providerRecordingId = claimed.snapshot.recording?.providerRecordingId;
       if (!providerRecordingId) {
         throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -1295,7 +1366,7 @@ export class CallService {
       const media = await this.telephonyProvider.getRecordingMedia(
         providerRecordingId
       );
-      const result = await this.#postCallTranscriber.transcribe(
+      const result = await this.#postCallTranscriber!.transcribe(
         media,
         claimed.snapshot.brief,
         claimed.snapshot.transcript,
@@ -1394,6 +1465,8 @@ export class CallService {
         }
         throw new DurableJobExecutionError(failureCode, {
           cause: error,
+          defer: error instanceof BetaControlError,
+          retryAfterMs: error instanceof BetaControlError ? 5 * 60_000 : 0,
           retryable: error instanceof PostCallTranscriptionError
             ? isPostCallTranscriptionErrorRetryable(error)
             : true
@@ -1904,6 +1977,7 @@ function externalWorkerView(
 }
 
 function transcriptionFailureCode(error: unknown) {
+  if (error instanceof BetaControlError) return error.code;
   if (error instanceof PostCallTranscriptionError) return error.code;
   if (error instanceof Error && error.message.startsWith("TWILIO_")) {
     return error.message.slice(0, 120);

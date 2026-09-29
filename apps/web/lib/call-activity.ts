@@ -9,9 +9,10 @@ export function callActivityPhase(status: CallBriefStatus, starting: boolean, co
   const active = ["dialing", "in_progress", "awaiting_approval"].includes(status);
   if (!active) return starting ? "starting" : null;
   if (connection !== "connected") return "reconnecting";
-  if (status === "in_progress" && lifecycle?.answering?.phase === "pending") return "checking";
+  if (lifecycle?.consent === "granted") return status === "awaiting_approval" ? "approval" : "connected";
+  if (status === "in_progress" && lifecycle?.answering?.phase === "pending") return lifecycle.disclosureAt ? "consent" : "checking";
   if (status === "in_progress" && lifecycle?.answering?.decision && lifecycle.answering.decision !== "consent") return "machine";
-  if (status === "in_progress" && lifecycle?.answering?.decision === "consent" && lifecycle.consent !== "granted") return "consent";
+  if (status === "in_progress" && lifecycle?.answering?.decision === "consent") return "consent";
   if (status === "awaiting_approval") return "approval";
   return status === "dialing" ? "dialing" : "connected";
 }

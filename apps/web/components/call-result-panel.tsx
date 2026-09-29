@@ -1,4 +1,6 @@
 "use client";
+import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
+import { transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 
 import { type CallBrief, type CallTextArtifact, type FinalTranscriptRevision, type SourceSegment, type TextLanguage } from "@callassist/contracts";
 import { useEffect, useState } from "react";
@@ -115,7 +117,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, initial
       {availabilityStatus === "error" ? <button type="button" className="secondary-button" onClick={() => void refreshCapabilities()}>{copy.refresh}</button> : null}
       {exportStatus === "failed" ? <p className="form-error" role="alert">{copy.exportError}</p> : null}
       {pollingPaused ? <button type="button" className="secondary-button" onClick={() => void refresh().catch(() => setError(copy.generationError))}>{copy.refresh}</button> : null}
-      <p className="transcript-subtitle">{copy.sourceRevision} {revision.revision}{displayedView === "translated" ? ` · ${copy.translationNote}` : ""}</p>
+      <p className="transcript-subtitle">{transcriptSourceDescription(locale, revision.source)} {copy.sourceRevision} {revision.revision}{displayedView === "translated" ? ` · ${copy.translationNote}` : ""}</p>
       <div className="final-transcript-body" lang={displayedView === "translated" ? taskLanguage : brief.locale}>
         {displayed.segments.length ? <div className="final-transcript-list">{displayed.segments.map((segment) => <TranscriptLine key={segment.id}
           segment={segment} brief={brief} sourceId={displayedView === "original" ? sourceSegmentAnchor(revision.id, segment.id) : undefined} />)}</div> : <p>{displayed.text}</p>}
@@ -129,7 +131,7 @@ function TranscriptLine({ segment, brief, sourceId }: { segment: SourceSegment; 
   const { messages } = useUiLocale();
   return <article className={`final-transcript-line role-${segment.role}`} id={sourceId} tabIndex={-1}>
     <div className="speaker-mark">{segment.role === "assistant" ? "AI" : segment.role === "recipient" ? "RE" : "?"}</div>
-    <div><div className="speaker-row"><strong>{segment.role === "assistant" ? brief.agentName : segment.role === "recipient" ? brief.recipientName : messages.live.unassignedSpeaker}</strong>
+    <div><div className="speaker-row"><strong>{segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? brief.recipientName : messages.live.unassignedSpeaker}</strong>
       {segment.startSeconds !== null ? <time>~{formatTranscriptOffset(segment.startSeconds)}</time> : null}
     </div><p>{segment.text}</p></div>
   </article>;

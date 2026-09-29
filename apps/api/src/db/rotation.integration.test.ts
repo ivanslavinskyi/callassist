@@ -98,7 +98,13 @@ it("rotates immutable text evidence and queued input without changing source has
       VALUES(${exportId},${userId},${randomUUID()},'fixture','Rotation fixture',now()-interval '1 day',now())`;
     await sql`INSERT INTO admin_telemetry_export_parts(export_id,generation,part,payload_ciphertext,byte_count,sha256)
       VALUES(${exportId},1,0,${encryptJson(exportPayload,parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: oldKey, DATA_ENCRYPTION_ACTIVE_KEY_ID: "old" }))},20,'fixture')`;
+    const actionId = randomUUID(), actionPayload = { content: "An encrypted spoken appointment request", evidence: ["turn-1"] };
+    await sql`INSERT INTO call_voice_actions(id,call_brief_id,call_attempt_id,snapshot_hash,state,payload_ciphertext)
+      VALUES(${actionId},${historical.id},${attempt.attempt.id},${historicalHash!},'uncertain',${encryptJson(actionPayload,Buffer.from(oldKey,"base64"))})`;
     const rotation = await reencryptDatabase(environment);
+    const [rotatedAction] = await sql`SELECT payload_ciphertext FROM call_voice_actions WHERE id=${actionId}`;
+    expect(decryptJson(rotatedAction!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
+      DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(actionPayload);
     const [exportPart] = await sql`SELECT payload_ciphertext FROM admin_telemetry_export_parts WHERE export_id=${exportId}`;
     expect(decryptJson(exportPart!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toBe(exportPayload);
@@ -106,7 +112,7 @@ it("rotates immutable text evidence and queued input without changing source has
     expect(decryptJson(notification!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(notificationPayload);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 20, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 21, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);
@@ -122,8 +128,8 @@ it("rotates immutable text evidence and queued input without changing source has
     if (process.env.RUN_TEXT_RECOVERY_DRILL === "true") {
       expect(await runRecoveryDrill({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
         DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current", RECOVERY_SOURCE_DATABASE_URL: database.url }))
-        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 29,
-          temporaryResourcesRemoved: true, encryptedSamplesVerified: 16 });
+        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 30,
+          temporaryResourcesRemoved: true, encryptedSamplesVerified: 17 });
     }
     expect(await reencryptDatabase({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
       DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current" })).toMatchObject({ rewrittenCiphertexts: 0 });

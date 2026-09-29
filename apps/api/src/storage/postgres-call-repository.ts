@@ -1,3 +1,4 @@
+import type { NativeTranscriptCapture } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { answeringUsage } from "../telephony/answering-usage";
 import { answeringStateSchema } from "@callassist/contracts";
@@ -11,10 +12,11 @@ import { PostgresRecipientOptOutStore } from "./postgres-recipient-opt-out-store
 import { recipientContactHashKey } from "../safety/recipient-opt-out-store";
 import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle, callStage, callStatusesForStage, emptyCallStageCounts, callFeedbackScope, summarizeCallFeedback, type CallFeedbackSummary, type CallSettlementFact, type CallAssessmentRecord } from "@callassist/contracts";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend } from "../beta/beta-controls";
+import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend, reservePostCallProviderSpend } from "../beta/beta-controls";
 import { isFreeProviderOperation } from "../beta/beta-spend-accounting";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
+import { voiceActionTransitionAllowed, type VoiceActionInput, type VoiceActionRecord, type VoiceActionTransition } from "./voice-action";
 import type { CallTextRepository } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import { conversationCreditEvidenceSchema, conversationCreditReason, conversationCreditRefundReason, type ConversationCreditEvidence } from "../credits/conversation-credit";
@@ -253,6 +255,7 @@ type CallRecordingRow = {
 };
 
 type FinalTranscriptRow = {
+  source: "recording_asr" | "live_native";
   id: string;
   status: FinalTranscript["status"];
   textCiphertext: string | null;
@@ -1373,7 +1376,7 @@ export class PostgresCallRepository implements CallRepository {
     lease: DurableJobLease
   ) {
     await this.#sql.begin(async (transaction) => {
-      if (this.betaControls) await reserveBetaSpend(transaction, "transcription", `provider:${input.id}`);
+      const policy = this.betaControls ? (await lockBetaControls(transaction)).settings : null;
       await requirePostgresDurableJobLease(transaction, lease);
       const [context] = await transaction<{ callAttemptId: string }[]>`
         SELECT call_recordings.call_attempt_id AS "callAttemptId"
@@ -1392,6 +1395,7 @@ export class PostgresCallRepository implements CallRepository {
         FOR SHARE OF call_recordings, final_transcripts, durable_jobs
       `;
       if (!context) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      if (policy) await reservePostCallProviderSpend(transaction, context.callAttemptId, input.id, policy);
       const inserted = await transaction`
         INSERT INTO provider_operations (
           id, provider, operation_type, stage, requested_model,
@@ -1974,9 +1978,11 @@ export class PostgresCallRepository implements CallRepository {
           compilation_id = NULL,
           compilation_revision = NULL,
           compilation_snapshot_hash = NULL,
-          execution_snapshot_ciphertext = NULL
+          execution_snapshot_ciphertext = NULL,
+          native_transcript_capture = NULL
         WHERE call_brief_id = ${input.callId}
       `;
+      await transaction`UPDATE call_voice_actions SET payload_ciphertext=NULL WHERE call_brief_id=${input.callId}`;
       await transaction`
         UPDATE call_compilations
         SET compilation_ciphertext = NULL
@@ -2683,7 +2689,36 @@ export class PostgresCallRepository implements CallRepository {
   async getCurrentReviewReceipt(...args: Parameters<CallTextRepository["getCurrentReviewReceipt"]>) { return this.#callText.getCurrentReviewReceipt(...args); }
   async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) {
     const text = await this.#callText.exportCallTextData(...args);
-    return {...text, assessments: await this.#assessments.export(args[0])};
+    const actions = await this.#sql`SELECT * FROM call_voice_actions WHERE call_brief_id=${args[0]} AND payload_ciphertext IS NOT NULL ORDER BY created_at`;
+    return {...text, assessments: await this.#assessments.export(args[0]), voiceActions: actions.map(row => ({
+      ...decryptJson<VoiceActionInput>(row.payload_ciphertext, this.#encryptionKey), id: row.id, version: row.version, state: row.state
+    })) };
+  }
+
+  async beginVoiceAction(input: VoiceActionInput): Promise<VoiceActionRecord | null> {
+    return this.#sql.begin(async tx => {
+      const [brief] = await tx`SELECT id FROM call_briefs WHERE id=${input.callBriefId} AND data_deleted_at IS NULL FOR UPDATE`;
+      if (!brief) return null;
+      const [attempt] = await tx`SELECT * FROM call_attempts WHERE call_brief_id=${input.callBriefId} ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`;
+      if (!attempt || attempt.id !== input.callAttemptId || attempt.compilation_snapshot_hash !== input.snapshotHash ||
+          !attempt.execution_snapshot_ciphertext || !["dialing", "in_progress"].includes(attempt.status)) return null;
+      const id = randomUUID(), encrypted = encryptJson(input, this.#encryptionKey);
+      const rows = await tx`INSERT INTO call_voice_actions(id,call_brief_id,call_attempt_id,snapshot_hash,state,payload_ciphertext)
+        VALUES (${id},${input.callBriefId},${input.callAttemptId},${input.snapshotHash},'sending',${encrypted})
+        ON CONFLICT (call_attempt_id) DO NOTHING RETURNING id`;
+      return rows.length ? { ...input, id, version: 1, state: "sending" as const } : null;
+    });
+  }
+  async transitionVoiceAction(input: VoiceActionTransition): Promise<VoiceActionRecord | null> {
+    return this.#sql.begin(async tx => {
+      const [row] = await tx`SELECT * FROM call_voice_actions WHERE id=${input.id} FOR UPDATE`;
+      if (!row?.payload_ciphertext || row.version !== input.version || !voiceActionTransitionAllowed(row.state, input.state)) return null;
+      const payload = decryptJson<VoiceActionInput>(row.payload_ciphertext, this.#encryptionKey);
+      payload.evidence = [...new Set([...payload.evidence, ...input.evidence])];
+      if (input.observations) payload.observations = [...new Map([...(payload.observations ?? []), ...input.observations].map(turn => [turn.id, turn])).values()];
+      await tx`UPDATE call_voice_actions SET state=${input.state},version=version+1,payload_ciphertext=${encryptJson(payload,this.#encryptionKey)},updated_at=now() WHERE id=${input.id}`;
+      return { ...payload, id: row.id, version: row.version + 1, state: input.state };
+    });
   }
 
   async getLanguageContext(id: string) {
@@ -2751,6 +2786,7 @@ export class PostgresCallRepository implements CallRepository {
             final_transcripts.text_ciphertext AS "textCiphertext",
             final_transcripts.segments_ciphertext AS "segmentsCiphertext",
             final_transcripts.model,
+            final_transcripts.source,
             final_transcripts.failure_reason AS "failureReason",
             final_transcripts.created_at AS "createdAt",
             final_transcripts.updated_at AS "updatedAt",
@@ -2800,16 +2836,17 @@ export class PostgresCallRepository implements CallRepository {
       const [event] = await tx`SELECT metadata FROM call_events WHERE call_attempt_id=${input.attemptId}
         AND event_name='answering.updated' ORDER BY sequence DESC LIMIT 1`;
       const stops = await tx`SELECT id FROM call_events WHERE call_attempt_id=${input.attemptId} AND event_name='call.stop' AND metadata->>'phase'='requested' LIMIT 1`;
+      const consent = ["dispatch", "expire"].includes(input.kind) ? await tx`SELECT id FROM call_events WHERE call_attempt_id=${input.attemptId} AND event_name='consent.granted' LIMIT 1` : [];
       const attempt: CallAttemptRecord = { id: row.id, callBriefId: id, compilationId: row.compilation_id,
         provider: row.provider, providerCallId: row.provider_call_id, status: row.status, providerStatus: row.provider_status,
         startedAt: new Date(row.started_at).toISOString(), endedAt: row.ended_at ? new Date(row.ended_at).toISOString() : null,
         failureReason: row.failure_reason, compilationRevision: row.compilation_revision, compilationSnapshotHash: row.compilation_snapshot_hash,
         executionSnapshot: row.execution_snapshot_ciphertext ? approvedExecutionSnapshotSchema.parse(decryptJson(row.execution_snapshot_ciphertext, this.#encryptionKey)) : null };
       const result = transitionAnswering(attempt, event ? answeringStateSchema.parse(event.metadata) : null, input,
-        latest?.id === attempt.id && ["dialing", "in_progress"].includes(brief.status) && stops.length === 0);
+        latest?.id === attempt.id && ["dialing", "in_progress"].includes(brief.status) && stops.length === 0 && consent.length === 0);
       if (result.applied && result.state) {
         await tx`UPDATE call_attempts SET provider_call_id=COALESCE(provider_call_id,${input.providerCallId}) WHERE id=${attempt.id}`;
-        if (input.kind === "resolve" || input.kind === "timeout") for (const op of answeringUsage(attempt, result.state)) {
+        if (["resolve", "timeout", "dispatch"].includes(input.kind)) for (const op of answeringUsage(attempt, result.state).filter(op => input.kind !== "dispatch" || op.operationType === "voicemail_tts")) {
           await tx`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,call_attempt_id,started_at)
             VALUES (${op.id},${op.provider},${op.operationType},${op.stage},${op.requestedModel},${op.clientRequestId},${id},${attempt.id},${op.startedAt}::timestamptz)
             ON CONFLICT DO NOTHING`;
@@ -4790,7 +4827,10 @@ export class PostgresCallRepository implements CallRepository {
           throw new CallRepositoryError("RECIPIENT_REPEAT_LIMIT");
         }
       }
-      if (beta && input.provider === "twilio") await reserveBetaSpend(transaction, "call", `call:${attemptId}`, beta);
+      if (beta && input.provider === "twilio") {
+        await reserveBetaSpend(transaction, "call", `call:${attemptId}`, beta);
+        await reserveBetaSpend(transaction, "transcription", `postcall:${attemptId}`, beta);
+      }
       const updated = await transaction`
         UPDATE call_briefs
         SET status = 'dialing', updated_at = ${now}
@@ -5413,6 +5453,8 @@ export class PostgresCallRepository implements CallRepository {
     const recordingId = randomUUID();
     const now = new Date();
     const providerCallId = await this.#sql.begin(async (transaction) => {
+      // Match answering/Stop lock order: parent call, then attempt.
+      await transaction`SELECT id FROM call_briefs WHERE id=${id} FOR UPDATE`;
       const [attempt] = await transaction<
         {
           attemptId: string;
@@ -5440,6 +5482,15 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
       }
 
+      const [answeringEvent] = await transaction`SELECT metadata FROM call_events
+        WHERE call_attempt_id=${attempt.attemptId} AND event_name='answering.updated' ORDER BY sequence DESC LIMIT 1`;
+      if (answeringEvent?.metadata?.execution === "async") {
+        const stopped = await transaction`SELECT id FROM call_events WHERE call_attempt_id=${attempt.attemptId}
+          AND event_name='call.stop' AND metadata->>'phase'='requested' LIMIT 1`;
+        if (answeringEvent.metadata.actionDispatched || stopped.length) {
+          throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+        }
+      }
       const existing = await transaction`
         SELECT id FROM call_recordings WHERE call_brief_id = ${id}
       `;
@@ -5791,6 +5842,21 @@ export class PostgresCallRepository implements CallRepository {
     return callId ? this.#recordingMutation(callId) : null;
   }
 
+  async setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture) {
+    await this.#sql`UPDATE call_attempts SET native_transcript_capture=${this.#sql.json(capture)}
+      WHERE id=${attemptId} AND call_brief_id=${callId}
+      AND EXISTS(SELECT 1 FROM call_briefs WHERE id=${callId} AND data_deleted_at IS NULL)
+      AND (native_transcript_capture IS NULL OR (native_transcript_capture->>'sessionId'=${capture.sessionId}
+        AND native_transcript_capture->>'status'='collecting'))`;
+  }
+  async getNativeTranscriptWork(recordingId: string) {
+    const [row]=await this.#sql<{callId:string;capture:NativeTranscriptCapture|null}[]>`
+      SELECT r.call_brief_id AS "callId",a.native_transcript_capture AS capture FROM call_recordings r
+      JOIN call_attempts a ON a.id=r.call_attempt_id WHERE r.id=${recordingId}`;
+    if(!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    return {capture:row.capture,snapshot:await this.#require(row.callId)};
+  }
+
   async claimFinalTranscript(
     recordingId: string,
     model: string,
@@ -5807,12 +5873,15 @@ export class PostgresCallRepository implements CallRepository {
           callId: string;
           callAttemptId: string;
           recordingStatus: CallRecording["status"];
+          nativeReady: boolean;
         }[]
       >`
         SELECT
           call_recordings.call_brief_id AS "callId",
           call_recordings.call_attempt_id AS "callAttemptId",
-          call_recordings.status AS "recordingStatus"
+          call_recordings.status AS "recordingStatus",
+          EXISTS(SELECT 1 FROM call_attempts a WHERE a.id=call_recordings.call_attempt_id
+            AND a.native_transcript_capture->>'status'='complete') AS "nativeReady"
         FROM call_recordings
         WHERE call_recordings.id = ${recordingId}
         FOR UPDATE
@@ -5832,7 +5901,7 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (
-        recording.recordingStatus !== "available" ||
+        (recording.recordingStatus !== "available" && !(model.startsWith("live-native:") && recording.nativeReady)) ||
         (transcript?.transcriptStatus === "processing" && !lease) ||
         (transcript?.transcriptStatus === "completed" && !force)
       ) {
@@ -5845,6 +5914,7 @@ export class PostgresCallRepository implements CallRepository {
           UPDATE final_transcripts
           SET
             status = 'processing',
+            source = ${model.startsWith('live-native:') ? 'live_native' : 'recording_asr'},
             model = ${model},
             text_ciphertext = NULL,
             segments_ciphertext = NULL,
@@ -5872,6 +5942,7 @@ export class PostgresCallRepository implements CallRepository {
           )
         `;
       }
+      await transaction`UPDATE final_transcripts SET source=${model.startsWith("live-native:") ? "live_native" : "recording_asr"} WHERE id=${transcriptId}`;
       await this.#audit(transaction, recording.callId, "final_transcript.started", {
         model,
         recordingId
@@ -5898,7 +5969,7 @@ export class PostgresCallRepository implements CallRepository {
     text: string,
     segments: FinalTranscriptSegment[],
     lease?: DurableJobLease,
-    options?: {summaryGeneratorVersion?:string}
+    options?: {summaryGeneratorVersion?:string; source?: "recording_asr" | "live_native"}
   ) {
     const now = new Date();
     const ciphertext = encryptJson(text, this.#encryptionKey);
@@ -5937,6 +6008,8 @@ export class PostgresCallRepository implements CallRepository {
         UPDATE final_transcripts
         SET
           status = 'completed',
+          source = ${options?.source ?? 'recording_asr'},
+          model = regexp_replace(model, '^live-native:', ''),
           text_ciphertext = ${ciphertext},
           segments_ciphertext = ${segmentsCiphertext},
           failure_reason = NULL,
@@ -5945,7 +6018,7 @@ export class PostgresCallRepository implements CallRepository {
         WHERE call_recording_id = ${recordingId}
       `;
       await persistTranscriptRevision(transaction,this.#encryptionKey,{callId:row.callId,transcriptId:row.transcriptId,callAttemptId:row.callAttemptId,
-        text,segments,createdAt:now.toISOString()},options?.summaryGeneratorVersion);
+        text,segments,createdAt:now.toISOString(),source:options?.source},options?.summaryGeneratorVersion);
       await transaction`
         UPDATE call_recordings
         SET
@@ -6566,7 +6639,8 @@ export class PostgresCallRepository implements CallRepository {
     errorCode: string,
     now: string,
     retryAt: string,
-    retryable = true
+    retryable = true,
+    defer = false
   ) {
     const found = await this.#sql.begin(async (transaction) => {
       const [job] = await transaction<{
@@ -6592,6 +6666,13 @@ export class PostgresCallRepository implements CallRepository {
         FOR UPDATE
       `;
       if (!job) return false;
+      // Admission did not reach a provider: preserve the retry budget and chunk generation.
+      if (defer && job.type === "final_transcription" && /^BETA_(BUDGET_EXHAUSTED|BUDGET_UNCONFIGURED|SPENDING_PAUSED)$/.test(errorCode)) {
+        await transaction`UPDATE durable_jobs SET status='queued', attempt_count=greatest(0,attempt_count-1),
+          run_after=${retryAt}::timestamptz, lease_owner=NULL, leased_at=NULL, lease_expires_at=NULL,
+          last_error_code=${errorCode}, updated_at=${now}::timestamptz, completed_at=NULL WHERE id=${jobId}`;
+        return true;
+      }
       const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
       const cancelled = job.type === "text_artifact_generation" && errorCode === "TEXT_ARTIFACT_STALE";
       await transaction`
@@ -7056,6 +7137,7 @@ export class PostgresCallRepository implements CallRepository {
 
   #mapFinalTranscript(row: FinalTranscriptRow): FinalTranscript {
     return {
+      source: row.source,
       id: row.id,
       status: row.status,
       text: row.textCiphertext

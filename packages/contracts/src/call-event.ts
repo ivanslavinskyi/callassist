@@ -27,7 +27,8 @@ export const callEventSchema = z.discriminatedUnion("type", [
     key: z.string().min(1),
     role: z.enum(["assistant", "recipient"]),
     delta: z.string(),
-    locale: callLocaleSchema
+    locale: callLocaleSchema,
+    nativeTiming: transcriptSegmentSchema.shape.nativeTiming
   }),
   z.object({
     type: z.literal("approval.requested"),

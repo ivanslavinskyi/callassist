@@ -1,0 +1,1 @@
+export const ASSISTANT_DISPLAY_NAME = "SHPROHLI";

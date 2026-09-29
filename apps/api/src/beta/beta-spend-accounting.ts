@@ -2,7 +2,7 @@ import type postgres from "postgres";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 import { calculateProviderUsageCost, openAIPublicPricingVersion } from "../config/provider-pricing-policy";
 
-export const betaAccountingVersion = `${openAIPublicPricingVersion}:twilio-ch-ancillary-2026-09-15`;
+export const betaAccountingVersion = `${openAIPublicPricingVersion}:twilio-ch-ancillary-2026-09-15:postcall-2026-09-27`;
 // Media Streams, recording and one month of recording storage, rounded upwards.
 // Connectivity has its own provider-reported price. This is an allowance until
 // those ancillary line items can be reconciled, not a provider invoice.
@@ -18,7 +18,16 @@ export type BudgetReservation = {
   key: string; kind: string; amount: number;
   call: { terminal: boolean; providerStatus: string | null } | null;
   operations: BudgetOperation[];
+  postCallPending?: boolean;
 };
+
+// Matches the maximum simultaneous transcription uploads. Keep an allowance for
+// each unfinished request, including requests with an uncertain provider outcome.
+export const postCallReserveSlots = 4;
+export function postCallCommittedMicros(reservation: BudgetReservation) {
+  return reservation.operations.filter(o => !o.separatelyReserved).reduce((sum, operation) =>
+    sum + (priceBudgetOperation(operation) ?? reservation.amount / postCallReserveSlots), 0);
+}
 type Amounts = { reportedCostMicros: number; usageCostMicros: number; pendingReserveMicros: number };
 const empty = (): Amounts => ({ reportedCostMicros: 0, usageCostMicros: 0, pendingReserveMicros: 0 });
 
@@ -54,7 +63,8 @@ export function priceBudgetOperation(operation: BudgetOperation): number | null 
   if (operation.provider === "twilio" && ["answering_detection", "voicemail_tts"].includes(operation.operationType)) return priced.calculatedUsdMicros;
   if (priced.durationUsdMicros !== null) return priced.calculatedUsdMicros;
   // Token totals and all billable input/output modalities must be present.
-  const audio = operation.operationType === "realtime_response" && operation.stage !== "live_delegation";
+  const textOnlyLiveStages = ["live_delegation", "live_consent_classification", "live_speech_classification", "live_action_speech_classification", "live_closing_classification"];
+  const audio = operation.operationType === "realtime_response" && !textOnlyLiveStages.includes(operation.stage);
   if (audio && ["input_text_tokens", "output_text_tokens", "input_audio_tokens", "output_audio_tokens"].some(k => !present(k))) return null;
   if (!audio && (!present("output_text_tokens") || (!present("input_text_tokens") && !present("input_audio_tokens")))) return null;
   const accounted = value("input_text_tokens") + value("input_audio_tokens") + value("output_text_tokens") + value("output_audio_tokens");
@@ -65,6 +75,16 @@ export function priceBudgetOperation(operation: BudgetOperation): number | null 
 
 export function accountBudgetReservation(reservation: BudgetReservation): Amounts {
   const amounts = empty();
+  if (reservation.key.startsWith("postcall:")) {
+    for (const operation of reservation.operations.filter(o => !o.separatelyReserved)) {
+      const price = priceBudgetOperation(operation);
+      if (price === null) amounts.pendingReserveMicros += reservation.amount / postCallReserveSlots;
+      else amounts.usageCostMicros += price;
+    }
+    if (reservation.postCallPending) amounts.pendingReserveMicros = Math.max(amounts.pendingReserveMicros,
+      reservation.amount - amounts.usageCostMicros);
+    return amounts;
+  }
   if (reservation.kind !== "call") {
     const operation = reservation.operations[0];
     const price = operation ? priceBudgetOperation(operation) : null;
@@ -119,13 +139,17 @@ export function summarizeBetaSpend(reservations: BudgetReservation[]) {
 // reservations and append-only provider ledgers remain intact. Recompute on
 // admission/read so late costs are included without a second settlement worker
 // or a lock-order inversion against provider completion transactions.
-export async function readBetaSpend(tx: postgres.TransactionSql) {
+export async function readBetaReservations(tx: postgres.TransactionSql) {
   const rows = await tx<BudgetReservation[]>`
     WITH reservations AS (
       SELECT *,substring(reservation_key from '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')::uuid AS entity_id
       FROM beta_spend_reservations WHERE created_at>now()-interval '24 hours'
     )
     SELECT b.reservation_key AS key,b.kind,b.amount_micros::double precision AS amount,
+      (a.ended_at IS NULL OR EXISTS(SELECT 1 FROM call_recordings cr
+        LEFT JOIN final_transcripts ft ON ft.call_recording_id=cr.id
+        WHERE cr.call_attempt_id=a.id AND cr.status NOT IN ('failed','deleted')
+          AND COALESCE(ft.status,'processing')<>'completed')) AS "postCallPending",
       CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('terminal',
         a.ended_at IS NOT NULL AND a.provider_status IN ('completed','canceled','busy','failed','no-answer'),
         'providerStatus',a.provider_status) END AS call,
@@ -139,14 +163,19 @@ export async function readBetaSpend(tx: postgres.TransactionSql) {
           'input_audio_tokens',u.input_audio_tokens,'cached_input_audio_tokens',u.cached_input_audio_tokens,
           'output_audio_tokens',u.output_audio_tokens,'total_tokens',u.total_tokens,
           'duration_seconds',u.duration_seconds,'billable_seconds',u.billable_seconds) END,
-        'separatelyReserved',EXISTS(SELECT 1 FROM beta_spend_reservations separate WHERE separate.reservation_key='provider:'||o.id::text),
+        'separatelyReserved',EXISTS(SELECT 1 FROM beta_spend_reservations separate WHERE separate.reservation_key='provider:'||o.id::text
+          OR (b.kind='call' AND o.operation_type='transcription' AND separate.reservation_key='postcall:'||o.call_attempt_id::text)),
         'costs',COALESCE((SELECT json_agg(json_build_object('component',c.component,'currency',c.currency,'amount',c.amount_micros::double precision))
           FROM provider_cost_records c WHERE c.operation_id=o.id),'[]'::json)))
         FROM provider_operations o
         LEFT JOIN provider_operation_results r ON r.operation_id=o.id
         LEFT JOIN effective_provider_usage u ON u.operation_id=o.id
         WHERE (b.kind='call' AND o.call_attempt_id=a.id)
+          OR (b.reservation_key LIKE 'postcall:%' AND o.call_attempt_id=a.id AND o.operation_type='transcription')
           OR (b.kind<>'call' AND b.reservation_key LIKE 'provider:%' AND o.id=b.entity_id)), '[]'::json) AS operations
-    FROM reservations b LEFT JOIN call_attempts a ON b.kind='call' AND b.reservation_key LIKE 'call:%' AND a.id=b.entity_id`;
-  return summarizeBetaSpend(rows);
+    FROM reservations b LEFT JOIN call_attempts a ON (b.reservation_key LIKE 'call:%' OR b.reservation_key LIKE 'postcall:%') AND a.id=b.entity_id`;
+  return rows;
+}
+export async function readBetaSpend(tx: postgres.TransactionSql) {
+  return summarizeBetaSpend(await readBetaReservations(tx));
 }

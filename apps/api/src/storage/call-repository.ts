@@ -1,4 +1,6 @@
+import type { NativeTranscriptCapture } from "./native-transcript";
 import type { AnsweringTransitionInput, AnsweringTransitionResult } from "../telephony/answering-policy";
+import type { VoiceActionInput, VoiceActionRecord, VoiceActionTransition } from "./voice-action";
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
 import type { BetaControls } from "../beta/beta-controls";
 import type { RecipientOptOutStore } from "../safety/recipient-opt-out-store";
@@ -823,6 +825,8 @@ export interface CallRepository extends CallTextRepository {
     lease: DurableJobLease
   ): Promise<void>;
   completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
+  beginVoiceAction(input: VoiceActionInput): Promise<VoiceActionRecord | null>;
+  transitionVoiceAction(input: VoiceActionTransition): Promise<VoiceActionRecord | null>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;
   findCallDataDeletion(
@@ -967,6 +971,8 @@ export interface CallRepository extends CallTextRepository {
     input: RecordingStatusInput,
     lease?: DurableJobLease
   ): Promise<RecordingMutationResult | null>;
+  setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture): Promise<void>;
+  getNativeTranscriptWork(recordingId: string): Promise<{ capture: NativeTranscriptCapture | null; snapshot: CallSnapshot }>;
   claimFinalTranscript(
     recordingId: string,
     model: string,
@@ -978,7 +984,7 @@ export interface CallRepository extends CallTextRepository {
     text: string,
     segments: FinalTranscriptSegment[],
     lease?: DurableJobLease,
-    options?: { summaryGeneratorVersion?: string }
+    options?: { summaryGeneratorVersion?: string; source?: "recording_asr" | "live_native" }
   ): Promise<FinalTranscriptMutationResult>;
   failFinalTranscript(
     recordingId: string,
@@ -1011,7 +1017,8 @@ export interface CallRepository extends CallTextRepository {
     errorCode: string,
     now: string,
     retryAt: string,
-    retryable?: boolean
+    retryable?: boolean,
+    defer?: boolean
   ): Promise<DurableJob | null>;
   listDurableJobs(): Promise<DurableJob[]>;
   listDurableJobAttempts(jobId: string): Promise<DurableJobAttempt[]>;

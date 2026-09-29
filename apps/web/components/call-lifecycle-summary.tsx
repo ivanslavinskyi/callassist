@@ -24,7 +24,7 @@ export function CallLifecycleSummary({ lifecycle, locale, message }: { lifecycle
   return <section className={`call-lifecycle-summary result-${lifecycle.result}`} aria-label={label}>
     <div className="lifecycle-heading"><h2>{callPresentationCopy[locale].result}: {label}</h2>{credit ? <span className="lifecycle-credit">{credit}</span> : null}</div>
     <p>{help}</p>
-    {lifecycle.answering && lifecycle.answering.decision !== "consent" ? <>
+    {lifecycle.answering && lifecycle.answering.decision !== "consent" && lifecycle.consent !== "granted" && !lifecycle.conversationStartedAt ? <>
       <p>{answeringMessages[locale].message[lifecycle.answering.message === "issued" ? "unknown" : lifecycle.answering.message]}</p>
       {message ? <><p>{answeringMessages[locale].approvedMessage}</p><blockquote>{message}</blockquote></> : null}
       <p className="muted-text">{answeringMessages[locale].uncertainty}</p>

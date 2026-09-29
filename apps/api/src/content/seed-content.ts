@@ -1,3 +1,4 @@
+import { updateTranscriptCopy } from "./transcript-copy";
 import { contentUiLocales } from "@callassist/contracts";
 import { localizedPublicText, localizePublicPage, publicText } from "./public-localizations";
 import type {
@@ -306,6 +307,7 @@ for (const definition of definitions) {
   for (const locale of contentUiLocales) {
     if (!definition.translations[locale]) definition.translations[locale] = localizePublicPage(definition.translations.en!, definition.key, locale);
   }
+  definition.translations = updateTranscriptCopy(definition.translations, `page:${definition.key}`);
 }
 
 export const seededContentPages: SeedContentPage[] = definitions.flatMap(
@@ -405,7 +407,7 @@ export const seededEditorialCollections: SeedEditorialCollection[] = [
   { collectionId: "80000000-0000-4000-8000-000000000001", revision: { key: "faq", id: "82000000-0000-4000-8000-000000000001", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, requiredLocales: [...contentUiLocales], items: faqItems } },
   { collectionId: "80000000-0000-4000-8000-000000000002", revision: { key: "navigation", id: "82000000-0000-4000-8000-000000000002", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, requiredLocales: [...contentUiLocales], items: navigationItems } },
   { collectionId: "80000000-0000-4000-8000-000000000003", revision: { key: "landing", id: "82000000-0000-4000-8000-000000000003", number: 1, status: "published", createdByUserId: null, createdAt: publishedAt, updatedAt: publishedAt, publishedAt, requiredLocales: [...contentUiLocales], items: landingBlocks } }
-];
+].map(collection => updateTranscriptCopy(collection, `collection:${collection.revision.key}`)) as SeedEditorialCollection[];
 
 function sectionAnswer(value: ContentSection) {
   return [...value.paragraphs, ...value.bullets.map((bullet) => `• ${bullet}`)].join("\n\n");

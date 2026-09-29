@@ -240,6 +240,30 @@ const callBrief = {
 } satisfies CreateCallBriefInput;
 
 describe("auth API", () => {
+  it.each(["user", "admin", "superadmin"] as const)("applies authenticated %s settings before preparation fingerprints", async role => {
+    const { app, repository } = createAuthApp();
+    const cookie = await registerAndVerify(app, registration);
+    const userId = (await app.inject({ url: "/api/auth/me", headers: { cookie } })).json().user.id;
+    await repository.setUserRoleForTest(userId, role);
+    const input = { ...callBrief, tonePreference: "friendly", addressingMode: "informal", resultHandling: "request_external_delivery", deliveryInstruction: "Ask for email delivery to nina@example.com." };
+    const key = randomUUID();
+    const request = (payload: object) => app.inject({ method: "POST", url: "/api/call-preparations", headers: { cookie, "idempotency-key": key }, payload });
+    const first = await request(input);
+    expect(first.statusCode).toBe(202);
+    const again = await request({ ...input, resultHandling: "message_only", ...(role === "superadmin" ? {} : { addressingMode: "auto", tonePreference: "formal" }) });
+    expect(again.statusCode).toBe(202); expect(again.json().id).toBe(first.json().id);
+    let preparation = first.json();
+    for (let i = 0; i < 100 && !preparation.callBriefId; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      preparation = (await app.inject({ url: `/api/call-preparations/${preparation.id}`, headers: { cookie } })).json();
+    }
+    expect(preparation.status).toBe("succeeded");
+    const snapshot = (await app.inject({ url: `/api/call-briefs/${preparation.callBriefId}`, headers: { cookie } })).json();
+    expect(snapshot.compilation.rawBrief).toMatchObject({ tonePreference: role === "superadmin" ? "friendly" : "neutral", addressingMode: role === "superadmin" ? "informal" : "formal", resultHandling: "capture_in_callassist", deliveryInstruction: "" });
+    expect(snapshot.compilation.rawBrief.context).toContain(input.deliveryInstruction);
+    const edit = await app.inject({ method: "PUT", url: `/api/call-briefs/${preparation.callBriefId}`, headers: { cookie, "idempotency-key": randomUUID() }, payload: input });
+    expect(edit.statusCode).toBe(202);
+  });
   it.each(["user", "admin", "support"] as const)("restricts Russian call preparation and fallback for %s", async (role) => {
     const { app, repository } = createAuthApp();
     const cookie = await registerAndVerify(app, registration);

@@ -5,6 +5,9 @@ import type { EndCallReason } from "../realtime/agent-hangup";
 /** The HTTP/Twilio boundary is independent of the conversation protocol. */
 export interface VoiceRuntime {
   handleTwilioSocket(socket: WebSocket): void;
+  prepareCall?(binding: { callBriefId: string; callAttemptId: string; providerCallId: string; compilationSnapshotHash: string }): Promise<void>;
+  releasePrepared?(attemptId: string): void;
+  close?(): void;
 }
 
 /** Attempt-bound application controls; the runtime must gate model context and actions by call phase. */
