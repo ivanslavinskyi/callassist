@@ -410,7 +410,6 @@
   "Close menu": "Закрити меню",
   "A little help.\nA call made easier.": "Трохи допомоги.\nТелефонувати стає простіше.",
   "Prepare your request, review the plan and stay in control.": "Опишіть завдання, перевірте план і керуйте дзвінком.",
-  "3 calls included in the public beta": "3 дзвінки включено у відкриту бету",
   "Calls to Swiss numbers only. The recipient chooses whether to continue.": "Дзвінки лише на швейцарські номери. Співрозмовник сам вирішує, чи продовжувати розмову.",
   "Assistant": "Асистент",
   "Prepare a plan. Review it before the call.": "Підготуйте план і перевірте його перед дзвінком.",
@@ -1007,5 +1006,7 @@
   "The call policy changed. Review and approve the updated plan before calling.": "Правила дзвінка змінилися. Перевірте та підтвердьте оновлений план перед дзвінком.",
   "Delete after the call": "Видалити після дзвінка",
   "Deleted automatically when the recording becomes available after the call.": "Видаляється автоматично, щойно запис стане доступним після дзвінка.",
-  "Deleted automatically {0} days after the recording becomes available.": "Видаляється автоматично через {0} днів після готовності запису."
+  "Deleted automatically {0} days after the recording becomes available.": "Видаляється автоматично через {0} днів після готовності запису.",
+  "Beta allowance": "Квота бета-тесту",
+  "Beta access is limited": "Доступ до бета-тесту обмежений"
 }

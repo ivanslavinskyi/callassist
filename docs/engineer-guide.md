@@ -1,0 +1,397 @@
+# SHPROHLI engineer guide
+
+Source checkpoint: 2026-10-01, schema catalog `0001`–`0099`. This describes the
+implementation, not the currently deployed environment. Deployment runbooks,
+recovery procedures and VPS topology are local, ignored operational materials.
+The [implementation record](pre-production-implementation-2026-10-01.md) states
+what was actually verified and which acceptance checks remain external.
+
+## Repository and ownership
+
+| Location | Responsibility |
+| --- | --- |
+| `apps/web` | Next.js App Router UI, localized public/authenticated pages and admin console |
+| `apps/api` | Fastify API, session authorization, PostgreSQL repositories, provider integrations and workers |
+| `packages/contracts` | Zod request/response schemas, domain types and shared validation |
+| `apps/api/src/db/migrations` | Immutable, ordered SQL catalog with checksum ledger |
+| `apps/api/src/voice` | Live/Realtime sessions, PCMU transport, consent/disclosure, playback and action authorization |
+| `apps/api/src/brief-compiler` | Model compilation, moderation, execution-language checks and deterministic policy |
+| `apps/api/src/text-processing` | Plan review translation, transcript translations, summaries and final assessment |
+| `apps/api/src/storage` | Durable calls/attempts, immutable revisions, usage/credit writes and admin projections |
+| `apps/api/src/credits`, `beta` | Period allowances, credit funding and service admission/spending controls |
+| `apps/api/src/safety` | Recipient suppression and returned-plan case review |
+| `apps/api/src/telemetry-export` | Snapshot selection, ZIP generation, retained audio, expiry/revocation |
+| `apps/api/src/notifications` | Superadmin delivery outbox, reports and localized plan-review alerts |
+| `apps/api/src/content` | CMS seeds, editorial collections and exact public-copy upgrades |
+| `apps/web/lib/i18n` | Static interface dictionaries; distinct from published CMS content |
+
+Node.js >=22.19 and pnpm 10.12.4 are declared in the root package. CI uses
+PostgreSQL 17. Use the lockfile for exact dependency versions. All four first-party
+packages are private and `UNLICENSED`; third-party licenses/notices remain intact.
+
+## Process and data flow
+
+```mermaid
+flowchart LR
+  UI[Localized Next.js UI] --> API[Fastify API]
+  API --> DB[(PostgreSQL)]
+  DB --> W[Durable workers]
+  W --> C[Plan compiler and text processing]
+  API --> T[Twilio call and media stream]
+  T --> V[Live or Realtime bridge]
+  V --> O[Voice and Responses providers]
+  V --> DB
+  DB --> A[Admin projections / exports / notifications]
+  API --> SSE[Authorized SSE updates]
+  SSE --> UI
+```
+
+`src/index.ts` starts the API, `src/worker.ts` the external worker. Embedded worker
+mode exists for local development; production configuration validates real
+providers, durable storage and required configuration. `app.ts` composes route
+groups and repositories. `CallService` coordinates workflow; repositories own
+transactional invariants. In-memory implementations support deterministic tests
+and mock development, with the same public contracts where supported.
+
+PostgreSQL is authoritative. Persist state and an idempotent operation before
+network work, then record provider completion. Do not infer a durable state solely
+from a websocket event or browser timer. Jobs are leased and renewed, bounded by
+generation/attempt budgets and checked before publication. Separate serial worker
+lanes prevent recording work from occupying the preparation lane. Across processes,
+database claims and lease checks prevent duplicate job ownership. The worker drains
+current work on shutdown; expired leases permit bounded recovery.
+
+## User and call lifecycle
+
+Registration verifies phone possession and captures the configured legal agreement.
+Email verification is required by default; explicit deferral is available only when
+enabled. Deferral does not mark an address verified. Current policy gates new calls.
+Roles and sensitive reads are checked server-side, not only by hiding controls.
+
+A preparation request is idempotent for the account and request key. It stores the
+input and a durable compilation job. Compilation produces an immutable revision
+with raw/compiled brief, moderation results, policy decision, model/compiler
+versions and snapshot hash. Edits create another revision. Approval binds a precise
+revision/hash and original or translated review receipt. A stale approval cannot
+authorize a changed plan. A recompile that fails before publication preserves the
+previous revision; a published returned plan still needs correction and fresh approval.
+
+New call attempts pass recipient suppression, account/email/phone eligibility,
+service limits, budget admission, approved-plan and credit checks transactionally.
+The frozen execution snapshot owns runtime language/voice/plan/permissions. Each
+attempt has its own provider lifecycle, credit reservation, recording and usage.
+Repeated calls are separate attempts or newly reviewed drafts according to the
+repeat workflow; they do not overwrite earlier evidence.
+
+Transport completion, no answer, voicemail, consent refusal, missing consent,
+substantive conversation, task outcome and user feedback are different facts.
+Credit settlement follows the substantive-answer policy, not mere call connection
+or whether the user's objective succeeded. A negative factual answer or referral
+can count as substantive. Assessment uncertainty has a bounded settlement path.
+
+## Current voice runtime
+
+Default `VOICE_RUNTIME_DRIVER=live`, `VOICE_RUNTIME_LIVE_FALLBACK=false`. One
+`UnifiedLiveCall` manages the native session from admission/disclosure through
+conversation and closing. Realtime and legacy hybrid fallback remain deliberate
+compatibility code; removing them requires a separate supported-runtime decision.
+The source runtime identifier is `live-managed-v7`.
+
+Live handles ordinary speech and native Responses delegation. The application owns
+the hard boundaries: validated tool schemas and permissions, consent, recording,
+disclosure playback, appointment confirmation and the final hangup. A managed
+decision can resolve settled input missed by native delegation; there is no separate
+ordinary-reply semantic classifier. Calendar/appointment authorization remains
+within the approved time windows and no-new-financial-terms policy. No external
+calendar integration is implied.
+
+For native Live, AMD runs alongside disclosure. Explicit machine/fax outcomes have
+their own policy; `unknown` is inconclusive. A later AMD callback cannot reverse
+accepted consent. Consent tools are restricted to the consent stage. Recording
+and task access wait for the required consent/disclosure/recording conditions.
+Pre-consent recipient audio/transcript is not retained as conversational evidence.
+Application-owned speech and terminal playback are journaled; hangup waits for the
+correct uncleared playback mark. Recipient corrections and interrupted playback
+are handled explicitly rather than treating an attempted send as heard speech.
+
+Each new native attempt records a runtime descriptor before OpenAI Live/TTS startup:
+runtime version, optional validated release SHA, compiler/policy versions,
+hashes of instructions and compilation, models, voice, locale and disclosure
+version. The optional release value comes from a valid 40-hex `SHPROHLI_RELEASE_SHA`.
+It contains hashes, not raw prompts, and is cleared by call/account deletion.
+Historical missing descriptors stay null. A code/config change does not
+retroactively identify an old call's runtime.
+
+## Preparation latency and diagnostics
+
+`CALL_PREPARATION_TIMEOUT_MS` defaults to 120000 and covers queue time, provider
+requests and durable retries from the preparation creation timestamp.
+`OPENAI_BRIEF_COMPILER_TIMEOUT_MS` is a second compile-level ceiling. Generation requests
+default to 35 seconds; moderation retains its own bounded timeout. Output moderation
+gets reserved time. No safety stage is removed to shorten waiting.
+
+Provider requests identify input moderation, initial compilation, compilation repair,
+language audit and output moderation. Metadata includes repair kind/number,
+transport attempt, planned timeout and remaining deadline before journaling. Actual
+request duration comes from result timestamps; time spent journaling can reduce the
+effective provider timeout. The admin preparation
+inspector shows initial queue delay, stage timing, errors and attempts. Historical
+rows without request metadata are explicitly incomplete. Public status uses localized
+stage labels; browser polling never authorizes a second paid compilation by itself.
+
+The audit found a small local sample's long tail dominated by provider/network
+failures and retries; short initial queue times do not prove zero congestion under
+load. New limits bound delay and expose its cause. They are not a claim of measured
+production latency improvement. Tune from stage percentiles and completion/error
+rates together, not successful latency alone.
+
+## Credits, allowances and admission
+
+The immutable credit ledger records grant/reserve/charge/refund; funding provenance
+distinguishes persistent/manual/promotional balance from a beta period. Existing
+balances are preserved. Beta policy is versioned; the initial policy remains
+3 credits for a lifetime. Admin > System separates allowance policy from attempt
+limits and spending controls.
+
+Policies support 0–100 credits for `lifetime`, `day`, `week` or `month`. Periods use
+UTC calendar boundaries, weeks start Monday, months start on day 1. Unused period
+credits do not roll over. Period grants are materialized lazily and idempotently;
+there is no monthly cron whose failure can issue duplicate grants. Concurrent call
+starts must serialize last-credit admission. Beta funding is consumed before
+persistent funding. Refunds return to the original funding period; an expired
+period refund does not enlarge the next period's allowance.
+
+Saving a policy changes enrollment for new registrations. Applying it to existing
+accounts is a separate preview/apply operation with expected revision, snapshot
+token and audit reason. It does not silently reset balances on every settings save.
+The preview reports affected accounts, immediate/next-boundary transitions,
+persistent credits and active reservations. Pending effective changes and funding
+breakdown are visible in account/admin credit views. Existing period boundaries
+are respected; active reservations retain their original provenance.
+Existing-account transition targets active users with verified phones. Transitioning
+an existing account to a lifetime policy does not issue a second signup grant;
+the interface distinguishes that fact from a new registrant's one-time allowance.
+
+Public registration options expose `open`/`full`, the current allowance and UTC
+semantics. When seat display is disabled, `remaining` is null, not a hidden DOM
+value. Available seats are derived from the same registration-cap accounting used
+inside account creation. Concurrent last-seat attempts cannot oversubscribe the
+cap. The preview is informational; final admission is transactional.
+Intake counts retained registration slots, including unfinished/deleted registrations;
+it is not a count of currently active users. Invitation capacity is additional to
+open-registration capacity and follows its own admission rules.
+
+Budget reservations are not actual expenses. Service spending has a separate
+reservation/journal model. Failed/refunded calls still count toward attempt limits.
+Changing caps does not delete accounts or interrupt already admitted calls.
+
+## Costs and accounting
+
+| Evidence | Interpretation |
+| --- | --- |
+| Credit ledger | User entitlement; never a provider currency amount |
+| Provider operation | Intent/admission before dispatch, including requests with lost responses |
+| Provider result/usage | Returned quantities/status; absence may still mean a charge |
+| Versioned estimate | Quantities priced against the saved tariff version |
+| Provider-reported cost | Actual amount/currency returned for an operation/telephony leg |
+| Account billing snapshot | Provider account-level reconciliation evidence with scope and coverage |
+| Budget reservation | Conservative capacity held to prevent overspending |
+
+OpenAI totals contain OpenAI operations. Twilio ancillary estimates (AMD/voicemail)
+and telephony reported costs remain Twilio. Application-rendered speech is a speech
+category, not text generation. Live sessions and failed paid operations without
+usage remain visible in the request drilldown. Missing usage is
+`usage_unknown_possible_charge`, never a zero-cost success.
+
+Estimates use the saved pricing version and usage provenance. AMD uses request
+count; voicemail uses captured character count; speech uses its measured duration
+where supported. Known historical version aliases remain interpretable. Unknown
+tariffs or missing quantities remain unpriced. Do not add reported actuals and an
+estimate for the same service. Do not sum different currencies or present a partial
+estimate as a complete invoice. Provider billing snapshots may cover a broader
+account or timezone than the selected application's operations.
+
+The expense explorer separates Cost / Usage / Requests and displays incomplete
+coverage. Pricing definitions are in `config/provider-pricing-policy.ts`, request
+journaling in repositories, and admin display helpers in `apps/web/lib/admin-costs.ts`.
+Tariff changes require a new version rather than rewriting historical estimates.
+
+## Telemetry, transcripts and audio export
+
+Structured telemetry excludes raw provider error messages and sensitive prompt
+content. Operational logs use PII-safe error reporting. Native transcript capture,
+application playback, terminal decision, assessment and credit evidence are
+separate persisted sources. "First audio sent by application" measures application
+egress, not what the recipient heard; playback acknowledgement is stronger evidence.
+
+Primary transcript source is Live. Recording ASR is an owner-requested additional
+source, not automatic recovery triggered by page reads or callbacks. Transcript
+revisions are immutable; summaries and translations reference their source/hash.
+Incomplete native captures retain quality flags. Recording retention does not
+imply deleting the retained textual source unless the wider deletion policy applies.
+
+Admin telemetry export v2 includes native captures, immutable contexts/revisions,
+terminal/action evidence, preparation diagnostics, runtime descriptors, budget and
+beta credit provenance, and scoped plan-review evidence. Explicit source inventory
+tests guard new persisted tables and columns. Direct transcript attribution,
+legacy inference and unknown provenance are distinct; export does not invent old
+runtime metadata. Preview shows record coverage and approximate WAV size.
+
+The period selects attempt start times and preparation creation times. Export
+includes associated retained history and recordings for those calls, including
+attempts outside the selected period. New exports default to include audio;
+metadata-only remains an explicit option. Eligible recordings
+must be available, consented, not deletion-pending and within a known retention
+deadline. The database snapshot completes before provider network streaming.
+Audio is fetched one recording at a time, with the stored channel count. No ASR is
+triggered by export. The manifest records status/reason, byte length, checksum,
+channels and linkage for each recording, including unavailable/missing sources.
+
+Limits: 64 MiB per recording, 250 MiB audio and a separate 250 MiB structured-data
+limit per archive. Oversized exports fail with narrower-period guidance; automatic
+multipart exports are not implemented. A missing recording/404 is explicit partial
+coverage; a broken stream fails that generation rather than shipping truncated audio.
+Build leases renew and jobs have a 30-minute deadline. Ready exports expire at the
+earlier of 24 hours or the earliest eligible recording retention deadline. Build
+fencing and per-part download checks revoke archives after deletion, consent
+revocation or shortened retention. Files already downloaded cannot be recalled.
+
+## Returned plans and superadmin review
+
+Admin > Safety opens Plan reviews; Recipient protection is the adjacent tab.
+Overview, user and call screens link to the corresponding cases. A case belongs to
+an immutable returned compilation revision. Categories distinguish policy signal,
+ordinary clarification, unsupported task and technical failure. A returned plan is
+not by itself evidence of abuse.
+
+The publication transaction inserts the case and durable notification event.
+Default notification policy covers all returned plans; signals-only is optional.
+Historical backfill is dry-run by default and deliberately sends no retroactive
+email. Delivery status/failure/retry is visible with audit evidence. Emails contain
+validated reason/version/case metadata and a console link; raw briefs, contacts and
+transcripts stay behind superadmin sensitive-access authorization and a reason.
+Localized HTML/text rendering escapes data and follows recipient language.
+
+Case triage uses revision checks, status/assignee/disposition, encrypted notes and
+an audit trail. Detailed revision evidence and diffs require a sensitive-access
+reason. Read and mutation permissions, CSRF, account deletion and source deletion
+are rechecked server-side. Email delivery retries create an audited fresh generation;
+they do not manufacture or overwrite the original incident.
+
+## Language and content model
+
+Public UI locales: `de`, `fr`, `it`, `rm`, `en`, `ru`, `uk`. UI locale, task-content
+language, spoken call locale and communication locale are distinct. A user's UI
+switch must not change the frozen call language or authorize a different translated
+plan. Approval binds source and review artifact revision/hash.
+
+Static interface strings live in web dictionaries. CMS page/collection content is
+versioned in PostgreSQL with seeds for empty installations. Updating a seed does
+not change an existing publication. Exact copy upgrades `0094`/`0098` preserve old
+publications and legal acceptances, update known draft text without publishing it,
+and abort on unknown edits of target published fields. All seven locales are checked.
+The beta landing/terms copy points to the current allowance rather than promising
+three credits forever. API public options supply dynamic allowance/seat values.
+
+Admin operational UI is primarily English. Public allowance/registration/account
+copy and alert emails have all seven locales. Do not silently reuse English for a
+missing public locale. Romansh text should receive editorial review independently
+of automated key/coverage checks. Timezones are explicit: credit periods use UTC;
+localized display/report periods can use Europe/Zurich, and appointment windows
+use the approved plan's timezone.
+
+## API map and extension points
+
+Exact inputs/outputs come from `packages/contracts/src`; route authorization and
+status codes come from their registration modules. The [runtime reference](runtime-reference.md)
+contains the broader route/configuration inventory. Core families:
+
+| API family | Purpose / authorization |
+| --- | --- |
+| `/api/auth/*` | Registration options, session/login/recovery, verification and legal agreement |
+| `/api/account/*` | Authenticated account, preferences, sessions, export/deletion |
+| `/api/call-preparations*` | Idempotent asynchronous plan preparation and status |
+| `/api/call-briefs/*` | Owner plans, review/approval/start, attempts, SSE, text/audio and deletion |
+| `/api/call-briefs/:id/recording-transcript` | Owner explicit ASR request, bounded admission |
+| Twilio callback/media routes | Signature/token validation and call/attempt binding |
+| `/api/admin/calls*`, `/api/admin/operations/overview` | Role-authorized operational projections and reasoned sensitive reads |
+| `/api/admin/system/beta*` | Superadmin admission settings and versioned allowance controls |
+| `/api/admin/system/beta/credits/preview`, `/apply` | Explicit existing-account transition |
+| `/api/admin/safety/plan-reviews*` | List/detail/triage, sensitive evidence and audited email retry |
+| `/api/admin/telemetry-exports*` | Superadmin preview/create/status/download/retry with expiry/revocation |
+| Content/SEO admin route groups | CMS drafts, preview, publish/history and OG assets |
+
+New routes should validate strict contracts, set private/no-store for sensitive
+responses, enforce ownership/role inside the backend, and require CSRF for
+authenticated state changes. Reuse repository transactions and idempotency rather
+than adding an independent client-side counter. On errors expose stable codes;
+keep provider secrets and raw error text out of responses/logs.
+
+## Storage and privacy invariants
+
+First-party sensitive fields use the encryption keyring; the authoritative inventory
+is `src/db/encrypted-columns.ts`. New sensitive persisted fields must be included
+there and covered by deletion, account anonymization, export and rotation handling.
+Sensitive-access reasons/triage notes are encrypted. Hashes used for lookup have
+separate purposes/keys. Never log raw environment or decrypted rows in diagnostics.
+
+Migration names/checksums are immutable once applied. `db:migrate:check` checks the
+catalog without applying it; ordinary migration application is a distinct explicit
+step. Migrations `0095`–`0099` add accounting/audio exports, beta allowances,
+plan-review cases, public-copy updates and preparation request metadata. Backfills
+and existing-account policy transitions remain explicit, reviewed actions.
+
+Deletion spans call inputs, transcripts, recordings, derived artifacts, safety
+notes and generated archives. Do not extend source retention merely to complete an
+export. Missing/deleted historical data stays missing; never reconstruct evidence
+from today's prompt or current mutable plan.
+
+## Development and verification
+
+Initialize from `.env.example`, using dedicated local databases. Providers default
+to mock where offered. Real compiler/voice/email/telephony tests cost money or create
+external effects and require an explicit exercise. Paid audio fixture generation
+uses synthetic text only. No customer recordings belong in committed fixtures.
+
+Useful commands from repository root:
+
+```sh
+corepack pnpm license:check
+corepack pnpm copy:check
+corepack pnpm db:migrate:check
+corepack pnpm lint
+corepack pnpm typecheck
+corepack pnpm build
+```
+
+For API tests use the disposable database wrapper from `apps/api`:
+
+```sh
+node --import tsx scripts/test-isolated-db.mjs --reporter=dot
+```
+
+It creates a uniquely named test database, migrates it, sets the test connection
+for the child runner and drops only its own fixture. Some destructive integration
+suites create an additional isolated database. The test role needs CREATEDB.
+Run web/contracts tests through their package scripts. CI checks the migration
+catalog, fresh schema, privacy/re-encryption/recovery, dependency audit, copy,
+license, lint, types, tests and build. CI result and real-provider acceptance are
+separate evidence.
+
+The optional `scripts/preproduction-browser-smoke.mts` exercises the new admin
+and registration flows against its own database and mock providers. From
+`apps/api`, run `node --import tsx ../../scripts/preproduction-browser-smoke.mts`.
+It requires an available Playwright module and Chromium; when those are outside
+the workspace, provide `PLAYWRIGHT_MODULE_PATH` and, if needed,
+`CHROMIUM_EXECUTABLE_PATH`. It uses separate API/web ports and a separate Next
+output directory, writes local receipts/screenshots under `.tools/`, then closes
+its services and removes its database. `--cleanup-only` checks service lifecycle
+without launching the browser. Do not run it concurrently with a Next build:
+Next can rewrite shared generated TypeScript configuration.
+
+When changing costs, test missing/duplicate/late usage and currency provenance.
+When changing credits, test last-credit concurrency, expiry/refund and policy
+transition. When changing export, test source deletion during build/download,
+lease expiry, audio failures and source inventory. When changing voice, retain
+consent, unauthorized action, interruption and hangup regressions. When changing
+language copy, verify every supported locale and existing CMS publications.

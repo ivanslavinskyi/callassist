@@ -1,4 +1,7 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { executionSpokenIdentities } from "./spoken-execution";
+import { liveRuntimeDescriptor } from "./runtime-descriptor";
 import { projectSpokenIdentityText } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import { randomUUID } from "node:crypto";
@@ -106,7 +109,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
           !["dialing", "in_progress"].includes(attempt.status)) { this.dispose(); return; }
       if (snapshot.brief.lifecycle?.answering?.streamAdmitted ||
           (snapshot.brief.lifecycle?.answering?.decision && snapshot.brief.lifecycle.answering.decision !== "consent")) { this.dispose(); return; }
-      this.#initialize(snapshot, attempt);
+      await this.#initialize(snapshot, attempt);
+      if (this.closed) return;
       const disclosure = resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).text;
       await Promise.all([this.#live!.start(), this.#render(disclosure)]);
       if (this.closed || this.#admitted) return;
@@ -185,7 +189,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#admitted = true;
     if (this.#warmSilence) clearInterval(this.#warmSilence);
     this.#warmSilence = null;
-    if (!this.#live) this.#initialize(snapshot, attempt);
+    if (!this.#live) await this.#initialize(snapshot, attempt);
+    if (this.closed) return;
     if (snapshot.brief.lifecycle?.answering?.execution === "async") {
       this.#unsubscribeAnswering = this.options.service.subscribe(binding.callBriefId, () => { void this.#checkAnswering(); });
       // Poll as a recovery path when gateway and callbacks use different processes,
@@ -240,7 +245,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     } catch { this.#close("openai_error"); }
     finally { this.#checkingAnswering = false; }
   }
-  #initialize(snapshot: NonNullable<Awaited<ReturnType<OpenAILiveBridgeOptions["service"]["get"]>>>,
+  async #initialize(snapshot: NonNullable<Awaited<ReturnType<OpenAILiveBridgeOptions["service"]["get"]>>>,
     attempt: NonNullable<Awaited<ReturnType<OpenAILiveBridgeOptions["service"]["getLatestAttempt"]>>>) {
     const approved = attempt.executionSnapshot!;
     const identities = executionSpokenIdentities(approved, snapshot.compilation!.rawBrief);
@@ -259,6 +264,12 @@ export class UnifiedLiveCall implements LiveLifecycle {
       fail: () => this.#close("openai_error")
     };
     this.#context = context;
+    await this.options.service.recordRuntimeDescriptor(snapshot.brief.id, attempt.id,
+      liveRuntimeDescriptor(context, snapshot.compilation!, buildLiveInstructions(context, false), {
+        live: this.options.liveModel ?? "gpt-live-1", delegation: this.options.delegationModel ?? "gpt-6-luna",
+        speech: this.options.speechModel ?? "gpt-4o-mini-tts"
+      }));
+    if (this.closed) return;
     this.#live = new OpenAILiveConversation(this.options, context, this);
   }
   startup() {
@@ -370,12 +381,15 @@ export class UnifiedLiveCall implements LiveLifecycle {
     const operationId = randomUUID(), started = Date.now();
     const stage = text === resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).text
       ? "live_disclosure_synthesis" : "live_application_synthesis";
-    const request = renderSpeech({ apiKey: this.options.apiKey, text, locale: this.#locale, voice,
-      model, speechFetch: this.options.speechFetch });
     const rendering = (async () => {
+      // Journal the paid request before crossing the provider boundary. A crash
+      // now leaves an explicit unknown operation instead of invisible spending.
+      await this.#recordRenderedSpeech(operationId, model, started, stage, null);
       let rendered: RenderedSpeech;
       try {
-        rendered = await request;
+        if (this.closed) throw new Error("SPEECH_RENDER_CANCELLED");
+        rendered = await renderSpeech({ apiKey: this.options.apiKey, text, locale: this.#locale, voice,
+          model, speechFetch: this.options.speechFetch });
       } catch (error) {
         await this.#recordRenderedSpeech(operationId, model, started, stage, {
           outcome: speechRenderOutcome(error), providerRequestId: null, providerResponseId: null,

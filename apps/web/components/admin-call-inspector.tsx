@@ -91,7 +91,7 @@ export function AdminCallInspector({ callId }: { callId: string }) {
           <h1>{copy.inspectorTitle}</h1>
           <code>{callId}</code>
         </header>
-        <nav className="section-navigation" aria-label="Inspector sections"><a href="#technical-state">{copy.technical}</a><a href="#cost-breakdown">Usage and cost</a><a href="#call-timeline">{copy.timeline}</a><a href="#sensitive-content">{copy.sensitiveTitle}</a></nav>
+        <nav className="section-navigation" aria-label="Inspector sections"><a href="#technical-state">{copy.technical}</a><a href="#cost-breakdown">Usage and cost</a><a href="#call-timeline">{copy.timeline}</a><a href="#sensitive-content">{copy.sensitiveTitle}</a><Link href={`/admin/safety?callId=${callId}`}>Returned plans</Link></nav>
 
         {loading ? <p role="status">{copy.loading}</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}

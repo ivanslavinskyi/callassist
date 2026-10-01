@@ -1,4 +1,24 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { betaMessages } from "./i18n/beta-messages";
+import { planReviewListSchema, planReviewDetailSchema, planReviewEvidenceSchema, type PlanReviewFilters, type PlanReviewUpdate } from "@callassist/contracts";
+
+export async function listPlanReviews(filters: Partial<PlanReviewFilters> = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
+  return planReviewListSchema.parse(await apiRequest(`/api/admin/safety/plan-reviews?${query}`, { cache: "no-store" }));
+}
+export async function getPlanReview(id: string) {
+  return planReviewDetailSchema.parse(await apiRequest(`/api/admin/safety/plan-reviews/${encodeURIComponent(id)}`, { cache: "no-store" }));
+}
+export async function readPlanReviewEvidence(id: string, reason: string) {
+  return planReviewEvidenceSchema.parse(await apiRequest(`/api/admin/safety/plan-reviews/${encodeURIComponent(id)}/sensitive-access`, { method: "POST", body: JSON.stringify({ reason }) }));
+}
+export async function updatePlanReview(id: string, input: PlanReviewUpdate) {
+  return planReviewDetailSchema.parse(await apiRequest(`/api/admin/safety/plan-reviews/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }));
+}
+export async function retryPlanReviewEmail(id: string, deliveryId: string, reason: string) {
+  return planReviewDetailSchema.parse(await apiRequest(`/api/admin/safety/plan-reviews/${encodeURIComponent(id)}/emails/${encodeURIComponent(deliveryId)}/retry`, { method: "POST", body: JSON.stringify({ reason }) }));
+}
 import type {
   AccountDeletionInput,
   AccountDeletionResponse,
@@ -843,9 +863,10 @@ export async function createCallBrief(
   return snapshot.brief;
 }
 
-export type CallPreparationProgress = "queued" | "preparing" | "retrying" | "delayed";
+export type CallPreparationProgress = "queued" | "preparing" | "retrying" | "delayed" | NonNullable<CallPreparation["stage"]>;
 
-// The worker can take three 120-second attempts, with backoff and queue time.
+// Server preparation retries share a deadline. Allow browser reconnection and an
+// older server's recovery window without turning transport delay into job failure.
 // A browser timeout is resumable; it must not turn an active job into a failed attempt.
 const CALL_PREPARATION_WAIT_MS = 8 * 60_000;
 
@@ -879,7 +900,7 @@ async function waitForCallPreparation(
     const progress: CallPreparationProgress = preparation.status === "retrying" || preparation.attemptCount > 1
       ? "retrying"
       : elapsed >= 60_000 ? "delayed"
-      : preparation.status === "queued" ? "queued" : "preparing";
+      : preparation.status === "queued" ? "queued" : preparation.stage ?? "preparing";
     if (progress !== lastProgress) {
       onProgress?.(progress);
       lastProgress = progress;
@@ -1090,6 +1111,19 @@ export async function getOgPreview(version: import("@callassist/contracts").OgIm
 
 export function getRegistrationOptions(locale: string) {
   return apiRequest<import("@callassist/contracts").RegistrationOptions>(`/api/auth/registration-options?locale=${encodeURIComponent(locale)}`, { cache: "no-store" });
+}
+export async function previewTelemetryExport(input: import("@callassist/contracts").TelemetryExportInput) {
+  return apiRequest<{ recordings: number; estimatedBytes: number; unknownSizes: number; earliestDeadline: string | null; coverage: Record<string, number> }>(
+    "/api/admin/telemetry-exports/preview", { method: "POST", body: JSON.stringify(input) });
+}
+export function updateBetaCreditPolicy(policy: import("@callassist/contracts").BetaCreditPolicy, expectedRevision: number, reason: string) {
+  return apiRequest("/api/admin/system/beta/credit-policy", { method: "PUT", body: JSON.stringify({ policy, expectedRevision, reason }) });
+}
+export function previewBetaCreditTransition() {
+  return apiRequest<import("@callassist/contracts").BetaCreditTransitionPreview>("/api/admin/system/beta/credits/preview", { cache: "no-store" });
+}
+export function applyBetaCreditTransition(input: import("@callassist/contracts").BetaCreditTransitionInput) {
+  return apiRequest<{ updated: number }>("/api/admin/system/beta/credits/apply", { method: "POST", body: JSON.stringify(input) });
 }
 export function deferEmailVerification() {
   return apiRequest<{ user: User }>("/api/auth/email-verification/defer", { method: "POST" });

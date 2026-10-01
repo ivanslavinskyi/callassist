@@ -16,6 +16,8 @@ type DurableJobHandler = (
   lease: DurableJobLease
 ) => Promise<void>;
 
+type WorkerLane = { types: DurableJobType[]; drain: Promise<void> | null; wakeRequested: boolean };
+
 type DurableJobWorkerOptions = {
   workerId?: string;
   pollIntervalMs?: number;
@@ -25,6 +27,8 @@ type DurableJobWorkerOptions = {
   keepAlive?: boolean;
   reportRuntimeHeartbeat?: boolean;
   runtimeHeartbeatIntervalMs?: number;
+  /** One serial consumer per lane. Every configured job type belongs to one lane. */
+  lanes?: DurableJobType[][];
 };
 
 export class DurableJobWorker {
@@ -33,6 +37,7 @@ export class DurableJobWorker {
   readonly #leaseDurationMs: number;
   readonly #now: () => Date;
   readonly #types: DurableJobType[];
+  readonly #lanes: WorkerLane[];
   readonly #configured: boolean;
   readonly #keepAlive: boolean;
   readonly #reportRuntimeHeartbeat: boolean;
@@ -42,7 +47,6 @@ export class DurableJobWorker {
   #runtimeHeartbeatTimer: NodeJS.Timeout | null = null;
   #runtimeHeartbeatWrite: Promise<void> | null = null;
   #runtimeHeartbeatDirty = false;
-  #drain: Promise<void> | null = null;
   #activeJobs = 0;
   #assessmentSweep: Promise<void> | null = null;
   #closed = false;
@@ -59,6 +63,14 @@ export class DurableJobWorker {
     this.#leaseDurationMs = options.leaseDurationMs ?? 120_000;
     this.#now = options.now ?? (() => new Date());
     this.#types = Object.keys(handlers) as DurableJobType[];
+    const lanes = options.lanes
+      ? options.lanes.map(lane => lane.filter(type => this.#types.includes(type))).filter(lane => lane.length)
+      : [this.#types];
+    const scheduledTypes = lanes.flat();
+    if (new Set(scheduledTypes).size !== scheduledTypes.length || this.#types.some(type => !scheduledTypes.includes(type))) {
+      throw new Error("Durable worker lanes must include every handled type exactly once");
+    }
+    this.#lanes = lanes.map(types => ({ types, drain: null, wakeRequested: false }));
     this.#configured = options.enabled ?? true;
     this.#keepAlive = options.keepAlive ?? false;
     this.#reportRuntimeHeartbeat = options.reportRuntimeHeartbeat ?? false;
@@ -68,7 +80,7 @@ export class DurableJobWorker {
   }
 
   get runningCount() {
-    return this.#drain ? 1 : 0;
+    return this.#activeJobs;
   }
 
   get enabled() {
@@ -103,30 +115,13 @@ export class DurableJobWorker {
   }
 
   wake() {
-    if (
-      !this.#configured ||
-      this.#closed ||
-      this.#types.length === 0 ||
-      this.#drain
-    ) return;
-    this.#drain = this.#drainDueJobs()
-      .catch(this.onError)
-      .finally(() => {
-        this.#drain = null;
-        this.#writeRuntimeHeartbeat();
-      });
-    this.#writeRuntimeHeartbeat();
+    if (!this.#configured || this.#closed) return;
+    for (const lane of this.#lanes) void this.#wakeLane(lane).catch(this.onError);
   }
 
   async runOnce() {
     if (!this.#configured || this.#closed) return;
-    if (this.#drain) return this.#drain;
-    this.#drain = this.#drainDueJobs()
-      .finally(() => {
-        this.#drain = null;
-        this.#writeRuntimeHeartbeat();
-      });
-    return this.#drain;
+    await Promise.all(this.#lanes.map(lane => this.#wakeLane(lane)));
   }
 
   async close() {
@@ -137,7 +132,7 @@ export class DurableJobWorker {
       clearInterval(this.#runtimeHeartbeatTimer);
     }
     this.#runtimeHeartbeatTimer = null;
-    await this.#drain;
+    await Promise.allSettled(this.#lanes.map(lane => lane.drain));
     await this.#assessmentSweep;
     await this.#runtimeHeartbeatWrite;
     if (this.#reportRuntimeHeartbeat) {
@@ -168,11 +163,28 @@ export class DurableJobWorker {
     });
   }
 
-  async #drainDueJobs() {
+  #wakeLane(lane: WorkerLane): Promise<void> {
+    lane.wakeRequested = true;
+    if (lane.drain) return lane.drain;
+    lane.drain = (async () => {
+      do {
+        lane.wakeRequested = false;
+        await this.#drainLane(lane.types);
+      } while (lane.wakeRequested && !this.#closed);
+    })().finally(() => {
+      lane.drain = null;
+      // A wake can arrive between the final empty claim and this continuation.
+      if (lane.wakeRequested && !this.#closed) void this.#wakeLane(lane).catch(this.onError);
+      this.#writeRuntimeHeartbeat();
+    });
+    return lane.drain;
+  }
+
+  async #drainLane(types: DurableJobType[]) {
     while (!this.#closed) {
       const now = this.#now();
       const job = await this.repository.claimDueDurableJob({
-        types: this.#types,
+        types,
         workerId: this.#workerId,
         now: now.toISOString(),
         leaseExpiresAt: new Date(
@@ -187,7 +199,7 @@ export class DurableJobWorker {
   async #execute(job: DurableJob) {
     const handler = this.handlers[job.type];
     if (!handler) return;
-    this.#activeJobs = 1;
+    this.#activeJobs += 1;
     this.#writeRuntimeHeartbeat();
     const heartbeat = setInterval(() => {
       const now = this.#now();
@@ -230,7 +242,7 @@ export class DurableJobWorker {
       if (failed && failed.status !== "cancelled") this.onError(error);
     } finally {
       clearInterval(heartbeat);
-      this.#activeJobs = 0;
+      this.#activeJobs -= 1;
       this.#writeRuntimeHeartbeat();
     }
   }

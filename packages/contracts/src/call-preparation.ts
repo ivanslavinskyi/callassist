@@ -27,6 +27,7 @@ export const callPreparationSchema = z.strictObject({
   callBriefId: z.uuid().nullable(),
   failureCode: callPreparationFailureCodeSchema.nullable(),
   attemptCount: z.number().int().nonnegative(),
+  stage: z.enum(["input_moderation", "compilation", "compilation_repair", "language_audit", "output_moderation"]).optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   completedAt: z.iso.datetime().nullable()

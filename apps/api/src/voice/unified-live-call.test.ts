@@ -6,7 +6,7 @@ import { approvedCall, authorization, proposal, TestSocket, flush, silence, spee
 
 
 const cleanup: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const close of cleanup.splice(0)) await close(); vi.useRealTimers(); });
+afterEach(async () => { for (const close of cleanup.splice(0)) await close(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 async function harness(answer: string | null = "human", recordingFailure = false, appointment = false, locale: CallLocale = "en-GB", asyncAnswering = false, profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment") {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
@@ -35,18 +35,13 @@ async function harness(answer: string | null = "human", recordingFailure = false
     speechRequests.push(JSON.parse(init!.body as string));
     return new Response(Buffer.alloc(4_800), { status: 200, headers: { "x-request-id": "speech-test" } });
   });
-  const semanticFetch = vi.fn<typeof fetch>(async (_url, init) => {
-    const request = JSON.parse(init!.body as string);
-    const input = JSON.parse(request.input[0].content);
-    const decision = input.kind === "speech" ? "different" : "equivalent";
-    return new Response(JSON.stringify({ id: "semantic-test", model: "gpt-6-luna", status: "completed",
-      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ decision }) }] }],
-      usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 }
-    }));
-  });
+  // Tripwire on the actual transport, not an unused option on the bridge.
+  // Application TTS is injected above; native delegation uses the live socket.
+  const unexpectedFetch = vi.fn<typeof fetch>(async () => { throw new Error("Unexpected standalone provider request"); });
+  vi.stubGlobal("fetch", unexpectedFetch);
   const bridge = createVoiceRuntime({ apiKey: "test", service: call.service, agentHangupEnabled: true,
     validateStreamToken: (_binding, token) => token === "valid", createLiveSocket: connect,
-    createOpenAISocket: legacy, createConsentSocket: legacy, semanticFetch, speechFetch, logger }, { VOICE_RUNTIME_DRIVER: "live" });
+    createOpenAISocket: legacy, createConsentSocket: legacy, speechFetch, logger }, { VOICE_RUNTIME_DRIVER: "live" });
   bridge.handleTwilioSocket(twilio.ws);
   const start = { event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ", customParameters: { callBriefId: call.brief.id,
     callAttemptId: call.attempt.id, compilationSnapshotHash: call.snapshot.compilationSnapshotHash, streamToken: "valid" } } };
@@ -119,7 +114,7 @@ async function harness(answer: string | null = "human", recordingFailure = false
   const resolveAnswer = async (answeredBy: string) => { await call.service.transitionAnswering(call.brief.id, {
     attemptId: call.attempt.id, providerCallId: "CA-LIVE", snapshotHash: call.snapshot.compilationSnapshotHash,
     kind: "resolve", answeredBy, now: new Date().toISOString() }); await flush(); await flush(); };
-  return { ...call, twilio, live, legacy, connect, recording, hangup, dispatch, resolveAnswer, semanticFetch, speechFetch,
+  return { ...call, twilio, live, legacy, connect, recording, hangup, dispatch, resolveAnswer, unexpectedFetch, speechFetch,
     speechRequests, providerOperation, logger, transcript, requestedSpeech, play, accept, closeNaturally, tool, continueClosing, result, start };
 }
 
@@ -146,6 +141,8 @@ describe('inline assistance reason admission', () => {
     const id = await h.tool('report_consent', { decision: 'negative' }, 'Нет, не записывайте.');
     expect(h.result(id).ok).toBe(true); expect(h.recording).not.toHaveBeenCalled();
     expect(h.speechRequests[0].input).toBe(h.snapshot.runtime.initialDisclosure?.text);
+    const journal = h.providerOperation.mock.invocationCallOrder[h.providerOperation.mock.calls.findIndex(([op]) => op.stage === "live_disclosure_synthesis" && op.result === null)];
+    expect(journal).toBeLessThan(h.speechFetch.mock.invocationCallOrder[0]!);
   });
 });
 
@@ -499,7 +496,7 @@ describe("one Live session, application-owned lifecycle", () => {
   });
   it("does not run the former disclosure speech classifier or retry loop", async () => {
     const h = await harness(); await h.play();
-    expect(h.semanticFetch).not.toHaveBeenCalled();
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
     expect(h.speechFetch).toHaveBeenCalledTimes(1);
     expect((await h.repository.listCallTelemetryEvents(h.brief.id)).filter(e => e.payload.name === "disclosure.started")).toHaveLength(1);
     expect(h.twilio.readyState).toBe(1);
@@ -582,7 +579,7 @@ it("uses native structured consent without a separate text classifier or recipie
   h.transcript("input", " Ja"); h.transcript("input", ", gerne");
   const id = await h.tool("report_consent", { decision: "affirmative" });
   expect(h.result(id)).toMatchObject({ ok: true, decision: "affirmative" });
-  expect(h.semanticFetch).not.toHaveBeenCalled();
+  expect(h.unexpectedFetch).not.toHaveBeenCalled();
   expect(h.recording).toHaveBeenCalledOnce();
   expect(JSON.stringify(h.logger.info.mock.calls)).not.toContain("gerne");
   expect((await h.service.get(h.brief.id))!.transcript.some(t => t.role === "recipient")).toBe(false);
@@ -659,7 +656,7 @@ it("keeps spoken consent available after clarification and keypad fallback", asy
   }
   await h.tool("report_consent", { decision: "affirmative" }, "Ja");
   expect(h.recording).toHaveBeenCalledOnce();
-  expect(h.semanticFetch).not.toHaveBeenCalled();
+  expect(h.unexpectedFetch).not.toHaveBeenCalled();
 });
 
 it.each(["correction", "disconnect", "timeout", "dtmf"])("ignores a delegated affirmative result after %s", async event => {
@@ -850,7 +847,7 @@ describe("rendered disclosure recovery without conversation-specific rules", () 
     expect(h.speechRequests[0]).toMatchObject({ voice: "cedar", model: "gpt-4o-mini-tts" });
     expect(h.speechRequests[0].input).toContain("Nina Keller");
     expect(h.speechRequests[0].input).toBe(h.snapshot.runtime.initialDisclosure?.text);
-    expect(h.semanticFetch).not.toHaveBeenCalled();
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
     expect(h.providerOperation).toHaveBeenCalledWith(expect.objectContaining({
       parentOperationId: expect.any(String), operationType: "realtime_response", stage: "live_disclosure_synthesis",
       requestedModel: "gpt-4o-mini-tts", result: expect.objectContaining({ outcome: "succeeded",
@@ -1005,7 +1002,7 @@ describe("autonomous conversation and protected effects", () => {
     expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(instructions);
     h.transcript("output", "Understood."); h.live.receive({ type: "session.output_audio.delta", delta: speech });
     await vi.advanceTimersByTimeAsync(701);
-    expect(h.semanticFetch).not.toHaveBeenCalled();
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
     await h.continueClosing(id); await h.closeNaturally();
     expect(h.hangup).toHaveBeenCalledOnce();
   });
@@ -1028,13 +1025,13 @@ describe("autonomous conversation and protected effects", () => {
     }, "It arrived yesterday.", false);
     expect(h.result(id)).toMatchObject({ ok: true, resultSummary: "The application arrived yesterday." });
     await h.continueClosing(id);
-    const checks = h.semanticFetch.mock.calls.length;
+    const checks = h.unexpectedFetch.mock.calls.length;
     h.transcript("output", "The application arrived yesterday. Thank you, goodbye.");
     h.live.receive({ type: "session.output_audio.delta", delta: speech });
     await vi.advanceTimersByTimeAsync(1_001); await flush();
     const mark = h.twilio.sent.filter(e => e.event === "mark").at(-1)?.mark.name;
     expect(mark).toMatch(/^live-application-/);
-    expect(h.semanticFetch).toHaveBeenCalledTimes(checks);
+    expect(h.unexpectedFetch).toHaveBeenCalledTimes(checks);
     expect(h.hangup).not.toHaveBeenCalled();
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
     expect(h.hangup).toHaveBeenCalledOnce();
@@ -1097,9 +1094,9 @@ describe("autonomous conversation and protected effects", () => {
   });
   it.each([false, true])("ordinary speech needs no classification (appointment=%s)", async appointment => {
     const h = await harness("human", false, appointment); await h.accept();
-    const calls = h.semanticFetch.mock.calls.length, media = h.twilio.sent.filter(e => e.event === "media").length;
+    const calls = h.unexpectedFetch.mock.calls.length, media = h.twilio.sent.filter(e => e.event === "media").length;
     h.transcript("output", "Which date works for you?"); h.live.receive({ type: "session.output_audio.delta", delta: speech }); await flush();
-    expect(h.semanticFetch).toHaveBeenCalledTimes(calls);
+    expect(h.unexpectedFetch).toHaveBeenCalledTimes(calls);
     expect(h.twilio.sent.filter(e => e.event === "media")).toHaveLength(media + 1);
     expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text.includes("Which date"))).toBe(true);
     expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(2);
@@ -1170,9 +1167,9 @@ describe("autonomous conversation and protected effects", () => {
     await h.closeNaturally(); expect(h.hangup).toHaveBeenCalledOnce();
   });
   it("rejects a proposal outside permission before speech or classification", async () => {
-    const h = await harness("human", false, true); await h.accept(); const count = h.semanticFetch.mock.calls.length;
+    const h = await harness("human", false, true); await h.accept(); const count = h.unexpectedFetch.mock.calls.length;
     const id = await h.tool("request_appointment", { proposal: { ...proposal, startTime: "20:00" } }, "20:00 is available.");
-    expect(h.result(id).reason).toBe("outside_authorized_window"); expect(h.semanticFetch).toHaveBeenCalledTimes(count);
+    expect(h.result(id).reason).toBe("outside_authorized_window"); expect(h.unexpectedFetch).toHaveBeenCalledTimes(count);
     expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions).toEqual([]);
   });
   it("journals before buffered commitment playback, requires later exact confirmation and prevents repeat booking", async () => {

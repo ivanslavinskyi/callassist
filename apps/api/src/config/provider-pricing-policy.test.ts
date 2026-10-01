@@ -6,6 +6,13 @@ import {
 } from "./provider-pricing-policy";
 
 describe("provider pricing policy", () => {
+  it("prices voicemail from the persisted issued character count and refuses unknown snapshots", () => {
+    const saved = bucket({ provider: "twilio", operationType: "voicemail_tts", model: "polly-standard-voicemail-v1:en-GB",
+      pricingVersion: "twilio-answering-public-2026-09-26", billableCharacters: 101 });
+    expect(calculateProviderUsageCost(saved).calculatedUsdMicros).toBe(1600);
+    expect(calculateProviderUsageCost({ ...saved, billableCharacters: undefined }).calculatedUsdMicros).toBeNull();
+    expect(calculateProviderUsageCost({ ...saved, pricingVersion: "future" }).unpricedMetrics).toEqual(["pricing_version"]);
+  });
   it("prices Live duration per second and Luna tokens separately without changing older snapshots", () => {
     expect(calculateProviderUsageCost(bucket({ model: "gpt-live-1", durationSeconds: 90.5, durationSamples: 1 })))
       .toMatchObject({ calculatedUsdMicros: 75_417, durationUsdMicros: 75_417, unpricedMetrics: [] });

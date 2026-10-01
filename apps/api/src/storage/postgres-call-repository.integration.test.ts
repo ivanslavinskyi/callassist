@@ -140,17 +140,17 @@ describe("PostgresCallRepository", () => {
     }
   });
 
-  it("recovers a persisted agent hangup after restart and a lost provider response", async () => {
-    // This exercise starts a real worker, which must not consume other fixtures' jobs.
+  describe("isolated agent hangup recovery", () => {
+    // Schema setup has its own hook budget; the runtime assertion keeps its 15s bound.
+    // This real worker must never consume another fixture's jobs.
     const database = isolatedTestDatabase();
-    await database.setup();
-    try {
+    beforeAll(() => database.setup(), 30_000);
+    afterAll(() => database.teardown());
+    it("recovers a persisted agent hangup after restart and a lost provider response", async () => {
       const reopen = () => new PostgresCallRepository(database.url, encryptionKey);
       await verifyAgentHangupRecovery(reopen(), reopen);
-    } finally {
-      await database.teardown();
-    }
-  }, 15_000);
+    }, 15_000);
+  });
 
   it("returns privacy-minimized recipient suggestions for one owner", async () => {
     const compiler = new DeterministicBriefCompiler();
@@ -2180,6 +2180,7 @@ describe("PostgresCallRepository", () => {
       input,
       now
     });
+    expect((await repository.getPreparationDiagnostics(queued.id)).initialQueueMs).toBeNull();
     await expect(repository.enqueueCallPreparation({
       userId: ownerA,
       idempotencyKey,
@@ -2227,6 +2228,7 @@ describe("PostgresCallRepository", () => {
           clientRequestId: id,
           startedAt: lease.checkedAt,
           maxRequests: 8,
+          requestMetadata: { repairKind: "none" as const, repairNumber: 0, transportAttempt: 1, timeoutMs: 35000, remainingMs: 119000 },
           durableJobGeneration: job!.generation
       };
     });
@@ -2266,6 +2268,13 @@ describe("PostgresCallRepository", () => {
     };
     await repository.completeProviderOperation(operationResult);
     await repository.completeProviderOperation(operationResult);
+    const diagnostics = await repository.getPreparationDiagnostics(queued.id);
+    expect(diagnostics.initialQueueMs).toBe(0);
+    expect(diagnostics.timeline).toHaveLength(8);
+    expect(diagnostics.timeline.find(row => row.id === acceptedOperationId)).toMatchObject({
+      stage: "compilation", startedAt: lease.checkedAt, completedAt: operationResult.completedAt,
+      durationMs: 123, metadata: { repairKind: "none", transportAttempt: 1, timeoutMs: 35000 }
+    });
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
@@ -2329,13 +2338,23 @@ describe("PostgresCallRepository", () => {
     expect(callFacts.providerUsage).toMatchObject({
       operationCount: 8,
       usageRecordCount: 1,
-      buckets: [expect.objectContaining({
+      missingUsageOperations: 7,
+      buckets: expect.arrayContaining([expect.objectContaining({
+        operationId: acceptedOperationId,
         provider: "openai",
         operationType: "brief_compilation",
+        usageRecords: 1,
         inputTextTokens: 100,
         outputTextTokens: 40
-      })]
+      })])
     });
+    expect(callFacts.providerUsage.buckets).toHaveLength(8);
+    expect(callFacts.providerUsage.buckets.map(bucket => bucket.operationId).sort()).toEqual(
+      reservationInputs.filter((_input, index) => reservations[index]).map(input => input.id).sort()
+    );
+    const unmeasured = callFacts.providerUsage.buckets.filter(bucket => bucket.operationId !== acceptedOperationId);
+    expect(unmeasured).toHaveLength(7);
+    expect(unmeasured.every(bucket => bucket.usageRecords === 0 && bucket.outcome === null)).toBe(true);
     const preparationFacts = await repository.getAdminOperationsFacts(
       "2096-01-01T00:00:00.000Z",
       "2096-01-01T00:01:00.000Z",
@@ -2347,12 +2366,17 @@ describe("PostgresCallRepository", () => {
       providerUsage: {
         operationCount: 8,
         usageRecordCount: 1,
-        buckets: [expect.objectContaining({
+        missingUsageOperations: 7,
+        buckets: expect.arrayContaining([expect.objectContaining({
+          operationId: acceptedOperationId,
           operationType: "brief_compilation",
           inputTextTokens: 100
-        })]
+        })])
       }
     });
+    expect(preparationFacts.providerUsage.buckets.map(bucket => bucket.operationId).sort()).toEqual(
+      callFacts.providerUsage.buckets.map(bucket => bucket.operationId).sort()
+    );
     await expect(inspection`
       UPDATE provider_operations
       SET stage = 'output_moderation'

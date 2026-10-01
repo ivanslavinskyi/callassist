@@ -3,7 +3,7 @@ import { formatLocale } from "@callassist/contracts";
 
 import Image from "next/image";
 import { useId, useRef, useState, type ReactNode } from "react";
-import { expenseCategory, expenseGroups, formatAdminMoney, type AdminCost, type ExpenseCategory, type UsageComponent } from "@/lib/admin-costs";
+import { expenseCategory, expenseGroups, formatAdminMoney, twilioReportedMicros, type AdminCost, type ExpenseCategory, type UsageComponent } from "@/lib/admin-costs";
 import { adminExpenseMessages } from "@/lib/i18n/admin-expense-messages";
 import { UiIcon } from "./ui-icon";
 
@@ -26,11 +26,12 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
   const money = (amount: number | null, precise = false, currency = "USD") => formatAdminMoney(amount, locale, precise, currency);
   const date = (at: string, time = false) => new Intl.DateTimeFormat(formatLocale(locale), { dateStyle: "medium", ...(time ? { timeStyle: "short" as const } : {}), timeZone: "UTC" }).format(new Date(at));
   const groups = expenseGroups(cost);
-  const visibleGroups = groups.filter(g => g.records > 0 || g.amount !== null || (g.key === "twilio" && (cost.providerReported.recordCount > 0 || cost.providerReported.pendingOperations > 0)));
+  const visibleGroups = groups.filter(g => g.records > 0 || g.incomplete > 0 || g.amount !== null || (g.key === "twilio" && (cost.providerReported.recordCount > 0 || cost.providerReported.pendingOperations > 0)));
   const group = selected === null ? undefined : visibleGroups.find(g => g.key === selected) ?? visibleGroups[0];
   const billing = cost.billing.find(b => b.provider === "twilio");
   const openaiBilling = cost.billing.find(b => b.provider === "openai");
   const usage = cost.providerUsage;
+  const twilioActual = twilioReportedMicros(cost);
   const hasIssues = usage.missingUsageOperations > 0 || usage.incompleteSessions > 0 || usage.unpricedBuckets > 0 || cost.providerReported.pendingOperations > 0;
   const close = () => { const trigger = document.getElementById(`${id}-category-${group?.key}`); setSelected(null); trigger?.focus(); };
   const records = usage.records.filter(record => expenseCategory(record.operationType) === group?.key);
@@ -50,7 +51,7 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
       <div className="expense-overview">
         <div className="expense-headlines">
           <div><span>{copy.openai}</span><strong>{money(usage.calculatedUsdMicros)}</strong><small>{usage.calculatedUsdMicros === null ? copy.noActivity : usage.status === "partial" ? copy.partial : copy.calculated}</small></div>
-          <div><span>{billing?.totalMicros != null ? copy.twilio : copy.twilioLocal}</span><strong>{money(billing?.totalMicros ?? cost.providerReported.usdMicros)}</strong><small>{billing?.totalMicros != null ? copy.preliminary : cost.providerReported.usdMicros === null ? copy.noActivity : cost.providerReported.pendingOperations ? copy.partial : copy.reported}</small></div>
+          <div><span>{billing?.totalMicros != null ? copy.twilio : copy.twilioLocal}</span><strong>{money(billing?.totalMicros ?? twilioActual)}</strong><small>{billing?.totalMicros != null ? copy.preliminary : twilioActual === null ? copy.noActivity : cost.providerReported.pendingOperations ? copy.partial : copy.reported}</small></div>
         </div>
         <p className="expense-source-note">{copy.amountsHelp}</p>
         <div className="expense-list-heading"><span>{copy.category}</span><span>{copy.amount}</span></div>
@@ -78,7 +79,7 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
             <h3>{report.provider === "openai" ? "OpenAI" : "Twilio"}</h3>
             {report.status === "unsupported_window" ? <p>{copy.calendar}</p> : report.totalMicros === null ? <p>{report.status === "not_configured" ? copy.unavailable : copy.awaiting}</p> : <>
               <dl className="expense-facts"><Fact label={copy.account}>{money(report.totalMicros, true)}</Fact>
-                <Fact label={report.provider === "twilio" ? copy.local : copy.calculated}>{money(report.provider === "twilio" ? cost.providerReported.usdMicros : usage.calculatedUsdMicros, true)}</Fact>
+                <Fact label={report.provider === "twilio" ? copy.local : copy.calculated}>{money(report.provider === "twilio" ? twilioActual : usage.calculatedUsdMicros, true)}</Fact>
                 <Fact label={copy.updated}>{report.observedAt ? `${date(report.observedAt, true)} UTC` : copy.unknown}</Fact>
                 <Fact label={copy.missingDays}>{report.days}/{report.expectedDays}</Fact>
                 <Fact label={copy.scope}>{report.scope}</Fact></dl>
@@ -105,7 +106,8 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
               <Fact label={copy.total}><strong>{money(group.amount, true)}</strong></Fact>
             </dl>
             {group.key === "realtime" ? <p className="expense-detail-note">{copy.shared}</p> : null}
-            {group.key === "twilio" ? <><p className="expense-detail-note">{billing?.totalMicros != null ? copy.nonAdditive : copy.pendingNote}</p><dl className="expense-facts"><Fact label={copy.local}>{money(cost.providerReported.usdMicros, true)}</Fact><Fact label={copy.prices}>{cost.providerReported.pendingOperations}</Fact>
+            {group.key === "twilio" ? <><p className="expense-detail-note">{billing?.totalMicros != null ? copy.nonAdditive : copy.pendingNote}</p><dl className="expense-facts"><Fact label={copy.local}>{money(twilioActual, true)}</Fact><Fact label={copy.prices}>{cost.providerReported.pendingOperations}</Fact>
+              <Fact label={locale === "de" ? "AMD / Mailbox · Schätzung" : "AMD / voicemail · estimate"}>{money(usage.components.telephony.calculatedUsdMicros, true)}</Fact>
               {cost.providerReported.amounts.filter(a => a.currency !== "USD").map(a => <Fact key={`${a.provider}:${a.component}:${a.currency}`} label={`${a.provider} · ${a.currency}`}>{money(a.amountMicros, true, a.currency)}</Fact>)}
               {billing?.observedAt ? <Fact label={copy.updated}>{date(billing.observedAt, true)} UTC</Fact> : null}</dl></> : <>
               <dl className="expense-facts"><Fact label={copy.models}>{group.models.join(", ") || copy.unknown}</Fact><Fact label={copy.version}>{usage.pricingVersions.join(", ") || usage.pricingVersion}</Fact></dl>
@@ -114,7 +116,7 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
             </>}
           </> : null}
           {tab === "usage" ? <>{group.parts.map((part, index) => <div key={index}>{group.key === "transcription" ? <h4>{index === 0 ? copy.realtimeTranscription : copy.postCallTranscription}</h4> : null}{usageDetails(part, String(index))}</div>)}</> : null}
-          {tab === "requests" ? <><p className="expense-detail-note">{copy.latestRequests}</p>{records.length ? <ul className="expense-requests">{records.map(record => <li key={record.id}><div><time dateTime={record.startedAt}>{date(record.startedAt, true)} UTC</time><strong>{money(record.calculatedUsdMicros, true)}</strong></div><span>{record.model} · {record.outcome ?? copy.unknown}</span>{record.missingMetrics.length ? <small>{copy.partial}: {record.missingMetrics.join(", ")}</small> : null}<details><summary>ID</summary><code>{record.id}</code></details></li>)}</ul> : <p>{copy.noRequests}</p>}</> : null}
+          {tab === "requests" ? <><p className="expense-detail-note">{copy.latestRequests}</p>{records.length ? <ul className="expense-requests">{records.map(record => <li key={record.id}><div><time dateTime={record.startedAt}>{date(record.startedAt, true)} UTC</time><strong>{money(record.calculatedUsdMicros, true)}</strong></div><span>{record.provider} · {record.model} · {record.stage} · {record.outcome ?? copy.unknown}</span>{record.missingMetrics.length ? <small>{copy.partial}: {record.missingMetrics.join(", ")}</small> : null}<details><summary>ID</summary><code>{record.id}</code></details></li>)}</ul> : <p>{copy.noRequests}</p>}</> : null}
         </div>
       </aside> : <div id={`${id}-details`} hidden />}
     </div>

@@ -410,7 +410,6 @@
   "Close menu": "Serrar il menu",
   "A little help.\nA call made easier.": "In pau agid.\nIn telefonat pli simpel.",
   "Prepare your request, review the plan and stay in control.": "Descriva tes giavisch, controllescha il plan e mantegna la controlla.",
-  "3 calls included in the public beta": "3 telefonats inclus en la beta publica",
   "Calls to Swiss numbers only. The recipient chooses whether to continue.": "Mo telefonats a numers svizzers. Il destinatari decida sch’el vul cuntinuar.",
   "Assistant": "Assistent",
   "Prepare a plan. Review it before the call.": "Prepara in plan. Controllescha el avant il telefonat.",
@@ -1007,5 +1006,7 @@
   "The call policy changed. Review and approve the updated plan before calling.": "Las reglas dal telefonat èn sa midadas. Controlla ed approvescha il plan actualisà avant da telefonar.",
   "Delete after the call": "Stizzar suenter il telefonat",
   "Deleted automatically when the recording becomes available after the call.": "Stizzà automaticamain uschespert che la registraziun è disponibla suenter il telefonat.",
-  "Deleted automatically {0} days after the recording becomes available.": "Stizzà automaticamain {0} dis suenter che la registraziun è disponibla."
+  "Deleted automatically {0} days after the recording becomes available.": "Stizzà automaticamain {0} dis suenter che la registraziun è disponibla.",
+  "Beta allowance": "Quota beta",
+  "Beta access is limited": "L’access a la beta è limità"
 }

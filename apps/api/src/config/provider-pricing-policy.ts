@@ -1,7 +1,7 @@
-import { neutralVoicemailText, type CallLocale } from "@callassist/contracts";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 
 export const openAIPublicPricingVersion = "openai-public-2026-09-25";
+export const twilioAnsweringPricingVersion = "twilio-answering-public-2026-09-26";
 const previousPricingVersion = "openai-public-2026-09-15";
 
 type TokenRates = {
@@ -100,14 +100,17 @@ export function calculateProviderUsageCost(
 ): ProviderUsageCost {
   // Twilio public list prices, checked 2026-09-26. Estimates, never invoices.
   if (usage.provider === "twilio" && ["answering_detection", "voicemail_tts"].includes(usage.operationType)) {
-    const locale = usage.model.replace("polly-standard-voicemail-v1:", "") as CallLocale;
-    const text = neutralVoicemailText[locale];
-    const unit = usage.model === "twilio-amd-v1" ? 7_500 :
-      usage.model.startsWith("polly-standard-voicemail-v1:") && text ? Math.ceil([...text].length / 100) * 800 : null;
-    return { pricingVersion: "twilio-answering-public-2026-09-26", matched: unit !== null,
+    // Legacy writers stamped the OpenAI version on every provider. These two
+    // explicit aliases retain the original Twilio snapshot, never today's copy.
+    const knownVersion = !usage.pricingVersion || [twilioAnsweringPricingVersion, openAIPublicPricingVersion, previousPricingVersion].includes(usage.pricingVersion);
+    const characters = usage.billableCharacters;
+    const unit = !knownVersion ? null : usage.model === "twilio-amd-v1" ? 7_500 :
+      usage.model.startsWith("polly-standard-voicemail-v1:") && characters != null && Number.isSafeInteger(characters) && characters >= 0
+        ? Math.ceil(characters / 100) * 800 : null;
+    return { pricingVersion: knownVersion ? twilioAnsweringPricingVersion : usage.pricingVersion!, matched: unit !== null,
       calculatedUsdMicros: unit === null || !usage.usageRecords ? null : unit * usage.requestCount,
       textUsdMicros: null, audioUsdMicros: null, durationUsdMicros: null,
-      unpricedMetrics: unit === null ? ["unknown_answering_model"] : [] };
+      unpricedMetrics: !knownVersion ? ["pricing_version"] : unit === null ? ["answering_model_or_recorded_characters"] : [] };
   }
   const version = usage.pricingVersion ?? openAIPublicPricingVersion;
   return { ...calculateUsageCost(usage, version), pricingVersion: version };

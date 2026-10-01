@@ -339,6 +339,17 @@ describe("TwilioTelephonyProvider", () => {
     );
     expect(fetchImplementation.mock.calls[1][1].signal).toBe(fetchImplementation.mock.calls[0][1].signal);
   });
+  it("streams export audio with the requested channels and never silently retries mono", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(new Uint8Array([1,2,3]), { headers: { "content-type": "audio/wav" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 400 }));
+    vi.stubGlobal("fetch", fetcher);
+    const { provider } = createProvider();
+    const media = await provider.streamRecordingMedia("RE123", 2, new AbortController().signal);
+    const chunks: Uint8Array[] = []; for await (const chunk of media.bytes) chunks.push(chunk);
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from([1,2,3])); expect(media.channels).toBe(2);
+    await expect(provider.streamRecordingMedia("RE123", 2, new AbortController().signal)).rejects.toThrow("TWILIO_RECORDING_DOWNLOAD_400");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 
   it.each(["headers", "body"])("aborts a recording download stalled at %s", async phase => {
     const realTimeout = AbortSignal.timeout.bind(AbortSignal);

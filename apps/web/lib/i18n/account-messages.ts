@@ -174,6 +174,7 @@ const en = {
     completed: "Completed"
   } satisfies Record<AccountDeletionStatus, string>,
   transaction: {
+    beta_grant: "Beta allowance",
     signup_grant: "Signup credit",
     promo_grant: "Promo credit",
     admin_grant: "Manual credit",
@@ -372,6 +373,7 @@ const de: AccountMessages = {
     completed: "Abgeschlossen"
   },
   transaction: {
+    beta_grant: "Beta-Kontingent",
     signup_grant: "Startguthaben",
     promo_grant: "Aktionsguthaben",
     admin_grant: "Manuelles Guthaben",

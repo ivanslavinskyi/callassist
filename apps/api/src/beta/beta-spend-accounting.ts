@@ -45,6 +45,7 @@ export function priceBudgetOperation(operation: BudgetOperation): number | null 
   const present = (key: string) => u[key] == null ? 0 : 1;
   const bucket: AdminProviderUsageBucket = {
     provider: operation.provider, operationType: operation.operationType, stage: operation.stage,
+    billableCharacters: u.billable_characters,
     pricingVersion: operation.pricingVersion, model: operation.model, usageRecords: 1, requestCount: value("request_count"),
     inputTextTokens: value("input_text_tokens"), inputTextTokenSamples: present("input_text_tokens"),
     cachedInputTextTokens: value("cached_input_text_tokens"), cachedInputTextTokenSamples: present("cached_input_text_tokens"),
@@ -162,7 +163,8 @@ export async function readBetaReservations(tx: postgres.TransactionSql) {
           'output_text_tokens',u.output_text_tokens,'reasoning_output_tokens',u.reasoning_output_tokens,
           'input_audio_tokens',u.input_audio_tokens,'cached_input_audio_tokens',u.cached_input_audio_tokens,
           'output_audio_tokens',u.output_audio_tokens,'total_tokens',u.total_tokens,
-          'duration_seconds',u.duration_seconds,'billable_seconds',u.billable_seconds) END,
+          'duration_seconds',u.duration_seconds,'billable_seconds',u.billable_seconds,
+          'billable_characters',u.raw_usage->'characters') END,
         'separatelyReserved',EXISTS(SELECT 1 FROM beta_spend_reservations separate WHERE separate.reservation_key='provider:'||o.id::text
           OR (b.kind='call' AND o.operation_type='transcription' AND separate.reservation_key='postcall:'||o.call_attempt_id::text)),
         'costs',COALESCE((SELECT json_agg(json_build_object('component',c.component,'currency',c.currency,'amount',c.amount_micros::double precision))

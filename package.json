@@ -29,7 +29,8 @@
     "security:audit": "corepack pnpm audit --audit-level low",
     "test": "turbo test",
     "tunnel:twilio": "node scripts/start-twilio-tunnel.mjs",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "license:check": "node scripts/check-license.mjs && node --test scripts/check-license.test.mjs"
   },
   "devDependencies": {
     "turbo": "^2.5.0",
@@ -43,5 +44,6 @@
       "postcss": "8.5.23",
       "sharp": "0.35.4"
     }
-  }
+  },
+  "license": "UNLICENSED"
 }

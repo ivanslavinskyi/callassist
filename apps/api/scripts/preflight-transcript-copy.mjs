@@ -9,7 +9,13 @@ try {
     const count = async () => (await transaction`SELECT
       (SELECT count(*) FROM content_page_revisions)+(SELECT count(*) FROM content_editorial_revisions) AS n`)[0].n;
     const before = await count();
-    await transaction.unsafe(await readFile(new URL('../src/db/migrations/0088_conversation_transcript_copy.sql', import.meta.url), 'utf8'));
+    const applied = new Set((await transaction`SELECT name FROM schema_migrations`).map(row => row.name));
+    const migrations = verify
+      ? ['0094_optional_transcript_public_copy.sql', '0098_beta_credit_public_copy.sql']
+      : ['0088_conversation_transcript_copy.sql', '0094_optional_transcript_public_copy.sql', '0098_beta_credit_public_copy.sql'].filter(name => !applied.has(name));
+    for (const name of migrations) {
+      await transaction.unsafe(await readFile(new URL(`../src/db/migrations/${name}`, import.meta.url), 'utf8'));
+    }
     const after = await count();
     if (verify && before !== after) throw new Error('TRANSCRIPT_COPY_NOT_PUBLISHED');
     console.log(JSON.stringify({ check: verify ? 'transcript-copy-publication' : 'transcript-copy-preflight', ok: true, newPublications: Number(after) - Number(before) }));

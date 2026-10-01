@@ -5,6 +5,7 @@ import type { TextProcessingInput } from "../src/text-processing/text-processor.
 import type { TextLanguage } from "@callassist/contracts";
 
 const apiKey = process.env.OPENAI_API_KEY;
+if (!process.argv.includes("--run-provider")) throw new Error("RUN_PROVIDER_OPT_IN_REQUIRED");
 if (!apiKey) throw new Error("OPENAI_API_KEY_REQUIRED");
 let failed = 0;
 const summaryProcessor = new OpenAITextProcessor({ apiKey, model: process.env.TEXT_PROCESSOR_MODEL ?? process.env.OPENAI_BRIEF_COMPILER_MODEL });

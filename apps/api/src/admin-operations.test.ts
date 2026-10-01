@@ -193,6 +193,27 @@ describe("admin operations overview", () => {
     } });
   });
 
+  it("keeps Twilio estimates out of OpenAI totals and classifies all application TTS as audio", () => {
+    const overview = buildAdminOperationsOverview({ facts: { ...facts, providerUsage: { ...facts.providerUsage,
+      buckets: [providerBucket({ provider: "twilio", operationType: "answering_detection", model: "twilio-amd-v1" }),
+        providerBucket({ operationType: "realtime_session", stage: "live_conversation", model: "gpt-live-1", durationSeconds: 60, durationSamples: 1 }),
+        providerBucket({ operationType: "realtime_response", stage: "live_application_synthesis", model: "gpt-4o-mini-tts", durationSeconds: 60, durationSamples: 1 })]
+    } }, kind: "7d", from: "2026-08-15T12:00:00.000Z", to: "2026-08-22T12:00:00.000Z", costPolicy: unavailableOperationalCostPolicy });
+    expect(overview.cost.providerUsage).toMatchObject({ calculatedUsdMicros: 65_000, components: {
+      telephony: { calculatedUsdMicros: 7_500 }, realtimeAudio: { calculatedUsdMicros: 65_000 }, realtimeText: { calculatedUsdMicros: null }
+    } });
+  });
+
+  it("retains a possibly charged request with no usage in its drilldown", () => {
+    const overview = buildAdminOperationsOverview({ facts: { ...facts, providerUsage: { ...facts.providerUsage,
+      missingUsageOperations: 1, buckets: [providerBucket({ operationId: "df8e08db-043a-43b0-bec0-b6e36c6e5ad0", startedAt: "2026-08-16T12:00:00.000Z",
+        outcome: "network_error", usageRecords: 0, requestCount: 0 })]
+    } }, kind: "7d", from: "2026-08-15T12:00:00.000Z", to: "2026-08-22T12:00:00.000Z", costPolicy: unavailableOperationalCostPolicy });
+    expect(overview.cost.providerUsage.records[0]).toMatchObject({ provider: "openai", calculatedUsdMicros: null, missingMetrics: ["usage_unknown_possible_charge"] });
+    expect(overview.cost.providerUsage.components.briefCompilation.incompleteRecords).toBe(1);
+    expect(overview.cost.providerUsage.unpricedBuckets).toBe(1);
+  });
+
   it("keeps provider-reported actual cost separate and currency-safe", () => {
     const overview = buildAdminOperationsOverview({
       facts: {

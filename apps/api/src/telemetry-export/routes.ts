@@ -33,6 +33,11 @@ export function registerTelemetryExportRoutes(app: FastifyInstance, service: Tel
     const result = await exports.create(actor.id, input.data);
     return reply.status(202).send(result);
   }));
+  app.post("/api/admin/telemetry-exports/preview", (request, reply) => handle(request, reply, true, async (actor, exports) => {
+    const input = telemetryExportInputSchema.safeParse(request.body);
+    if (!input.success) throw new ExportError("EXPORT_INVALID_INPUT", 400);
+    return exports.preview(actor.id, input.data);
+  }));
   app.get<{ Params: { id: string } }>("/api/admin/telemetry-exports/:id", (request, reply) => handle(request, reply, false, async (actor, exports) => {
     if (!isUuid(request.params.id)) throw new ExportError("EXPORT_NOT_FOUND", 404);
     return exports.get(actor.id, request.params.id);

@@ -216,19 +216,19 @@ function buildProviderUsageCost(
     );
     if (bucket.operationType !== "telephony_leg") {
       versions.add(cost.pricingVersion);
-      if (incomplete) unpricedBuckets += bucket.usageRecords;
+      if (incomplete) unpricedBuckets += Math.max(1, bucket.usageRecords);
     }
     if (bucket.operationId && bucket.startedAt) records.push({
       id: bucket.operationId, startedAt: bucket.startedAt, operationType: bucket.operationType,
-      stage: bucket.stage, model: bucket.model, outcome: bucket.outcome ?? null,
+      stage: bucket.stage, model: bucket.model, provider: bucket.provider, outcome: bucket.outcome ?? null,
       costBasis: bucket.operationType === "telephony_leg" ? "provider_reported" : "usage_estimate",
       calculatedUsdMicros: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros ?? null : cost.calculatedUsdMicros,
-      missingMetrics: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics
+      missingMetrics: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : bucket.usageRecords === 0 ? ["usage_unknown_possible_charge"] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics
     });
     for (const destination of destinations) {
       const component = components[destination.name];
       addProviderUsage(component, bucket);
-      if (incomplete && bucket.operationType !== "telephony_leg") component.incompleteRecords += bucket.usageRecords;
+      if (incomplete && bucket.operationType !== "telephony_leg") component.incompleteRecords += Math.max(1, bucket.usageRecords);
       const amount = destination.cost(cost);
       if (amount !== null) {
         component.calculatedUsdMicros =
@@ -242,7 +242,9 @@ function buildProviderUsageCost(
     component.models = component.models.slice(0, 50);
   }
   const amounts = Object.entries(components)
-    .filter(([key]) => !["realtimeText", "realtimeAudio"].includes(key))
+    // The public headline is OpenAI usage. Twilio estimates stay in telephony;
+    // account billing is independent context and must never enter this total.
+    .filter(([key]) => !["realtimeText", "realtimeAudio", "telephony"].includes(key))
     .map(([, component]) => component)
     .map(({ calculatedUsdMicros }) => calculatedUsdMicros)
     .filter((value): value is number => value !== null);
@@ -276,7 +278,7 @@ function buildProviderUsageCost(
 }
 
 function providerUsageDestinations(bucket: AdminProviderUsageBucket) {
-  if (bucket.operationType === "realtime_response" && bucket.stage === "live_disclosure_synthesis") {
+  if (bucket.operationType === "realtime_response" && ["live_disclosure_synthesis", "live_application_synthesis"].includes(bucket.stage)) {
     return [
       { name: "realtime" as const, cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.durationUsdMicros },
       { name: "realtimeAudio" as const, cost: (value: ReturnType<typeof calculateProviderUsageCost>) => value.durationUsdMicros }

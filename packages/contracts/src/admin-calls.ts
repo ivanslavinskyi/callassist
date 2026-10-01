@@ -117,10 +117,25 @@ export type AdminCallCostBreakdown = z.infer<
   typeof adminCallCostBreakdownSchema
 >;
 
+export const preparationRequestTraceSchema = z.strictObject({
+  id: z.uuid(), stage: z.string(), model: z.string(),
+  startedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  outcome: z.string().nullable(), errorCode: z.string().nullable(),
+  metadata: z.strictObject({
+    repairKind: z.enum(["none", "language", "integrity", "schema"]),
+    repairNumber: z.number().int().nonnegative(), transportAttempt: z.number().int().positive(),
+    timeoutMs: z.number().nonnegative(), remainingMs: z.number().nonnegative()
+  }).nullable()
+});
+export type PreparationRequestTrace = z.infer<typeof preparationRequestTraceSchema>;
+
 export const adminCallPreparationInspectorSchema = z.strictObject({
   preparation: callPreparationSchema,
   generatedAt: z.iso.datetime(),
-  cost: adminOperationsOverviewSchema.shape.cost
+  cost: adminOperationsOverviewSchema.shape.cost,
+  timeline: z.array(preparationRequestTraceSchema).optional(),
+  initialQueueMs: z.number().nonnegative().nullable().optional()
 });
 export type AdminCallPreparationInspector = z.infer<
   typeof adminCallPreparationInspectorSchema

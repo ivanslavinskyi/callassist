@@ -1,6 +1,8 @@
 import { initialDisclosureProjection } from "@callassist/contracts";
+import { betaCreditFunding } from "../credits/postgres-beta-credits";
 import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
+import { recordPlanReview } from "../safety/plan-review-publication";
 import { answeringUsage } from "../telephony/answering-usage";
 import { answeringStateSchema } from "@callassist/contracts";
 import { transitionAnswering, type AnsweringTransitionInput } from "../telephony/answering-policy";
@@ -494,6 +496,7 @@ type CallPreparationRow = {
   status: CallPreparation["status"];
   callBriefId: string | null;
   failureCode: CallPreparation["failureCode"];
+  stage?: CallPreparation["stage"] | null;
   attemptCount: number;
   createdAt: DatabaseDate;
   updatedAt: DatabaseDate;
@@ -901,7 +904,8 @@ export class PostgresCallRepository implements CallRepository {
           transaction,
           resolvedId,
           compilation,
-          now.toISOString()
+          now.toISOString(),
+          publication?.preparationId
         );
       } else {
         const [raced] = await transaction<{ id: string }[]>`
@@ -1277,15 +1281,49 @@ export class PostgresCallRepository implements CallRepository {
         INSERT INTO provider_operations (
           id, provider, operation_type, stage, requested_model,
           client_request_id, call_preparation_id, durable_job_id,
-          durable_job_generation, started_at
+          durable_job_generation, started_at, request_metadata
         ) VALUES (
           ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
           ${input.requestedModel}, ${input.clientRequestId},
           ${input.preparationId}, ${lease.jobId},
-          ${input.durableJobGeneration}, ${input.startedAt}::timestamptz
+          ${input.durableJobGeneration}, ${input.startedAt}::timestamptz,
+          ${input.requestMetadata ? transaction.json(input.requestMetadata) : null}
         )
       `;
       return true;
+    });
+  }
+
+  async getPreparationDiagnostics(id: string) {
+    const timeline = await this.#sql<import("@callassist/contracts").PreparationRequestTrace[]>`
+      SELECT o.id,o.stage,o.requested_model AS model,o.started_at AS "startedAt",
+        r.completed_at AS "completedAt",r.duration_ms AS "durationMs",r.outcome,r.error_code AS "errorCode",
+        o.request_metadata AS metadata
+      FROM provider_operations o LEFT JOIN provider_operation_results r ON r.operation_id=o.id
+      WHERE o.call_preparation_id=${id} ORDER BY o.started_at,o.id LIMIT 100
+    `;
+    const [queue] = await this.#sql<{ milliseconds: number | null }[]>`
+      SELECT CASE WHEN COALESCE(min(a.started_at),min(j.leased_at) FILTER(WHERE j.attempt_count=1)) IS NULL THEN NULL
+        ELSE GREATEST(0,EXTRACT(EPOCH FROM(COALESCE(min(a.started_at),min(j.leased_at) FILTER(WHERE j.attempt_count=1))-p.created_at))*1000)::float END AS milliseconds
+      FROM call_preparation_requests p LEFT JOIN durable_jobs j ON j.call_preparation_id=p.id
+      LEFT JOIN durable_job_attempts a ON a.job_id=j.id WHERE p.id=${id} GROUP BY p.created_at
+    `;
+    return { timeline: timeline.map(row => ({ ...row, startedAt: new Date(row.startedAt).toISOString(),
+      completedAt: row.completedAt ? new Date(row.completedAt).toISOString() : null })), initialQueueMs: queue?.milliseconds ?? null };
+  }
+
+  async recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor) {
+    await this.#sql.begin(async tx => {
+      const [owner] = await tx<{ user_id: string | null }[]>`SELECT user_id FROM call_briefs WHERE id=${callId}`;
+      if (!owner) throw new CallRepositoryError("CALL_NOT_FOUND");
+      if (owner.user_id) await this.#lockActiveUser(tx, owner.user_id);
+      // Serialize with call/account deletion before locking or updating attempts.
+      const available = await tx`SELECT id FROM call_briefs WHERE id=${callId} AND data_deleted_at IS NULL FOR SHARE`;
+      if (!available.length) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const [attempt] = await tx`SELECT id,runtime_descriptor FROM call_attempts WHERE id=${attemptId}
+        AND call_brief_id=${callId} AND status IN ('dialing','in_progress','awaiting_approval') FOR UPDATE`;
+      if (!attempt) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      if (attempt.runtime_descriptor === null) await tx`UPDATE call_attempts SET runtime_descriptor=${tx.json(descriptor)} WHERE id=${attemptId}`;
     });
   }
 
@@ -1994,7 +2032,8 @@ export class PostgresCallRepository implements CallRepository {
           compilation_revision = NULL,
           compilation_snapshot_hash = NULL,
           execution_snapshot_ciphertext = NULL,
-          native_transcript_capture = NULL
+          native_transcript_capture = NULL,
+          runtime_descriptor = NULL
         WHERE call_brief_id = ${input.callId}
       `;
       await transaction`UPDATE call_voice_actions SET payload_ciphertext=NULL WHERE call_brief_id=${input.callId}`;
@@ -2069,29 +2108,24 @@ export class PostgresCallRepository implements CallRepository {
         SELECT id FROM users WHERE id = ${userId} AND phone_verified_at IS NOT NULL
       `;
       if (user.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
-      await transaction`
-        INSERT INTO credit_transactions (
-          id, user_id, amount, type, reason, idempotency_key, created_at
-        ) VALUES (
-          ${randomUUID()}, ${userId}, 3, 'signup_grant',
-          'Phone verification signup grant', ${`signup:${userId}`}, ${new Date()}
-        )
-        ON CONFLICT (idempotency_key) DO NOTHING
-      `;
+      await betaCreditFunding(transaction, userId, new Date(), true);
     });
     return this.getCreditUsage(userId);
   }
 
   async getCreditUsage(userId: string): Promise<CreditUsage> {
+    return this.#sql.begin(async transaction => {
+    await this.#lockCreditAccount(transaction, userId);
+    const { funding, balance } = await betaCreditFunding(transaction, userId, new Date());
     const [activeRows, transactionRows] = await Promise.all([
-      this.#sql<{ callBriefId: string }[]>`
+      transaction<{ callBriefId: string }[]>`
         SELECT call_brief_id AS "callBriefId"
         FROM call_attempts
         WHERE user_id = ${userId} AND ended_at IS NULL
         ORDER BY created_at DESC
         LIMIT 1
       `,
-      this.#sql<CreditTransactionRow[]>`
+      transaction<CreditTransactionRow[]>`
         SELECT
           id,
           amount,
@@ -2100,20 +2134,24 @@ export class PostgresCallRepository implements CallRepository {
           promo_redemption_id AS "promoRedemptionId",
           admin_id AS "adminId",
           reason,
-          created_at AS "createdAt"
+          created_at AS "createdAt",
+          beta_period_id AS "betaPeriodId",
+          (SELECT ends_at FROM beta_credit_periods p WHERE p.id=credit_transactions.beta_period_id) AS "expiresAt"
         FROM credit_transactions
         WHERE user_id = ${userId}
         ORDER BY created_at DESC, id DESC
       `
     ]);
     return {
-      balance: transactionRows.reduce((total, row) => total + row.amount, 0),
+      balance, funding,
       activeCallBriefId: activeRows[0]?.callBriefId ?? null,
       transactions: transactionRows.map((row) => ({
         ...row,
-        createdAt: toIso(row.createdAt)
+        createdAt: toIso(row.createdAt),
+        expiresAt: row.expiresAt ? toIso(row.expiresAt) : null
       }))
     };
+    });
   }
 
   async createPromoCode(
@@ -2659,7 +2697,8 @@ export class PostgresCallRepository implements CallRepository {
         transaction,
         id,
         compilation,
-        now.toISOString()
+        now.toISOString(),
+        publication?.preparationId
       );
       if (publication) {
         const updated = await transaction`
@@ -3319,8 +3358,8 @@ export class PostgresCallRepository implements CallRepository {
     const [[operationCount], usageRows, costRows] = await Promise.all([
       this.#sql<AdminProviderOperationCountRow[]>`
         SELECT count(*)::int AS "operationCount",
-          count(*) FILTER (WHERE provider='openai' AND operation_type IN
-            ('brief_compilation','text_translation','call_summary','realtime_response','transcription')
+          count(*) FILTER (WHERE (operation_type IN
+            ('brief_compilation','text_translation','call_summary','realtime_response','transcription','answering_detection','voicemail_tts') OR (operation_type='realtime_session' AND stage='live_conversation'))
             AND NOT EXISTS (SELECT 1 FROM provider_usage_records u WHERE u.operation_id=provider_operations.id))::int AS "missingUsageOperations",
           count(*) FILTER (WHERE operation_type='realtime_session' AND NOT EXISTS
             (SELECT 1 FROM provider_operation_results r WHERE r.operation_id=provider_operations.id AND r.outcome='succeeded'))::int AS "incompleteSessions",
@@ -3364,7 +3403,9 @@ export class PostgresCallRepository implements CallRepository {
           operations.stage,
           COALESCE(results.provider_model, operations.requested_model)
             AS model,
-          count(*)::int AS "usageRecords",
+          count(usage.id)::int AS "usageRecords",
+          max(CASE WHEN jsonb_typeof(usage.raw_usage->'characters')='number'
+            THEN (usage.raw_usage->>'characters')::numeric END)::double precision AS "billableCharacters",
           COALESCE(sum(usage.request_count), 0)::int AS "requestCount",
           COALESCE(sum(usage.input_text_tokens), 0)::double precision
             AS "inputTextTokens",
@@ -3403,9 +3444,9 @@ export class PostgresCallRepository implements CallRepository {
           COALESCE(sum(usage.billable_seconds), 0)::double precision
             AS "billableSeconds",
           count(usage.billable_seconds)::int AS "billableSamples"
-        FROM effective_provider_usage usage
-        JOIN provider_operations operations
-          ON operations.id = usage.operation_id
+        FROM provider_operations operations
+        LEFT JOIN effective_provider_usage usage
+          ON usage.operation_id = operations.id
         LEFT JOIN provider_operation_results results
           ON results.operation_id = operations.id
         WHERE operations.started_at >= ${from}::timestamptz
@@ -4708,6 +4749,7 @@ export class PostgresCallRepository implements CallRepository {
     const attemptId = randomUUID();
     const userId = input.userId ?? null;
     let maxDurationSeconds: number | undefined;
+    let reservationPeriodId: string | null = null;
     await this.#sql.begin(async (transaction) => {
       const beta = this.betaControls ? (await lockBetaControls(transaction)).settings : undefined;
       const policy = beta ?? input.admissionPolicy ?? defaultCallAdmissionPolicy;
@@ -4863,12 +4905,9 @@ export class PostgresCallRepository implements CallRepository {
         if (usage?.active) {
           throw new CallRepositoryError("CONCURRENT_CALL_LIMIT");
         }
-        const [credits] = await transaction<{ balance: number }[]>`
-          SELECT COALESCE(sum(amount), 0)::int AS balance
-          FROM credit_transactions
-          WHERE user_id = ${userId}
-        `;
-        if ((credits?.balance ?? 0) < 1) {
+        const credits = await betaCreditFunding(transaction, userId, now);
+        reservationPeriodId = credits.reservationPeriodId;
+        if (credits.balance < 1) {
           throw new CallRepositoryError("INSUFFICIENT_CREDITS");
         }
         if ((usage?.hourlyStarts ?? 0) >= policy.maxStartsPerHour) {
@@ -4945,11 +4984,11 @@ export class PostgresCallRepository implements CallRepository {
         await transaction`
           INSERT INTO credit_transactions (
             id, user_id, amount, type, call_attempt_id, reason,
-            idempotency_key, created_at
+            idempotency_key, created_at, beta_period_id
           ) VALUES (
             ${randomUUID()}, ${userId}, -1, 'call_reservation', ${attemptId},
             'Outbound call credit reservation',
-            ${`call:${attemptId}:reservation`}, ${now}
+            ${`call:${attemptId}:reservation`}, ${now}, ${reservationPeriodId}
           )
         `;
       }
@@ -5318,11 +5357,11 @@ export class PostgresCallRepository implements CallRepository {
       if(existing[0]) { Object.assign(segment,this.#mapTranscript(existing[0])); return; }
       const [saved]=await transaction<{ingestionSequence:number;receivedAt:Date;callAttemptId:string|null}[]>`
         INSERT INTO transcript_segments (
-          id, call_brief_id, role, text, locale, final, created_at, native_timing, application_playback, call_attempt_id
+          id, call_brief_id, role, text, locale, final, created_at, native_timing, application_playback, call_attempt_id, attempt_attribution
         ) VALUES (
           ${segment.id}, ${id}, ${role}, ${text}, ${locale}, true,
           ${new Date(segment.createdAt)}, ${nativeTiming ? transaction.json(nativeTiming) : null},
-          ${applicationPlayback ? transaction.json(applicationPlayback) : null}, ${attempt?.id??null}
+          ${applicationPlayback ? transaction.json(applicationPlayback) : null}, ${attempt?.id??null}, ${attempt ? "direct" : "unknown"}
         )
         RETURNING ingestion_sequence::float8 AS "ingestionSequence",received_at AS "receivedAt",call_attempt_id AS "callAttemptId"
       `;
@@ -7348,6 +7387,8 @@ export class PostgresCallRepository implements CallRepository {
         call_preparation_requests.created_at AS "createdAt",
         call_preparation_requests.updated_at AS "updatedAt",
         call_preparation_requests.completed_at AS "completedAt"
+        ,(SELECT o.stage FROM provider_operations o WHERE o.call_preparation_id=call_preparation_requests.id
+          ORDER BY o.started_at DESC,o.id DESC LIMIT 1) AS stage
       FROM call_preparation_requests
       JOIN durable_jobs
         ON durable_jobs.call_preparation_id = call_preparation_requests.id
@@ -7775,7 +7816,7 @@ export class PostgresCallRepository implements CallRepository {
     const settled = await transaction<{ type: "call_charge" | "call_refund" }[]>`
       INSERT INTO credit_transactions (
         id, user_id, amount, type, call_attempt_id, reason,
-        idempotency_key, created_at, qualification
+        idempotency_key, created_at, qualification, beta_period_id
       )
       SELECT
         ${randomUUID()},
@@ -7788,7 +7829,8 @@ export class PostgresCallRepository implements CallRepository {
           : conversationCreditReason},
         ${`call:${attemptId}:${type === "call_refund" ? "refund" : "charge"}`},
         ${new Date()},
-        ${qualification ? transaction.json(qualification) : null}
+        ${qualification ? transaction.json(qualification) : null},
+        (SELECT beta_period_id FROM credit_transactions WHERE call_attempt_id=${attemptId} AND type='call_reservation')
       WHERE NOT EXISTS (
         SELECT 1
         FROM credit_transactions
@@ -8014,7 +8056,8 @@ export class PostgresCallRepository implements CallRepository {
     transaction: postgres.TransactionSql,
     callBriefId: string,
     compilation: CallCompilation,
-    occurredAt: string
+    occurredAt: string,
+    preparationId?: string
   ) {
     await this.#appendTelemetry(transaction, callBriefId, {
       idempotencyKey: `compilation:${compilation.revision}:completed`,
@@ -8042,6 +8085,7 @@ export class PostgresCallRepository implements CallRepository {
         }
       }
     });
+    await recordPlanReview(transaction, callBriefId, compilation, { preparationId });
   }
 
   async #appendTelemetry(
@@ -8203,7 +8247,7 @@ export class PostgresCallRepository implements CallRepository {
         ${input.usage.durationSeconds ?? null},
         ${input.usage.billableSeconds ?? null},
         ${transaction.json(input.usage.rawUsage as postgres.JSONValue)},
-        ${input.completedAt}::timestamptz, ${openAIPublicPricingVersion}
+        ${input.completedAt}::timestamptz, ${input.usage.pricingVersion ?? openAIPublicPricingVersion}
       )
       ON CONFLICT (operation_id) DO NOTHING
     `;
@@ -8273,6 +8317,7 @@ function mapCallPreparationRow(row: CallPreparationRow): CallPreparation {
     status: row.status,
     callBriefId: row.callBriefId,
     failureCode: row.failureCode,
+    ...(row.stage ? { stage: row.stage } : {}),
     attemptCount: row.attemptCount,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),

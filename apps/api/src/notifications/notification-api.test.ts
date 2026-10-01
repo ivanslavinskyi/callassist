@@ -9,7 +9,7 @@ import { NotificationSettingsError } from "./superadmin-notifications";
 
 const apps:ReturnType<typeof buildApp>[]=[];
 afterEach(async()=>{for(const app of apps.splice(0)) await app.close();});
-const settings={enabled:false,registrations:true,calls:true,recipientUserIds:[]};
+const settings={enabled:false,registrations:true,calls:true,planReviews:true,planReviewSignalsOnly:false,recipientUserIds:[]};
 async function fixture() {
   const repository=new InMemoryAuthRepository(),calls=new CallService(new InMemoryCallRepository());
   const authService=new AuthService({repository,verificationProvider:new MockVerificationProvider("123456"),signupCreditGranter:calls});

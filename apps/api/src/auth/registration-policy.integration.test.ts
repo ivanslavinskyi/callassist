@@ -88,7 +88,7 @@ describe("registration policies and email deferral", () => {
     for (const locale of uiLocales) {
       const options = await f.app.inject(`/api/auth/registration-options?locale=${locale}`);
       expect(options.statusCode).toBe(200);
-      expect(Object.keys(options.json()).sort()).toEqual(["documents", "policy", "smsCountries"]);
+      expect(Object.keys(options.json()).sort()).toEqual(["beta", "documents", "policy", "smsCountries"]);
       expect(options.json().documents.privacy.id).toEqual(expect.any(String));
     }
     for (const phoneE164 of ["+999123456789", "+442079460000"]) {

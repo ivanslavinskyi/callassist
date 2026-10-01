@@ -10,11 +10,13 @@ import type { CallRepository } from "../storage/call-repository";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import { NotificationReportReader, type NotificationEvent } from "./notification-report";
 import { callNotificationEmail, registrationNotificationEmail } from "./notification-email";
+import { planReviewNotificationEmail } from "./plan-review-email";
 
 type Sql = postgres.Sql | postgres.TransactionSql;
 type Delivery = NotificationEvent & {
   recipient_user_id:string; status:string; lease_owner:string|null; payload_ciphertext:string|null;
   send_attempts:number; first_send_at:Date|null;
+  delivery_generation:number;
 };
 export class NotificationSettingsError extends Error {
   constructor(readonly code:"NOTIFICATION_SETTINGS_STALE"|"NOTIFICATION_RECIPIENT_INVALID"|"NOTIFICATION_FORBIDDEN") { super(code); }
@@ -64,6 +66,8 @@ export class SuperadminNotifications implements NotificationAdmin {
       await tx`UPDATE superadmin_notifications SET status='cancelled',payload_ciphertext=NULL,lease_owner=NULL,lease_until=NULL,
         last_error_code='NOTIFICATIONS_DISABLED',updated_at=now() WHERE status IN ('queued','processing') AND (
           NOT ${settings.enabled} OR (kind='registration' AND NOT ${settings.registrations}) OR (kind='call' AND NOT ${settings.calls})
+          OR (kind='plan_review' AND (NOT ${settings.planReviews} OR (${settings.planReviewSignalsOnly}
+            AND NOT EXISTS(SELECT 1 FROM plan_review_cases p WHERE p.id=superadmin_notifications.source_id AND p.category='policy_signal'))))
           OR NOT (recipient_user_id::text IN (SELECT jsonb_array_elements_text(${tx.json(settings.recipientUserIds)}::jsonb))))`;
       await tx`INSERT INTO superadmin_notification_audit(actor_user_id,action,reason,previous_settings,next_settings)
         VALUES(${actor},'settings.updated',${parsed.reason},${tx.json(current.settings)},${tx.json(settings)})`;
@@ -115,15 +119,17 @@ export class SuperadminNotifications implements NotificationAdmin {
     if(!message) {
       const recipient=await eligibleRecipient(this.sql,row.recipient_user_id);
       if(!recipient) { await this.cancel(row,"RECIPIENT_UNAVAILABLE"); return; }
-      const report=row.kind==='registration' ? await this.reports.registration(row) : await this.reports.call(row,this.now());
+      const report=row.kind==='plan_review' ? await this.reports.planReview(row)
+        : row.kind==='registration' ? await this.reports.registration(row) : await this.reports.call(row,this.now());
       if(report==='pending') {
         await this.sql`UPDATE superadmin_notifications SET status='queued',run_after=${new Date(this.now().getTime()+10_000)},
           lease_owner=NULL,lease_until=NULL WHERE id=${row.id} AND status='processing' AND lease_owner=${this.workerId}`;
         return;
       }
       if(!report) { await this.cancel(row,"SOURCE_UNAVAILABLE"); return; }
-      message={to:recipient.email,idempotencyKey:`superadmin-notification:${row.id}`,
-        content:'userId' in report ? registrationNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale)) : callNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale))};
+      message={to:recipient.email,idempotencyKey:`superadmin-notification:${row.id}${row.delivery_generation > 1 ? `:${row.delivery_generation}` : ""}`,
+        content:'caseId' in report ? planReviewNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale))
+          : 'userId' in report ? registrationNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale)) : callNotificationEmail(report,this.branding,resolveEmailLocale(recipient.uiLocale))};
       const saved=await this.sql`UPDATE superadmin_notifications SET payload_ciphertext=${encryptJson(message,this.key)},
         first_send_at=COALESCE(first_send_at,${this.now()}) WHERE id=${row.id} AND status='processing' AND lease_owner=${this.workerId}`;
       if(!saved.count) return;
@@ -137,7 +143,10 @@ export class SuperadminNotifications implements NotificationAdmin {
       const settings=notificationSettingsSchema.parse(config?.settings);
       const recipient=await eligibleRecipient(tx,row.recipient_user_id);
       const source=await sourceAvailable(tx,row);
-      if(!settings.enabled || !(row.kind==='registration'?settings.registrations:settings.calls) || !settings.recipientUserIds.includes(row.recipient_user_id)
+      const categoryAllowed = row.kind==='plan_review' ? settings.planReviews && (!settings.planReviewSignalsOnly ||
+        (await tx`SELECT 1 FROM plan_review_cases WHERE id=${row.source_id} AND category='policy_signal'`).length > 0)
+        : row.kind==='registration' ? settings.registrations : settings.calls;
+      if(!settings.enabled || !categoryAllowed || !settings.recipientUserIds.includes(row.recipient_user_id)
         || !recipient || recipient.email!==frozen.to || !source || !current.payload_ciphertext) {
         await this.finish(tx,row.id,"cancelled",null,"NOTIFICATION_NO_LONGER_ALLOWED"); return;
       }
@@ -179,6 +188,8 @@ async function sourceAvailable(sql:Sql,event:NotificationEvent) {
   const [row]=await sql`SELECT 1 WHERE
     (${event.source_user_id}::uuid IS NULL OR EXISTS(SELECT 1 FROM users u WHERE u.id=${event.source_user_id} AND u.status<>'deleted'
       AND NOT EXISTS(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.id AND d.status<>'completed')))
-    AND (${event.call_brief_id}::uuid IS NULL OR EXISTS(SELECT 1 FROM call_briefs WHERE id=${event.call_brief_id} AND data_deleted_at IS NULL))`;
+    AND (${event.call_brief_id}::uuid IS NULL OR EXISTS(SELECT 1 FROM call_briefs WHERE id=${event.call_brief_id} AND data_deleted_at IS NULL))
+    AND (${event.kind}<>'plan_review' OR EXISTS(SELECT 1 FROM plan_review_cases p JOIN call_compilations c ON c.id=p.compilation_id
+      WHERE p.id=${event.source_id} AND c.compilation_ciphertext IS NOT NULL))`;
   return !!row;
 }

@@ -1,0 +1,191 @@
+[
+  {
+    "group": "page:terms",
+    "locale": "en",
+    "semantic": "credit_allowance",
+    "old": [
+      "The beta includes three promotional call credits. A credit is reserved when a call starts. It is used only after the recipient consents and gives a substantive answer to your task. A factual negative answer, an answer that they do not know, or a referral to another contact also counts. A connection, greeting, silence or immediate refusal alone does not use a credit. If no substantive answer is confirmed, the credit is returned when the call ends. The task does not have to be resolved. No payments during the beta. Supported destinations, languages, limits, features and availability may change during the beta."
+    ],
+    "next": "The current beta credit allowance is shown at registration and in your account. A credit is reserved when a call starts. It is used only after the recipient consents and gives a substantive answer to your task. A factual negative answer, an answer that they do not know, or a referral to another contact also counts. A connection, greeting, silence or immediate refusal alone does not use a credit. If no substantive answer is confirmed, the credit is returned when the call ends. The task does not have to be resolved. No payments during the beta. Supported destinations, languages, limits, features and availability may change during the beta."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "en",
+    "semantic": "credit_badge",
+    "old": [
+      "3 call credits"
+    ],
+    "next": "Call credits for the beta"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "en",
+    "semantic": "credit_cta",
+    "old": [
+      "Start with 3 free call credits. A credit is used only after the recipient agrees and gives a substantive answer about your task."
+    ],
+    "next": "See the current call-credit allowance when registering. A credit is used only after the recipient agrees and gives a substantive answer about your task."
+  },
+  {
+    "group": "page:terms",
+    "locale": "de",
+    "semantic": "credit_allowance",
+    "old": [
+      "Die Beta umfasst drei Anrufguthaben. Beim Start wird ein Anrufguthaben reserviert. Es wird erst verbraucht, wenn die angerufene Person zugestimmt und inhaltlich auf Ihr Anliegen geantwortet hat. Auch eine sachlich negative Antwort, Nichtwissen oder der Verweis an eine andere Stelle zählt. Eine Verbindung, Begrüssung, Stille oder sofortige Gesprächsverweigerung allein verbraucht kein Guthaben. Wird keine inhaltliche Antwort bestätigt, erhalten Sie das Guthaben nach Anrufende zurück. Das Anliegen muss nicht gelöst sein. Während der Beta gibt es keine Zahlungen. Unterstützte Ziele, Sprachen, Limiten, Funktionen und Verfügbarkeit können sich während der Beta ändern."
+    ],
+    "next": "Das aktuelle Beta-Anrufguthaben wird bei der Registrierung und in Ihrem Konto angezeigt. Beim Start wird ein Anrufguthaben reserviert. Es wird erst verbraucht, wenn die angerufene Person zugestimmt und inhaltlich auf Ihr Anliegen geantwortet hat. Auch eine sachlich negative Antwort, Nichtwissen oder der Verweis an eine andere Stelle zählt. Eine Verbindung, Begrüssung, Stille oder sofortige Gesprächsverweigerung allein verbraucht kein Guthaben. Wird keine inhaltliche Antwort bestätigt, erhalten Sie das Guthaben nach Anrufende zurück. Das Anliegen muss nicht gelöst sein. Während der Beta gibt es keine Zahlungen. Unterstützte Ziele, Sprachen, Limiten, Funktionen und Verfügbarkeit können sich während der Beta ändern."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "de",
+    "semantic": "credit_badge",
+    "old": [
+      "3 Anrufguthaben"
+    ],
+    "next": "Anrufguthaben für die Beta"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "de",
+    "semantic": "credit_cta",
+    "old": [
+      "Starten Sie mit 3 kostenlosen Anrufguthaben. Ein Guthaben wird erst nach Zustimmung und einer inhaltlichen Antwort auf Ihr Anliegen verbraucht."
+    ],
+    "next": "Das aktuelle Anrufguthaben sehen Sie bei der Registrierung. Ein Guthaben wird erst nach Zustimmung und einer inhaltlichen Antwort auf Ihr Anliegen verbraucht."
+  },
+  {
+    "group": "page:terms",
+    "locale": "fr",
+    "semantic": "credit_allowance",
+    "old": [
+      "La bêta comprend trois crédits d'appel offerts. Un crédit est réservé au début de l'appel. Il n'est utilisé que si la personne accepte la conversation et apporte une réponse de fond à votre demande. Une réponse négative factuelle, le fait de ne pas savoir ou une orientation vers un autre contact comptent aussi. Une connexion, une salutation, un silence ou un refus immédiat ne suffisent pas. Si aucune réponse de fond n'est confirmée, le crédit est rendu à la fin de l'appel. Votre demande n'a pas besoin d'être résolue. Aucun paiement pendant la bêta. Les destinations, langues, limites, fonctionnalités et disponibilités peuvent changer pendant la bêta."
+    ],
+    "next": "Le quota actuel de crédits bêta est indiqué à l’inscription et dans votre compte. Un crédit est réservé au début de l'appel. Il n'est utilisé que si la personne accepte la conversation et apporte une réponse de fond à votre demande. Une réponse négative factuelle, le fait de ne pas savoir ou une orientation vers un autre contact comptent aussi. Une connexion, une salutation, un silence ou un refus immédiat ne suffisent pas. Si aucune réponse de fond n'est confirmée, le crédit est rendu à la fin de l'appel. Votre demande n'a pas besoin d'être résolue. Aucun paiement pendant la bêta. Les destinations, langues, limites, fonctionnalités et disponibilités peuvent changer pendant la bêta."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "fr",
+    "semantic": "credit_badge",
+    "old": [
+      "3 crédits d'appel"
+    ],
+    "next": "Crédits d’appel pour la bêta"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "fr",
+    "semantic": "credit_cta",
+    "old": [
+      "Commencez avec 3 crédits d'appel gratuits. Un crédit n'est utilisé que si la personne accepte et apporte une réponse de fond à votre demande."
+    ],
+    "next": "Consultez le quota actuel de crédits d’appel à l’inscription. Un crédit n'est utilisé que si la personne accepte et apporte une réponse de fond à votre demande."
+  },
+  {
+    "group": "page:terms",
+    "locale": "it",
+    "semantic": "credit_allowance",
+    "old": [
+      "La beta include tre crediti chiamata promozionali. Un credito viene riservato all'avvio della chiamata. Viene usato solo quando il destinatario acconsente e dà una risposta sostanziale alla tua richiesta. Contano anche una risposta negativa concreta, un «non lo so» o il rinvio a un altro contatto. Il solo collegamento, un saluto, il silenzio o un rifiuto immediato non consumano credito. Se non viene confermata una risposta sostanziale, il credito viene restituito alla fine della chiamata. Non è necessario che la richiesta sia risolta. Nessun pagamento durante la beta. Destinazioni, lingue, limiti, funzionalità e disponibilità possono cambiare durante la beta."
+    ],
+    "next": "La quota attuale di crediti beta è indicata alla registrazione e nel tuo account. Un credito viene riservato all'avvio della chiamata. Viene usato solo quando il destinatario acconsente e dà una risposta sostanziale alla tua richiesta. Contano anche una risposta negativa concreta, un «non lo so» o il rinvio a un altro contatto. Il solo collegamento, un saluto, il silenzio o un rifiuto immediato non consumano credito. Se non viene confermata una risposta sostanziale, il credito viene restituito alla fine della chiamata. Non è necessario che la richiesta sia risolta. Nessun pagamento durante la beta. Destinazioni, lingue, limiti, funzionalità e disponibilità possono cambiare durante la beta."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "it",
+    "semantic": "credit_badge",
+    "old": [
+      "3 crediti chiamata"
+    ],
+    "next": "Crediti chiamata per la beta"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "it",
+    "semantic": "credit_cta",
+    "old": [
+      "Inizia con 3 crediti chiamata gratuiti. Un credito viene usato solo se il destinatario acconsente e dà una risposta sostanziale alla tua richiesta."
+    ],
+    "next": "Consulta la quota attuale di crediti chiamata alla registrazione. Un credito viene usato solo se il destinatario acconsente e dà una risposta sostanziale alla tua richiesta."
+  },
+  {
+    "group": "page:terms",
+    "locale": "rm",
+    "semantic": "credit_allowance",
+    "old": [
+      "La beta cuntegna trais credits da telefonat gratuits. In credit vegn reservà al cumenzament dal telefonat. El vegn duvrà mo suenter che la persuna ha dà ses consentiment e respundì davart il cuntegn da tia dumonda. Ina resposta negativa concreta, il fatg da betg savair u il rinviament ad in auter contact quintan era. Ina colliaziun, in salid, silenzi u in refus immediat na dovran betg in credit. Sche nagina resposta davart il cuntegn vegn confermada, vegn il credit restituì a la fin dal telefonat. L'incumbensa na sto betg esser schliada. Durant la beta na datti nagins pajaments. Destinaziuns, linguas, cunfins, funcziuns e disponibladad pon sa midar durant la beta."
+    ],
+    "next": "La quota actuala da credits beta vegn mussada tar la registraziun ed en tes conto. In credit vegn reservà al cumenzament dal telefonat. El vegn duvrà mo suenter che la persuna ha dà ses consentiment e respundì davart il cuntegn da tia dumonda. Ina resposta negativa concreta, il fatg da betg savair u il rinviament ad in auter contact quintan era. Ina colliaziun, in salid, silenzi u in refus immediat na dovran betg in credit. Sche nagina resposta davart il cuntegn vegn confermada, vegn il credit restituì a la fin dal telefonat. L'incumbensa na sto betg esser schliada. Durant la beta na datti nagins pajaments. Destinaziuns, linguas, cunfins, funcziuns e disponibladad pon sa midar durant la beta."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "rm",
+    "semantic": "credit_badge",
+    "old": [
+      "3 credits da telefonat"
+    ],
+    "next": "Credits da telefonat per la beta"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "rm",
+    "semantic": "credit_cta",
+    "old": [
+      "Cumenza cun 3 credits da telefonat gratuits. In credit vegn duvrà mo sche la persuna è d'accord e respunda davart il ccuntegn da tia dumonda."
+    ],
+    "next": "Guarda la quota actuala da credits da telefonat tar la registraziun. In credit vegn duvrà mo sche la persuna è d'accord e respunda davart il ccuntegn da tia dumonda."
+  },
+  {
+    "group": "page:terms",
+    "locale": "ru",
+    "semantic": "credit_allowance",
+    "old": [
+      "В бета-версии доступны три бесплатных кредита на звонки. Кредит резервируется в начале звонка. Он расходуется, только если собеседник согласился на разговор и дал содержательный ответ по вашей задаче. Обоснованный отрицательный ответ, «не знаю» или направление к другому контакту тоже учитываются. Одного соединения, приветствия, молчания или немедленного отказа недостаточно. Если содержательный ответ не подтверждён, кредит возвращается после звонка. Задача при этом не обязательно должна быть решена. Во время бета-тестирования платежей нет. Направления, языки, ограничения, функции и доступность могут меняться в ходе бета-тестирования."
+    ],
+    "next": "Текущая квота кредитов беты указана при регистрации и в вашем аккаунте. Кредит резервируется в начале звонка. Он расходуется, только если собеседник согласился на разговор и дал содержательный ответ по вашей задаче. Обоснованный отрицательный ответ, «не знаю» или направление к другому контакту тоже учитываются. Одного соединения, приветствия, молчания или немедленного отказа недостаточно. Если содержательный ответ не подтверждён, кредит возвращается после звонка. Задача при этом не обязательно должна быть решена. Во время бета-тестирования платежей нет. Направления, языки, ограничения, функции и доступность могут меняться в ходе бета-тестирования."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "ru",
+    "semantic": "credit_badge",
+    "old": [
+      "3 кредита на звонки"
+    ],
+    "next": "Кредиты на звонки в бете"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "ru",
+    "semantic": "credit_cta",
+    "old": [
+      "Начните с 3 бесплатных кредитов. Кредит расходуется, только если собеседник согласился на разговор и дал содержательный ответ по вашей задаче."
+    ],
+    "next": "Текущая квота кредитов на звонки указана при регистрации. Кредит расходуется, только если собеседник согласился на разговор и дал содержательный ответ по вашей задаче."
+  },
+  {
+    "group": "page:terms",
+    "locale": "uk",
+    "semantic": "credit_allowance",
+    "old": [
+      "У бета-версії доступні три безкоштовні кредити на дзвінки. Кредит резервується на початку дзвінка. Він витрачається, лише якщо співрозмовник погодився на розмову й дав змістовну відповідь щодо вашого завдання. Обґрунтована негативна відповідь, «не знаю» або скерування до іншого контакту також враховуються. Самого з’єднання, привітання, мовчання чи негайної відмови недостатньо. Якщо змістовну відповідь не підтверджено, кредит повертається після дзвінка. Завдання при цьому не обов’язково має бути вирішене. Під час бета-тестування платежів немає. Напрямки, мови, обмеження, функції й доступність можуть змінюватися під час бета-тестування."
+    ],
+    "next": "Поточна квота кредитів бета-тесту вказана під час реєстрації та у вашому акаунті. Кредит резервується на початку дзвінка. Він витрачається, лише якщо співрозмовник погодився на розмову й дав змістовну відповідь щодо вашого завдання. Обґрунтована негативна відповідь, «не знаю» або скерування до іншого контакту також враховуються. Самого з’єднання, привітання, мовчання чи негайної відмови недостатньо. Якщо змістовну відповідь не підтверджено, кредит повертається після дзвінка. Завдання при цьому не обов’язково має бути вирішене. Під час бета-тестування платежів немає. Напрямки, мови, обмеження, функції й доступність можуть змінюватися під час бета-тестування."
+  },
+  {
+    "group": "collection:landing",
+    "locale": "uk",
+    "semantic": "credit_badge",
+    "old": [
+      "3 кредити на дзвінки"
+    ],
+    "next": "Кредити на дзвінки в бета-тесті"
+  },
+  {
+    "group": "collection:landing",
+    "locale": "uk",
+    "semantic": "credit_cta",
+    "old": [
+      "Почніть із 3 безкоштовних кредитів. Кредит витрачається, лише якщо співрозмовник погодився на розмову й дав змістовну відповідь щодо вашого завдання."
+    ],
+    "next": "Поточна квота кредитів на дзвінки вказана під час реєстрації. Кредит витрачається, лише якщо співрозмовник погодився на розмову й дав змістовну відповідь щодо вашого завдання."
+  }
+]

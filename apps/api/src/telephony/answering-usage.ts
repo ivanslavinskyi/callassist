@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AnsweringState } from "@callassist/contracts";
 import type { CallAttemptRecord, TelephonyProviderOperationRecord } from "../storage/call-repository";
+import { twilioAnsweringPricingVersion } from "../config/provider-pricing-policy";
 
 /** Stable identities; recorded atomically with the decision before returning TwiML. */
 export function answeringUsage(attempt: CallAttemptRecord, state: AnsweringState): TelephonyProviderOperationRecord[] {
@@ -22,6 +23,7 @@ export function answeringUsage(attempt: CallAttemptRecord, state: AnsweringState
         completedAt: state.observedAt, durationMs: amd ? state.durationMs ?? 0 : 0,
         errorCode: state.failure ? "ANSWER_DETECTION_FAILED" : null,
         usage: state.failure ? null : {
+          pricingVersion: twilioAnsweringPricingVersion,
           requestCount: 1, inputTextTokens: null, cachedInputTextTokens: null, cacheWriteInputTextTokens: null,
           outputTextTokens: null, reasoningOutputTokens: null, totalTokens: null,
           rawUsage: { answered_by: state.answeredBy, characters, policy_version: state.policyVersion,

@@ -15,7 +15,11 @@ export function formatAdminMoney(micros: number | null, locale: "en" | "de" = "e
   return formatter.format(micros / 1_000_000);
 }
 export function expenseCategory(operationType: string): ExpenseCategory | null {
-  return ({ realtime_response: "realtime", brief_compilation: "preparation", text_translation: "translation", call_summary: "summary", transcription: "transcription", telephony_leg: "twilio" } as Record<string, ExpenseCategory>)[operationType] ?? null;
+  return ({ realtime_response: "realtime", realtime_session: "realtime", brief_compilation: "preparation", text_translation: "translation", call_summary: "summary", transcription: "transcription", telephony_leg: "twilio", answering_detection: "twilio", voicemail_tts: "twilio" } as Record<string, ExpenseCategory>)[operationType] ?? null;
+}
+export function twilioReportedMicros(cost: AdminCost): number | null {
+  const amounts = cost.providerReported.amounts.filter(item => item.provider === "twilio" && item.currency === "USD");
+  return amounts.length ? amounts.reduce((sum, item) => sum + item.amountMicros, 0) : null;
 }
 export function expenseGroups(cost: AdminCost) {
   const c = cost.providerUsage.components;
@@ -30,9 +34,9 @@ export function expenseGroups(cost: AdminCost) {
   return groups.map(group => {
     const amounts = group.parts.map(p => p.calculatedUsdMicros).filter((v): v is number => v !== null);
     const billing = cost.billing.find(b => b.provider === "twilio");
-    return { ...group, amount: group.key === "twilio" ? billing?.totalMicros ?? cost.providerReported.usdMicros : amounts.length ? amounts.reduce((a, b) => a + b, 0) : null,
+    return { ...group, amount: group.key === "twilio" ? billing?.totalMicros ?? twilioReportedMicros(cost) : amounts.length ? amounts.reduce((a, b) => a + b, 0) : null,
       requests: group.parts.reduce((sum, p) => sum + p.requests, 0),
-      incomplete: group.key === "twilio" ? cost.providerReported.pendingOperations : group.parts.reduce((sum, p) => sum + p.incompleteRecords, 0),
+      incomplete: (group.key === "twilio" ? cost.providerReported.pendingOperations : 0) + group.parts.reduce((sum, p) => sum + p.incompleteRecords, 0),
       models: [...new Set(group.parts.flatMap(p => p.models))],
       records: group.parts.reduce((sum, p) => sum + p.usageRecords, 0) };
   });

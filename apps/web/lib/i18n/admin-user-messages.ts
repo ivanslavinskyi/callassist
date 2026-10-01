@@ -131,6 +131,7 @@ const en = {
     deleted: "Deleted"
   } satisfies Record<UserStatus, string>,
   transactions: {
+    beta_grant: "Beta allowance",
     signup_grant: "Signup grant",
     promo_grant: "Promo grant",
     admin_grant: "Admin grant",
@@ -295,6 +296,7 @@ const de: AdminUserMessages = {
     deleted: "Gelöscht"
   },
   transactions: {
+    beta_grant: "Beta-Kontingent",
     signup_grant: "Startguthaben",
     promo_grant: "Aktionsgutschrift",
     admin_grant: "Admin-Gutschrift",

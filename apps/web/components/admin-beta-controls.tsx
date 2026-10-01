@@ -1,5 +1,6 @@
 "use client";
 import { formatAdminMoney } from "@/lib/admin-costs";
+import { AdminBetaCreditPolicy } from "./admin-beta-credit-policy";
 import { RegistrationPolicyControls } from "./registration-policy-controls";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { BetaControlsView, BetaSettings, UserRole } from "@callassist/contracts";
@@ -36,6 +37,7 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
     const number = (name: string) => Number(data.get(name));
     const settings: BetaSettings = { ...view.settings,
       publicAccountLimit: number("publicAccountLimit"), maxDurationSeconds: number("minutes") * 60,
+      showRegistrationRemaining: data.has("showRegistrationRemaining"),
       maxConcurrentCalls: number("maxConcurrentCalls"), maxStartsPerHour: number("maxStartsPerHour"),
       maxStartsPerDay: number("maxStartsPerDay"), maxStartsPerRecipientPerDay: number("maxStartsPerRecipientPerDay"),
       spendingEnabled: data.has("spendingEnabled"),
@@ -50,7 +52,7 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
   return <section className="admin-system-panel" id="beta-controls" aria-busy={busy}>
     <h2>Beta access and spending</h2>
     <RegistrationPolicyControls role={role} />
-    <p>Open registration has a lifetime intake cap. One-use invitations are additional places. Every verified account receives 3 starting credits; one call per account can run at a time.</p>
+    <p>Open registration has a lifetime intake cap, including unfinished registrations. Deletion does not release a place. One-use invitations are additional places; one call per account can run at a time.</p>
     <button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh beta settings</button>
     {error && <p role="alert" className="form-error">{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -58,6 +60,8 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
       <p>Budget accounting follows reservations created in the last 24 hours. Expenses in the service overview follow service dates. Account-wide billing also includes costs outside these reservations.</p>
       <dl className="admin-operations-list">
         <div><dt>Public intake</dt><dd>{view.publicAccounts} / {view.settings.publicAccountLimit}</dd></div>
+        <div><dt>Remaining public places</dt><dd>{Math.max(0, view.settings.publicAccountLimit - view.publicAccounts)}</dd></div>
+        <div><dt>Unverified accounts (public and invited)</dt><dd>{view.unverifiedAccounts ?? "—"} · include interrupted registrations and SMS failures; review in Users</dd></div>
         <div><dt>Invited accounts</dt><dd>{view.invitedAccounts} (additional)</dd></div>
         <div><dt>Active calls</dt><dd>{view.activeCalls} / {view.settings.maxConcurrentCalls}</dd></div>
         <div><dt>Twilio call charges (budget cohort)</dt><dd>{formatAdminMoney(view.reportedCostMicros)}</dd></div>
@@ -76,6 +80,7 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
           <legend>Admission limits</legend>
           <div className="admin-system-grid">
             {field("Open registration cap", "publicAccountLimit", view.settings.publicAccountLimit, 0, 10000)}
+            <label><input type="checkbox" name="showRegistrationRemaining" defaultChecked={view.settings.showRegistrationRemaining} /> Show remaining beta places on registration</label>
             {field("Maximum call duration (minutes)", "minutes", view.settings.maxDurationSeconds / 60, 1, 15)}
             {field("Concurrent calls across the service", "maxConcurrentCalls", view.settings.maxConcurrentCalls, 1, 20)}
             {field("Starts per account / hour", "maxStartsPerHour", view.settings.maxStartsPerHour, 1, 100)}
@@ -96,6 +101,7 @@ export function AdminBetaControls({ role }: { role: UserRole }) {
         </fieldset>
       </form>
       {!editable && <p>Only a superadmin can change these limits or issue invitations.</p>}
+      <AdminBetaCreditPolicy view={view} editable={editable} onSaved={refresh} />
       <h3>Additional invitations</h3>
       <p>Each invitation is valid for 7 days and one account. Share its code directly with the participant; no email is sent automatically.</p>
       <form onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget);

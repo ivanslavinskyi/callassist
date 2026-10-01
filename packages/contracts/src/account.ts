@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { creditFundingSchema } from "./beta-credits";
 import { terminalDecisionSchema } from "./terminal-decision";
 import { normalizeAccountPhoneNumber, parseAccountPhoneNumber } from "./phone";
 import { callCompilationSchema, callSnapshotSchema, personNamePartSchema } from "./call-brief";
@@ -334,6 +335,7 @@ export const accountSessionListSchema = z.object({
 export type AccountSessionList = z.infer<typeof accountSessionListSchema>;
 
 export const creditTransactionTypeSchema = z.enum([
+  "beta_grant",
   "signup_grant",
   "promo_grant",
   "admin_grant",
@@ -347,6 +349,8 @@ export type CreditTransactionType = z.infer<
 >;
 
 export const creditTransactionSchema = z.object({
+  betaPeriodId: z.uuid().nullable().optional(),
+  expiresAt: z.iso.datetime().nullable().optional(),
   id: z.uuid(),
   amount: z.number().int(),
   type: creditTransactionTypeSchema,
@@ -359,6 +363,7 @@ export const creditTransactionSchema = z.object({
 export type CreditTransaction = z.infer<typeof creditTransactionSchema>;
 
 export const creditUsageSchema = z.object({
+  funding: creditFundingSchema.optional(),
   balance: z.number().int().nonnegative(),
   activeCallBriefId: z.uuid().nullable(),
   transactions: z.array(creditTransactionSchema)

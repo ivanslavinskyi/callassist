@@ -8,6 +8,7 @@ import { consentTimeline } from "@/lib/i18n/consent-timeline";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { buildInitialDisclosure, formatPersonName, answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
+import { betaInsufficientCreditMessages } from "@/lib/i18n/beta-credit-messages";
 import { systemMessages } from "@/lib/i18n/system-messages";
 import { callStatusClass, callStatusLabel } from "@/lib/call-status";
 import { PreviousCallResult } from "./previous-call-result";
@@ -285,7 +286,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           : error instanceof ApiError && error.code === "EMAIL_VERIFICATION_REQUIRED"
           ? emailVerificationMessages[uiLocale].banner
           : error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS"
-          ? messages.live.insufficientCredits
+          ? betaInsufficientCreditMessages[uiLocale]
           : error instanceof ApiError && error.code === "CONCURRENT_CALL_LIMIT"
             ? messages.live.concurrentCall
             : error instanceof ApiError && error.code === "RECIPIENT_SUPPRESSED"

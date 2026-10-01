@@ -25,7 +25,30 @@ describe("stage-aware compiler deadlines", () => {
     vi.unstubAllGlobals();
   });
 
-  it("lets a 40-second generation finish while moderation keeps its own short deadline", async () => {
+  it("does not dispatch when the shared preparation deadline has already expired", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    await expect(new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1,
+      { deadlineAtMs: Date.now()-1 })).rejects.toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a retry within the remaining shared budget and identifies timeout without headers", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined));
+    const results: BriefCompilerProviderRequestResult[] = [];
+    const reservations: unknown[] = [];
+    const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input,1,{
+      deadlineAtMs: Date.now()+8_000,
+      beforeProviderRequest: async value => { reservations.push(value.requestMetadata); return true; },
+      afterProviderRequest: async value => { results.push(value); }
+    }).catch(error => error);
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(await pending).toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(results[0]).toMatchObject({ errorCode:"OPENAI_RESPONSE_TIMEOUT", durationMs:8_000 });
+    expect(reservations[0]).toMatchObject({ repairKind:"none",repairNumber:0,transportAttempt:1,timeoutMs:8_000,remainingMs:8_000 });
+  });
+
+  it("lets a 30-second generation finish while moderation keeps its own short deadline", async () => {
     const payload = await compilationResponse();
     const results: BriefCompilerProviderRequestResult[] = [];
     let generationSignal: AbortSignal | null = null;
@@ -35,7 +58,7 @@ describe("stage-aware compiler deadlines", () => {
         return moderationResponse();
       }
       generationSignal = init!.signal as AbortSignal;
-      await wait(40_000);
+      await wait(30_000);
       return new Response(JSON.stringify(payload));
     });
     let finished = false;
@@ -46,11 +69,11 @@ describe("stage-aware compiler deadlines", () => {
     expect(finished).toBe(false);
     expect(generationSignal).not.toBeNull();
     expect((generationSignal as unknown as AbortSignal).aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(16_000);
+    await vi.advanceTimersByTimeAsync(6_000);
     expect((await pending).policyDecision.status).toBe("ready_for_review");
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
     expect(results.map(({ stage, durationMs }) => [stage, durationMs])).toEqual([
-      ["input_moderation", 1_000], ["compilation", 40_000], ["output_moderation", 1_000]
+      ["input_moderation", 1_000], ["compilation", 30_000], ["output_moderation", 1_000]
     ]);
   });
 
@@ -92,7 +115,7 @@ describe("stage-aware compiler deadlines", () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 
-  it("caps generation retries at the same deadline and leaves 25 seconds for output moderation", async () => {
+  it("bounds two stalled generation requests at 35 seconds each", async () => {
     const payload = await compilationResponse();
     const results: BriefCompilerProviderRequestResult[] = [];
     let generations = 0;
@@ -105,13 +128,13 @@ describe("stage-aware compiler deadlines", () => {
       await wait(++generations === 1 ? 60_000 : 35_000);
       return new Response(JSON.stringify(payload));
     });
-    // The first generation reaches its 60s cap; the second is capped by the 95s generation deadline.
+    // A stalled provider no longer consumes 60 seconds before the first retry.
     const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
       afterProviderRequest: async (result) => { results.push(result); }
     }).then(() => null, (error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(95_000);
+    await vi.advanceTimersByTimeAsync(70_000);
     expect(await pending).toMatchObject({ code: "OPENAI_REQUEST_FAILED", stage: "compilation" });
-    expect(results.filter(({ stage }) => stage === "compilation").map(({ durationMs }) => durationMs)).toEqual([60_000, 35_000]);
+    expect(results.filter(({ stage }) => stage === "compilation").map(({ durationMs }) => durationMs)).toEqual([35_000, 35_000]);
     expect(moderations).toBe(1);
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
   });
@@ -133,10 +156,10 @@ describe("stage-aware compiler deadlines", () => {
     const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
       afterProviderRequest: async (result) => { results.push(result); }
     });
-    await vi.advanceTimersByTimeAsync(118_000);
+    await vi.advanceTimersByTimeAsync(93_000);
     expect((await pending).policyDecision.status).toBe("ready_for_review");
     expect(results.map(({ stage, durationMs }) => [stage, durationMs])).toEqual([
-      ["input_moderation", 0], ["compilation", 60_000], ["compilation", 34_000], ["output_moderation", 24_000]
+      ["input_moderation", 0], ["compilation", 35_000], ["compilation", 34_000], ["output_moderation", 24_000]
     ]);
   });
 
@@ -157,7 +180,7 @@ describe("stage-aware compiler deadlines", () => {
     expect(signals).toHaveLength(1);
     expect(signals[0]!.aborted).toBe(true);
     expect(results.at(-1)).toMatchObject({ outcome: "network_error", statusCode: 200,
-      providerRequestId: "headers_received_body_stalled", durationMs: 15_000 });
+      providerRequestId: "headers_received_body_stalled", durationMs: 15_000, errorCode: "OPENAI_BODY_TIMEOUT" });
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 
@@ -175,10 +198,10 @@ describe("stage-aware compiler deadlines", () => {
       await wait(34_000);
       return new Response(JSON.stringify(payload));
     });
-    const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
+    const pending = new OpenAIBriefCompiler({ apiKey: "test", timeoutMs: 95_000, fetchImplementation }).compile(input, 1, {
       afterProviderRequest: async (result) => { results.push(result); }
     }).then(() => null, (error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(120_000);
+    await vi.advanceTimersByTimeAsync(95_000);
     expect(await pending).toMatchObject({ code: "OPENAI_REQUEST_FAILED", stage: "output_moderation" });
     expect(results.filter(({ stage }) => stage === "output_moderation").map(({ durationMs }) => durationMs)).toEqual([25_000, 1_000]);
   });

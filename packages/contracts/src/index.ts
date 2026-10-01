@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 export * from "./account";
 export * from "./assistant-identity";
 export * from "./appointment";
@@ -12,6 +14,7 @@ export * from "./call-preparation";
 export * from "./call-telemetry";
 export * from "./content";
 export * from "./credits";
+export * from "./beta-credits";
 export * from "./conversation-credit";
 export * from "./health";
 export * from "./languages";
@@ -40,3 +43,4 @@ export * from "./initial-disclosure";
 export * from "./transcript-provenance";
 export * from "./live-transcript";
 export * from "./spoken-identities";
+export * from "./plan-review-cases";

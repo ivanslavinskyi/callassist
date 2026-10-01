@@ -6,7 +6,7 @@ import { PostgresCallRepository } from "../storage/postgres-call-repository";
 import { approvedCall, authorization, proposal } from "./voice-test-helpers";
 import { decryptJson } from "../security/encryption";
 import { genericCiphertextColumns } from "../db/encrypted-columns";
-import { exportSources } from "../telemetry-export/sources";
+import { exportSources, mapExportRow, sourceQuery } from "../telemetry-export/sources";
 import { liveDurationUsage, liveResponsesUsage } from "./live-usage";
 import { buildAdminCostOverview } from "../admin-operations";
 import { unavailableOperationalCostPolicy } from "../config/operational-cost-policy";
@@ -78,7 +78,15 @@ describe("native Live persisted evidence", () => {
     expect(row!.payload_ciphertext).not.toContain(input.content);
     expect(decryptJson(row!.payload_ciphertext, Buffer.alloc(32, 7))).toEqual(input);
     expect(genericCiphertextColumns).toContainEqual(["call_voice_actions", "payload_ciphertext"]);
-    expect(exportSources.find(source => source.table === "call_voice_actions")?.fields).not.toContain("payload_ciphertext");
+    const source = exportSources.find(source => source.table === "call_voice_actions")!;
+    expect(source.fields).toContain("payload_ciphertext");
+    const exportRows = () => sql.unsafe<Array<{ data: Record<string, unknown> }>>(sourceQuery(source),
+      ["1970-01-01T00:00:00.000Z", "2100-01-01T00:00:00.000Z"]);
+    const retained = (await exportRows()).find(record => record.data.id === action.id)!;
+    expect(retained.data.payload_ciphertext).toBe(row!.payload_ciphertext);
+    const exported = mapExportRow(source, retained.data, Buffer.alloc(32, 7));
+    expect(exported.data).toMatchObject({ id: action.id, payload: input });
+    expect(exported.data).not.toHaveProperty("payload_ciphertext");
     expect(await repository.transitionVoiceAction({ id: action.id, version: 1, state: "confirmed", evidence: ["invented"] })).toBeNull();
     const delivered = await repository.transitionVoiceAction({ id: action.id, version: 1, state: "delivered", evidence: [] });
     expect(delivered?.version).toBe(2);
@@ -96,6 +104,7 @@ describe("native Live persisted evidence", () => {
     await repository.deleteCallData({ callId: input.callBriefId, userId: owner, requestId: randomUUID(),
       providerRecordingDisposition: "not_present", deletedAt: new Date().toISOString() });
     expect((await sql`SELECT payload_ciphertext FROM call_voice_actions WHERE id=${action.id}`)[0]?.payload_ciphertext).toBeNull();
+    expect((await exportRows()).some(record => record.data.id === action.id)).toBe(false);
     expect((await sql`SELECT native_transcript_capture FROM call_attempts WHERE id=${input.callAttemptId}`)[0]?.native_transcript_capture).toBeNull();
     expect(await repository.beginVoiceAction(input)).toBeNull();
     expect(await repository.transitionVoiceAction({ id: action.id, version: 3, state: "confirmed", evidence: [] })).toBeNull();

@@ -172,6 +172,25 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     };
   }
 
+  async streamRecordingMedia(providerRecordingId: string, channels: 1 | 2, signal: AbortSignal) {
+    // Export retains the recorded channel layout. No silent mono fallback.
+    const response = await this.#downloadRecording(providerRecordingId, channels,
+      AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new Error(`TWILIO_RECORDING_DOWNLOAD_${response.status}`);
+    }
+    const reader = response.body.getReader();
+    return {
+      contentType: response.headers.get("content-type")?.split(";")[0] ?? "audio/wav", channels,
+      cancel: async () => { await reader.cancel().catch(() => undefined); },
+      bytes: (async function* () {
+        try { while (true) { const chunk = await reader.read(); if (chunk.done) break; yield chunk.value; } }
+        finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+      })()
+    };
+  }
+
   #downloadRecording(providerRecordingId: string, channels: 1 | 2, signal: AbortSignal) {
     const url = new URL(
       `/2010-04-01/Accounts/${encodeURIComponent(

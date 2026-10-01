@@ -1,4 +1,6 @@
 import { supportsSummaryAssessment } from "@callassist/contracts";
+import { defaultBetaCreditPolicy, type BetaCreditPolicy, type CreditFunding } from "@callassist/contracts";
+import { betaCreditPeriod } from "../credits/beta-credit-period";
 import { terminalDecisionSchema, type TerminalDecision } from "@callassist/contracts";
 import { initialDisclosureProjection } from "@callassist/contracts";
 import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
@@ -222,6 +224,36 @@ function callPreparationFailureCode(
 }
 
 export class InMemoryCallRepository implements CallRepository {
+  readonly #betaCreditEnrollments = new Map<string, { id: string; policy: BetaCreditPolicy; activated: boolean;
+    lifetimeGrantAllowed: boolean; pending?: { id: string; policy: BetaCreditPolicy; effectiveAt: string } }>();
+  readonly #betaCreditPeriods = new Map<string, { id: string; userId: string; policyId: string; startsAt: string; endsAt: string }>();
+  /** Explicit synthetic enrollment; production snapshots the policy in account creation's transaction. */
+  enrollBetaCredits(userId: string, policy: BetaCreditPolicy, existing = false) {
+    const current = this.#betaCreditEnrollments.get(userId), now = new Date();
+    if (current && current.policy.amount === policy.amount && current.policy.period === policy.period && !current.pending) return;
+    const pending = { id: randomUUID(), policy: copy(policy), effectiveAt: betaCreditPeriod(current?.policy.period ?? "lifetime", now)?.endsAt ?? now.toISOString() };
+    if (current && existing && pending.effectiveAt > now.toISOString()) current.pending = pending;
+    else this.#betaCreditEnrollments.set(userId, { id: pending.id, policy: copy(policy), activated: current?.activated ?? existing, lifetimeGrantAllowed: !existing });
+  }
+  #ensureBetaCredits(userId: string) {
+    const enrollment = this.#betaCreditEnrollments.get(userId), now = new Date();
+    if (!enrollment?.activated) return null;
+    if (enrollment.pending && enrollment.pending.effectiveAt <= now.toISOString()) {
+      enrollment.id = enrollment.pending.id; enrollment.policy = enrollment.pending.policy;
+      enrollment.pending = undefined; enrollment.lifetimeGrantAllowed = false;
+    }
+    const window = betaCreditPeriod(enrollment.policy.period, now);
+    if (!window) return null;
+    const key = `${userId}:${enrollment.id}:${window.startsAt}`;
+    let period = this.#betaCreditPeriods.get(key);
+    if (!period) {
+      period = { id: randomUUID(), userId, policyId: enrollment.id, ...window }; this.#betaCreditPeriods.set(key, period);
+      this.#creditTransactions.push({ id: randomUUID(), userId, amount: enrollment.policy.amount, type: "beta_grant", callAttemptId: null,
+        promoRedemptionId: null, adminId: null, reason: "Beta allowance for UTC calendar period", idempotencyKey: `beta:${period.id}`,
+        createdAt: now.toISOString(), betaPeriodId: period.id, expiresAt: period.endsAt });
+    }
+    return period;
+  }
   readonly #voiceActions = new Map<string, VoiceActionRecord>();
   readonly #terminalDecisions = new Map<string, TerminalDecision>();
   async recordTerminalDecision(input: TerminalDecision) {
@@ -739,6 +771,30 @@ export class InMemoryCallRepository implements CallRepository {
   async getAdminCallPreparation(id: string) {
     const stored = this.#callPreparations.get(id);
     return stored ? this.#mapCallPreparation(stored) : null;
+  }
+
+  readonly #runtimeDescriptors = new Map<string, import("../voice/runtime-descriptor").RuntimeDescriptor>();
+  async recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor) {
+    if (this.#callDataDeletions.has(callId) || !this.#calls.has(callId)) throw new CallRepositoryError("CALL_NOT_FOUND");
+    if (!(this.#attempts.get(callId) ?? []).some(attempt => attempt.id === attemptId && ["dialing", "in_progress", "awaiting_approval"].includes(attempt.status))) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    if (!this.#runtimeDescriptors.has(attemptId)) this.#runtimeDescriptors.set(attemptId, copy(descriptor));
+  }
+
+  async getPreparationDiagnostics(id: string) {
+    const operations = [...this.#providerOperations.values()].filter((operation): operation is ProviderOperationRecord =>
+      "callPreparationId" in operation && operation.callPreparationId === id);
+    const timeline = operations.sort((a,b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id))
+      .slice(0,100).map(operation => ({ id: operation.id, stage: operation.stage, model: operation.requestedModel,
+        startedAt: operation.startedAt, completedAt: operation.result?.completedAt ?? null,
+        durationMs: operation.result?.durationMs ?? null, outcome: operation.result?.outcome ?? null,
+        errorCode: operation.result?.errorCode ?? null, metadata: operation.requestMetadata ?? null }));
+    const preparation = this.#callPreparations.get(id)?.preparation;
+    const jobs = (await this.listDurableJobs()).filter(job => job.callPreparationId === id);
+    const attempts = (await Promise.all(jobs.map(job => this.listDurableJobAttempts(job.id)))).flat();
+    const first = [...attempts.map(attempt => Date.parse(attempt.startedAt)),
+      ...jobs.filter(job => job.attemptCount === 1 && job.leasedAt).map(job => Date.parse(job.leasedAt!))]
+      .sort((a,b) => a-b)[0];
+    return { timeline, initialQueueMs: preparation && first !== undefined ? Math.max(0, first-Date.parse(preparation.createdAt)) : null };
   }
 
   async findCallPreparationByRequest(
@@ -1262,6 +1318,7 @@ export class InMemoryCallRepository implements CallRepository {
     const attempts = this.#attempts.get(input.callId) ?? [];
     for (const attempt of attempts) {
       this.#nativeCaptures.delete(attempt.id);
+      this.#runtimeDescriptors.delete(attempt.id);
       attempt.providerCallId = null;
       delete attempt.recipientContactHash;
       attempt.failureReason = null;
@@ -1322,12 +1379,14 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async grantSignupCredits(userId: string) {
+    if (!this.#betaCreditEnrollments.has(userId)) this.enrollBetaCredits(userId, defaultBetaCreditPolicy);
+    const enrollment = this.#betaCreditEnrollments.get(userId)!; enrollment.activated = true;
     const idempotencyKey = `signup:${userId}`;
-    if (!this.#creditTransactions.some((entry) => entry.idempotencyKey === idempotencyKey)) {
+    if (enrollment.policy.period === "lifetime" && enrollment.lifetimeGrantAllowed && !this.#creditTransactions.some((entry) => entry.idempotencyKey === idempotencyKey)) {
       this.#creditTransactions.push({
         id: randomUUID(),
         userId,
-        amount: 3,
+        amount: enrollment.policy.amount,
         type: "signup_grant",
         callAttemptId: null,
         promoRedemptionId: null,
@@ -1543,6 +1602,7 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   #buildCreditUsage(userId: string): CreditUsage {
+    const period = this.#ensureBetaCredits(userId);
     const transactions = this.#creditTransactions
       .filter((entry) => entry.userId === userId)
       .sort((left, right) =>
@@ -1559,8 +1619,16 @@ export class InMemoryCallRepository implements CallRepository {
         break;
       }
     }
+    const e = this.#betaCreditEnrollments.get(userId);
+    const persistent = transactions.filter(t => !t.betaPeriodId).reduce((sum, t) => sum + t.amount, 0);
+    const current = transactions.filter(t => t.betaPeriodId && t.betaPeriodId === period?.id);
+    const available = current.reduce((sum, t) => sum + t.amount, 0);
+    const funding: CreditFunding = { persistent, allowance: e ? { policyId: e.id, period: e.policy.period, limit: e.policy.amount, lifetimeGrantAllowed: e.lifetimeGrantAllowed,
+      available, reserved: current.filter(t => t.type === "call_reservation" && !current.some(s => s.callAttemptId === t.callAttemptId && ["call_charge", "call_refund"].includes(s.type))).length,
+      used: current.filter(t => t.type === "call_charge").length, startsAt: period?.startsAt ?? null, endsAt: period?.endsAt ?? null,
+      pending: e.pending ? { policy: e.pending.policy, effectiveAt: e.pending.effectiveAt } : null } : null };
     return {
-      balance: transactions.reduce((total, entry) => total + entry.amount, 0),
+      balance: persistent + available, funding,
       activeCallBriefId,
       transactions
     };
@@ -1981,9 +2049,14 @@ export class InMemoryCallRepository implements CallRepository {
       }
       const result = operation.result ? structuredClone(operation.result) : null;
       if (!result?.usage) {
-        if (operation.provider === "openai" && !["brief_moderation", "realtime_session"].includes(operation.operationType)) {
+        if (operation.operationType !== "brief_moderation" && operation.operationType !== "telephony_leg" &&
+            (operation.operationType !== "realtime_session" || operation.stage === "live_conversation")) {
           facts.providerUsage.missingUsageOperations = (facts.providerUsage.missingUsageOperations ?? 0) + 1;
         }
+        const bucket = emptyAdminProviderUsageBucket({ provider: operation.provider, operationType: operation.operationType,
+          stage: operation.stage, model: result?.providerModel ?? operation.requestedModel });
+        Object.assign(bucket, { operationId: operation.id, startedAt: operation.startedAt, outcome: result?.outcome ?? null });
+        providerBuckets.set(operation.id, bucket);
         continue;
       }
       const supplemental = this.#usageSupplements.get(operation.id);
@@ -2006,6 +2079,8 @@ export class InMemoryCallRepository implements CallRepository {
       bucket.operationId = operation.id;
       bucket.startedAt = operation.startedAt;
       bucket.outcome = result.outcome;
+      bucket.pricingVersion = result.usage.pricingVersion;
+      bucket.billableCharacters = typeof result.usage.rawUsage.characters === "number" ? result.usage.rawUsage.characters : null;
       bucket.usageRecords += 1;
       bucket.requestCount += result.usage.requestCount ?? 1;
       addAdminProviderMetric(
@@ -2666,11 +2741,15 @@ export class InMemoryCallRepository implements CallRepository {
     attempts.push(attempt);
     this.#attempts.set(id, attempts);
     if (userId !== null) {
+      const period = this.#ensureBetaCredits(userId);
+      const useBeta = (this.#buildCreditUsage(userId).funding?.allowance?.available ?? 0) > 0;
       this.#creditTransactions.push({
         id: randomUUID(),
         userId,
         amount: -1,
         type: "call_reservation",
+        betaPeriodId: useBeta ? period!.id : null,
+        expiresAt: useBeta ? period!.endsAt : null,
         callAttemptId: attempt.id,
         promoRedemptionId: null,
         adminId: null,
@@ -4155,6 +4234,8 @@ export class InMemoryCallRepository implements CallRepository {
       id: randomUUID(),
       userId,
       amount: type === "call_refund" ? 1 : 0,
+      betaPeriodId: this.#creditTransactions.find(t => t.callAttemptId === attempt.id && t.type === "call_reservation")?.betaPeriodId ?? null,
+      expiresAt: this.#creditTransactions.find(t => t.callAttemptId === attempt.id && t.type === "call_reservation")?.expiresAt ?? null,
       type,
       callAttemptId: attempt.id,
       promoRedemptionId: null,
@@ -4248,11 +4329,15 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   #mapCallPreparation(stored: StoredCallPreparation): CallPreparation {
+    const latest = [...this.#providerOperations.values()].filter((operation): operation is ProviderOperationRecord =>
+      "callPreparationId" in operation && operation.callPreparationId === stored.preparation.id)
+      .sort((a,b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id))[0];
     const job = this.#durableJobs.get(
       durableJobKey("brief_compilation", stored.preparation.id)
     );
     return copy({
       ...stored.preparation,
+      ...(latest ? { stage: latest.stage } : {}),
       attemptCount: job?.attemptCount ?? 0
     });
   }

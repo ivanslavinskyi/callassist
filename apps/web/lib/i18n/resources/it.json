@@ -410,7 +410,6 @@
   "Close menu": "Chiudi il menu",
   "A little help.\nA call made easier.": "Un piccolo aiuto.\nUna chiamata più semplice.",
   "Prepare your request, review the plan and stay in control.": "Descrivi la richiesta, controlla il piano e mantieni il controllo.",
-  "3 calls included in the public beta": "3 chiamate incluse nella beta pubblica",
   "Calls to Swiss numbers only. The recipient chooses whether to continue.": "Solo chiamate a numeri svizzeri. Il destinatario decide se continuare.",
   "Assistant": "Assistente",
   "Prepare a plan. Review it before the call.": "Prepara un piano. Controllalo prima della chiamata.",
@@ -1007,5 +1006,7 @@
   "The call policy changed. Review and approve the updated plan before calling.": "Le regole della chiamata sono cambiate. Verifica e approva il piano aggiornato prima di chiamare.",
   "Delete after the call": "Elimina dopo la chiamata",
   "Deleted automatically when the recording becomes available after the call.": "Eliminazione automatica non appena la registrazione è disponibile dopo la chiamata.",
-  "Deleted automatically {0} days after the recording becomes available.": "Eliminazione automatica {0} giorni dopo la disponibilità della registrazione."
+  "Deleted automatically {0} days after the recording becomes available.": "Eliminazione automatica {0} giorni dopo la disponibilità della registrazione.",
+  "Beta allowance": "Quota beta",
+  "Beta access is limited": "L’accesso alla beta è limitato"
 }

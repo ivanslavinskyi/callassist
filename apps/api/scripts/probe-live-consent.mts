@@ -1,9 +1,10 @@
 /** Opt-in paid native Live consent probe. Synthetic PCMU only, in-memory call,
  * simulated Twilio playback and recording; no telephone call or customer audio.
- * Run from repository root with --audio=<path> --expected=affirmative|negative|unclear.
+ * Run with --run-provider --audio=<consent-N.ulaw> [--then-audio=<consent-N.ulaw>].
+ * Generated companion manifests are mandatory; --expected must match the final fixture.
  */
 ﻿import '../src/config/load-env.ts';
-import {readFile} from 'node:fs/promises';
+import {readSyntheticConsent} from './live-audio-fixtures.mts';
 import {EventEmitter} from 'node:events';
 import WebSocket from 'ws';
 import {InMemoryCallRepository} from '../src/storage/in-memory-call-repository.ts';
@@ -12,16 +13,23 @@ import {DeterministicBriefCompiler} from '../src/brief-compiler/brief-compiler.t
 import {originalPlanReview} from '../src/test-helpers/original-plan-review.ts';
 import {OpenAILiveBridge} from '../src/voice/openai-live-bridge.ts';
 const audioPath = process.argv.find(arg => arg.startsWith("--audio="))?.slice(8);
-const expected = process.argv.find(arg => arg.startsWith("--expected="))?.slice(11) ?? "affirmative";
-if (!audioPath || !["affirmative", "negative", "unclear"].includes(expected)) throw new Error("Use --audio=<synthetic PCMU file> --expected=affirmative|negative|unclear");
+if (!process.argv.includes("--run-provider")) throw new Error("RUN_PROVIDER_OPT_IN_REQUIRED");
+if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY_REQUIRED");
+const expectedOption = process.argv.find(arg => arg.startsWith("--expected="))?.slice(11);
+if (!audioPath || (expectedOption && !["affirmative", "negative", "unclear"].includes(expectedOption))) throw new Error("Use --audio=<consent-N.ulaw> [--expected=affirmative|negative|unclear]");
+if (process.argv.slice(2).some(arg => arg !== "--run-provider" && !/^--(audio|then-audio|expected)=.+$/.test(arg))) throw new Error("UNKNOWN_PROBE_OPTION");
 const thenPath = process.argv.find(arg => arg.startsWith("--then-audio="))?.slice(13);
-const clips = await Promise.all([audioPath, ...(thenPath ? [thenPath] : [])].map(path => readFile(path)));
+const fixtures = await Promise.all([audioPath, ...(thenPath ? [thenPath] : [])].map(readSyntheticConsent));
+const expected = fixtures.at(-1)!.expected, locale = fixtures[0]!.locale;
+if (expectedOption && expectedOption !== expected) throw new Error("SYNTHETIC_EXPECTATION_MISMATCH");
+if (fixtures.some(fixture => fixture.locale !== locale)) throw new Error("SYNTHETIC_LOCALE_MISMATCH");
+const clips = fixtures.map(fixture => fixture.audio);
 let clip = clips[0];
 const decisions: string[] = [];
 let decision: string | null = null;
 const repository=new InMemoryCallRepository();
 const service=new CallService(repository,undefined,undefined,undefined,new DeterministicBriefCompiler());
-const brief=await service.create({recipientName:'Example',phoneNumber:'+41710000001',objective:'Ask what the recipient would like for lunch',assistantProfileId:'sebastian',representedPersonFirstName:'Test',representedPersonLastName:'Caller',assistanceReason:'speech_impairment',locale:'de-CH',audioRetentionDays:0,allowLanguageSwitch:false,allowedFacts:[]});
+const brief=await service.create({recipientName:'Example',phoneNumber:'+41710000001',objective:'Ask what the recipient would like for lunch',assistantProfileId:'sebastian',representedPersonFirstName:'Test',representedPersonLastName:'Caller',assistanceReason:'speech_impairment',locale,audioRetentionDays:0,allowLanguageSwitch:false,allowedFacts:[]});
 await service.approveCompilation(brief.id,await originalPlanReview(service,brief.id));
 const {attempt}=await repository.startAttempt(brief.id,{provider:'twilio'});
 await repository.attachProviderCall(attempt.id,'CA-SYNTHETIC','in-progress');
@@ -40,7 +48,6 @@ class Telephone extends EventEmitter {
 }
 const phone=new Telephone();
 const bridge=new OpenAILiveBridge({apiKey:process.env.OPENAI_API_KEY,service,agentHangupEnabled:true,validateStreamToken:()=>true,
- semanticFetch:async(url,init)=>{const body=JSON.parse(init.body); const response=await fetch(url,init);const result=await response.clone().json(); console.log(JSON.stringify({syntheticInput:JSON.parse(body.input[0].content),output:result.output?.filter(i=>i.type==="message"),status:result.status}));return response;},
  createLiveSocket:(url,key)=>{const socket=new WebSocket(url,{headers:{Authorization:'Bearer '+key}});socket.on('message',raw=>{const e=JSON.parse(raw.toString());if(e.type==='response.event' && ['response.output_item.done','response.completed'].includes(e.event?.type)) console.log(JSON.stringify({backend:e.event.type,items:(e.event.response?.output??[e.event.item]).filter(i=>i?.type==='function_call')}));if(e.type?.includes('transcript.delta'))console.log(JSON.stringify({type:e.type,delta:e.delta,start:e.start_ms,end:e.end_ms}));});return socket;},logger:{info:(metadata, message)=>{
  console.log(JSON.stringify({message, ...metadata}));
  if(message === "Live delegated consent decision") {decision=metadata.decision; decisions.push(decision!); if(decision===expected || decision==="negative" || !thenPath) setTimeout(()=>phone.close(),1000);}

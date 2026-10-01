@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { AdminSafetyForm } from "@/components/admin-safety-form";
+import { Suspense } from "react";
+import { AdminPlanReviews } from "@/components/admin-plan-reviews";
 
 export const metadata: Metadata = {
   title: "SHPROHLI safety operations",
@@ -7,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminSafetyPage() {
-  return <AdminSafetyForm />;
+  return <Suspense fallback={<p role="status">Loading plan review…</p>}><AdminPlanReviews /></Suspense>;
 }

@@ -1,17 +1,19 @@
 "use client";
 
 import type { CallPreparationProgress } from "@/lib/api";
+import { preparationStageMessages } from "@/lib/i18n/preparation-stages";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useUiLocale } from "./ui-locale-provider";
 import styles from "./workflow-feedback.module.css";
 
 export function CallPreparationStatus({ progress }: { progress: CallPreparationProgress }) {
-  const { messages } = useUiLocale();
+  const { messages, locale } = useUiLocale();
   const copy = messages.form;
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const description = {
+    ...preparationStageMessages[locale],
     queued: copy.preparingQueuedText,
     preparing: copy.preparingText,
     retrying: copy.preparingRetryingText,

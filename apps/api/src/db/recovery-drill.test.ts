@@ -41,7 +41,14 @@ describe("database recovery drill", () => {
   });
 
   it("requires every critical application table", () => {
+    // Independent recovery acceptance inventory; do not import the production list.
     const tables = [
+      "beta_credit_policies",
+      "beta_credit_enrollments",
+      "beta_credit_periods",
+      "plan_review_cases",
+      "plan_review_audit",
+      "admin_telemetry_export_recordings",
       "admin_telemetry_privacy_epoch",
       "admin_telemetry_exports",
       "admin_telemetry_export_parts",
@@ -75,8 +82,9 @@ describe("database recovery drill", () => {
       "sessions",
       "users"
     ];
+    expect(tables).toHaveLength(38);
     expect(() => validateCriticalTables(tables)).not.toThrow();
-    for (const table of ["superadmin_notifications", "superadmin_notification_settings", "superadmin_notification_audit", "call_text_artifacts", "call_text_artifact_chunks", "final_transcript_revisions", "call_plan_review_receipts"]) {
+    for (const table of tables) {
       expect(() => validateCriticalTables(tables.filter((name) => name !== table)))
         .toThrow(`Restored critical tables are missing: ${table}`);
     }

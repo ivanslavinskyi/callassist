@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { randomUUID } from "node:crypto";
 import {
   BRIEF_COMPILER_VERSION,
@@ -24,21 +26,35 @@ const defaultCompilerModel = "gpt-5.6";
 const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
 const defaultModerationEndpoint = "https://api.openai.com/v1/moderations";
 const defaultCompilationTimeoutMs = 120_000;
-const defaultGenerationRequestTimeoutMs = 60_000;
+// Successful requests in the release baseline completed within 29 seconds;
+// bound a stalled request before it consumes an entire preparation attempt.
+const defaultGenerationRequestTimeoutMs = 35_000;
 const defaultModerationRequestTimeoutMs = 25_000;
 
 const executionLanguageRepairLimit = 3;
-// Two additional language repairs each need generation + audit. Shared with the
+// Three language repairs each need generation + audit. Shared with the
 // durable reservation ledger; transport retries still consume this same budget.
 export const briefCompilationProviderRequestBudget = 12;
 
 export type BriefCompilerStage =
   | "input_moderation"
   | "compilation"
+  | "compilation_repair"
+  | "language_audit"
   | "output_moderation";
+
+export type PreparationRequestMetadata = {
+  repairKind: "none" | "language" | "integrity" | "schema";
+  repairNumber: number;
+  transportAttempt: number;
+  timeoutMs: number;
+  remainingMs: number;
+};
 
 export type BriefCompilerRunOptions = {
   maxProviderRequests?: number;
+  /** Persisted preparation creation time bounds all durable retries together. */
+  deadlineAtMs?: number;
   beforeProviderRequest?: (request: {
     clientRequestId: string;
     stage: BriefCompilerStage;
@@ -46,6 +62,7 @@ export type BriefCompilerRunOptions = {
     provider: "openai";
     model: string;
     startedAt: string;
+    requestMetadata?: PreparationRequestMetadata;
   }) => Promise<boolean>;
   afterProviderRequest?: (result: BriefCompilerProviderRequestResult) =>
     Promise<void>;
@@ -61,6 +78,7 @@ export type BriefCompilerProviderRequestResult = {
   statusCode: number | null;
   completedAt: string;
   durationMs: number;
+  errorCode?: string | null;
   usage: OpenAITextTokenUsage | null;
 };
 
@@ -167,10 +185,13 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     revision = 1,
     options: BriefCompilerRunOptions = {}
   ) {
-    const deadline = Date.now() + this.#timeoutMs;
+    const deadline = Math.min(Date.now() + this.#timeoutMs, options.deadlineAtMs ?? Infinity);
+    if (deadline <= Date.now()) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
+      cause: new Error("PREPARATION_DEADLINE_EXCEEDED")
+    });
     // Generation and its retries share a deadline that leaves time for the final moderation request.
     const compilationDeadline = deadline - Math.min(
-      this.#requestTimeoutMs ?? defaultModerationRequestTimeoutMs, Math.floor(this.#timeoutMs / 4)
+      this.#requestTimeoutMs ?? defaultModerationRequestTimeoutMs, Math.floor((deadline - Date.now()) / 4)
     );
     const requestBudget = createRequestBudget(options);
     const rawBrief = createCallBriefInputSchema.parse(input);
@@ -192,10 +213,13 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     let localPolicy: PolicyDecision | null = null;
     let validationFeedback: string[] = [];
     let languageRepairs = 0;
+    let repairKind: PreparationRequestMetadata["repairKind"] = "none";
 
     // Keep the existing single initial schema/policy repair, independently of
     // language repairs. Every pass still shares the original deadline and budget.
     for (let attempt = 0; attempt < 2 + executionLanguageRepairLimit; attempt += 1) {
+      requestBudget.repairKind = repairKind;
+      requestBudget.repairNumber = attempt;
       response = await this.#requestCompilation(
         rawBrief,
         validationFeedback,
@@ -231,14 +255,15 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           let languageIssues: string[];
           try {
             languageIssues = await verifyExecutionLanguage(compiledBrief, rawBrief, body => this.#request(
-              this.#responsesEndpoint, body, compilationDeadline, "compilation", this.model, requestBudget), this.model);
+              this.#responsesEndpoint, body, compilationDeadline, "language_audit", this.model, requestBudget), this.model);
           } catch (cause) {
             if (cause instanceof BriefCompilerError) throw cause;
-            throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "compilation", validationPaths: ["execution_language_audit"] });
+            throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "language_audit", validationPaths: ["execution_language_audit"] });
           }
           if (languageIssues.length) {
             if (languageRepairs < executionLanguageRepairLimit) {
               languageRepairs += 1;
+              repairKind = "language";
               validationFeedback = languageIssues.map(path => `Language mismatch at ${path}: regenerate all runtime text in ${rawBrief.locale}, including dates, conditions and approved facts. Preserve identity names, addresses and reference IDs. Do not copy source-language prose into runtime fields.`);
               continue;
             }
@@ -250,6 +275,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           localPolicy.status === "blocked" && localPolicy.reasonCodes.some((reason) =>
             reason === "fact_integrity_failure" || reason === "plan_constraint_failure");
         if (attempt === 0 && recoverable) {
+          repairKind = "integrity";
           validationFeedback = localPolicy.reasonCodes.map((reason) => reason === "fact_integrity_failure"
             ? "fact_integrity_failure: preserve every supplied name, address and reference exactly; use only supplied facts and dates derived from schedulingInterpretation; do not invent identifiers"
             : "plan_constraint_failure: preserve selected task settings and keep semantic intent, requested authority, operation and time zone consistent; availability alone grants no authority");
@@ -259,6 +285,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       }
 
       validationFeedback = parsed.validationFeedback;
+      repairKind = "schema";
       if (attempt >= 1) {
         throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", {
           cause: parsed.cause,
@@ -389,7 +416,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         }
       },
       deadline,
-      "compilation",
+      requestBudget.repairNumber > 0 ? "compilation_repair" : "compilation",
       this.model,
       requestBudget
     )) as OpenAIResponsePayload;
@@ -419,6 +446,13 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       lastClientRequestId = clientRequestId;
       const reservedAtMs = Date.now();
       const startedAt = new Date(reservedAtMs).toISOString();
+      const paidGeneration = stage === "compilation" || stage === "compilation_repair" || stage === "language_audit";
+      const requestMetadata: PreparationRequestMetadata = {
+        repairKind: requestBudget.repairKind, repairNumber: requestBudget.repairNumber,
+        transportAttempt: attempt + 1,
+        timeoutMs: Math.max(0, Math.min(this.#requestTimeoutMs ?? (paidGeneration ? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs), remainingMs)),
+        remainingMs
+      };
       if (requestBudget.used >= requestBudget.max) {
         throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
           clientRequestId,
@@ -430,12 +464,13 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         !(await requestBudget.beforeProviderRequest({
           clientRequestId,
           stage,
-          operationType: stage === "compilation"
+          operationType: paidGeneration
             ? "brief_compilation"
             : "brief_moderation",
           provider: "openai",
           model,
-          startedAt
+          startedAt,
+          requestMetadata
         }))
       ) {
         throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
@@ -448,7 +483,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       let response: Response | undefined;
       let payload: unknown = null;
       const requestTimeoutMs = Math.min(
-        this.#requestTimeoutMs ?? (stage === "compilation" ? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs),
+        this.#requestTimeoutMs ?? (paidGeneration ? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs),
         deadline - Date.now()
       );
       const controller = new AbortController();
@@ -485,6 +520,9 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           statusCode: response?.status ?? null,
           completedAt: new Date().toISOString(),
           durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
+          errorCode: controller.signal.aborted || isTimeoutError(error)
+            ? (response ? "OPENAI_BODY_TIMEOUT" : "OPENAI_RESPONSE_TIMEOUT")
+            : "OPENAI_NETWORK_ERROR",
           usage: null
         });
         lastError = error;
@@ -517,6 +555,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           statusCode: response.status,
           completedAt: new Date().toISOString(),
           durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
+          errorCode: `OPENAI_HTTP_${response.status}`,
           usage: null
         });
         if (attempt === 0 && isRetryableOpenAIStatus(response.status)) continue;
@@ -533,7 +572,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         await completeProviderRequest(requestBudget, {
           clientRequestId,
           stage,
-          outcome: stage === "compilation" && responsePayload.status !== undefined && responsePayload.status !== "completed"
+          outcome: paidGeneration && responsePayload.status !== undefined && responsePayload.status !== "completed"
             ? "invalid_response" : "succeeded",
           providerRequestId: responseId,
           providerResponseId: stringOrNull(responsePayload.id),
@@ -949,6 +988,8 @@ export function isBriefCompilerErrorRetryable(error: BriefCompilerError) {
 type ProviderRequestBudget = {
   used: number;
   max: number;
+  repairKind: PreparationRequestMetadata["repairKind"];
+  repairNumber: number;
   beforeProviderRequest?: BriefCompilerRunOptions["beforeProviderRequest"];
   afterProviderRequest?: BriefCompilerRunOptions["afterProviderRequest"];
 };
@@ -964,6 +1005,8 @@ function createRequestBudget(
   return {
     used: 0,
     max,
+    repairKind: "none",
+    repairNumber: 0,
     ...(options.beforeProviderRequest
       ? { beforeProviderRequest: options.beforeProviderRequest }
       : {}),

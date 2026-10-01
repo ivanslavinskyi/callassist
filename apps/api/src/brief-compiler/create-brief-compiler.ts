@@ -31,6 +31,11 @@ export function createBriefCompilerFromEnv(
   throw new Error(`Unsupported BRIEF_COMPILER_DRIVER: ${driver}`);
 }
 
+/** Includes queue time and every durable retry; never resets after a worker restart. */
+export function preparationTimeoutMsFromEnv(environment: NodeJS.ProcessEnv = process.env) {
+  return parsePositiveInteger(environment.CALL_PREPARATION_TIMEOUT_MS, "CALL_PREPARATION_TIMEOUT_MS") ?? 120_000;
+}
+
 function parsePositiveInteger(value: string | undefined, name: string) {
   if (!value?.trim()) return undefined;
   const parsed = Number(value);

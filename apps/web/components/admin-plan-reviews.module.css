@@ -1,0 +1,26 @@
+.page { max-width: 1360px; margin: 0 auto; padding: 1.5rem; }
+.heading { display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap; }
+.heading h1 { margin: 0.5rem 0; }
+.nav { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--border, #8c9b91); flex-wrap: wrap; }
+.nav a[aria-current="page"] { font-weight: 700; text-decoration-thickness: 3px; }
+.panel { padding: 1.25rem 0; border-top: 1px solid var(--border, #8c9b91); margin-top: 1.5rem; }
+.counters { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 1.25rem 0; }
+.counters strong { display: block; font-size: 1.4rem; }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: end; }
+.filters label, .form label { display: grid; gap: 0.4rem; }
+.filters input, .filters select, .form input, .form textarea, .form select { background: inherit; color: inherit; border: 1px solid var(--border, #8c9b91); border-radius: 0.4rem; padding: 0.6rem; min-width: 0; width: 100%; }
+.tableWrap { overflow-x: auto; margin: 1rem 0; }
+.table { border-collapse: collapse; width: 100%; text-align: left; }
+.table th, .table td { border-bottom: 1px solid var(--border, #8c9b91); padding: 0.85rem 0.6rem; vertical-align: top; }
+.table small { display: block; margin-top: 0.4rem; overflow-wrap: anywhere; }
+.metadata { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.metadata dt { font-size: 0.875rem; opacity: 0.75; }
+.metadata dd { margin: 0.35rem 0; overflow-wrap: anywhere; }
+.form { display: grid; gap: 1rem; max-width: 720px; }
+.actions { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+.evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.evidence pre, .changes pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.875rem; }
+.changes { max-width: 100%; }
+.badge { font-size: 0.85rem; font-weight: 700; }
+.badge[data-category="policy_signal"] { color: var(--danger, #b74b31); }
+@media(max-width: 720px) { .page { padding: 1rem; } .evidence { grid-template-columns: 1fr; } }

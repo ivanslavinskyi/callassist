@@ -38,3 +38,4 @@ docs/public-content-stage-verification-*.json
 # Local VPS runbooks contain operational details; keep them outside Git.
 docs/shprohli-vps-operations.md
 docs/shprohli-vps-runbook.md
+docs/local-operations/

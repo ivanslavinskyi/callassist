@@ -146,11 +146,11 @@ export const adminOperationsOverviewSchema = z.strictObject({
       firstRecordedAt: z.iso.datetime().nullable().default(null),
       pricingVersions: z.array(z.string()).default([]),
       records: z.array(z.strictObject({
-        id: z.uuid(), startedAt: z.iso.datetime(), operationType: z.string(), stage: z.string(), model: z.string(),
+        id: z.uuid(), startedAt: z.iso.datetime(), operationType: z.string(), stage: z.string(), model: z.string(), provider: z.string().default("openai"),
         costBasis: z.enum(["usage_estimate", "provider_reported"]),
         outcome: z.string().nullable(), calculatedUsdMicros: countSchema.nullable(),
         missingMetrics: z.array(z.string())
-      })).max(600).default([]),
+      })).max(1000).default([]),
       calculatedUsdMicros: countSchema.nullable(),
       components: z.strictObject({
         briefCompilation: providerUsageCostComponentSchema,

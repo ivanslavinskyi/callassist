@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { isLiveTranscript } from "@callassist/contracts";
 import { assembleNativeTranscript, type NativeTranscriptCapture } from "./storage/native-transcript";
 import type { AnsweringTransitionInput } from "./telephony/answering-policy";
@@ -136,6 +138,7 @@ export class CallService {
   readonly #onBackgroundError: (error: unknown) => void;
   readonly #postCallTranscriber?: PostCallTranscriber;
   readonly #briefCompiler: BriefCompiler;
+  readonly #preparationTimeoutMs: number;
   readonly #admissionPolicy: CallAdmissionPolicy;
   readonly #operationalCostPolicy: OperationalCostPolicy;
   readonly #durableJobWorker: DurableJobWorker;
@@ -167,11 +170,16 @@ export class CallService {
       liveEventMode?: LiveEventMode;
       textProcessor?: TextProcessor;
       textCapabilities?: TextCapabilities;
+      preparationTimeoutMs?: number;
     } = {}
   ) {
     this.#onBackgroundError = onBackgroundError;
     this.#postCallTranscriber = postCallTranscriber;
     this.#briefCompiler = briefCompiler;
+    this.#preparationTimeoutMs = runtime.preparationTimeoutMs ?? 120_000;
+    if (!Number.isSafeInteger(this.#preparationTimeoutMs) || this.#preparationTimeoutMs <= 0) {
+      throw new Error("preparationTimeoutMs must be a positive integer");
+    }
     this.#admissionPolicy = admissionPolicy;
     this.#operationalCostPolicy = operationalCostPolicy;
     this.#durableWorkerMode = runtime.durableWorkerMode ?? "embedded";
@@ -228,6 +236,14 @@ export class CallService {
       onBackgroundError,
       {
         enabled: durableWorkerEnabled,
+        lanes: [
+          ["brief_compilation"],
+          ["final_transcription"],
+          ["live_transcript_finalization"],
+          ["answer_detection_timeout", "provider_call_reconciliation"],
+          ["recording_retention", "provider_recording_reconciliation"],
+          ["provider_call_cost_reconciliation"]
+        ],
         reportRuntimeHeartbeat:
           runtime.reportDurableWorkerHeartbeat ?? false,
         ...(runtime.durableWorkerKeepAlive === undefined
@@ -355,6 +371,7 @@ export class CallService {
     return adminCallPreparationInspectorSchema.parse({
       preparation,
       generatedAt,
+      ...await this.repository.getPreparationDiagnostics(id),
       cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
     });
   }
@@ -651,6 +668,10 @@ export class CallService {
 
   recordRealtimeProviderOperation(input: RealtimeProviderOperationInput) {
     return this.repository.recordRealtimeProviderOperation(input);
+  }
+
+  recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("./voice/runtime-descriptor").RuntimeDescriptor) {
+    return this.repository.recordRuntimeDescriptor(callId, attemptId, descriptor);
   }
 
   completeProviderOperation(input: CompleteProviderOperationInput) {
@@ -1489,12 +1510,18 @@ export class CallService {
         retryable: false
       });
     }
+    const preparationDeadline = Date.parse(work.preparation.createdAt) + this.#preparationTimeoutMs;
+    if (Date.now() >= preparationDeadline) {
+      throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { retryable: false,
+        cause: new Error("PREPARATION_DEADLINE_EXCEEDED") });
+    }
     try {
       const compilation = await this.#briefCompiler.compile(
         normalizeCreateCallBriefInput(work.input),
         work.targetRevision,
         {
           maxProviderRequests: briefCompilationProviderRequestBudget,
+          deadlineAtMs: preparationDeadline,
           beforeProviderRequest: (request) =>
             this.repository.reserveCallPreparationProviderRequest(
               {
@@ -1506,6 +1533,7 @@ export class CallService {
                 requestedModel: request.model,
                 clientRequestId: request.clientRequestId,
                 startedAt: request.startedAt,
+                requestMetadata: request.requestMetadata,
                 maxRequests: briefCompilationProviderRequestBudget,
                 durableJobGeneration: job.generation
               },
@@ -1521,11 +1549,11 @@ export class CallService {
               statusCode: result.statusCode,
               completedAt: result.completedAt,
               durationMs: result.durationMs,
-              errorCode: result.outcome === "succeeded"
+              errorCode: result.errorCode ?? (result.outcome === "succeeded"
                 ? null
                 : result.outcome === "invalid_response"
                   ? "OPENAI_RESPONSE_INVALID"
-                  : "OPENAI_REQUEST_FAILED",
+                  : "OPENAI_REQUEST_FAILED"),
               usage: result.usage
             })
         }
@@ -1562,7 +1590,7 @@ export class CallService {
           mapBriefCompilerError(error).code,
           {
             cause: error,
-            retryable: isBriefCompilerErrorRetryable(error)
+            retryable: isBriefCompilerErrorRetryable(error) && Date.now() + 5_000 < preparationDeadline
           }
         );
       }

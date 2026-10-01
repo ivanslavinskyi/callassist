@@ -10,6 +10,7 @@ export default defineConfig({
     "db/migrate": "src/db/migrate.ts",
     "db/backfill-call-compilations": "src/db/backfill-call-compilations.ts",
     "db/backfill-live-transcripts": "src/db/backfill-live-transcripts.ts",
+    "db/backfill-plan-reviews": "src/db/backfill-plan-reviews.ts",
     "db/classify-legacy-call-plans": "src/db/classify-legacy-call-plans.ts",
     "db/verify-call-plan-cutover": "src/db/verify-call-plan-cutover.ts",
     "db/reencrypt-data": "src/db/reencrypt-data.ts",

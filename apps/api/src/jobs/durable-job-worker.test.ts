@@ -77,6 +77,37 @@ async function repositoryWithAvailableRecording() {
 }
 
 describe("durable job worker", () => {
+  it("wakes an idle lane for newly queued work while another lane remains busy", async () => {
+    const { repository, recordingId } = await repositoryWithAvailableRecording();
+    let finish!: () => void;
+    const media = new Promise<void>(resolve => { finish = resolve; });
+    const transcription = vi.fn(async () => media);
+    const retention = vi.fn(async () => undefined);
+    const worker = new DurableJobWorker(repository, { final_transcription: transcription, recording_retention: retention }, vi.fn(),
+      { lanes: [["final_transcription"], ["recording_retention"]] });
+    worker.wake();
+    await vi.waitFor(() => expect(transcription).toHaveBeenCalledOnce());
+    await repository.enqueueDurableJob({ type: "recording_retention", recordingId, runAfter: new Date().toISOString(), maxAttempts: 5 });
+    worker.wake();
+    await vi.waitFor(() => expect(retention).toHaveBeenCalledOnce());
+    expect(worker.runningCount).toBe(1);
+    finish();
+    await worker.close();
+  });
+  it("serves a separate lane while a slow media request is still running", async () => {
+    const { repository, recordingId } = await repositoryWithAvailableRecording();
+    await repository.enqueueDurableJob({ type:"recording_retention",recordingId,runAfter:new Date().toISOString(),maxAttempts:5 });
+    let finish!: () => void;
+    const media = new Promise<void>(resolve => { finish=resolve; });
+    const retention = vi.fn(async () => undefined);
+    const worker = new DurableJobWorker(repository,{ final_transcription:async()=>media,recording_retention:retention },vi.fn(),
+      {lanes:[["final_transcription"],["recording_retention"]]});
+    const run = worker.runOnce();
+    await vi.waitFor(()=>expect(retention).toHaveBeenCalledOnce());
+    expect(worker.runningCount).toBe(1);
+    finish(); await run; await worker.close();
+    expect(worker.runningCount).toBe(0);
+  });
   it("defers budget admission without exhausting attempts and resumes after capacity returns", async () => {
     const { repository } = await repositoryWithAvailableRecording();
     let now = new Date("2099-02-01T00:00:00.000Z");

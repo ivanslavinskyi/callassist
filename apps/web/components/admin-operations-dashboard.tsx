@@ -2,6 +2,7 @@
 import { formatLocale } from "@callassist/contracts";
 
 import { AdminCostBreakdown } from "./admin-cost-breakdown";
+import { AdminPlanReviewSummary } from "./admin-plan-review-summary";
 import { AdminGoalAssessments } from "./admin-goal-assessments";
 import { callResultCopy } from "@/lib/call-status";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
@@ -53,6 +54,7 @@ export function AdminOperationsDashboard() {
 
   return (
     <main className="admin-operations-page" id="main-content">
+        <AdminPlanReviewSummary />
         <header className="admin-operations-heading">
           <div>
             <span className="eyebrow">{copy.overviewEyebrow}</span>

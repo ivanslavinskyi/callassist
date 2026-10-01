@@ -1,5 +1,6 @@
 "use client";
 import { formatLocale } from "@callassist/contracts";
+import { CreditFundingDetails, CreditSourceDetails } from "./credit-funding-details";
 
 import { FilterDisclosure } from "./filter-disclosure";
 
@@ -270,6 +271,7 @@ function Ledger({
       <span className="eyebrow">{copy.ledger}</span>
       <h2>{ledger.user.firstName} {ledger.user.lastName}</h2>
       <p className="admin-ledger-email">{ledger.user.email}</p>
+      <a href={`/admin/safety?userId=${ledger.user.id}`}>Returned call plans</a>
       <dl className="admin-ledger-summary">
         <div><dt>{copy.balance}</dt><dd>{ledger.usage.balance}</dd></div>
         <div><dt>{copy.activeCall}</dt><dd>{ledger.usage.activeCallBriefId ?? copy.noActiveCall}</dd></div>
@@ -282,6 +284,7 @@ function Ledger({
             : copy.noAccountDeletion}</dd>
         </div>
       </dl>
+      <CreditFundingDetails funding={ledger.usage.funding} locale={locale} />
       <AdminUserActions
         actorId={actorId}
         key={ledger.user.id}
@@ -313,6 +316,7 @@ function Ledger({
               <time dateTime={transaction.createdAt}>{formatDateTime(transaction.createdAt, locale)}</time>
               {transaction.reason ? <p><b>{copy.reason}:</b> {transaction.reason}</p> : null}
               <TransactionSource transaction={transaction} locale={locale} />
+              <CreditSourceDetails transaction={transaction} locale={locale} />
             </li>
           ))}
         </ol>

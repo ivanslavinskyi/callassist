@@ -240,15 +240,17 @@ export type ProviderOperationReservationInput = {
   preparationId: string;
   provider: "openai";
   operationType: "brief_moderation" | "brief_compilation";
-  stage: "input_moderation" | "compilation" | "output_moderation";
+  stage: "input_moderation" | "compilation" | "compilation_repair" | "language_audit" | "output_moderation";
   requestedModel: string;
   clientRequestId: string;
   startedAt: string;
   maxRequests: number;
   durableJobGeneration: number;
+  requestMetadata?: import("../brief-compiler/brief-compiler").PreparationRequestMetadata;
 };
 
 export type ProviderTextTokenUsage = {
+  pricingVersion?: string;
   requestCount?: number | null;
   inputTextTokens: number | null;
   cachedInputTextTokens: number | null;
@@ -468,6 +470,7 @@ export type AdminOperationsAggregateFacts = {
 };
 
 export type AdminProviderUsageBucket = {
+  billableCharacters?: number | null;
   reportedUsdMicros?: number | null;
   operationId?: string;
   startedAt?: string;
@@ -792,6 +795,8 @@ export interface CallRepository extends CallTextRepository {
     userId: string
   ): Promise<CallPreparation | null>;
   getAdminCallPreparation(id: string): Promise<CallPreparation | null>;
+  recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor): Promise<void>;
+  getPreparationDiagnostics(id: string): Promise<{ timeline: import("@callassist/contracts").PreparationRequestTrace[]; initialQueueMs: number | null }>;
   claimCallPreparation(
     id: string,
     lease: DurableJobLease

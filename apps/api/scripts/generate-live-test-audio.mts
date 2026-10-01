@@ -1,49 +1,43 @@
-/** Creates synthetic recipient fixtures only; never reads customer recordings. */
+/** Paid, explicitly opted-in synthesis of fixed synthetic recipient fixtures. */
 import "../src/config/load-env.ts";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import WebSocket from "ws";
-import { LiveControlledSpeech } from "../src/voice/live-controlled-speech.ts";
+import { mkdir, access, writeFile } from "node:fs/promises";
+import { resolve, join } from "node:path";
+import { createHash } from "node:crypto";
+import { renderSpeech } from "../src/voice/rendered-speech.ts";
+import { consentFixtures } from "../src/test-helpers/live-consent-fixtures.ts";
+import { syntheticAnswers } from "./live-audio-fixtures.mts";
+
+const args = process.argv.slice(2);
+const folderArg = args.find(arg => arg.startsWith("--fixtures-dir="))?.slice("--fixtures-dir=".length);
+if (!args.includes("--run-provider") || !folderArg) throw new Error("Use --run-provider --fixtures-dir=<explicit output directory> [--fixture=N | --consent-fixture=N | --appointment-only]");
+if (args.some(arg => !["--run-provider", "--appointment-only"].includes(arg) && !/^--(fixtures-dir|fixture|consent-fixture)=.+$/.test(arg))) throw new Error("UNKNOWN_FIXTURE_OPTION");
 const key = process.env.OPENAI_API_KEY;
 if (!key) throw new Error("OPENAI_API_KEY_REQUIRED");
-const folder = resolve(process.cwd(), ".tools/synthetic-live-client");
+const folder = resolve(folderArg);
+const selected = args.find(arg => arg.startsWith("--fixture="))?.slice("--fixture=".length);
+const consent = args.find(arg => arg.startsWith("--consent-fixture="))?.slice("--consent-fixture=".length);
+if ([selected !== undefined, consent !== undefined, args.includes("--appointment-only")].filter(Boolean).length > 1) throw new Error("SELECT_ONE_FIXTURE_MODE");
+function index(value: string, length: number) {
+  if (!/^\d+$/.test(value) || Number(value) >= length) throw new Error("FIXTURE_INDEX_INVALID");
+  return Number(value);
+}
+const fixtures = consent !== undefined ? (() => {
+  const id = index(consent, consentFixtures.length), fixture = consentFixtures[id]!;
+  return [{ name: `consent-${id}`, text: fixture.input.received, locale: fixture.input.locale, expected: fixture.expected }];
+})() : syntheticAnswers.flatMap((text, id) => selected !== undefined && id !== index(selected, syntheticAnswers.length) || args.includes("--appointment-only") && id < 3
+  ? [] : [{ name: `answer-${id}`, text, locale: "en-GB", expected: null }]);
 await mkdir(folder, { recursive: true });
-const phrases = ["Yes, you may record and transcribe this call.", "Yes, now is a convenient time.", "Yes, we received the application yesterday.",
-  "16 September 2099 at 15:00 is available for that appointment. There is no payment or special condition.",
-  "Yes, that exact appointment on 16 September 2099 at 15:00 is now booked.",
-  "Yes, please go ahead and book that exact appointment at that time."];
-for (const [index, text] of phrases.entries()) {
-if (process.argv.includes("--appointment-only") && index < 3) continue;
-const selected = process.argv.find(arg => arg.startsWith("--fixture="));
-if (selected && index !== Number(selected.split("=")[1])) continue;
-await new Promise<void>((resolve, reject) => {
-  const socket = new WebSocket("wss://api.openai.com/v1/live/sessions", { headers: { Authorization: `Bearer ${key}` } });
-  const chunks: Buffer[] = []; let input: ReturnType<typeof setInterval>; let complete = false;
-  const deadline = setTimeout(() => { socket.terminate(); reject(new Error("FIXTURE_TIMEOUT")); }, 45_000);
-  const send = (event: object) => socket.send(JSON.stringify(event));
-  const gate = new LiveControlledSpeech(text, (audio, mark) => {
-    for (const packet of audio) chunks.push(Buffer.from(packet, "base64"));
-    if (mark) gate.acknowledge(mark);
-  }, () => { complete = true; send({ type: "session.close" }); }, reason => { reject(new Error(reason)); socket.close(); }, async () => "different");
-  socket.on("open", () => send({ type: "session.start", session: { model: "gpt-live-1", store: false,
-    instructions: "This is a synthetic audio fixture. Speak only the exact text requested by the application, once, then stay silent. Never ask questions or respond on your own.",
-    audio: { format: { type: "audio/pcmu", rate: 8000 }, output: { voice: "marin" } }, delegation: { type: "client" } } }));
-  socket.on("message", data => {
-    const event = JSON.parse(data.toString());
-    if (event.type === "session.started") {
-      input = setInterval(() => send({ type: "session.input_audio.append", audio: Buffer.alloc(160, 255).toString("base64") }), 20);
-      send({ type: "session.instructions.append", delegation_id: null, content: `Say exactly once now: ${text}` });
-    }
-    if (event.type === "session.output_audio.delta") gate.audio(event.delta);
-    if (event.type === "session.output_transcript.delta") gate.transcript(event.delta);
-    if (event.type === "error") { reject(new Error(`FIXTURE_PROVIDER_${event.error?.code}`)); socket.close(); }
-    if (event.type === "session.closed") { console.log(JSON.stringify({ fixture: index, complete, usage: event.usage })); socket.close(); }
-  });
-  socket.on("error", () => reject(new Error("FIXTURE_NETWORK_ERROR")));
-  socket.on("close", () => {
-    clearTimeout(deadline); clearInterval(input); gate.cancel();
-    if (!complete) { reject(new Error("FIXTURE_INCOMPLETE")); return; }
-    void writeFile(`${folder}/answer-${index}.ulaw`, Buffer.concat(chunks)).then(() => resolve(), reject);
-  });
-});
+// Reject existing destinations before making any paid request.
+for (const fixture of fixtures) for (const ext of ["ulaw", "json"]) {
+  if (await access(join(folder, `${fixture.name}.${ext}`)).then(() => true, () => false)) throw new Error(`FIXTURE_ALREADY_EXISTS:${fixture.name}.${ext}`);
+}
+for (const fixture of fixtures) {
+  const rendered = await renderSpeech({ apiKey: key, text: fixture.text, locale: fixture.locale, voice: "alloy" });
+  const audio = Buffer.concat(rendered.frames.map(frame => Buffer.from(frame, "base64")));
+  await writeFile(join(folder, `${fixture.name}.ulaw`), audio, { flag: "wx" });
+  await writeFile(join(folder, `${fixture.name}.json`), JSON.stringify({ schemaVersion: 1, synthetic: true, name: fixture.name,
+    text: fixture.text, locale: fixture.locale, expected: fixture.expected, sha256: createHash("sha256").update(audio).digest("hex"),
+    mimeType: "audio/pcmu", sampleRate: 8000, channels: 1, bytes: audio.length, durationMs: rendered.durationMs,
+    model: rendered.model, providerRequestId: rendered.providerRequestId }, null, 2) + "\n", { flag: "wx" });
+  console.log(JSON.stringify({ fixture: fixture.name, bytes: audio.length, durationMs: rendered.durationMs, model: rendered.model }));
 }

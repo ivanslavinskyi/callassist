@@ -186,6 +186,8 @@ export class PostgresAuthRepository implements AuthRepository {
         RETURNING ${this.#userColumns()}
       `;
       if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
+      if (this.betaControlsEnabled) await tx`INSERT INTO beta_credit_enrollments(user_id,policy_id,effective_at)
+        SELECT ${id},credit_policy_id,${now} FROM beta_controls WHERE id=true`;
       await accept?.(id, tx);
       return this.#mapUser(row);
       });

@@ -4,13 +4,24 @@ import { decryptJson, type DataEncryptionMaterial } from "../security/encryption
 import type { CallRepository } from "../storage/call-repository";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
 import { type CallReport, type RegistrationReport } from "./notification-email";
+import type { PlanReviewReport } from "./plan-review-email";
 
 export type NotificationEvent = {
-  id: string; kind: "registration" | "call"; source_id: string; source_user_id: string | null;
+  id: string; kind: "registration" | "call" | "plan_review"; source_id: string; source_user_id: string | null;
   call_brief_id: string | null; call_attempt_id: string | null; occurred_at: Date;
 };
 export class NotificationReportReader {
   constructor(private readonly sql: postgres.Sql, private readonly key: DataEncryptionMaterial, private readonly calls: CallRepository) {}
+
+  async planReview(event: NotificationEvent): Promise<PlanReviewReport | null> {
+    const [row] = await this.sql`SELECT p.*,
+      (SELECT count(*)::int FROM plan_review_cases other WHERE other.call_brief_id=p.call_brief_id AND other.id<>p.id) AS repeats
+      FROM plan_review_cases p JOIN call_briefs b ON b.id=p.call_brief_id JOIN call_compilations c ON c.id=p.compilation_id
+      WHERE p.id=${event.source_id} AND b.data_deleted_at IS NULL AND c.compilation_ciphertext IS NOT NULL`;
+    return row ? { caseId: row.id, callId: row.call_brief_id, userId: row.user_id, revision: row.plan_revision,
+      occurredAt: row.occurred_at.toISOString(), decision: row.decision, category: row.category, reasons: row.reasons,
+      locale: row.call_locale, compilerVersion: row.compiler_version, policyVersion: row.policy_version, model: row.model, repeats: row.repeats } : null;
+  }
 
   async registration(event: NotificationEvent): Promise<RegistrationReport | null> {
     const [user] = await this.sql<{id:string;first_name:string;last_name:string;email:string;phone_e164:string;

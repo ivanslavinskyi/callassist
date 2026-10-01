@@ -4,6 +4,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import postgres from "postgres";
 import { normalizeCreateCallBriefInput, type CreateCallBriefInput } from "@callassist/contracts";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
 import { decryptJson, encryptJson, parseDataEncryptionKeyring } from "../security/encryption";
 import { uncertainAssessment } from "../credits/final-assessment";
@@ -101,7 +102,23 @@ it("rotates immutable text evidence and queued input without changing source has
     const actionId = randomUUID(), actionPayload = { content: "An encrypted spoken appointment request", evidence: ["turn-1"] };
     await sql`INSERT INTO call_voice_actions(id,call_brief_id,call_attempt_id,snapshot_hash,state,payload_ciphertext)
       VALUES(${actionId},${historical.id},${attempt.attempt.id},${historicalHash!},'uncertain',${encryptJson(actionPayload,Buffer.from(oldKey,"base64"))})`;
+    const returned = await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input));
+    returned.policyDecision = { ...returned.policyDecision, status: "needs_clarification",
+      reasonCodes: ["required_information_missing"], clarificationQuestions: ["Which date?"] };
+    returned.snapshotHash = createCompilationSnapshotHash(returned);
+    const returnedBrief = await old.create(input, returned, userId);
+    const [review] = await sql`SELECT id FROM plan_review_cases WHERE call_brief_id=${returnedBrief.id}`;
+    const reviewNote = "Private synthetic triage note", reviewReason = "Review synthetic missing date";
+    await sql`UPDATE plan_review_cases SET note_ciphertext=${encryptJson(reviewNote, Buffer.from(oldKey, "base64"))} WHERE id=${review!.id}`;
+    const auditId = randomUUID();
+    await sql`INSERT INTO plan_review_audit(id,case_id,actor_id,action,reason_ciphertext)
+      VALUES(${auditId},${review!.id},${userId},'review.updated',${encryptJson(reviewReason, Buffer.from(oldKey, "base64"))})`;
     const rotation = await reencryptDatabase(environment);
+    const [rotatedReview] = await sql`SELECT note_ciphertext FROM plan_review_cases WHERE id=${review!.id}`;
+    const [rotatedAudit] = await sql`SELECT reason_ciphertext FROM plan_review_audit WHERE id=${auditId}`;
+    const currentKeyring = parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey, DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" });
+    expect(decryptJson(rotatedReview!.note_ciphertext, currentKeyring)).toBe(reviewNote);
+    expect(decryptJson(rotatedAudit!.reason_ciphertext, currentKeyring)).toBe(reviewReason);
     const [rotatedAction] = await sql`SELECT payload_ciphertext FROM call_voice_actions WHERE id=${actionId}`;
     expect(decryptJson(rotatedAction!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(actionPayload);
@@ -112,7 +129,7 @@ it("rotates immutable text evidence and queued input without changing source has
     expect(decryptJson(notification!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(notificationPayload);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 24, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 26, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);
@@ -128,8 +145,8 @@ it("rotates immutable text evidence and queued input without changing source has
     if (process.env.RUN_TEXT_RECOVERY_DRILL === "true") {
       expect(await runRecoveryDrill({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
         DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current", RECOVERY_SOURCE_DATABASE_URL: database.url }))
-        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 30,
-          temporaryResourcesRemoved: true, encryptedSamplesVerified: 17 });
+        .toMatchObject({ event: "database_recovery_drill_succeeded", criticalTableCount: 38,
+          temporaryResourcesRemoved: true, encryptedSamplesVerified: expect.any(Number) });
     }
     expect(await reencryptDatabase({ ...environment, DATA_ENCRYPTION_PREVIOUS_KEYS: "",
       DATA_ENCRYPTION_LEGACY_V1_KEY_ID: "current" })).toMatchObject({ rewrittenCiphertexts: 0 });

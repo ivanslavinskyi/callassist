@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "credits:audit": "node --import tsx scripts/audit-beta-credit-migration.ts",
     "og:build-fallbacks": "node --import tsx scripts/build-og-fallbacks.ts",
     "eval:call-assessment": "tsx src/text-processing/final-assessment.eval.ts",
     "eval:summary-calendar": "node --use-system-ca --import tsx src/text-processing/summary-calendar.eval.ts",
@@ -19,6 +20,8 @@
     "db:migrate:check": "tsx src/db/migrate.ts --check",
     "db:backfill:call-plans": "tsx src/db/backfill-call-compilations.ts",
     "db:backfill:live-transcripts": "tsx src/db/backfill-live-transcripts.ts",
+    "db:backfill:plan-reviews": "tsx src/db/backfill-plan-reviews.ts",
+    "db:backfill:plan-reviews:prod": "node dist/db/backfill-plan-reviews.js",
     "db:classify:legacy-call-plans": "tsx src/db/classify-legacy-call-plans.ts",
     "db:verify:call-plan-cutover": "tsx src/db/verify-call-plan-cutover.ts",
     "db:reencrypt": "tsx src/db/reencrypt-data.ts",
@@ -67,5 +70,6 @@
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
     "vitest": "^4.1.11"
-  }
+  },
+  "license": "UNLICENSED"
 }

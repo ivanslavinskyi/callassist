@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { voiceRuntimeMode } from "./config/voice-runtime";
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import { createNotificationsFromEnv } from "./notifications/create-notifications";
+import { createPlanReviewsFromEnv } from "./safety/plan-review-service";
 import "./config/load-env";
 import { createTelemetryExportsFromEnv } from "./telemetry-export/service";
 import { buildApp, buildWebhookApp } from "./app";
@@ -15,7 +18,7 @@ import {
 import { createRateLimiterFromEnv } from "./auth/create-rate-limiter";
 import { createVerificationProviderFromEnv } from "./auth/create-verification-provider";
 import { RecipientOptOutService } from "./safety/recipient-opt-out-service";
-import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
+import { createBriefCompilerFromEnv, preparationTimeoutMsFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
 import { createTextProcessorFromEnv } from "./text-processing/text-processor";
 import { textCapabilitiesFromEnv } from "./text-processing/text-capabilities";
@@ -68,7 +71,7 @@ const service = new CallService(
   briefCompiler,
   callAdmissionPolicyFromEnv(),
   operationalCostPolicyFromEnv(),
-  { durableWorkerMode, textProcessor, textCapabilities: textCapabilitiesFromEnv(textProcessor) }
+  { durableWorkerMode, textProcessor, textCapabilities: textCapabilitiesFromEnv(textProcessor), preparationTimeoutMs: preparationTimeoutMsFromEnv() }
 );
 const authService = new AuthService({
   repository: authRepository,
@@ -97,6 +100,7 @@ const creditService = new CreditService({
 const notifications = createNotificationsFromEnv(repository);
 const telemetryExports = createTelemetryExportsFromEnv();
 const app = buildApp({
+  planReviews: createPlanReviewsFromEnv(),
   telemetryExports,
   ogService: createOgServiceFromEnv(),
   notifications,

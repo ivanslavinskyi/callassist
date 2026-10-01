@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import { createNotificationsFromEnv } from "./notifications/create-notifications";
 import "./config/load-env";
 import { createTelemetryExportsFromEnv } from "./telemetry-export/service";
-import { createBriefCompilerFromEnv } from "./brief-compiler/create-brief-compiler";
+import { createBriefCompilerFromEnv, preparationTimeoutMsFromEnv } from "./brief-compiler/create-brief-compiler";
 import { CallService } from "./call-service";
 import { createTextProcessorFromEnv } from "./text-processing/text-processor";
 import { textCapabilitiesFromEnv } from "./text-processing/text-capabilities";
@@ -39,6 +41,7 @@ const service = new CallService(
   undefined,
   {
     durableWorkerMode: "external",
+    preparationTimeoutMs: preparationTimeoutMsFromEnv(),
     durableWorkerEnabled: true,
     durableWorkerKeepAlive: true,
     reportDurableWorkerHeartbeat: true,

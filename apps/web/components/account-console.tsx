@@ -1,5 +1,6 @@
 "use client";
 import { PhoneInput } from "./phone-input";
+import { CreditFundingDetails, CreditSourceDetails } from "./credit-funding-details";
 import { formatLocale } from "@callassist/contracts";
 
 import {
@@ -663,12 +664,14 @@ export function AccountConsole() {
                 <div><dt>{copy.activeCall}</dt><dd>{data.usage.activeCallBriefId ?? copy.noActiveCall}</dd></div>
               </dl>
               <h3>{copy.transactions}</h3>
+              <CreditFundingDetails funding={data.usage.funding} locale={locale} />
               {data.usage.transactions.length ? (
                 <ul className="account-transactions">
                   {data.usage.transactions.map((transaction) => (
                     <li key={transaction.id}>
                       <div>
                         <strong>{copy.transaction[transaction.type]}</strong>
+                        <CreditSourceDetails transaction={transaction} locale={locale} />
                         <time dateTime={transaction.createdAt}>{dateFormatter.format(new Date(transaction.createdAt))}</time>
                       </div>
                       <span data-positive={transaction.amount > 0}>{transaction.amount > 0 ? "+" : ""}{transaction.amount}</span>

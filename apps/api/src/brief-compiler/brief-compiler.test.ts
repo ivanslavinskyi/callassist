@@ -157,7 +157,7 @@ describe("bounded semantic repair", () => {
     const mock = provider([{ ...modelOutput, backgroundSummary: "Invented case SECRET-777-XYZ" }, modelOutput]);
     await expect(new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation: mock.fetchImplementation })
       .compile(normalizeCreateCallBriefInput(rawInput), 1, { maxProviderRequests: 2 }))
-      .rejects.toMatchObject({ code: "OPENAI_REQUEST_BUDGET_EXHAUSTED", stage: "compilation" });
+      .rejects.toMatchObject({ code: "OPENAI_REQUEST_BUDGET_EXHAUSTED", stage: "compilation_repair" });
     expect(mock.fetchImplementation).toHaveBeenCalledTimes(2);
     expect(mock.attempts()).toBe(1);
   });
@@ -784,7 +784,7 @@ describe("OpenAIBriefCompiler", () => {
       );
     const reservations: Array<{
       clientRequestId: string;
-      stage: "input_moderation" | "compilation" | "output_moderation";
+      stage: import("./brief-compiler").BriefCompilerStage;
     }> = [];
     const beforeProviderRequest = vi.fn(async (
       request: (typeof reservations)[number]

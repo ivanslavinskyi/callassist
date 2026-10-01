@@ -22,6 +22,12 @@ import {
 const restoreDatabasePrefix = "callassist_restore_drill_";
 const temporaryDirectoryPrefix = "callassist-recovery-";
 const criticalTables = [
+  "beta_credit_policies",
+  "beta_credit_enrollments",
+  "beta_credit_periods",
+  "plan_review_cases",
+  "plan_review_audit",
+  "admin_telemetry_export_recordings",
   "admin_telemetry_privacy_epoch",
   "admin_telemetry_exports",
   "admin_telemetry_export_parts",

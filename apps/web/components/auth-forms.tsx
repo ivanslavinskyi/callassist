@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { authMessages, getAuthErrorMessage } from "@/lib/i18n/auth-messages";
 import { betaMessages } from "@/lib/i18n/beta-messages";
+import { betaAllowanceText, betaCreditMessages, betaPlacesText } from "@/lib/i18n/beta-credit-messages";
 import { useUiLocale } from "@/components/ui-locale-provider";
 import { localizePathname } from "@/lib/i18n/routing";
 import { clearExplicitGuestLocale, readExplicitGuestLocale, rememberUiLocale, resolvePostLoginLocale } from "@/lib/ui-language-preference";
@@ -107,7 +108,10 @@ export function RegistrationForm() {
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "LEGAL_REVISION_CHANGED") {
         setError(extra.legalChanged); setReload(value => value + 1);
-      } else setError(getAuthErrorMessage(caught, locale));
+      } else {
+        setError(getAuthErrorMessage(caught, locale));
+        if (caught instanceof ApiError && caught.code === "BETA_REGISTRATION_FULL") setReload(value => value + 1);
+      }
       setBusy(false);
     }
   }
@@ -116,6 +120,14 @@ export function RegistrationForm() {
     <AuthFrame>
       <h1>{copy.register.title}</h1>
       <p className="auth-intro">{copy.register.intro}</p>
+      <div role="status" aria-live="polite">
+        {!options && !optionsError ? <p>{betaCreditMessages[locale].loading}</p> : null}
+        {options?.beta && <>
+          <p>{options.beta.remaining === null ? betaCreditMessages[locale][options.beta.state] : betaPlacesText(options.beta.remaining, locale)}</p>
+          {options.beta.state === "full" && options.beta.remaining !== null && <p>{betaCreditMessages[locale].full}</p>}
+          <p>{betaAllowanceText(options.beta.allowance, locale)}{options.beta.allowance.period !== "lifetime" ? `. ${betaCreditMessages[locale].noCarry} UTC.` : ""}</p>
+        </>}
+      </div>
       <form className="auth-form" onSubmit={submit}>
         <label className="field">
           <span>{betaMessages[locale].invitation}</span>

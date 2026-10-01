@@ -1,6 +1,6 @@
 /** Real Live audio + Responses through the production bridge; synthetic recipient and simulated Twilio playback. */
 import "../src/config/load-env.ts";
-import { readFile } from "node:fs/promises";
+import { readSyntheticAnswers } from "./live-audio-fixtures.mts";
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import { InMemoryCallRepository } from "../src/storage/in-memory-call-repository.ts";
@@ -11,10 +11,13 @@ import { OpenAILiveBridge } from "../src/voice/openai-live-bridge.ts";
 import { createCompilationSnapshotHash } from "../src/brief-compiler/compilation-integrity.ts";
 import { pcmuHasSpeech } from "../src/voice/pcmu-activity.ts";
 
+const fixturesDir = process.argv.find(arg => arg.startsWith("--fixtures-dir="))?.slice("--fixtures-dir=".length);
+if (!process.argv.includes("--run-provider") || !fixturesDir) throw new Error("Use --run-provider --fixtures-dir=<synthetic fixture directory> [--appointment]");
+if (process.argv.slice(2).some(arg => !["--run-provider", "--appointment"].includes(arg) && !arg.startsWith("--fixtures-dir="))) throw new Error("UNKNOWN_PROBE_OPTION");
 if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY_REQUIRED");
 const probeStartedAt = Date.now();
 const appointment = process.argv.includes("--appointment");
-const clips = await Promise.all((appointment ? [0, 1, 3, 4, 5] : [0, 1, 2]).map(i => readFile(`.tools/synthetic-live-client/answer-${i}.ulaw`)));
+const clips = await readSyntheticAnswers(fixturesDir, appointment ? [0, 1, 3, 4, 5] : [0, 1, 2]);
 const repository = new InMemoryCallRepository();
 const compiler = new DeterministicBriefCompiler();
 if (appointment) {
@@ -70,17 +73,6 @@ class Telephone extends EventEmitter {
 const phone = new Telephone();
 const bridge = new OpenAILiveBridge({ apiKey: process.env.OPENAI_API_KEY, service, agentHangupEnabled: true,
   validateStreamToken: () => true,
-  semanticFetch: async (url, init) => {
-    const input = JSON.parse(String(init?.body)).input;
-    const started = Date.now();
-    const response = await fetch(url, init);
-    const body = await response.clone().json();
-    // This probe uses synthetic fixtures only. Never enable raw diagnostics for customer calls.
-    console.log(JSON.stringify({ semanticMs: Date.now() - started, input, status: body.status,
-      output: body.output?.filter((item: any) => item.type === "message").flatMap((item: any) => item.content ?? [])
-        .filter((item: any) => item.type === "output_text").map((item: any) => item.text), incomplete: body.incomplete_details }));
-    return response;
-  },
   createLiveSocket: (url, key) => {
     const socket = new WebSocket(url, { headers: { Authorization: 'Bearer ' + key } });
     const send = socket.send.bind(socket);

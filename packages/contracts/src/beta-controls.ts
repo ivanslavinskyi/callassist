@@ -1,5 +1,6 @@
 import { analyticsSettingsSchema, defaultAnalyticsSettings } from "./analytics";
 import { z } from "zod";
+import { betaCreditPolicySchema, defaultBetaCreditPolicy } from "./beta-credits";
 
 const micros = z.number().int().min(1).max(1_000_000_000);
 export const MAX_STARTS_PER_RECIPIENT_PER_DAY = 100;
@@ -13,6 +14,8 @@ export const registrationPolicyUpdateSchema = z.strictObject({
   settings: registrationPolicySchema, expectedRevision: z.number().int().positive(), reason: z.string().trim().min(3).max(500)
 });
 export const betaSettingsSchema = z.strictObject({
+  creditAllowance: betaCreditPolicySchema.default(defaultBetaCreditPolicy),
+  showRegistrationRemaining: z.boolean().default(true),
   registration: registrationPolicySchema.default(defaultRegistrationPolicy),
   analytics: analyticsSettingsSchema.default(defaultAnalyticsSettings).catch(defaultAnalyticsSettings),
   publicAccountLimit: z.number().int().min(0).max(10000),
@@ -32,6 +35,7 @@ export const betaSettingsSchema = z.strictObject({
 });
 export type BetaSettings = z.infer<typeof betaSettingsSchema>;
 export const defaultBetaSettings: BetaSettings = {
+  creditAllowance: defaultBetaCreditPolicy, showRegistrationRemaining: true,
   registration: defaultRegistrationPolicy,
   analytics: defaultAnalyticsSettings,
   publicAccountLimit: 30, maxDurationSeconds: 420, maxConcurrentCalls: 2,
@@ -41,11 +45,16 @@ export const defaultBetaSettings: BetaSettings = {
   transcriptionRequestReserveMicros: 1_000_000, smsReserveMicros: 500_000, emailReserveMicros: 10_000
 };
 export const betaSettingsUpdateSchema = z.strictObject({
-  settings: betaSettingsSchema, expectedRevision: z.number().int().positive(),
+  // A legacy settings client can omit this field. Do not apply the read/default
+  // schema's `true` value to a mutation of an already-hidden public counter.
+  settings: betaSettingsSchema.extend({ showRegistrationRemaining: z.boolean().optional() }), expectedRevision: z.number().int().positive(),
   reason: z.string().trim().min(3).max(500)
 });
+export type BetaSettingsUpdate = z.infer<typeof betaSettingsUpdateSchema>;
 export const betaInvitationCreateSchema = z.strictObject({ reason: z.string().trim().min(3).max(500) });
 export const betaControlsViewSchema = z.strictObject({
+  creditPolicyId: z.uuid().optional(),
+  unverifiedAccounts: z.number().int().nonnegative().optional(),
   settings: betaSettingsSchema, revision: z.number().int().positive(),
   publicAccounts: z.number().int().nonnegative(), invitedAccounts: z.number().int().nonnegative(),
   activeCalls: z.number().int().nonnegative(), reservedMicros: z.number().int().nonnegative(),

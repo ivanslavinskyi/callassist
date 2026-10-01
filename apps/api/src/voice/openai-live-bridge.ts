@@ -32,7 +32,6 @@ export type OpenAILiveBridgeOptions = OpenAIRealtimeBridgeOptions & {
   speechModel?: string;
   createLiveSocket?: (url: string, apiKey: string) => WebSocket;
   liveStartupTimeoutMs?: number;
-  semanticFetch?: typeof fetch;
   speechFetch?: typeof fetch;
 };
 

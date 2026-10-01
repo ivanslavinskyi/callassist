@@ -79,6 +79,12 @@ export type RecordingMedia = {
   fileName: string;
   channels?: 1 | 2;
 };
+export type RecordingMediaStream = {
+  bytes: AsyncIterable<Uint8Array>;
+  contentType: string;
+  channels: 1 | 2;
+  cancel(): Promise<void>;
+};
 
 export type ProviderCallStatus = {
   providerCallId: string;
@@ -111,6 +117,7 @@ export interface TelephonyProvider {
     input: StartCallRecordingInput
   ): Promise<StartCallRecordingResult>;
   getRecordingMedia(providerRecordingId: string): Promise<RecordingMedia>;
+  streamRecordingMedia?(providerRecordingId: string, channels: 1 | 2, signal: AbortSignal): Promise<RecordingMediaStream>;
   deleteRecording(providerRecordingId: string): Promise<void>;
   getCallStatus?(providerCallId: string): Promise<ProviderCallStatus>;
   getRecordingStatus?(

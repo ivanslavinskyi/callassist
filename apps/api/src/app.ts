@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Proprietary
+// Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { smsAllowedCountries, VerificationSendError } from "./auth/bounded-verification-provider";
 import { toPublicUser } from "./auth/auth-repository";
 import { defaultRegistrationPolicy, registrationOptionsSchema, registrationPolicyUpdateSchema } from "@callassist/contracts";
@@ -7,6 +9,7 @@ import { analyticsSettingsUpdateSchema, defaultAnalyticsSettings } from "@callas
 import { accountLanguagePreferencesUpdateInputSchema, safeParseCallPreparationRequest, contentLanguageUpdateSchema, supportedTextLanguage, selectableCallLanguagesForRole, isCallLanguageAvailable, TEXT_LANGUAGES, type CallLocale } from "@callassist/contracts";
 import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
 import { betaControlsViewSchema, betaSettingsUpdateSchema, betaInvitationCreateSchema } from "@callassist/contracts";
+import { betaCreditPolicyUpdateSchema, betaCreditTransitionInputSchema } from "@callassist/contracts";
 import { BetaControlError } from "./beta/beta-controls";
 import { trustedProxyPolicy } from "./config/proxy-policy";
 import { randomUUID } from "node:crypto";
@@ -139,11 +142,14 @@ import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provi
 import { notificationSettingsUpdateSchema } from "@callassist/contracts";
 import { registerOgRoutes } from "./og/og-routes";
 import { registerTelemetryExportRoutes } from "./telemetry-export/routes";
+import { registerPlanReviewRoutes } from "./safety/plan-review-routes";
+import type { PlanReviewAdmin } from "./safety/plan-review-service";
 import type { TelemetryExportService } from "./telemetry-export/service";
 import type { OgService } from "./og/og-service";
 import { NotificationSettingsError, type NotificationAdmin } from "./notifications/superadmin-notifications";
 
 type BuildAppOptions = {
+  planReviews?: PlanReviewAdmin;
   telemetryExports?: TelemetryExportService;
   ogService?: OgService;
   notifications?: NotificationAdmin;
@@ -174,6 +180,7 @@ type BuildWebhookAppOptions = {
 };
 
 export function buildApp({
+  planReviews,
   ogService,
   notifications,
   telemetryExports,
@@ -216,6 +223,8 @@ export function buildApp({
   });
   if (logger) registerPiiSafeRequestLogging(app);
   registerHttpSecurity(app, { allowedOrigins: webOrigins, production });
+  registerPlanReviewRoutes(app, planReviews, (request, reply, mutation) => mutation
+    ? authorizeSensitiveCallMutation(request, reply) : authorizeAdminRead(request, reply));
 
   void app.register(cors, {
     origin: webOrigins,
@@ -621,6 +630,7 @@ export function buildApp({
       const locale = contentLocaleSchema.safeParse(request.query.locale ?? "en");
       if (!locale.success) return reply.status(400).send({ error: "INVALID_LOCALE" });
       return reply.header("Cache-Control", "no-store").send(registrationOptionsSchema.parse({
+        beta: await service.repository.betaControls?.getPublicRegistration?.(),
         policy: await registrationPolicy(), smsCountries: smsAllowedCountries(), documents: contentService ? await contentService.getRegistrationDocuments(locale.data) : null
       }));
     });
@@ -1686,6 +1696,36 @@ export function buildApp({
       if (!actor) return;
       if (!service.repository.betaControls) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
       return reply.header("Cache-Control", "private, no-store").send(betaControlsViewSchema.parse(await service.repository.betaControls.getView()));
+    });
+    app.put("/api/admin/system/beta/credit-policy", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      const parsed = betaCreditPolicyUpdateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_BETA_SETTINGS" });
+      const controls = service.repository.betaControls;
+      if (!controls?.updateCreditPolicy) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      try {
+        await controls.updateCreditPolicy(parsed.data.policy, parsed.data.expectedRevision, actor.id, parsed.data.reason);
+        return reply.header("Cache-Control", "private, no-store").send({ updated: true });
+      } catch (error) { return sendRepositoryError(reply, error); }
+    });
+    app.get("/api/admin/system/beta/credits/preview", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      if (!service.repository.betaControls?.previewCreditTransition) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      return reply.header("Cache-Control", "private, no-store").send(await service.repository.betaControls.previewCreditTransition());
+    });
+    app.post("/api/admin/system/beta/credits/apply", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "BETA_ADMIN_FORBIDDEN" });
+      const parsed = betaCreditTransitionInputSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_BETA_SETTINGS" });
+      if (!service.repository.betaControls?.applyCreditTransition) return reply.status(503).send({ error: "BETA_CONTROLS_UNAVAILABLE" });
+      try { return reply.header("Cache-Control", "private, no-store").send(await service.repository.betaControls.applyCreditTransition(parsed.data, actor.id)); }
+      catch (error) { return sendRepositoryError(reply, error); }
     });
     app.get("/api/admin/system/notifications", async (request, reply) => {
       reply.header("Cache-Control", "private, no-store");
