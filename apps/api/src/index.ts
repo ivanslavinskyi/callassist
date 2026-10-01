@@ -1,3 +1,4 @@
+import { voiceRuntimeMode } from "./config/voice-runtime";
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import { createNotificationsFromEnv } from "./notifications/create-notifications";
 import "./config/load-env";
@@ -133,7 +134,7 @@ const realtimeBridge =
     : null;
 if (realtimeBridge) {
   app.log.info(
-    { driver: voiceRuntimeDriver(process.env), agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true" },
+    { driver: voiceRuntimeDriver(process.env), mode: voiceRuntimeMode(process.env), agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true" },
     "Voice runtime configuration"
   );
 }

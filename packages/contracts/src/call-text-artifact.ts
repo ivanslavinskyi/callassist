@@ -1,3 +1,4 @@
+import { applicationPlaybackReceiptSchema, transcriptSourceSchema, transcriptSegmentSourceSchema } from "./transcript-provenance";
 import { z } from "zod";
 import { languageTagSchema, textLanguageSchema } from "./languages";
 import { callAssessmentDecisionSchema } from "./call-assessment";
@@ -15,6 +16,8 @@ export type PlanSource = z.infer<typeof planSourceSchema>;
 export const translatedFieldSchema = z.object({ id: z.string().min(1).max(200), text: z.string().min(1).max(24000) });
 export const planReviewPayloadSchema = z.object({ fields: z.array(translatedFieldSchema).max(250) });
 export const sourceSegmentSchema = z.object({
+  source: transcriptSegmentSourceSchema.optional(),
+  applicationPlayback: applicationPlaybackReceiptSchema.optional(),
   id: z.string().min(1).max(160), role: z.enum(["assistant", "recipient", "unknown"]),
   text: z.string().min(1), startSeconds: z.number().nonnegative().nullable(), endSeconds: z.number().nonnegative().nullable()
 });
@@ -70,7 +73,7 @@ export const callTextArtifactSchema = z.object({
 });
 export type CallTextArtifact = z.infer<typeof callTextArtifactSchema>;
 export const finalTranscriptRevisionSchema = z.object({
-  source: z.enum(["recording_asr", "live_native"]).optional(),
+  source: transcriptSourceSchema.optional(),
   id: z.string().uuid(), transcriptId: z.string().uuid(), callAttemptId: z.string().uuid().nullable(),
   revision: z.number().int().positive(), sourceHash: hashSchema, text: z.string(),
   segments: z.array(sourceSegmentSchema), createdAt: z.string().datetime()

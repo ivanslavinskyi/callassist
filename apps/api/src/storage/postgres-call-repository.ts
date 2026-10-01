@@ -213,6 +213,7 @@ type TranscriptRow = {
   final: boolean;
   createdAt: DatabaseDate;
   nativeTiming: TranscriptSegment["nativeTiming"] | null;
+  applicationPlayback: TranscriptSegment["applicationPlayback"] | null;
 };
 
 type ApprovalRow = {
@@ -257,7 +258,7 @@ type CallRecordingRow = {
 };
 
 type FinalTranscriptRow = {
-  source: "recording_asr" | "live_native";
+  source: "recording_asr" | "live_native" | "live_composed";
   id: string;
   status: FinalTranscript["status"];
   textCiphertext: string | null;
@@ -2784,7 +2785,7 @@ export class PostgresCallRepository implements CallRepository {
           locale,
           final,
           created_at AS "createdAt",
-          native_timing AS "nativeTiming"
+          native_timing AS "nativeTiming", application_playback AS "applicationPlayback"
         FROM transcript_segments
         WHERE call_brief_id = ${id}
         ORDER BY created_at ASC
@@ -5264,7 +5265,8 @@ export class PostgresCallRepository implements CallRepository {
     role: TranscriptSegment["role"],
     text: string,
     locale: CallLocale,
-    nativeTiming?: TranscriptSegment["nativeTiming"]
+    nativeTiming?: TranscriptSegment["nativeTiming"],
+    applicationPlayback?: TranscriptSegment["applicationPlayback"]
   ) {
     const segment: TranscriptSegment = {
       id: randomUUID(),
@@ -5272,8 +5274,9 @@ export class PostgresCallRepository implements CallRepository {
       text,
       locale,
       final: true,
-      createdAt: nativeTiming ? new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString() : new Date().toISOString(),
-      ...(nativeTiming ? { nativeTiming } : {})
+      createdAt: nativeTiming ? new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString() : applicationPlayback?.sentAt ?? new Date().toISOString(),
+      ...(nativeTiming ? { nativeTiming } : {}),
+      ...(applicationPlayback ? { applicationPlayback } : {})
     };
 
     await this.#sql.begin(async (transaction) => {
@@ -5283,10 +5286,11 @@ export class PostgresCallRepository implements CallRepository {
       if (call.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
       await transaction`
         INSERT INTO transcript_segments (
-          id, call_brief_id, role, text, locale, final, created_at, native_timing
+          id, call_brief_id, role, text, locale, final, created_at, native_timing, application_playback
         ) VALUES (
           ${segment.id}, ${id}, ${role}, ${text}, ${locale}, true,
-          ${new Date(segment.createdAt)}, ${nativeTiming ? transaction.json(nativeTiming) : null}
+          ${new Date(segment.createdAt)}, ${nativeTiming ? transaction.json(nativeTiming) : null},
+          ${applicationPlayback ? transaction.json(applicationPlayback) : null}
         )
       `;
       await this.#audit(transaction, id, "transcript.finalized", {
@@ -6000,7 +6004,7 @@ export class PostgresCallRepository implements CallRepository {
     text: string,
     segments: FinalTranscriptSegment[],
     lease?: DurableJobLease,
-    options?: {summaryGeneratorVersion?:string; source?: "recording_asr" | "live_native"}
+    options?: {summaryGeneratorVersion?:string; source?: "recording_asr" | "live_native" | "live_composed"}
   ) {
     const now = new Date();
     const ciphertext = encryptJson(text, this.#encryptionKey);
@@ -7104,10 +7108,11 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapTranscript(row: TranscriptRow): TranscriptSegment {
-    const { nativeTiming, ...rest } = row;
+    const { nativeTiming, applicationPlayback, ...rest } = row;
     return {
       ...rest,
       ...(nativeTiming ? { nativeTiming } : {}),
+      ...(applicationPlayback ? { applicationPlayback } : {}),
       createdAt: toIso(row.createdAt)
     };
   }

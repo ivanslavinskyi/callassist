@@ -3,14 +3,14 @@
 Updated 2026-10-01. Start from the existing local `.env`; keep credentials and
 temporary tunnel URLs out of Git. This procedure does not authorize production
 rollout. The current local acceptance profile is Live with fallback disabled.
-The repository default is Realtime; deployment state must be checked separately.
+The repository default is unified Live with fallback=false; deployment state must be checked separately.
 
 ## Current checkpoint, 1 October
 
-The [Live v5 implementation record](live-stabilization-implementation-2026-10-01.md)
+The [Live v6 correction](live-transcript-language-fix-2026-10-01.md)
 supersedes the historical checkpoints below. Current local process IDs, URLs, source
 manifest and verification timestamps are in `.tools/runtime/stabilization-state.json`.
-Use migrations through 0091, Live with fallback=false, automatic hangup enabled and
+Use migrations through 0092, Live with fallback=false, automatic hangup enabled and
 the existing embedded worker. Check zero active calls and drain older summary jobs
 before restarting. Do not infer readiness from an old PID or tunnel URL.
 
@@ -140,7 +140,7 @@ calls predate AMD. Keep Live fallback disabled during this acceptance session.
    For a new checkout, `corepack pnpm env:init` creates local keys without replacing
    an existing `.env`. Check the database host/name before running migrations.
 2. Run `corepack pnpm db:up`, then `corepack pnpm db:migrate`. The current catalog
-   ends at `0091_freeze_summary_context.sql`. Preserve existing accounts and keys.
+   ends at `0092_application_playback_transcript.sql`. Preserve existing accounts and keys.
    Automated integration tests require a separate disposable `*_test` database;
    never point `TEST_DATABASE_URL` at the application database.
 3. For real calls, configure `TELEPHONY_DRIVER=twilio`, `BRIEF_COMPILER_DRIVER=openai`,
@@ -219,7 +219,7 @@ mistake the later readiness answer for the original recording consent.
 
 For closing, check accepted `end_call`, `conversation.hangup` requested and
 playback_complete, then `conversation.ended=agent_hangup`. The saved conversation
-transcript should show `live_native` for complete native capture, with the outcome
+transcript should show `live_composed` when confirmed application speech supplements complete native capture, or `live_native` without application speech, with the outcome
 and farewell. Incomplete capture uses `recording_asr`. Speech should not recite internal plan
 prohibitions. Check natural short permission, refusal, ambiguity, a correction,
 spoken yes after clarification, DTMF recovery and interruption during goodbye.

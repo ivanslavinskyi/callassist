@@ -18,7 +18,7 @@ describe("execution language audit", () => {
     const body = request.mock.calls[0]![0] as { input: string; instructions: string };
     const data = JSON.parse(body.input);
     expect(data.callLocale).toBe(locale);
-    expect(data.identityNames).toContain("Иван Петров");
+    expect(data.identityNames).toContain(locale === "ru-RU" ? "Иван Петров" : "Ivan Petrov");
     expect(data.fields).toHaveProperty("backgroundSummary");
     expect(Object.keys(data.fields).some(key => key.startsWith("orderedQuestions."))).toBe(true);
     expect(body.input).not.toContain("SOURCE PRIVATE CONTEXT");

@@ -51,6 +51,9 @@ describe("final transcript export", () => {
     expect(nativePdf).toContain("during the conversation");
     expect(nativeText).not.toContain("from the call recording");
     expect(buildFinalTranscriptCopyText(input)).toContain("from the call recording");
+    const composed = { ...input, finalTranscript: { ...finalTranscript, source: "live_composed" as const } };
+    expect(buildFinalTranscriptCopyText(composed)).toContain("whose playback was confirmed");
+    expect(JSON.stringify(buildFinalTranscriptPdfDefinition(composed))).toContain("whose playback was confirmed");
   });
   it("copies the structured transcript with speakers and timestamps", () => {
     const text = buildFinalTranscriptCopyText(input);

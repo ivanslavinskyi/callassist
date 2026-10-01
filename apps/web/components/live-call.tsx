@@ -1,4 +1,6 @@
 "use client";
+
+import { isLiveTranscript } from "@callassist/contracts";
 import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
 import { transcriptSourceCopy, transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 
@@ -239,7 +241,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   }, [copyStatus]);
 
   useEffect(() => setCopyStatus("idle"), [snapshot?.finalTranscript?.updatedAt]);
-  useEffect(() => { if(snapshot?.finalTranscript?.source === "live_native") setTranscriptView("final"); },[snapshot?.finalTranscript?.source]);
+  useEffect(() => { if(isLiveTranscript(snapshot?.finalTranscript?.source)) setTranscriptView("final"); },[snapshot?.finalTranscript?.source]);
   useEffect(() => {
     const terminal = ["completed","failed","stopped"].includes(snapshot?.brief.status ?? "");
     if (snapshot?.brief.lifecycle?.assessment?.status !== "pending" && !(terminal && snapshot?.brief.lifecycle?.credit === "reserved")) return;
@@ -728,7 +730,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           <div className="transcript-column">
             {isTerminal && !silentAutomatedCall && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
               <button type="button" aria-pressed={transcriptView === "final"} onClick={() => setTranscriptView("final")}>{copy.finalTitle}</button>
-              {snapshot.finalTranscript?.source !== "live_native" ? <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{sourceCopy.raw}</button> : null}
+              {!isLiveTranscript(snapshot.finalTranscript?.source) ? <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{sourceCopy.raw}</button> : null}
               <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
             </nav> : null}
             <section className="transcript-card" tabIndex={-1} hidden={silentAutomatedCall || (isTerminal && transcriptView !== "provisional")} ref={transcriptCardRef}>

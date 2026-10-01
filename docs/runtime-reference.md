@@ -1,11 +1,16 @@
 # Runtime and API reference
 
-Voice runtime and transcript references updated 2026-09-29; registration/route inventory checkpoint remains 2026-09-25.
+Voice runtime and transcript references updated 2026-10-01; registration/route inventory checkpoint remains 2026-09-25.
 The route inventory below was regenerated from source. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
 
 ## Saved transcript source
+
+[Live v6 correction](live-transcript-language-fix-2026-10-01.md) adds marked application playback to the canonical native transcript.
+The receipt shares native persistence/drain ordering; ordinary rendered closing
+does not trigger ASR. Source and receipts survive revision/export.
+
 
 Display labels are independent of the stored legacy assistant profile: SHPROHLI is
 used for assistant turns in live, saved and translated transcripts and their text/PDF
@@ -13,7 +18,7 @@ exports. Call settings show voice gender. Historical utterance text and immutabl
 approvals are preserved; this is not a data migration.
 
 Migration 0087 introduces `final_transcripts.source`
-(`live_native` / `recording_asr`, old rows default to the latter) and technical
+(`live_native` / `recording_asr`, old rows default to the latter; migration 0092 adds `live_composed`) and technical
 `call_attempts.native_transcript_capture`. No new environment flag, queue or provider
 is required. Native capture drains until `session.closed` through the existing write
 queue. A collecting capture waits at most 120 seconds from durable-job creation; incomplete capture
@@ -199,7 +204,7 @@ normal tool-result/backend continuation, followed by a bounded completion check
 and playback confirmation; it does not verify business truth after speech.
 The historical consent
 stage stays readable for accounting. See [runtime details](live-unified-runtime.md)
-and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0091.
+and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0092.
 See [voice continuity](live-voice-continuity-2026-09-28.md) for the two-voice catalog,
 provider confirmation checks and manual acoustic acceptance.
 
@@ -262,7 +267,7 @@ were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
 ## Recent configuration and workers
 
-Apply the complete source catalog through **0091** before starting the new API and
+Apply the complete source catalog through **0092** before starting the new API and
 worker. Source catalog availability is not deployment evidence; verify the target's
 applied checksums. See [current schema rollout](deployment-preflight.md#schema-release-0090-0091).
 

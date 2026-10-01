@@ -81,18 +81,20 @@ export function textPayloadHash(value: unknown) {
 
 export function createTranscriptRevision(input: {
   transcriptId: string; callAttemptId: string | null; revision: number;
-  text: string; segments: FinalTranscriptSegment[]; createdAt: string; source?: "recording_asr" | "live_native";
+  text: string; segments: FinalTranscriptSegment[]; createdAt: string; source?: "recording_asr" | "live_native" | "live_composed";
 }): FinalTranscriptRevision {
   const id = randomUUID();
   const segments = input.segments.length ? input.segments.map((segment) => ({
     role: segment.role, text: segment.text,
+    ...(segment.source ? { source: segment.source } : {}),
+    ...(segment.applicationPlayback ? { applicationPlayback: segment.applicationPlayback } : {}),
     startSeconds: segment.startSeconds ?? null, endSeconds: segment.endSeconds ?? null
   })) : splitTranscriptText(input.text).map(text=>({ role: "unknown" as const, text, startSeconds: null, endSeconds: null }));
   return {
     id, transcriptId: input.transcriptId, callAttemptId: input.callAttemptId,
     revision: input.revision,
     source: input.source ?? "recording_asr",
-    sourceHash: textPayloadHash({ text: input.text, segments, ...(input.source === "live_native" ? { source: input.source } : {}) }),
+    sourceHash: textPayloadHash({ text: input.text, segments, ...((input.source === "live_native" || input.source === "live_composed") ? { source: input.source } : {}) }),
     text: input.text,
     segments: segments.map((segment, index) => ({ id: `${id}:${index}`, ...segment })),
     createdAt: input.createdAt

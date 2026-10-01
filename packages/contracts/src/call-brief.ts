@@ -1,3 +1,5 @@
+import { spokenIdentitiesSchema, createSpokenIdentities } from "./spoken-identities";
+import { applicationPlaybackReceiptSchema, transcriptSourceSchema, transcriptSegmentSourceSchema } from "./transcript-provenance";
 import { answeringApproval, answeringApprovalSchema } from "./call-answering";
 import { ASSISTANT_NAME } from "./assistant-identity";
 import { buildInitialDisclosure, INITIAL_DISCLOSURE_VERSION } from "./initial-disclosure";
@@ -565,6 +567,7 @@ export type ApprovedExecutionPlan = z.infer<
 >;
 
 export const approvedExecutionRuntimeSchema = z.object({
+  spokenIdentities: spokenIdentitiesSchema.optional(),
   agentName: z.string().trim().min(2),
   voiceGender: callVoiceGenderSchema,
   // Optional only for historical immutable approvals.
@@ -734,7 +737,8 @@ export function compilationApprovalInput(
 export const callBriefSchema = callBriefStoredFieldsSchema
   .extend({
     assistantProfileId: assistantProfileIdSchema.nullable(),
-    agentName: z.string().trim().min(2),
+    spokenIdentities: spokenIdentitiesSchema.optional(),
+  agentName: z.string().trim().min(2),
     representedPersonFirstName: personNamePartSchema,
     representedPersonLastName: personNamePartSchema,
     voiceGender: callVoiceGenderSchema,
@@ -757,6 +761,7 @@ export const transcriptSegmentSchema = z.object({
   locale: callLocaleSchema,
   final: z.boolean(),
   createdAt: z.string().datetime(),
+  applicationPlayback: applicationPlaybackReceiptSchema.optional(),
   nativeTiming: z.object({
     sessionId: z.string().min(1).max(200), eventId: z.string().min(1).max(200),
     sessionStartedAt: z.string().datetime(), startMs: z.number().nonnegative(), endMs: z.number().nonnegative()
@@ -799,6 +804,8 @@ export type FinalTranscriptStatus = z.infer<
 >;
 
 export const finalTranscriptSegmentSchema = z.object({
+  source: transcriptSegmentSourceSchema.optional(),
+  applicationPlayback: applicationPlaybackReceiptSchema.optional(),
   role: z.enum(["assistant", "recipient", "unknown"]),
   text: z.string().min(1),
   startSeconds: z.number().nonnegative(),
@@ -809,7 +816,7 @@ export type FinalTranscriptSegment = z.infer<
 >;
 
 export const finalTranscriptSchema = z.object({
-  source: z.enum(["recording_asr", "live_native"]).optional(),
+  source: transcriptSourceSchema.optional(),
   id: z.string().uuid(),
   status: finalTranscriptStatusSchema,
   text: z.string().nullable(),
@@ -874,6 +881,7 @@ export function createApprovedExecutionSnapshot(
     throw new Error("CALL_EXECUTION_SNAPSHOT_NOT_APPROVED");
   }
 
+  const spokenIdentities = createSpokenIdentities(compiled.callLocale, compilation.rawBrief.recipientName, compilation.rawBrief.representedPerson);
   return approvedExecutionSnapshotSchema.parse({
     version: APPROVED_EXECUTION_SNAPSHOT_VERSION,
     callBriefId: snapshot.brief.id,
@@ -883,12 +891,13 @@ export function createApprovedExecutionSnapshot(
     plan: { appointmentAuthorization: null, ...createApprovedExecutionPlan(compiled) },
     answering: answeringApproval(compiled.voicemailAction, compiled.callLocale),
     runtime: {
+      spokenIdentities,
       agentName: ASSISTANT_NAME,
       voiceGender: snapshot.brief.voiceGender,
       liveVoice: LIVE_VOICES[snapshot.brief.voiceGender],
       assistanceDisclosure: snapshot.brief.assistanceDisclosure,
       initialDisclosure: buildInitialDisclosure(compiled.callLocale,
-        formatPersonName(snapshot.brief.representedPersonFirstName, snapshot.brief.representedPersonLastName),
+        spokenIdentities.representedPerson.spoken,
         snapshot.brief.voiceGender, snapshot.brief.assistanceReason),
       audioRetentionDays: snapshot.brief.audioRetentionDays,
       allowLanguageSwitch: snapshot.brief.allowLanguageSwitch,

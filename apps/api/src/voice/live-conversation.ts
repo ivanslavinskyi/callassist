@@ -1,3 +1,5 @@
+import { executionSpokenIdentities } from "./spoken-execution";
+import type { TranscriptSegment } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import { createHash, randomUUID } from "node:crypto";
 import { ASSISTANT_NAME, getAppointmentAuthorization, LIVE_VOICES, resolveInitialDisclosure } from "@callassist/contracts";
@@ -70,6 +72,7 @@ export class OpenAILiveConversation implements VoiceConversation {
   #transcriptBoundaryMs = Number.POSITIVE_INFINITY;
   #recordingAdmitted = false;
   #outputSuspended = false;
+  #outputSuppression: Array<{ start: number; end: number }> = [];
   #outputFenceMs = -1;
   #outputEpochReady = true;
   #outputResumeId: string | undefined;
@@ -169,7 +172,12 @@ export class OpenAILiveConversation implements VoiceConversation {
     this.#transcriptBoundaryMs = boundary;
     this.#recordingAdmitted = true;
   }
-  suspendOutput() { this.#outputSuspended = true; this.#outputEpochReady = false; this.#outputResumeId = undefined; }
+  suspendOutput() {
+    if (!this.#outputSuspended) this.#outputSuppression.push({
+      start: Math.max(0, Date.now() - Date.parse(this.#sessionStartedAt)), end: Number.POSITIVE_INFINITY
+    });
+    this.#outputSuspended = true; this.#outputEpochReady = false; this.#outputResumeId = undefined;
+  }
   resumeOutput(outcome: string) {
     if (!this.#outputSuspended || this.#closing) return;
     if (this.#outputResumeId) return;
@@ -301,6 +309,8 @@ export class OpenAILiveConversation implements VoiceConversation {
           this.#fail("LIVE_OUTPUT_BOUNDARY_INVALID"); return;
         }
         this.#outputFenceMs = Math.max(this.#outputFenceMs, event.end_ms);
+        const interval = this.#outputSuppression.at(-1);
+        if (interval) interval.end = Math.max(interval.start, this.#outputFenceMs);
         this.#outputSuspended = false; this.#outputResumeId = undefined;
       }
       this.#forgetCommand(String(event.client_event_id), ack); return;
@@ -337,7 +347,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       this.#resolveStart?.(); this.#resolveStart = null; this.#rejectStart = null;
       for (const audio of this.#queue) this.#send({ type: "session.input_audio.append", audio });
       this.#queue = []; this.#queuedBytes = 0;
-      this.context.telemetry(`live:${this.operationId}:ready`, { name: "realtime.ready", metadata: { model: this.#model, transcriptionModel: this.#model, runtimeVersion: "live-managed-v5" } });
+      this.context.telemetry(`live:${this.operationId}:ready`, { name: "realtime.ready", metadata: { model: this.#model, transcriptionModel: this.#model, runtimeVersion: "live-managed-v6" } });
       if (this.lifecycle) this.lifecycle.ready(); else this.#backendEnabled = true;
     } else if (event.type === "session.updated") {
       if (!this.#ready || !this.#checkVoice(object(event.session))) return;
@@ -369,7 +379,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       // Native WebSocket audio has no timing or utterance identifier. Reopen it
       // only after a fresh assistant transcript beyond the acknowledged fence.
       if (this.lifecycle && (this.#outputSuspended || !this.#outputEpochReady)) {
-        this.lifecycle.nativeOutputDiscarded?.(); return;
+        return;
       }
       if (pcmuHasSpeech(decodePcmu(event.delta)!)) this.#nativeActivityAt = Date.now();
       if (this.lifecycle) this.lifecycle.audio(event.delta as string);
@@ -417,7 +427,7 @@ export class OpenAILiveConversation implements VoiceConversation {
           (command.backendScope ? command.backendScope.delegationId === delegationId : allowFresh)) {
         if (!command.backendScope) {
           this.context.telemetry(`live:${id}:association`, { name: "conversation.task", metadata: {
-            runtimeVersion: "live-managed-v5", phase: "running", revision: command.answerRevision,
+            runtimeVersion: "live-managed-v6", phase: "running", revision: command.answerRevision,
             cause: "ambiguous_backend_start" } });
           command.observedResponseId = responseId;
           // An unscoped start is not causal acknowledgement of this command.
@@ -526,10 +536,19 @@ export class OpenAILiveConversation implements VoiceConversation {
         event.start_ms < this.#consentTranscriptBoundaryMs) return;
     // A late pre-consent answer must not become persistable after the phase changes.
     if (this.lifecycle && this.#recordingAdmitted && event.start_ms < this.#transcriptBoundaryMs) return;
+    let historicalOutput = false;
     if (role === "assistant" && this.lifecycle && (this.#outputSuspended || event.start_ms < this.#outputFenceMs)) {
-      this.lifecycle.nativeOutputDiscarded?.(); return;
+      const start = event.start_ms, end = event.end_ms;
+      const intervals = this.#outputSuppression.filter(interval => start < interval.end && end > interval.start);
+      if (intervals.length) {
+        // A fragment crossing a playback boundary cannot be clipped into words.
+        // Fully muted output was not heard and does not invalidate the transcript.
+        if (!intervals.some(interval => start >= interval.start && end <= interval.end)) this.lifecycle.nativeTranscriptGap?.();
+        return;
+      }
+      historicalOutput = true;
     }
-    if (role === "assistant" && this.lifecycle && !drainOnly) this.#outputEpochReady = true;
+    if (role === "assistant" && this.lifecycle && !drainOnly && !historicalOutput) this.#outputEpochReady = true;
     if (!drainOnly && role === "recipient" && event.delta.trim()) {
       this.#epoch++;
       this.#answerRevision++;
@@ -544,7 +563,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       this.options.service.publishTranscriptDelta(this.context.brief.id, key, role, text, this.context.brief.locale, nativeTiming);
       this.#write(() => this.options.service.addNativeLiveTranscript(this.context.brief.id, role, text, key, nativeTiming));
     };
-    if (!drainOnly && this.lifecycle && !this.lifecycle.transcript(role, text, event.start_ms, event.end_ms, persist)) return;
+    if (!drainOnly && !historicalOutput && this.lifecycle && !this.lifecycle.transcript(role, text, event.start_ms, event.end_ms, persist)) return;
     if (this.lifecycle && !this.#recordingAdmitted) return;
     persist();
   }
@@ -596,7 +615,7 @@ export class OpenAILiveConversation implements VoiceConversation {
             run.progressRevision === this.#progressRevision && (run.closingEpoch === undefined || this.context.isClosing());
           if (!current()) {
             this.context.telemetry(`live:${run.id}:obsolete-timeout`, { name: "conversation.task", metadata: {
-              runtimeVersion: "live-managed-v5", phase: "stale", revision: run.answerRevision,
+              runtimeVersion: "live-managed-v6", phase: "stale", revision: run.answerRevision,
               cause: "obsolete_backend_timeout", responseId: run.id } });
             this.options.logger?.info({ callAttemptId: this.context.attemptId, responseId: run.id,
               epoch: run.epoch, currentEpoch: this.#epoch }, "Live backend timeout retains physical occupancy");
@@ -651,7 +670,7 @@ export class OpenAILiveConversation implements VoiceConversation {
         if (command.type === 'response.create' && command.observedResponseId === run.id) {
           this.#forgetCommand(commandId, command);
           this.context.telemetry('live:' + commandId + ':settled', { name: 'conversation.task', metadata: {
-            runtimeVersion: 'live-managed-v5', phase: 'running', revision: command.answerRevision,
+            runtimeVersion: 'live-managed-v6', phase: 'running', revision: command.answerRevision,
             cause: 'ambiguous_command_settled' } });
         }
       }
@@ -837,6 +856,14 @@ export class OpenAILiveConversation implements VoiceConversation {
     for (const command of this.#commands.values()) if (command.timer) clearTimeout(command.timer);
     this.#commands.clear();
   }
+  recordApplicationPlayback(text: string, key: string, timing: Omit<NonNullable<TranscriptSegment["applicationPlayback"]>, "sessionId">) {
+    if (!this.#sessionId || this.#finalized) return;
+    const receipt = { ...timing, sessionId: this.#sessionId };
+    // Same queue as native fragments and capture finalization: never publish a
+    // complete transcript before its acknowledged application speech is durable.
+    this.#write(() => this.options.service.addApplicationPlaybackTranscript(this.context.brief.id, text, key, receipt));
+  }
+
   async #capture(status: "collecting" | "complete" | "incomplete") {
     if(!this.#sessionId) return;
     await this.options.service.setNativeTranscriptCapture(this.context.brief.id,this.context.attemptId,{
@@ -890,12 +917,13 @@ function isTrackedCommand(type: string): type is LiveCommandType {
 
 export function buildLiveInstructions(context: VoiceConversationContext, consentComplete = true) {
   const { plan, runtime } = context.snapshot;
-  return `You are ${ASSISTANT_NAME}, an AI telephone assistant calling ${context.brief.recipientName} on behalf of ${context.brief.representedPerson}.
+  const identities = executionSpokenIdentities(context.snapshot, context.brief);
+  return `You are ${ASSISTANT_NAME}, an AI telephone assistant calling ${identities.recipient.spoken} on behalf of ${identities.representedPerson.spoken}.
 Speak ${plan.callLocale}, use ${plan.addressingStyle} address and a ${plan.tone} tone. Speak calmly at an unhurried pace, with clear names, dates and numbers. ${runtime.allowLanguageSwitch ? `Switch only to ${runtime.fallbackLocale} on explicit request.` : "Do not change language."}
 
 ${liveAssistantIdentityInstructions(plan.callLocale)}
 
-Representation: The requests, preferences, constraints and commitments belong to ${context.brief.representedPerson}, never to you personally. Say that the represented person asked you to do something; never say that you personally want, need or will receive it. Use first person only for your own conversational actions such as asking, clarifying or relaying. Do not invent a delivery, email, callback or other next step.
+Representation: You act on behalf of ${identities.representedPerson.spoken}. Distinguish the customer from the called recipient: each answer, preference or commitment belongs to its actual subject, never to you personally. Address the recipient directly when referring to their own answers; third person is for other people. Say that the represented person asked you to do something; never say that you personally want, need or will receive it. Use first person only for your own conversational actions such as asking, clarifying or relaying. Do not invent a delivery, email, callback or other next step.
 
 ${consentComplete ? "Consent and the opening are complete. Continue from the recipient's latest answer without greeting again." : "Before the application enables the task, stay silent and listen while the application plays the recording and transcription disclosure and its short permission question. Do not speak, repeat or paraphrase either segment. Do not discuss the task or infer permission. The application, not you, initiates exactly one semantic consent check after a settled recipient answer; do not initiate consent delegation yourself. Natural spoken permission needs no keypad press. After the decision, wait silently for the application."}
 

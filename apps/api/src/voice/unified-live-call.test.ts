@@ -150,6 +150,40 @@ describe('inline assistance reason admission', () => {
 });
 
 describe("complex-call orchestration regression", () => {
+  it("publishes one native-based final transcript after the closing playback write drains, without recording ASR", async () => {
+    const h = await harness("human", false, false, "de-CH", false, "anna", "none");
+    h.recording.mockImplementation(async () => {
+      const begun = await h.repository.beginRecording(h.brief.id);
+      await h.repository.attachProviderRecording(begun.recording.id, "RE-v6", "in-progress");
+      return (await h.repository.get(h.brief.id))!;
+    });
+    await h.accept();
+    h.transcript("output", "Was möchten Sie zum Mittagessen?");
+    h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(300);
+    const id = await h.tool("end_call", { reason: "objective_resolved", resultSummary: "Sie möchten also Pizza zum Mittagessen." }, "Ich möchte Pizza.");
+    expect(h.result(id).ok).toBe(true);
+    const persist = h.service.addApplicationPlaybackTranscript.bind(h.service);
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(h.service, "addApplicationPlaybackTranscript").mockImplementation(async (...args) => { await pending; return persist(...args); });
+    await h.play();
+    expect(h.hangup).toHaveBeenCalledOnce();
+    h.live.receive({ type: "session.closed", reason: "close_requested", usage: { seconds: 12 } });
+    await flush();
+    const recordingId = (await h.repository.get(h.brief.id))!.recording!.id;
+    expect((await h.repository.getNativeTranscriptWork(recordingId)).capture?.status).toBe("collecting");
+    release(); await flush(); await flush();
+    vi.useRealTimers();
+    await expect.poll(async () => (await h.repository.get(h.brief.id))?.finalTranscript?.status).toBe("completed");
+    const snapshot = (await h.repository.get(h.brief.id))!;
+    expect(snapshot.finalTranscript?.source).toBe("live_composed");
+    expect(snapshot.finalTranscript?.text).toContain("Ich möchte Pizza.");
+    expect(snapshot.finalTranscript?.text).toContain("Sie möchten also Pizza zum Mittagessen.");
+    expect(snapshot.finalTranscript?.segments.at(-1)).toMatchObject({ source: "application_playback", applicationPlayback: { sessionId: "one-live" } });
+    expect((await h.repository.getCurrentTranscriptRevision(h.brief.id))?.segments.at(-1)?.source).toBe("application_playback");
+    expect(h.legacy).not.toHaveBeenCalled();
+  });
   it("retains an ambiguous announced lease and suppresses its late effects", async () => {
     const h = await harness("human", false, false, "en-GB", false, "anna", "none"); await h.accept();
     h.live.receive({ type: "session.delegation.created", delegation: { id: "announced-old", response_id: "not-started", target: "responses" } });
@@ -289,6 +323,24 @@ describe("complex-call orchestration regression", () => {
 });
 
 describe("asynchronous answering alongside the disclosure", () => {
+  it.each([false, true])("retains late audible text before mute and falls back only for a crossing fragment (crossing=%s)", async crossing => {
+    const h = await harness(); await h.accept();
+    const capture = vi.spyOn(h.service, "setNativeTranscriptCapture");
+    const start = Date.now() - h.live.liveStartedAt + 10;
+    await vi.advanceTimersByTimeAsync(250);
+    h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(250);
+    await h.tool("end_call", { reason: "objective_resolved", resultSummary: "You confirmed receipt." }, "It arrived.");
+    const mediaCount = h.twilio.sent.filter(event => event.event === "media").length;
+    h.live.receive({ type: "session.output_transcript.delta", delta: "Late native words.", start_ms: start,
+      end_ms: crossing ? Date.now() - h.live.liveStartedAt : start + 100 });
+    await h.play();
+    h.live.receive({ type: "session.closed", reason: "close_requested", usage: { seconds: 12 } });
+    for (let i = 0; i < 10; i++) await flush();
+    expect((await h.repository.get(h.brief.id))!.transcript.some(t => t.text === "Late native words.")).toBe(!crossing);
+    expect(capture).toHaveBeenLastCalledWith(h.brief.id, h.attempt.id, expect.objectContaining({ status: crossing ? "incomplete" : "complete" }));
+    expect(h.twilio.sent.filter(event => event.event === "media")).toHaveLength(mediaCount);
+  });
   it("drains late transcript fragments before completing capture without resuming speech or tools", async () => {
     const h = await harness(); await h.accept();
     const capture = vi.spyOn(h.service, "setNativeTranscriptCapture");

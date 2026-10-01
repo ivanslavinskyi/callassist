@@ -2,7 +2,7 @@
 
 Voice architecture updated 2026-10-01 for native consent delegation, background AMD,
 voice continuity, calm pacing, natural closing and native-first saved transcripts on
-`codex/live-unified-runtime`. Source migrations run through 0091.
+`codex/live-unified-runtime`. Source migrations run through 0092.
 Other feature checkpoints retain their original dates.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
 [dated audits and verification](README.md) retain the evidence available at their dates.
@@ -18,7 +18,7 @@ The [call lifecycle/history checkpoint](call-lifecycle-history-2026-09-15.md) ad
 ### Voice runtime selection
 
 `VoiceRuntime` and its factory select `OpenAIRealtimeBridge` or `OpenAILiveBridge`
-from `VOICE_RUNTIME_DRIVER`; absent means `realtime`, invalid values fail startup.
+from `VOICE_RUNTIME_DRIVER`; absent means `live`, invalid values fail startup.
 With `VOICE_RUNTIME_LIVE_FALLBACK=false` (the default), Live uses one native voice
 session from disclosure through closing, optionally prepared during ringing/AMD.
 Native Responses delegation uses GPT-6 Luna with `parallel_tool_calls=false`.
@@ -539,7 +539,7 @@ kind, immutable source identity/hash, target language and generator/model versio
 Original final transcripts have encrypted immutable revisions and stable segment IDs.
 Unsegmented historical text is split without losing characters; speaker/timing remain
 unknown. Source processing/failure does not expose an older revision as current.
-The canonical source is `live_native` or `recording_asr`; all derived artifacts use
+The canonical source is `live_native`, `live_composed` or `recording_asr`; all derived artifacts use
 the same immutable revision/hash. Native hashes include provenance; historical ASR
 hashes remain unchanged. The UI does not duplicate a saved native transcript as a
 second provisional result. Translation and summary follow the saved task language,
@@ -690,7 +690,7 @@ migration runner enforces the gate; see the [rollout sequence](approved-call-pla
 | Preparation requests | Encrypted normalized input while pending; retained fingerprint/idempotency/status; erased input on terminal state |
 | Attempts, recordings | Immutable approved execution snapshot/hash; provider IDs/status, consent/time/duration/channels/deadline; audio held at Twilio |
 | Live transcript and approvals | Relational plaintext transcript and proposed disclosure text, access-controlled |
-| Final transcript | Encrypted text/segments and resumable encrypted ASR chunks; source (`live_native` / `recording_asr`), model/status/error/usage metadata; technical native capture state on the attempt |
+| Final transcript | Encrypted text/segments and resumable encrypted ASR chunks; source (`live_native` / `live_composed` / `recording_asr`), model/status/error/usage metadata; technical native capture state on the attempt |
 | Text results and review evidence | Encrypted immutable transcript revisions, generated payloads/chunks and review receipts; source hashes, language and lease/accounting metadata are separate |
 | Language preferences and task context | Account UI/content preferences and captured preparation/call selection metadata, outside the execution hash |
 | Provider accounting | Deduplicated operations, request results, raw usage and reported costs; versioned calculated rates separate from actual/fallback/unknown |
@@ -818,3 +818,12 @@ Deferred: browser softphone/native apps, teams, payments, external CRM/calendar/
 unrestricted automatic language selection, model-session reconnect, transcript click-to-seek and
 operator-corrected revisions, media CMS and indefinite audio retention. High-risk,
 bulk/marketing/emergency calls are outside the current product boundary.
+
+## Live v6 transcript and language boundary
+
+See [Live v6 correction](live-transcript-language-fix-2026-10-01.md). Confirmed application speech and native fragments share one write queue and
+immutable transcript revision. Per-segment provenance distinguishes native words from
+rendered text with its Twilio playback receipt. Normal closing no longer triggers ASR.
+A speech-only identity projection retains original names in the approved data while
+using a separate pronunciation spelling in Live; final summaries address the actual
+recipient. No new model call or turn orchestrator is introduced.

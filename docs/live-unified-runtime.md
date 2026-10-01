@@ -1,9 +1,9 @@
-# Unified Live runtime — updated 30 September 2026
+# Unified Live runtime — updated 1 October 2026
 
 Branch: `codex/live-unified-runtime`. Production last reported by the owner:
 `915a8f6`, Live, fallback=false, migrations through 0084 (owner report on 26 September,
-not a fresh deployment inspection). The current branch extends through migration 0091.
-Current behavior is Live v5: see [1 October implementation](live-stabilization-implementation-2026-10-01.md).
+not a fresh deployment inspection). The current branch extends through migration 0092.
+Current behavior is Live v6: see [Live v6 correction](live-transcript-language-fix-2026-10-01.md).
 Dated checkpoints below describe historical candidates and do not establish v5 handset acceptance.
 No production deployment was performed. A local real Twilio information call passed on
 28 September; see [evidence and remaining observations](live-call-review-2026-09-28.md).
@@ -269,8 +269,8 @@ resumes conversation and needs a new terminal decision. Replays preserve the fac
 recap. At most one failure retry shares a single 30-second closing deadline; interruption
 does not reset that deadline. Failed delivery records incomplete playback. Physical
 disconnect cancels pending work. A backend completion or ordinary address acknowledgment
-cannot end the call. Renderer-generated task speech conservatively retains recording-ASR
-fallback rather than claiming complete native-only capture.
+cannot end the call. Acknowledged renderer-generated task speech is composed with native Live segments
+in one `live_composed` transcript. Only incomplete coverage requires recording ASR.
 
 See [implementation, acceptance scenarios and limits](live-stabilization-implementation-2026-10-01.md).
 
@@ -447,7 +447,7 @@ Current source ownership:
 | Protected speech/action verification; no consent or terminal-completion classifier | [live-semantic-gate.ts](../apps/api/src/voice/live-semantic-gate.ts) |
 | Canonical native transcript assembly and provenance | [native-transcript.ts](../apps/api/src/storage/native-transcript.ts) |
 
-Apply additive migrations through 0091 before starting the new API/worker. 0090/0091
+Apply additive migrations through 0092 before starting the new API/worker. 0090/0091
 add frozen summary context and immutable assessment/terminal evidence; see the
 [1 October rollout](deployment-preflight.md#schema-release-0090-0091). Migration
 0087 adds transcript provenance without rewriting historical payloads/hashes; 0088

@@ -2890,7 +2890,8 @@ export class InMemoryCallRepository implements CallRepository {
     role: TranscriptSegment["role"],
     text: string,
     locale: CallLocale,
-    nativeTiming?: TranscriptSegment["nativeTiming"]
+    nativeTiming?: TranscriptSegment["nativeTiming"],
+    applicationPlayback?: TranscriptSegment["applicationPlayback"]
   ) {
     const snapshot = this.#require(id);
     const segment: TranscriptSegment = {
@@ -2899,8 +2900,9 @@ export class InMemoryCallRepository implements CallRepository {
       text,
       locale,
       final: true,
-      createdAt: nativeTiming ? new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString() : new Date().toISOString(),
-      ...(nativeTiming ? { nativeTiming } : {})
+      createdAt: nativeTiming ? new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString() : applicationPlayback?.sentAt ?? new Date().toISOString(),
+      ...(nativeTiming ? { nativeTiming } : {}),
+      ...(applicationPlayback ? { applicationPlayback } : {})
     };
     snapshot.transcript.push(segment);
     return { segment: copy(segment), snapshot: copy(snapshot) };
@@ -3299,7 +3301,7 @@ export class InMemoryCallRepository implements CallRepository {
     text: string,
     segments: FinalTranscriptSegment[],
     lease?: DurableJobLease,
-    options?: {summaryGeneratorVersion?:string; source?: "recording_asr" | "live_native"}
+    options?: {summaryGeneratorVersion?:string; source?: "recording_asr" | "live_native" | "live_composed"}
   ) {
     this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);

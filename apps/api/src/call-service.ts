@@ -1,3 +1,4 @@
+import { isLiveTranscript } from "@callassist/contracts";
 import { assembleNativeTranscript, type NativeTranscriptCapture } from "./storage/native-transcript";
 import type { AnsweringTransitionInput } from "./telephony/answering-policy";
 import { assertRetryableCall } from "./storage/call-retry";
@@ -1059,6 +1060,11 @@ export class CallService {
     this.#durableJobWorker.wake();
   }
 
+  async addApplicationPlaybackTranscript(id: string, text: string, sourceKey: string, receipt: NonNullable<TranscriptSegment["applicationPlayback"]>) {
+    if (!text.trim()) return null;
+    return (await this.#persistTranscript(id, "assistant", text, sourceKey, undefined, receipt)).segment;
+  }
+
   async addNativeLiveTranscript(id: string, role: "recipient" | "assistant", text: string, sourceKey: string, nativeTiming: NonNullable<TranscriptSegment["nativeTiming"]>) {
     if (!text.length) return null;
     return (await this.#persistTranscript(id, role, text, sourceKey, nativeTiming)).segment;
@@ -1323,7 +1329,7 @@ export class CallService {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
     const work=await this.repository.getNativeTranscriptWork(recordingId);
-    if(work.snapshot.finalTranscript?.status === "completed" && work.snapshot.finalTranscript.source === "live_native") return;
+    if(work.snapshot.finalTranscript?.status === "completed" && isLiveTranscript(work.snapshot.finalTranscript.source)) return;
     if(work.capture?.status === "collecting" && Date.now()-Date.parse(job.createdAt)<120_000) {
       throw new DurableJobExecutionError("NATIVE_TRANSCRIPT_DRAINING",{retryAfterMs:60_000});
     }
@@ -1352,7 +1358,7 @@ export class CallService {
       });
       if(native) {
         const completed=await this.repository.completeFinalTranscript(recordingId,native.text,native.segments,currentLease(lease),{
-          source:"live_native",
+          source:native.source,
           ...(textDirectionEnabled(this.textArtifacts.capabilities,"call_summary","*",claimed.snapshot.languageContext?.taskContentLanguage??"en")
             ? {summaryGeneratorVersion:textGeneratorVersion(this.textArtifacts.processor,"call_summary")} : {}) });
         this.wakeTextJobs();
@@ -1839,14 +1845,14 @@ export class CallService {
     return (await this.#persistTranscript(id, role, text, sourceKey)).snapshot;
   }
 
-  async #persistTranscript(id: string, role: TranscriptSegment["role"], text: string, sourceKey?: string, nativeTiming?: TranscriptSegment["nativeTiming"]) {
+  async #persistTranscript(id: string, role: TranscriptSegment["role"], text: string, sourceKey?: string, nativeTiming?: TranscriptSegment["nativeTiming"], applicationPlayback?: TranscriptSegment["applicationPlayback"]) {
     const snapshot = await this.#require(id);
     const result = await this.repository.addTranscript(
       id,
       role,
       text,
       snapshot.brief.locale,
-      nativeTiming
+      nativeTiming, applicationPlayback
     );
     this.#publish(id, { type: "transcript.added", segment: result.segment, ...(sourceKey ? { key: sourceKey } : {}) });
     return result;

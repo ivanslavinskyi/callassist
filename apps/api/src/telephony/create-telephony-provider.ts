@@ -1,6 +1,7 @@
 import type { TelephonyProvider } from "./telephony-provider";
 import { MockTelephonyProvider } from "./mock-telephony-provider";
 import { TwilioTelephonyProvider } from "./twilio-telephony-provider";
+import { voiceRuntimeMode } from "../config/voice-runtime";
 
 export function createTelephonyProviderFromEnv(): TelephonyProvider {
   const driver = process.env.TELEPHONY_DRIVER?.trim() || "mock";
@@ -18,7 +19,7 @@ export function createTelephonyProviderFromEnv(): TelephonyProvider {
       authToken,
       fromNumber,
       publicBaseUrl,
-      asyncAnswering: asyncAmd === "true" && process.env.VOICE_RUNTIME_DRIVER?.trim() === "live" && process.env.VOICE_RUNTIME_LIVE_FALLBACK?.trim() !== "true"
+      asyncAnswering: asyncAmd === "true" && voiceRuntimeMode(process.env) === "unified_live"
     });
   }
 

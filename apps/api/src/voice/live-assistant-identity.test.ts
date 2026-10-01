@@ -45,6 +45,8 @@ describe("Live product identity", () => {
 
   it("preserves a participant whose name matches a legacy persona", async () => {
     const call = await approvedCall(); cleanup.push(() => call.service.close());
+    // This fixture represents an old approval without frozen spoken identities.
+    delete call.snapshot.runtime.spokenIdentities;
     const instructions = buildLiveInstructions({
       brief: { ...call.brief, recipientName: "Sebastian", representedPerson: "Anna Keller" },
       snapshot: call.snapshot, attemptId: call.attempt.id, sendAudio: vi.fn(), clearPlayback: vi.fn(),

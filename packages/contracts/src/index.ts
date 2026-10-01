@@ -37,3 +37,5 @@ export * from "./call-retry";
 export * from "./call-answering";
 export * from "./plan-preparation";
 export * from "./initial-disclosure";
+export * from "./transcript-provenance";
+export * from "./spoken-identities";

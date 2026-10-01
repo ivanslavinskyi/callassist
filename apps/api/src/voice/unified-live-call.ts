@@ -1,3 +1,5 @@
+import { executionSpokenIdentities } from "./spoken-execution";
+import { projectSpokenIdentityText } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import { randomUUID } from "node:crypto";
 import { LIVE_VOICES, type AnsweringState, type CallLocale, type ConsentEvidence } from "@callassist/contracts";
@@ -80,7 +82,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #criticalResolve: ((played: boolean) => void) | null = null;
   #criticalReleased = false;
   #applicationPlayback: { mark: string; text: string; generation: number; current: () => boolean;
-    resolve: (played: boolean) => void; timer: ReturnType<typeof setTimeout>; released: boolean } | null = null;
+    resolve: (played: boolean) => void; timer: ReturnType<typeof setTimeout>; released: boolean; sentAt: string; durationMs: number } | null = null;
   #appointmentReply: { afterTurn: number; resolve: (turn: { id: string; text: string } | null) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   #taskWaitTimer: ReturnType<typeof setTimeout> | null = null;
   #taskWaitTurn = -1;
@@ -239,9 +241,13 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #initialize(snapshot: NonNullable<Awaited<ReturnType<OpenAILiveBridgeOptions["service"]["get"]>>>,
     attempt: NonNullable<Awaited<ReturnType<OpenAILiveBridgeOptions["service"]["getLatestAttempt"]>>>) {
-    const execution = attempt.executionSnapshot!;
+    const approved = attempt.executionSnapshot!;
+    const identities = executionSpokenIdentities(approved, snapshot.compilation!.rawBrief);
+    const execution = { ...approved, runtime: { ...approved.runtime, spokenIdentities: identities,
+      ...(approved.runtime.initialDisclosure ? { initialDisclosure: { ...approved.runtime.initialDisclosure,
+        text: projectSpokenIdentityText(approved.runtime.initialDisclosure.text, identities) } } : {}) } };
     const context: VoiceConversationContext = {
-      brief: { ...snapshot.brief, representedPerson: snapshot.compilation!.rawBrief.representedPerson,
+      brief: { ...snapshot.brief, representedPerson: identities.representedPerson.spoken, recipientName: identities.recipient.spoken,
         voiceGender: execution.runtime.voiceGender, locale: execution.plan.callLocale }, snapshot: execution, attemptId: attempt.id,
       sendAudio: payload => this.#sendAudio(payload), clearPlayback: () => this.#clear(),
       requestFarewell: (_id, reason) => this.#requestClosing(reason),
@@ -439,6 +445,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
     const playback = this.#applicationPlayback;
     if (!playback) return;
     clearTimeout(playback.timer); this.#applicationPlayback = null;
+    // A released clip without its matching mark may have been heard partially.
+    if (playback.released && this.#consented) this.#clippedTaskSpeech = true;
     this.#clear(); playback.resolve(false);
   }
   #playApplicationText(text: string, current: () => boolean, deadlineMs = 30_000, recoverable = false) {
@@ -455,7 +463,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
         if (!recoverable) this.#close('openai_error');
       }, deadlineMs);
       timer.unref?.();
-      const playback = { mark, text, generation, current, resolve, timer, released: false };
+      const playback = { mark, text, generation, current, resolve, timer, released: false, sentAt: "", durationMs: 0 };
       this.#applicationPlayback = playback;
       void this.#render(text).then(rendered => {
         const release = () => {
@@ -465,9 +473,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
             const wait = setTimeout(release, 100); wait.unref?.(); return;
           }
           playback.released = true;
-          // Application-rendered speech has real Twilio playback evidence but no
-          // native Live timing. The saved recording must cover this audible unit.
-          if (this.#consented) this.#clippedTaskSpeech = true;
+          playback.sentAt = new Date().toISOString();
+          playback.durationMs = rendered.durationMs;
           if (this.#criticalResolve) this.#criticalReleased = true;
           for (const payload of rendered.frames) this.#sendAudio(payload);
           this.#send({ event: 'mark', streamSid: this.#stream, mark: { name: mark } });
@@ -490,11 +497,11 @@ export class UnifiedLiveCall implements LiveLifecycle {
     clearTimeout(playback.timer); this.#applicationPlayback = null;
     const key = 'rendered-application:' + this.#context!.attemptId + ':' + playback.generation;
     this.options.service.publishTranscriptDelta(this.#context!.brief.id, key, 'assistant', playback.text, this.#locale);
-    void this.options.service.addRealtimeTranscript(this.#context!.brief.id, 'assistant', playback.text, key)
-      .catch(() => this.#close('openai_error'));
+    this.#playbackUntil = 0;
+    this.#live!.recordApplicationPlayback(playback.text, key, { markId: mark,
+      sentAt: playback.sentAt, acknowledgedAt: new Date().toISOString(), durationMs: playback.durationMs });
     playback.resolve(true); return true;
   }
-  nativeOutputDiscarded() { if (this.#consented) this.#clippedTaskSpeech = true; }
   audio(payload: string) {
     if (this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null) this.#sendAudio(payload);
   }
@@ -671,7 +678,10 @@ export class UnifiedLiveCall implements LiveLifecycle {
       this.#say(getTwilioCopy(this.#locale).recordingFailure, () => this.#hangup());
     }
   }
-  transcriptCaptureComplete() { return !this.#clippedTaskSpeech && !this.#speechFailure; }
+  // A render failure before audio release leaves no missing audible words.
+  // Unacknowledged/cleared audio is tracked separately as a coverage gap.
+  transcriptCaptureComplete() { return !this.#clippedTaskSpeech; }
+  nativeTranscriptGap() { if (this.#consented) this.#clippedTaskSpeech = true; }
   decisionReady() {
     if (this.#speaking || this.#recipientTurnTimer) return false;
     return this.#phase === "consent" ? this.#hasConsentAnswer() :
@@ -699,7 +709,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#backendFailurePending = true;
     this.#backendFailureCurrent = current; this.#backendFailureCode = code;
     this.#context!.telemetry(`live:failure:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v5", phase: "failed", revision: this.#generation, cause: code } });
+      runtimeVersion: "live-managed-v6", phase: "failed", revision: this.#generation, cause: code } });
     this.options.logger?.warn({ callAttemptId: this.#context!.attemptId, code }, "Live owned backend failure pending");
     this.#backendFailureDeadlineAt = Date.now() + 8_000;
     this.#scheduleBackendFailure();
@@ -751,9 +761,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #cancelCritical(cause = "stale_action") {
     if (!this.#criticalResolve) return;
-    this.#clippedTaskSpeech = true;
+    if (this.#criticalReleased) this.#clippedTaskSpeech = true;
     this.#context!.telemetry(`live:action-interrupted:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v5", phase: "stale", revision: this.#generation,
+      runtimeVersion: "live-managed-v6", phase: "stale", revision: this.#generation,
       cause, released: this.#criticalReleased } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, cause,
       released: this.#criticalReleased, generation: this.#generation }, "Live appointment playback cancelled");
@@ -927,7 +937,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#action || this.#isClosed()) return;
     this.#live?.appointmentState(this.taskDecisionContext().appointment);
     this.#context!.telemetry(`live:action:${this.#action.id}:${this.#action.version}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v5", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
+      runtimeVersion: "live-managed-v6", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
       revision: this.#action.version, actionState: this.#action.state,
       ...(this.#action.delivery ? { deliveryKind: this.#action.delivery.kind, deliveryStatus: this.#action.delivery.status } : {}) } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, actionId: this.#action.id,

@@ -55,7 +55,7 @@ describe("voice runtime selection and consent gate integration", () => {
     expect(() => createVoiceRuntime(options, { VOICE_RUNTIME_DRIVER: "live", OPENAI_LIVE_FEMALE_VOICE: "cedar" })).toThrow("OPENAI_LIVE_FEMALE_VOICE must be marin");
     expect(createVoiceRuntime(options, { VOICE_RUNTIME_DRIVER: "live", OPENAI_LIVE_MALE_VOICE: "cedar", OPENAI_LIVE_FEMALE_VOICE: "marin" })).toBeInstanceOf(OpenAILiveBridge);
   });
-  it("defaults to unchanged Realtime and explicitly selects Live", async () => {
+  it("defaults to Live and retains explicitly selected legacy Realtime", async () => {
     expect(voiceRuntimeDriver({})).toBe("live");
     expect((await harness("realtime")).bridge).toBeInstanceOf(OpenAIRealtimeBridge);
     expect((await harness()).bridge).toBeInstanceOf(OpenAILiveBridge);

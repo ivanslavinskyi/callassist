@@ -10,10 +10,10 @@ export { OpenAILiveConversation, buildLiveInstructions } from "./live-conversati
 
 export interface LiveLifecycle {
   transcriptCaptureComplete?(): boolean;
+  nativeTranscriptGap?(): void;
   startup(): { instructions: string; input: unknown[] };
   backendFailed?(current?: () => boolean, code?: string): void;
   backendProgress?(): void;
-  nativeOutputDiscarded?(): void;
   consentDecisionUnavailable?(reason?: "provider_failure" | "contract_violation"): void;
   decisionReady?(): boolean;
   taskDecisionContext?(): { closing: boolean; waitingExpired: boolean; appointment?: unknown };

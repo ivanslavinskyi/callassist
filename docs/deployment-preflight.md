@@ -230,3 +230,12 @@ Rollback requires a reader compatible with payload v3/context and assessment
 revisions. Do not blindly restore a v4 reader after publishing v5 artifacts or roll
 back by dropping the new tables. Preserve original billing evidence and transcripts.
 Local migration/testing does not authorize or establish production deployment.
+
+## Schema release 0092
+
+The [Live v6 correction](live-transcript-language-fix-2026-10-01.md) requires additive migration 0092 before new API/worker processes.
+It adds application playback receipts and permits source `live_composed`; existing rows
+and historical revisions remain unchanged. Preserve the extended source constraint on
+rollback. Confirm `unified_live` in startup logs, fallback=false, and zero active calls
+before a local restart. A successful build and synthetic evaluation do not establish
+new handset acceptance or a production deployment.

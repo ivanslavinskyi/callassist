@@ -12,6 +12,18 @@ function snapshot(transcript: TranscriptSegment[], startedAt = origin) {
   return { transcript, recording: { startedAt } } as CallSnapshot;
 }
 describe("native conversation transcript", () => {
+  it("composes marked application audio without merging it with native words or including another session", () => {
+    const applicationPlayback = { sessionId: "session", markId: "closing-mark", sentAt: "2026-09-28T12:00:01.000Z",
+      acknowledgedAt: "2026-09-28T12:00:02.000Z", durationMs: 900 };
+    const closing = { ...fragment("closing", "assistant", "Sie möchten Pizza. Auf Wiederhören.", 0), nativeTiming: undefined, applicationPlayback };
+    const other = { ...closing, applicationPlayback: { ...applicationPlayback, sessionId: "other" } };
+    const result = assembleNativeTranscript(snapshot([closing, fragment("q", "assistant", "Was möchten Sie?", 100),
+      fragment("a", "recipient", "Pizza", 700), closing, other]), capture)!;
+    expect(result.source).toBe("live_composed");
+    expect(result.segments).toHaveLength(3);
+    expect(result.segments[0].source).toBe("live_native");
+    expect(result.segments[2]).toMatchObject({ text: closing.text, source: "application_playback", startSeconds: 1.1, endSeconds: 2, applicationPlayback });
+  });
   it("preserves words and whitespace, orders late fragments and deduplicates event IDs", () => {
     const second = fragment("b", "recipient", " хочу жареной картошки", 300);
     const result = assembleNativeTranscript(snapshot([second, fragment("a", "recipient", "М-м, я", 100), second,

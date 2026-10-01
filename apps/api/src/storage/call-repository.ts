@@ -941,7 +941,8 @@ export interface CallRepository extends CallTextRepository {
     role: TranscriptSegment["role"],
     text: string,
     locale: CallLocale,
-    nativeTiming?: TranscriptSegment["nativeTiming"]
+    nativeTiming?: TranscriptSegment["nativeTiming"],
+    applicationPlayback?: TranscriptSegment["applicationPlayback"]
   ): Promise<{ segment: TranscriptSegment; snapshot: CallSnapshot }>;
   qualifyConversationCredit(
     id: string,
@@ -986,7 +987,7 @@ export interface CallRepository extends CallTextRepository {
     text: string,
     segments: FinalTranscriptSegment[],
     lease?: DurableJobLease,
-    options?: { summaryGeneratorVersion?: string; source?: "recording_asr" | "live_native" }
+    options?: { summaryGeneratorVersion?: string; source?: "recording_asr" | "live_native" | "live_composed" }
   ): Promise<FinalTranscriptMutationResult>;
   failFinalTranscript(
     recordingId: string,
