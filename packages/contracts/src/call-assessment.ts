@@ -25,6 +25,7 @@ export const callAssessmentSummarySchema = z.strictObject({
 });
 export type CallAssessmentSummary = z.infer<typeof callAssessmentSummarySchema>;
 export const callAssessmentRecordSchema = z.strictObject({
+  artifactId: z.uuid().optional(), contextHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   callAttemptId: z.uuid(), compilationId: z.uuid(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   summary: callAssessmentSummarySchema, decision: callAssessmentDecisionSchema.nullable()
 });

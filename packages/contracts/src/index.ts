@@ -16,6 +16,8 @@ export * from "./conversation-credit";
 export * from "./health";
 export * from "./languages";
 export * from "./call-text-artifact";
+export * from "./summary-source";
+export * from "./terminal-decision";
 export * from "./call-language-request";
 export * from "./phone";
 export * from "./recipient-suggestion";

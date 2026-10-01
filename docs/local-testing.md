@@ -1,11 +1,30 @@
 # Local testing on `codex/live-unified-runtime`
 
-Updated 2026-09-29. Start from the existing local `.env`; keep credentials and
+Updated 2026-10-01. Start from the existing local `.env`; keep credentials and
 temporary tunnel URLs out of Git. This procedure does not authorize production
 rollout. The current local acceptance profile is Live with fallback disabled.
 The repository default is Realtime; deployment state must be checked separately.
 
-## Current checkpoint, 29 September
+## Current checkpoint, 1 October
+
+The [Live v5 implementation record](live-stabilization-implementation-2026-10-01.md)
+supersedes the historical checkpoints below. Current local process IDs, URLs, source
+manifest and verification timestamps are in `.tools/runtime/stabilization-state.json`.
+Use migrations through 0091, Live with fallback=false, automatic hangup enabled and
+the existing embedded worker. Check zero active calls and drain older summary jobs
+before restarting. Do not infer readiness from an old PID or tunnel URL.
+
+For the next call, create and approve a fresh appointment plan. On 1 October in Zurich,
+"next two weeks except Fridays, 09:00–18:00" permits Saturday 3 October at 11:00.
+After the recipient confirms, let the assistant deliver a brief factual recap and
+farewell, then hang up automatically. Inspect the exact playback mark and `endedBy`,
+and verify that result, copy and PDF show the same computed schedule check. Spoken
+confirmation and application action confirmation remain separate. In separate calls,
+test reciprocal goodbye, a material correction during closing and recipient-first
+disconnect. Repeat acoustic acceptance for both voices; a synthetic test is not that
+acceptance. No outgoing call is created by preparing this checkpoint.
+
+## Historical checkpoint, 29 September
 
 The API/embedded worker was restarted at 18:43 Europe/Zurich with Live,
 fallback=false, and agent hangup enabled. Zero calls were active before restart;
@@ -121,7 +140,7 @@ calls predate AMD. Keep Live fallback disabled during this acceptance session.
    For a new checkout, `corepack pnpm env:init` creates local keys without replacing
    an existing `.env`. Check the database host/name before running migrations.
 2. Run `corepack pnpm db:up`, then `corepack pnpm db:migrate`. The current catalog
-   ends at `0089_realtime_error_telemetry.sql`. Preserve existing accounts and keys.
+   ends at `0091_freeze_summary_context.sql`. Preserve existing accounts and keys.
    Automated integration tests require a separate disposable `*_test` database;
    never point `TEST_DATABASE_URL` at the application database.
 3. For real calls, configure `TELEPHONY_DRIVER=twilio`, `BRIEF_COMPILER_DRIVER=openai`,
@@ -191,8 +210,8 @@ change the browser origin. Main API is port 4000; Twilio gateway is port 4001.
 
 For Live, finish active calls, stop the API, set `VOICE_RUNTIME_DRIVER=live` and
 `VOICE_RUNTIME_LIVE_FALLBACK=false`, then restart with the same current tunnel URL.
-Check the startup driver log. Unified Live uses one native session for consent,
-opening, conversation and closing. No Realtime sockets or standalone consent
+Check the startup driver log. Unified Live keeps one native listening session; the existing renderer owns mandatory
+disclosure, protected requests and the v5 finite recap/farewell. No Realtime sockets or standalone consent
 classifier should appear. Verify `Live delegated consent decision` with initial
 `affirmative`, `consent.granted` with `method=voice`, then `recording.started`.
 Recipient consent wording is deliberately unavailable in stored transcripts; do not

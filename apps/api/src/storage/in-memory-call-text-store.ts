@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { assertSummaryArtifactOutput } from "../text-processing/summary-calendar";
+import { summarySourceContextSchema, type SummarySourceContext } from "@callassist/contracts";
 import type {
   CallSnapshot, CallCompilation, PlanSource, CallTextArtifact, FinalTranscriptRevision,
   CompilationReviewApprovalInput, FinalTranscriptSegment
@@ -11,6 +13,7 @@ import {
   type TextArtifactChunk, type CallPlanReviewReceipt
 } from "./call-text-repository";
 import { parseArtifactPayload } from "./postgres-call-text-store";
+import type { VoiceActionRecord } from "./voice-action";
 
 type CompilationSource={id:string;compilation:CallCompilation|null};
 type Hooks={
@@ -18,6 +21,7 @@ type Hooks={
   textAllowed:(id:string)=>boolean;
   compilations:(id:string)=>CompilationSource[];
   attempt:(id:string,attemptId?:string|null)=>CallAttemptRecord|undefined;
+  action:(id:string)=>VoiceActionRecord|undefined;
   enqueue:(input:EnqueueDurableJobInput)=>Promise<DurableJob>;
   job:(id:string)=>DurableJob|null|undefined;
   jobs:()=>DurableJob[];
@@ -129,6 +133,30 @@ export class InMemoryCallTextStore {
     this.requireLease(id,lease);
     return structuredClone(this.chunks.get(id)??[]);
   }
+  freezeTextArtifactContext(id: string, context: SummarySourceContext, lease: DurableJobLease) {
+    const artifact = this.requireLease(id, lease);
+    const parsed = summarySourceContextSchema.parse(context);
+    if (artifact.kind !== "call_summary" || parsed.compilationId !== artifact.compilationId || parsed.transcriptRevisionId !== artifact.transcriptRevisionId ||
+        parsed.transcriptSourceHash !== artifact.sourceHash) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    const revision = this.revisions.get(parsed.transcriptRevisionId)?.revision;
+    const compilation = this.hooks.compilations(artifact.callId).find(c => c.id === parsed.compilationId)?.compilation;
+    if (revision?.callAttemptId !== parsed.callAttemptId || compilation?.snapshotHash !== parsed.compilationSnapshotHash)
+      throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    if (!artifact.sourceContext) {
+      if (parsed.actionEvidence) {
+        const evidence = parsed.actionEvidence, action = this.hooks.action(evidence.id);
+        if (!action || action.callAttemptId !== parsed.callAttemptId || action.snapshotHash !== parsed.compilationSnapshotHash ||
+            action.version !== evidence.version || action.state !== evidence.state || action.proposal.date !== evidence.date ||
+            action.proposal.startTime !== evidence.startTime || action.proposal.timeZone !== evidence.timeZone)
+          throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+      }
+      const sibling = [...this.artifacts.values()].find(a => a.callId === artifact.callId && a.compilationId === artifact.compilationId &&
+        a.transcriptRevisionId === artifact.transcriptRevisionId && a.sourceHash === artifact.sourceHash && a.generatorVersion === artifact.generatorVersion && a.sourceContext);
+      artifact.sourceContext = structuredClone(sibling?.sourceContext ?? parsed);
+      artifact.contextHash = textPayloadHash(artifact.sourceContext);
+    }
+    return structuredClone(artifact);
+  }
   saveTextArtifactChunk(id:string,index:number,payload:unknown,lease:DurableJobLease) {
     this.requireLease(id,lease);
     if(!Number.isInteger(index)||index<0||index>=textArtifactMaximumChunks||JSON.stringify(payload).length>1000000) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
@@ -141,6 +169,8 @@ export class InMemoryCallTextStore {
   completeTextArtifact(id:string,payload:NonNullable<CallTextArtifact["payload"]>,lease:DurableJobLease) {
     const artifact=this.requireLease(id,lease);
     const parsed=parseArtifactPayload(artifact.kind,payload);
+    try { assertSummaryArtifactOutput(artifact,parsed); }
+    catch { throw new CallRepositoryError("TEXT_ARTIFACT_INVALID"); }
     if(artifact.status==="ready"&&artifact.payloadHash!==textPayloadHash(parsed)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
     this.hooks.complete?.({...artifact,payload:parsed,status:"ready"});
     Object.assign(artifact,{status:"ready",payload:structuredClone(parsed),payloadHash:textPayloadHash(parsed),failureCode:null,updatedAt:new Date().toISOString()});
@@ -198,7 +228,7 @@ export class InMemoryCallTextStore {
       reviewReceipts:[...this.receipts.values()].filter(r=>r.callId===callId).map(r=>structuredClone(r))};
   }
   redact(callId:string) {
-    for(const [id,artifact] of this.artifacts) if(artifact.callId===callId) { artifact.payload=null;artifact.status="cancelled";this.chunks.delete(id); }
+    for(const [id,artifact] of this.artifacts) if(artifact.callId===callId) { artifact.payload=null;artifact.sourceContext=null;artifact.status="cancelled";this.chunks.delete(id); }
     for(const [id,row] of this.revisions) if(row.callId===callId) this.revisions.delete(id);
     for(const [id,receipt] of this.receipts) if(receipt.callId===callId) this.receipts.delete(id);
   }

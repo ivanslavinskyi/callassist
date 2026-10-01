@@ -1,5 +1,6 @@
+import { supportsSummaryAssessment } from "@callassist/contracts";
 import type postgres from "postgres";
-import { callCompilationSchema, finalTranscriptRevisionSchema, type CallAssessmentRecord, type CallTextArtifact } from "@callassist/contracts";
+import { callCompilationSchema, finalTranscriptRevisionSchema, callAssessmentDecisionSchema, type CallAssessmentRecord, type CallTextArtifact } from "@callassist/contracts";
 import { encryptJson, decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { assessmentDeadlineMs, assessmentVersion, validateFinalAssessment } from "../credits/final-assessment";
 import { CallRepositoryError } from "./call-repository";
@@ -20,7 +21,7 @@ export class PostgresCallAssessmentStore {
   async get(callId: string, attemptId: string): Promise<CallAssessmentRecord | null> {
     const [row] = await this.sql<Row[]>`SELECT a.* FROM call_assessments a JOIN call_briefs b ON b.id=a.call_brief_id
       WHERE a.call_brief_id=${callId} AND a.call_attempt_id=${attemptId} AND b.data_deleted_at IS NULL`;
-    return row ? this.map(row, true) : null;
+    return row ? (await this.displayRevisions([this.map(row, true)]))[0]! : null;
   }
   async forCalls(ids: string[], sql: postgres.Sql | postgres.TransactionSql = this.sql) {
     const grouped = new Map<string, CallAssessmentRecord[]>();
@@ -28,8 +29,28 @@ export class PostgresCallAssessmentStore {
     const rows = await sql<Row[]>`SELECT a.call_attempt_id,a.call_brief_id,a.compilation_id,a.source_hash,a.transcript_revision_id,a.evaluator_version,
       NULL::text AS payload_ciphertext,a.status,a.conversation,a.goal,a.reason,a.updated_at,a.deadline_at FROM call_assessments a JOIN call_briefs b ON b.id=a.call_brief_id
       WHERE a.call_brief_id IN ${sql(ids)} AND b.data_deleted_at IS NULL`;
-    for (const row of rows) grouped.set(row.call_brief_id, [...(grouped.get(row.call_brief_id) ?? []), this.map(row)]);
+    const displays = await this.displayRevisions(rows.map(row => this.map(row)), sql);
+    for (const [index, row] of rows.entries()) grouped.set(row.call_brief_id, [...(grouped.get(row.call_brief_id) ?? []), displays[index]!]);
     return grouped;
+  }
+  async displayRevisions(records: CallAssessmentRecord[], sql: postgres.Sql | postgres.TransactionSql = this.sql) {
+    if (!records.length) return records;
+    const revisions = await sql`SELECT DISTINCT ON (r.call_attempt_id) r.*,a.compilation_id,a.source_hash
+      FROM call_assessment_revisions r JOIN call_text_artifacts a ON a.id=r.artifact_id
+      JOIN call_briefs b ON b.id=r.call_brief_id
+      WHERE r.call_attempt_id IN ${sql(records.map(r => r.callAttemptId))} AND r.payload_ciphertext IS NOT NULL
+        AND b.data_deleted_at IS NULL AND a.status='ready'
+      ORDER BY r.call_attempt_id,r.created_at DESC,r.artifact_id DESC`;
+    return records.map(original => {
+      const row = revisions.find(r => r.call_attempt_id === original.callAttemptId);
+      if (!row) return original;
+      const decision = callAssessmentDecisionSchema.parse(decryptJson(row.payload_ciphertext, this.key));
+      return { ...original, artifactId: row.artifact_id, contextHash: row.context_hash, compilationId: row.compilation_id,
+        sourceHash: row.source_hash, decision, summary: { ...original.summary, status: "ready" as const,
+          conversation: decision.conversation.status, goal: decision.goal.status,
+          reason: decision.conversation.status === "uncertain" ? "evidence_uncertain" as const : null,
+          transcriptRevisionId: row.transcript_revision_id, evaluatorVersion: row.evaluator_version, updatedAt: row.created_at.toISOString() } };
+    });
   }
   map(row: Row, withDecision = false): CallAssessmentRecord {
     return { callAttemptId: row.call_attempt_id, compilationId: row.compilation_id, sourceHash: row.source_hash,
@@ -59,7 +80,7 @@ export class PostgresCallAssessmentStore {
   /** Runs inside the summary publication transaction, after the call/lease locks. */
   async complete(tx: postgres.TransactionSql, artifact: CallTextArtifact) {
     if (artifact.kind !== "call_summary" || !artifact.payload || !("assessment" in artifact.payload) || !artifact.payload.assessment ||
-      !artifact.generatorVersion.startsWith("summary-v3:") || !artifact.generatorVersion.includes(":openai:")) return;
+      !supportsSummaryAssessment(artifact.generatorVersion) || !artifact.generatorVersion.includes(":openai:")) return;
     const [source] = await tx<{payload_ciphertext:string;compilation_ciphertext:string;content_language:string|null;context:{taskContentLanguage:string}|null;ended_at:Date|null;consent:boolean}[]>`
       SELECT r.payload_ciphertext,c.compilation_ciphertext,a.content_language,l.context,a.ended_at,
         EXISTS(SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND cr.consent_granted_at IS NOT NULL AND cr.started_at IS NOT NULL) AS consent
@@ -74,6 +95,12 @@ export class PostgresCallAssessmentStore {
     try { decision = validateFinalAssessment(artifact.payload.assessment, revision.segments, compilation.compiledBrief.successCriteria.map((_,i)=>`criterion.${i}`)); }
     catch { throw new CallRepositoryError("TEXT_ARTIFACT_INVALID"); }
     const evaluatorVersion = `${assessmentVersion}:${artifact.generatorVersion}`;
+    // An explicit new generator/context yields an immutable display revision.
+    // The original canonical row remains the billing evidence; it is not rebilled.
+    if (artifact.contextHash) await tx`INSERT INTO call_assessment_revisions
+      (artifact_id,call_brief_id,call_attempt_id,transcript_revision_id,context_hash,evaluator_version,payload_ciphertext)
+      VALUES(${artifact.id},${artifact.callId},${revision.callAttemptId},${revision.id},${artifact.contextHash},${evaluatorVersion},${encryptJson(decision,this.key)})
+      ON CONFLICT (artifact_id) DO NOTHING`;
     await tx`INSERT INTO call_assessments(call_attempt_id,call_brief_id,compilation_id,status)
       VALUES(${revision.callAttemptId},${artifact.callId},${artifact.compilationId},'pending') ON CONFLICT DO NOTHING`;
     const [existing] = await tx<Row[]>`SELECT * FROM call_assessments WHERE call_attempt_id=${revision.callAttemptId} FOR UPDATE`;
@@ -97,7 +124,7 @@ export class PostgresCallAssessmentStore {
 
   /** Only a terminal failure of the canonical job can release its reservation. */
   async fail(tx: postgres.TransactionSql, artifact: CallTextArtifact) {
-    if (artifact.kind !== "call_summary" || !artifact.generatorVersion.startsWith("summary-v3:") || !artifact.generatorVersion.includes(":openai:")) return;
+    if (artifact.kind !== "call_summary" || !supportsSummaryAssessment(artifact.generatorVersion) || !artifact.generatorVersion.includes(":openai:")) return;
     const [attempt] = await tx<{id:string;ended_at:Date|null}[]>`SELECT a.id,a.ended_at
       FROM call_attempts a JOIN final_transcript_revisions r ON r.call_attempt_id=a.id
       LEFT JOIN call_language_contexts l ON l.call_brief_id=a.call_brief_id
@@ -118,6 +145,19 @@ export class PostgresCallAssessmentStore {
     const rows = await this.sql<Row[]>`SELECT a.* FROM call_assessments a JOIN call_briefs b ON b.id=a.call_brief_id
       WHERE a.call_brief_id=${callId} AND b.data_deleted_at IS NULL ORDER BY a.updated_at,a.id`;
     return rows.map(row=>this.map(row,true));
+  }
+  async exportRevisions(callId: string): Promise<CallAssessmentRecord[]> {
+    const rows = await this.sql`SELECT r.*,a.compilation_id,a.source_hash FROM call_assessment_revisions r
+      JOIN call_text_artifacts a ON a.id=r.artifact_id JOIN call_briefs b ON b.id=r.call_brief_id
+      WHERE r.call_brief_id=${callId} AND r.payload_ciphertext IS NOT NULL AND b.data_deleted_at IS NULL ORDER BY r.created_at,r.artifact_id`;
+    return rows.map(row => {
+      const decision = callAssessmentDecisionSchema.parse(decryptJson(row.payload_ciphertext,this.key));
+      return { callAttemptId: row.call_attempt_id, compilationId: row.compilation_id, sourceHash: row.source_hash,
+        artifactId: row.artifact_id, contextHash: row.context_hash, decision,
+        summary: { status: "ready", conversation: decision.conversation.status, goal: decision.goal.status,
+          reason: decision.conversation.status === "uncertain" ? "evidence_uncertain" : null,
+          updatedAt: row.created_at.toISOString(), deadlineAt: null, transcriptRevisionId: row.transcript_revision_id, evaluatorVersion: row.evaluator_version } };
+    });
   }
   /** Durable indexed sweep. Call locks precede assessment locks, as on publication. */
   async expire(now: string) {

@@ -1,3 +1,4 @@
+import { evaluateAppointmentCalendar } from "../appointments/appointment-calendar";
 import {
   appointmentAuthorizationSchema,
   type AppointmentAuthorization
@@ -115,18 +116,13 @@ export function validateAppointmentProposal(input: {
   if (!proposal.serviceMatches) return reject("service_mismatch");
   if (!proposal.recipientMatches) return reject("recipient_mismatch");
   if (proposal.requiresPaymentOrNewTerms) return reject("financial_terms_not_allowed");
-  // Aliases and offsets do not silently replace the time zone the user approved.
-  if (proposal.timeZone !== authorization.timeZone) return reject("time_zone_mismatch");
-  const inWindow = authorization.windows.some(window => window.date === proposal.date &&
-    window.startTime <= proposal.startTime && proposal.startTime <= window.endTime);
-  if (!inWindow) return reject("outside_authorized_window");
-
-  const instants = matchingInstants(proposal);
-  if (instants === null) return reject("invalid_authorization");
-  if (instants.length === 0) return reject("nonexistent_local_time");
-  if (instants.length !== 1) return reject("ambiguous_local_time");
-  if (instants[0] <= input.now.getTime()) return reject("past_time");
-  return { ok: true, proposal, startsAt: new Date(instants[0]).toISOString() };
+  const calendar = evaluateAppointmentCalendar({ authorization, candidate: proposal, referenceAt: input.now.toISOString() });
+  if (calendar.reason === "zone_conflict") return reject("time_zone_mismatch");
+  if (calendar.eligibility === "outside") return reject("outside_authorized_window");
+  if (calendar.reason === "nonexistent_local_time" || calendar.reason === "ambiguous_local_time") return reject(calendar.reason);
+  if (calendar.eligibility !== "within" || !calendar.startsAt) return reject("invalid_authorization");
+  if (calendar.pastAtReference) return reject("past_time");
+  return { ok: true, proposal, startsAt: calendar.startsAt };
 }
 
 function reject(reason: AppointmentRejectionReason): Rejection {
@@ -137,35 +133,4 @@ function isCalendarDate(date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   const instant = Date.parse(`${date}T00:00:00.000Z`);
   return Number.isFinite(instant) && new Date(instant).toISOString().slice(0, 10) === date;
-}
-
-/**
- * Enumerate possible UTC minutes, not an assumed one-hour DST correction. The
- * bounded +/-24-hour search covers all current IANA offsets, including half- and
- * quarter-hour zones and skipped dates. Two exact matches are an ambiguous fold.
- * Seconds must also match: historical sub-minute offsets cannot be rounded into
- * an accepted slot. No host time zone or implicit Date parsing is involved.
- */
-function matchingInstants(proposal: AppointmentProposal): number[] | null {
-  try {
-    const formatter = new Intl.DateTimeFormat("en-GB-u-ca-iso8601-nu-latn", {
-      timeZone: proposal.timeZone,
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
-    });
-    const middle = Date.parse(`${proposal.date}T${proposal.startTime}:00.000Z`);
-    const expected = `${proposal.date}T${proposal.startTime}:00`;
-    const matches: number[] = [];
-    for (let minuteOffset = -1_440; minuteOffset <= 1_440; minuteOffset++) {
-      const instant = middle + minuteOffset * 60_000;
-      const parts = formatter.formatToParts(instant);
-      const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value;
-      const local = `${part("year")?.padStart(4, "0")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part("second")}`;
-      if (local === expected) matches.push(instant);
-      if (matches.length === 2) break;
-    }
-    return matches;
-  } catch {
-    return null;
-  }
 }

@@ -51,7 +51,7 @@ describe("summary execution", () => {
       const input = JSON.parse(JSON.parse(String(init!.body)).input[1].content);
       expect(input.applicationFacts).toEqual({ transcriptPersisted: true, resultHandling: "capture_in_callassist" });
       count++;
-      const valid = { schemaVersion: 2, overview: [], findings: input.checks.map((check: {id:string}) => ({
+      const valid = { schemaVersion: 3, appointmentExtraction: { candidates: [], conditions: [] }, unresolvedDetails: [], overview: [], findings: input.checks.map((check: {id:string}) => ({
         id: check.id, label: "Opening hours", text: "Open on weekdays.", certainty: "reported", sourceSegmentIds: [input.segments[0].id]
       })), nextSteps: [], unresolved: [], assessment: {
         conversation: { status: "uncertain", category: "uncertain", questionSegmentId: null, answerSegmentId: null, answerQuote: "" },
@@ -79,7 +79,7 @@ describe("summary execution", () => {
         init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
       });
       const input = JSON.parse(JSON.parse(String(init!.body)).input[1].content);
-      return Response.json({ output_text: JSON.stringify({ schemaVersion: 2, overview: [],
+      return Response.json({ output_text: JSON.stringify({ schemaVersion: 3, appointmentExtraction: { candidates: [], conditions: [] }, unresolvedDetails: [], overview: [],
         findings: input.checks.map((check: {id:string}) => ({ id: check.id, label: "Office hours", text: "Open on weekdays.", certainty: "reported", sourceSegmentIds: [input.segments[0].id] })),
         nextSteps: [], unresolved: [], assessment: { conversation: { status: "uncertain", category: "uncertain", questionSegmentId: null, answerSegmentId: null, answerQuote: "" }, goal: { status: "uncertain", sourceSegmentIds: [] }, criteria: input.checks.filter((c:{id:string})=>c.id.startsWith("criterion.")).map((c:{id:string})=>({id:c.id,status:"uncertain",sourceSegmentIds:[]})) } }) });
     });
@@ -114,7 +114,7 @@ describe("summary execution", () => {
     const processor = new MockTextProcessor();
     expect(textGeneratorVersion(processor, "plan_review")).toBe(processor.generatorVersion);
     expect(textGeneratorVersion(processor, "transcript_translation")).toBe(processor.generatorVersion);
-    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v3:grounded-v2:${processor.generatorVersion}`);
+    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v4:grounded-v3:${processor.generatorVersion}`);
   });
 
   it("uses one request for an ordinary transcript, persists new format and never regenerates a ready result", async () => {
@@ -133,7 +133,7 @@ describe("summary execution", () => {
     await h.service.process(h.job, h.lease);
     expect(h.process).toHaveBeenCalledTimes(4);
     const lastInput = h.process.mock.calls.at(-1)![0];
-    expect(lastInput.kind === "call_summary" && lastInput.extraction?.schemaVersion).toBe(2);
+    expect(lastInput.kind === "call_summary" && lastInput.extraction?.schemaVersion).toBe(3);
     const saved = (await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id))!;
     expect(saved.status).toBe("ready");
     expect(callSummaryPayloadSchema.parse(saved.payload).overview).toEqual([]);

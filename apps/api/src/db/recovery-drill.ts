@@ -33,6 +33,8 @@ const criticalTables = [
   "call_briefs",
   "call_voice_actions",
   "call_assessments",
+  "call_assessment_revisions",
+  "call_terminal_decisions",
   "call_compilations",
   "call_compilation_approvals",
   "call_compilation_review_policies",

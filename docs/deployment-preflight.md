@@ -211,3 +211,22 @@ build including the new CLI. No external deployment, DNS changes or provider dis
 were performed. The earlier 1,163-test beta-controls checkpoint is separate evidence.
 Current implementation checks, including production validation of both new opt-out
 settings, are recorded in [delivery, 2026-09-16](delivery-2026-09-16.md).
+
+## Schema release 0090–0091
+
+The 1 October Live v5 candidate requires the full additive catalog through 0091 on
+both API and worker. 0090 adds encrypted summary context, immutable assessment
+revisions and terminal decisions. 0091 permits one context freeze before completion
+and protects it and the new histories against mutation, while allowing redaction and
+key rotation. The shared encrypted-column inventory now has 24 families.
+
+Before activation, check no active call and drain queued/running jobs from older
+summary generators. Keep the same data and keyring; do not regenerate history or
+recompile approved plans. Apply/check the catalog, start matching API/worker source,
+verify readiness, browser access and signed-Twilio gateway isolation, then execute
+the [handset scenarios](live-stabilization-implementation-2026-10-01.md).
+
+Rollback requires a reader compatible with payload v3/context and assessment
+revisions. Do not blindly restore a v4 reader after publishing v5 artifacts or roll
+back by dropping the new tables. Preserve original billing evidence and transcripts.
+Local migration/testing does not authorize or establish production deployment.

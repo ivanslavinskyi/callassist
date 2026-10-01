@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { assertSummaryArtifactOutput } from "../text-processing/summary-calendar";
+import type { VoiceActionInput } from "./voice-action";
 import type postgres from "postgres";
 import { reserveBetaSpend } from "../beta/beta-controls";
 import {
-  callCompilationSchema, callTextArtifactSchema, finalTranscriptRevisionSchema,
+  callCompilationSchema, callTextArtifactSchema, finalTranscriptRevisionSchema, summarySourceContextSchema, type SummarySourceContext,
   planReviewPayloadSchema, transcriptTranslationPayloadSchema, callSummaryPayloadSchema,
   type CallTextArtifact, type FinalTranscriptRevision, type CompilationReviewApprovalInput,
   type FinalTranscriptSegment, type TextLanguage, type PlanSource
@@ -21,6 +23,7 @@ type ArtifactRow = {
   id: string; call_brief_id: string; kind: CallTextArtifact["kind"]; compilation_id: string | null;
   transcript_revision_id: string | null; source_hash: string; target_language: TextLanguage;
   generator_version: string; status: CallTextArtifact["status"]; payload_ciphertext: string | null;
+  context_hash: string | null; context_ciphertext: string | null;
   payload_hash: string | null; failure_code: string | null; created_at: Date; updated_at: Date; provider_request_count: number;
   job_status?: DurableJob["status"] | null; job_generation?: number; job_error_code?: string | null; job_updated_at?: Date;
 };
@@ -114,6 +117,39 @@ export class PostgresCallTextStore {
     });
   }
 
+  async freezeTextArtifactContext(id: string, context: SummarySourceContext, lease: DurableJobLease) {
+    return this.sql.begin(async tx => {
+      const row = await requireTextLease(tx, id, lease);
+      const parsed = summarySourceContextSchema.parse(context);
+      if (row.kind !== "call_summary" || parsed.compilationId !== row.compilation_id || parsed.transcriptRevisionId !== row.transcript_revision_id ||
+          parsed.transcriptSourceHash !== row.source_hash) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+      const binding = await tx`SELECT r.id FROM final_transcript_revisions r JOIN call_attempts a ON a.id=r.call_attempt_id
+        JOIN call_compilations c ON c.id=a.compilation_id WHERE r.id=${row.transcript_revision_id} AND r.call_attempt_id=${parsed.callAttemptId}
+        AND r.call_brief_id=${row.call_brief_id} AND c.id=${parsed.compilationId} AND c.snapshot_hash=${parsed.compilationSnapshotHash}`;
+      if (!binding.count) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+      if (row.context_ciphertext) return mapArtifact(row, this.key);
+      if (parsed.actionEvidence) {
+        const action = parsed.actionEvidence;
+        const matching = await tx`SELECT payload_ciphertext FROM call_voice_actions WHERE id=${action.id} AND call_attempt_id=${parsed.callAttemptId}
+          AND snapshot_hash=${parsed.compilationSnapshotHash} AND state=${action.state} AND version=${action.version} AND payload_ciphertext IS NOT NULL`;
+        if (!matching.count) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+        const proposal = decryptJson<VoiceActionInput>(matching[0]!.payload_ciphertext,this.key).proposal;
+        if (proposal.date !== action.date || proposal.startTime !== action.startTime || proposal.timeZone !== action.timeZone)
+          throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+      }
+      // The call mutation lock serializes languages and workers. Reuse the first
+      // frozen context, so late callbacks cannot change a sibling's assessment.
+      const [sibling] = await tx<ArtifactRow[]>`SELECT * FROM call_text_artifacts WHERE call_brief_id=${row.call_brief_id}
+        AND compilation_id=${row.compilation_id} AND transcript_revision_id=${row.transcript_revision_id}
+        AND source_hash=${row.source_hash} AND generator_version=${row.generator_version}
+        AND context_ciphertext IS NOT NULL ORDER BY created_at,id LIMIT 1`;
+      const frozen = sibling?.context_ciphertext ? summarySourceContextSchema.parse(decryptJson(sibling.context_ciphertext, this.key)) : parsed;
+      const [updated] = await tx<ArtifactRow[]>`UPDATE call_text_artifacts SET context_hash=${textPayloadHash(frozen)},
+        context_ciphertext=${encryptJson(frozen, this.key)} WHERE id=${id} RETURNING *`;
+      return mapArtifact(updated!, this.key);
+    });
+  }
+
   async saveTextArtifactChunk(id:string,index:number,payload:unknown,lease:DurableJobLease) {
     if(!Number.isInteger(index)||index<0||index>=textArtifactMaximumChunks||JSON.stringify(payload).length>1000000) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
     await this.sql.begin(async tx=>{
@@ -130,6 +166,8 @@ export class PostgresCallTextStore {
     return this.sql.begin(async tx=>{
       const row=await requireTextLease(tx,id,lease);
       const parsed=parseArtifactPayload(row.kind,payload);
+      try { assertSummaryArtifactOutput(mapArtifact(row,this.key),parsed); }
+      catch { throw new CallRepositoryError("TEXT_ARTIFACT_INVALID"); }
       if(row.status==="ready") {
         if(row.payload_hash!==textPayloadHash(parsed)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
         return mapArtifact(row,this.key);
@@ -323,6 +361,7 @@ async function readArtifactJob(sql:Sql,id:string) {
 function mapArtifact(row:ArtifactRow,key:DataEncryptionMaterial) {
   return callTextArtifactSchema.parse({id:row.id,callId:row.call_brief_id,kind:row.kind,compilationId:row.compilation_id,
     transcriptRevisionId:row.transcript_revision_id,sourceHash:row.source_hash,targetLanguage:row.target_language,generatorVersion:row.generator_version,
+    contextHash:row.context_hash ?? null,sourceContext:row.context_ciphertext?summarySourceContextSchema.parse(decryptJson(row.context_ciphertext,key)):null,
     status:row.status,payload:row.payload_ciphertext?decryptJson(row.payload_ciphertext,key):null,payloadHash:row.payload_hash,
     failureCode:row.failure_code,retryable:false,createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString()});
 }
@@ -379,7 +418,9 @@ export async function redactCallTextData(tx:postgres.TransactionSql,callId:strin
   await tx`UPDATE durable_jobs SET status='cancelled',lease_owner=NULL,leased_at=NULL,lease_expires_at=NULL,completed_at=now(),updated_at=now(),last_error_code='call_data_deleted'
     WHERE text_artifact_id IN (SELECT id FROM call_text_artifacts WHERE call_brief_id=${callId}) AND status IN ('queued','running')`;
   await tx`UPDATE call_text_artifact_chunks SET payload_ciphertext=NULL WHERE artifact_id IN (SELECT id FROM call_text_artifacts WHERE call_brief_id=${callId})`;
-  await tx`UPDATE call_text_artifacts SET payload_ciphertext=NULL,status='cancelled',updated_at=now() WHERE call_brief_id=${callId}`;
+  await tx`UPDATE call_text_artifacts SET payload_ciphertext=NULL,context_ciphertext=NULL,status='cancelled',updated_at=now() WHERE call_brief_id=${callId}`;
+  await tx`UPDATE call_assessment_revisions SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
+  await tx`UPDATE call_terminal_decisions SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
   await tx`UPDATE final_transcript_revisions SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
   await tx`UPDATE call_assessments SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;
   await tx`UPDATE call_plan_review_receipts SET payload_ciphertext=NULL WHERE call_brief_id=${callId}`;

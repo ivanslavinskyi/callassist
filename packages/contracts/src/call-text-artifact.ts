@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { languageTagSchema, textLanguageSchema } from "./languages";
 import { callAssessmentDecisionSchema } from "./call-assessment";
+import { appointmentExtractionSchema, summaryCalendarSchema, summarySourceContextSchema } from "./summary-source";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const textArtifactKindSchema = z.enum(["plan_review", "clarification_review", "transcript_translation", "call_summary"]);
@@ -24,7 +25,11 @@ export const summaryItemSchema = z.strictObject({
   sourceSegmentIds: z.array(z.string().min(1)).max(30)
 });
 export const callSummaryPayloadSchema = z.strictObject({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.union([z.literal(2), z.literal(3)]),
+  appointmentExtraction: appointmentExtractionSchema.optional(),
+  unresolvedDetails: z.array(z.strictObject({ checkId: z.string().min(1).max(160),
+    reason: z.literal("conversation_evidence"), text: z.string().min(1).max(4000) })).max(30).optional(),
+  calendar: summaryCalendarSchema.optional(),
   assessment: callAssessmentDecisionSchema.optional(),
   overview: z.array(z.strictObject({
     label: z.string().trim().min(1).max(160).nullable(), text: z.string().trim().min(1).max(1200),
@@ -34,6 +39,10 @@ export const callSummaryPayloadSchema = z.strictObject({
   nextSteps: z.array(z.strictObject({ text: z.string().trim().min(1).max(2000), sourceSegmentIds: z.array(z.string().min(1)).min(1).max(30) })).max(30),
   unresolved: z.array(z.string().trim().min(1).max(4000)).max(30)
 }).superRefine((value, context) => {
+  if (value.schemaVersion === 2 && (value.calendar || value.appointmentExtraction))
+    context.addIssue({ code: "custom", message: "Calendar evidence requires schema 3" });
+  if (value.schemaVersion === 3 && !value.appointmentExtraction)
+    context.addIssue({ code: "custom", message: "Schema 3 requires appointment extraction" });
   const ids = new Set(value.findings.map(item => item.id));
   if (ids.size !== value.findings.length) context.addIssue({ code: "custom", message: "Duplicate finding id", path: ["findings"] });
   for (const [index, item] of value.overview.entries()) {
@@ -55,6 +64,7 @@ export const callTextArtifactSchema = z.object({
   id: z.string().uuid(), callId: z.string().uuid(), kind: textArtifactKindSchema,
   compilationId: z.string().uuid().nullable(), transcriptRevisionId: z.string().uuid().nullable(),
   sourceHash: hashSchema, targetLanguage: textLanguageSchema, generatorVersion: z.string(),
+  contextHash: hashSchema.nullable().optional(), sourceContext: summarySourceContextSchema.nullable().optional(),
   status: textArtifactStatusSchema, payload: textArtifactPayloadSchema.nullable(), payloadHash: hashSchema.nullable(),
   failureCode: z.string().nullable(), retryable: z.boolean(), createdAt: z.string().datetime(), updatedAt: z.string().datetime()
 });

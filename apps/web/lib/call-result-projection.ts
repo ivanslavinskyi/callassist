@@ -38,6 +38,10 @@ export function evidencedSummary(artifact: CallTextArtifact | undefined, revisio
       artifact.transcriptRevisionId !== revision.id || artifact.sourceHash !== revision.sourceHash) return null;
   const parsed = callSummaryPayloadSchema.safeParse(artifact.payload);
   if (!parsed.success) return null;
+  if (parsed.data.schemaVersion === 3 && (!artifact.contextHash || !artifact.sourceContext ||
+      artifact.sourceContext.callAttemptId !== revision.callAttemptId || artifact.sourceContext.transcriptRevisionId !== revision.id ||
+      artifact.sourceContext.transcriptSourceHash !== revision.sourceHash || artifact.sourceContext.compilationId !== artifact.compilationId ||
+      (parsed.data.calendar && parsed.data.calendar.contextHash !== artifact.contextHash))) return null;
   const ids = new Set(revision.segments.map((segment) => segment.id));
   for (const item of [...parsed.data.findings, ...parsed.data.nextSteps]) {
     if (item.sourceSegmentIds.some((id) => !ids.has(id))) return null;

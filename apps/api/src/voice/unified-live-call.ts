@@ -7,7 +7,6 @@ import { endCallReasons, type EndCallReason } from "../realtime/agent-hangup";
 import { getAppointmentAuthorization } from "@callassist/contracts";
 import type { VoiceConversationContext } from "./voice-runtime";
 import { buildLiveInstructions, OpenAILiveConversation, type LiveLifecycle, type OpenAILiveBridgeOptions } from "./openai-live-bridge";
-import { LiveClosingSpeech } from "./live-closing-speech";
 import { object } from "./live-usage";
 import { pcmuHasSpeech } from "./pcmu-activity";
 import { parseAppointmentProposal, validateAppointmentProposal } from "../realtime/appointment-authorization";
@@ -63,7 +62,10 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #recipientFragments: Array<{ text: string; start: number; end: number }> = [];
   #recipientTurnTimer: ReturnType<typeof setTimeout> | null = null;
   #generation = 0;
-  #closingSpeech: LiveClosingSpeech | null = null;
+  #terminalDecision: { revision: number; reason: EndCallReason; summary: string; evidence: string[]; actionState: VoiceActionRecord["state"] | null } | null = null;
+  #terminalRevision = 0;
+  #closingAttempts = 0;
+  #appointmentRejectedTurn: number | null = null;
   #conversationStartedAt = 0;
   #firstConversationAudio = false;
   #lastOutputAudioAt = 0;
@@ -136,7 +138,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     } else if (event.event === "mark") {
       const name = object(event.mark).name;
       if (typeof name === "string") {
-        if (!this.#acknowledgeApplicationPlayback(name) && !this.#acknowledgeRendered(name)) { this.#closingSpeech?.acknowledge(name); }
+        if (!this.#acknowledgeApplicationPlayback(name)) this.#acknowledgeRendered(name);
       }
     } else if (event.event === "dtmf") {
       const digit = object(event.dtmf).digit;
@@ -439,7 +441,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     clearTimeout(playback.timer); this.#applicationPlayback = null;
     this.#clear(); playback.resolve(false);
   }
-  #playApplicationText(text: string, current: () => boolean, deadlineMs = 30_000) {
+  #playApplicationText(text: string, current: () => boolean, deadlineMs = 30_000, recoverable = false) {
     this.#cancelApplicationPlayback(); this.#clearTimer();
     this.#live!.suspendOutput(); this.#clear();
     const generation = ++this.#generation;
@@ -450,7 +452,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
         this.#cancelApplicationPlayback();
         if (!current() || this.#isClosed()) return;
         this.#speechFailure = { code: 'LIVE_APPLICATION_PLAYBACK_DEADLINE', phase: this.#phase };
-        this.#close('openai_error');
+        if (!recoverable) this.#close('openai_error');
       }, deadlineMs);
       timer.unref?.();
       const playback = { mark, text, generation, current, resolve, timer, released: false };
@@ -476,7 +478,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
         this.#cancelApplicationPlayback();
         if (!current() || this.#isClosed()) return;
         this.#speechFailure = { code: 'LIVE_APPLICATION_RENDER_FAILED', phase: this.#phase };
-        this.#close('openai_error');
+        this.#renderedSpeech.delete(text);
+        if (!recoverable) this.#close('openai_error');
       });
     });
   }
@@ -493,13 +496,11 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   nativeOutputDiscarded() { if (this.#consented) this.#clippedTaskSpeech = true; }
   audio(payload: string) {
-    if (this.#closingSpeech) this.#closingSpeech.audio(payload);
-    else if (this.#phase === 'conversation' && !this.#applicationPlayback) this.#sendAudio(payload);
+    if (this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null) this.#sendAudio(payload);
   }
   transcript(role: 'recipient' | 'assistant', text: string, _startMs: number, _endMs: number, _persist: () => void) {
     if (role === 'assistant') {
-      if (this.#closingSpeech) { this.#closingSpeech.transcript(text); return true; }
-      return this.#phase === 'conversation' && !this.#applicationPlayback;
+      return this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null;
     }
     // Only timing evidence is needed here. Live's managed backend interprets
     // the answer in its native context; never assemble or classify recipient text.
@@ -592,6 +593,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       if (this.#speaking || this.#isClosed()) return;
       const turn = { id: `turn-${++this.#turnSequence}`, text: this.#recipientTurnText.trim() };
       this.#recipientTurns.push(turn);
+      this.#waitingExpired = false;
       this.#recipientTurnText = "";
       this.#recipientFragments = [];
       if (this.#appointmentReply && this.#turnSequence > this.#appointmentReply.afterTurn) {
@@ -697,7 +699,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#backendFailurePending = true;
     this.#backendFailureCurrent = current; this.#backendFailureCode = code;
     this.#context!.telemetry(`live:failure:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v4", phase: "failed", revision: this.#generation, cause: code } });
+      runtimeVersion: "live-managed-v5", phase: "failed", revision: this.#generation, cause: code } });
     this.options.logger?.warn({ callAttemptId: this.#context!.attemptId, code }, "Live owned backend failure pending");
     this.#backendFailureDeadlineAt = Date.now() + 8_000;
     this.#scheduleBackendFailure();
@@ -751,7 +753,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#criticalResolve) return;
     this.#clippedTaskSpeech = true;
     this.#context!.telemetry(`live:action-interrupted:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v4", phase: "stale", revision: this.#generation,
+      runtimeVersion: "live-managed-v5", phase: "stale", revision: this.#generation,
       cause, released: this.#criticalReleased } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, cause,
       released: this.#criticalReleased, generation: this.#generation }, "Live appointment playback cancelled");
@@ -814,7 +816,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
         if (value.state === "keep_closing") {
           this.#closingInputPending = false; this.#startClosingSpeech();
           return { ok: true, state: "closing_authorized", reason: "keep_closing",
-            instruction: "The recipient only acknowledged closing. Say one brief farewell, then finish this delegation. Do not repeat the task or its questions." };
+            instruction: "The recipient only acknowledged closing. The application will finish the authorized closing audio. Stay silent and finish this delegation." };
         }
         if (value.state !== "resume_conversation") return reject("closing_decision_required");
         this.#interruptClosing(); this.#armTaskWait();
@@ -826,6 +828,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
         this.backendFailed(() => this.#waitingExpired && turn === this.#turnSequence, "LIVE_TASK_WAIT_EXHAUSTED");
         return reject("waiting_deadline_exhausted");
       }
+      this.#appointmentRejectedTurn = null;
+      this.#live?.resumeOutput("task_clarification_authorized");
       this.#armTaskWait();
       return { ok: true, state: value.state, reason: value.state, summary: value.summary,
         instruction: "Continue only the approved task. Ask the necessary next question if it has not already been asked, then listen. This is not appointment confirmation." };
@@ -839,7 +843,12 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (call.name === "request_appointment") {
       if (this.#phase !== "conversation" || Object.keys(value).sort().join() !== "intent,proposal" || !["request", "status_check"].includes(String(value.intent)) || !evidence.length) return reject("invalid_arguments");
       const validation = validateAppointmentProposal({ authorization: getAppointmentAuthorization(context.snapshot.plan), proposal: value.proposal, now: new Date() });
-      if (!validation.ok) return validation;
+      if (!validation.ok) {
+        this.#appointmentRejectedTurn = this.#turnSequence;
+        this.#live?.suspendOutput(); this.#clear();
+        return { ...validation, instruction: "The proposal is not authorized. Do not claim booking. Use report_task_state to resolve the missing details with a focused clarification, or status_check for an already reported arrangement. A recoverable rejection is not a terminal outcome." };
+      }
+      this.#appointmentRejectedTurn = null;
       const pending = this.#action;
       if (pending && (pending.state !== "uncertain" || JSON.stringify(pending.proposal) !== JSON.stringify(validation.proposal)))
         return reject("appointment_already_requested");
@@ -901,6 +910,15 @@ export class UnifiedLiveCall implements LiveLifecycle {
       if (!evidence.length) return reject("recipient_evidence_required");
       if (getAppointmentAuthorization(context.snapshot.plan) && this.#action?.state !== "confirmed") return reject("appointment_confirmation_required");
     }
+    if (!evidence.length && !this.#waitingExpired) return reject("recipient_evidence_required");
+    if (value.reason === "cannot_proceed" && this.#appointmentRejectedTurn === this.#turnSequence && !this.#waitingExpired)
+      return reject("clarification_required");
+    const summary = evidence.length ? value.resultSummary.trim() : liveTaskFailureCopy[this.#locale];
+    this.#terminalDecision = { revision: ++this.#terminalRevision, reason: value.reason as EndCallReason, summary,
+      evidence, actionState: this.#action?.state ?? null };
+    await this.options.service.repository.recordTerminalDecision({ ...this.#terminalDecision, callBriefId: context.brief.id,
+      callAttemptId: context.attemptId, snapshotHash: context.snapshot.compilationSnapshotHash, observations, locale: this.#locale });
+    if (!current() || this.#isClosed()) return reject("stale_request");
     return { ok: this.#requestClosing(value.reason as EndCallReason), actionCompleted: false,
       state: "closing_authorized", reason: value.reason, resultSummary: value.resultSummary.trim() };
   }
@@ -909,18 +927,14 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#action || this.#isClosed()) return;
     this.#live?.appointmentState(this.taskDecisionContext().appointment);
     this.#context!.telemetry(`live:action:${this.#action.id}:${this.#action.version}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v4", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
+      runtimeVersion: "live-managed-v5", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
       revision: this.#action.version, actionState: this.#action.state,
       ...(this.#action.delivery ? { deliveryKind: this.#action.delivery.kind, deliveryStatus: this.#action.delivery.status } : {}) } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, actionId: this.#action.id,
       state: this.#action.state, delivery: this.#action.delivery }, "Live appointment state updated");
   }
-  #closingFallback = false;
-  closingBackendCompleted() {
-    if (!this.#closingSpeech) return;
-    this.#clearTimer();
-    this.#closingSpeech.backendCompleted();
-  }
+  // Backend continuation is independent of audible terminal delivery.
+  closingBackendCompleted() {}
   #requestClosing(reason: EndCallReason) {
     if (this.#phase === "closing") {
       this.#closingInputPending = false; this.#closingReason = reason; this.#startClosingSpeech(); return true;
@@ -935,6 +949,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#closingReason = reason;
     if (this.#taskWaitTimer) clearTimeout(this.#taskWaitTimer);
     this.#taskWaitTimer = null;
+    this.#closingAttempts = 0;
     this.#closingDeadlineAt = Date.now() + 30_000;
     this.#closingDeadlineTimer = setTimeout(() => {
       if (this.#phase !== "closing") return;
@@ -946,45 +961,40 @@ export class UnifiedLiveCall implements LiveLifecycle {
     return true;
   }
   #startClosingSpeech() {
-    this.#live?.resumeOutput("closing_authorized");
-    this.#closingSpeech?.cancel(); this.#closingSpeech = null;
-    const generation = ++this.#generation;
+    if (this.#phase !== "closing" || this.#closingInputPending || this.#speaking) return;
+    this.#live?.suspendOutput();
+    this.#cancelApplicationPlayback();
+    const decision = this.#terminalDecision;
+    const remaining = this.#closingDeadlineAt - Date.now();
+    if (remaining <= 0 || this.#closingAttempts >= 2) { this.#clear(); this.#close("openai_error"); return; }
+    this.#closingAttempts++;
+    // One finite audio unit owns the output. A native tail or a backend completion
+    // cannot issue its mark; only the final rendered frame does.
+    const text = [decision?.summary, liveFarewellCopy[this.#locale]].filter(Boolean).join(" ");
+    const current = () => this.#phase === "closing" && !this.#closingInputPending && this.#terminalDecision === decision;
+    const playback = this.#playApplicationText(text, current, remaining, true);
+    const generation = this.#generation;
     this.#context!.telemetry(`live:closing:${generation}:requested`, { name: "conversation.hangup", metadata: {
       phase: "requested", reason: this.#closingReason, generation
     } });
-    this.#closingFallback = false;
-    this.#wait(8_000, () => this.#fallbackClosing());
-    this.#closingSpeech = new LiveClosingSpeech(payload => this.#sendAudio(payload),
-      name => this.#send({ event: "mark", streamSid: this.#stream, mark: { name } }),
-      () => {
-        if (this.#phase !== "closing" || this.#generation !== generation) return;
-        this.#closingSpeech = null; this.#hangup();
-      }, code => {
-        if (this.#phase !== "closing" || this.#generation !== generation) return;
-        this.options.logger?.warn({ callBriefId: this.#context!.brief.id, code }, "Live closing recovery");
-        // Late assistant speech cannot revoke an accepted end_call; recipient input can.
-        this.#fallbackClosing();
-      });
+    void playback.then(played => {
+      if (!current() || generation !== this.#generation) return;
+      if (played) { this.#speechFailure = null; this.#hangup(); }
+      else this.#fallbackClosing();
+    });
   }
   #pauseClosing() {
     if (this.#closingInputPending) return;
     this.#closingInputPending = true;
-    this.#closingSpeech?.cancel(); this.#closingSpeech = null;
+    if (this.#applicationPlayback) this.#closingAttempts = Math.max(0, this.#closingAttempts - 1);
     this.#cancelApplicationPlayback();
-    this.#closingFallback = false;
     this.#clearTimer(); this.#clear();
     this.#live?.instruct("The recipient interrupted closing audio. Listen silently while the backend interprets the complete answer. Closing remains authorized unless the backend identifies a material new request or correction. Do not repeat the task or announce this check.");
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId }, "Live closing awaiting recipient interpretation");
   }
   #fallbackClosing() {
-    if (this.#phase !== "closing" || this.#closingFallback || this.#closingInputPending || this.#speaking) return;
-    this.#closingFallback = true;
-    this.#closingSpeech?.cancel(); this.#closingSpeech = null;
-    const deadlineMs = Math.min(8_000, this.#closingDeadlineAt - Date.now());
-    if (deadlineMs <= 0) { this.#clear(); this.#close("openai_error"); return; }
-    this.#say(liveFarewellCopy[this.#locale], () => this.#hangup(),
-      { current: () => this.#phase === "closing" && this.#closingFallback, buffered: true },
-      { deadlineMs, exactOnly: true });
+    if (this.#phase !== "closing" || this.#closingInputPending || this.#speaking) return;
+    this.#startClosingSpeech();
   }
   #interruptClosing() {
     if (this.#phase !== "closing") return false;
@@ -992,11 +1002,11 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#context!.telemetry(`live:closing:${this.#generation}:interrupted`, { name: "conversation.hangup", metadata: {
       phase: "interrupted", reason: this.#closingReason, generation: this.#generation
     } });
-    this.#closingSpeech?.cancel(); this.#closingSpeech = null;
     this.#clearTimer(); this.#clear();
     if (this.#closingDeadlineTimer) clearTimeout(this.#closingDeadlineTimer);
     this.#closingDeadlineTimer = null; this.#closingInputPending = false;
     this.#cancelApplicationPlayback();
+    this.#terminalDecision = null;
     this.#phase = "conversation";
     this.#live?.resumeOutput("closing_cancelled");
     return true;
@@ -1021,8 +1031,10 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #wait(ms: number, task: () => void) { this.#clearTimer(); this.#timer = setTimeout(task, ms); this.#timer.unref?.(); }
   #isClosed() { return this.#phase === "closed"; }
   #recordingAccepted() { return this.#consented || this.#phase === "recording"; }
+  #hangupRequested = false;
   #hangup() {
-    if (this.#isClosed() || !this.#context) return;
+    if (this.#isClosed() || !this.#context || this.#hangupRequested) return;
+    this.#hangupRequested = true;
     this.#phase = "ending";
     if (this.#closingDeadlineTimer) clearTimeout(this.#closingDeadlineTimer);
     this.#closingDeadlineTimer = null;
@@ -1031,13 +1043,12 @@ export class UnifiedLiveCall implements LiveLifecycle {
     } });
     this.#wait(2_000, () => this.#close("agent_hangup_fallback"));
     void this.options.service.prepareAgentHangup(this.#context.brief.id, this.#context.attemptId, this.#provider)
-      .then(() => this.#close("agent_hangup"), () => this.#close("agent_hangup_fallback"));
+      .then(prepared => this.#close(prepared ? "agent_hangup" : "socket_closed"), () => this.#close("agent_hangup_fallback"));
   }
   #close(reason: "socket_closed" | "stream_stopped" | "openai_error" | "agent_hangup" | "agent_hangup_fallback") {
     if (this.#isClosed()) return;
     this.#phase = "closed";
     this.#stopAnsweringWatch();
-    this.#closingSpeech?.cancel(); this.#closingSpeech = null;
     if (this.#appointmentReply) clearTimeout(this.#appointmentReply.timer);
     this.#appointmentReply?.resolve(null); this.#appointmentReply = null;
     if (this.#taskWaitTimer) clearTimeout(this.#taskWaitTimer);

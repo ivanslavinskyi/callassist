@@ -5,6 +5,8 @@ import { normalizeCreateCallBriefInput, type CallAssessmentDecision, type CallSu
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 import type { CallRepository } from "./call-repository";
+import { buildSummarySourceContext } from "../text-processing/summary-source";
+import { composeCalendarSummary } from "../text-processing/summary-calendar";
 
 export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository;owner:string;reopen?:()=>Promise<CallRepository>}>) {
   async function fixture(consent=true) {
@@ -67,6 +69,33 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     expect(facts.lifecycle?.conversations).toBe(1);
     expect(facts.lifecycle?.goals?.[category==="task_answer"?"achieved":"notAchieved"]).toBe(1);
     expect(facts.userGoalFeedback).toEqual({yes:0,partly:0,no:0,notProvided:1});
+  });
+  it("freezes a new summary context and publishes an immutable assessment revision without rebilling", async () => {
+    const f = await fixture(); await f.r.updateStatus(f.brief.id,"completed");
+    const old = await final(f); await f.r.completeTextArtifact(old.artifact.id,old.payload,old.lease);
+    await f.r.completeDurableJob(old.lease.jobId,old.lease.workerId,new Date().toISOString());
+    const artifact = await f.r.enqueueTextArtifact({ callId:f.brief.id,kind:"call_summary",compilationId:f.attempt.compilationId!,
+      transcriptRevisionId:old.revision.id,sourceHash:old.revision.sourceHash,targetLanguage:f.attempt.contentLanguage??"en",generatorVersion:"summary-v4:grounded-v3:openai:fixture" });
+    const job = (await f.r.claimDueDurableJob({types:["text_artifact_generation"],workerId:randomUUID(),now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+60000).toISOString()}))!;
+    const lease = {jobId:job.id,workerId:job.leaseOwner!,checkedAt:new Date().toISOString(),generation:job.generation,attemptNumber:job.attemptCount};
+    await f.r.claimTextArtifact(artifact.id,lease);
+    const context = await buildSummarySourceContext(f.r,artifact);
+    expect(context.callAttemptId).toBe(f.attempt.id);
+    expect(context.compilationSnapshotHash).toBe(f.attempt.compilationSnapshotHash);
+    await expect(f.r.freezeTextArtifactContext(artifact.id,{...context,callAttemptId:randomUUID()},lease)).rejects.toMatchObject({code:"TEXT_ARTIFACT_INVALID"});
+    const frozen = await f.r.freezeTextArtifactContext(artifact.id,context,lease);
+    expect((await f.r.freezeTextArtifactContext(artifact.id,{...context,callEndedAt:"2099-01-01T00:00:00Z"},lease)).contextHash).toBe(frozen.contextHash);
+    const payload = composeCalendarSummary({...old.payload,schemaVersion:3,appointmentExtraction:{candidates:[],conditions:[]},unresolvedDetails:[],
+      assessment:{...old.decision,goal:{...old.decision.goal,status:"partial"}}},context,f.attempt.contentLanguage??"en");
+    await f.r.completeTextArtifact(artifact.id,payload,lease);
+    await f.r.completeTextArtifact(artifact.id,payload,lease);
+    const display = await f.r.getCallAssessment(f.brief.id,f.attempt.id);
+    expect(display).toMatchObject({artifactId:artifact.id,contextHash:frozen.contextHash,summary:{goal:"partial"}});
+    expect((await f.r.get(f.brief.id))!.brief.lifecycle?.assessment?.goal).toBe("partial");
+    const data = await f.r.exportCallTextData(f.brief.id);
+    expect(data.assessments![0]!.decision!.goal.status).toBe("achieved");
+    expect(data.assessmentRevisions).toHaveLength(1);
+    expect((await f.r.getCreditUsage(f.owner)).transactions.filter(t=>["call_charge","call_refund"].includes(t.type))).toHaveLength(1);
   });
   it("expires the reservation after restart and permits a late outcome without a retroactive charge",async()=>{
     const f=await fixture();await f.r.updateStatus(f.brief.id,"completed");

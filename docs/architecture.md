@@ -1,8 +1,8 @@
 # SHPROHLI architecture
 
-Voice architecture updated 2026-09-29 for native consent delegation, background AMD,
+Voice architecture updated 2026-10-01 for native consent delegation, background AMD,
 voice continuity, calm pacing, natural closing and native-first saved transcripts on
-`codex/live-unified-runtime`. Source migrations run through 0089.
+`codex/live-unified-runtime`. Source migrations run through 0091.
 Other feature checkpoints retain their original dates.
 Remaining work and release decisions live in the [roadmap](mvp-plan.md);
 [dated audits and verification](README.md) retain the evidence available at their dates.
@@ -52,13 +52,13 @@ brief sentence pauses and clear names, dates and numbers. Controlled speech rein
 that pace. No form or environment speed control is implemented. See
 [voice continuity, user feedback and verification limits](live-voice-continuity-2026-09-28.md).
 
-Live chooses ordinary speech and closing words. `end_call` supplies only a reason;
-there is no required recap or backend-authored farewell. The application validates
-state/evidence, checks completion of Live's farewell and waits for its matching,
-uncleared Twilio mark before hangup. Recipient speech cancels pending closure.
-Late assistant questions cannot cancel an accepted end_call; the existing short
-farewell recovery completes the authorized closing. See the
-[29 September repair and evidence](live-progress-fix-2026-09-29.md).
+Live chooses ordinary speech. In v5, accepted `end_call` saves a bounded terminal
+decision with a factual recap, recipient evidence and action state. The existing
+renderer produces that recap and the localized farewell as one finite audio unit
+using the selected voice. Native output is suspended while this unit owns playback.
+Only its current, uncleared Twilio mark permits hangup. Material recipient corrections
+resume the task; reciprocal farewells preserve the decision. One retry shares the
+original 30-second deadline. See the [implementation and evidence limits](live-stabilization-implementation-2026-10-01.md).
 Appointment tools retain approved-scope checks, an encrypted action journal
 (migration 0085), protected commitment playback and subsequent confirmation.
 Model output does not independently prove external booking or other business effects.
@@ -70,6 +70,15 @@ the existing storage/ledger. Complete native capture becomes the saved result so
 recording-based post-call ASR remains the fallback for missing or incomplete capture.
 See the [current Live contract](live-unified-runtime.md) and
 [28 September local real-call evidence](live-call-review-2026-09-28.md).
+
+Summary v4 freezes attempt/approved-snapshot/transcript bindings, call timestamps,
+approved appointment windows and exact-slot action evidence in an encrypted context.
+The existing structured summary request extracts cited candidates; shared pure calendar
+code calculates membership and DST validity. Payload v3 keeps computed facts separate
+from reported conversation evidence. UI, copy and PDF share one projection. Immutable
+assessment revisions may update the displayed result without rewriting the original
+billing evidence or settling twice. Migrations 0090/0091 extend export, redaction and
+key rotation; legacy summary payload v2 remains readable.
 
 ### Retry and call-page behavior
 
@@ -550,7 +559,7 @@ The validator requires evidence for non-unknown findings and all next steps; it
 checks references, not truth independently of the source conversation. Negative, partial,
 conditional and conflicting answers are valid outcomes. The compact view has
 expandable detail/evidence; if compaction is unavailable it shows validated findings.
-Summary generation uses its own `summary-v3` namespace, separate from the
+Summary generation uses its own `summary-v4:grounded-v3` namespace (legacy `summary-v3` remains readable), separate from the
 `text-processing-v2` translation/review generator; it does not retain a v1 summary
 reader. Plan/approval/ciphertext version compatibility is a separate concern.
 
@@ -591,7 +600,7 @@ atomically; startup/hourly maintenance enforces their 30-day limit. See [data li
 
 The ledger grants `+3` on verification. Starting reserves `-1`; connection alone
 does not settle it. Consented attempts hold the reservation for the final transcript
-and the existing summary job. One canonical `summary-v3` request also grades the
+and the existing summary job. One canonical `summary-v4:grounded-v3` request also grades the
 substantive exchange and goal against the attempt's approved plan. Server checks
 same attempt, compilation, source revision/hash, trusted recording consent, recipient
 speaker, preceding assistant question/message and exact quote. A confirmed exchange
@@ -693,7 +702,7 @@ migration runner enforces the gate; see the [rollout sequence](approved-call-pla
 
 AES-256-GCM `v2` envelopes authenticate key ID as additional data; the keyring supports
 an active write key, up to four decrypt-only previous keys and an explicit legacy `v1`
-mapping. Rotation and restore verification share an inventory of twenty ciphertext
+mapping. Rotation and restore verification share an inventory of twenty-four ciphertext
 columns, including preparation/text payloads, final assessments, notification
 payloads and temporary telemetry archive parts. An integration test
 checks the inventory against the migrated schema and completes a queued preparation

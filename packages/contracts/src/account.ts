@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { terminalDecisionSchema } from "./terminal-decision";
 import { normalizeAccountPhoneNumber, parseAccountPhoneNumber } from "./phone";
 import { callCompilationSchema, callSnapshotSchema, personNamePartSchema } from "./call-brief";
 import { callOutcomeViewSchema } from "./call-outcome";
@@ -408,6 +409,8 @@ export const accountExportCallTextDataSchema = z.strictObject({
   artifacts: z.array(callTextArtifactSchema),
   reviewReceipts: z.array(accountExportReviewReceiptSchema),
   assessments: z.array(callAssessmentRecordSchema).optional(),
+  assessmentRevisions: z.array(callAssessmentRecordSchema).optional(),
+  terminalDecisions: z.array(terminalDecisionSchema).optional(),
   voiceActions: z.array(accountExportVoiceActionSchema).optional()
 });
 

@@ -112,7 +112,7 @@ it("rotates immutable text evidence and queued input without changing source has
     expect(decryptJson(notification!.payload_ciphertext, parseDataEncryptionKeyring({ DATA_ENCRYPTION_KEY: newKey,
       DATA_ENCRYPTION_ACTIVE_KEY_ID: "current" }))).toEqual(notificationPayload);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 21, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 24, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);

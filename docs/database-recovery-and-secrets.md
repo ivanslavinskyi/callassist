@@ -213,3 +213,13 @@ seven critical tables and eight available ciphertext-family samples verified.
 The drill reported temporary resources removed. This proves the current tool's
 enumerated coverage, not verification of preparation ciphertext or production PITR.
 The targeted rotation probe separately reproduced the omitted-family failure.
+
+## 1 October summary and terminal evidence
+
+Migrations 0090/0091 add three encrypted families: artifact `context_ciphertext`,
+`call_assessment_revisions.payload_ciphertext` and
+`call_terminal_decisions.payload_ciphertext`. The shared rotation inventory has 24
+families. Account export includes the new evidence; deletion redacts it without
+rewriting immutable hashes or restoring removed payloads. Recovery verification
+includes both new tables. Earlier inventory counts above describe older releases.
+Run the current rotation/recovery commands with the matching API/worker version.

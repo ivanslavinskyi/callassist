@@ -87,13 +87,10 @@ async function harness(answer: string | null = "human", recordingFailure = false
 
   }
   async function closeNaturally(acknowledge = true, text = "Thank you for your help. Goodbye.") {
+    // Native output cannot complete an application-owned terminal audio unit.
     transcript("output", text);
     live.receive({ type: "session.output_audio.delta", delta: speech });
-    await vi.advanceTimersByTimeAsync(1_001); await flush();
-    const mark = twilio.sent.filter(e => e.event === "mark").at(-1)?.mark.name;
-    expect(mark).toMatch(/^live-closing:/);
-    if (acknowledge) twilio.receive({ event: "mark", mark: { name: mark } });
-    await flush(); return mark as string;
+    return play(acknowledge);
   }
   let sequence = 0;
   async function continueClosing(delegation: string, status = "completed") {
@@ -153,21 +150,21 @@ describe('inline assistance reason admission', () => {
 });
 
 describe("complex-call orchestration regression", () => {
-  it("settles an obsolete announced delegation without ending newer accepted work", async () => {
+  it("retains an ambiguous announced lease and suppresses its late effects", async () => {
     const h = await harness("human", false, false, "en-GB", false, "anna", "none"); await h.accept();
     h.live.receive({ type: "session.delegation.created", delegation: { id: "announced-old", response_id: "not-started", target: "responses" } });
     const fresh = await h.tool("report_task_state", { state: "continue", summary: "A required detail was supplied." }, "Here is a newer detail.");
     expect(h.result(fresh).ok).toBe(true); await h.continueClosing(fresh);
     await vi.advanceTimersByTimeAsync(15_001); await flush();
     expect(h.hangup).not.toHaveBeenCalled(); expect(h.twilio.readyState).toBe(1);
-    expect(h.requestedSpeech()).not.toContain("can't reliably continue");
+    expect(h.requestedSpeech()).toContain("can't reliably continue");
     const backend = (event: object) => h.live.receive({ type: "response.event", delegation_id: "announced-old", event });
     backend({ type: "response.created", response: { id: "not-started" } });
     backend({ type: "response.output_item.done", item: { type: "function_call", call_id: "late-old-call", name: "end_call",
       arguments: JSON.stringify({ reason: "cannot_proceed", resultSummary: "Old decision" }) } });
     backend({ type: "response.completed", response: { id: "not-started", status: "completed", output: [] } });
     await flush(); await flush();
-    expect(h.result("late-old-call")).toMatchObject({ ok: false, reason: "stale_or_unauthorized_request" });
+    expect(h.live.sent.some(e => e.type === "response.item.create" && e.item.call_id === "late-old-call")).toBe(false);
     expect(h.hangup).not.toHaveBeenCalled();
   });
   it("does not retry an old continuation command after newer progress in the same input epoch", async () => {
@@ -965,7 +962,7 @@ describe("autonomous conversation and protected effects", () => {
     const id = await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
     if (failure === "backend_missing") await vi.advanceTimersByTimeAsync(8_001);
     else await h.continueClosing(id, "failed");
-    expect(h.requestedSpeech()).toBe("Thank you. Goodbye.");
+    expect(h.requestedSpeech()).toBe("The recipient's answer was recorded. Thank you. Goodbye.");
     await h.play(false);
     expect(h.hangup).not.toHaveBeenCalled();
     const mark = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
@@ -984,7 +981,7 @@ describe("autonomous conversation and protected effects", () => {
     h.live.receive({ type: "session.output_audio.delta", delta: speech });
     await vi.advanceTimersByTimeAsync(1_001); await flush();
     const mark = h.twilio.sent.filter(e => e.event === "mark").at(-1)?.mark.name;
-    expect(mark).toMatch(/^live-closing:/);
+    expect(mark).toMatch(/^live-application-/);
     expect(h.semanticFetch).toHaveBeenCalledTimes(checks);
     expect(h.hangup).not.toHaveBeenCalled();
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
@@ -1008,7 +1005,33 @@ describe("autonomous conversation and protected effects", () => {
     await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
     await vi.advanceTimersByTimeAsync(8_001); await h.play(false);
     await vi.advanceTimersByTimeAsync(8_001); await flush();
+    expect(h.twilio.readyState).toBe(1);
+    await vi.advanceTimersByTimeAsync(14_000); await flush();
     expect(h.hangup).not.toHaveBeenCalled(); expect(h.twilio.readyState).toBe(3);
+  });
+  it("retries a failed terminal render with the same recap and saves its source decision", async () => {
+    const h = await harness(); await h.accept();
+    h.speechFetch.mockRejectedValueOnce(new Error("temporary rendering outage"));
+    const summary = "The application arrived yesterday.";
+    await h.tool("end_call", { reason: "objective_resolved", resultSummary: summary }, "It arrived yesterday.", false);
+    await flush(); await flush();
+    expect(h.speechRequests.at(-1)?.input).toBe(summary + " Thank you. Goodbye.");
+    expect(h.hangup).not.toHaveBeenCalled();
+    const data = await h.repository.exportCallTextData(h.brief.id);
+    expect(data.terminalDecisions).toHaveLength(1);
+    expect(data.terminalDecisions![0]).toMatchObject({ callAttemptId: h.attempt.id, summary,
+      snapshotHash: h.snapshot.compilationSnapshotHash, observations: [{ id: "turn-1", text: "It arrived yesterday." }] });
+    await h.play(); expect(h.hangup).toHaveBeenCalledOnce();
+  });
+  it("does not attribute a recipient-first terminal race to an accepted agent hangup", async () => {
+    const h = await harness(); await h.accept();
+    h.hangup.mockResolvedValue(false);
+    await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
+    await h.play(); await flush();
+    const events = await h.repository.listCallTelemetryEvents(h.brief.id);
+    const ended = events.find(event => event.payload.name === "conversation.ended");
+    expect(ended?.payload.metadata).toMatchObject({ reason: "socket_closed" });
+    expect(h.hangup).toHaveBeenCalledOnce();
   });
   it("does not let an interrupted closing continuation time out a resumed conversation", async () => {
     const h = await harness(); await h.accept();
@@ -1029,17 +1052,17 @@ describe("autonomous conversation and protected effects", () => {
     expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text.includes("Which date"))).toBe(true);
     expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(2);
   });
-  it("lets Live close without a backend script and hangs up only after verified playback", async () => {
+  it("renders the accepted factual summary and hangs up only after verified playback", async () => {
     const h = await harness(); await h.accept();
     const id = await h.tool("end_call", { reason: "objective_resolved" }, "It arrived yesterday.");
     expect(h.result(id)).toMatchObject({ ok: true, state: "closing_authorized", actionCompleted: false });
     expect(h.live.sent.filter(e => e.type === "response.item.create" && e.item.type === "message")).toEqual([]);
-    expect(h.requestedSpeech()).toBe("");
+    expect(h.requestedSpeech()).toBe("The recipient's answer was recorded. Thank you. Goodbye.");
     const mark = await h.closeNaturally(false);
     expect(h.hangup).not.toHaveBeenCalled();
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
     expect(h.hangup).toHaveBeenCalledOnce();
-    expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text === "Thank you for your help. Goodbye.")).toBe(true);
+    expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text === "The recipient's answer was recorded. Thank you. Goodbye.")).toBe(true);
   });
   it("does not hang up on a cleared mark; resumes naturally after an interruption", async () => {
     const h = await harness(); await h.accept();
@@ -1060,7 +1083,7 @@ describe("autonomous conversation and protected effects", () => {
     h.twilio.receive({ event: "media", media: { payload: speech } });
     for (let i = 0; i < 30; i++) h.twilio.receive({ event: "media", media: { payload: silence } });
     await vi.advanceTimersByTimeAsync(901);
-    expect(h.requestedSpeech()).toBe("Thank you. Goodbye.");
+    expect(h.requestedSpeech()).toBe("The recipient's answer was recorded. Thank you. Goodbye.");
     h.twilio.receive({ event: "mark", mark: { name: staleMark } }); await flush();
     expect(h.hangup).not.toHaveBeenCalled();
     const fallbackMark = await h.play(false);
@@ -1400,4 +1423,91 @@ describe('v4 protected output and recording admission failures', () => {
     h.live.receive({ type: 'session.input_transcript.delta', delta: 'PRIVATE_INVALID_BOUNDARY', start_ms: 0, end_ms: 50 });
     await flush(); expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text === 'PRIVATE_INVALID_BOUNDARY')).toBe(false);
   });
+});
+
+
+// Regression coverage promoted from the October 1 incident audit (synthetic data).
+it('ordinary native address acknowledgment cannot complete the authorized final audio', async () => {
+  const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none'); await h.accept();
+  const id = await h.tool('end_call', {reason:'cannot_proceed',resultSummary:'The appointment could not be confirmed.'}, 'The address is Example Street.', false);
+  expect(h.result(id).ok).toBe(true);
+  h.transcript('output','Understood, Example Street.');
+  h.live.receive({type:'session.output_audio.delta',delta:speech});
+  await h.continueClosing(id);
+  await vi.advanceTimersByTimeAsync(1001); await flush();
+  const mark = h.twilio.sent.filter(e=>e.event==='mark').at(-1)?.mark.name;
+  expect(mark).toMatch(/^live-application-/);
+  expect(h.hangup).not.toHaveBeenCalled();
+  expect(h.speechRequests.at(-1)?.input).toBe('The appointment could not be confirmed. Thank you. Goodbye.');
+  h.twilio.receive({event:'mark',mark:{name:mark}}); await flush();
+  expect(h.hangup).toHaveBeenCalledOnce();
+  expect(h.speechRequests).toHaveLength(2);
+});
+it('rejects unsupported cannot_proceed without task evidence', async () => {
+  const h = await harness('human', false, true, 'en-GB', false, 'anna', 'none'); await h.accept();
+  const id = await h.tool('end_call',{reason:'cannot_proceed',resultSummary:'The appointment is confirmed and payment was completed.'}, undefined, false);
+  expect(h.result(id)).toMatchObject({ok:false,reason:'recipient_evidence_required'});
+  expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions ?? []).toHaveLength(0);
+});
+it('rejected appointment keeps native commitment output closed until clarification', async () => {
+  const h = await harness('human', false, true, 'en-GB', false, 'anna', 'none'); await h.accept();
+  const id=await h.tool('request_appointment',{proposal:{...proposal,detailsConfirmed:false}},'Saturday is possible.');
+  expect(h.result(id)).toMatchObject({ok:false,reason:'unconfirmed_details'});
+  const before=h.twilio.sent.filter(e=>e.event==='media').length;
+  h.transcript('output','Good, I am booking that appointment.');
+  h.live.receive({type:'session.output_audio.delta',delta:speech});
+  expect(h.twilio.sent.filter(e=>e.event==='media')).toHaveLength(before);
+  expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions ?? []).toHaveLength(0);
+});
+it('collects streamed backend messages when response.completed output is empty', async () => {
+  const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none'); await h.accept();
+  h.transcript('input','I need one clarification.'); await vi.advanceTimersByTimeAsync(901);
+  for(let i=0;i<2;i++) {
+    const id='tool-free-'+i;
+    const backend=(event:object)=>h.live.receive({type:'response.event',delegation_id:id,event});
+    backend({type:'response.created',response:{id}});
+    backend({type:'response.output_text.delta',response_id:id,delta:'Ask which department is responsible.'});
+    backend({type:'response.output_item.done',response_id:id,item:{type:'message',role:'assistant',content:[{type:'output_text',text:'Ask which department is responsible.'}]}});
+    backend({type:'response.completed',response:{id,status:'completed',output:[]}});
+    await flush(); await flush();
+  }
+  expect(h.logger.warn).not.toHaveBeenCalledWith(expect.objectContaining({code:'LIVE_TASK_PROGRESS_MISSING'}),'Live owned backend failure pending');
+});
+it('a fresh recipient answer resets the previous turn waiting deadline', async () => {
+  const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none'); await h.accept();
+  const old=await h.tool('report_task_state',{state:'wait_for_recipient',summary:'Wait for the requested information.'},'Please hold while I check.');
+  await h.continueClosing(old);
+  await vi.advanceTimersByTimeAsync(45001); await flush();
+  const fresh=await h.tool('report_task_state',{state:'continue',summary:'The new answer allows the next question.'},'I found the answer, please continue.');
+  expect(h.result(fresh)).toMatchObject({ok:true,state:'continue'});
+});
+it('control: task silence before the first recipient answer requests bounded recovery', async () => {
+  const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none'); await h.accept();
+  h.transcript('output','May I ask about your opening hours?');
+  h.live.receive({type:'session.output_audio.delta',delta:speech});
+  await vi.advanceTimersByTimeAsync(60001); await flush();
+  expect(h.hangup).not.toHaveBeenCalled();
+  expect(h.twilio.readyState).toBe(1);
+  expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({waitingExpired:true}),'Live task decision requested');
+});
+it('silent native packets do not postpone missing-delegation recovery', async () => {
+  const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none'); await h.accept();
+  h.transcript('input','The requested information is ready.'); await vi.advanceTimersByTimeAsync(901);
+  for(let i=0;i<400;i++) {
+    h.live.receive({type:'session.output_audio.delta',delta:silence});
+    await vi.advanceTimersByTimeAsync(20);
+  }
+  expect(h.logger.info).toHaveBeenCalledWith(expect.anything(),'Live task decision requested');
+  expect(h.hangup).not.toHaveBeenCalled();
+});
+it('local timeout retains backend occupancy until a provider terminal event', async () => {
+  const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none'); await h.accept();
+  h.live.receive({type:'response.event',delegation_id:'still-physical',event:{type:'response.created',response:{id:'still-physical-response'}}});
+  h.transcript('input','Here is the updated information.'); await vi.advanceTimersByTimeAsync(901);
+  const before=h.live.sent.filter(e=>e.type==='response.create').length;
+  await vi.advanceTimersByTimeAsync(35001); await flush();
+  expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({responseId:'still-physical-response'}),'Live backend timeout retains physical occupancy');
+  expect(h.live.sent.filter(e=>e.type==='response.create').length).toBe(before);
+  expect(h.live.sent.some(e=>e.type==='response.cancel')).toBe(false);
+  expect(h.hangup).not.toHaveBeenCalled();
 });

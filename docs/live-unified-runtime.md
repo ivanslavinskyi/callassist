@@ -2,7 +2,9 @@
 
 Branch: `codex/live-unified-runtime`. Production last reported by the owner:
 `915a8f6`, Live, fallback=false, migrations through 0084 (owner report on 26 September,
-not a fresh deployment inspection). The current branch extends through migration 0089.
+not a fresh deployment inspection). The current branch extends through migration 0091.
+Current behavior is Live v5: see [1 October implementation](live-stabilization-implementation-2026-10-01.md).
+Dated checkpoints below describe historical candidates and do not establish v5 handset acceptance.
 No production deployment was performed. A local real Twilio information call passed on
 28 September; see [evidence and remaining observations](live-call-review-2026-09-28.md).
 The corrected runtime then passed a real Russian handset call on 29 September with continuous
@@ -99,7 +101,7 @@ the current policy, inconclusive `unknown`; neither result itself authorizes rec
 No Realtime or separate
 transcription socket is created. The application renders the exact AI/name/recording/
 transcription disclosure with the Speech API in the same selected voice; Live owns the
-opening, ordinary conversation and natural closing. Responses
+opening and ordinary conversation. Terminal recap/farewell uses the existing finite renderer. Responses
 uses native managed Responses delegation with GPT-6 Luna and parallel_tool_calls=false. The default driver
 in `.env.example` is live; fallback defaults false. Explicit fallback=true
 retains the older hybrid pilot for compatibility, including its Realtime speech.
@@ -245,41 +247,32 @@ an autonomous model can never speak an unauthorized claim. Speech verification i
 including cancelled requests. Consent shares the managed delegation response limit
 and has bounded clarification/playback deadlines. Ordinary task conversation is not routed through this gate.
 
-Live owns closing wording (updated 28 September 2026). `end_call` accepts only a
-reason; the backend supplies no spoken script. The application checks observed
-recipient evidence and required appointment confirmation before authorizing closure.
-Live then chooses one natural closing from the conversation context. Recap is optional,
-without a word-count target; already conveyed information need not be repeated.
-Internal constraints govern actions and are explained only when material to the
-recipient's request or expectations. There is no required recap or duplicate acknowledgment. Natural acknowledgments of received
-information may precede delegation; claims of completed external actions wait for actual
-results. Promises require an approved executor, authorization and capability.
+Live v5 terminal ownership (1 October 2026) replaces the earlier native closing
+heuristic. `end_call` supplies a reason and a short factual `resultSummary`. The
+application validates current recipient evidence and protected action state, then
+persists an encrypted terminal decision bound to the attempt and approved snapshot.
+The existing speech renderer produces recap plus localized farewell with the selected
+voice. It queues all finite audio frames before issuing a generation-specific Twilio
+mark. Native voice output is suspended and cannot satisfy this playback receipt.
+Only the actual, current, uncleared mark enables durable agent-hangup preparation.
+There is no closing-text classifier or calendar model call.
 
-Live has no speech-done event. The normal end_call function result is followed by
-response.create. Its terminal backend continuation enables inspection, without implying
-that voice output has finished. No separate application instruction starts the normal farewell.
-After 700 ms without voiced audio or new transcript
-content, a text-only semantic check asks whether the actual Live transcript contains
-a completed farewell with no pending question or unfinished speech. It writes no
-replacement speech and performs no task reasoning. Silence, tool success or backend
-completion alone cannot authorize hangup. A positive check queues a unique Twilio
-mark; only its acknowledgement ends the call. Later voiced audio or text invalidates
-the check and mark. Recipient interruption cancels closure; Live handles it in context
-and requests fresh end_call authorization. Native closing text is persisted as streamed.
-One classifier may be in flight, with at most two attempts including cancellations.
-It judges conversational completion, not business truth. Recipient input cancels
-closure and returns to Live. Late assistant questions cannot revoke an accepted
-end_call: they use the same bounded farewell recovery. Incomplete speech waits for changed text; two seconds without
-progress triggers recovery. Unclear/failed checks or a missing backend continuation (eight
-seconds) use one short localized farewell through the existing controlled-speech path.
-That fallback requires the complete expected transcript and a real playback mark, performs
-no further model classification, and has an eight-second deadline capped by the original
-30-second closing deadline. Normal mark acknowledgment is bounded by queued playback
-plus three seconds. Failed fallback never records successful playback.
-The semantic check is probabilistic and adds text-model latency/cost at closing;
-it is not a pre-playback filter or proof of task success. Existing appointment
-authorization and subsequent confirmation fences still apply.
-Tools, provider disconnects and timers cannot silently restart the call in another model.
+A recoverable appointment rejection requires clarification or same-proposal status
+reconciliation, rather than immediate `cannot_proceed`. `recipient_requested_end`
+remains available independently of appointment completion. Refusal/consent-failure and
+voicemail retain their existing short, policy-specific endings. Technical failure
+uses neutral failure copy without claiming success.
+
+Recipient interruption clears the mark immediately. The same backend interprets the
+full answer: reciprocal farewell keeps the terminal decision; a material correction
+resumes conversation and needs a new terminal decision. Replays preserve the factual
+recap. At most one failure retry shares a single 30-second closing deadline; interruption
+does not reset that deadline. Failed delivery records incomplete playback. Physical
+disconnect cancels pending work. A backend completion or ordinary address acknowledgment
+cannot end the call. Renderer-generated task speech conservatively retains recording-ASR
+fallback rather than claiming complete native-only capture.
+
+See [implementation, acceptance scenarios and limits](live-stabilization-implementation-2026-10-01.md).
 
 Live protocol errors are command-scoped rather than globally fatal. The runtime correlates
 `error.client_event_id` with tracked `session.update`, context-append, `response.create` and
@@ -306,12 +299,12 @@ Native Responses delegation replaces the custom client task controller. Live nor
 when reasoning/tools are needed and handles ordinary questions itself. Nested response
 events provide usage and completed function items; the application returns all function
 results and explicitly continues the managed backend, including an accepted closing tool.
-The closing continuation returns concise task state without further tools or a spoken script.
+The closing continuation returns concise task state without further tools or speech; terminal playback does not wait for it.
 There is no speak/wait/ignore decision loop or standalone Responses controller.
 After a 900 ms consent-answer settlement, the application is the sole owner of the
 managed consent `response.create`; GPT-Live is explicitly told not to initiate that handoff.
-Only work for the same current answer/configuration revision blocks a request, so stale work
-cannot wedge a correction. Task-stage delegation remains native and autonomous. Acoustic noise
+Logical freshness prevents stale effects. A local timeout retains physical provider occupancy
+until a provider terminal event; an ambiguously occupied session uses bounded failure instead of another command. Task-stage delegation remains native and autonomous. Acoustic noise
 does not create another answer revision. The existing backend interprets consent and task
 completion with the same tool and evidence gates. Recipient observations
 support application provenance without shadow transcript items or keyword rules.
@@ -450,11 +443,13 @@ Current source ownership:
 | Native transport, stage-specific backend configuration and stale-result checks | [live-conversation.ts](../apps/api/src/voice/live-conversation.ts) |
 | Consent/tool schemas and backend policies | [live-managed-tools.ts](../apps/api/src/voice/live-managed-tools.ts) |
 | Admission, consent, recording, task effects and playback transitions | [unified-live-call.ts](../apps/api/src/voice/unified-live-call.ts) |
-| Natural farewell completion and playback acknowledgment | [live-closing-speech.ts](../apps/api/src/voice/live-closing-speech.ts) |
-| Speech/action/closing verification; no consent classification | [live-semantic-gate.ts](../apps/api/src/voice/live-semantic-gate.ts) |
+| Terminal decision, finite recap/farewell and playback acknowledgment | [unified-live-call.ts](../apps/api/src/voice/unified-live-call.ts) |
+| Protected speech/action verification; no consent or terminal-completion classifier | [live-semantic-gate.ts](../apps/api/src/voice/live-semantic-gate.ts) |
 | Canonical native transcript assembly and provenance | [native-transcript.ts](../apps/api/src/storage/native-transcript.ts) |
 
-Apply additive migrations through 0089 before starting the new API/worker. Migration
+Apply additive migrations through 0091 before starting the new API/worker. 0090/0091
+add frozen summary context and immutable assessment/terminal evidence; see the
+[1 October rollout](deployment-preflight.md#schema-release-0090-0091). Migration
 0087 adds transcript provenance without rewriting historical payloads/hashes; 0088
 creates updated CMS publications in seven locales while preserving legal acceptances
 and publication history; 0089 allows the bounded `realtime.error` telemetry event. Use the

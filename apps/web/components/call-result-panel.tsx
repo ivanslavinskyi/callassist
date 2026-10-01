@@ -79,7 +79,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     });
   }
   function exportInput(): DerivedTranscriptExport {
-    return { brief, revision, appointmentAction, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
+    return { brief, revision, appointmentAction, summary, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
   }
   async function copyText() {
     const input = exportInput();
@@ -96,7 +96,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     } catch { setExportStatus("failed"); }
   }
   return <div className="call-result-panel">
-    {appointmentState ? <p role="status">
+    {appointmentState && !summary?.calendar ? <p role="status">
       {appointmentResultMessages[locale][appointmentState]}
     </p> : null}
     <section className="call-result-summary" aria-labelledby={`summary-heading-${revision.id}`}>

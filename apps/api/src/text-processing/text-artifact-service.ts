@@ -1,6 +1,6 @@
 import { uncertainAssessment } from "../credits/final-assessment";
 import {
-  TEXT_LANGUAGES, callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema, isPlanPreparationFailure,
+  TEXT_LANGUAGES, callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema, isPlanPreparationFailure, supportsSummaryAssessment,
   type CallCompilation, type CallTextArtifact, type TextArtifactKind, type TextLanguage,
   type PlanReviewPayload, type CallSummaryPayload
 } from "@callassist/contracts";
@@ -12,6 +12,8 @@ import { planReviewFields } from "./plan-review-fields";
 import { textDirectionEnabled, type TextCapabilities } from "./text-capabilities";
 import { TextProcessingError, textGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
 import { summaryInput } from "./summary-input";
+import { buildSummarySourceContext, assertSummaryContext } from "./summary-source";
+import { composeCalendarSummary } from "./summary-calendar";
 import { validateTextProcessingInput, validateTextProcessingOutput } from "./text-validation";
 
 export class TextArtifactServiceError extends Error {
@@ -85,7 +87,7 @@ export class TextArtifactService {
     if (!job.textArtifactId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     const lease = () => ({ ...baseLease, generation: job.generation, attemptNumber: job.attemptCount, checkedAt: new Date().toISOString() });
     try {
-      const artifact = await this.repository.claimTextArtifact(job.textArtifactId, lease());
+      let artifact = await this.repository.claimTextArtifact(job.textArtifactId, lease());
       if (["ready", "stale", "cancelled"].includes(artifact.status)) return;
       const snapshot = await this.repository.get(artifact.callId);
       if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
@@ -93,6 +95,11 @@ export class TextArtifactService {
         ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
       this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
       if (artifact.generatorVersion !== textGeneratorVersion(this.processor, artifact.kind)) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
+      if (artifact.kind === "call_summary") {
+        artifact = await this.repository.freezeTextArtifactContext(artifact.id,
+          artifact.sourceContext ?? await buildSummarySourceContext(this.repository, artifact), lease());
+        assertSummaryContext(artifact);
+      }
       const inputs = await this.#inputs(artifact);
       const completed = new Map((await this.repository.getTextArtifactChunks(artifact.id, lease())).map((chunk) => [chunk.index, chunk.payload]));
       const outputs: TextProcessingPayload[] = [];
@@ -145,6 +152,9 @@ export class TextArtifactService {
           await this.repository.saveTextArtifactChunk(artifact.id, inputs.length, payload, lease());
         }
       }
+      if (artifact.kind === "call_summary" && artifact.sourceContext) {
+        payload = composeCalendarSummary(callSummaryPayloadSchema.parse(payload), artifact.sourceContext, artifact.targetLanguage);
+      }
       await this.repository.completeTextArtifact(artifact.id, payload, lease());
     } catch (error) {
       const code = error instanceof TextProcessingError || error instanceof DurableJobExecutionError || error instanceof CallRepositoryError || error instanceof TextArtifactServiceError || error instanceof BetaControlError ? error.code : "TEXT_ARTIFACT_GENERATION_FAILED";
@@ -169,20 +179,26 @@ export class TextArtifactService {
     if (artifact.kind === "transcript_translation") return chunkBySize(source.segments).map((segments) => ({ kind: "transcript_translation", targetLanguage: artifact.targetLanguage, segments }));
     const compilation = artifact.compilationId ? await this.repository.getTextArtifactSourceCompilation(artifact.callId, artifact.compilationId) : null;
     if (!compilation?.compiledBrief) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    if (artifact.sourceContext?.compilationSnapshotHash !== compilation.snapshotHash || artifact.sourceContext?.callAttemptId !== source.callAttemptId)
+      throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
     // These are committed original segments retrieved from storage, never a claim
     // taken from the brief, recipient speech or a model/tool authorization.
     const inputs = chunkBySize(source.segments).map(segments => ({ ...summaryInput(compilation, segments, artifact.targetLanguage),
+      ...(artifact.sourceContext ? { sourceContext: assertSummaryContext(artifact) } : {}),
       applicationFacts: { transcriptPersisted: true as const, resultHandling: compilation.compiledBrief!.resultHandling } }));
     return inputs.length === 1 ? [await this.#assessmentInput(artifact, inputs[0]!)] : inputs;
   }
 
   async #assessmentInput(artifact: CallTextArtifact, input: Extract<TextProcessingInput,{kind:"call_summary"}>): Promise<Extract<TextProcessingInput,{kind:"call_summary"}>> {
-    if (!artifact.generatorVersion.startsWith("summary-v3:") || this.processor.driver !== "openai" || !artifact.transcriptRevisionId) return input;
+    if (!supportsSummaryAssessment(artifact.generatorVersion) || this.processor.driver !== "openai" || !artifact.transcriptRevisionId) return input;
     const source = await this.repository.getTranscriptRevision(artifact.callId,artifact.transcriptRevisionId);
     if (!source?.callAttemptId) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
     const attempt = await this.repository.getAttempt(artifact.callId,source.callAttemptId);
     const saved = await this.repository.getCallAssessment(artifact.callId,source.callAttemptId);
-    if (saved?.decision && saved.sourceHash === source.sourceHash && saved.summary.transcriptRevisionId === source.id) {
+    const priorArtifact = (await this.repository.listTextArtifacts(artifact.callId)).find(a => a.status === "ready" && a.contextHash === artifact.contextHash &&
+      a.generatorVersion === artifact.generatorVersion && a.transcriptRevisionId === source.id && a.payload && "assessment" in a.payload && a.payload.assessment);
+    if (saved?.decision && saved.sourceHash === source.sourceHash && saved.summary.transcriptRevisionId === source.id &&
+        saved.summary.evaluatorVersion?.endsWith(`:${artifact.generatorVersion}`) && saved.contextHash === artifact.contextHash && priorArtifact) {
       return {...input,assessmentMode:"preserve",fixedAssessment:saved.decision};
     }
     const snapshot = await this.repository.get(artifact.callId);
@@ -267,8 +283,13 @@ export function combinePayloads(kind: TextArtifactKind, outputs: TextProcessingP
     mergedSteps.set(step.text.trim(), { text: step.text, sourceSegmentIds: [...new Set([...(prior?.sourceSegmentIds ?? []), ...step.sourceSegmentIds])].slice(0, 30) });
   }
   // Keep cited steps where the chunk answers agree; conflicting evidence stays explicitly unresolved.
-  return { schemaVersion: 2, overview: [], findings, nextSteps: unresolvedAnswers ? [] : [...mergedSteps.values()].slice(0, 30),
-    unresolved: [...new Set([...summaries.flatMap((summary) => summary.unresolved), ...(unresolvedAnswers ? [uncertaintyText(language, summaries[0]!.unresolved[0] ?? summaries[0]!.findings[0]?.text ?? "…")] : [])])].slice(0, 30) } satisfies CallSummaryPayload;
+  const modern = summaries.every(summary => summary.schemaVersion === 3);
+  return { schemaVersion: modern ? 3 : 2, overview: [], findings, nextSteps: unresolvedAnswers ? [] : [...mergedSteps.values()].slice(0, 30),
+    ...(modern ? { appointmentExtraction: { candidates: [], conditions: [] }, unresolvedDetails: [
+      ...summaries.flatMap(s => s.unresolvedDetails ?? []),
+      ...(unresolvedAnswers ? [{ checkId: findings[0]!.id, reason: "conversation_evidence" as const, text: uncertaintyText(language, "…") }] : [])
+    ].slice(0, 30) } : {}),
+    unresolved: modern ? [] : [...new Set([...summaries.flatMap((summary) => summary.unresolved), ...(unresolvedAnswers ? [uncertaintyText(language, summaries[0]!.unresolved[0] ?? summaries[0]!.findings[0]?.text ?? "…")] : [])])].slice(0, 30) } satisfies CallSummaryPayload;
 }
 
 function uncertaintyText(language: TextLanguage, fallback: string) {

@@ -1,9 +1,10 @@
 import type { CallSummaryPayload } from "@callassist/contracts";
 import type { UiLocale } from "@/lib/i18n/messages";
 import { textArtifactMessages } from "@/lib/i18n/text-artifact-messages";
+import { summaryPresentation } from "@/lib/summary-presentation";
 
 /** Task-language facts; interface-language controls. Sources point to the original revision. */
-export function CallSummaryPresentation({ summary, uiLocale, sourceHref, onSource, headingLevel = 3 }: {
+export function CallSummaryPresentation({ summary: rawSummary, uiLocale, sourceHref, onSource, headingLevel = 3 }: {
   summary: CallSummaryPayload;
   uiLocale: UiLocale;
   sourceHref?: (segmentId: string) => string;
@@ -11,6 +12,7 @@ export function CallSummaryPresentation({ summary, uiLocale, sourceHref, onSourc
   headingLevel?: 3 | 4;
 }) {
   const copy = textArtifactMessages[uiLocale];
+  const summary = summaryPresentation(rawSummary);
   const Heading = headingLevel === 4 ? "h4" : "h3";
   const sources = (ids: string[]) => sourceHref && ids.length ? <details className="summary-evidence">
     <summary>{copy.sources}</summary>
@@ -33,6 +35,9 @@ export function CallSummaryPresentation({ summary, uiLocale, sourceHref, onSourc
       {cautions.length ? <div className="summary-cautions">{findings(cautions)}</div> : null}
     </> : summary.findings.length ? findings(summary.findings) : <p>{copy.noAnswers}</p>}
     {summary.nextSteps.length ? <section><Heading>{copy.nextSteps}</Heading><ul>{summary.nextSteps.map((item, index) => <li key={index}>{item.text}{sources(item.sourceSegmentIds)}</li>)}</ul></section> : null}
+    {summary.calendar ? <section><Heading>{summary.calendar.label}</Heading><p>{summary.calendar.text}</p>
+      <details className="summary-evidence"><summary>{summary.calendar.sourceLabel}</summary><p>{summary.calendar.sourceText}</p></details>
+      {sources(summary.calendar.sourceSegmentIds)}<p>{summary.calendar.actionText}</p></section> : null}
     {summary.unresolved.length ? <section><Heading>{copy.unresolved}</Heading><ul>{summary.unresolved.map((item, index) => <li key={index}>{item}</li>)}</ul></section> : null}
     {summary.overview.length && summary.findings.length ? <details className="summary-findings"><summary>{copy.allFindings}</summary>{findings(summary.findings)}</details> : null}
   </div>;

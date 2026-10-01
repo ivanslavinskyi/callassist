@@ -8,11 +8,11 @@ import { liveManagedTools, managedBackendInstructions, liveExecutionContext, liv
   type LiveExecutionParties } from "./live-managed-tools";
 import { createProviderEventOperationId } from "../realtime/openai-realtime-usage";
 
-import { decodePcmu, PcmuActivity } from "./pcmu-activity";
+import { decodePcmu, pcmuHasSpeech, PcmuActivity } from "./pcmu-activity";
 import { liveDurationUsage, liveResponsesUsage, object } from "./live-usage";
 
 type FunctionCall = { call_id: string; name: string; arguments: string };
-type BackendRun = { progressRevision: number; closingEpoch?: number; continuation: boolean; settled?: boolean; rejected?: boolean; id: string; operationId: string; epoch: number; answerRevision: number; backendRevision: number; consent: boolean; startedAt: number; calls: FunctionCall[]; completed: boolean; timer: ReturnType<typeof setTimeout> };
+type BackendRun = { progressRevision: number; closingEpoch?: number; continuation: boolean; settled?: boolean; timedOut?: boolean; usefulMessage?: boolean; rejected?: boolean; id: string; operationId: string; epoch: number; answerRevision: number; backendRevision: number; consent: boolean; startedAt: number; calls: FunctionCall[]; completed: boolean; timer: ReturnType<typeof setTimeout> };
 type LiveCommandPhase = "startup" | "consent" | "conversation";
 type LiveCommandType = "session.update" | "session.instructions.append" | "session.thinking.append" |
   "session.commentary.append" | "response.create" | "response.item.create";
@@ -337,7 +337,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       this.#resolveStart?.(); this.#resolveStart = null; this.#rejectStart = null;
       for (const audio of this.#queue) this.#send({ type: "session.input_audio.append", audio });
       this.#queue = []; this.#queuedBytes = 0;
-      this.context.telemetry(`live:${this.operationId}:ready`, { name: "realtime.ready", metadata: { model: this.#model, transcriptionModel: this.#model, runtimeVersion: "live-managed-v4" } });
+      this.context.telemetry(`live:${this.operationId}:ready`, { name: "realtime.ready", metadata: { model: this.#model, transcriptionModel: this.#model, runtimeVersion: "live-managed-v5" } });
       if (this.lifecycle) this.lifecycle.ready(); else this.#backendEnabled = true;
     } else if (event.type === "session.updated") {
       if (!this.#ready || !this.#checkVoice(object(event.session))) return;
@@ -356,7 +356,8 @@ export class OpenAILiveConversation implements VoiceConversation {
             this.#announced.get(delegation.id as string)!.timedOut = true;
             this.options.logger?.info({ callAttemptId: this.context.attemptId, delegationId: delegation.id,
               epoch, backendRevision: revision, progressRevision: progress, current: current() }, "Live announced backend deadline settled");
-            if (!current()) this.scheduleTaskDecision();
+            if (!current()) this.lifecycle?.backendFailed?.(() => this.#announced.has(delegation.id as string) ||
+              !!this.#runs.get(this.#delegations.get(delegation.id as string) ?? "")?.timedOut, "LIVE_BACKEND_START_TIMEOUT");
             else if (this.#consentBackend) this.lifecycle?.consentDecisionUnavailable?.("provider_failure");
             else this.lifecycle?.backendFailed?.(current, "LIVE_BACKEND_START_TIMEOUT");
           }, 15_000);
@@ -370,7 +371,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       if (this.lifecycle && (this.#outputSuspended || !this.#outputEpochReady)) {
         this.lifecycle.nativeOutputDiscarded?.(); return;
       }
-      this.#nativeActivityAt = Date.now();
+      if (pcmuHasSpeech(decodePcmu(event.delta)!)) this.#nativeActivityAt = Date.now();
       if (this.lifecycle) this.lifecycle.audio(event.delta as string);
       else if (!this.context.isClosing()) this.context.sendAudio(event.delta as string);
     } else if ((event.type === "session.input_transcript.delta" || event.type === "session.output_transcript.delta") && this.#ready) this.#transcript(event);
@@ -416,7 +417,7 @@ export class OpenAILiveConversation implements VoiceConversation {
           (command.backendScope ? command.backendScope.delegationId === delegationId : allowFresh)) {
         if (!command.backendScope) {
           this.context.telemetry(`live:${id}:association`, { name: "conversation.task", metadata: {
-            runtimeVersion: "live-managed-v4", phase: "running", revision: command.answerRevision,
+            runtimeVersion: "live-managed-v5", phase: "running", revision: command.answerRevision,
             cause: "ambiguous_backend_start" } });
           command.observedResponseId = responseId;
           // An unscoped start is not causal acknowledgement of this command.
@@ -583,8 +584,9 @@ export class OpenAILiveConversation implements VoiceConversation {
         startedAt: Date.now(), epoch: consent && predecessor ? predecessor.epoch : trigger?.epoch ?? announced?.epoch ?? this.#epoch,
         answerRevision: consent && predecessor ? predecessor.answerRevision : trigger?.answerRevision ?? announced?.answerRevision ?? this.#answerRevision,
         backendRevision: predecessor ? predecessor.backendRevision : trigger?.backendRevision ?? announced?.backendRevision ?? this.#backendRevision,
-        closingEpoch: predecessor?.closingEpoch, rejected: predecessor?.rejected, consent, calls: [], completed: false, timer: setTimeout(() => {
-          run.settled = true; run.completed = true;
+        closingEpoch: predecessor?.closingEpoch, rejected: predecessor?.rejected, timedOut: announced?.timedOut, consent, calls: [], completed: false, timer: setTimeout(() => {
+          // A local timeout fences effects, but cannot release a physical run.
+          run.timedOut = true;
           this.#write(() => this.options.service.completeProviderOperation({ operationId: run.operationId,
             outcome: "provider_error", providerRequestId: null, providerResponseId: run.id,
             providerModel: this.options.delegationModel ?? "gpt-6-luna", statusCode: null,
@@ -594,11 +596,11 @@ export class OpenAILiveConversation implements VoiceConversation {
             run.progressRevision === this.#progressRevision && (run.closingEpoch === undefined || this.context.isClosing());
           if (!current()) {
             this.context.telemetry(`live:${run.id}:obsolete-timeout`, { name: "conversation.task", metadata: {
-              runtimeVersion: "live-managed-v4", phase: "stale", revision: run.answerRevision,
+              runtimeVersion: "live-managed-v5", phase: "stale", revision: run.answerRevision,
               cause: "obsolete_backend_timeout", responseId: run.id } });
             this.options.logger?.info({ callAttemptId: this.context.attemptId, responseId: run.id,
-              epoch: run.epoch, currentEpoch: this.#epoch }, "Obsolete Live backend timeout settled");
-            this.#flushContinuations(); this.scheduleTaskDecision(); return;
+              epoch: run.epoch, currentEpoch: this.#epoch }, "Live backend timeout retains physical occupancy");
+            this.lifecycle?.backendFailed?.(() => !run.settled, "LIVE_BACKEND_TIMEOUT"); return;
           }
           if (run.consent && this.lifecycle?.consentDecisionUnavailable) {
             this.#requestedConsentDecision = "";
@@ -624,8 +626,12 @@ export class OpenAILiveConversation implements VoiceConversation {
     const id = typeof response.id === "string" ? response.id : typeof event.response_id === "string" ? event.response_id : this.#delegations.get(delegation);
     const run = id ? this.#runs.get(id) : undefined;
     if (!run || run.completed) return;
-    if (event.type === "response.output_item.done") {
+    if (event.type === "response.output_text.delta" && typeof event.delta === "string" && event.delta.trim()) {
+      run.usefulMessage = true;
+    } else if (event.type === "response.output_item.done") {
       const item = object(event.item);
+      if (item.type === "message" && (Array.isArray(item.content) ? item.content : [])
+        .some(part => typeof object(part).text === "string" && String(object(part).text).trim())) run.usefulMessage = true;
       if (item.type !== "function_call") return;
       if (typeof item.call_id !== "string" || typeof item.name !== "string" || typeof item.arguments !== "string" || item.arguments.length > 16_000 || run.calls.length >= 16) {
         this.#fail(); return;
@@ -645,7 +651,7 @@ export class OpenAILiveConversation implements VoiceConversation {
         if (command.type === 'response.create' && command.observedResponseId === run.id) {
           this.#forgetCommand(commandId, command);
           this.context.telemetry('live:' + commandId + ':settled', { name: 'conversation.task', metadata: {
-            runtimeVersion: 'live-managed-v4', phase: 'running', revision: command.answerRevision,
+            runtimeVersion: 'live-managed-v5', phase: 'running', revision: command.answerRevision,
             cause: 'ambiguous_command_settled' } });
         }
       }
@@ -663,6 +669,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       const persisted = this.#writes;
       void persisted.then(async () => {
         if (this.#closing) return;
+        if (run.timedOut) return;
         if (run.closingEpoch !== undefined && (run.closingEpoch !== this.#epoch || !this.context.isClosing())) return;
         if (!succeeded) {
           if (run.epoch !== this.#epoch || run.backendRevision !== this.#backendRevision) return;
@@ -678,7 +685,7 @@ export class OpenAILiveConversation implements VoiceConversation {
         if (run.closingEpoch !== undefined && !run.calls.length) this.lifecycle?.closingBackendCompleted?.();
         if (!run.consent && !run.continuation && !run.calls.length && !run.rejected && run.epoch === this.#epoch &&
             run.backendRevision === this.#backendRevision) {
-          const useful = (Array.isArray(response.output) ? response.output : []).some(item => {
+          const useful = run.usefulMessage || (Array.isArray(response.output) ? response.output : []).some(item => {
             const message = object(item);
             return message.type === "message" && (Array.isArray(message.content) ? message.content : [])
               .some(part => typeof object(part).text === "string" && String(object(part).text).trim());
@@ -762,13 +769,13 @@ export class OpenAILiveConversation implements VoiceConversation {
 
   #backendOccupied() {
     return this.#toolBusy || this.#continuations.size > 0 ||
-      [...this.#announced.values()].some(run => !run.timedOut) ||
+      this.#announced.size > 0 ||
       [...this.#commands.values()].some(command => command.type === "response.create") ||
       [...this.#runs.values()].some(run => !run.settled);
   }
   #flushContinuations() {
     if (this.#closing || this.#toolBusy || [...this.#runs.values()].some(run => !run.settled) ||
-        [...this.#announced.values()].some(run => !run.timedOut) ||
+        this.#announced.size > 0 ||
         [...this.#commands.values()].some(command => command.type === "response.create")) return;
     const next = this.#continuations.entries().next().value;
     if (!next) return;
@@ -896,7 +903,7 @@ Conversation: Follow the approved task, ask one useful question at a time, accep
 
 Calendar: Use application-calculated appointmentCalendar and tool-result appointmentDetails for date/weekday labels. When first proposing a concrete appointment date and when recapping its final confirmation, say the weekday, full date and time in the conversation language; later references may be shorter. These labels never expand authorization. Delegate weekday-only ambiguity or a conflicting weekday/date before any commitment; ask a focused clarification instead of guessing. Do not recite every allowed date or compute weekdays yourself.
 
-Appointments: applicationAppointmentState and tool results are the authoritative action journal. Collect missing required details before any commitment. If delivery is uncertain, delegate recovery for the SAME exact proposal: the application permits a bounded retry only for never-transmitted request audio; otherwise it asks whether the existing arrangement is already booked, without requesting another booking. Never independently repeat a booking request, change the proposal during recovery or call availability, a name or a birth date booking confirmation. Preserve uncertainty until a later exact recipient confirmation is accepted by the backend.
+Appointments: applicationAppointmentState and tool results are the authoritative action journal. Collect missing required details before any commitment. If delivery is uncertain, delegate recovery for the SAME exact proposal: the application always uses a bounded status-only check of whether the existing arrangement is already booked; it never transmits a second booking request. Never independently repeat a booking request, change the proposal during recovery or call availability, a name or a birth date booking confirmation. Preserve uncertainty until a later exact recipient confirmation is accepted by the backend.
 
 Backchannel policy: During the task, acknowledge naturally and briefly without competing with the recipient. During disclosure and consent, use no filler or acknowledgment.
 
@@ -914,5 +921,5 @@ Do not delegate when:
 - greeting, acknowledging or repeating a still-current result;
 - asking an approved question or a brief clarification;
 - answering from approved facts without a protected action.
-Delegate before claims that depend on backend work. After end_call is authorized, state its factual resultSummary naturally in one short sentence, mention only a material unresolved point if needed, say goodbye once, and ask no new question. Stop closing audio for an interruption and delegate the complete answer: a reciprocal farewell preserves closing; only a material question or correction resumes the conversation. Never repeat the completed task because the recipient said goodbye.`;
+Delegate before claims that depend on backend work. After end_call is authorized, stay silent: the application owns the single finite audio unit with the factual resultSummary and farewell. Do not produce competing closing audio or ask a new question. Stop closing audio for an interruption and delegate the complete answer: a reciprocal farewell preserves closing; only a material question or correction resumes the conversation. Never repeat the completed task because the recipient said goodbye.`;
 }

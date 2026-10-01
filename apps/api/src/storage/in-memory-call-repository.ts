@@ -1,3 +1,5 @@
+import { supportsSummaryAssessment } from "@callassist/contracts";
+import { terminalDecisionSchema, type TerminalDecision } from "@callassist/contracts";
 import { initialDisclosureProjection } from "@callassist/contracts";
 import type { NativeTranscriptCapture } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
@@ -221,6 +223,16 @@ function callPreparationFailureCode(
 
 export class InMemoryCallRepository implements CallRepository {
   readonly #voiceActions = new Map<string, VoiceActionRecord>();
+  readonly #terminalDecisions = new Map<string, TerminalDecision>();
+  async recordTerminalDecision(input: TerminalDecision) {
+    const parsed = terminalDecisionSchema.parse(input);
+    const attempt = this.#attempts.get(parsed.callBriefId)?.find(a => a.id === parsed.callAttemptId);
+    if (!attempt || attempt.compilationSnapshotHash !== parsed.snapshotHash || attempt.endedAt) throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
+    const key = `${parsed.callAttemptId}:${parsed.revision}`;
+    const prior = this.#terminalDecisions.get(key);
+    if (prior && JSON.stringify(prior) !== JSON.stringify(parsed)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+    this.#terminalDecisions.set(key, parsed);
+  }
   async beginVoiceAction(input: VoiceActionInput) {
     const attempt = (this.#attempts.get(input.callBriefId) ?? []).at(-1);
     if (!attempt || attempt.id !== input.callAttemptId || attempt.compilationSnapshotHash !== input.snapshotHash ||
@@ -243,6 +255,7 @@ export class InMemoryCallRepository implements CallRepository {
       return this.#require(id);
     },
     textAllowed: id => !this.#textCancelledUsers.has(this.#owners.get(id)??""),
+    action: id => this.#voiceActions.get(id),
     compilations: id => this.#compilations.get(id)??[],
     attempt: (id,attemptId) => {
       const recordingId=this.#calls.get(id)?.recording?.id;
@@ -262,6 +275,7 @@ export class InMemoryCallRepository implements CallRepository {
   );
   readonly #calls = new Map<string, CallSnapshot>();
   readonly #assessments = new Map<string, CallAssessmentRecord>();
+  readonly #assessmentRevisions = new Map<string, CallAssessmentRecord>();
   readonly #owners = new Map<string, string | null>();
   readonly #textCancelledUsers = new Set<string>();
   readonly #creationRequests = new Map<
@@ -1208,6 +1222,8 @@ export class InMemoryCallRepository implements CallRepository {
     };
     this.#callText.redact(input.callId);
     for (const [id, action] of this.#voiceActions) if (action.callBriefId === input.callId) this.#voiceActions.delete(id);
+    for (const [id, decision] of this.#terminalDecisions) if (decision.callBriefId === input.callId) this.#terminalDecisions.delete(id);
+    for (const [id, assessment] of this.#assessmentRevisions) if (this.#attempts.get(input.callId)?.some(a => a.id === assessment.callAttemptId)) this.#assessmentRevisions.delete(id);
     for (const attempt of this.#attempts.get(input.callId) ?? []) { const a=this.#assessments.get(attempt.id); if(a) a.decision=null; }
     snapshot.compilation = null;
     snapshot.languageContext = null;
@@ -1640,7 +1656,10 @@ export class InMemoryCallRepository implements CallRepository {
   async getCallAssessment(callId: string, attemptId: string) {
     if (this.#callDataDeletions.has(callId)) return null;
     if (!this.#attempts.get(callId)?.some(a=>a.id===attemptId)) return null;
-    return copy(this.#assessments.get(attemptId) ?? null);
+    return copy(this.#displayAssessment(attemptId) ?? null);
+  }
+  #displayAssessment(attemptId: string) {
+    return [...this.#assessmentRevisions.values()].filter(a => a.callAttemptId === attemptId).at(-1) ?? this.#assessments.get(attemptId);
   }
 
   async getPlanSource(...args: Parameters<CallTextRepository["getPlanSource"]>) { return this.#callText.getPlanSource(...args); }
@@ -1651,6 +1670,7 @@ export class InMemoryCallRepository implements CallRepository {
   async getTextArtifact(...args: Parameters<CallTextRepository["getTextArtifact"]>) { return this.#callText.getTextArtifact(...args); }
   async enqueueTextArtifact(...args: Parameters<CallTextRepository["enqueueTextArtifact"]>) { return this.#callText.enqueueTextArtifact(...args); }
   async claimTextArtifact(...args: Parameters<CallTextRepository["claimTextArtifact"]>) { return this.#callText.claimTextArtifact(...args); }
+  async freezeTextArtifactContext(...args: Parameters<CallTextRepository["freezeTextArtifactContext"]>) { return this.#callText.freezeTextArtifactContext(...args); }
   async getTextArtifactChunks(...args: Parameters<CallTextRepository["getTextArtifactChunks"]>) { return this.#callText.getTextArtifactChunks(...args); }
   async saveTextArtifactChunk(...args: Parameters<CallTextRepository["saveTextArtifactChunk"]>) { return this.#callText.saveTextArtifactChunk(...args); }
   async completeTextArtifact(...args: Parameters<CallTextRepository["completeTextArtifact"]>) { return this.#callText.completeTextArtifact(...args); }
@@ -1661,6 +1681,8 @@ export class InMemoryCallRepository implements CallRepository {
     const text = this.#callText.exportCallTextData(...args);
     const attempts = new Set((this.#attempts.get(args[0]) ?? []).map(a=>a.id));
     return {...text, assessments: copy([...this.#assessments.values()].filter(a=>attempts.has(a.callAttemptId))),
+      assessmentRevisions: copy([...this.#assessmentRevisions.values()].filter(a=>attempts.has(a.callAttemptId))),
+      terminalDecisions: copy([...this.#terminalDecisions.values()].filter(d=>d.callBriefId===args[0])),
       voiceActions: copy([...this.#voiceActions.values()].filter(a => a.callBriefId === args[0])) };
   }
 
@@ -3825,7 +3847,7 @@ export class InMemoryCallRepository implements CallRepository {
     const attemptIds = new Set((this.#attempts.get(brief.id) ?? []).map(({ id }) => id));
     return deriveCallLifecycle(brief.status, (this.#callTelemetryEvents.get(brief.id) ?? []).map(({ event }) => event), this.#creditTransactions.flatMap((entry) =>
       entry.callAttemptId && attemptIds.has(entry.callAttemptId) && (entry.type === "call_charge" || entry.type === "call_refund")
-        ? [{ callAttemptId: entry.callAttemptId, settlement: entry.type === "call_charge" ? "charge" as const : "refund" as const, qualified: this.#qualifiedCreditAttempts.has(entry.callAttemptId) }] : []), [...this.#assessments.values()].filter(a=>attemptIds.has(a.callAttemptId)));
+        ? [{ callAttemptId: entry.callAttemptId, settlement: entry.type === "call_charge" ? "charge" as const : "refund" as const, qualified: this.#qualifiedCreditAttempts.has(entry.callAttemptId) }] : []), [...attemptIds].flatMap(id => this.#displayAssessment(id) ?? []));
   }
 
   #appendConnectionTelemetry(
@@ -3982,7 +4004,7 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   #failAssessment(artifact: CallTextArtifact) {
-    if (artifact.kind !== "call_summary" || !artifact.generatorVersion.startsWith("summary-v3:") || !artifact.generatorVersion.includes(":openai:")) return;
+    if (artifact.kind !== "call_summary" || !supportsSummaryAssessment(artifact.generatorVersion) || !artifact.generatorVersion.includes(":openai:")) return;
     const revision=this.#callText.revisions.get(artifact.transcriptRevisionId??"")?.revision;
     const attempt=this.#attempts.get(artifact.callId)?.find(a=>a.id===revision?.callAttemptId);
     if (!attempt || attempt.compilationId !== artifact.compilationId || revision?.sourceHash !== artifact.sourceHash ||
@@ -4001,7 +4023,7 @@ export class InMemoryCallRepository implements CallRepository {
 
   #completeAssessment(artifact: CallTextArtifact) {
     if (artifact.kind !== "call_summary" || !artifact.payload || !("assessment" in artifact.payload) || !artifact.payload.assessment ||
-      !artifact.generatorVersion.startsWith("summary-v3:") || !artifact.generatorVersion.includes(":openai:")) return;
+      !supportsSummaryAssessment(artifact.generatorVersion) || !artifact.generatorVersion.includes(":openai:")) return;
     const revision=this.#callText.revisions.get(artifact.transcriptRevisionId??"")?.revision;
     const attempt=this.#attempts.get(artifact.callId)?.find(a=>a.id===revision?.callAttemptId);
     const compilation=this.#callText.getTextArtifactSourceCompilation(artifact.callId,artifact.compilationId??"");
@@ -4013,6 +4035,11 @@ export class InMemoryCallRepository implements CallRepository {
     try { decision=validateFinalAssessment(artifact.payload.assessment,revision.segments,compilation.compiledBrief.successCriteria.map((_,i)=>`criterion.${i}`)); }
     catch {throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");}
     const prior=this.#assessments.get(attempt.id);
+    if (artifact.contextHash) this.#assessmentRevisions.set(artifact.id, { callAttemptId: attempt.id, compilationId: artifact.compilationId!,
+      artifactId: artifact.id, contextHash: artifact.contextHash, sourceHash: revision.sourceHash, decision,
+      summary: { status: "ready", conversation: decision.conversation.status, goal: decision.goal.status,
+        reason: decision.conversation.status === "uncertain" ? "evidence_uncertain" : null, updatedAt: new Date().toISOString(),
+        deadlineAt: null, transcriptRevisionId: revision.id, evaluatorVersion: `${assessmentVersion}:${artifact.generatorVersion}` } });
     if (prior?.summary.status==="ready" && prior.summary.transcriptRevisionId===revision.id) return;
     if (prior?.summary.deadlineAt && prior.summary.deadlineAt <= new Date().toISOString()) {
       const settled=this.#settleAttempt(artifact.callId,attempt,"call_refund",undefined,true);

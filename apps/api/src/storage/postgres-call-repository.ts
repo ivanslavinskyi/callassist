@@ -18,6 +18,7 @@ import { isFreeProviderOperation } from "../beta/beta-spend-accounting";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
 import { voiceActionTransitionAllowed, type VoiceActionInput, type VoiceActionRecord, type VoiceActionTransition } from "./voice-action";
+import { terminalDecisionSchema, type TerminalDecision } from "@callassist/contracts";
 import type { CallTextRepository } from "./call-text-repository";
 import type { CompilationReviewApprovalInput } from "@callassist/contracts";
 import { conversationCreditEvidenceSchema, conversationCreditReason, conversationCreditRefundReason, type ConversationCreditEvidence } from "../credits/conversation-credit";
@@ -2680,6 +2681,7 @@ export class PostgresCallRepository implements CallRepository {
   async getTextArtifact(...args: Parameters<CallTextRepository["getTextArtifact"]>) { return this.#callText.getTextArtifact(...args); }
   async enqueueTextArtifact(...args: Parameters<CallTextRepository["enqueueTextArtifact"]>) { return this.#callText.enqueueTextArtifact(...args); }
   async claimTextArtifact(...args: Parameters<CallTextRepository["claimTextArtifact"]>) { return this.#callText.claimTextArtifact(...args); }
+  async freezeTextArtifactContext(...args: Parameters<CallTextRepository["freezeTextArtifactContext"]>) { return this.#callText.freezeTextArtifactContext(...args); }
   async getTextArtifactChunks(...args: Parameters<CallTextRepository["getTextArtifactChunks"]>) { return this.#callText.getTextArtifactChunks(...args); }
   async saveTextArtifactChunk(...args: Parameters<CallTextRepository["saveTextArtifactChunk"]>) { return this.#callText.saveTextArtifactChunk(...args); }
   async completeTextArtifact(...args: Parameters<CallTextRepository["completeTextArtifact"]>) { return this.#callText.completeTextArtifact(...args); }
@@ -2691,7 +2693,9 @@ export class PostgresCallRepository implements CallRepository {
   async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) {
     const text = await this.#callText.exportCallTextData(...args);
     const actions = await this.#sql`SELECT * FROM call_voice_actions WHERE call_brief_id=${args[0]} AND payload_ciphertext IS NOT NULL ORDER BY created_at`;
-    return {...text, assessments: await this.#assessments.export(args[0]), voiceActions: actions.map(row => ({
+    const terminal = await this.#sql`SELECT payload_ciphertext FROM call_terminal_decisions WHERE call_brief_id=${args[0]} AND payload_ciphertext IS NOT NULL ORDER BY created_at`;
+    return {...text, assessments: await this.#assessments.export(args[0]), assessmentRevisions: await this.#assessments.exportRevisions(args[0]),
+      terminalDecisions: terminal.map(row => terminalDecisionSchema.parse(decryptJson(row.payload_ciphertext,this.#encryptionKey))), voiceActions: actions.map(row => ({
       ...decryptJson<VoiceActionInput>(row.payload_ciphertext, this.#encryptionKey), id: row.id, version: row.version, state: row.state
     })) };
   }
@@ -2708,6 +2712,23 @@ export class PostgresCallRepository implements CallRepository {
         VALUES (${id},${input.callBriefId},${input.callAttemptId},${input.snapshotHash},'sending',${encrypted})
         ON CONFLICT (call_attempt_id) DO NOTHING RETURNING id`;
       return rows.length ? { ...input, id, version: 1, state: "sending" as const } : null;
+    });
+  }
+  async recordTerminalDecision(input: TerminalDecision) {
+    const parsed = terminalDecisionSchema.parse(input);
+    await this.#sql.begin(async tx => {
+      const [attempt] = await tx`SELECT a.id FROM call_attempts a JOIN call_briefs b ON b.id=a.call_brief_id
+        WHERE a.id=${parsed.callAttemptId} AND a.call_brief_id=${parsed.callBriefId} AND a.compilation_snapshot_hash=${parsed.snapshotHash}
+        AND a.ended_at IS NULL AND b.data_deleted_at IS NULL FOR UPDATE OF b`;
+      if (!attempt) throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
+      const [prior] = await tx`SELECT payload_ciphertext FROM call_terminal_decisions WHERE call_attempt_id=${parsed.callAttemptId} AND revision=${parsed.revision}`;
+      if (prior) {
+        if (!prior.payload_ciphertext || JSON.stringify(decryptJson(prior.payload_ciphertext, this.#encryptionKey)) !== JSON.stringify(parsed))
+          throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+        return;
+      }
+      await tx`INSERT INTO call_terminal_decisions(call_brief_id,call_attempt_id,revision,payload_ciphertext)
+        VALUES(${parsed.callBriefId},${parsed.callAttemptId},${parsed.revision},${encryptJson(parsed,this.#encryptionKey)})`;
     });
   }
   async transitionVoiceAction(input: VoiceActionTransition): Promise<VoiceActionRecord | null> {

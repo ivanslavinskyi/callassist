@@ -7,12 +7,13 @@ import type {
   TextLanguage,
   TranscriptTranslationPayload
 } from "@callassist/contracts";
+import type { SummarySourceContext } from "@callassist/contracts";
 import type { OpenAITextTokenUsage } from "../brief-compiler/brief-compiler";
 import { MockTextProcessor } from "./mock-text-processor";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
 export const TEXT_PROCESSOR_VERSION = "text-processing-v2";
-export const SUMMARY_PROCESSOR_VERSION = "summary-v3";
+export const SUMMARY_PROCESSOR_VERSION = "summary-v4";
 export const MAX_TEXT_PROCESSING_SOURCE_CHARACTERS = 60_000;
 
 export type TextProcessingInput = (
@@ -21,6 +22,7 @@ export type TextProcessingInput = (
   | { kind: "transcript_translation"; segments: SourceSegment[] }
   | { kind: "call_summary"; segments: SourceSegment[]; checks: Array<{ id: string; text: string }>;
       context: { objective: string; taskType: string; recipient: string; representedPerson: string };
+      sourceContext?: SummarySourceContext;
       extraction?: CallSummaryPayload;
       applicationFacts?: { transcriptPersisted: true; resultHandling: "capture_in_callassist" | "request_external_delivery" | "message_only" };
       assessmentMode?: "evaluate" | "preserve"; fixedAssessment?: CallAssessmentDecision }
@@ -65,7 +67,7 @@ export interface TextProcessor {
 
 /** Summary changes must not invalidate queued translations or their reusable chunks. */
 export function textGeneratorVersion(processor: Pick<TextProcessor, "generatorVersion">, kind: TextArtifactKind) {
-  return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:grounded-v2:${processor.generatorVersion}` : processor.generatorVersion;
+  return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:grounded-v3:${processor.generatorVersion}` : processor.generatorVersion;
 }
 
 export class TextProcessingError extends Error {

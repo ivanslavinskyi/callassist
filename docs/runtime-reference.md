@@ -50,7 +50,7 @@ See [registration/call behavior and tests](registration-and-call-improvements-20
 
 Migrations 0073/0074 add stop events and final assessments. List/snapshot/Inspector responses share the `lifecycle` projection, including `assessment_pending` and `assessment_unavailable`. Operations exposes independent `lifecycle.goals` and `userGoalFeedback` counts. Those two migrations introduce no production environment variable; migration 0075 and opt-out require the additional settings below. Apply migrations before restarting all API/worker processes; do not leave an old worker using immediate refunds. History lives at `/[locale]/app/history`. [Final assessment semantics and verification](post-call-assessment-diagnosis-2026-09-15.md).
 
-`summary-v3` combines the final summary and canonical assessment. Normal short calls use one request; transient failures allow one automatic retry per generation. The five-minute reservation deadline starts when termination is first processed and survives restarts. Worker maintenance releases expired reservations independently of slow model/transcription work. Actual model availability and diarization still affect assessment quality. Optional billable smoke evaluation: `ALLOW_BILLABLE_EVAL=true pnpm --filter @callassist/api eval:call-assessment` (eight synthetic examples; `ASSESSMENT_EVAL_CASE` limits the run to one named case).
+`summary-v4:grounded-v3` combines the final summary, cited appointment extraction and canonical assessment, followed by pure server calendar composition. Legacy `summary-v3` remains readable. Normal short calls use one request; transient failures allow one automatic retry per generation. The five-minute reservation deadline starts when termination is first processed and survives restarts. Worker maintenance releases expired reservations independently of slow model/transcription work. Actual model availability and diarization still affect assessment quality. Optional billable smoke evaluations: `ALLOW_BILLABLE_EVAL=true pnpm --filter @callassist/api eval:call-assessment` (eight synthetic examples; `ASSESSMENT_EVAL_CASE` selects one) and `eval:summary-calendar` (six synthetic examples, five languages; no calls).
 
 ## Processes and configuration loading
 
@@ -170,8 +170,8 @@ parity. See [deployment preflight and the chosen first-release target](deploymen
 | `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
 | `VOICE_RUNTIME_DRIVER` | `live`; accepts `realtime` or `live`, invalid values fail startup; API restart required. Set `realtime` explicitly only for rollback. |
 | `VOICE_RUNTIME_LIVE_FALLBACK` | `false`; one Live voice session with no Realtime sockets. Explicit `true` retains the legacy hybrid pilot and startup fallback |
-| `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live listening, consent interpretation, opening, conversation and closing when fallback is disabled |
-| `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; native Responses consent/task delegation plus appointment/closing semantic checks; `parallel_tool_calls=false` |
+| `OPENAI_LIVE_MODEL` | `gpt-live-1`; native Live listening, consent interpretation, opening and conversation when fallback is disabled; v5 terminal speech uses the existing selected-voice renderer |
+| `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; native Responses consent/task delegation plus protected appointment semantic checks; `parallel_tool_calls=false` |
 | `OPENAI_SPEECH_MODEL` | `gpt-4o-mini-tts`; application-owned exact disclosure synthesis. Raw 24 kHz PCM is converted locally to Twilio PCMU and cached per call. |
 | `OPENAI_LIVE_MALE_VOICE`, `OPENAI_LIVE_FEMALE_VOICE` | Fixed `cedar`, `marin`; optional legacy settings must match. Approved snapshots freeze the concrete voice ID. |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-2.1` |
@@ -199,7 +199,7 @@ normal tool-result/backend continuation, followed by a bounded completion check
 and playback confirmation; it does not verify business truth after speech.
 The historical consent
 stage stays readable for accounting. See [runtime details](live-unified-runtime.md)
-and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0089.
+and [real-call evidence](live-call-review-2026-09-28.md). Source migrations end at 0091.
 See [voice continuity](live-voice-continuity-2026-09-28.md) for the two-voice catalog,
 provider confirmation checks and manual acoustic acceptance.
 
@@ -262,9 +262,9 @@ were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
 ## Recent configuration and workers
 
-Apply the complete source catalog through **0089** before starting the new API and
+Apply the complete source catalog through **0091** before starting the new API and
 worker. Source catalog availability is not deployment evidence; verify the target's
-applied checksums. See [current schema rollout](deployment-preflight.md#schema-release-0085-0089).
+applied checksums. See [current schema rollout](deployment-preflight.md#schema-release-0090-0091).
 
 | Setting / subsystem | Current behavior |
 | --- | --- |
@@ -386,7 +386,7 @@ The last is a read-only gate required before migration 0061; follow the
 | `ADMIN_COST_TELEPHONY_USD_MICROS_PER_MINUTE` | Optional nonnegative integer connected-minute estimate |
 | `ADMIN_COST_REALTIME_USD_MICROS_PER_MINUTE` | Optional nonnegative integer connected-minute estimate |
 | `ADMIN_COST_TRANSCRIPTION_USD_MICROS_PER_MINUTE` | Optional nonnegative integer recorded-minute estimate |
-| `DATA_ENCRYPTION_REENCRYPT_CONFIRM` | Must equal active key ID; rotation verifies all twenty ciphertext columns |
+| `DATA_ENCRYPTION_REENCRYPT_CONFIRM` | Must equal active key ID; rotation verifies all twenty-four ciphertext columns |
 | `DATA_ENCRYPTION_REENCRYPT_BATCH_SIZE` | 1–500; default 100 |
 | `RECOVERY_SOURCE_DATABASE_URL` | Overrides DATABASE_URL for the local recovery drill |
 | `RECOVERY_POSTGRES_CONTAINER` | Explicit Docker PostgreSQL container, otherwise discovered through Compose |

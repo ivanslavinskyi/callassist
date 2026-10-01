@@ -27,10 +27,10 @@ export class MockTextProcessor implements TextProcessor {
         : input.kind === "transcript_translation"
           ? { segments: input.segments.map((segment) => ({ id: segment.id, text: prefix + segment.text })) }
           : input.extraction ? { ...input.extraction, overview: [] }
-          : { schemaVersion: 2, overview: [], findings: input.checks.map(check => ({
+          : { schemaVersion: input.sourceContext ? 3 : 2, ...(input.sourceContext ? { appointmentExtraction: { candidates: [], conditions: [] }, unresolvedDetails: [] } : {}), overview: [], findings: input.checks.map(check => ({
             id: check.id, label: prefix + "Result",
             text: "[MOCK: no factual summary has been generated]", certainty: "unknown", sourceSegmentIds: []
-          })), nextSteps: [], unresolved: ["[MOCK: no factual summary has been generated]"] };
+          })), nextSteps: [], unresolved: input.sourceContext ? [] : ["[MOCK: no factual summary has been generated]"] };
     return validateTextProcessingOutput(input, output);
   }
 }

@@ -6,6 +6,7 @@
   "scripts": {
     "og:build-fallbacks": "node --import tsx scripts/build-og-fallbacks.ts",
     "eval:call-assessment": "tsx src/text-processing/final-assessment.eval.ts",
+    "eval:summary-calendar": "node --use-system-ca --import tsx src/text-processing/summary-calendar.eval.ts",
     "deployment:check": "tsx src/config/check-deployment.ts",
     "deployment:check:prod": "node dist/config/check-deployment.js",
     "communications:check": "tsx src/auth/check-communications.ts",

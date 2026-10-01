@@ -1,6 +1,7 @@
 import type { NativeTranscriptCapture } from "./native-transcript";
 import type { AnsweringTransitionInput, AnsweringTransitionResult } from "../telephony/answering-policy";
 import type { VoiceActionInput, VoiceActionRecord, VoiceActionTransition } from "./voice-action";
+import type { TerminalDecision } from "@callassist/contracts";
 import type { CallTextRepository, TextArtifactProviderReservationInput } from "./call-text-repository";
 import type { BetaControls } from "../beta/beta-controls";
 import type { RecipientOptOutStore } from "../safety/recipient-opt-out-store";
@@ -826,6 +827,7 @@ export interface CallRepository extends CallTextRepository {
   ): Promise<void>;
   completeProviderOperation(input: CompleteProviderOperationInput): Promise<void>;
   beginVoiceAction(input: VoiceActionInput): Promise<VoiceActionRecord | null>;
+  recordTerminalDecision(input: TerminalDecision): Promise<void>;
   transitionVoiceAction(input: VoiceActionTransition): Promise<VoiceActionRecord | null>;
   cancelCallPreparations(userId: string, now: string): Promise<void>;
   isOwnedBy(id: string, userId: string | null): Promise<boolean>;

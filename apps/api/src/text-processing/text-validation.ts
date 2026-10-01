@@ -6,6 +6,7 @@ import {
   textLanguageSchema,
   transcriptTranslationPayloadSchema
 } from "@callassist/contracts";
+import { summarySourceContextSchema, type AppointmentExtraction } from "@callassist/contracts";
 import { protectedIdentifiers } from "../brief-compiler/brief-compiler";
 import {
   MAX_TEXT_PROCESSING_SOURCE_CHARACTERS,
@@ -49,6 +50,7 @@ export function validateTextProcessingInput(input: TextProcessingInput): void {
     }
     characterCount = input.segments.reduce((sum, segment) => sum + segment.id.length + segment.text.length, 0);
     if (input.kind === "call_summary") {
+      if (input.sourceContext && !summarySourceContextSchema.safeParse(input.sourceContext).success) throw new TextProcessingError("TEXT_INPUT_INVALID");
       if (!Array.isArray(input.checks) || input.checks.length > 30 || !input.checks.length ||
         input.checks.some(check => !nonempty(check.id, 160) || !nonempty(check.text, 12000)) ||
         new Set(input.checks.map(check => check.id)).size !== input.checks.length ||
@@ -57,7 +59,8 @@ export function validateTextProcessingInput(input: TextProcessingInput): void {
         throw new TextProcessingError("TEXT_INPUT_INVALID");
       }
       characterCount += input.checks.reduce((sum, check) => sum + check.id.length + check.text.length, 0) +
-        JSON.stringify(input.context).length + (input.extraction ? JSON.stringify(input.extraction).length : 0);
+        JSON.stringify(input.context).length + (input.extraction ? JSON.stringify(input.extraction).length : 0) +
+        (input.sourceContext ? JSON.stringify(input.sourceContext).length : 0);
     }
   } else {
     throw new TextProcessingError("TEXT_INPUT_INVALID");
@@ -88,13 +91,18 @@ export function validateTextProcessingOutput(
   const parsed = callSummaryPayloadSchema.safeParse(payload);
   if (!parsed.success || parsed.data.findings.length !== input.checks.length) invalid();
   const summary = parsed.data;
+  if (input.sourceContext) {
+    if (summary.schemaVersion !== 3 || !summary.appointmentExtraction || summary.calendar || !summary.unresolvedDetails || summary.unresolved.length) invalid();
+    validateAppointmentExtraction(input, summary.appointmentExtraction);
+    if (summary.unresolvedDetails.some(d => !input.checks.some(c => c.id === d.checkId))) invalid("TEXT_INVALID_REFERENCES");
+  } else if (summary.schemaVersion !== 2 || summary.calendar) invalid();
   if (input.assessmentMode) {
     if (!summary.assessment) invalid();
     try { validateFinalAssessment(summary.assessment, input.segments, input.checks.filter(c => c.id.startsWith("criterion.")).map(c => c.id)); }
     catch { invalid("TEXT_INVALID_ASSESSMENT"); }
     if (input.assessmentMode === "preserve" && JSON.stringify(summary.assessment) !== JSON.stringify(input.fixedAssessment)) invalid("TEXT_INVALID_FIXED_ASSESSMENT");
   } else if (summary.assessment) invalid();
-  if (input.extraction && ["findings", "nextSteps", "unresolved"].some(key =>
+  if (input.extraction && !input.sourceContext && ["findings", "nextSteps", "unresolved"].some(key =>
     JSON.stringify(summary[key as keyof typeof summary]) !== JSON.stringify(input.extraction![key as keyof typeof summary]))) invalid();
   const sourceIds = new Set(input.segments.map((segment) => segment.id));
   const sourceTexts = new Map(input.segments.map((segment) => [segment.id, segment.text]));
@@ -117,7 +125,26 @@ export function validateTextProcessingOutput(
   for (const step of summary.nextSteps) assertGroundedIdentifiers(step.text, evidence(step.sourceSegmentIds));
   const fullSource = [...input.checks.map(check => check.text), ...input.segments.map(segment => segment.text)].join("\n");
   for (const item of summary.unresolved) assertGroundedIdentifiers(item, fullSource);
+  for (const item of summary.unresolvedDetails ?? []) assertGroundedIdentifiers(item.text, fullSource);
   return summary;
+}
+
+function validateAppointmentExtraction(input: Extract<TextProcessingInput, {kind: "call_summary"}>, extraction: AppointmentExtraction) {
+  const authority = input.sourceContext?.appointmentAuthorization;
+  if (!authority && (extraction.candidates.length || extraction.conditions.length)) invalid("TEXT_INVALID_REFERENCES");
+  const candidates = new Map(extraction.candidates.map((c, index) => [c.id, { ...c, index }]));
+  if (candidates.size !== extraction.candidates.length) invalid("TEXT_INVALID_REFERENCES");
+  const sources = new Map(input.segments.map((s, index) => [s.id, { ...s, index }]));
+  for (const c of candidates.values()) {
+    if (new Set(c.sourceSegmentIds).size !== c.sourceSegmentIds.length || c.sourceSegmentIds.some(id => !sources.has(id)) ||
+        new Set(c.supersedes).size !== c.supersedes.length || c.supersedes.some(id => !candidates.has(id) || candidates.get(id)!.index >= c.index) ||
+        (c.zoneSource === "approved_plan" && c.timeZone !== authority?.timeZone) ||
+        (c.zoneSource === "unknown" && c.timeZone !== null) ||
+        (c.status === "reported_confirmed" && !c.sourceSegmentIds.some(id => sources.get(id)?.role === "recipient"))) invalid("TEXT_INVALID_REFERENCES");
+  }
+  if (new Set(extraction.conditions.map(c => c.checkId)).size !== extraction.conditions.length) invalid("TEXT_INVALID_REFERENCES");
+  for (const c of extraction.conditions) if (!input.checks.some(check => check.id === c.checkId) ||
+    (c.candidateId !== null && !candidates.has(c.candidateId))) invalid("TEXT_INVALID_REFERENCES");
 }
 
 function orderedTranslations(value: unknown, source: Array<{ id: string; text: string }>) {
@@ -164,7 +191,22 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
   const checkId = { ...bounded(160), enum: input.checks.map(c => c.id) };
   const criteriaIds = input.checks.filter(c => c.id.startsWith("criterion.")).map(c => c.id);
   return object({
-    schemaVersion: { type: "integer", enum: [2] },
+    schemaVersion: { type: "integer", enum: [input.sourceContext ? 3 : 2] },
+    ...(input.sourceContext ? {
+      appointmentExtraction: object({
+        candidates: { type: "array", maxItems: input.sourceContext.appointmentAuthorization ? 10 : 0, items: object({
+          id: bounded(80), date: { type: ["string", "null"], pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+          startTime: { type: ["string", "null"], pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" }, timeZone: { type: ["string", "null"], maxLength: 80 },
+          zoneSource: { type: "string", enum: ["approved_plan", "conversation", "unknown"] },
+          status: { type: "string", enum: ["offered", "reported_confirmed", "conditional", "corrected", "ambiguous"] },
+          supersedes: { type: "array", maxItems: 10, items: bounded(80) }, sourceSegmentIds: { ...citations, minItems: 1 }
+        }) },
+        conditions: { type: "array", maxItems: input.sourceContext.appointmentAuthorization ? 30 : 0, items: object({
+          checkId, kind: { type: "string", enum: ["calendar_only", "combined"] }, candidateId: { type: ["string", "null"], maxLength: 80 }
+        }) }
+      }),
+      unresolvedDetails: { type: "array", maxItems: 30, items: object({ checkId, reason: { type: "string", enum: ["conversation_evidence"] }, text: bounded(4000) }) }
+    } : {}),
     ...(input.assessmentMode ? { assessment: object({
       conversation: object({ status: { type: "string", enum: ["confirmed", "absent", "uncertain"] },
         category: { type: "string", enum: ["task_answer", "cannot_answer", "referral", "message_acknowledged", "none", "uncertain"] },
@@ -183,7 +225,7 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
       sourceSegmentIds: citations
     }) },
     nextSteps: { type: "array", maxItems: 30, items: object({ text: bounded(2000), sourceSegmentIds: { ...citations, minItems: 1 } }) },
-    unresolved: { type: "array", maxItems: 30, items: bounded(4000) }
+    unresolved: { type: "array", maxItems: input.sourceContext ? 0 : 30, items: bounded(4000) }
   });
 }
 

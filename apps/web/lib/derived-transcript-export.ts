@@ -1,5 +1,7 @@
 import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
 import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
+import { summaryExportLines } from "./summary-presentation";
+import type { CallSummaryPayload } from "@callassist/contracts";
 import type { CallBrief, CallSnapshot, FinalTranscriptRevision, SourceSegment, TextLanguage } from "@callassist/contracts";
 import { appointmentResultState } from "./call-result-projection";
 import { appointmentResultMessages } from "./i18n/appointment-result-messages";
@@ -18,11 +20,12 @@ export type DerivedTranscriptExport = {
   translationLanguage: TextLanguage | null;
   uiLocale: UiLocale;
   appointmentAction?: CallSnapshot["appointmentAction"];
+  summary?: CallSummaryPayload | null;
 };
 
 export function buildDerivedTranscriptCopyText(input: DerivedTranscriptExport) {
   const copy = textArtifactMessages[input.uiLocale];
-  return [...exportHeader(input), "", appointmentNote(input), transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
+  return [...exportHeader(input), "", ...summaryExportLines(input.summary), "", appointmentNote(input), transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
     const timestamp = segment.startSeconds === null ? "" : `[~${formatTranscriptOffset(segment.startSeconds)}] `;
     return `${timestamp}[${segment.id}] ${speaker(input, segment)}: ${segment.text}`;
   }), ...(input.segments.length ? [] : [input.text]), "", input.translationLanguage ? copy.translationNote : "", messages[input.uiLocale].live.aiWarning].filter((value, index, values) => value || values[index - 1]).join("\n");
@@ -53,7 +56,7 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
       offset: segment.startSeconds === null ? null : `~${formatTranscriptOffset(segment.startSeconds)}`
     })),
     text: input.text,
-    notes: [appointmentNote(input), messages[input.uiLocale].live.aiWarning].filter(Boolean),
+    notes: [...summaryExportLines(input.summary), appointmentNote(input), messages[input.uiLocale].live.aiWarning].filter(Boolean),
     source: { title: common.source, rows: [
       { label: copy.sourceRevision, value: `${input.revision.revision} · ${input.revision.id}` },
       { label: "SHA-256", value: input.revision.sourceHash }
@@ -62,6 +65,7 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
 }
 
 function appointmentNote(input: DerivedTranscriptExport) {
+  if (input.summary?.calendar) return "";
   const state = appointmentResultState(input.appointmentAction, input.revision);
   return state ? appointmentResultMessages[input.uiLocale][state] : "";
 }

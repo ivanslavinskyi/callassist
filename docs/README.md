@@ -1,6 +1,6 @@
 # Documentation index
 
-Current-branch references refreshed **2026-09-29** for unified Live, native consent
+Current-branch references refreshed **2026-10-01** for unified Live, native consent
 delegation, background AMD, native-first saved transcripts, seven-locale CMS migration
 and the schema release procedure. Public brand: SHPROHLI; internal package names,
 cookies and database identifiers still use callassist.
@@ -20,13 +20,26 @@ mapped there and are not separate work queues.
 
 ## Current references
 
+[Live v4 completion audit and stabilization plan, 1 October](live-runtime-completion-audit-2026-10-01.md)
+reviews the latest handset call: application hangup after an address acknowledgement,
+without a saved farewell, plus seven reproduced runtime defects. It proposes one
+grounded terminal decision and controlled final playback across the supported policy
+space. The [1 October implementation](live-stabilization-implementation-2026-10-01.md)
+delivers Live v5, frozen summary context, deterministic calendar validation, immutable
+assessment revisions and a finite recap/farewell with exact playback acknowledgment.
+Handset acceptance remains open; migrations 0090/0091 are required.
+The [detailed implementation plan](live-stabilization-implementation-plan-2026-10-01.md)
+also addresses the post-call calendar finding: approved windows and the call date
+were omitted from summary input. Calendar membership belongs to shared pure code;
+the plan adds no calendar agent, tool, model request or realtime orchestration layer.
+
 [Consent and completion fixes, 29 September](live-progress-fix-2026-09-29.md)
 records the fixes following [two failed calls](live-two-calls-review-2026-09-29.md):
 overlapping consent, bounded waiting, recovery when native delegation is absent,
 and farewell recovery after late assistant speech. It distinguishes synthetic API
 evidence from the outstanding handset acceptance. The same follow-up makes voice
 settings and SHPROHLI transcript labels consistent across the UI and exports.
-Use the [current local checkpoint](local-testing.md#current-checkpoint-29-september)
+Use the [current local checkpoint](local-testing.md#current-checkpoint-1-october)
 for the next manual test.
 
 The [29 September stable Live checkpoint](live-stable-checkpoint-2026-09-29.md) records
@@ -54,11 +67,11 @@ Full handset acceptance of the combined follow-up remains open.
 
 [Unified Live runtime](live-unified-runtime.md) is the current source of truth for
 `codex/live-unified-runtime`: one voice session, native `report_consent`, application
-recording/playback gates, task tools and a Live-authored closing without a recap script.
+recording/playback gates, task tools and application-rendered factual recap/farewell.
 The [28 September call review](live-call-review-2026-09-28.md) confirms initial voice
 consent, recording after consent and playback-confirmed hangup in a real local Twilio
 call; it also records the remaining short filler before closing. Broader manual
-acceptance and production deployment remain open. The source catalog ends at **0089**.
+acceptance and production deployment remain open. The source catalog ends at **0091**.
 
 The [voice continuity and pace follow-up](live-voice-continuity-2026-09-28.md) records
 the two-voice form, frozen voice IDs and provider confirmation diagnostics. The owner
@@ -162,7 +175,7 @@ revisions must be verified on the target database.
 | Document | Purpose |
 | --- | --- |
 | [Operations](operations-readiness.md) | Health, minimized logs, worker/result/live-state diagnosis, recovery and deployment gaps |
-| [Database recovery and secrets](database-recovery-and-secrets.md) | Rotation/restore procedures, twenty ciphertext columns and dated evidence |
+| [Database recovery and secrets](database-recovery-and-secrets.md) | Rotation/restore procedures, twenty-four ciphertext columns and dated evidence |
 | [Data deletion](data-deletion-policy.md) | Provider-first deletion, artifact fencing/redaction, account anonymization and contact cleanup |
 | [Password recovery](password-recovery-policy.md) | Verified-phone recovery, bounded capabilities and session invalidation |
 | [Phone change](phone-change-policy.md) | Session-bound replacement, OTP and temporary challenge lifecycle |

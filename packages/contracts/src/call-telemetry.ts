@@ -57,7 +57,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     attempt: z.number().int().min(0).max(2)
   }) }),
   z.strictObject({ name: z.literal("conversation.task"), metadata: z.strictObject({
-    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
+    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
     revision: z.number().int().nonnegative(), requestId: z.uuid().optional(),
     cause: safeTokenSchema.optional(), responseId: safeTokenSchema.optional(), released: z.boolean().optional(),
     actionState: z.enum(["sending", "delivered", "uncertain", "confirmed"]).optional(),
@@ -185,7 +185,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     metadata: z.strictObject({
       model: safeTokenSchema,
       transcriptionModel: safeTokenSchema,
-      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4"]).optional()
+      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5"]).optional()
     })
   }),
   z.strictObject({

@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   CallTextArtifact, FinalTranscriptRevision, FinalTranscriptSegment, PlanSource,
-  TextArtifactKind, TextLanguage, ReviewEvidence, CallCompilation, CallAssessmentRecord
+  TextArtifactKind, TextLanguage, ReviewEvidence, CallCompilation, CallAssessmentRecord, SummarySourceContext
 } from "@callassist/contracts";
 import type { DurableJob, DurableJobLease } from "../jobs/durable-job";
 import type { VoiceActionRecord } from "./voice-action";
+import type { TerminalDecision } from "@callassist/contracts";
 
 export type EnqueueTextArtifactInput = {
   callId: string; kind: TextArtifactKind; compilationId?: string; transcriptRevisionId?: string;
@@ -30,6 +31,7 @@ export interface CallTextRepository {
   getTextArtifact(callId: string, artifactId: string): Promise<CallTextArtifact | null>;
   enqueueTextArtifact(input: EnqueueTextArtifactInput): Promise<CallTextArtifact>;
   claimTextArtifact(artifactId: string, lease: DurableJobLease): Promise<CallTextArtifact>;
+  freezeTextArtifactContext(artifactId: string, context: SummarySourceContext, lease: DurableJobLease): Promise<CallTextArtifact>;
   getTextArtifactChunks(artifactId: string, lease: DurableJobLease): Promise<TextArtifactChunk[]>;
   saveTextArtifactChunk(artifactId: string, index: number, payload: unknown, lease: DurableJobLease): Promise<void>;
   completeTextArtifact(artifactId: string, payload: NonNullable<CallTextArtifact["payload"]>, lease: DurableJobLease): Promise<CallTextArtifact>;
@@ -41,6 +43,8 @@ export interface CallTextRepository {
   exportCallTextData(callId: string): Promise<{
     compilations: Array<{ id: string; compilation: CallCompilation }>;
     assessments?: CallAssessmentRecord[];
+    assessmentRevisions?: CallAssessmentRecord[];
+    terminalDecisions?: TerminalDecision[];
     voiceActions?: VoiceActionRecord[];
     transcriptRevisions: FinalTranscriptRevision[]; artifacts: CallTextArtifact[]; reviewReceipts: CallPlanReviewReceipt[];
   }>;
