@@ -1,4 +1,9 @@
-import { callSummaryPayloadSchema, transcriptTranslationPayloadSchema, type CallTextArtifact, type FinalTranscriptRevision, type TextLanguage } from "@callassist/contracts";
+import { callSummaryPayloadSchema, transcriptTranslationPayloadSchema, type CallSnapshot, type CallTextArtifact, type FinalTranscriptRevision, type TextLanguage } from "@callassist/contracts";
+
+export function appointmentResultState(action: CallSnapshot["appointmentAction"], revision: FinalTranscriptRevision) {
+  return action && action.callAttemptId === revision.callAttemptId
+    ? action.state === "confirmed" ? "confirmed" : "unresolved" : null;
+}
 
 export function currentResultArtifact(items: CallTextArtifact[], revision: FinalTranscriptRevision, kind: "transcript_translation" | "call_summary", language: TextLanguage) {
   const candidates = items.filter((item) => !["cancelled", "stale"].includes(item.status) && item.kind === kind && item.transcriptRevisionId === revision.id && item.sourceHash === revision.sourceHash && item.targetLanguage === language)

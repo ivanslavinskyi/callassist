@@ -3,6 +3,17 @@ import { LiveControlledSpeech } from "./live-controlled-speech";
 import { silence, speech } from "./voice-test-helpers";
 import type { SemanticDecision } from "./live-semantic-gate";
 afterEach(() => vi.useRealTimers());
+it("holds an already verified commitment through energy-only input until quiet, without replaying it", async () => {
+  vi.useFakeTimers();
+  const release = vi.fn(), played = vi.fn(), fail = vi.fn();
+  const gate = new LiveControlledSpeech("Please confirm Tuesday.", release, played, fail, async () => "equivalent", true);
+  gate.audio(speech); gate.transcript("Please confirm Tuesday."); gate.inputActivity("started");
+  await vi.advanceTimersByTimeAsync(600);
+  expect(release).not.toHaveBeenCalled(); expect(fail).not.toHaveBeenCalled();
+  gate.inputActivity("stopped"); await vi.advanceTimersByTimeAsync(501);
+  expect(release).toHaveBeenCalledExactlyOnceWith([speech], gate.mark);
+  gate.acknowledge(gate.mark); expect(played).toHaveBeenCalledOnce();
+});
 it("withholds critical PCMU until text verification, then requires the matching playback mark", async () => {
   vi.useFakeTimers();
   const release = vi.fn(), played = vi.fn(), fail = vi.fn();

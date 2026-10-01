@@ -395,6 +395,8 @@ export const accountExportVoiceActionSchema = z.strictObject({
   id: z.uuid(), callBriefId: z.uuid(), callAttemptId: z.uuid(), snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
   version: z.number().int().positive(), state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
   content: z.string(), evidence: z.array(z.string()),
+  delivery: z.strictObject({ kind: z.enum(["request", "status_check"]), status: z.enum(["not_sent", "unacknowledged", "played"]),
+    attempt: z.number().int().min(1).max(3) }).optional(),
   observations: z.array(z.strictObject({ id: z.string(), text: z.string() })).optional(),
   proposal: z.strictObject({ operation: z.enum(["book", "confirm_existing"]), date: z.string(), startTime: z.string(), timeZone: z.string(),
     serviceMatches: z.boolean(), recipientMatches: z.boolean(), requiresPaymentOrNewTerms: z.boolean(), detailsConfirmed: z.boolean() })

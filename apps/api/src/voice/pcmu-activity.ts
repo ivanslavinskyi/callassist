@@ -3,6 +3,7 @@ export class PcmuActivity {
   speaking = false;
   #voicedMs = 0;
   #quietMs = 0;
+  get voicedMs() { return this.#voicedMs; }
 
   push(bytes: Buffer): "started" | "stopped" | null {
     let energy = 0;

@@ -1,5 +1,8 @@
 # Stable local Live checkpoint — 29 September 2026
 
+Current follow-up: [v4 implementation and acceptance record](live-combined-stabilization-implementation-2026-09-30.md) implements the combined runtime/disclosure changes. Historical evidence below describes its original version; v4 handset acceptance remains pending.
+
+
 Status: accepted as the stable local implementation baseline after a real handset call.
 This is implementation and local acceptance evidence, not a production deployment claim.
 
@@ -64,3 +67,10 @@ equivalent regional-tag) translation and does not run a second language detector
 Any later change to disclosure/consent ordering, AMD admission, Live command error policy, closing,
 native transcript selection or prompt/call-language translation gating must preserve this evidence
 as an explicit regression baseline.
+
+## Later consent candidate
+
+The [consent stabilization candidate](live-consent-stabilization-2026-09-29.md) changes the
+disclosure/consent boundary after this checkpoint. It is implemented and automatically verified but
+is not part of this accepted stable baseline until a new real handset call passes. Use this checkpoint
+and commit `4e0b6a5` as the rollback reference if that acceptance fails.

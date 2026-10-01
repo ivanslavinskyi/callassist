@@ -33,6 +33,12 @@ const validBrief = {
 };
 
 describe("createCallBriefInputSchema", () => {
+  it.each(ASSISTANT_PROFILES)("normalizes legacy profile $id to the brand without changing its voice", profile => {
+    const normalized = normalizeCreateCallBriefInput({ ...validBrief, assistantProfileId: profile.id });
+    expect(normalized.agentName).toBe("Shprohli");
+    expect(normalized.voiceGender).toBe(profile.voiceGender);
+  });
+
   it("requires an exact revision and SHA-256 hash for compilation approval", () => {
     expect(compilationApprovalInputSchema.safeParse({
       revision: 2,
@@ -54,7 +60,7 @@ describe("createCallBriefInputSchema", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       const normalized = normalizeCreateCallBriefInput(result.data);
-      expect(normalized.agentName).toBe("Sebastian");
+      expect(normalized.agentName).toBe("Shprohli");
       expect(normalized.voiceGender).toBe("male");
       expect(normalized.representedPerson).toBe("Nina Keller");
       expect(result.data.audioRetentionDays).toBe(7);
@@ -176,7 +182,7 @@ describe("createCallBriefInputSchema", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(normalizeCreateCallBriefInput(result.data)).toMatchObject({
-        agentName: "Anna",
+        agentName: "Shprohli",
         voiceGender: "female"
       });
     }
@@ -329,7 +335,7 @@ describe("createCallBriefInputSchema", () => {
     if (result.success) {
       const normalized = normalizeCreateCallBriefInput(result.data);
       expect(normalized).toMatchObject({
-        agentName: "Sebastian",
+        agentName: "Shprohli",
         voiceGender: "male"
       });
       expect(normalized.assistanceDisclosure).not.toContain(

@@ -31,8 +31,12 @@ export async function renderSpeech(input: RenderSpeechInput): Promise<RenderedSp
   const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 15_000);
   timer.unref?.();
   let response: Response;
+  let pcm: Buffer;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener("abort", () => reject(new Error("SPEECH_RENDER_TIMEOUT")), { once: true });
+  });
   try {
-    response = await (input.speechFetch ?? fetch)("https://api.openai.com/v1/audio/speech", {
+    response = await Promise.race([(input.speechFetch ?? fetch)("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: { Authorization: `Bearer ${input.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -43,14 +47,16 @@ export async function renderSpeech(input: RenderSpeechInput): Promise<RenderedSp
         response_format: "pcm"
       }),
       signal: controller.signal
-    });
+    }), aborted]);
+    if (!response.ok) throw new Error(`SPEECH_RENDER_PROVIDER_ERROR_${response.status}`);
+    pcm = Buffer.from(await Promise.race([response.arrayBuffer(), aborted]));
   } catch (error) {
-    throw new Error(controller.signal.aborted ? "SPEECH_RENDER_TIMEOUT" : "SPEECH_RENDER_NETWORK_ERROR", { cause: error });
+    if (controller.signal.aborted) throw new Error("SPEECH_RENDER_TIMEOUT", { cause: error });
+    if (error instanceof Error && error.message.startsWith("SPEECH_RENDER_PROVIDER_ERROR_")) throw error;
+    throw new Error("SPEECH_RENDER_NETWORK_ERROR", { cause: error });
   } finally {
     clearTimeout(timer);
   }
-  if (!response.ok) throw new Error(`SPEECH_RENDER_PROVIDER_ERROR_${response.status}`);
-  const pcm = Buffer.from(await response.arrayBuffer());
   if (!pcm.length || pcm.length > MAX_PCM_BYTES || pcm.length % 2 !== 0) throw new Error("SPEECH_RENDER_INVALID_AUDIO");
   const pcmu = pcm24kToPcmu8k(pcm);
   if (!pcmu.length) throw new Error("SPEECH_RENDER_INVALID_AUDIO");

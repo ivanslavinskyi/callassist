@@ -1804,7 +1804,8 @@ ${JSON.stringify(exactOpening)}`;
 }
 
 export function buildConsentAnnouncementInstructions(brief: CallBrief) {
-  const announcement = getTwilioCopy(brief.locale).introduction(brief);
+  const copy = getTwilioCopy(brief.locale);
+  const announcement = `${copy.disclosure(brief)} ${copy.consentQuestion}`;
   return `Read exactly the announcement stored in the JSON string below in ${languageNames[brief.locale]}.
 Do not paraphrase, shorten, translate, explain, or add any words before or after it. Do not read the quote marks. Do not begin the call objective. Stop speaking after the consent question.
 

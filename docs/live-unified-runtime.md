@@ -1,4 +1,4 @@
-# Unified Live runtime — updated 29 September 2026
+# Unified Live runtime — updated 30 September 2026
 
 Branch: `codex/live-unified-runtime`. Production last reported by the owner:
 `915a8f6`, Live, fallback=false, migrations through 0084 (owner report on 26 September,
@@ -9,7 +9,7 @@ The corrected runtime then passed a real Russian handset call on 29 September wi
 Live session, semantic consent, achieved task, natural playback-confirmed closing and no Live
 errors; this is the [stable local regression checkpoint](live-stable-checkpoint-2026-09-29.md).
 That call predates the [three simplification changes](live-simplification-implementation-2026-09-28.md).
-Those changes are active locally after the 28 September, 17:56 CEST API restart:
+Those changes were activated locally after the 28 September, 17:56 CEST API restart:
 Live, fallback=false, embedded worker, liveness/readiness passed. Their automated
 and synthetic-provider evidence is recorded separately; handset acceptance remains open.
 
@@ -22,12 +22,76 @@ real-call audio acceptance test.
 
 ## Runtime
 
+The latest [post-v3 handset review](live-post-v3-call-review-2026-09-30.md) covers
+the 20:51 Zurich appointment call. It confirms one disclosure start and correct
+obsolete-timeout handling, but two canceled never-released request buffers, an
+uncertain action, concurrent-work recovery risks and no application hangup. The
+owner confirms the recipient disconnected after a long pause. This run fails
+stabilization acceptance. The [combined next implementation plan](live-runtime-stabilization-and-disclosure-plan-2026-09-30.md)
+reduces per-turn commands, owns protected rendered playback, adds explicit
+status-only recovery and includes the full short reason/name/surname disclosure
+specification below. It is implemented by the [v4 implementation and acceptance record](live-combined-stabilization-implementation-2026-09-30.md); v4 replaces the v3 candidate locally after the recorded readiness checks. Handset acceptance remains pending.
+
+The owner-approved [short inline assistance disclosure plan](live-inline-assistance-disclosure-plan-2026-09-30.md)
+moves either selected reason into one initial, playback-verified script that includes
+the recording/transcription permission question. It removes the post-consent reason
+gate, separates transcript admission from backend admission, and defines shared
+multilingual preview/snapshot behavior. This specification is implemented by v4. The reason-opening defects are covered by passing regressions; a real v4 handset call remains required.
+
+The subsequent [assistance reason audit](live-assistance-reason-audit-2026-09-30.md)
+verifies both explanations in all seven locales and both voices, but reproduces two
+historical v3 opening defects: a substantive interruption can trigger fatal stalled
+speech, and delayed pre-recording transcript fragments can be persisted before task
+admission. Their v4 repairs and remaining handset evidence boundaries are recorded in the implementation link above.
+
+The earlier [30 September complex appointment incident review](live-appointment-incident-review-2026-09-30.md)
+supersedes any inference of general handset stability from the earlier information
+call. It records three disclosure starts, an interrupted action stuck in uncertainty,
+and an obsolete backend timeout that forced failure despite newer successful work.
+Four synthetic diagnostics reproduce the orchestration defects. The approved
+[orchestration recovery implementation](live-orchestration-recovery-implementation-2026-09-30.md)
+adds owned failure recovery, bounded disclosure replay, one-action appointment
+reconciliation and explicit result uncertainty. Its candidate emits `live-managed-v3`.
+The later handset review above supplies its failed acceptance evidence.
+
+The [30 September appointment weekday implementation](live-appointment-weekdays-2026-09-30.md)
+adds deterministic weekday/date labels to existing plan cards, Live/backend context,
+the exact protected appointment request and its tool results. Approved dates, windows,
+snapshots and booking permissions remain unchanged. UI labels follow the UI locale;
+speech labels follow the call locale. Weekday-only ambiguity or conflicting calendar
+details require clarification. This adds no model call or voice runtime.
+
+The [30 September orchestration stabilization](live-orchestration-stabilization-2026-09-30.md)
+records the last three calls, the approved fixes, rollback baseline and verification.
+That stabilization candidate emitted `live-managed-v2`: uncovered settled task answers receive
+one managed decision, backend task state is explicit, waiting is bounded, and reciprocal
+farewells preserve authorized closing. Only a material question/correction reopens the
+conversation. Appointment request text comes from validated proposal data in the call
+locale. The [30 September post-stabilization handset review](live-call-review-2026-09-30.md)
+confirms an information answer and playback-triggered application hangup in one real
+call. That call exposed a legacy personal name in Live instructions and an incomplete
+saved opening. The [Shprohli identity fix and post-reboot verification](live-brand-identity-2026-09-30.md)
+replaces the runtime persona with one brand name for both voices. Opening completeness,
+appointment and reciprocal-farewell handset acceptance remain pending.
+
 The [29 September repair](live-progress-fix-2026-09-29.md) supersedes earlier consent
 and completion behavior: overlapping answers are retained, acoustic wait extensions
 are bounded, uncovered answers receive a managed decision request, and late assistant
 speech cannot revoke an accepted end_call. See that report for validation limits.
-The UI exposes voice only and labels the assistant SHPROHLI in all transcripts and
-exports; stored legacy persona identifiers are not rewritten.
+The UI exposes voice only. New briefs and new approved snapshots use Shprohli, and
+assistant speaker labels share the same constant. Existing stored persona identifiers
+and approved snapshots are not rewritten; Live uses Shprohli independently of their
+`runtime.agentName`. Localized pronunciation cues cover all seven call locales and share
+IPA `/ˈʃprox.li/` (ШПРОХ-ли, German Schprochli). Acoustic acceptance is still required.
+The post-reboot local startup at 15:50 Zurich on 30 September runs this identity candidate
+with Live, fallback=false and automatic hangup enabled. The current process/log/tunnel
+state is `.tools/runtime/stabilization-state.json`; old state files and tunnel URLs
+must not be used after reboot.
+The latest API restart at 17:16 Zurich adds `appointment-weekdays-v1` on top of
+`live-managed-v2` and `shprohli-v1`, retaining that web app and tunnel. Local readiness,
+liveness, web access and public gateway checks passed; weekday speech and ambiguity
+handling await the next handset call. Activation evidence is in the appointment
+weekday report above.
 
 `VOICE_RUNTIME_DRIVER=live` and `VOICE_RUNTIME_LIVE_FALLBACK=false` create exactly
 one native Live WebSocket per admitted stream. Admission accepts AMD `human` and, under
@@ -97,38 +161,40 @@ previously approved openings are not silently rewritten or shortened.
 
 ## Application gates
 
-During preparation and application-owned disclosure playback no tools are enabled.
-Live receives recipient audio continuously but is instructed to listen silently while
-the application plays the disclosure. Only after the complete clip's matching, uncleared
-Twilio mark does the application enable the strict
-`report_consent({ decision: affirmative | negative | unclear })` tool. The task plan
-and its tools remain unavailable. Live delegates a subsequent complete answer in its native
-conversation context; the application no longer assembles recipient text or calls
-a separate consent classifier. There are no phrase lists or scenario-specific rules.
-Natural contextual permission is accepted without a keypad press. The first unclear
-decision replays the complete cached disclosure; a second adds a localized clarification
-and optional keypad recovery. Spoken consent remains
-available throughout. Silence times out without becoming consent. Backend failure
-fails closed.
+During preparation no tools are enabled. When mandatory disclosure playback starts, the
+application configures only the strict
+`report_consent({ decision: affirmative | negative | unclear })` tool with
+`tool_choice: required`; task context and task tools remain unavailable. Live receives
+recipient audio continuously and is instructed to listen silently, never to start consent
+delegation itself. The application starts exactly one semantic check after the current
+answer settles. It no longer assembles recipient text or calls a separate consent classifier.
+There are no phrase lists or scenario-specific rules. Natural contextual permission is
+accepted without a keypad press. An unclear decision plays a short localized permission
+question; bounded recovery later adds the optional keypad instruction without replaying the
+already-completed identity/privacy segment. Spoken consent remains available throughout.
+Silence times out without becoming consent. Provider/contract failure first retries the same
+settled answer and is not treated as a semantic `unclear` result.
 
 Update 29 September: the disclosure is no longer a Live speech instruction. The Speech
-API receives the exact application text and returns PCM while Live prewarms. Recipient
-audio is never buffered: acoustic barge-in immediately clears Twilio playback and Live
-continues listening. A partially heard clip cannot unlock consent and is replayed in full
-from memory after the recipient stops. Speech made before a complete disclosure mark is
-not reused as affirmative consent. After the mark, a request to repeat or explain is
-interpreted semantically as `unclear` and replays the complete disclosure from memory.
-Native transcript timestamps enforce the same boundary if a pre-mark transcript arrives late.
-Acoustic activity can extend the consent wait only
-up to 20 seconds from playback completion, not indefinitely.
+API renders two exact application-owned segments while Live prewarms: (1) mandatory AI/name/
+recording/transcription information and (2) a short permission question. The mandatory
+segment's matching, uncleared Twilio mark is the only playback proof that can unlock consent.
+An audio-duration boundary may retain an answer that begins after mandatory audio ends but
+before its mark returns; that answer remains provisional until the real mark. Earlier barge-in
+clears playback and replays only the mandatory segment. Barge-in during the short question
+stops the question and keeps the semantic answer. Native transcript timestamps reject late
+pre-boundary fragments. Acoustic activity can extend the consent wait only up to 20 seconds
+from mandatory playback completion, not indefinitely. The full decision and rollback boundary
+are recorded in [live-consent-stabilization-2026-09-29.md](live-consent-stabilization-2026-09-29.md).
 
 Input audio is continuously forwarded in PCMU at 8 kHz without transcoding or
 pre-consent recording. Pre-consent recipient text is neither retained by the application
 nor published as conversation history. The app keeps timing evidence only. Fixed
-assistant disclosure text is retained only after its matching, uninterrupted Twilio
-playback mark; no transcript-based disclosure classifier is involved. Consent delegation
-does not exist before that mark. New speech, corrections, phase changes or disconnect
-invalidate pending effects.
+assistant disclosure text is retained only after each segment's matching, uninterrupted Twilio
+playback mark; no transcript-based disclosure classifier is involved. Consent configuration
+may exist during mandatory playback so a post-boundary candidate is not lost, but the application
+does not request a decision and recording cannot begin before the mandatory mark. New speech,
+corrections, phase changes or disconnect invalidate pending effects.
 A continuation of an old consent delegation cannot refresh its evidence: corrected
 answers require a fresh Live delegation. Only an accepted affirmative after verified
 disclosure playback can start recording. Successful recording enables task context/tools;
@@ -145,8 +211,8 @@ verbatim recipient answer. Model interpretation remains probabilistic.
 | Stage | Available backend tools | Application transition |
 | --- | --- | --- |
 | Preparation / AMD | None | Validate human admission and signed attempt/snapshot binding |
-| Disclosure playback | None | Render exact application text; clear immediately on barge-in; require an uninterrupted matching playback mark |
-| Consent | `report_consent` only | Interpret the post-disclosure answer semantically and apply the current decision |
+| Mandatory disclosure playback | `report_consent` configured but never application-triggered | Render exact identity/privacy text; replay only this segment if interrupted; require its uncleared mark before any effect |
+| Consent question | `report_consent` only, `tool_choice: required` | Accept a settled semantic answer, including a provisional answer begun after mandatory audio; stop the question on barge-in |
 | Recording startup / optional assistance disclosure | Consent calls rejected; task tools unavailable | Recording must succeed; play a nonempty approved assistance disclosure once |
 | Native opening / conversation | `end_call` when enabled; appointment tools only for approved scope | Validate current evidence/authorization and serialize effects |
 | Closing | Task tools remain configured; new effects are gated by phase | Continue accepted `end_call` through Responses; inspect farewell after its terminal result and verify playback; interruption returns to conversation |
@@ -216,11 +282,13 @@ authorization and subsequent confirmation fences still apply.
 Tools, provider disconnects and timers cannot silently restart the call in another model.
 
 Live protocol errors are command-scoped rather than globally fatal. The runtime correlates
-`error.client_event_id` with tracked `session.update`, context-append and `response.create`
+`error.client_event_id` with tracked `session.update`, context-append, `response.create` and
+`response.item.create`
 commands. An explicit provider rejection is retried once because the rejected command was not
 applied. An acknowledgement timeout is not retried because acceptance is ambiguous and resending
-could duplicate context or create a second response. A repeated consent-response failure returns
-to the existing semantic consent recovery; a repeated task-stage command failure uses the existing
+could duplicate context or create a second response. Function output has no invented success
+acknowledgment; it remains correlated until the following backend response starts. A repeated
+consent-response failure retries the same answer once before entering bounded clarification; a repeated task-stage command failure uses the existing
 `cannot_proceed` closing path. Late, uncorrelated or already superseded command errors are recorded
 and the active conversation continues. A closed Live session/socket or an exhausted active
 command/delegation remains fatal.
@@ -240,12 +308,12 @@ events provide usage and completed function items; the application returns all f
 results and explicitly continues the managed backend, including an accepted closing tool.
 The closing continuation returns concise task state without further tools or a spoken script.
 There is no speak/wait/ignore decision loop or standalone Responses controller.
-After the existing 600 ms recipient-turn settlement, the application requests a
-managed backend decision if native delegation has not covered the answer. Announced
-or running native work and pending continuations prevent a duplicate request. Each
-answer/configuration revision gets at most one application request; acoustic noise
-does not create another answer revision. The existing backend interprets consent or
-task completion, with the same tool and evidence gates. Recipient observations
+After a 900 ms consent-answer settlement, the application is the sole owner of the
+managed consent `response.create`; GPT-Live is explicitly told not to initiate that handoff.
+Only work for the same current answer/configuration revision blocks a request, so stale work
+cannot wedge a correction. Task-stage delegation remains native and autonomous. Acoustic noise
+does not create another answer revision. The existing backend interprets consent and task
+completion with the same tool and evidence gates. Recipient observations
 support application provenance without shadow transcript items or keyword rules.
 
 Consent delegation validation (28 September 2026): 161 focused voice/accounting tests

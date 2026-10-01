@@ -1,3 +1,4 @@
+import { initialDisclosureProjection } from "@callassist/contracts";
 import type { NativeTranscriptCapture } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { answeringUsage } from "../telephony/answering-usage";
@@ -230,8 +231,9 @@ export class InMemoryCallRepository implements CallRepository {
   }
   async transitionVoiceAction(input: VoiceActionTransition) {
     const record = this.#voiceActions.get(input.id);
-    if (!record || record.version !== input.version || !voiceActionTransitionAllowed(record.state, input.state)) return null;
+    if (!record || record.version !== input.version || !voiceActionTransitionAllowed(record.state, input.state, record.delivery, input.delivery)) return null;
     record.state = input.state; record.version++; record.evidence = [...new Set([...record.evidence, ...input.evidence])];
+    if (input.delivery) record.delivery = structuredClone(input.delivery);
     if (input.observations) record.observations = [...new Map([...(record.observations ?? []), ...structuredClone(input.observations)].map(turn => [turn.id, turn])).values()];
     return structuredClone(record);
   }
@@ -1628,8 +1630,10 @@ export class InMemoryCallRepository implements CallRepository {
     if (this.#callDataDeletions.has(id)) return null;
     const snapshot = this.#calls.get(id);
     if(!snapshot) return null;
+    const action = [...this.#voiceActions.values()].find(a => a.callAttemptId === this.#attempts.get(id)?.at(-1)?.id);
     if(!snapshot.languageContext&&snapshot.compilation) snapshot.languageContext=resolveTaskLanguage({detectedLanguage:snapshot.compilation.compiledBrief?.sourceLanguage,compilationRevision:snapshot.compilation.revision});
-    return {...copy(snapshot),brief:{...copy(snapshot.brief),lifecycle:this.#lifecycle(snapshot.brief)},planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
+    return {...copy(snapshot),initialDisclosure: initialDisclosureProjection(this.#attempts.get(id)?.at(-1) ?? null),appointmentAction: action ? { callAttemptId: action.callAttemptId, state: action.state, delivery: copy(action.delivery ?? null) } : null,
+      brief:{...copy(snapshot.brief),lifecycle:this.#lifecycle(snapshot.brief)},planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
       textArtifacts:this.#callText.listTextArtifacts(id),finalTranscriptRevision:await this.#callText.getCurrentTranscriptRevision(id)};
   }
 

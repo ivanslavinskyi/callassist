@@ -1,4 +1,6 @@
 import { answeringApproval, answeringApprovalSchema } from "./call-answering";
+import { ASSISTANT_NAME } from "./assistant-identity";
+import { buildInitialDisclosure, INITIAL_DISCLOSURE_VERSION } from "./initial-disclosure";
 import { z } from "zod";
 import { callLifecycleSchema } from "./call-lifecycle";
 import { appointmentAuthorizationSchema } from "./appointment";
@@ -387,7 +389,7 @@ export function normalizeCreateCallBriefInput(input: CreateCallBriefInput) {
   const profile = getAssistantProfile(parsed.assistantProfileId);
   return {
     ...parsed,
-    agentName: profile.displayName,
+    agentName: ASSISTANT_NAME,
     voiceGender: profile.voiceGender,
     assistanceDisclosure: getAssistanceDisclosure(
       parsed.locale,
@@ -568,6 +570,8 @@ export const approvedExecutionRuntimeSchema = z.object({
   // Optional only for historical immutable approvals.
   liveVoice: liveVoiceSchema.optional(),
   assistanceDisclosure: z.string().trim(),
+  initialDisclosure: z.strictObject({ version: z.literal(INITIAL_DISCLOSURE_VERSION),
+    text: z.string().trim().min(10).max(2_000), assistanceReason: assistanceReasonSchema }).optional(),
   audioRetentionDays: audioRetentionDaysSchema,
   allowLanguageSwitch: z.boolean(),
   fallbackLocale: callLocaleSchema.optional()
@@ -830,6 +834,11 @@ export const approvalRequestSchema = z.object({
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const callSnapshotSchema = z.object({
+  initialDisclosure: z.strictObject({ callAttemptId: z.uuid(), version: z.literal(INITIAL_DISCLOSURE_VERSION),
+    locale: callLocaleSchema, text: z.string().min(10).max(2_000) }).nullable().optional(),
+  appointmentAction: z.strictObject({ callAttemptId: z.uuid(), state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
+    delivery: z.strictObject({ kind: z.enum(["request", "status_check"]), status: z.enum(["not_sent", "unacknowledged", "played"]),
+      attempt: z.number().int().min(1).max(3) }).nullable() }).nullable().optional(),
   finalTranscriptRevision: finalTranscriptRevisionSchema.nullable().optional(),
   textArtifacts: z.array(callTextArtifactSchema).optional(),
   languageContext: callLanguageContextSchema.nullable().optional(),
@@ -874,10 +883,13 @@ export function createApprovedExecutionSnapshot(
     plan: { appointmentAuthorization: null, ...createApprovedExecutionPlan(compiled) },
     answering: answeringApproval(compiled.voicemailAction, compiled.callLocale),
     runtime: {
-      agentName: snapshot.brief.agentName,
+      agentName: ASSISTANT_NAME,
       voiceGender: snapshot.brief.voiceGender,
       liveVoice: LIVE_VOICES[snapshot.brief.voiceGender],
       assistanceDisclosure: snapshot.brief.assistanceDisclosure,
+      initialDisclosure: buildInitialDisclosure(compiled.callLocale,
+        formatPersonName(snapshot.brief.representedPersonFirstName, snapshot.brief.representedPersonLastName),
+        snapshot.brief.voiceGender, snapshot.brief.assistanceReason),
       audioRetentionDays: snapshot.brief.audioRetentionDays,
       allowLanguageSwitch: snapshot.brief.allowLanguageSwitch,
       fallbackLocale: snapshot.brief.fallbackLocale

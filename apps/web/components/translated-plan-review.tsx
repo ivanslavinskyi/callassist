@@ -29,6 +29,7 @@ function PlanReviewReader({ callId, userId, compilation, source, languageContext
   callId: string; userId: string; compilation: CallCompilation; source: PlanSource;
   languageContext: CallLanguageContext; initialArtifacts?: CallTextArtifact[]; reuseExistingOnly?: boolean;
   busy: boolean; recipientName: string; showActions?: boolean; callDetails?: Array<{ label: string; value: string }>;
+  initialDisclosure?: { text: string; locale: string } | null;
   onAnswerClarifications: (answers: ClarificationAnswer[]) => Promise<void>;
   onApproveAndCall: (review: ReviewEvidence) => void; onEdit: () => void; onRetryPreparation?: () => void;
 }) {

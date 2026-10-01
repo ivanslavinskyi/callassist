@@ -85,6 +85,7 @@ export class LiveControlledSpeech {
       if (this.#incomplete) clearTimeout(this.#incomplete);
       this.#incomplete = null;
     } else if (this.#incompleteRevision !== null) this.#scheduleIncomplete(this.#incompleteRevision);
+    else if (this.buffered) this.#candidate();
   }
   cancel() {
     this.#cancelled = true;
@@ -145,6 +146,7 @@ export class LiveControlledSpeech {
     this.#incomplete.unref?.();
   }
   #seal() {
+    if (this.buffered && this.#recipientSpeaking) return;
     this.#sealed = true;
     if (!this.limits) clearTimeout(this.#deadline);
     if (this.buffered) this.#queueEnd = Date.now() + this.#bytes / 8;

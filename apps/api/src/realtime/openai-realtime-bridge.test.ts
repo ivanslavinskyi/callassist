@@ -223,7 +223,7 @@ describe("buildConsentAnnouncementInstructions", () => {
     });
 
     expect(prompt).toContain("ИИ-ассистент");
-    expect(prompt).toContain("записать и автоматически расшифровать");
+    expect(prompt).toContain("записан и автоматически расшифрован");
     expect(prompt).not.toContain("нарушения речи");
     expect(prompt).not.toContain(brief.agentName);
     expect(prompt).not.toContain("7 дней");
@@ -728,7 +728,7 @@ describe("OpenAIRealtimeBridge", () => {
     expect(openAISocket.sent[1]).toMatchObject({
       type: "response.create",
       response: {
-        instructions: expect.stringContaining("aufnehmen und automatisch transkribieren")
+        instructions: expect.stringContaining("aufgenommen und automatisch transkribiert")
       }
     });
     expect(JSON.stringify(openAISocket.sent[1])).toContain(

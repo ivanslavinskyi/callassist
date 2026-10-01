@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { vi } from "vitest";
 import WebSocket from "ws";
-import type { AppointmentAuthorization, CallLocale, AssistantProfileId } from "@callassist/contracts";
+import type { AppointmentAuthorization, CallLocale, AssistantProfileId, AssistanceReason } from "@callassist/contracts";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import type { CallRepository } from "../storage/call-repository";
 import { CallService } from "../call-service";
@@ -14,6 +14,8 @@ export class TestSocket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
   sent: any[] = [];
   liveSession: Record<string, unknown> | null = null;
+  liveStartedAt = Date.now();
+  timelineMs = 0;
   startLive(id: string) {
     this.receive({ type: "session.started", session: { ...this.sent.find(e => e.type === "session.start").session, id } });
   }
@@ -23,13 +25,15 @@ export class TestSocket extends EventEmitter {
       queueMicrotask(() => this.receive({ type: "session.updated", client_event_id: event.event_id, session: this.liveSession }));
     }
     if (this.autoAcknowledge && typeof event.type === "string" && event.type.endsWith(".append") && event.type !== "session.input_audio.append") {
-      queueMicrotask(() => this.receive({ type: `${event.type}ed`, client_event_id: event.event_id }));
+      queueMicrotask(() => this.receive({ type: `${event.type}ed`, client_event_id: event.event_id, start_ms: this.timelineMs, end_ms: this.timelineMs }));
     }
   }
   close() { if (this.readyState === WebSocket.CLOSED) return; this.readyState = WebSocket.CLOSED; this.emit("close"); }
   terminate() { this.close(); }
   receive(event: object) {
-    if ((event as any).type === "session.started") this.liveSession = (event as any).session;
+    if ((event as any).type === "session.started") { this.liveSession = (event as any).session; this.liveStartedAt = Date.now(); }
+    const incoming = event as any;
+    if (typeof incoming.end_ms === 'number') this.timelineMs = Math.max(this.timelineMs, incoming.end_ms);
     this.emit("message", Buffer.from(JSON.stringify(event)));
   }
   get ws() { return this as unknown as WebSocket; }
@@ -46,7 +50,7 @@ export const authorization: AppointmentAuthorization = {
 export const proposal = { operation: "book", date: "2099-09-16", startTime: "15:00", timeZone: "Europe/Zurich",
   serviceMatches: true, recipientMatches: true, requiresPaymentOrNewTerms: false, detailsConfirmed: true };
 
-export async function approvedCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: "none" | "speech_impairment" = "speech_impairment") {
+export async function approvedCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment") {
   const compiler = new DeterministicBriefCompiler();
   if (appointment) {
     const compile = compiler.compile.bind(compiler);

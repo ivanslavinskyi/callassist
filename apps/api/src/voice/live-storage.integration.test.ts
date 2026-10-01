@@ -25,6 +25,37 @@ beforeAll(async () => {
 afterAll(async () => { await call?.service.close(); await repository?.close(); await sql?.end(); await fixture.teardown(); });
 
 describe("native Live persisted evidence", () => {
+  it("projects the frozen full disclosure of this attempt without regenerating approved data", async () => {
+    const snapshot = await repository.get(call.brief.id);
+    expect(snapshot?.initialDisclosure).toEqual({ callAttemptId: call.attempt.id,
+      version: "assistance-inline-v1", locale: call.snapshot.plan.callLocale, text: call.snapshot.runtime.initialDisclosure?.text });
+    expect(snapshot?.initialDisclosure?.text).toContain("Nina Keller");
+  });
+  it("recovers one encrypted action conservatively and projects its current attempt state", async () => {
+    const fixtureCall = await approvedCall(authorization, repository, "en-GB", "CA-RECOVERY");
+      const input = { callBriefId: fixtureCall.brief.id, callAttemptId: fixtureCall.attempt.id,
+        snapshotHash: fixtureCall.snapshot.compilationSnapshotHash, proposal: { ...proposal, operation: "book" as const },
+        content: "Approved appointment", evidence: [],
+        delivery: { kind: "request" as const, status: "not_sent" as const, attempt: 1 } };
+      const action = (await repository.beginVoiceAction(input))!;
+      const uncertain = (await repository.transitionVoiceAction({ id: action.id, version: action.version, state: "uncertain", evidence: [],
+        delivery: { ...input.delivery, status: "unacknowledged" } }))!;
+      expect((await repository.get(input.callBriefId))?.appointmentAction).toMatchObject({
+        callAttemptId: input.callAttemptId, state: "uncertain", delivery: { status: "unacknowledged", attempt: 1 } });
+      expect(await repository.transitionVoiceAction({ id: action.id, version: uncertain.version, state: "sending", evidence: [],
+        delivery: { kind: "request", status: "not_sent", attempt: 2 } })).toBeNull();
+      const recovery = (await repository.transitionVoiceAction({ id: action.id, version: uncertain.version, state: "sending", evidence: [],
+        delivery: { kind: "status_check", status: "not_sent", attempt: 2 } }))!;
+      const delivered = (await repository.transitionVoiceAction({ id: action.id, version: recovery.version, state: "delivered", evidence: [],
+        delivery: { kind: "status_check", status: "played", attempt: 2 } }))!;
+      const confirmed = await repository.transitionVoiceAction({ id: action.id, version: delivered.version, state: "confirmed", evidence: ["later-exact-reply"] });
+      expect(confirmed).toMatchObject({ id: action.id, state: "confirmed", proposal: input.proposal,
+        delivery: { kind: "status_check", status: "played", attempt: 2 } });
+      expect((await repository.get(input.callBriefId))?.appointmentAction?.state).toBe("confirmed");
+      expect((await repository.exportCallTextData(input.callBriefId)).voiceActions).toEqual([confirmed]);
+      const [row] = await sql`SELECT payload_ciphertext FROM call_voice_actions WHERE id=${action.id}`;
+      expect(decryptJson(row!.payload_ciphertext, Buffer.alloc(32, 7))).toMatchObject({ delivery: confirmed!.delivery });
+  });
   it("persists the approved voice and content-free confirmations for the same attempt", async () => {
     expect((await repository.getLatestAttempt(call.brief.id))?.executionSnapshot?.runtime.liveVoice).toBe("marin");
     await repository.appendCallTelemetryEvent(call.brief.id, { callAttemptId: call.attempt.id, idempotencyKey: "voice-confirmed", payload: {

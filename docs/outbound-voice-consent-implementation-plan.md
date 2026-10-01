@@ -1,5 +1,8 @@
 # Outbound voice consent implementation plan
 
+Current follow-up: [v4 implementation and acceptance record](live-combined-stabilization-implementation-2026-09-30.md) implements the combined runtime/disclosure changes. Historical evidence below describes its original version; v4 handset acceptance remains pending.
+
+
 Status: core implementation present, including the subsequent consent-audio fix;
 reviewed 2026-09-12 against `ef36cfa`, retaining the 2026-09-09 decision to restore the previous short spoken consent. Stages below are a delivery record, not the
 next backlog. Current release follow-ups are R06/R07/R08/R14 in the [roadmap](mvp-plan.md).
@@ -82,6 +85,17 @@ explicit consent has been durably recorded.
   compatibility.
 - UI tests for the default selector and disclosure warning.
 - Full `test`, `typecheck`, `lint`, and `build` suites before merge.
+
+Subsequent Live design: the owner-approved
+[30 September short inline assistance disclosure plan](live-inline-assistance-disclosure-plan-2026-09-30.md)
+replaces the post-recording placement of the selected reason and the older instruction
+to exclude it from the initial disclosure. That change is planned, not yet activated.
+Its complete short script, including the recording/transcription permission question,
+must be playback-verified before consent can authorize recording. Legacy Realtime
+remains a separate adapter unless deliberately updated together with its opening.
+The [combined runtime stabilization/disclosure plan](live-runtime-stabilization-and-disclosure-plan-2026-09-30.md)
+is the implementation entry point after the latest v3 handset failure; the short
+disclosure specification remains part of that same release.
 
 The 2026-09-07 audit ran the automated contract/classifier/bridge/repository suite;
 no real recipient call was placed. The 2026-09-09 copy/bridge checks must retain the

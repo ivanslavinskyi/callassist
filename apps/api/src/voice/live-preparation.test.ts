@@ -35,7 +35,7 @@ describe("attempt-bound Live preparation", () => {
     expect(h.connect).toHaveBeenCalledOnce();
     expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(0);
     const mark = h.twilio.sent.find(e => e.event === "mark")?.mark.name;
-    expect(mark).toMatch(/^rendered-disclosure:/);
+    expect(mark).toMatch(/^rendered-consent-required:/);
     h.twilio.receive({ event: "mark", mark: { name: mark } }); await flush();
     expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: {name: string}) => t.name)).toEqual(["report_consent"]);
     const count = h.live.sent.filter(e => e.type === "session.input_audio.append").length;
@@ -59,7 +59,7 @@ describe("attempt-bound Live preparation", () => {
     h.attach(); await flush();
     expect(h.twilio.readyState).toBe(1);
     expect(h.live.sent.some(e => e.type === "session.close")).toBe(false);
-    expect(h.twilio.sent.some(e => e.event === "mark" && String(e.mark.name).startsWith("rendered-disclosure:"))).toBe(true);
+    expect(h.twilio.sent.some(e => e.event === "mark" && String(e.mark.name).startsWith("rendered-consent-required:"))).toBe(true);
   });
   it("does not consume a prepared session for a forged binding", async () => {
     const h = await fixture(); await h.warm(); h.attach("invalid"); await flush();

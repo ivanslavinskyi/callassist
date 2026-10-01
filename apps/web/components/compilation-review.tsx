@@ -7,6 +7,7 @@ import {
   type CallCompilation,
   type ClarificationAnswer
 } from "@callassist/contracts";
+import { initialDisclosureMessages } from "@/lib/i18n/initial-disclosure-messages";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { useState, type FormEvent } from "react";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -24,6 +25,7 @@ export function CompilationReview({
   onRetryPreparation,
   recipientName,
   showActions = true,
+  initialDisclosure,
   callDetails = []
 }: {
   busy: boolean;
@@ -34,6 +36,7 @@ export function CompilationReview({
   onRetryPreparation?: () => void;
   recipientName: string;
   showActions?: boolean;
+  initialDisclosure?: { text: string; locale: string } | null;
   callDetails?: Array<{ label: string; value: string }>;
 }) {
   const [confirmingCall, setConfirmingCall] = useState(false);
@@ -61,6 +64,11 @@ export function CompilationReview({
         </div>
       </div>
 
+      {compiled && !preparationFailed ? <section className="initial-disclosure-preview">
+        <h3>{initialDisclosureMessages[locale].title}</h3>
+        {initialDisclosure ? <blockquote lang={initialDisclosure.locale}>{initialDisclosure.text}</blockquote>
+          : <p>{initialDisclosureMessages[locale].unavailable}</p>}
+      </section> : null}
       {compiled && !preparationFailed ? <CallPlanPresentation plan={compiled} uiLocale={locale} /> : null}
 
       {compiled && isReady && showActions ? <section>

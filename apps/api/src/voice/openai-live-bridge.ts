@@ -11,12 +11,15 @@ export { OpenAILiveConversation, buildLiveInstructions } from "./live-conversati
 export interface LiveLifecycle {
   transcriptCaptureComplete?(): boolean;
   startup(): { instructions: string; input: unknown[] };
-  backendFailed?(): void;
-  consentDecisionUnavailable?(): void;
+  backendFailed?(current?: () => boolean, code?: string): void;
+  backendProgress?(): void;
+  nativeOutputDiscarded?(): void;
+  consentDecisionUnavailable?(reason?: "provider_failure" | "contract_violation"): void;
   decisionReady?(): boolean;
+  taskDecisionContext?(): { closing: boolean; waitingExpired: boolean; appointment?: unknown };
   closingBackendCompleted?(): void;
   ready(): void;
-  activity(event: "started" | "stopped" | null): void;
+  activity(event: "started" | "stopped" | null, voicedMs?: number): void;
   audio(payload: string): void;
   transcript(role: "recipient" | "assistant", text: string, startMs: number, endMs: number, persist: () => void): boolean;
   tool(call: { name: string; arguments: string }, current: () => boolean): Promise<Record<string, unknown>>;

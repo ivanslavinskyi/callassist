@@ -1,5 +1,7 @@
 export * from "./account";
+export * from "./assistant-identity";
 export * from "./appointment";
+export * from "./calendar-date";
 export * from "./admin-users";
 export * from "./admin-calls";
 export * from "./admin-operations";
@@ -32,3 +34,4 @@ export * from "./registration";
 export * from "./call-retry";
 export * from "./call-answering";
 export * from "./plan-preparation";
+export * from "./initial-disclosure";

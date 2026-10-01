@@ -5,7 +5,7 @@ import { transcriptSourceCopy, transcriptSourceDescription } from "@/lib/i18n/tr
 import { consentTimeline } from "@/lib/i18n/consent-timeline";
 import { isTranscriptionBudgetBlocked, transcriptionBudgetMessages } from "@/lib/i18n/transcription-budget";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
-import { answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
+import { buildInitialDisclosure, formatPersonName, answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { systemMessages } from "@/lib/i18n/system-messages";
 import { callStatusClass, callStatusLabel } from "@/lib/call-status";
@@ -542,6 +542,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
       { label: copy.voice, value: brief.voiceGender === "female" ? copy.female : copy.male },
       { label: copy.audioRetention, value: brief.audioRetentionDays === 0 ? copy.untilFinalTranscript : copy.retentionDays(brief.audioRetentionDays) }
     ],
+    initialDisclosure: snapshot.initialDisclosure
+      ? { text: snapshot.initialDisclosure.text, locale: snapshot.initialDisclosure.locale }
+      : !isTerminal && !isActive && compilation.compiledBrief
+        ? { text: buildInitialDisclosure(compilation.compiledBrief.callLocale,
+            formatPersonName(brief.representedPersonFirstName, brief.representedPersonLastName),
+            brief.voiceGender, brief.assistanceReason).text, locale: compilation.compiledBrief.callLocale }
+        : null,
     showActions: !isTerminal && !isActive
   } : null;
 
@@ -863,6 +870,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                 taskLanguage={snapshot.languageContext?.taskContentLanguage ?? supportedTextLanguage(brief.locale) ?? "en"}
                 promptLanguage={snapshot.languageContext?.detectedInputLanguage ?? snapshot.compilation?.compiledBrief?.sourceLanguage ?? null}
                 initialArtifacts={snapshot.textArtifacts}
+                appointmentAction={snapshot.appointmentAction}
               /> : finalTranscript?.status === "completed" &&
               (finalTranscript.text || finalSegments.length > 0) ? (
                 <div className="final-transcript-body">

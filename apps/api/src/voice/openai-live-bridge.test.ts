@@ -72,9 +72,11 @@ describe("native Live protocol and full duplex", () => {
     expect(h.socket.sent[0]).toMatchObject({ type: "session.start", session: { model: "gpt-live-1", store: false,
       audio: { format: { type: "audio/pcmu", rate: 8000 } }, delegation: { type: "responses", responses: { model: "gpt-6-luna", parallel_tool_calls: false } } } });
     expect(h.socket.sent[0].session.instructions).not.toContain("# Ordered questions");
+    expect(h.socket.sent[0].session.instructions).toContain("You are Shprohli, an AI telephone assistant");
+    expect(h.socket.sent[0].session.instructions).toContain("/ˈʃprox.li/");
     expect(h.socket.sent[0].session.instructions).toContain(`${h.snapshot.plan.addressingStyle} address`);
     expect(h.context.telemetry).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ name: "realtime.ready",
-      metadata: expect.objectContaining({ runtimeVersion: "live-managed-v1" }) }));
+      metadata: expect.objectContaining({ runtimeVersion: "live-managed-v4" }) }));
   });
   it("buffers bounded input until session.started and relays PCMU byte-for-byte", async () => {
     const h = await harness(false, false);
@@ -138,7 +140,7 @@ describe("native Live protocol and full duplex", () => {
     expect(h.context.fail).not.toHaveBeenCalled();
     expect(h.socket.readyState).toBe(1);
     expect(h.context.telemetry).toHaveBeenCalledWith(expect.any(String), { name: "realtime.error", metadata: expect.objectContaining({
-      disposition: "continued", command: null, clientEventId: command.event_id
+      disposition: "continued", command: "session.instructions.append", clientEventId: command.event_id
     }) });
     expect(JSON.stringify(h.context.telemetry.mock.calls)).not.toContain("private provider data");
   });
@@ -158,6 +160,25 @@ describe("native Live protocol and full duplex", () => {
     } });
     expect(h.context.fail).toHaveBeenCalledOnce();
     expect(h.context.telemetry.mock.calls.map(([, payload]) => payload.metadata.disposition)).toEqual(expect.arrayContaining(["retrying", "fatal"]));
+  });
+  it("correlates a function output without inventing a success acknowledgement", async () => {
+    const h = await harness(); await h.tool("end_call", { reason: "recipient_requested_end" });
+    const first = h.socket.sent.findLast(event => event.type === "response.item.create");
+    expect(first?.event_id).toEqual(expect.any(String));
+    h.socket.receive({ type: "error", event_id: "tool-output-error-1", error: {
+      type: "invalid_request_error", code: "temporary_rejection", client_event_id: first.event_id
+    } });
+    const retry = h.socket.sent.findLast(event => event.type === "response.item.create");
+    expect(retry).toMatchObject({ item: first.item });
+    expect(retry.event_id).not.toBe(first.event_id);
+    expect(h.context.fail).not.toHaveBeenCalled();
+    h.socket.receive({ type: "error", event_id: "tool-output-error-2", error: {
+      type: "invalid_request_error", code: "temporary_rejection", client_event_id: retry.event_id
+    } });
+    expect(h.context.fail).toHaveBeenCalledOnce();
+    expect(h.context.telemetry).toHaveBeenCalledWith(expect.any(String), { name: "realtime.error", metadata: expect.objectContaining({
+      command: "response.item.create", disposition: "fatal", attempt: 2
+    }) });
   });
   it("does not duplicate an ambiguously accepted command after its acknowledgement times out", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

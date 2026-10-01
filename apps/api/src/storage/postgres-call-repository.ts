@@ -1,3 +1,4 @@
+import { initialDisclosureProjection } from "@callassist/contracts";
 import type { NativeTranscriptCapture } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { answeringUsage } from "../telephony/answering-usage";
@@ -2712,8 +2713,10 @@ export class PostgresCallRepository implements CallRepository {
   async transitionVoiceAction(input: VoiceActionTransition): Promise<VoiceActionRecord | null> {
     return this.#sql.begin(async tx => {
       const [row] = await tx`SELECT * FROM call_voice_actions WHERE id=${input.id} FOR UPDATE`;
-      if (!row?.payload_ciphertext || row.version !== input.version || !voiceActionTransitionAllowed(row.state, input.state)) return null;
+      if (!row?.payload_ciphertext || row.version !== input.version) return null;
       const payload = decryptJson<VoiceActionInput>(row.payload_ciphertext, this.#encryptionKey);
+      if (!voiceActionTransitionAllowed(row.state, input.state, payload.delivery, input.delivery)) return null;
+      if (input.delivery) payload.delivery = input.delivery;
       payload.evidence = [...new Set([...payload.evidence, ...input.evidence])];
       if (input.observations) payload.observations = [...new Map([...(payload.observations ?? []), ...input.observations].map(turn => [turn.id, turn])).values()];
       await tx`UPDATE call_voice_actions SET state=${input.state},version=version+1,payload_ciphertext=${encryptJson(payload,this.#encryptionKey)},updated_at=now() WHERE id=${input.id}`;
@@ -2745,6 +2748,11 @@ export class PostgresCallRepository implements CallRepository {
     `;
     if (!briefRow) return null;
 
+    const [actionRow] = await this.#sql`SELECT state,call_attempt_id,payload_ciphertext FROM call_voice_actions
+      WHERE call_attempt_id=(SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1)
+      AND payload_ciphertext IS NOT NULL`;
+    const appointmentAction = actionRow ? { callAttemptId: actionRow.call_attempt_id, state: actionRow.state,
+      delivery: decryptJson<VoiceActionInput>(actionRow.payload_ciphertext, this.#encryptionKey).delivery ?? null } : null;
     const [transcriptRows, approvalRows, recordingRows, finalTranscriptRows] =
       await Promise.all([
       this.#sql<TranscriptRow[]>`
@@ -2800,6 +2808,8 @@ export class PostgresCallRepository implements CallRepository {
       ]);
 
     return {
+      appointmentAction,
+      initialDisclosure: initialDisclosureProjection(await this.getLatestAttempt(id)),
       languageContext: await this.getLanguageContext(id),
       planSource: briefRow.currentCompilationId?await this.#callText.getPlanSource(id):null,
       textArtifacts: await this.#callText.listTextArtifacts(id),

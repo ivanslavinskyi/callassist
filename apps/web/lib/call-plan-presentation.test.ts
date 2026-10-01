@@ -19,6 +19,22 @@ const plan: CallPlanPresentationData = {
 };
 
 describe("complete readable call plan", () => {
+  it.each(uiLocales)("shows computed weekdays in %s without mutating an existing plan", locale => {
+    vi.stubGlobal("React", React);
+    const appointmentPlan: CallPlanPresentationData = { ...plan, appointmentAuthorization: {
+      operation: "book", serviceDescription: "Meeting", providerScope: "called_recipient", timeZone: "Pacific/Kiritimati",
+      windows: [{ date: "2026-10-01", startTime: "09:00", endTime: "10:00" },
+        { date: "2026-10-01", startTime: "14:00", endTime: "18:00" }],
+      selection: "first_matching", maxAppointments: 1, financialPolicy: "no_new_financial_terms"
+    } };
+    const before = JSON.stringify(appointmentPlan);
+    const html = renderToStaticMarkup(React.createElement(CallPlanPresentation, { plan: appointmentPlan, uiLocale: locale }));
+    const weekdays = { de: "Donnerstag", fr: "jeudi", it: "giovedì", rm: "gievgia", en: "Thursday", ru: "четверг", uk: "четвер" };
+    expect(html).toContain(weekdays[locale]);
+    expect(html.match(/dateTime="2026-10-01"/g)).toHaveLength(2);
+    expect(html).toContain("09:00–10:00"); expect(html).toContain("14:00–18:00");
+    expect(html).toContain("Pacific/Kiritimati"); expect(JSON.stringify(appointmentPlan)).toBe(before);
+  });
   it.each(uiLocales)("shows every material detail with %s UI labels, without raw source text", locale => {
     vi.stubGlobal("React", React);
     const html = renderToStaticMarkup(React.createElement(CallPlanPresentation, { plan, uiLocale: locale }));

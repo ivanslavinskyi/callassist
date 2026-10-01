@@ -56,7 +56,7 @@ describe("final transcript export", () => {
     const text = buildFinalTranscriptCopyText(input);
 
     expect(text).toContain("Recipient: Иван Müller");
-    expect(text).toContain("[~00:01] SHPROHLI: Здравствуйте.");
+    expect(text).toContain("[~00:01] Shprohli: Здравствуйте.");
     expect(text).not.toContain("Sebastian");
     expect(text).toContain("[~01:05] Иван Müller: Добрый день.");
     expect(text).toContain("AI-generated. Check important names");

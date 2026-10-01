@@ -1,6 +1,8 @@
 import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
 import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
-import type { CallBrief, FinalTranscriptRevision, SourceSegment, TextLanguage } from "@callassist/contracts";
+import type { CallBrief, CallSnapshot, FinalTranscriptRevision, SourceSegment, TextLanguage } from "@callassist/contracts";
+import { appointmentResultState } from "./call-result-projection";
+import { appointmentResultMessages } from "./i18n/appointment-result-messages";
 import type { TDocumentDefinitions } from "pdfmake/interfaces";
 import { messages, type UiLocale } from "./i18n/messages";
 import { getCallLanguageLabel, getTextLanguageLabel } from "./i18n/language-messages";
@@ -15,11 +17,12 @@ export type DerivedTranscriptExport = {
   text: string;
   translationLanguage: TextLanguage | null;
   uiLocale: UiLocale;
+  appointmentAction?: CallSnapshot["appointmentAction"];
 };
 
 export function buildDerivedTranscriptCopyText(input: DerivedTranscriptExport) {
   const copy = textArtifactMessages[input.uiLocale];
-  return [...exportHeader(input), "", transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
+  return [...exportHeader(input), "", appointmentNote(input), transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
     const timestamp = segment.startSeconds === null ? "" : `[~${formatTranscriptOffset(segment.startSeconds)}] `;
     return `${timestamp}[${segment.id}] ${speaker(input, segment)}: ${segment.text}`;
   }), ...(input.segments.length ? [] : [input.text]), "", input.translationLanguage ? copy.translationNote : "", messages[input.uiLocale].live.aiWarning].filter((value, index, values) => value || values[index - 1]).join("\n");
@@ -50,12 +53,17 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
       offset: segment.startSeconds === null ? null : `~${formatTranscriptOffset(segment.startSeconds)}`
     })),
     text: input.text,
-    notes: [messages[input.uiLocale].live.aiWarning],
+    notes: [appointmentNote(input), messages[input.uiLocale].live.aiWarning].filter(Boolean),
     source: { title: common.source, rows: [
       { label: copy.sourceRevision, value: `${input.revision.revision} · ${input.revision.id}` },
       { label: "SHA-256", value: input.revision.sourceHash }
     ] }
   });
+}
+
+function appointmentNote(input: DerivedTranscriptExport) {
+  const state = appointmentResultState(input.appointmentAction, input.revision);
+  return state ? appointmentResultMessages[input.uiLocale][state] : "";
 }
 
 export function derivedTranscriptFilename(input: DerivedTranscriptExport) {

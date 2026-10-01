@@ -6,6 +6,29 @@ import {
 } from "./call-telemetry";
 
 describe("durable call telemetry contracts", () => {
+  it("retains historical task events and records recovery without recipient content", () => {
+    for (const runtimeVersion of ["live-managed-v2", "live-managed-v3"]) {
+      const payload = { name: "conversation.task", metadata: { runtimeVersion, phase: "stale", revision: 3,
+        cause: "obsolete_backend_timeout", responseId: "old-response", released: false } };
+      expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "recovery:1", payload }).success).toBe(true);
+      expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "recovery:1", payload: {
+        ...payload, metadata: { ...payload.metadata, recipientText: "private details" }
+      } }).success).toBe(false);
+    }
+  });
+  it("accepts the stabilization runtime and typed task decisions without storing a spoken summary", () => {
+    for (const runtimeVersion of ["live-managed-v1", "live-managed-v2", "live-managed-v3"]) {
+      expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: `live:${runtimeVersion}`, payload: {
+        name: "realtime.ready", metadata: { model: "gpt-live-1", transcriptionModel: "gpt-live-1", runtimeVersion }
+      } }).success).toBe(true);
+    }
+    const payload = { name: "conversation.tool_result", metadata: { tool: "report_task_state", outcome: "accepted",
+      reason: "keep_closing", requestFingerprint: "a".repeat(64), snapshotHash: "b".repeat(64), generation: 5 } };
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "decision:1", payload }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "decision:1", payload: {
+      ...payload, metadata: { ...payload.metadata, summary: "private recipient words" }
+    } }).success).toBe(false);
+  });
   it("persists only bounded Live error diagnostics", () => {
     const payload = { name: "realtime.error", metadata: {
       phase: "conversation", disposition: "retrying", code: "invalid_request_error",
@@ -13,6 +36,9 @@ describe("durable call telemetry contracts", () => {
       clientEventId: "8c5909ef-2bb3-4f19-b78d-cda54fcd3b20", attempt: 1
     } };
     expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "live:error:1", payload }).success).toBe(true);
+    expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "live:error:2", payload: {
+      ...payload, metadata: { ...payload.metadata, command: "response.item.create" }
+    } }).success).toBe(true);
     expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "live:error:1", payload: {
       ...payload, metadata: { ...payload.metadata, message: "private provider text" }
     } }).success).toBe(false);

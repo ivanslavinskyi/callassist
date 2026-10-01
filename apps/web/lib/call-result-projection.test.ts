@@ -1,7 +1,8 @@
 import type { CallBrief, CallTextArtifact, FinalTranscriptRevision } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
-import { currentResultArtifact, displayedResultTranscript, evidencedSummary, translatedTranscript } from "./call-result-projection";
+import { appointmentResultState, currentResultArtifact, displayedResultTranscript, evidencedSummary, translatedTranscript } from "./call-result-projection";
 import { buildDerivedTranscriptCopyText, buildDerivedTranscriptPdfDefinition } from "./derived-transcript-export";
+import { appointmentResultMessages } from "./i18n/appointment-result-messages";
 
 const revision: FinalTranscriptRevision = {
   id: "revision-2", transcriptId: "same-transcript", revision: 2, callAttemptId: null, sourceHash: "a".repeat(64),
@@ -14,6 +15,24 @@ const translation = { id: "artifact-1", kind: "transcript_translation", status: 
 } as CallTextArtifact;
 
 describe("revision-bound call results", () => {
+  it("qualifies exported reports with journal state only from the same attempt", () => {
+    const boundRevision = { ...revision, callAttemptId: "attempt-2" };
+    const action = { callAttemptId: boundRevision.callAttemptId, state: "uncertain" as const, delivery: null };
+    const input = { brief: { recipientName: "Office", locale: "de-CH" } as CallBrief,
+      revision: boundRevision, segments: revision.segments, text: revision.text, translationLanguage: null, uiLocale: "ru" as const, appointmentAction: action };
+    expect(buildDerivedTranscriptCopyText(input)).toContain(appointmentResultMessages.ru.unresolved);
+    expect(JSON.stringify(buildDerivedTranscriptPdfDefinition(input))).toContain(appointmentResultMessages.ru.unresolved);
+    const foreign = { ...input, appointmentAction: { ...action, callAttemptId: "foreign-attempt" } };
+    expect(buildDerivedTranscriptCopyText(foreign)).not.toContain(appointmentResultMessages.ru.unresolved);
+    expect(JSON.stringify(buildDerivedTranscriptPdfDefinition(foreign))).not.toContain(appointmentResultMessages.ru.unresolved);
+  });
+  it("shows journal uncertainty independently of reported text and never borrows another attempt's booking", () => {
+    const action = { callAttemptId: "current-attempt", state: "uncertain" as const, delivery: null };
+    expect(appointmentResultState(action, revision)).toBeNull();
+    expect(appointmentResultState(action, { ...revision, callAttemptId: "older-attempt" })).toBeNull();
+    expect(appointmentResultState(action, { ...revision, callAttemptId: action.callAttemptId })).toBe("unresolved");
+    expect(appointmentResultState({ ...action, state: "confirmed" }, { ...revision, callAttemptId: action.callAttemptId })).toBe("confirmed");
+  });
   it("keeps the original readable and exportable until a requested translation is valid and ready", () => {
     for (const unavailable of [
       undefined,

@@ -50,14 +50,19 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
       "session.instructions.append",
       "session.thinking.append",
       "session.commentary.append",
-      "response.create"
+      "response.create",
+      "response.item.create"
     ]).nullable(),
     clientEventId: safeTokenSchema.nullable(),
     attempt: z.number().int().min(0).max(2)
   }) }),
   z.strictObject({ name: z.literal("conversation.task"), metadata: z.strictObject({
-    runtimeVersion: z.literal("live-client-v1"), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
-    revision: z.number().int().nonnegative(), requestId: z.uuid().optional()
+    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
+    revision: z.number().int().nonnegative(), requestId: z.uuid().optional(),
+    cause: safeTokenSchema.optional(), responseId: safeTokenSchema.optional(), released: z.boolean().optional(),
+    actionState: z.enum(["sending", "delivered", "uncertain", "confirmed"]).optional(),
+    deliveryKind: z.enum(["request", "status_check"]).optional(),
+    deliveryStatus: z.enum(["not_sent", "unacknowledged", "played"]).optional()
   }) }),
   z.strictObject({ name: z.literal("answering.updated"), metadata: answeringStateSchema }),
   z.strictObject({ name: z.literal("provider.sip_response"), metadata: z.strictObject({ code: z.number().int().min(100).max(699) }) }),
@@ -180,7 +185,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     metadata: z.strictObject({
       model: safeTokenSchema,
       transcriptionModel: safeTokenSchema,
-      runtimeVersion: z.literal("live-managed-v1").optional()
+      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4"]).optional()
     })
   }),
   z.strictObject({
@@ -222,7 +227,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("conversation.tool_result"),
     metadata: z.strictObject({
-      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing", "request_appointment", "confirm_appointment"]),
+      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing", "request_appointment", "confirm_appointment", "report_task_state"]),
       outcome: z.enum(["accepted", "rejected"]),
       reason: safeTokenSchema,
       requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),

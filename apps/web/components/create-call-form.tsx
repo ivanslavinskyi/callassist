@@ -1,4 +1,5 @@
 "use client";
+import { initialDisclosureMessages } from "@/lib/i18n/initial-disclosure-messages";
 
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import {
@@ -9,7 +10,7 @@ import {
   isCallLanguageAvailable,
   callBriefTaskTextLength,
   formatPersonName,
-  getAssistanceDisclosure,
+  buildInitialDisclosure,
   type AssistanceReason,
   type CallBrief,
   type CallLocale,
@@ -162,23 +163,11 @@ export function CreateCallForm({
     () => selectableLanguages.filter(({ locale }) => locale !== form.locale),
     [form.locale, selectableLanguages]
   );
-  const disclosurePreview = useMemo(
-    () =>
-      getAssistanceDisclosure(
-        form.locale,
-        form.assistanceReason ?? "none",
-        formatPersonName(
-          form.representedPersonFirstName,
-          form.representedPersonLastName
-        )
-      ),
-    [
-      form.assistanceReason,
-      form.locale,
-      form.representedPersonFirstName,
-      form.representedPersonLastName
-    ]
-  );
+  const disclosurePreview = useMemo(() => {
+    if (!form.representedPersonFirstName.trim() || !form.representedPersonLastName.trim()) return null;
+    return buildInitialDisclosure(form.locale, formatPersonName(form.representedPersonFirstName, form.representedPersonLastName),
+      getAssistantProfile(form.assistantProfileId).voiceGender, form.assistanceReason ?? 'none').text;
+  }, [form.locale, form.representedPersonFirstName, form.representedPersonLastName, form.assistantProfileId, form.assistanceReason]);
   const normalizedPhone = normalizePhoneNumber(form.phoneNumber);
   const phoneEntered = form.phoneNumber.trim().length > 0;
   const phoneValid = isE164PhoneNumber(normalizedPhone);
@@ -433,8 +422,8 @@ export function CreateCallForm({
             <option value="speech_impairment">{copy.speechImpairment}</option>
             <option value="language_barrier">{copy.languageBarrier}</option>
           </select>
-          {(form.assistanceReason ?? "none") === "speech_impairment" ? (
-            <small>{copy.assistanceDisclosureWarning}</small>
+          {(form.assistanceReason ?? "none") !== "none" ? (
+            <small>{initialDisclosureMessages[uiLocale].warning}</small>
           ) : null}
         </label>
 
@@ -549,11 +538,11 @@ export function CreateCallForm({
           <div className="field field-wide disclosure-preview">
             {disclosurePreview ? (
               <>
-                <span>{messages.form.disclosurePreview}</span>
-                <blockquote>{disclosurePreview}</blockquote>
+                <span>{initialDisclosureMessages[uiLocale].title}</span>
+                <blockquote lang={form.locale}>{disclosurePreview}</blockquote>
               </>
             ) : null}
-            <small>{messages.form.disclosureHelp}</small>
+            <small>{initialDisclosureMessages[uiLocale].help}</small>
           </div>
 
           <label className="field field-wide">

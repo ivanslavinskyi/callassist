@@ -31,4 +31,16 @@ describe("application-owned rendered speech", () => {
       speechFetch: vi.fn<typeof fetch>(async () => new Response(Buffer.from([1]))) }))
       .rejects.toThrow("SPEECH_RENDER_INVALID_AUDIO");
   });
+
+  it("bounds a stalled response body even after successful response headers", async () => {
+    vi.useFakeTimers();
+    try {
+      const body = new ReadableStream<Uint8Array>({ start() {} });
+      const rendering = renderSpeech({ apiKey: "test", text: "Exact question", locale: "en-GB", voice: "cedar", timeoutMs: 100,
+        speechFetch: vi.fn<typeof fetch>(async () => new Response(body)) });
+      const rejected = expect(rendering).rejects.toThrow("SPEECH_RENDER_TIMEOUT");
+      await vi.advanceTimersByTimeAsync(101);
+      await rejected;
+    } finally { vi.useRealTimers(); }
+  });
 });

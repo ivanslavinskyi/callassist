@@ -5,7 +5,7 @@ import { transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 import { type CallBrief, type CallTextArtifact, type FinalTranscriptRevision, type SourceSegment, type TextLanguage } from "@callassist/contracts";
 import { useEffect, useState } from "react";
 import { ApiError, requestCallSummary, requestTranscriptTranslation, retryCallTextArtifact } from "@/lib/api";
-import { currentResultArtifact, displayedResultTranscript, evidencedSummary, sourceSegmentAnchor } from "@/lib/call-result-projection";
+import { appointmentResultState, currentResultArtifact, displayedResultTranscript, evidencedSummary, sourceSegmentAnchor } from "@/lib/call-result-projection";
 import { buildDerivedTranscriptCopyText, buildDerivedTranscriptPdfDefinition, derivedTranscriptFilename, type DerivedTranscriptExport } from "@/lib/derived-transcript-export";
 import { formatTranscriptOffset, writeTextToClipboard } from "@/lib/final-transcript-export";
 import { getTextLanguageLabel } from "@/lib/i18n/language-messages";
@@ -17,10 +17,13 @@ import { useCallDraftStore } from "./call-draft-provider";
 import { canGenerateText, useTextCapabilities } from "./use-text-capabilities";
 import { canRequestTextArtifact } from "@/lib/text-artifact-retry";
 import { needsTranscriptTranslation } from "@/lib/text-capabilities";
+import type { CallSnapshot } from "@callassist/contracts";
+import { appointmentResultMessages } from "@/lib/i18n/appointment-result-messages";
 
-export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts }: {
+export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction }: {
   brief: CallBrief; userId: string; revision: FinalTranscriptRevision; taskLanguage: TextLanguage;
   promptLanguage: string | null; initialArtifacts?: CallTextArtifact[];
+  appointmentAction?: CallSnapshot["appointmentAction"];
 }) {
   const { locale, messages } = useUiLocale();
   const copy = textArtifactMessages[locale];
@@ -36,6 +39,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
   const translationArtifact = translationNeeded ? currentResultArtifact(items, revision, "transcript_translation", taskLanguage) : undefined;
   const summaryArtifact = currentResultArtifact(items, revision, "call_summary", taskLanguage);
   const summary = evidencedSummary(summaryArtifact, revision);
+  const appointmentState = appointmentResultState(appointmentAction, revision);
   const { translation, transcript: displayed, view: displayedView } = displayedResultTranscript(revision, translationArtifact,
     translationNeeded ? view : "original");
   const waitingTranslation = busy === "translation" || translationArtifact?.status === "queued" || translationArtifact?.status === "processing";
@@ -75,7 +79,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     });
   }
   function exportInput(): DerivedTranscriptExport {
-    return { brief, revision, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
+    return { brief, revision, appointmentAction, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
   }
   async function copyText() {
     const input = exportInput();
@@ -92,6 +96,9 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     } catch { setExportStatus("failed"); }
   }
   return <div className="call-result-panel">
+    {appointmentState ? <p role="status">
+      {appointmentResultMessages[locale][appointmentState]}
+    </p> : null}
     <section className="call-result-summary" aria-labelledby={`summary-heading-${revision.id}`}>
       <div className="final-transcript-heading">
         <h2 id={`summary-heading-${revision.id}`}>{copy.summary}</h2>

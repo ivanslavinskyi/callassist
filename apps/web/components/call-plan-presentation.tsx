@@ -1,4 +1,5 @@
 import type { AppointmentAuthorization, CompiledCallBrief } from "@callassist/contracts";
+import { calendarDateDetails, formatLocale } from "@callassist/contracts";
 import { messages, type UiLocale } from "@/lib/i18n/messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
 import { planReviewMessages } from "@/lib/i18n/plan-review-messages";
@@ -37,7 +38,7 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
       <dl className="appointment-time-zone"><dt>{appointmentCopy.timeZone}</dt><dd>{authorization.timeZone}</dd></dl>
       <p className="appointment-window-label">{appointmentCopy.windows}</p>
       <ul className="appointment-windows">{authorization.windows.map((window, index) => <li key={`${window.date}:${window.startTime}:${window.endTime}:${index}`}>
-        <time dateTime={window.date}>{window.date}</time>
+        <time dateTime={window.date}>{calendarDateDetails(window.date, formatLocale(uiLocale), "numeric").dateLabel}</time>
         <span>{window.startTime === window.endTime ? window.startTime : `${window.startTime}–${window.endTime}`}</span>
       </li>)}</ul>
       {authorization.windows.some((window) => window.startTime !== window.endTime) ? <p className="appointment-window-note">{appointmentCopy.inclusive}</p> : null}
