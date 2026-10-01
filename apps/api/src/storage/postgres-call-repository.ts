@@ -1,5 +1,5 @@
 import { initialDisclosureProjection } from "@callassist/contracts";
-import type { NativeTranscriptCapture } from "./native-transcript";
+import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { answeringUsage } from "../telephony/answering-usage";
 import { answeringStateSchema } from "@callassist/contracts";
@@ -13,7 +13,7 @@ import { PostgresRecipientOptOutStore } from "./postgres-recipient-opt-out-store
 import { recipientContactHashKey } from "../safety/recipient-opt-out-store";
 import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle, callStage, callStatusesForStage, emptyCallStageCounts, callFeedbackScope, summarizeCallFeedback, type CallFeedbackSummary, type CallSettlementFact, type CallAssessmentRecord } from "@callassist/contracts";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend, reservePostCallProviderSpend } from "../beta/beta-controls";
+import { BetaControlError, PostgresBetaControls, activeBetaCall, lockBetaControls, reserveBetaSpend } from "../beta/beta-controls";
 import { isFreeProviderOperation } from "../beta/beta-spend-accounting";
 import { toAdminDurableJob } from "../jobs/admin-durable-job";
 import { PostgresCallTextStore, persistTranscriptRevision, saveReviewReceipt, requireReceiptForStart, redactCallTextData } from "./postgres-call-text-store";
@@ -206,6 +206,9 @@ type CallCompilationSourceRow = Pick<
 >;
 
 type TranscriptRow = {
+  ingestionSequence?: number;
+  receivedAt?: DatabaseDate;
+  callAttemptId?: string | null;
   id: string;
   role: TranscriptSegment["role"];
   text: string;
@@ -258,6 +261,9 @@ type CallRecordingRow = {
 };
 
 type FinalTranscriptRow = {
+  artifactKind: "live" | "recording_asr";
+  quality: FinalTranscript["quality"] | null;
+  requestId: string | null; requestedAt: DatabaseDate | null; jobStatus: string | null;
   source: "recording_asr" | "live_native" | "live_composed";
   id: string;
   status: FinalTranscript["status"];
@@ -1381,8 +1387,8 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.begin(async (transaction) => {
       const policy = this.betaControls ? (await lockBetaControls(transaction)).settings : null;
       await requirePostgresDurableJobLease(transaction, lease);
-      const [context] = await transaction<{ callAttemptId: string }[]>`
-        SELECT call_recordings.call_attempt_id AS "callAttemptId"
+      const [context] = await transaction<{ callAttemptId: string; requestId: string }[]>`
+        SELECT call_recordings.call_attempt_id AS "callAttemptId", final_transcripts.request_id AS "requestId"
         FROM call_recordings
         INNER JOIN final_transcripts
           ON final_transcripts.call_recording_id = call_recordings.id
@@ -1394,21 +1400,27 @@ export class PostgresCallRepository implements CallRepository {
         WHERE call_recordings.id = ${input.recordingId}
           AND call_recordings.call_brief_id = ${input.callBriefId}
           AND call_recordings.status = 'available'
-          AND final_transcripts.status = 'processing'
+          AND (call_recordings.delete_after IS NULL OR call_recordings.delete_after>now())
+          AND final_transcripts.request_id IS NOT NULL
+          AND EXISTS(SELECT 1 FROM call_briefs b JOIN users u ON u.id=b.user_id WHERE b.id=call_recordings.call_brief_id AND b.data_deleted_at IS NULL AND u.status='active'
+            AND NOT EXISTS(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.id AND d.status<>'completed'))
+          AND final_transcripts.status = 'processing' AND final_transcripts.artifact_kind='recording_asr'
         FOR SHARE OF call_recordings, final_transcripts, durable_jobs
       `;
       if (!context) throw new CallRepositoryError("RECORDING_NOT_FOUND");
-      if (policy) await reservePostCallProviderSpend(transaction, context.callAttemptId, input.id, policy);
+      // On-demand work may start long after the call's protected pool was released.
+      // Admit each request against current capacity; never resurrect that pool.
+      if (policy) await reserveBetaSpend(transaction, "transcription", `provider:${input.id}`, policy);
       const inserted = await transaction`
         INSERT INTO provider_operations (
           id, provider, operation_type, stage, requested_model,
           client_request_id, call_brief_id, call_attempt_id, recording_id,
-          durable_job_id, durable_job_generation, started_at
+          durable_job_id, durable_job_generation, recording_transcript_request_id, started_at
         ) VALUES (
           ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
           ${input.requestedModel}, ${input.clientRequestId},
           ${input.callBriefId}, ${context.callAttemptId}, ${input.recordingId},
-          ${lease.jobId}, ${input.durableJobGeneration},
+          ${lease.jobId}, ${input.durableJobGeneration}, ${context.requestId},
           ${input.startedAt}::timestamptz
         )
         ON CONFLICT DO NOTHING
@@ -1449,17 +1461,18 @@ export class PostgresCallRepository implements CallRepository {
           ON durable_jobs.id = ${lease.jobId}
           AND durable_jobs.job_type = 'final_transcription'
           AND durable_jobs.recording_id = call_recordings.id
-          AND durable_jobs.generation = chunks.durable_job_generation
+          AND durable_jobs.generation = ${input.durableJobGeneration}
         WHERE chunks.recording_id = ${input.recordingId}
           AND call_recordings.call_brief_id = ${input.callBriefId}
           AND call_recordings.status = 'available'
-          AND final_transcripts.status = 'processing'
-          AND chunks.durable_job_generation = ${input.durableJobGeneration}
+          AND final_transcripts.status = 'processing' AND final_transcripts.artifact_kind='recording_asr'
+          AND final_transcripts.request_id IS NOT NULL
+          AND (call_recordings.delete_after IS NULL OR call_recordings.delete_after>now())
           AND chunks.stage = ${input.stage}
           AND chunks.chunk_key = ${input.chunkKey}
           AND chunks.input_fingerprint = ${input.inputFingerprint}
           AND chunks.requested_model = ${input.requestedModel}
-        LIMIT 1
+        ORDER BY chunks.durable_job_generation DESC LIMIT 1
       `;
       return chunk
         ? decryptJson<string>(chunk.textCiphertext, this.#encryptionKey)
@@ -1519,7 +1532,9 @@ export class PostgresCallRepository implements CallRepository {
         WHERE call_recordings.id = ${input.recordingId}
           AND call_recordings.call_brief_id = ${input.callBriefId}
           AND call_recordings.status = 'available'
-          AND final_transcripts.status = 'processing'
+          AND (call_recordings.delete_after IS NULL OR call_recordings.delete_after>now())
+          AND EXISTS(SELECT 1 FROM call_briefs b WHERE b.id=call_recordings.call_brief_id AND b.data_deleted_at IS NULL)
+          AND final_transcripts.status = 'processing' AND final_transcripts.artifact_kind='recording_asr'
         ON CONFLICT DO NOTHING
       `;
     });
@@ -1959,12 +1974,9 @@ export class PostgresCallRepository implements CallRepository {
         SET
           text_ciphertext = NULL,
           segments_ciphertext = NULL,
-          failure_reason = NULL,
+          failure_reason = NULL, quality=NULL, request_id=NULL, requested_at=NULL, requested_by=NULL,
           updated_at = ${new Date(input.deletedAt)}
-        WHERE call_recording_id IN (
-          SELECT id FROM call_recordings
-          WHERE call_brief_id = ${input.callId}
-        )
+        WHERE call_attempt_id IN (SELECT id FROM call_attempts WHERE call_brief_id = ${input.callId})
       `;
       await transaction`
         UPDATE call_feedback_revisions
@@ -2770,6 +2782,7 @@ export class PostgresCallRepository implements CallRepository {
     `;
     if (!briefRow) return null;
 
+    const [nativeRow] = await this.#sql<{capture: NativeTranscriptCapture|null}[]>`SELECT native_transcript_capture AS capture FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1`;
     const [actionRow] = await this.#sql`SELECT state,call_attempt_id,payload_ciphertext FROM call_voice_actions
       WHERE call_attempt_id=(SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1)
       AND payload_ciphertext IS NOT NULL`;
@@ -2785,10 +2798,11 @@ export class PostgresCallRepository implements CallRepository {
           locale,
           final,
           created_at AS "createdAt",
-          native_timing AS "nativeTiming", application_playback AS "applicationPlayback"
+          native_timing AS "nativeTiming", application_playback AS "applicationPlayback",
+          ingestion_sequence::float8 AS "ingestionSequence", received_at AS "receivedAt", call_attempt_id AS "callAttemptId"
         FROM transcript_segments
         WHERE call_brief_id = ${id}
-        ORDER BY created_at ASC
+        ORDER BY ingestion_sequence ASC
       `,
         this.#sql<ApprovalRow[]>`
         SELECT
@@ -2811,6 +2825,8 @@ export class PostgresCallRepository implements CallRepository {
         `,
         this.#sql<FinalTranscriptRow[]>`
           SELECT
+            final_transcripts.artifact_kind AS "artifactKind", final_transcripts.quality,
+            final_transcripts.request_id AS "requestId", final_transcripts.requested_at AS "requestedAt", j.status AS "jobStatus",
             final_transcripts.id,
             final_transcripts.status,
             final_transcripts.text_ciphertext AS "textCiphertext",
@@ -2822,14 +2838,23 @@ export class PostgresCallRepository implements CallRepository {
             final_transcripts.updated_at AS "updatedAt",
             final_transcripts.completed_at AS "completedAt"
           FROM final_transcripts
-          JOIN call_recordings
-            ON call_recordings.id = final_transcripts.call_recording_id
-          WHERE call_recordings.call_brief_id = ${id}
-          LIMIT 1
+          JOIN call_attempts a ON a.id=final_transcripts.call_attempt_id
+          LEFT JOIN durable_jobs j ON j.recording_id=final_transcripts.call_recording_id AND j.job_type='final_transcription'
+          WHERE a.id=(SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1)
+          ORDER BY (final_transcripts.artifact_kind='live') DESC
         `
       ]);
 
+    const liveRow=finalTranscriptRows.find(row=>row.artifactKind==='live');
+    const audioRow=finalTranscriptRows.find(row=>row.artifactKind==='recording_asr');
+    const primaryRow=liveRow ?? (nativeRow?.capture ? undefined : audioRow);
+    const audioRevision=audioRow?.status==='completed' ? await this.#callText.getRecordingTranscriptRevision(id) : null;
     return {
+      nativeTranscriptCapture: nativeRow?.capture ?? null,
+      recordingTranscript: audioRow ? this.#mapFinalTranscript(audioRow) : null,
+      recordingTranscriptRevision: audioRevision,
+      recordingTranscriptRequest: audioRow?.requestId && audioRow.requestedAt ? { id:audioRow.requestId, requestedAt:toIso(audioRow.requestedAt),
+        status:audioRow.status==='completed' ? 'completed' : audioRow.jobStatus==='queued' ? 'queued' : audioRow.jobStatus==='running' ? 'processing' : 'failed' } : null,
       appointmentAction,
       initialDisclosure: initialDisclosureProjection(await this.getLatestAttempt(id)),
       languageContext: await this.getLanguageContext(id),
@@ -2852,8 +2877,8 @@ export class PostgresCallRepository implements CallRepository {
       recording: recordingRows[0]
         ? this.#mapRecording(recordingRows[0])
         : null,
-      finalTranscript: finalTranscriptRows[0]
-        ? this.#mapFinalTranscript(finalTranscriptRows[0])
+      finalTranscript: primaryRow
+        ? this.#mapFinalTranscript(primaryRow)
         : null
     };
   }
@@ -5281,18 +5306,27 @@ export class PostgresCallRepository implements CallRepository {
 
     await this.#sql.begin(async (transaction) => {
       const call = await transaction`
-        SELECT id FROM call_briefs WHERE id = ${id} FOR UPDATE
+        SELECT id FROM call_briefs WHERE id = ${id} AND data_deleted_at IS NULL FOR UPDATE
       `;
       if (call.count === 0) throw new CallRepositoryError("CALL_NOT_FOUND");
-      await transaction`
+      const [attempt]=await transaction<{id:string}[]>`SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1`;
+      const existing=await transaction<TranscriptRow[]>`SELECT id,role,text,locale,final,created_at AS "createdAt",native_timing AS "nativeTiming",
+        application_playback AS "applicationPlayback",ingestion_sequence::float8 AS "ingestionSequence",received_at AS "receivedAt",call_attempt_id AS "callAttemptId"
+        FROM transcript_segments WHERE call_brief_id=${id} AND call_attempt_id IS NOT DISTINCT FROM ${attempt?.id??null}
+          AND ((${!!nativeTiming} AND native_timing->>'sessionId'=${nativeTiming?.sessionId??null} AND native_timing->>'eventId'=${nativeTiming?.eventId??null})
+            OR (${!!applicationPlayback} AND application_playback->>'sessionId'=${applicationPlayback?.sessionId??null} AND application_playback->>'markId'=${applicationPlayback?.markId??null})) LIMIT 1`;
+      if(existing[0]) { Object.assign(segment,this.#mapTranscript(existing[0])); return; }
+      const [saved]=await transaction<{ingestionSequence:number;receivedAt:Date;callAttemptId:string|null}[]>`
         INSERT INTO transcript_segments (
-          id, call_brief_id, role, text, locale, final, created_at, native_timing, application_playback
+          id, call_brief_id, role, text, locale, final, created_at, native_timing, application_playback, call_attempt_id
         ) VALUES (
           ${segment.id}, ${id}, ${role}, ${text}, ${locale}, true,
           ${new Date(segment.createdAt)}, ${nativeTiming ? transaction.json(nativeTiming) : null},
-          ${applicationPlayback ? transaction.json(applicationPlayback) : null}
+          ${applicationPlayback ? transaction.json(applicationPlayback) : null}, ${attempt?.id??null}
         )
+        RETURNING ingestion_sequence::float8 AS "ingestionSequence",received_at AS "receivedAt",call_attempt_id AS "callAttemptId"
       `;
+      if(saved) Object.assign(segment,{...saved,receivedAt:saved.receivedAt.toISOString()});
       await this.#audit(transaction, id, "transcript.finalized", {
         role,
         locale,
@@ -5830,24 +5864,12 @@ export class PostgresCallRepository implements CallRepository {
             }
           }
         });
-        await transaction`
-          INSERT INTO durable_jobs (
-            id,
-            job_type,
-            recording_id,
-            status,
-            max_attempts,
-            run_after
-          ) VALUES (
-            ${randomUUID()},
-            'final_transcription',
-            ${input.recordingId},
-            'queued',
-            ${durableJobMaxAttempts.final_transcription},
-            ${now}
-          )
-          ON CONFLICT (job_type, recording_id) DO NOTHING
-        `;
+        await transaction`UPDATE call_recordings r SET delete_after=COALESCE(r.delete_after,${now}::timestamptz+b.audio_retention_days*interval '1 day')
+          FROM call_briefs b WHERE b.id=r.call_brief_id AND r.id=${input.recordingId}`;
+        await transaction`INSERT INTO durable_jobs(id,job_type,recording_id,status,max_attempts,run_after)
+          SELECT ${randomUUID()},'recording_retention',id,'queued',${durableJobMaxAttempts.recording_retention},delete_after
+          FROM call_recordings WHERE id=${input.recordingId}
+          ON CONFLICT(job_type,recording_id) DO NOTHING`;
       } else if (status === "failed" && input.providerStatus === "absent") {
         const failureCode = safeTelemetryCode(
           input.failureReason,
@@ -5892,6 +5914,78 @@ export class PostgresCallRepository implements CallRepository {
     return {capture:row.capture,snapshot:await this.#require(row.callId)};
   }
 
+  async getNativeTranscriptAttemptWork(callId: string, attemptId: string) {
+    const [row]=await this.#sql<{capture:NativeTranscriptCapture|null;ended:boolean}[]>`
+      SELECT native_transcript_capture AS capture, status IN ('completed','failed','stopped') AS ended FROM call_attempts
+      WHERE id=${attemptId} AND call_brief_id=${callId}
+        AND id=(SELECT id FROM call_attempts WHERE call_brief_id=${callId} ORDER BY created_at DESC,id DESC LIMIT 1)`;
+    if(!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return {...row,snapshot:await this.#require(callId)};
+  }
+
+  async publishNativeTranscript(callId: string, attemptId: string, result: NativeTranscriptResult, lease?: DurableJobLease, summaryGeneratorVersion?: string) {
+    await this.#sql.begin(async tx=>{
+      if(lease) await requirePostgresDurableJobLease(tx,lease);
+      const [attempt]=await tx<{recordingId:string|null}[]>`SELECT r.id AS "recordingId" FROM call_attempts a
+        JOIN call_briefs b ON b.id=a.call_brief_id LEFT JOIN call_recordings r ON r.call_attempt_id=a.id
+        WHERE a.id=${attemptId} AND b.id=${callId} AND b.data_deleted_at IS NULL FOR UPDATE OF b`;
+      if(!attempt) throw new CallRepositoryError("CALL_NOT_FOUND");
+      const [existing]=await tx<{id:string;status:string;text_ciphertext:string|null;segments_ciphertext:string|null;quality:FinalTranscript["quality"]|null}[]>`
+        SELECT id,status,text_ciphertext,segments_ciphertext,quality FROM final_transcripts WHERE call_attempt_id=${attemptId} AND artifact_kind='live' FOR UPDATE`;
+      const id=existing?.id??randomUUID(),now=new Date().toISOString();
+      // Keep a published historical Live revision and its existing summary current.
+      // Backfill enriches diagnostics; it must not silently rebase old evidence.
+      if(existing?.status==='completed' && !existing.quality) {
+        await tx`UPDATE final_transcripts SET quality=${tx.json(result.quality)} WHERE id=${id}`;
+        return;
+      }
+      if(existing?.text_ciphertext && decryptJson(existing.text_ciphertext,this.#encryptionKey)===result.text && existing.segments_ciphertext &&
+        JSON.stringify(decryptJson(existing.segments_ciphertext,this.#encryptionKey))===JSON.stringify(result.segments)) {
+        await tx`UPDATE final_transcripts SET quality=${tx.json(result.quality)} WHERE id=${id}`;
+        return;
+      }
+      await tx`INSERT INTO final_transcripts(id,call_attempt_id,call_recording_id,artifact_kind,status,model,source,text_ciphertext,segments_ciphertext,quality,created_at,updated_at,completed_at)
+        VALUES(${id},${attemptId},${attempt.recordingId},'live','completed',${result.model},${result.source},${encryptJson(result.text,this.#encryptionKey)},
+          ${encryptJson(result.segments,this.#encryptionKey)},${tx.json(result.quality)},${now},${now},${now})
+        ON CONFLICT(call_attempt_id,artifact_kind) DO UPDATE SET status='completed',model=EXCLUDED.model,source=EXCLUDED.source,
+          text_ciphertext=EXCLUDED.text_ciphertext,segments_ciphertext=EXCLUDED.segments_ciphertext,quality=EXCLUDED.quality,updated_at=EXCLUDED.updated_at,completed_at=EXCLUDED.completed_at`;
+      // Historical ASR summaries retain their immutable evidence; backfill is model-free.
+      const historical=await tx`SELECT id FROM final_transcripts WHERE call_attempt_id=${attemptId} AND artifact_kind='recording_asr' AND status='completed' AND request_id IS NULL`;
+      await persistTranscriptRevision(tx,this.#encryptionKey,{callId,callAttemptId:attemptId,transcriptId:id,text:result.text,segments:result.segments,createdAt:now,source:result.source},
+        result.quality.coverage==='unavailable'||historical.count||(existing && !existing.quality) ? undefined : summaryGeneratorVersion);
+    });
+    const snapshot=await this.#require(callId);
+    return {callId,finalTranscript:snapshot.finalTranscript!,snapshot};
+  }
+
+  async requestRecordingTranscript(callId: string, userId: string, model: string) {
+    await this.#sql.begin(async tx=>{
+      const [recording]=await tx<{id:string;attemptId:string;status:string;deleteAfter:Date|null}[]>`
+        SELECT r.id,r.call_attempt_id AS "attemptId",r.status,r.delete_after AS "deleteAfter" FROM call_recordings r
+        JOIN call_briefs b ON b.id=r.call_brief_id JOIN users u ON u.id=b.user_id
+        WHERE b.id=${callId} AND b.user_id=${userId} AND b.data_deleted_at IS NULL AND u.status='active'
+          AND NOT EXISTS(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.id AND d.status<>'completed')
+        FOR UPDATE OF b,r`;
+      if(!recording) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const [old]=await tx<{id:string;status:string;request_id:string|null}[]>`SELECT id,status,request_id FROM final_transcripts
+        WHERE call_attempt_id=${recording.attemptId} AND artifact_kind='recording_asr' FOR UPDATE`;
+      if(old?.status==='completed') return;
+      if(recording.status!=='available'||(recording.deleteAfter && recording.deleteAfter.getTime()<=Date.now())) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+      const [job]=await tx<{id:string;status:string}[]>`SELECT id,status FROM durable_jobs WHERE job_type='final_transcription' AND recording_id=${recording.id}`;
+      if(old?.request_id && job && ['queued','running'].includes(job.status)) return;
+      const now=new Date().toISOString();
+      await tx`INSERT INTO final_transcripts(id,call_attempt_id,call_recording_id,artifact_kind,status,model,source,request_id,requested_by,requested_at,created_at,updated_at)
+        VALUES(${old?.id??randomUUID()},${recording.attemptId},${recording.id},'recording_asr','processing',${model},'recording_asr',${old?.request_id??randomUUID()},${userId},${now},${now},${now})
+        ON CONFLICT(call_attempt_id,artifact_kind) DO UPDATE SET request_id=EXCLUDED.request_id,requested_by=EXCLUDED.requested_by,
+          requested_at=COALESCE(final_transcripts.requested_at,EXCLUDED.requested_at),model=EXCLUDED.model,status='processing',failure_reason=NULL,updated_at=EXCLUDED.updated_at`;
+      await tx`INSERT INTO durable_jobs(id,job_type,recording_id,status,max_attempts,run_after)
+        VALUES(${randomUUID()},'final_transcription',${recording.id},'queued',${durableJobMaxAttempts.final_transcription},${now})
+        ON CONFLICT(job_type,recording_id) DO UPDATE SET status='queued',attempt_count=0,force_requested=true,
+          generation=durable_jobs.generation+1,run_after=EXCLUDED.run_after,lease_owner=NULL,leased_at=NULL,lease_expires_at=NULL,
+          last_error_code=NULL,completed_at=NULL,updated_at=EXCLUDED.run_after`;
+    });
+  }
+
   async claimFinalTranscript(
     recordingId: string,
     model: string,
@@ -5932,7 +6026,7 @@ export class PostgresCallRepository implements CallRepository {
           id AS "transcriptId",
           status AS "transcriptStatus"
         FROM final_transcripts
-        WHERE call_recording_id = ${recordingId}
+        WHERE call_recording_id = ${recordingId} AND artifact_kind='recording_asr'
         FOR UPDATE
       `;
       if (
@@ -5962,14 +6056,14 @@ export class PostgresCallRepository implements CallRepository {
         await transaction`
           INSERT INTO final_transcripts (
             id,
-            call_recording_id,
+            call_recording_id, call_attempt_id, artifact_kind,
             status,
             model,
             created_at,
             updated_at
           ) VALUES (
             ${transcriptId},
-            ${recordingId},
+            ${recordingId}, ${recording.callAttemptId}, 'recording_asr',
             'processing',
             ${model},
             ${now},
@@ -6033,7 +6127,8 @@ export class PostgresCallRepository implements CallRepository {
         JOIN final_transcripts
           ON final_transcripts.call_recording_id = call_recordings.id
         WHERE call_recordings.id = ${recordingId}
-          AND final_transcripts.status = 'processing'
+          AND (${!lease} OR (call_recordings.status='available' AND (call_recordings.delete_after IS NULL OR call_recordings.delete_after>now())))
+          AND final_transcripts.status = 'processing' AND final_transcripts.artifact_kind='recording_asr'
         FOR UPDATE OF call_recordings, final_transcripts
       `;
       if (!row) throw new CallRepositoryError("RECORDING_NOT_FOUND");
@@ -6050,37 +6145,10 @@ export class PostgresCallRepository implements CallRepository {
           failure_reason = NULL,
           updated_at = ${now},
           completed_at = ${now}
-        WHERE call_recording_id = ${recordingId}
+        WHERE call_recording_id = ${recordingId} AND artifact_kind='recording_asr'
       `;
       await persistTranscriptRevision(transaction,this.#encryptionKey,{callId:row.callId,transcriptId:row.transcriptId,callAttemptId:row.callAttemptId,
         text,segments,createdAt:now.toISOString(),source:options?.source},options?.summaryGeneratorVersion);
-      await transaction`
-        UPDATE call_recordings
-        SET
-          delete_after = ${new Date(
-            now.getTime() + row.retentionDays * 86_400_000
-          )},
-          updated_at = ${now}
-        WHERE id = ${recordingId}
-      `;
-      await transaction`
-        INSERT INTO durable_jobs (
-          id,
-          job_type,
-          recording_id,
-          status,
-          max_attempts,
-          run_after
-        ) VALUES (
-          ${randomUUID()},
-          'recording_retention',
-          ${recordingId},
-          'queued',
-          ${durableJobMaxAttempts.recording_retention},
-          ${new Date(now.getTime() + row.retentionDays * 86_400_000)}
-        )
-        ON CONFLICT (job_type, recording_id) DO NOTHING
-      `;
       await this.#audit(transaction, row.callId, "final_transcript.completed", {
         recordingId
       });
@@ -6127,7 +6195,7 @@ export class PostgresCallRepository implements CallRepository {
         FROM final_transcripts
         JOIN call_recordings
           ON call_recordings.id = final_transcripts.call_recording_id
-        WHERE call_recordings.id = ${recordingId}
+        WHERE call_recordings.id = ${recordingId} AND final_transcripts.artifact_kind='recording_asr'
         FOR UPDATE OF final_transcripts
       `;
       if (!transcript) return null;
@@ -6168,6 +6236,17 @@ export class PostgresCallRepository implements CallRepository {
     return this.#finalTranscriptMutation(row.callId);
   }
 
+  async requestRecordingDeletion(id: string) {
+    await this.#sql.begin(async tx => {
+      const [recording] = await tx<{id:string}[]>`UPDATE call_recordings SET delete_after=LEAST(COALESCE(delete_after,now()),now()),updated_at=now()
+        WHERE call_brief_id=${id} AND status='available' RETURNING id`;
+      if (!recording) throw new CallRepositoryError('RECORDING_NOT_FOUND');
+      await tx`INSERT INTO durable_jobs(id,job_type,recording_id,status,max_attempts,run_after)
+        VALUES(${randomUUID()},'recording_retention',${recording.id},'queued',${durableJobMaxAttempts.recording_retention},now())
+        ON CONFLICT(job_type,recording_id) DO UPDATE SET run_after=now(),updated_at=now() WHERE durable_jobs.status='queued'`;
+    });
+  }
+
   async markRecordingDeleted(id: string, lease?: DurableJobLease) {
     const now = new Date();
     await this.#sql.begin(async (transaction) => {
@@ -6195,6 +6274,9 @@ export class PostgresCallRepository implements CallRepository {
         }
         return;
       }
+      await transaction`UPDATE durable_jobs SET status='cancelled',lease_owner=NULL,leased_at=NULL,lease_expires_at=NULL,
+        last_error_code='RECORDING_NOT_AVAILABLE',updated_at=now(),completed_at=now()
+        WHERE job_type='final_transcription' AND recording_id IN(SELECT id FROM call_recordings WHERE call_brief_id=${id}) AND status IN('queued','running')`;
       await this.#audit(transaction, id, "recording.deleted", {});
     });
     return this.#recordingMutation(id);
@@ -6203,7 +6285,7 @@ export class PostgresCallRepository implements CallRepository {
   async enqueueDurableJob(input: EnqueueDurableJobInput) {
     const now = new Date();
     const jobId = await this.#sql.begin(async (transaction) => {
-      const callTarget = input.type === "answer_detection_timeout" || input.type === "provider_call_reconciliation" ||
+      const callTarget = input.type === "live_transcript_finalization" || input.type === "answer_detection_timeout" || input.type === "provider_call_reconciliation" ||
         input.type === "provider_call_cost_reconciliation";
       const preparationTarget = input.type === "brief_compilation";
       const textTarget = input.type === "text_artifact_generation";
@@ -6336,7 +6418,7 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async seedDurableJobs(now: string) {
-    const [callReconciliations, callCostReconciliations,
+    const [nativeTranscripts, callReconciliations, callCostReconciliations,
       recordingReconciliations, transcriptions, retention] = await this.#sql.begin(
       async (transaction) => {
         const callReconciliationRows = await transaction`
@@ -6420,8 +6502,9 @@ export class PostgresCallRepository implements CallRepository {
             ${now}::timestamptz
           FROM call_recordings
           LEFT JOIN final_transcripts
-            ON final_transcripts.call_recording_id = call_recordings.id
-          WHERE call_recordings.status = 'available'
+            ON final_transcripts.call_recording_id = call_recordings.id AND final_transcripts.artifact_kind='recording_asr'
+          WHERE call_recordings.status = 'available' AND final_transcripts.request_id IS NOT NULL
+            AND (call_recordings.delete_after IS NULL OR call_recordings.delete_after>${now}::timestamptz)
             AND (
               final_transcripts.id IS NULL
               OR final_transcripts.status IN ('processing', 'failed')
@@ -6446,16 +6529,20 @@ export class PostgresCallRepository implements CallRepository {
             ${durableJobMaxAttempts.recording_retention},
             call_recordings.delete_after
           FROM call_recordings
-          INNER JOIN final_transcripts
-            ON final_transcripts.call_recording_id = call_recordings.id
-            AND final_transcripts.status = 'completed'
           WHERE call_recordings.status = 'available'
             AND call_recordings.delete_after IS NOT NULL
           ON CONFLICT (job_type, recording_id) DO NOTHING
           RETURNING id
         `;
+        const nativeRows=await transaction`INSERT INTO durable_jobs(id,job_type,call_attempt_id,status,max_attempts,run_after)
+          SELECT gen_random_uuid(),'live_transcript_finalization',a.id,'queued',${durableJobMaxAttempts.live_transcript_finalization},${now}::timestamptz
+          FROM call_attempts a JOIN call_briefs b ON b.id=a.call_brief_id
+          WHERE b.data_deleted_at IS NULL AND a.native_transcript_capture IS NOT NULL
+            AND a.id=(SELECT id FROM call_attempts WHERE call_brief_id=b.id ORDER BY created_at DESC,id DESC LIMIT 1)
+            AND NOT EXISTS(SELECT 1 FROM final_transcripts f WHERE f.call_attempt_id=a.id AND f.artifact_kind='live' AND f.quality IS NOT NULL)
+          ON CONFLICT(job_type,call_attempt_id) WHERE call_attempt_id IS NOT NULL DO NOTHING RETURNING id`;
         return [
-          callReconciliationRows,
+          nativeRows,callReconciliationRows,
           callCostReconciliationRows,
           recordingReconciliationRows,
           transcriptionRows,
@@ -6463,7 +6550,7 @@ export class PostgresCallRepository implements CallRepository {
         ] as const;
       }
     );
-    return callReconciliations.count + callCostReconciliations.count +
+    return nativeTranscripts.count + callReconciliations.count + callCostReconciliations.count +
       recordingReconciliations.count + transcriptions.count + retention.count;
   }
 
@@ -7108,11 +7195,12 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   #mapTranscript(row: TranscriptRow): TranscriptSegment {
-    const { nativeTiming, applicationPlayback, ...rest } = row;
+    const { nativeTiming, applicationPlayback, receivedAt, ...rest } = row;
     return {
       ...rest,
       ...(nativeTiming ? { nativeTiming } : {}),
       ...(applicationPlayback ? { applicationPlayback } : {}),
+      ...(receivedAt ? { receivedAt:toIso(receivedAt) } : {}),
       createdAt: toIso(row.createdAt)
     };
   }
@@ -7173,6 +7261,7 @@ export class PostgresCallRepository implements CallRepository {
 
   #mapFinalTranscript(row: FinalTranscriptRow): FinalTranscript {
     return {
+      ...(row.quality ? {quality:row.quality} : {}),
       source: row.source,
       id: row.id,
       status: row.status,
@@ -7557,12 +7646,12 @@ export class PostgresCallRepository implements CallRepository {
 
   async #finalTranscriptMutation(callId: string) {
     const snapshot = await this.#require(callId);
-    if (!snapshot.finalTranscript) {
+    if (!snapshot.recordingTranscript) {
       throw new CallRepositoryError("RECORDING_NOT_FOUND");
     }
     return {
       callId,
-      finalTranscript: snapshot.finalTranscript,
+      finalTranscript: snapshot.recordingTranscript,
       snapshot
     };
   }

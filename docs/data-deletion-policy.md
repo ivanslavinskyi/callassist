@@ -47,7 +47,7 @@ in the production retention/Privacy acceptance under B11.
 | Password recovery challenges/grants | Unchanged | Capabilities fail eligibility after deletion, but rows are retained | Expiry is not erasure; scheduled retention remains R17 |
 | Pending call preparations | Unchanged | Cancel queued/running work and erase encrypted source input before publication | Prevent creation of new calls after deletion request |
 | Call brief recipient/person/objective/context/facts/compilation/disability or language-assistance text | Redact; hide call from owner reads | Redact every owned call | User-provided personal content |
-| Realtime and final transcript text/segments | Delete or null | Delete or null for every owned call | Conversation content |
+| Live and optional audio transcript text/segments (both source artifacts) | Delete or null | Delete or null for every owned call | Conversation content |
 | Native transcript capture state on attempts | Clear | Clear for every owned call | Technical capture metadata must not survive call-content redaction |
 | Immutable final transcript revisions | Null encrypted payloads; retain source identity/hash and minimized references | Same for every owned call | Historical source text is personal content too |
 | Plan/clarification translations, transcript translations, summaries and persisted chunks | Cancel jobs and null all encrypted payloads | Cancel at request time; redact with each call | No late worker result may recreate content |

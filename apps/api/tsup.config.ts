@@ -9,6 +9,7 @@ export default defineConfig({
     "db/sync-provider-billing": "src/db/sync-provider-billing.ts",
     "db/migrate": "src/db/migrate.ts",
     "db/backfill-call-compilations": "src/db/backfill-call-compilations.ts",
+    "db/backfill-live-transcripts": "src/db/backfill-live-transcripts.ts",
     "db/classify-legacy-call-plans": "src/db/classify-legacy-call-plans.ts",
     "db/verify-call-plan-cutover": "src/db/verify-call-plan-cutover.ts",
     "db/reencrypt-data": "src/db/reencrypt-data.ts",

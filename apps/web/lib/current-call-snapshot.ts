@@ -8,6 +8,13 @@ export function currentCallSnapshot(current: CallSnapshot | null, incoming: Call
       (incoming.compilation && current.compilation && incoming.compilation.revision < current.compilation.revision)) return current;
   // Deletion removes the compilation as well as the transcript. Never restore it from local state.
   if (current.compilation && !incoming.compilation) return incoming;
+  // Independent transcript sources can finish without changing the brief timestamp.
+  for (const [field, revision] of [["finalTranscript", "finalTranscriptRevision"], ["recordingTranscript", "recordingTranscriptRevision"]] as const) {
+    const previous = current[field], next = incoming[field];
+    if (previous && (!next || (previous.id === next.id && previous.updatedAt > next.updatedAt))) {
+      incoming = { ...incoming, [field]: previous, [revision]: current[revision] };
+    }
+  }
   if (incoming.brief.updatedAt === current.brief.updatedAt && current.brief.lifecycle?.assessment &&
       (!incoming.brief.lifecycle?.assessment || incoming.brief.lifecycle.assessment.updatedAt < current.brief.lifecycle.assessment.updatedAt)) {
     incoming = { ...incoming, brief: { ...incoming.brief, lifecycle: current.brief.lifecycle } };

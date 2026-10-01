@@ -1,4 +1,4 @@
-import type { NativeTranscriptCapture } from "./native-transcript";
+import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
 import type { AnsweringTransitionInput, AnsweringTransitionResult } from "../telephony/answering-policy";
 import type { VoiceActionInput, VoiceActionRecord, VoiceActionTransition } from "./voice-action";
 import type { TerminalDecision } from "@callassist/contracts";
@@ -976,6 +976,10 @@ export interface CallRepository extends CallTextRepository {
   ): Promise<RecordingMutationResult | null>;
   setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture): Promise<void>;
   getNativeTranscriptWork(recordingId: string): Promise<{ capture: NativeTranscriptCapture | null; snapshot: CallSnapshot }>;
+  getNativeTranscriptAttemptWork(callId: string, attemptId: string): Promise<{ capture: NativeTranscriptCapture | null; snapshot: CallSnapshot; ended: boolean }>;
+  publishNativeTranscript(callId: string, attemptId: string, result: NativeTranscriptResult, lease?: DurableJobLease,
+    summaryGeneratorVersion?: string): Promise<FinalTranscriptMutationResult>;
+  requestRecordingTranscript(callId: string, userId: string, model: string): Promise<void>;
   claimFinalTranscript(
     recordingId: string,
     model: string,
@@ -994,6 +998,7 @@ export interface CallRepository extends CallTextRepository {
     failureReason: string,
     lease?: DurableJobLease
   ): Promise<FinalTranscriptMutationResult>;
+  requestRecordingDeletion(id: string): Promise<void>;
   markRecordingDeleted(
     id: string,
     lease?: DurableJobLease

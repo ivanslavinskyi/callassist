@@ -247,6 +247,7 @@ const en = {
   jobTypes: {
     brief_compilation: "Call brief compilation",
     final_transcription: "Final transcription",
+    live_transcript_finalization: "Save Live transcript",
     text_artifact_generation: "Text translation and call summary",
     recording_retention: "Recording retention",
     answer_detection_timeout: "Answer detection recovery",
@@ -552,6 +553,7 @@ const de: AdminOperationsCopy = {
   jobTypes: {
     brief_compilation: "Call-Brief-Erstellung",
     final_transcription: "Finale Transkription",
+    live_transcript_finalization: "Live-Transkript speichern",
     text_artifact_generation: "Textübersetzung und Gesprächszusammenfassung",
     recording_retention: "Aufzeichnungsaufbewahrung",
     answer_detection_timeout: "Antwortprüfung wiederherstellen",

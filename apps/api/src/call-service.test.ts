@@ -1325,13 +1325,15 @@ describe("CallService", () => {
     services.push(service);
     const brief = await service.create({ recipientName: "Office", phoneNumber: "+41523686688",
       objective: "Ask for opening hours", assistantProfileId: "sebastian", representedPersonFirstName: "Nina",
-      representedPersonLastName: "Keller", locale: "en-GB", allowedFacts: [] });
+      representedPersonLastName: "Keller", locale: "en-GB", allowedFacts: [] }, "12345678-1234-4234-8234-123456789012");
     await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id)); await service.start(brief.id);
     const started = await service.startRecordingAfterConsent(brief.id);
     await service.handleTwilioRecordingStatus({ callBriefId: brief.id, recordingId: started.recording!.id,
       providerCallId: "CA-budget", providerRecordingId: "RE-budget", providerStatus: "completed", durationSeconds: 30, channels: 2 });
+    expect(transcribe).not.toHaveBeenCalled();
+    await service.retryFinalTranscript(brief.id, "12345678-1234-4234-8234-123456789012");
     await vi.waitFor(async () => {
-      expect((await service.get(brief.id))!.finalTranscript).toMatchObject({ status: "failed", failureReason: "BETA_BUDGET_EXHAUSTED" });
+      expect((await service.get(brief.id))!.recordingTranscript).toMatchObject({ status: "failed", failureReason: "BETA_BUDGET_EXHAUSTED" });
       const job = (await repository.listDurableJobs()).find(j => j.type === "final_transcription")!;
       expect(job).toMatchObject({ status: "queued", attemptCount: 0, lastErrorCode: "BETA_BUDGET_EXHAUSTED" });
       expect(Date.parse(job.runAfter) - Date.now()).toBeGreaterThan(290_000);
@@ -1339,7 +1341,7 @@ describe("CallService", () => {
     expect(transcribe).toHaveBeenCalledOnce();
   });
 
-  it("records only after consent and creates an idempotent final transcript", async () => {
+  it("records after consent but runs ASR only on an explicit idempotent request", async () => {
     const startRecording = vi.fn().mockResolvedValue({
       providerRecordingId: "RE123",
       providerStatus: "in-progress"
@@ -1396,7 +1398,7 @@ describe("CallService", () => {
       audioRetentionDays: 7,
       allowLanguageSwitch: false,
       allowedFacts: ["Application sent: 12 July"]
-    });
+    }, "12345678-1234-4234-8234-123456789012");
 
     await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
     await service.start(brief.id);
@@ -1427,8 +1429,11 @@ describe("CallService", () => {
       channels: 2
     });
 
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(getRecordingMedia).not.toHaveBeenCalled();
+    await Promise.all([service.retryFinalTranscript(brief.id, "12345678-1234-4234-8234-123456789012"), service.retryFinalTranscript(brief.id, "12345678-1234-4234-8234-123456789012")]);
     await vi.waitFor(async () => {
-      expect((await service.get(brief.id))?.finalTranscript).toMatchObject({
+      expect((await service.get(brief.id))?.recordingTranscript).toMatchObject({
         status: "completed",
         text: "The application was received.",
         segments: [expect.objectContaining({ role: "recipient" })],
@@ -1450,10 +1455,10 @@ describe("CallService", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(transcribe).toHaveBeenCalledOnce();
 
-    await service.retryFinalTranscript(brief.id);
-    await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2));
+    await service.retryFinalTranscript(brief.id, "12345678-1234-4234-8234-123456789012");
+    expect(transcribe).toHaveBeenCalledOnce();
     await vi.waitFor(async () =>
-      expect((await service.get(brief.id))?.finalTranscript?.status).toBe(
+      expect((await service.get(brief.id))?.recordingTranscript?.status).toBe(
         "completed"
       )
     );
@@ -1461,7 +1466,7 @@ describe("CallService", () => {
     const deleted = await service.deleteRecording(brief.id);
     expect(deleteRecording).toHaveBeenCalledWith("RE123");
     expect(deleted.recording?.status).toBe("deleted");
-    expect(deleted.finalTranscript?.text).toBe("The application was received.");
+    expect(deleted.recordingTranscript?.text).toBe("The application was received.");
   });
 
   it("does not downgrade a completed recording when its start request resolves late", async () => {

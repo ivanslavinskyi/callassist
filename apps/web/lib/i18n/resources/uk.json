@@ -1004,5 +1004,8 @@
   "Message playback interrupted.": "Відтворення повідомлення перервано.",
   "Message playback completion could not be confirmed.": "Завершення відтворення повідомлення не підтверджено.",
   "Approved message text": "Затверджений текст повідомлення",
-  "The call policy changed. Review and approve the updated plan before calling.": "Правила дзвінка змінилися. Перевірте та підтвердьте оновлений план перед дзвінком."
+  "The call policy changed. Review and approve the updated plan before calling.": "Правила дзвінка змінилися. Перевірте та підтвердьте оновлений план перед дзвінком.",
+  "Delete after the call": "Видалити після дзвінка",
+  "Deleted automatically when the recording becomes available after the call.": "Видаляється автоматично, щойно запис стане доступним після дзвінка.",
+  "Deleted automatically {0} days after the recording becomes available.": "Видаляється автоматично через {0} днів після готовності запису."
 }

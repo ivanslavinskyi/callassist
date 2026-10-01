@@ -1,6 +1,7 @@
 "use client";
 import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
 import { transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
+import { consentTimeline } from "@/lib/i18n/consent-timeline";
 
 import { type CallBrief, type CallTextArtifact, type FinalTranscriptRevision, type SourceSegment, type TextLanguage } from "@callassist/contracts";
 import { useEffect, useState } from "react";
@@ -20,10 +21,11 @@ import { needsTranscriptTranslation } from "@/lib/text-capabilities";
 import type { CallSnapshot } from "@callassist/contracts";
 import { appointmentResultMessages } from "@/lib/i18n/appointment-result-messages";
 
-export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction }: {
+export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction, showSummary=true, allowSummaryGeneration=true }: {
   brief: CallBrief; userId: string; revision: FinalTranscriptRevision; taskLanguage: TextLanguage;
   promptLanguage: string | null; initialArtifacts?: CallTextArtifact[];
   appointmentAction?: CallSnapshot["appointmentAction"];
+  showSummary?: boolean; allowSummaryGeneration?: boolean;
 }) {
   const { locale, messages } = useUiLocale();
   const copy = textArtifactMessages[locale];
@@ -99,17 +101,17 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     {appointmentState && !summary?.calendar ? <p role="status">
       {appointmentResultMessages[locale][appointmentState]}
     </p> : null}
-    <section className="call-result-summary" aria-labelledby={`summary-heading-${revision.id}`}>
+    {showSummary ? <section className="call-result-summary" aria-labelledby={`summary-heading-${revision.id}`}>
       <div className="final-transcript-heading">
         <h2 id={`summary-heading-${revision.id}`}>{copy.summary}</h2>
       </div>
       {summary ? <div lang={taskLanguage}><CallSummaryPresentation summary={summary} uiLocale={locale}
         sourceHref={(id) => `#${sourceSegmentAnchor(revision.id, id)}`} onSource={revealSource} /></div>
         : <div role="status"><p>{availabilityMessage ?? (waitingSummary ? (pollingPaused ? copy.pending : copy.summaryLoading) : summaryArtifact ? (summaryArtifact.retryable ? copy.summaryFailed : copy.summaryRetryUnavailable) : !canSummarize ? copy.unsupported : copy.summaryMissing)}</p>
-          {!waitingSummary && canSummarize && canRequestTextArtifact(summaryArtifact) ? <button type="button" className="secondary-button" disabled={busy !== null}
+          {allowSummaryGeneration && !waitingSummary && canSummarize && canRequestTextArtifact(summaryArtifact) ? <button type="button" className="secondary-button" disabled={busy !== null}
             onClick={() => void generate("summary", summaryArtifact?.status === "failed")}>{summaryArtifact ? copy.retry : copy.createSummary}</button> : null}
         </div>}
-    </section>
+    </section> : null}
 
     <section aria-label={copy.originalSource}>
       {translation ? <div className="transcript-version-nav">
@@ -138,10 +140,10 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
 }
 
 function TranscriptLine({ segment, brief, sourceId }: { segment: SourceSegment; brief: CallBrief; sourceId?: string }) {
-  const { messages } = useUiLocale();
+  const { messages, locale } = useUiLocale();
   return <article className={`final-transcript-line role-${segment.role}`} id={sourceId} tabIndex={-1}>
-    <div className="speaker-mark">{segment.role === "assistant" ? "AI" : segment.role === "recipient" ? "RE" : "?"}</div>
-    <div><div className="speaker-row"><strong>{segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? brief.recipientName : messages.live.unassignedSpeaker}</strong>
+    <div className="speaker-mark">{segment.role === "assistant" ? "AI" : segment.role === "recipient" ? "RE" : segment.role === "system" ? "✓" : "?"}</div>
+    <div><div className="speaker-row"><strong>{segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? brief.recipientName : segment.role === "system" ? consentTimeline[locale].system : messages.live.unassignedSpeaker}</strong>
       {segment.startSeconds !== null ? <time>~{formatTranscriptOffset(segment.startSeconds)}</time> : null}
     </div><p>{segment.text}</p></div>
   </article>;

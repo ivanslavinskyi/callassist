@@ -7,28 +7,35 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 
 ## Saved transcript source
 
-[Live v6 correction](live-transcript-language-fix-2026-10-01.md) adds marked application playback to the canonical native transcript.
-The receipt shares native persistence/drain ordering; ordinary rendered closing
-does not trigger ASR. Source and receipts survive revision/export.
+[Live primary implementation](live-native-primary-implementation-2026-10-01.md) supersedes the automatic recording fallback.
+Migration 0093 extends encrypted `final_transcripts` into separate per-attempt
+`live` and `recording_asr` artifacts while preserving existing immutable revision IDs.
+`finalTranscript`/`finalTranscriptRevision` project the primary Live source;
+`recordingTranscript`/`recordingTranscriptRevision` expose the optional audio source.
+Legacy attempts without Live retain their labelled existing ASR result.
 
+`live_transcript_finalization` runs without recording availability or an ASR provider.
+The existing write queue drains native deltas and acknowledged application playback.
+Incomplete capture publishes useful text with quality issues, never automatic ASR.
+A terminal collecting capture is recovered after a 20-second drain grace period.
+Disclosure playback and a separate consent event remain in the primary transcript;
+pre-consent recipient speech is excluded.
 
-Display labels are independent of the stored legacy assistant profile: SHPROHLI is
-used for assistant turns in live, saved and translated transcripts and their text/PDF
-exports. Call settings show voice gender. Historical utterance text and immutable
-approvals are preserved; this is not a data migration.
+Owner-authenticated `POST /api/call-briefs/:id/recording-transcript` atomically saves
+an explicit request and queues `final_transcription`. The former
+`POST /api/call-briefs/:id/final-transcript/retry` is a compatibility alias with the
+same authorization. GET, opening a tab, callback and restart never initiate ASR.
+Cached completed audio transcripts return without new work. Provider reservations
+require the durable request, active owner, available/unexpired recording and lease;
+`provider_operations.recording_transcript_request_id` identifies authorization.
+Successful chunks are reusable across retries by recording/stage/model/fingerprint.
 
-Migration 0087 introduces `final_transcripts.source`
-(`live_native` / `recording_asr`, old rows default to the latter; migration 0092 adds `live_composed`) and technical
-`call_attempts.native_transcript_capture`. No new environment flag, queue or provider
-is required. Native capture drains until `session.closed` through the existing write
-queue. A collecting capture waits at most 120 seconds from durable-job creation; incomplete capture
-uses the existing recording transcriber. Completion preserves one revision for all
-result artifacts and schedules retention even when no ASR request occurs.
-The [implementation report](live-transcript-implementation-2026-09-28.md) defines
-fallback, historical compatibility, CMS rollout and verification limits.
-Migration 0088 updates versioned public CMS copy in all seven locales; it introduces
-no new runtime flag. Migration 0089 adds bounded Live-error telemetry. See the
-[schema release procedure](deployment-preflight.md#schema-release-0085-0089).
+Retention is scheduled once when recording becomes available, independently of
+both transcript jobs. Existing deadlines are retained; ASR never extends them.
+Zero-day recordings become immediately eligible for deletion. The model-free
+`db:backfill:live-transcripts` command defaults to dry run; `--execute` publishes
+historical native projections without regenerating summaries or changing old evidence.
+No new provider or environment switch is required. Display labels remain SHPROHLI.
 
 ## Registration policy and call retries
 

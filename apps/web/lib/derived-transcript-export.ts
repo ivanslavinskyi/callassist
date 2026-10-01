@@ -11,6 +11,7 @@ import { getCallLanguageLabel, getTextLanguageLabel } from "./i18n/language-mess
 import { textArtifactMessages } from "./i18n/text-artifact-messages";
 import { formatTranscriptOffset, transcriptExportCopy } from "./final-transcript-export";
 import { buildTranscriptPdfLayout, formatTranscriptPdfDate } from "./transcript-pdf-layout";
+import { consentTimeline } from "./i18n/consent-timeline";
 
 export type DerivedTranscriptExport = {
   brief: CallBrief;
@@ -86,5 +87,5 @@ function exportHeader(input: DerivedTranscriptExport) {
 }
 
 function speaker(input: DerivedTranscriptExport, segment: SourceSegment) {
-  return segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? input.brief.recipientName : "?";
+  return segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? input.brief.recipientName : segment.role === "system" ? consentTimeline[input.uiLocale].system : "?";
 }

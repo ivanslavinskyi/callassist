@@ -1004,5 +1004,8 @@
   "Message playback interrupted.": "Reproducziun interrutta.",
   "Message playback completion could not be confirmed.": "Fin da la reproducziun betg confermada.",
   "Approved message text": "Text da la communicaziun approvà",
-  "The call policy changed. Review and approve the updated plan before calling.": "Las reglas dal telefonat èn sa midadas. Controlla ed approvescha il plan actualisà avant da telefonar."
+  "The call policy changed. Review and approve the updated plan before calling.": "Las reglas dal telefonat èn sa midadas. Controlla ed approvescha il plan actualisà avant da telefonar.",
+  "Delete after the call": "Stizzar suenter il telefonat",
+  "Deleted automatically when the recording becomes available after the call.": "Stizzà automaticamain uschespert che la registraziun è disponibla suenter il telefonat.",
+  "Deleted automatically {0} days after the recording becomes available.": "Stizzà automaticamain {0} dis suenter che la registraziun è disponibla."
 }

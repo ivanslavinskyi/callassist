@@ -1,5 +1,5 @@
 import { spokenIdentitiesSchema, createSpokenIdentities } from "./spoken-identities";
-import { applicationPlaybackReceiptSchema, transcriptSourceSchema, transcriptSegmentSourceSchema } from "./transcript-provenance";
+import { applicationPlaybackReceiptSchema, transcriptSourceSchema, transcriptSegmentSourceSchema, transcriptQualitySchema, nativeTranscriptCaptureSchema, recordingTranscriptRequestSchema } from "./transcript-provenance";
 import { answeringApproval, answeringApprovalSchema } from "./call-answering";
 import { ASSISTANT_NAME } from "./assistant-identity";
 import { buildInitialDisclosure, INITIAL_DISCLOSURE_VERSION } from "./initial-disclosure";
@@ -755,6 +755,9 @@ export const callBriefSchema = callBriefStoredFieldsSchema
 export type CallBrief = z.infer<typeof callBriefSchema>;
 
 export const transcriptSegmentSchema = z.object({
+  ingestionSequence: z.number().int().nonnegative().optional(),
+  receivedAt: z.string().datetime().optional(),
+  callAttemptId: z.string().uuid().nullable().optional(),
   id: z.string().uuid(),
   role: z.enum(["assistant", "recipient", "system"]),
   text: z.string(),
@@ -806,7 +809,7 @@ export type FinalTranscriptStatus = z.infer<
 export const finalTranscriptSegmentSchema = z.object({
   source: transcriptSegmentSourceSchema.optional(),
   applicationPlayback: applicationPlaybackReceiptSchema.optional(),
-  role: z.enum(["assistant", "recipient", "unknown"]),
+  role: z.enum(["assistant", "recipient", "unknown", "system"]),
   text: z.string().min(1),
   startSeconds: z.number().nonnegative(),
   endSeconds: z.number().nonnegative()
@@ -816,6 +819,7 @@ export type FinalTranscriptSegment = z.infer<
 >;
 
 export const finalTranscriptSchema = z.object({
+  quality: transcriptQualitySchema.optional(),
   source: transcriptSourceSchema.optional(),
   id: z.string().uuid(),
   status: finalTranscriptStatusSchema,
@@ -841,6 +845,10 @@ export const approvalRequestSchema = z.object({
 export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const callSnapshotSchema = z.object({
+  nativeTranscriptCapture: nativeTranscriptCaptureSchema.nullable().optional(),
+  recordingTranscript: finalTranscriptSchema.nullable().optional(),
+  recordingTranscriptRevision: finalTranscriptRevisionSchema.nullable().optional(),
+  recordingTranscriptRequest: recordingTranscriptRequestSchema.nullable().optional(),
   initialDisclosure: z.strictObject({ callAttemptId: z.uuid(), version: z.literal(INITIAL_DISCLOSURE_VERSION),
     locale: callLocaleSchema, text: z.string().min(10).max(2_000) }).nullable().optional(),
   appointmentAction: z.strictObject({ callAttemptId: z.uuid(), state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),

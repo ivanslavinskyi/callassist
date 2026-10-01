@@ -25,7 +25,8 @@ it("persists deferred budget jobs without losing the provider retry budget", asy
   const begun = await f.repository.beginRecording(call.id);
   await f.repository.attachProviderRecording(begun.recording.id, "RE-defer", "in-progress");
   await f.repository.applyRecordingStatus({ callBriefId: call.id, recordingId: begun.recording.id,
-    providerCallId: "CA-defer", providerRecordingId: "RE-defer", providerStatus: "completed", durationSeconds: 30, channels: 2 });
+      providerCallId: "CA-defer", providerRecordingId: "RE-defer", providerStatus: "completed", durationSeconds: 30, channels: 2 });
+  await f.repository.requestRecordingTranscript(call.id, owner.id, "gpt-transcribe");
   for (let index = 0; index < 5; index++) {
     const now = new Date(Date.now() + index * 300_000).toISOString();
     const job = await f.repository.claimDueDurableJob({ types: ["final_transcription"], workerId: "defer-test", now,

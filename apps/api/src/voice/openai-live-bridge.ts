@@ -10,6 +10,7 @@ export { OpenAILiveConversation, buildLiveInstructions } from "./live-conversati
 
 export interface LiveLifecycle {
   transcriptCaptureComplete?(): boolean;
+  transcriptQualityIssues?(): import("@callassist/contracts").TranscriptQualityIssue[];
   nativeTranscriptGap?(): void;
   startup(): { instructions: string; input: unknown[] };
   backendFailed?(current?: () => boolean, code?: string): void;

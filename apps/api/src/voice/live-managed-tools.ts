@@ -63,7 +63,7 @@ export function executionData(snapshot: ApprovedExecutionSnapshot, parties?: Liv
       .map(date => calendarDateDetails(date, plan.callLocale)) : [],
     application: { results: "Spoken answers and call results are saved in the application. No email, forwarding or callback is performed by this assistant.",
       audioRetentionDays: snapshot.runtime.audioRetentionDays,
-      retention: snapshot.runtime.audioRetentionDays === 0 ? "Audio is deleted after the conversation transcript is saved." : `Audio retention: ${snapshot.runtime.audioRetentionDays} days.` } };
+      retention: snapshot.runtime.audioRetentionDays === 0 ? "Audio is deleted as soon as the recording becomes available after the call." : `Audio retention: ${snapshot.runtime.audioRetentionDays} days from recording availability, independent of transcription.` } };
 }
 
 /** Self-contained logical sections, each conservatively below the 500-token append limit.

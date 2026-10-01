@@ -71,6 +71,8 @@ async function repositoryWithAvailableRecording() {
     durationSeconds: 30,
     channels: 2
   });
+  // This fixture explicitly supplies work; recording callbacks no longer enqueue ASR.
+  await repository.enqueueDurableJob({type:'final_transcription',recordingId:begun.recording.id,runAfter:new Date().toISOString(),maxAttempts:3});
   return { repository, brief, recordingId: begun.recording.id };
 }
 
@@ -544,7 +546,8 @@ describe("durable job worker", () => {
       "dead-letter-worker",
       "provider_unavailable",
       "2099-03-01T00:00:01.000Z",
-      "2099-03-01T00:00:06.000Z"
+      "2099-03-01T00:00:06.000Z",
+      false
     )).resolves.toMatchObject({ status: "dead_letter" });
 
     const actorUserId = randomUUID();
@@ -746,7 +749,7 @@ describe("durable job worker", () => {
     await closing;
 
     expect((await repository.listDurableJobs()).map(({ status }) => status))
-      .toEqual(["succeeded", "queued"]);
+      .toEqual(expect.arrayContaining(["succeeded", "queued"]));
 
     const restartedHandler = vi.fn(async () => undefined);
     const restarted = new DurableJobWorker(

@@ -5,7 +5,6 @@ import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
 import { transcriptSourceCopy, transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 
 import { consentTimeline } from "@/lib/i18n/consent-timeline";
-import { isTranscriptionBudgetBlocked, transcriptionBudgetMessages } from "@/lib/i18n/transcription-budget";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { buildInitialDisclosure, formatPersonName, answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
@@ -40,7 +39,8 @@ import { designMessages } from "@/lib/i18n/design-messages";
 import { CallFeedback } from "./call-feedback";
 import { CompilationReview } from "./compilation-review";
 import { TranslatedPlanReview } from "./translated-plan-review";
-import { CallResultPanel } from "./call-result-panel";
+import { CallTranscriptResult } from "./call-transcript-result";
+import { transcriptTabs } from "@/lib/i18n/transcript-tabs";
 import { ConfirmDialog } from "./confirm-dialog";
 import { CreateCallForm } from "./create-call-form";
 import { CallPreparationStatus } from "./call-preparation-status";
@@ -74,12 +74,6 @@ import {
   ApiError,
   type CallPreparationProgress
 } from "@/lib/api";
-import {
-  buildFinalTranscriptCopyText,
-  buildFinalTranscriptPdfDefinition,
-  finalTranscriptPdfFileName,
-  writeTextToClipboard
-} from "@/lib/final-transcript-export";
 import {
   consumeCallPreparationAttempt,
   getCallPreparationSessionStorage,
@@ -128,6 +122,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   const draftStore = useCallDraftStore();
   const [snapshot, setSnapshot] = useState<CallSnapshot | null>(null);
   const sourceCopy=transcriptSourceCopy[uiLocale];
+  const tabCopy=transcriptTabs[uiLocale];
   const copy={...messages.live, finalTitle:sourceCopy.title,
     finalHelp:snapshot?.finalTranscript?.status === "completed" ? transcriptSourceDescription(uiLocale,snapshot.finalTranscript.source) : sourceCopy.pending,
     creatingFinal:sourceCopy.preparing,creatingFinalHelp:sourceCopy.pending,availableAfterCallHelp:sourceCopy.pending,
@@ -153,7 +148,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   >("connecting");
   const { following: followLiveTranscript, listRef: transcriptListRef, follow: followTranscript } = useTranscriptFollowing(Boolean(snapshot && activeStatuses.has(snapshot.brief.status)));
   const [showFullObjective, setShowFullObjective] = useState(false);
-  const [transcriptView, setTranscriptView] = useState<"final" | "provisional">("final");
+  const [transcriptView, setTranscriptView] = useState<"live" | "recording">("live");
   const transcriptCardRef = useRef<HTMLElement>(null);
   const actionErrorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -166,12 +161,6 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   }, [actionError, startingCall]);
   const deletionRequestIdRef = useRef<string | null>(null);
   const clarificationAttemptRef = useRef<CallPreparationAttempt | null>(null);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
-    "idle"
-  );
-  const [pdfStatus, setPdfStatus] = useState<"idle" | "exporting" | "failed">(
-    "idle"
-  );
   const [liveTranscript, setLiveTranscript] = useState(emptyLiveTranscript);
   const partialTranscript = liveTranscript.partials;
   const eventSegments = useRef<CallSnapshot["transcript"]>([]);
@@ -235,19 +224,13 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
   }, [callId, refresh]);
 
   useEffect(() => {
-    if (copyStatus === "idle") return;
-    const timeout = window.setTimeout(() => setCopyStatus("idle"), 3000);
-    return () => window.clearTimeout(timeout);
-  }, [copyStatus]);
-
-  useEffect(() => setCopyStatus("idle"), [snapshot?.finalTranscript?.updatedAt]);
-  useEffect(() => { if(isLiveTranscript(snapshot?.finalTranscript?.source)) setTranscriptView("final"); },[snapshot?.finalTranscript?.source]);
-  useEffect(() => {
     const terminal = ["completed","failed","stopped"].includes(snapshot?.brief.status ?? "");
-    if (snapshot?.brief.lifecycle?.assessment?.status !== "pending" && !(terminal && snapshot?.brief.lifecycle?.credit === "reserved")) return;
+    const transcriptsPending=snapshot?.recordingTranscript?.status==='processing' && ['queued','processing'].includes(snapshot.recordingTranscriptRequest?.status??'') ||
+      terminal && !!snapshot?.nativeTranscriptCapture && !snapshot.finalTranscript;
+    if (!transcriptsPending && snapshot?.brief.lifecycle?.assessment?.status !== "pending" && !(terminal && snapshot?.brief.lifecycle?.credit === "reserved")) return;
     const timer = window.setInterval(() => { void refresh(false); }, 3000);
     return () => window.clearInterval(timer);
-  }, [snapshot?.brief.lifecycle?.assessment?.status, snapshot?.brief.lifecycle?.credit, snapshot?.brief.status, refresh]);
+  }, [snapshot?.brief.lifecycle?.assessment?.status, snapshot?.brief.lifecycle?.credit, snapshot?.brief.status, snapshot?.recordingTranscript?.status, snapshot?.recordingTranscriptRequest?.status, snapshot?.nativeTranscriptCapture, snapshot?.finalTranscript, refresh]);
 
   useEffect(() => {
     if (!snapshot?.brief.recipientName) return;
@@ -423,47 +406,6 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     finally { setBusy(false); }
   }
 
-  async function copyFinalTranscript() {
-    if (!snapshot?.finalTranscript || !language) return;
-    try {
-      await writeTextToClipboard(
-        buildFinalTranscriptCopyText({
-          brief: snapshot.brief,
-          finalTranscript: snapshot.finalTranscript,
-          languageLabel: language.label,
-          uiLocale
-        })
-      );
-      setCopyStatus("copied");
-    } catch {
-      setCopyStatus("failed");
-    }
-  }
-
-  async function downloadFinalTranscript() {
-    if (!snapshot?.finalTranscript || !language) return;
-    setPdfStatus("exporting");
-    try {
-      const input = {
-        brief: snapshot.brief,
-        finalTranscript: snapshot.finalTranscript,
-        languageLabel: language.label,
-        uiLocale
-      };
-      const { downloadTranscriptPdf, loadTranscriptLogo } = await import(
-        "@/lib/download-transcript-pdf"
-      );
-      await downloadTranscriptPdf(
-        buildFinalTranscriptPdfDefinition(input, await loadTranscriptLogo()),
-        finalTranscriptPdfFileName(input)
-      );
-      setPdfStatus("idle");
-    } catch (error) {
-      console.error("Final transcript PDF export failed", error);
-      setPdfStatus("failed");
-    }
-  }
-
   async function permanentlyDeleteCallData() {
     setDeletionBusy(true);
     setDeletionError(null);
@@ -516,7 +458,6 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
     recording,
     finalTranscript
   } = snapshot;
-  const finalSegments = finalTranscript?.segments ?? [];
   const isActive = activeStatuses.has(brief.status);
   const isTerminal = isTerminalCallStatus(brief.status);
   const pendingCallStart = startingCall && !isActive && !isTerminal;
@@ -729,15 +670,15 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         >
           <div className="transcript-column">
             {isTerminal && !silentAutomatedCall && brief.status !== "blocked" ? <nav className="transcript-version-nav" aria-label={copy.finalTitle}>
-              <button type="button" aria-pressed={transcriptView === "final"} onClick={() => setTranscriptView("final")}>{copy.finalTitle}</button>
-              {!isLiveTranscript(snapshot.finalTranscript?.source) ? <button type="button" aria-pressed={transcriptView === "provisional"} onClick={() => setTranscriptView("provisional")}>{sourceCopy.raw}</button> : null}
+              <button type="button" aria-pressed={transcriptView === "live"} onClick={() => setTranscriptView("live")}>{snapshot.nativeTranscriptCapture||isLiveTranscript(finalTranscript?.source)?tabCopy.live:copy.finalTitle}</button>
+              <button type="button" aria-pressed={transcriptView === "recording"} onClick={() => setTranscriptView("recording")}>{tabCopy.audio}</button>
               <a href="#call-feedback">{designMessages[uiLocale].rateCall}</a>
             </nav> : null}
-            <section className="transcript-card" tabIndex={-1} hidden={silentAutomatedCall || (isTerminal && transcriptView !== "provisional")} ref={transcriptCardRef}>
+            <section className="transcript-card" tabIndex={-1} hidden={silentAutomatedCall || (isTerminal && (transcriptView !== "live" || !!finalTranscript))} ref={transcriptCardRef}>
             <div className="transcript-heading">
               <div>
                 <span className="eyebrow">{copy.liveTranscriptEyebrow}</span>
-                <h2>{isTerminal ? systemMessages[uiLocale].provisionalTranscript : copy.liveCaptions}</h2>
+                <h2>{isTerminal ? tabCopy.live : copy.liveCaptions}</h2>
                 <p className="transcript-subtitle">{copy.liveTranscriptHelp}</p>
               </div>
               {isActive ? (
@@ -810,177 +751,9 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
             ) : null}
             </section>
 
-            <section className="final-transcript-card" hidden={silentAutomatedCall || !isTerminal || transcriptView !== "final"}>
-              <div className="final-transcript-heading">
-                <div>
-                  <span className="eyebrow">
-                    {copy.finalEyebrow}
-                  </span>
-                  <h2>{copy.finalTitle}</h2>
-                  <p className="transcript-subtitle">{copy.finalHelp}</p>
-                </div>
-                {finalTranscript?.status === "completed" && !snapshot.finalTranscriptRevision ? (
-                  <div className="final-transcript-actions">
-                    <button
-                      className="transcript-export-button"
-                      onClick={() => void copyFinalTranscript()}
-                      type="button"
-                    >
-                      <CopyIcon />
-                      {copyStatus === "copied"
-                        ? messages.live.copied
-                        : copyStatus === "failed"
-                          ? messages.live.copyFailed
-                          : messages.live.copyTranscript}
-                    </button>
-                    <button
-                      className="transcript-export-button"
-                      disabled={pdfStatus === "exporting"}
-                      onClick={() => void downloadFinalTranscript()}
-                      type="button"
-                    >
-                      <FileDownloadIcon />
-                      {pdfStatus === "exporting"
-                        ? copy.preparingPdf
-                        : pdfStatus === "failed"
-                          ? copy.pdfFailed
-                          : copy.downloadPdf}
-                    </button>
-                    <span className="sr-only" aria-live="polite">
-                      {copyStatus === "copied"
-                        ? messages.live.copiedAnnouncement
-                        : copyStatus === "failed"
-                          ? messages.live.copyFailedAnnouncement
-                          : pdfStatus === "failed"
-                            ? copy.pdfFailedAnnouncement
-                            : ""}
-                    </span>
-                  </div>
-                ) : null}
-                {finalTranscript && finalTranscript.status !== "completed" ? (
-                  <span
-                    className={`processing-badge final-${finalTranscript.status}`}
-                  >
-                    {isTranscriptionBudgetBlocked(finalTranscript.failureReason) ? transcriptionBudgetMessages[uiLocale].title : copy.finalTranscriptStatus[finalTranscript.status]}
-                  </span>
-                ) : null}
-              </div>
-
-              {finalTranscript?.status === "completed" && snapshot.finalTranscriptRevision ? <CallResultPanel
-                key={snapshot.finalTranscriptRevision.id}
-                brief={brief} userId={userId} revision={snapshot.finalTranscriptRevision}
-                taskLanguage={snapshot.languageContext?.taskContentLanguage ?? supportedTextLanguage(brief.locale) ?? "en"}
-                promptLanguage={snapshot.languageContext?.detectedInputLanguage ?? snapshot.compilation?.compiledBrief?.sourceLanguage ?? null}
-                initialArtifacts={snapshot.textArtifacts}
-                appointmentAction={snapshot.appointmentAction}
-              /> : finalTranscript?.status === "completed" &&
-              (finalTranscript.text || finalSegments.length > 0) ? (
-                <div className="final-transcript-body">
-
-                  {finalSegments.length > 0 ? (
-                    <div className="final-transcript-list">
-                      {finalSegments.map((segment, index) => (
-                        <article
-                          className={`final-transcript-line role-${segment.role}`}
-                          key={`${segment.startSeconds}-${segment.role}-${index}`}
-                        >
-                          <div className="speaker-mark">
-                            {segment.role === "assistant"
-                              ? "AI"
-                              : segment.role === "recipient"
-                                ? "RE"
-                                : "?"}
-                          </div>
-                          <div>
-                            <div className="speaker-row">
-                              <strong>
-                                {segment.role === "assistant"
-                                  ? ASSISTANT_DISPLAY_NAME
-                                  : segment.role === "recipient"
-                                    ? brief.recipientName
-                                    : copy.unassignedSpeaker}
-                              </strong>
-                              <time>~{formatOffset(segment.startSeconds)}</time>
-                            </div>
-                            <p>{segment.text}</p>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="legacy-final-transcript">
-                      <strong>{copy.fullRecordingTranscript}</strong>
-                      <p>{finalTranscript.text}</p>
-                    </div>
-                  )}
-                  <p className="transcript-warning">{copy.aiWarning}</p>
-                  <details className="transcript-method">
-                    <summary>{copy.transcriptMethod}</summary>
-                    <p>
-                      {finalSegments.length > 0
-                        ? copy.structuredTranscriptNote
-                        : copy.plainTranscriptNote}
-                    </p>
-                  </details>
-                  {recording?.status === "available" ? (
-                    <button
-                      className="secondary-button regenerate-button"
-                      disabled={busy}
-                      onClick={() =>
-                        runAction(() => retryFinalTranscript(callId))
-                      }
-                      type="button"
-                    >
-                      {copy.regenerateTranscript}
-                    </button>
-                  ) : null}
-                </div>
-              ) : finalTranscript?.status === "failed" && isTranscriptionBudgetBlocked(finalTranscript.failureReason) ? (
-                <div className="final-transcript-state" role="status">
-                  <strong>{transcriptionBudgetMessages[uiLocale].title}</strong>
-                  <p>{transcriptionBudgetMessages[uiLocale].help}</p>
-                </div>
-              ) : finalTranscript?.status === "failed" ? (
-                <div className="final-transcript-state state-error">
-                  <strong>{copy.finalFailed}</strong>
-                  <p>{copy.finalFailedHelp}</p>
-                  <button
-                    className="secondary-button"
-                    disabled={busy || recording?.status !== "available"}
-                    onClick={() => runAction(() => retryFinalTranscript(callId))}
-                    type="button"
-                  >
-                    {copy.retryTranscription}
-                  </button>
-                </div>
-              ) : finalTranscript?.status === "processing" ||
-                recording?.status === "processing" ||
-                recording?.status === "available" ? (
-                <div className="final-transcript-state">
-                  <span className="processing-spinner" aria-hidden="true" />
-                  <strong>{copy.creatingFinal}</strong>
-                  <p>{copy.creatingFinalHelp}</p>
-                </div>
-              ) : recording?.status === "failed" ? (
-                <div className="final-transcript-state state-error">
-                  <strong>{copy.recordingNotStarted}</strong>
-                  <p>{copy.recordingNotStartedHelp}</p>
-                </div>
-              ) :
-                !recording &&
-                ["completed", "stopped", "failed"].includes(brief.status) ? (
-                <div className="final-transcript-state">
-                  <strong>{copy.noRecording}</strong>
-                  <p>{copy.noRecordingHelp}</p>
-                </div>
-              ) : (
-                <div className="final-transcript-state">
-                  <strong>{copy.availableAfterCall}</strong>
-                  <p>{copy.availableAfterCallHelp}</p>
-                </div>
-              )}
-
-            </section>
+            {isTerminal && !silentAutomatedCall && (transcriptView==='recording'||finalTranscript||!hasTranscript) ? <CallTranscriptResult
+              snapshot={snapshot} userId={userId} view={transcriptView} busy={busy}
+              onRequest={()=>void runAction(()=>retryFinalTranscript(callId))} onViewRecording={()=>setTranscriptView('recording')} /> : null}
             {compilation && (isTerminal || isActive) ? <details className="call-plan-disclosure">
               <summary>{copy.briefEyebrow}</summary>{reviewPanel}
             </details> : null}
@@ -1007,7 +780,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                       <button
                         className="text-button danger-text"
                         disabled={
-                          busy || finalTranscript?.status === "processing"
+                          busy
                         }
                         onClick={() => setConfirmingAudioDelete(true)}
                         type="button"
@@ -1237,44 +1010,4 @@ function retentionLabel(
     return copy.retentionScheduled(formattedDate);
   }
   return copy.retentionAutomatic(days);
-}
-
-function CopyIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="transcript-action-icon"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-    >
-      <rect height="13" rx="2" width="13" x="8" y="8" />
-      <path
-        d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"
-      />
-    </svg>
-  );
-}
-
-function FileDownloadIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="transcript-action-icon"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-    >
-      <path d="M14 2.75H6.5a2 2 0 0 0-2 2v14.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8.25z" />
-      <path d="M14 2.75v5.5h5.5" />
-      <path d="M12 11.5v6" />
-      <path d="m9.5 15 2.5 2.5 2.5-2.5" />
-    </svg>
-  );
 }

@@ -38,4 +38,5 @@ export * from "./call-answering";
 export * from "./plan-preparation";
 export * from "./initial-disclosure";
 export * from "./transcript-provenance";
+export * from "./live-transcript";
 export * from "./spoken-identities";

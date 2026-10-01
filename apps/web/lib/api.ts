@@ -1006,7 +1006,7 @@ export async function deleteCallData(
 
 export async function retryFinalTranscript(id: string) {
   return apiRequest<CallSnapshot>(
-    `/api/call-briefs/${id}/final-transcript/retry`,
+    `/api/call-briefs/${id}/recording-transcript`,
     { method: "POST", body: "{}" }
   );
 }

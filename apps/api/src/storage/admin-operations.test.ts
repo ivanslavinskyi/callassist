@@ -265,7 +265,7 @@ describe("admin operational read models", () => {
       activeCalls: 0,
       transcriptionProcessing: 1,
       transcriptionFailed: 0,
-      retentionScheduled: 0,
+      retentionScheduled: 1,
       callPlanCutover: {
         recoverableLegacyCalls: 0,
         archivedLegacyCalls: 0,

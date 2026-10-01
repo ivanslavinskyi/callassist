@@ -70,6 +70,7 @@ export class OpenAILiveConversation implements VoiceConversation {
   #writes = Promise.resolve();
   #persistenceFailed = false;
   #transcriptBoundaryMs = Number.POSITIVE_INFINITY;
+  #transcriptIssues: import("@callassist/contracts").TranscriptQualityIssue[] = [];
   #recordingAdmitted = false;
   #outputSuspended = false;
   #outputSuppression: Array<{ start: number; end: number }> = [];
@@ -347,7 +348,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       this.#resolveStart?.(); this.#resolveStart = null; this.#rejectStart = null;
       for (const audio of this.#queue) this.#send({ type: "session.input_audio.append", audio });
       this.#queue = []; this.#queuedBytes = 0;
-      this.context.telemetry(`live:${this.operationId}:ready`, { name: "realtime.ready", metadata: { model: this.#model, transcriptionModel: this.#model, runtimeVersion: "live-managed-v6" } });
+      this.context.telemetry(`live:${this.operationId}:ready`, { name: "realtime.ready", metadata: { model: this.#model, transcriptionModel: this.#model, runtimeVersion: "live-managed-v7" } });
       if (this.lifecycle) this.lifecycle.ready(); else this.#backendEnabled = true;
     } else if (event.type === "session.updated") {
       if (!this.#ready || !this.#checkVoice(object(event.session))) return;
@@ -427,7 +428,7 @@ export class OpenAILiveConversation implements VoiceConversation {
           (command.backendScope ? command.backendScope.delegationId === delegationId : allowFresh)) {
         if (!command.backendScope) {
           this.context.telemetry(`live:${id}:association`, { name: "conversation.task", metadata: {
-            runtimeVersion: "live-managed-v6", phase: "running", revision: command.answerRevision,
+            runtimeVersion: "live-managed-v7", phase: "running", revision: command.answerRevision,
             cause: "ambiguous_backend_start" } });
           command.observedResponseId = responseId;
           // An unscoped start is not causal acknowledgement of this command.
@@ -535,7 +536,11 @@ export class OpenAILiveConversation implements VoiceConversation {
     if (this.lifecycle && this.#consentBackend && role === "recipient" &&
         event.start_ms < this.#consentTranscriptBoundaryMs) return;
     // A late pre-consent answer must not become persistable after the phase changes.
-    if (this.lifecycle && this.#recordingAdmitted && event.start_ms < this.#transcriptBoundaryMs) return;
+    if (this.lifecycle && this.#recordingAdmitted && event.start_ms < this.#transcriptBoundaryMs) {
+      if(event.end_ms>this.#transcriptBoundaryMs && this.#transcriptIssues.length<64)
+        this.#transcriptIssues.push({code:"consent_boundary",startMs:this.#transcriptBoundaryMs,endMs:event.end_ms});
+      return;
+    }
     let historicalOutput = false;
     if (role === "assistant" && this.lifecycle && (this.#outputSuspended || event.start_ms < this.#outputFenceMs)) {
       const start = event.start_ms, end = event.end_ms;
@@ -543,7 +548,10 @@ export class OpenAILiveConversation implements VoiceConversation {
       if (intervals.length) {
         // A fragment crossing a playback boundary cannot be clipped into words.
         // Fully muted output was not heard and does not invalidate the transcript.
-        if (!intervals.some(interval => start >= interval.start && end <= interval.end)) this.lifecycle.nativeTranscriptGap?.();
+        if (!intervals.some(interval => start >= interval.start && end <= interval.end)) {
+          this.lifecycle.nativeTranscriptGap?.();
+          if(this.#transcriptIssues.length<64) this.#transcriptIssues.push({code:"output_boundary",startMs:start,endMs:end});
+        }
         return;
       }
       historicalOutput = true;
@@ -615,7 +623,7 @@ export class OpenAILiveConversation implements VoiceConversation {
             run.progressRevision === this.#progressRevision && (run.closingEpoch === undefined || this.context.isClosing());
           if (!current()) {
             this.context.telemetry(`live:${run.id}:obsolete-timeout`, { name: "conversation.task", metadata: {
-              runtimeVersion: "live-managed-v6", phase: "stale", revision: run.answerRevision,
+              runtimeVersion: "live-managed-v7", phase: "stale", revision: run.answerRevision,
               cause: "obsolete_backend_timeout", responseId: run.id } });
             this.options.logger?.info({ callAttemptId: this.context.attemptId, responseId: run.id,
               epoch: run.epoch, currentEpoch: this.#epoch }, "Live backend timeout retains physical occupancy");
@@ -670,7 +678,7 @@ export class OpenAILiveConversation implements VoiceConversation {
         if (command.type === 'response.create' && command.observedResponseId === run.id) {
           this.#forgetCommand(commandId, command);
           this.context.telemetry('live:' + commandId + ':settled', { name: 'conversation.task', metadata: {
-            runtimeVersion: 'live-managed-v6', phase: 'running', revision: command.answerRevision,
+            runtimeVersion: 'live-managed-v7', phase: 'running', revision: command.answerRevision,
             cause: 'ambiguous_command_settled' } });
         }
       }
@@ -864,10 +872,15 @@ export class OpenAILiveConversation implements VoiceConversation {
     this.#write(() => this.options.service.addApplicationPlaybackTranscript(this.context.brief.id, text, key, receipt));
   }
 
-  async #capture(status: "collecting" | "complete" | "incomplete") {
+  async #capture(status: "collecting" | "complete" | "incomplete", sessionFinalized = false) {
     if(!this.#sessionId) return;
     await this.options.service.setNativeTranscriptCapture(this.context.brief.id,this.context.attemptId,{
       version:1,sessionId:this.#sessionId,model:this.#model,
+      sessionStartedAt:this.#sessionStartedAt,sessionFinalized,
+      ...(Number.isFinite(this.#transcriptBoundaryMs) ? {transcriptBoundaryMs:this.#transcriptBoundaryMs} : {}),
+      issues:[...this.#transcriptIssues,...(this.lifecycle?.transcriptQualityIssues?.()??[]),
+        ...(this.#persistenceFailed ? [{code:"persistence_failed" as const}] : []),
+        ...(status!=="collecting"&&!sessionFinalized ? [{code:"session_unconfirmed" as const}] : [])],
       status:status === "complete" && this.#persistenceFailed ? "incomplete" : status,updatedAt:new Date().toISOString()
     });
   }
@@ -906,7 +919,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       providerRequestId: null, providerResponseId: this.#sessionId, providerModel: this.#model, statusCode: null,
       completedAt: new Date().toISOString(), durationMs: Date.now() - this.#startedAt,
       errorCode: successful ? null : this.#failureCode ?? "LIVE_FINAL_USAGE_UNCONFIRMED", usage: liveDurationUsage(this.#seconds, finalized) }));
-    if(this.lifecycle) this.#write(() => this.#capture(successful && this.lifecycle?.transcriptCaptureComplete?.() !== false ? "complete" : "incomplete"));
+    if(this.lifecycle) this.#write(() => this.#capture(successful && this.lifecycle?.transcriptCaptureComplete?.() !== false ? "complete" : "incomplete",finalized));
   }
 }
 

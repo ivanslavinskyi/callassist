@@ -1,7 +1,7 @@
 import { supportsSummaryAssessment } from "@callassist/contracts";
 import { terminalDecisionSchema, type TerminalDecision } from "@callassist/contracts";
 import { initialDisclosureProjection } from "@callassist/contracts";
-import type { NativeTranscriptCapture } from "./native-transcript";
+import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { answeringUsage } from "../telephony/answering-usage";
 import { transitionAnswering, type AnsweringTransitionInput } from "../telephony/answering-policy";
@@ -899,8 +899,10 @@ export class InMemoryCallRepository implements CallRepository {
       job.recordingId !== input.recordingId ||
       job.generation !== input.durableJobGeneration ||
       callId !== input.callBriefId ||
-      snapshot.finalTranscript?.status !== "processing" ||
-      !attempt
+      snapshot.recordingTranscript?.status !== "processing" ||
+      !snapshot.recordingTranscriptRequest ||
+      (snapshot.recording?.status!=="available" || (snapshot.recording.deleteAfter!==null && Date.parse(snapshot.recording.deleteAfter)<=Date.now())) ||
+      !this.#callText.hooks.textAllowed(callId) || !attempt
     ) {
       throw new CallRepositoryError("RECORDING_NOT_FOUND");
     }
@@ -944,7 +946,9 @@ export class InMemoryCallRepository implements CallRepository {
       input.outcome !== "succeeded" ||
       !input.transcriptText ||
       snapshot.recording?.status !== "available" ||
-      snapshot.finalTranscript?.status !== "processing"
+      snapshot.recordingTranscript?.status !== "processing" ||
+      !this.#callText.hooks.textAllowed(input.callBriefId) ||
+      (snapshot.recording.deleteAfter !== null && Date.parse(snapshot.recording.deleteAfter) <= Date.now())
     ) return;
     const chunk = {
       callBriefId: input.callBriefId,
@@ -1252,6 +1256,9 @@ export class InMemoryCallRepository implements CallRepository {
         updatedAt: input.deletedAt
       };
     }
+    snapshot.recordingTranscript = null;
+    snapshot.recordingTranscriptRevision = null;
+    snapshot.recordingTranscriptRequest = null;
     const attempts = this.#attempts.get(input.callId) ?? [];
     for (const attempt of attempts) {
       this.#nativeCaptures.delete(attempt.id);
@@ -1646,10 +1653,16 @@ export class InMemoryCallRepository implements CallRepository {
     if (this.#callDataDeletions.has(id)) return null;
     const snapshot = this.#calls.get(id);
     if(!snapshot) return null;
+    if(snapshot.recordingTranscriptRequest && snapshot.recording) {
+      const job=this.#durableJobs.get(durableJobKey('final_transcription',snapshot.recording.id));
+      snapshot.recordingTranscriptRequest.status=snapshot.recordingTranscript?.status==='completed' ? 'completed' : snapshot.recording.status!=='available' || (snapshot.recording.deleteAfter && Date.parse(snapshot.recording.deleteAfter)<=Date.now()) ? 'unavailable' : job?.status==='queued' ? 'queued' : job?.status==='running' ? 'processing' : 'failed';
+    }
     const action = [...this.#voiceActions.values()].find(a => a.callAttemptId === this.#attempts.get(id)?.at(-1)?.id);
     if(!snapshot.languageContext&&snapshot.compilation) snapshot.languageContext=resolveTaskLanguage({detectedLanguage:snapshot.compilation.compiledBrief?.sourceLanguage,compilationRevision:snapshot.compilation.revision});
     return {...copy(snapshot),initialDisclosure: initialDisclosureProjection(this.#attempts.get(id)?.at(-1) ?? null),appointmentAction: action ? { callAttemptId: action.callAttemptId, state: action.state, delivery: copy(action.delivery ?? null) } : null,
       brief:{...copy(snapshot.brief),lifecycle:this.#lifecycle(snapshot.brief)},planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
+      nativeTranscriptCapture: copy(this.#nativeCaptures.get(this.#attempts.get(id)?.at(-1)?.id??'')??null),
+      recordingTranscriptRevision:await this.#callText.getRecordingTranscriptRevision(id),
       textArtifacts:this.#callText.listTextArtifacts(id),finalTranscriptRevision:await this.#callText.getCurrentTranscriptRevision(id)};
   }
 
@@ -2894,7 +2907,11 @@ export class InMemoryCallRepository implements CallRepository {
     applicationPlayback?: TranscriptSegment["applicationPlayback"]
   ) {
     const snapshot = this.#require(id);
+    const existing=snapshot.transcript.find(s=>(nativeTiming && s.nativeTiming?.sessionId===nativeTiming.sessionId && s.nativeTiming.eventId===nativeTiming.eventId) ||
+      (applicationPlayback && s.applicationPlayback?.sessionId===applicationPlayback.sessionId && s.applicationPlayback.markId===applicationPlayback.markId));
+    if(existing) return {segment:copy(existing),snapshot:copy(snapshot)};
     const segment: TranscriptSegment = {
+      ingestionSequence:snapshot.transcript.length+1,receivedAt:new Date().toISOString(),callAttemptId:this.#attempts.get(id)?.at(-1)?.id??null,
       id: randomUUID(),
       role,
       text,
@@ -3186,12 +3203,8 @@ export class InMemoryCallRepository implements CallRepository {
           }
         }
       });
-      await this.enqueueDurableJob({
-        type: "final_transcription",
-        recordingId: input.recordingId,
-        runAfter: recording.completedAt ?? new Date().toISOString(),
-        maxAttempts: durableJobMaxAttempts.final_transcription
-      });
+      recording.deleteAfter ??= new Date(Date.parse(recording.completedAt??new Date().toISOString())+snapshot.brief.audioRetentionDays*86_400_000).toISOString();
+      await this.enqueueDurableJob({type:'recording_retention',recordingId:input.recordingId,runAfter:recording.deleteAfter,maxAttempts:durableJobMaxAttempts.recording_retention});
     } else if (input.providerStatus === "absent") {
       const failureCode = safeTelemetryCode(
         recording.failureReason,
@@ -3233,6 +3246,46 @@ export class InMemoryCallRepository implements CallRepository {
     return {capture:copy(this.#nativeCaptures.get(attempt?.id??"")??null),snapshot:copy(snapshot)};
   }
 
+  async getNativeTranscriptAttemptWork(callId: string, attemptId: string) {
+    const attempt=this.#attempts.get(callId)?.at(-1);
+    if(!attempt || attempt.id!==attemptId) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return {capture:copy(this.#nativeCaptures.get(attemptId)??null),snapshot:(await this.get(callId))!,ended:["completed","failed","stopped"].includes(attempt.status)};
+  }
+  async publishNativeTranscript(callId: string, attemptId: string, result: NativeTranscriptResult, lease?: DurableJobLease, summaryGeneratorVersion?: string) {
+    this.#assertDurableJobLease(lease);
+    const snapshot=this.#require(callId);
+    if(this.#attempts.get(callId)?.at(-1)?.id!==attemptId) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    const previous=snapshot.finalTranscript?.source?.startsWith("live_") ? snapshot.finalTranscript : null;
+    if(previous?.status==='completed' && !previous.quality) {
+      previous.quality=copy(result.quality);
+      return {callId,finalTranscript:copy(previous),snapshot:(await this.get(callId))!};
+    }
+    if(previous?.text===result.text && JSON.stringify(previous.segments)===JSON.stringify(result.segments)) {
+      previous.quality=copy(result.quality);
+      return {callId,finalTranscript:copy(previous),snapshot:(await this.get(callId))!};
+    }
+    const now=new Date().toISOString();
+    snapshot.finalTranscript={id:previous?.id??randomUUID(),...copy(result),status:"completed",failureReason:null,
+      createdAt:previous?.createdAt??now,updatedAt:now,completedAt:now};
+    await this.#callText.persistRevision(callId,snapshot.finalTranscript.id,result.text,result.segments,now,
+      result.quality.coverage==='unavailable'||(previous && !previous.quality)||(snapshot.recordingTranscript?.status==='completed'&&!snapshot.recordingTranscriptRequest) ? undefined : summaryGeneratorVersion,result.source);
+    return {callId,finalTranscript:copy(snapshot.finalTranscript),snapshot:(await this.get(callId))!};
+  }
+  async requestRecordingTranscript(callId: string, userId: string, model: string) {
+    const snapshot=this.#require(callId),recording=snapshot.recording;
+    if(this.#owners.get(callId)!==userId) throw new CallRepositoryError("CALL_NOT_FOUND");
+    if(!this.#callText.hooks.textAllowed(callId)) throw new CallRepositoryError("CALL_NOT_FOUND");
+    if(snapshot.recordingTranscript?.status==='completed') return;
+    if(!recording || recording.status!=='available' || (recording.deleteAfter && Date.parse(recording.deleteAfter)<=Date.now())) throw new CallRepositoryError("RECORDING_NOT_FOUND");
+    const job=this.#durableJobs.get(durableJobKey("final_transcription",recording.id));
+    if(snapshot.recordingTranscriptRequest && job && ['queued','running'].includes(job.status)) return;
+    const now=new Date().toISOString();
+    snapshot.recordingTranscriptRequest ??= {id:randomUUID(),requestedAt:now,status:'queued'};
+    snapshot.recordingTranscript={id:snapshot.recordingTranscript?.id??randomUUID(),source:'recording_asr',status:'processing',text:null,segments:[],model,
+      failureReason:null,createdAt:snapshot.recordingTranscript?.createdAt??now,updatedAt:now,completedAt:null};
+    await this.enqueueDurableJob({type:'final_transcription',recordingId:recording.id,runAfter:now,maxAttempts:durableJobMaxAttempts.final_transcription,force:true,restartTerminal:true});
+  }
+
   async claimFinalTranscript(
     recordingId: string,
     model: string,
@@ -3243,18 +3296,18 @@ export class InMemoryCallRepository implements CallRepository {
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
     const native = await this.getNativeTranscriptWork(recordingId);
     if (recording.status !== "available" && !(model.startsWith("live-native:") && native.capture?.status === "complete")) return null;
-    if (snapshot.finalTranscript?.status === "completed" && !force) return null;
-    if (snapshot.finalTranscript?.status === "processing" && !lease) return null;
-    const retry = Boolean(snapshot.finalTranscript);
+    if (snapshot.recordingTranscript?.status === "completed" && !force) return null;
+    if (snapshot.recordingTranscript?.status === "processing" && !lease) return null;
+    const retry = Boolean(snapshot.recordingTranscript);
     const now = new Date(Math.max(
       Date.now(),
-      snapshot.finalTranscript
-        ? Date.parse(snapshot.finalTranscript.updatedAt) + 1
+      snapshot.recordingTranscript
+        ? Date.parse(snapshot.recordingTranscript.updatedAt) + 1
         : 0
     )).toISOString();
-    const finalTranscript: FinalTranscript = snapshot.finalTranscript
+    const finalTranscript: FinalTranscript = snapshot.recordingTranscript
       ? {
-          ...snapshot.finalTranscript,
+          ...snapshot.recordingTranscript,
           status: "processing",
           text: null,
           segments: [],
@@ -3275,7 +3328,8 @@ export class InMemoryCallRepository implements CallRepository {
           completedAt: null
         };
     finalTranscript.source = model.startsWith("live-native:") ? "live_native" : "recording_asr";
-    snapshot.finalTranscript = finalTranscript;
+    snapshot.recordingTranscript = finalTranscript;
+    if(!native.capture) snapshot.finalTranscript = finalTranscript;
     const attempt = (this.#attempts.get(callId) ?? []).at(-1);
     this.#appendTelemetry(callId, {
       callAttemptId: attempt?.id ?? null,
@@ -3305,10 +3359,11 @@ export class InMemoryCallRepository implements CallRepository {
   ) {
     this.#assertDurableJobLease(lease);
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
-    const finalTranscript = snapshot.finalTranscript;
+    const finalTranscript = snapshot.recordingTranscript;
     if (!finalTranscript) {
       throw new CallRepositoryError("RECORDING_NOT_FOUND");
     }
+    if(lease && (recording.status!=='available' || (recording.deleteAfter && Date.parse(recording.deleteAfter)<=Date.now()) || !this.#callText.hooks.textAllowed(callId))) throw new CallRepositoryError("RECORDING_NOT_FOUND");
     const now = new Date();
     finalTranscript.status = "completed";
     finalTranscript.source = options?.source ?? "recording_asr";
@@ -3318,16 +3373,7 @@ export class InMemoryCallRepository implements CallRepository {
     finalTranscript.failureReason = null;
     finalTranscript.updatedAt = now.toISOString();
     finalTranscript.completedAt = now.toISOString();
-    await this.#callText.persistRevision(callId,finalTranscript.id,text,segments,now.toISOString(),options?.summaryGeneratorVersion);
-    recording.deleteAfter = new Date(
-      now.getTime() + snapshot.brief.audioRetentionDays * 86_400_000
-    ).toISOString();
-    await this.enqueueDurableJob({
-      type: "recording_retention",
-      recordingId,
-      runAfter: recording.deleteAfter,
-      maxAttempts: durableJobMaxAttempts.recording_retention
-    });
+    await this.#callText.persistRevision(callId,finalTranscript.id,text,segments,now.toISOString(),options?.summaryGeneratorVersion,"recording_asr");
     const attempt = (this.#attempts.get(callId) ?? []).at(-1);
     this.#appendTelemetry(callId, {
       callAttemptId: attempt?.id ?? null,
@@ -3355,7 +3401,7 @@ export class InMemoryCallRepository implements CallRepository {
   ) {
     this.#assertDurableJobLease(lease);
     const { callId, snapshot } = this.#requireRecording(recordingId);
-    const finalTranscript = snapshot.finalTranscript;
+    const finalTranscript = snapshot.recordingTranscript;
     if (!finalTranscript) {
       throw new CallRepositoryError("RECORDING_NOT_FOUND");
     }
@@ -3388,6 +3434,12 @@ export class InMemoryCallRepository implements CallRepository {
     };
   }
 
+  async requestRecordingDeletion(id: string) {
+    const recording=this.#require(id).recording;
+    if(!recording || recording.status!=='available') throw new CallRepositoryError('RECORDING_NOT_FOUND');
+    recording.deleteAfter=new Date(Math.min(Date.now(),recording.deleteAfter?Date.parse(recording.deleteAfter):Infinity)).toISOString();
+    await this.enqueueDurableJob({type:'recording_retention',recordingId:recording.id,runAfter:recording.deleteAfter,maxAttempts:durableJobMaxAttempts.recording_retention});
+  }
   async markRecordingDeleted(id: string, lease?: DurableJobLease) {
     this.#assertDurableJobLease(lease);
     const snapshot = this.#require(id);
@@ -3398,6 +3450,8 @@ export class InMemoryCallRepository implements CallRepository {
         this.#postCallTranscriptionChunks.delete(key);
       }
     }
+    const job=this.#durableJobs.get(durableJobKey('final_transcription',recording.id));
+    if(job && ['queued','running'].includes(job.status)) Object.assign(job,{status:'cancelled',leaseOwner:null,leasedAt:null,leaseExpiresAt:null,lastErrorCode:'RECORDING_NOT_AVAILABLE',completedAt:new Date().toISOString()});
     recording.status = "deleted";
     recording.deletedAt = new Date().toISOString();
     return { callId: id, recording: copy(recording), snapshot: copy(snapshot) };
@@ -3439,7 +3493,7 @@ export class InMemoryCallRepository implements CallRepository {
     }
     if (
       input.restartTerminal &&
-      ["succeeded", "dead_letter"].includes(existing.status)
+      ["succeeded", "dead_letter", "cancelled"].includes(existing.status)
     ) {
       Object.assign(existing, {
         status: "queued" as const,
@@ -3508,9 +3562,11 @@ export class InMemoryCallRepository implements CallRepository {
           maxAttempts: durableJobMaxAttempts.provider_recording_reconciliation
         });
       }
+      const capture=attempt ? this.#nativeCaptures.get(attempt.id) : null;
+      if(capture && !snapshot.finalTranscript?.quality && attempt) await this.enqueueDurableJob({type:'live_transcript_finalization',callAttemptId:attempt.id,runAfter:now,maxAttempts:durableJobMaxAttempts.live_transcript_finalization});
       if (recording?.status !== "available") continue;
       if (
-        snapshot.finalTranscript?.status !== "completed"
+        snapshot.recordingTranscriptRequest && snapshot.recordingTranscript?.status !== "completed" && (!recording.deleteAfter || recording.deleteAfter>now)
       ) {
         await this.enqueueDurableJob({
           type: "final_transcription",
@@ -3520,8 +3576,7 @@ export class InMemoryCallRepository implements CallRepository {
         });
       }
       if (
-        recording.deleteAfter &&
-        snapshot.finalTranscript?.status === "completed"
+        recording.deleteAfter
       ) {
         await this.enqueueDurableJob({
           type: "recording_retention",
@@ -4185,7 +4240,8 @@ export class InMemoryCallRepository implements CallRepository {
       job.generation !== input.durableJobGeneration ||
       callId !== input.callBriefId ||
       snapshot.recording?.status !== "available" ||
-      snapshot.finalTranscript?.status !== "processing"
+      snapshot.recordingTranscript?.status !== "processing" || !snapshot.recordingTranscriptRequest ||
+      (snapshot.recording.deleteAfter!==null && Date.parse(snapshot.recording.deleteAfter)<=Date.now()) || !this.#callText.hooks.textAllowed(callId)
     ) {
       throw new CallRepositoryError("RECORDING_NOT_FOUND");
     }
@@ -4245,7 +4301,7 @@ export class InMemoryCallRepository implements CallRepository {
       };
     }
     if (
-      input.type === "answer_detection_timeout" || input.type === "provider_call_reconciliation" ||
+      input.type === "live_transcript_finalization" || input.type === "answer_detection_timeout" || input.type === "provider_call_reconciliation" ||
       input.type === "provider_call_cost_reconciliation"
     ) {
       if (!input.callAttemptId || input.recordingId || input.callPreparationId) {
@@ -4656,12 +4712,13 @@ function safeProviderWebhookErrorCode(value?: string | null) {
 function postCallTranscriptionChunkKey(
   input: Pick<
     PostCallTranscriptionChunkLookupInput,
-    "recordingId" | "durableJobGeneration" | "chunkKey" | "inputFingerprint"
+    "recordingId" | "stage" | "requestedModel" | "chunkKey" | "inputFingerprint"
   >
 ) {
   return [
     input.recordingId,
-    input.durableJobGeneration,
+    input.stage,
+    input.requestedModel,
     input.chunkKey,
     input.inputFingerprint
   ].join(":");

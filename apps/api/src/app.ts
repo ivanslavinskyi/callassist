@@ -2642,6 +2642,31 @@ export function buildApp({
   );
 
   app.post<{ Params: { id: string } }>(
+    "/api/call-briefs/:id/recording-transcript",
+    async (request, reply) => {
+      const access = await authorizeCallAccess(request, reply, {
+        callId: request.params.id,
+        mutation: true
+      });
+      if (!access) return;
+      if (!(await enforceEndpointRateLimit(
+        request,
+        reply,
+        access.userId,
+        "transcription-retry",
+        endpointRateLimitPolicy.transcriptionRetry
+      ))) return;
+      try {
+        return reply
+          .status(202)
+          .send(await service.retryFinalTranscript(request.params.id, access.userId));
+      } catch (error) {
+        return sendRepositoryError(reply, error);
+      }
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
     "/api/call-briefs/:id/final-transcript/retry",
     async (request, reply) => {
       const access = await authorizeCallAccess(request, reply, {
@@ -2659,7 +2684,7 @@ export function buildApp({
       try {
         return reply
           .status(202)
-          .send(await service.retryFinalTranscript(request.params.id));
+          .send(await service.retryFinalTranscript(request.params.id, access.userId));
       } catch (error) {
         return sendRepositoryError(reply, error);
       }

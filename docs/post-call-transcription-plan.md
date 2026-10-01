@@ -1,5 +1,7 @@
 # Consent-Based Recording and Post-Call Transcription Plan
 
+**Superseded orchestration (1 October):** ASR is now an optional owner-requested second source. Native Live is primary, including partial capture. Retention starts when recording becomes available and never waits for ASR. See [current implementation](live-native-primary-implementation-2026-10-01.md). The audio processing details below remain useful; automatic triggers and retention tied to transcript completion are historical.
+
 Status: implemented decision, reviewed 2026-09-12 against `ef36cfa`.
 Dated verification and outstanding quality work are in the
 [index](README.md) and [roadmap](mvp-plan.md).

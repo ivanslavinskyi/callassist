@@ -7,6 +7,14 @@ const current = { brief: { id: "call", updatedAt: "2026-09-09T12:00:00Z" }, comp
   languageContext: { taskContentLanguage: "uk", selectionRevision: 3, compilationRevision: 2 }
 } as CallSnapshot;
 describe("late call responses", () => {
+  it("keeps sources independent when an older poll arrives after Live or ASR completes", () => {
+    const live={id:'live',status:'completed',updatedAt:'2026-10-01T12:01:00Z',text:'Live'};
+    const asr={id:'asr',status:'completed',updatedAt:'2026-10-01T12:02:00Z',text:'ASR'};
+    const newer={...current,finalTranscript:live,recordingTranscript:asr,finalTranscriptRevision:{id:'live-r'},recordingTranscriptRevision:{id:'asr-r'}} as CallSnapshot;
+    const older={...newer,recordingTranscript:{...asr,status:'processing',updatedAt:'2026-10-01T12:00:00Z'},recordingTranscriptRevision:null} as CallSnapshot;
+    expect(currentCallSnapshot(newer,older).recordingTranscriptRevision?.id).toBe('asr-r');
+    expect(currentCallSnapshot(newer,older).finalTranscript?.text).toBe('Live');
+  });
   it("does not undo a final assessment when an earlier read completes late", () => {
     const base=deriveCallLifecycle("completed",[]);
     const assessment={status:"ready" as const,conversation:"confirmed" as const,goal:"achieved" as const,reason:null,

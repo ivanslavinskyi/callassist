@@ -1,3 +1,4 @@
+import { consentTimeline } from "./i18n/consent-timeline";
 import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
 import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
 import { extendMessages } from "./i18n/extend-messages";
@@ -60,7 +61,7 @@ export function buildFinalTranscriptCopyText(input: ExportInput) {
     `${copy.language}: ${languageLabel}`,
     `${copy.completed}: ${formatExportDate(finalTranscript.completedAt ?? finalTranscript.updatedAt, uiLocale)}`
   ];
-  const transcript = transcriptLines(brief, finalTranscript, copy.unassigned);
+  const transcript = transcriptLines(brief, finalTranscript, copy.unassigned, consentTimeline[uiLocale].system);
 
   return [
     ...header,
@@ -93,7 +94,7 @@ export function buildFinalTranscriptPdfDefinition(
       { label: copy.completed, value: formatExportDate(finalTranscript.completedAt ?? finalTranscript.updatedAt, uiLocale) }
     ],
     turns: finalTranscript.segments.map(segment => ({
-      speaker: speakerName(brief, segment.role, copy.unassigned), role: segment.role,
+      speaker: speakerName(brief, segment.role, copy.unassigned, consentTimeline[uiLocale].system), role: segment.role,
       offset: `~${formatTranscriptOffset(segment.startSeconds)}`, text: segment.text
     })),
     text: finalTranscript.text ?? "",
@@ -132,24 +133,25 @@ export async function writeTextToClipboard(text: string) {
   if (!copied) throw new Error("CLIPBOARD_UNAVAILABLE");
 }
 
-function transcriptLines(brief: CallBrief, finalTranscript: FinalTranscript, unassigned: string) {
+function transcriptLines(brief: CallBrief, finalTranscript: FinalTranscript, unassigned: string, system: string) {
   if (finalTranscript.segments.length === 0) {
     return finalTranscript.text ? [finalTranscript.text] : [];
   }
   return finalTranscript.segments.map(
     (segment) =>
-      `[~${formatTranscriptOffset(segment.startSeconds)}] ${speakerName(brief, segment.role, unassigned)}: ${segment.text}`
+      `[~${formatTranscriptOffset(segment.startSeconds)}] ${speakerName(brief, segment.role, unassigned, system)}: ${segment.text}`
   );
 }
 
 function speakerName(
   brief: CallBrief,
   role: FinalTranscriptSegment["role"],
-  unassigned: string
+  unassigned: string,
+  system: string
 ) {
   if (role === "assistant") return ASSISTANT_DISPLAY_NAME;
   if (role === "recipient") return brief.recipientName;
-  return unassigned;
+  return role === "system" ? system : unassigned;
 }
 
 export function formatTranscriptOffset(seconds: number) {

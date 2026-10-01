@@ -5,6 +5,7 @@ import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresContentRepository } from "./postgres-content-repository";
 import { seededContentPages, seededEditorialCollections } from "./seed-content";
 import rules from "./transcript-copy-migration.json";
+import optionalRules from "./optional-transcript-copy-migration.json";
 
 const fixture = isolatedTestDatabase();
 let sql: postgres.Sql;
@@ -14,7 +15,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await repository?.close(); await sql?.end(); await fixture.teardown(); });
 function oldCopy<T>(value: T): T {
-  if (typeof value === "string") return (rules.find(rule => rule.next === value)?.old[0] ?? value) as T;
+  if (typeof value === "string") {
+    const previous=optionalRules.find(rule=>rule.next===value)?.old[0]??value;
+    return (rules.find(rule => rule.next === previous)?.old[0] ?? previous) as T;
+  }
   if (Array.isArray(value)) return value.map(oldCopy) as T;
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, oldCopy(child)])) as T;
   return value;
@@ -62,4 +66,19 @@ it("upgrades current publications atomically, preserves editorial changes/drafts
       FROM content_editorial_revisions WHERE id=${result.id}`;
   await expect(sql.begin(transaction => transaction.unsafe(migration))).rejects.toThrow("TRANSCRIPT_COPY_PREFLIGHT");
   expect((await sql`SELECT count(*)::int AS n FROM content_page_revisions`)[0]!.n).toBe(count);
+});
+it("publishes explicit-request and recording-availability copy without rewriting earlier legal evidence", async () => {
+  const before=await sql`SELECT id,sections FROM content_page_revision_localizations ORDER BY id`;
+  const migration=await readFile(new URL('../db/migrations/0094_optional_transcript_public_copy.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(migration));
+  for(const locale of ['en','de','fr','it','rm','ru','uk'] as const) {
+    const page=(await repository.getAdminRevision('privacy',locale,{status:'published'}))!;
+    expect(page.sections[4]?.paragraphs[0]).toBe(optionalRules.find(rule=>rule.group==='page:privacy'&&rule.locale===locale&&rule.semantic==='transcript')!.next);
+    expect(page.revision.requiresReacceptance).toBe(false);
+  }
+  const old=await sql`SELECT l.id,l.sections FROM content_page_revision_localizations l JOIN content_page_revisions r ON r.id=l.revision_id WHERE r.status='published' AND l.id IN ${sql(before.map(row=>row.id))}`;
+  expect(old.every(row=>JSON.stringify(row.sections)===JSON.stringify(before.find(prior=>prior.id===row.id)?.sections))).toBe(true);
+  const count=(await sql`SELECT count(*)::int AS n FROM content_page_revisions`)[0].n;
+  await sql.begin(tx=>tx.unsafe(migration));
+  expect((await sql`SELECT count(*)::int AS n FROM content_page_revisions`)[0].n).toBe(count);
 });

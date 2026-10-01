@@ -18,7 +18,7 @@ export const planReviewPayloadSchema = z.object({ fields: z.array(translatedFiel
 export const sourceSegmentSchema = z.object({
   source: transcriptSegmentSourceSchema.optional(),
   applicationPlayback: applicationPlaybackReceiptSchema.optional(),
-  id: z.string().min(1).max(160), role: z.enum(["assistant", "recipient", "unknown"]),
+  id: z.string().min(1).max(160), role: z.enum(["assistant", "recipient", "unknown", "system"]),
   text: z.string().min(1), startSeconds: z.number().nonnegative().nullable(), endSeconds: z.number().nonnegative().nullable()
 });
 export const transcriptTranslationPayloadSchema = z.object({ segments: z.array(sourceSegmentSchema), text: z.string() });

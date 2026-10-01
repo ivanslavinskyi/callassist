@@ -38,7 +38,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #resolveConsentPlayback: ((played: boolean) => void) | null = null;
   #renderedSpeech = new Map<string, Promise<RenderedSpeech>>();
   #renderedPlayback: { mark: string; text: string; generation: number; timer: ReturnType<typeof setTimeout>;
-    interrupted: boolean; segment: "required" | "question" } | null = null;
+    interrupted: boolean; segment: "required" | "question"; sentAt: string; durationMs: number } | null = null;
   #requiredDisclosureText: string | null = null;
   #pendingConsentQuestion: string | null = null;
   #requiredPlaybackEndsAt = 0;
@@ -51,6 +51,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #speaking = false;
   #playbackUntil = 0;
   #clippedTaskSpeech = false;
+  #transcriptIssues: import("@callassist/contracts").TranscriptQualityIssue[] = [];
   #consented = false;
   #consentFailed = false;
   #answeringPoll: ReturnType<typeof setInterval> | null = null;
@@ -328,7 +329,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       this.#close("openai_error");
     }, Math.max(8_000, rendered.durationMs + 5_000));
     timer.unref?.();
-    this.#renderedPlayback = { mark, text, generation, timer, interrupted: false, segment };
+    this.#renderedPlayback = { mark, text, generation, timer, interrupted: false, segment, sentAt:new Date().toISOString(),durationMs:rendered.durationMs };
     if (segment === "required")
       this.#context!.telemetry(`live:disclosure:${generation}`, { name: "disclosure.started", metadata: {} });
     this.#send({ event: "mark", streamSid: this.#stream, mark: { name: mark } });
@@ -421,9 +422,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     }
     clearTimeout(playback.timer); this.#renderedPlayback = null;
     const key = `rendered-consent-${playback.segment}:${this.#context!.attemptId}:${playback.generation}`;
-    this.options.service.publishTranscriptDelta(this.#context!.brief.id, key, "assistant", playback.text, this.#context!.brief.locale);
-    void this.options.service.addRealtimeTranscript(this.#context!.brief.id, "assistant", playback.text, key)
-      .catch(() => this.#close("openai_error"));
+    this.#live!.recordApplicationPlayback(playback.text,key,{markId:name,sentAt:playback.sentAt,durationMs:playback.durationMs,acknowledgedAt:new Date().toISOString()});
     if (playback.segment === "required") {
       this.#requiredDisclosureText = null;
       this.#requiredPlaybackEndsAt = 0;
@@ -446,7 +445,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!playback) return;
     clearTimeout(playback.timer); this.#applicationPlayback = null;
     // A released clip without its matching mark may have been heard partially.
-    if (playback.released && this.#consented) this.#clippedTaskSpeech = true;
+    if (playback.released && this.#consented) this.#noteTranscriptGap("application_interrupted");
     this.#clear(); playback.resolve(false);
   }
   #playApplicationText(text: string, current: () => boolean, deadlineMs = 30_000, recoverable = false) {
@@ -681,7 +680,12 @@ export class UnifiedLiveCall implements LiveLifecycle {
   // A render failure before audio release leaves no missing audible words.
   // Unacknowledged/cleared audio is tracked separately as a coverage gap.
   transcriptCaptureComplete() { return !this.#clippedTaskSpeech; }
-  nativeTranscriptGap() { if (this.#consented) this.#clippedTaskSpeech = true; }
+  transcriptQualityIssues() { return [...this.#transcriptIssues]; }
+  #noteTranscriptGap(code: import("@callassist/contracts").TranscriptQualityIssue["code"]) {
+    this.#clippedTaskSpeech=true;
+    if(!this.#transcriptIssues.some(issue=>issue.code===code)) this.#transcriptIssues.push({code});
+  }
+  nativeTranscriptGap() { if (this.#consented) this.#noteTranscriptGap("output_boundary"); }
   decisionReady() {
     if (this.#speaking || this.#recipientTurnTimer) return false;
     return this.#phase === "consent" ? this.#hasConsentAnswer() :
@@ -709,7 +713,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#backendFailurePending = true;
     this.#backendFailureCurrent = current; this.#backendFailureCode = code;
     this.#context!.telemetry(`live:failure:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v6", phase: "failed", revision: this.#generation, cause: code } });
+      runtimeVersion: "live-managed-v7", phase: "failed", revision: this.#generation, cause: code } });
     this.options.logger?.warn({ callAttemptId: this.#context!.attemptId, code }, "Live owned backend failure pending");
     this.#backendFailureDeadlineAt = Date.now() + 8_000;
     this.#scheduleBackendFailure();
@@ -761,9 +765,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #cancelCritical(cause = "stale_action") {
     if (!this.#criticalResolve) return;
-    if (this.#criticalReleased) this.#clippedTaskSpeech = true;
+    if (this.#criticalReleased) this.#noteTranscriptGap("application_interrupted");
     this.#context!.telemetry(`live:action-interrupted:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v6", phase: "stale", revision: this.#generation,
+      runtimeVersion: "live-managed-v7", phase: "stale", revision: this.#generation,
       cause, released: this.#criticalReleased } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, cause,
       released: this.#criticalReleased, generation: this.#generation }, "Live appointment playback cancelled");
@@ -937,7 +941,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#action || this.#isClosed()) return;
     this.#live?.appointmentState(this.taskDecisionContext().appointment);
     this.#context!.telemetry(`live:action:${this.#action.id}:${this.#action.version}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v6", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
+      runtimeVersion: "live-managed-v7", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
       revision: this.#action.version, actionState: this.#action.state,
       ...(this.#action.delivery ? { deliveryKind: this.#action.delivery.kind, deliveryStatus: this.#action.delivery.status } : {}) } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, actionId: this.#action.id,
@@ -1033,7 +1037,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #send(event: object) { if (this.twilio?.readyState === WebSocket.OPEN) this.twilio.send(JSON.stringify(event)); }
   #clear() {
-    if ((this.#phase === "conversation" || this.#phase === "closing") && this.#playbackUntil > Date.now()+150) this.#clippedTaskSpeech = true;
+    if ((this.#phase === "conversation" || this.#phase === "closing") && this.#playbackUntil > Date.now()+150) this.#noteTranscriptGap("output_cleared");
     this.#playbackUntil = 0;
     if (this.#stream) this.#send({ event: "clear", streamSid: this.#stream });
   }

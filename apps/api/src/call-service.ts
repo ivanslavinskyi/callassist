@@ -197,6 +197,7 @@ export class CallService {
           job: DurableJob,
           lease: DurableJobLease
         ) => this.#processCallPreparation(job, lease),
+        live_transcript_finalization: (job: DurableJob, lease: DurableJobLease) => this.#finalizeNativeTranscript(job, lease),
         final_transcription: (job: DurableJob, lease: DurableJobLease) => this.#processRecording(job, lease),
         recording_retention: (
           job: DurableJob,
@@ -1053,10 +1054,8 @@ export class CallService {
   async setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture) {
     await this.repository.setNativeTranscriptCapture(callId,attemptId,capture);
     if(capture.status === "collecting") return;
-    const snapshot=await this.repository.get(callId);
-    if(!snapshot?.recording || snapshot.finalTranscript?.status === "completed") return;
-    await this.repository.enqueueDurableJob({ type:"final_transcription",recordingId:snapshot.recording.id,
-      runAfter:new Date().toISOString(),maxAttempts:durableJobMaxAttempts.final_transcription,restartTerminal:true });
+    await this.repository.enqueueDurableJob({ type:"live_transcript_finalization",callAttemptId:attemptId,
+      runAfter:new Date().toISOString(),maxAttempts:durableJobMaxAttempts.live_transcript_finalization,restartTerminal:true });
     this.#durableJobWorker.wake();
   }
 
@@ -1167,11 +1166,11 @@ export class CallService {
     if (recording.status === "deleted") return snapshot;
     if (
       recording.status !== "available" ||
-      !recording.providerRecordingId ||
-      snapshot.finalTranscript?.status === "processing"
+      !recording.providerRecordingId
     ) {
       throw new CallServiceError("RECORDING_NOT_AVAILABLE");
     }
+    await this.repository.requestRecordingDeletion(id);
     await this.telephonyProvider.deleteRecording(
       recording.providerRecordingId
     );
@@ -1183,24 +1182,15 @@ export class CallService {
     return deleted.snapshot;
   }
 
-  async retryFinalTranscript(id: string) {
-    const snapshot = await this.#require(id);
-    if (
-      snapshot.recording?.status !== "available" ||
-      !this.#postCallTranscriber
-    ) {
-      throw new CallServiceError("RECORDING_NOT_AVAILABLE");
-    }
-    await this.repository.enqueueDurableJob({
-      type: "final_transcription",
-      recordingId: snapshot.recording.id,
-      runAfter: new Date().toISOString(),
-      maxAttempts: durableJobMaxAttempts.final_transcription,
-      force: true,
-      restartTerminal: true
-    });
+  async retryFinalTranscript(id: string, userId?: string | null) {
+    const snapshot=await this.#require(id);
+    if(!userId) throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    if(snapshot.recordingTranscript?.status==='completed') return snapshot;
+    if(!this.#postCallTranscriber || snapshot.recording?.status!=='available' ||
+      (snapshot.recording.deleteAfter && Date.parse(snapshot.recording.deleteAfter)<=Date.now())) throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    await this.repository.requestRecordingTranscript(id,userId,this.#postCallTranscriber.model);
     this.#durableJobWorker.wake();
-    return snapshot;
+    return this.#require(id);
   }
 
   publishTranscriptDelta(
@@ -1323,49 +1313,52 @@ export class CallService {
     await this.repository.close();
   }
 
+  async #finalizeNativeTranscript(job: DurableJob, lease: DurableJobLease) {
+    if(!job.callId||!job.callAttemptId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
+    const work=await this.repository.getNativeTranscriptAttemptWork(job.callId,job.callAttemptId);
+    if(!work.capture) return;
+    let capture=work.capture;
+    if(capture.status==='collecting') {
+      if(!work.ended || Date.now()-Date.parse(capture.updatedAt)<20_000)
+        throw new DurableJobExecutionError("NATIVE_TRANSCRIPT_DRAINING",{defer:true,retryAfterMs:20_000});
+      capture={...capture,status:'incomplete',sessionFinalized:false,issues:[...(capture.issues??[]),{code:'session_unconfirmed'}],updatedAt:new Date().toISOString()};
+      await this.repository.setNativeTranscriptCapture(job.callId,job.callAttemptId,capture);
+    }
+    const result=assembleNativeTranscript(work.snapshot,capture);
+    if(!result) return;
+    const completed=await this.repository.publishNativeTranscript(job.callId,job.callAttemptId,result,currentLease(lease),
+      capture.sessionStartedAt && textDirectionEnabled(this.textArtifacts.capabilities,'call_summary','*',work.snapshot.languageContext?.taskContentLanguage??'en')
+        ? textGeneratorVersion(this.textArtifacts.processor,'call_summary') : undefined);
+    this.#publish(completed.callId,{type:'final_transcript.updated',finalTranscript:completed.finalTranscript});
+    this.wakeTextJobs();
+    await this.#syncSystemOutcome(completed.callId);
+  }
+
   async #processRecording(job: DurableJob, lease: DurableJobLease) {
     const recordingId = job.recordingId;
     if (!recordingId) {
       throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     }
     const work=await this.repository.getNativeTranscriptWork(recordingId);
-    if(work.snapshot.finalTranscript?.status === "completed" && isLiveTranscript(work.snapshot.finalTranscript.source)) return;
-    if(work.capture?.status === "collecting" && Date.now()-Date.parse(job.createdAt)<120_000) {
-      throw new DurableJobExecutionError("NATIVE_TRANSCRIPT_DRAINING",{retryAfterMs:60_000});
-    }
-    const native=work.capture ? assembleNativeTranscript(work.snapshot,work.capture) : null;
-    if (!native && !this.#postCallTranscriber) {
-      if (!work.capture) return; // Preserve installations without post-call transcription.
-      throw new DurableJobExecutionError("TRANSCRIPTION_UNAVAILABLE", { retryable: false });
-    }
-    if(!native && work.snapshot.recording?.status !== "available") {
-      throw new DurableJobExecutionError("TRANSCRIPT_RECORDING_PENDING",{retryAfterMs:30_000});
-    }
+    if(!work.snapshot.recordingTranscriptRequest || work.snapshot.recordingTranscript?.status==='completed') return;
+    if(!this.#postCallTranscriber) throw new DurableJobExecutionError("TRANSCRIPTION_UNAVAILABLE",{retryable:false});
+    if(work.snapshot.recording?.status!=='available' || (work.snapshot.recording.deleteAfter && Date.parse(work.snapshot.recording.deleteAfter)<=Date.now()))
+      throw new DurableJobExecutionError("RECORDING_NOT_AVAILABLE",{retryable:false});
     this.#processingRecordings.add(recordingId);
     let callId: string | null = null;
     try {
       const claimed = await this.repository.claimFinalTranscript(
         recordingId,
-        native ? `live-native:${native.model}` : this.#postCallTranscriber!.model,
+        this.#postCallTranscriber!.model,
         job.forceRequested,
         currentLease(lease)
       );
       if (!claimed) return;
       callId = claimed.callId;
       this.#publish(claimed.callId, {
-        type: "final_transcript.updated",
+        type: "recording_transcript.updated",
         finalTranscript: claimed.finalTranscript
       });
-      if(native) {
-        const completed=await this.repository.completeFinalTranscript(recordingId,native.text,native.segments,currentLease(lease),{
-          source:native.source,
-          ...(textDirectionEnabled(this.textArtifacts.capabilities,"call_summary","*",claimed.snapshot.languageContext?.taskContentLanguage??"en")
-            ? {summaryGeneratorVersion:textGeneratorVersion(this.textArtifacts.processor,"call_summary")} : {}) });
-        this.wakeTextJobs();
-        this.#publish(completed.callId,{type:"final_transcript.updated",finalTranscript:completed.finalTranscript});
-        await this.#syncSystemOutcome(completed.callId);
-        return;
-      }
       const providerRecordingId = claimed.snapshot.recording?.providerRecordingId;
       if (!providerRecordingId) {
         throw new PostCallTranscriptionError("AUDIO_EMPTY");
@@ -1442,17 +1435,12 @@ export class CallService {
         recordingId,
         result.text,
         result.segments,
-        currentLease(lease),
-        textDirectionEnabled(this.textArtifacts.capabilities, "call_summary", "*",
-          claimed.snapshot.languageContext?.taskContentLanguage ?? "en")
-          ? { summaryGeneratorVersion: textGeneratorVersion(this.textArtifacts.processor, "call_summary") } : undefined
+        currentLease(lease)
       );
-      this.wakeTextJobs();
       this.#publish(completed.callId, {
-        type: "final_transcript.updated",
+        type: "recording_transcript.updated",
         finalTranscript: completed.finalTranscript
       });
-      await this.#syncSystemOutcome(completed.callId);
     } catch (error) {
       if (callId) {
         const failureCode = transcriptionFailureCode(error);
@@ -1465,10 +1453,9 @@ export class CallService {
           .catch(() => null);
         if (failed) {
           this.#publish(failed.callId, {
-            type: "final_transcript.updated",
+            type: "recording_transcript.updated",
             finalTranscript: failed.finalTranscript
           });
-          await this.#syncSystemOutcome(failed.callId);
         }
         throw new DurableJobExecutionError(failureCode, {
           cause: error,

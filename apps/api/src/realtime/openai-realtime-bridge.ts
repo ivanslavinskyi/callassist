@@ -1864,7 +1864,7 @@ export function buildRealtimeInstructions(snapshot: ApprovedExecutionSnapshot, a
     : "Do not switch to another language.";
 
   const retention = runtime.audioRetentionDays === 0
-    ? "The audio is deleted after the final transcript is created."
+    ? "The audio is deleted as soon as the recording becomes available after the call."
     : `The audio is retained for ${runtime.audioRetentionDays} days.`;
   const orderedQuestions = plan.orderedQuestions
     .map(

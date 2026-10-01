@@ -36,11 +36,13 @@ describe.each(["memory", "postgres"])("%s native result workflow", mode => {
         expect(snapshot.transcript.at(-1)?.applicationPlayback?.markId).toBe("twilio-closing");
         expect(revision.segments.at(-1)).toMatchObject({ source: "application_playback", applicationPlayback: { markId: "twilio-closing" } });
       }
-      expect(snapshot.recording?.deleteAfter).toBeTruthy();
-      expect((await repository.listDurableJobs()).some(job => job.type === "recording_retention" && job.recordingId === recording.id)).toBe(true);
+      expect(snapshot.recording?.deleteAfter).toBeNull();
       await call.service.setNativeTranscriptCapture(call.brief.id, call.attempt.id, capture);
       await call.service.handleTwilioRecordingStatus({ callBriefId: call.brief.id, recordingId: recording.id, providerCallId,
         providerRecordingId, providerStatus: "completed", durationSeconds: 4, channels: 2 });
+      expect((await repository.get(call.brief.id))?.recording?.deleteAfter).toBeTruthy();
+      expect((await repository.listDurableJobs()).some(job => job.type === "recording_retention" && job.recordingId === recording.id)).toBe(true);
+      expect((await repository.listDurableJobs()).some(job => job.type === "final_transcription")).toBe(false);
       expect((await repository.getCurrentTranscriptRevision(call.brief.id))?.id).toBe(revision.id);
       expect((await repository.exportCallTextData(call.brief.id)).transcriptRevisions).toHaveLength(1);
     } finally { await call.service.close(); if (repository instanceof PostgresCallRepository) await repository.close(); }

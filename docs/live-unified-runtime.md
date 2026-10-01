@@ -1,5 +1,7 @@
 # Unified Live runtime — updated 1 October 2026
 
+Current transcript behavior: [Live primary / optional audio ASR](live-native-primary-implementation-2026-10-01.md), runtime `live-managed-v7`, migration 0093. This supersedes recording-fallback descriptions in dated checkpoints below. No additional voice-model orchestration is introduced.
+
 Branch: `codex/live-unified-runtime`. Production last reported by the owner:
 `915a8f6`, Live, fallback=false, migrations through 0084 (owner report on 26 September,
 not a fresh deployment inspection). The current branch extends through migration 0092.

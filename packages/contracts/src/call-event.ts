@@ -43,7 +43,7 @@ export const callEventSchema = z.discriminatedUnion("type", [
     recording: callRecordingSchema
   }),
   z.object({
-    type: z.literal("final_transcript.updated"),
+    type: z.enum(["final_transcript.updated", "recording_transcript.updated"]),
     finalTranscript: finalTranscriptSchema
   })
 ]);

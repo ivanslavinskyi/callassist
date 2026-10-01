@@ -5,7 +5,7 @@ type Metadata = { label: string; value: string };
 type TranscriptPdfTurn = {
   id?: string;
   speaker: string;
-  role: "assistant" | "recipient" | "unknown";
+  role: "assistant" | "recipient" | "unknown" | "system";
   offset: string | null;
   text: string;
 };

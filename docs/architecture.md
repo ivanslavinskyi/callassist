@@ -497,23 +497,30 @@ consent. The opening asks whether it is convenient to continue; later conversati
 readiness and fact limits depend partly on model instructions. Realtime disconnects
 end the call; reconnecting that model session is unsupported.
 
-### Saved conversation transcript and recording fallback
+### Primary Live transcript and optional recording transcript
 
-For new unified Live calls, `final_transcription` first checks the persisted native
-capture. A gracefully closed, fully persisted capture is assembled from post-consent
-fragments with native timing and published through the existing encrypted transcript
-revision. Source `live_native` flows to summaries, assessment, translations, UI and
-PDF. Late deltas drain through `session.closed` and the persistence queue before
-capture is marked complete. The existing durable job waits at most 120 seconds from
-job creation for a collecting capture; ready native text does not wait for media.
-The same completion transaction schedules audio retention, and a later ready-recording
-callback can re-enqueue deletion. Missing/incomplete captures use `recording_asr`;
-old completed transcripts keep their source and hash. Native assembly requires a
-known recording boundary and valid timings; it excludes pre-recording fragments,
-including fragments crossing that boundary, without inventing word timestamps.
-See [implementation and rollout](live-transcript-implementation-2026-09-28.md).
+The `live_transcript_finalization` job publishes the primary native transcript by
+attempt, independently of recording availability. Native receive sequence determines
+word order; alignment times place speaker rows. Replayed events/receipts deduplicate
+without deleting intentional repeated words. Acknowledged application speech,
+including disclosure and farewell, is retained with playback receipts. Consent is
+a distinct system event, not an invented verbatim recipient quote. Recipient words
+before or crossing the consent boundary remain excluded.
 
-The recording fallback downloads authenticated Twilio media (browser playback
+Capture quality is independent of source: interrupted/incomplete captures keep
+admitted text and report partial coverage/reasons. They do not trigger ASR.
+Migration 0093 retains immutable revision IDs under separate per-attempt Live and
+audio artifact parents. The default tab, new summaries and assessment use Live;
+translations/PDF/citations use the explicitly selected revision. Historical summaries
+remain attached to their original source; model-free backfill does not regenerate them.
+
+ASR starts only after an authenticated owner explicitly requests it. Request and
+job insertion share a transaction; duplicate clicks/restarts reuse work, completed
+results return from storage. Provider admission checks the request ID, lease,
+owner availability and recording deadline. The ASR result cannot replace Live or
+automatically regenerate the call result. See [implementation](live-native-primary-implementation-2026-10-01.md).
+
+The optional recording transcriber downloads authenticated Twilio media (browser playback
 uses a separate owner-authorized proxy). For supported stereo WAV it extracts speech
 regions: channel 1 recipient, channel 2 assistant. It transcribes assistant utterances
 first, then recipient utterances using the nearest preceding recording-derived
@@ -540,7 +547,7 @@ Original final transcripts have encrypted immutable revisions and stable segment
 Unsegmented historical text is split without losing characters; speaker/timing remain
 unknown. Source processing/failure does not expose an older revision as current.
 The canonical source is `live_native`, `live_composed` or `recording_asr`; all derived artifacts use
-the same immutable revision/hash. Native hashes include provenance; historical ASR
+the selected immutable revision/hash. Native hashes include provenance; historical ASR
 hashes remain unchanged. The UI does not duplicate a saved native transcript as a
 second provisional result. Translation and summary follow the saved task language,
 independently of UI and call locale; transcript translation remains on demand.
@@ -567,7 +574,7 @@ Results do not change technical call status or user feedback. The UI identifies
 generated text, links evidence to the original and keeps the original readable when
 processing fails or a direction is disabled. Clipboard copy and branded PDF download
 use the displayed original/translated transcript with distinct labels and metadata;
-there is no separate TXT download endpoint. Automatic summary enqueue is atomic with final
+there is no separate TXT download endpoint. Automatic summary enqueue is atomic with primary Live
 transcript completion when that direction is enabled; it never delays audio retention.
 
 Validated chunks persist across retries. Storage caps each artifact at 24 provider
@@ -587,10 +594,13 @@ every publication. Owner deletion requests cancel text jobs and reject new provi
 reservations or late completions before eventual content redaction. Feature and
 direction switches stop new generation without removing retained ready results.
 
-Audio retention is 0, 7 (default) or 30 days. The deletion deadline is assigned from
-successful final-transcript completion, not the call-start timestamp; regeneration
-updates that deadline. Zero-day audio becomes eligible immediately then. Failed
-transcription can retain audio for retry. Retention work is durable and monitored, not a wall-clock guarantee during
+Audio retention is 0, 7 (default) or 30 days. The deletion deadline is assigned once
+when the provider reports the recording available; existing deadlines survive retries.
+Zero-day audio becomes eligible immediately. ASR requests never extend retention,
+and failed/unused ASR does not prevent deletion. Explicit audio deletion first moves
+the deadline to now, fencing new provider requests/publication even if provider
+deletion needs a retry. Ready text remains under the text retention policy.
+Retention work is durable and monitored, not a wall-clock guarantee during
 provider/worker outages. Deletion of a terminal call deletes provider audio before
 local redaction and fences content jobs. Account anonymization processes owned calls
 before tombstoning identity and revoking sessions. Contact challenges are erased

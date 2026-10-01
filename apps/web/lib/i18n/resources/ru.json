@@ -1004,5 +1004,8 @@
   "Message playback interrupted.": "Воспроизведение сообщения прервано.",
   "Message playback completion could not be confirmed.": "Завершение воспроизведения сообщения не подтверждено.",
   "Approved message text": "Утверждённый текст сообщения",
-  "The call policy changed. Review and approve the updated plan before calling.": "Правила звонка изменились. Проверьте и подтвердите обновлённый план перед звонком."
+  "The call policy changed. Review and approve the updated plan before calling.": "Правила звонка изменились. Проверьте и подтвердите обновлённый план перед звонком.",
+  "Delete after the call": "Удалить после звонка",
+  "Deleted automatically when the recording becomes available after the call.": "Удаляется автоматически, как только запись станет доступна после звонка.",
+  "Deleted automatically {0} days after the recording becomes available.": "Удаляется автоматически через {0} дней после готовности записи."
 }

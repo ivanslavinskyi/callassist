@@ -52,10 +52,15 @@ export class InMemoryCallTextStore {
     if(transcript?.status!=="completed"||transcript.text===null) return null;
     return this.persistRevision(callId,transcript.id,transcript.text,transcript.segments,transcript.completedAt??transcript.updatedAt);
   }
-  async persistRevision(callId:string,transcriptId:string,text:string,segments:FinalTranscriptSegment[],createdAt:string,summaryGeneratorVersion?:string) {
+  async getRecordingTranscriptRevision(callId:string) {
+    const transcript=this.hooks.snapshot(callId).recordingTranscript;
+    if(transcript?.status!=="completed"||transcript.text===null) return null;
+    return this.persistRevision(callId,transcript.id,transcript.text,transcript.segments,transcript.completedAt??transcript.updatedAt,undefined,"recording_asr");
+  }
+  async persistRevision(callId:string,transcriptId:string,text:string,segments:FinalTranscriptSegment[],createdAt:string,summaryGeneratorVersion?:string,source?:FinalTranscriptRevision["source"]) {
     const history=[...this.revisions.values()].filter(r=>r.callId===callId&&r.revision.transcriptId===transcriptId);
     const attempt=this.hooks.attempt(callId);
-    const proposed=createTranscriptRevision({transcriptId,callAttemptId:attempt?.id??null,text,segments,createdAt,source:this.hooks.snapshot(callId).finalTranscript?.source,revision:history.length+1});
+    const proposed=createTranscriptRevision({transcriptId,callAttemptId:attempt?.id??null,text,segments,createdAt,source:source??this.hooks.snapshot(callId).finalTranscript?.source,revision:history.length+1});
     const revision=history.find(row=>row.revision.sourceHash===proposed.sourceHash)?.revision??proposed;
     if(!this.revisions.has(revision.id)) this.revisions.set(revision.id,{callId,revision});
     if(summaryGeneratorVersion && attempt?.compilationId && this.hooks.textAllowed(callId)) {
@@ -90,7 +95,7 @@ export class InMemoryCallTextStore {
       return source.compilationId===artifact.compilationId&&source.snapshotHash===artifact.sourceHash;
     }
     const revision=this.revisions.get(artifact.transcriptRevisionId??"")?.revision;
-    const final=snapshot.finalTranscript;
+    const final=[snapshot.finalTranscript,snapshot.recordingTranscript].find(t=>t?.id===revision?.transcriptId);
     if(!revision||final?.status!=="completed"||final.text===null) return false;
     const current=createTranscriptRevision({transcriptId:final.id,callAttemptId:revision.callAttemptId,text:final.text,segments:final.segments,source:final.source,revision:1,createdAt:final.updatedAt});
     return revision.sourceHash===current.sourceHash&&artifact.sourceHash===revision.sourceHash&&

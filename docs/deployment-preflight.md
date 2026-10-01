@@ -1,5 +1,20 @@
 # Deployment preflight and first release
 
+## Schema release 0093–0094: Live primary and optional recording ASR
+
+Stop old API/worker processes after active calls drain. Apply 0093 and 0094 before
+starting `live-managed-v7`: 0093 fences automatic ASR jobs and splits per-attempt
+transcript parents without replacing existing revision IDs; 0094 publishes exact
+technical copy updates and preserves prior publications/acceptances. Unknown edited
+CMS target text fails preflight atomically and must be reviewed before applying it.
+
+Run `db:backfill:live-transcripts` first without arguments, then with `--execute`.
+This is model-free and preserves historical summaries and their source references.
+Keep explicit ASR request admission when rolling back the UI; do not restart an old
+automatic ASR worker against the new schema. Verify owner-only requests, no ASR on
+GET/callback/restart, retention deadlines and source-specific exports. See the
+[implementation report](live-native-primary-implementation-2026-10-01.md).
+
 ## Schema release 0085-0089
 
 Обновлено 28 сентября 2026 для `codex/live-unified-runtime`. Последнее подтверждение

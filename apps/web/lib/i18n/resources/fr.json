@@ -1004,5 +1004,8 @@
   "Message playback interrupted.": "Lecture du message interrompue.",
   "Message playback completion could not be confirmed.": "Fin de lecture du message non confirmée.",
   "Approved message text": "Texte du message approuvé",
-  "The call policy changed. Review and approve the updated plan before calling.": "Les règles d’appel ont changé. Vérifiez et approuvez le plan mis à jour avant d’appeler."
+  "The call policy changed. Review and approve the updated plan before calling.": "Les règles d’appel ont changé. Vérifiez et approuvez le plan mis à jour avant d’appeler.",
+  "Delete after the call": "Supprimer après l’appel",
+  "Deleted automatically when the recording becomes available after the call.": "Suppression automatique dès que l’enregistrement est disponible après l’appel.",
+  "Deleted automatically {0} days after the recording becomes available.": "Suppression automatique {0} jours après la disponibilité de l’enregistrement."
 }

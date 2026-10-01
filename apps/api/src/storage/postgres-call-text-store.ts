@@ -51,11 +51,19 @@ export class PostgresCallTextStore {
   }
 
   async getCurrentTranscriptRevision(callId: string) {
+    return this.getTranscriptRevisionForKind(callId);
+  }
+  async getRecordingTranscriptRevision(callId: string) {
+    return this.getTranscriptRevisionForKind(callId,"recording_asr");
+  }
+  private async getTranscriptRevisionForKind(callId: string, kind?: "recording_asr") {
     return this.sql.begin(async tx => {
       await requireAvailableCall(tx,callId,true);
       const [row] = await tx<{ id:string; source:"recording_asr"|"live_native"|"live_composed"; current_revision_id:string|null; text_ciphertext:string|null; segments_ciphertext:string|null; call_attempt_id:string|null; completed_at:Date }[]>`
-        SELECT f.*,r.call_attempt_id FROM final_transcripts f JOIN call_recordings r ON r.id=f.call_recording_id
-        WHERE r.call_brief_id=${callId} AND f.status='completed' ORDER BY f.completed_at DESC LIMIT 1 FOR UPDATE OF f`;
+        SELECT f.* FROM final_transcripts f JOIN call_attempts a ON a.id=f.call_attempt_id
+        WHERE a.id=(SELECT id FROM call_attempts WHERE call_brief_id=${callId} ORDER BY created_at DESC,id DESC LIMIT 1)
+          AND f.artifact_kind=COALESCE(${kind??null},CASE WHEN a.native_transcript_capture IS NOT NULL THEN 'live' ELSE 'recording_asr' END)
+          AND f.status='completed' LIMIT 1 FOR UPDATE OF f`;
       if (!row?.text_ciphertext) return null;
       if (row.current_revision_id) return readRevision(tx,this.key,callId,row.current_revision_id);
       return persistTranscriptRevision(tx,this.key,{

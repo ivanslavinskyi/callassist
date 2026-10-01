@@ -1417,6 +1417,7 @@ describe("PostgresCallRepository", () => {
     });
     expect((await repository.get(brief.id))?.recording?.status).toBe("available");
 
+    await repository.requestRecordingTranscript(brief.id, ownerA, "gpt-transcribe");
     const workerId = `transcription-ledger-${randomUUID()}`;
     const checkedAt = new Date().toISOString();
     const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();

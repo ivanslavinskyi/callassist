@@ -197,6 +197,7 @@ const systemComponentStateSchema = z.enum([
 export const adminDurableJobTypeSchema = z.enum([
   "brief_compilation",
   "final_transcription",
+  "live_transcript_finalization",
   "recording_retention",
   "answer_detection_timeout",
   "provider_call_reconciliation",

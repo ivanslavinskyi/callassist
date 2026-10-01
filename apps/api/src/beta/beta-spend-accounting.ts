@@ -147,7 +147,7 @@ export async function readBetaReservations(tx: postgres.TransactionSql) {
     )
     SELECT b.reservation_key AS key,b.kind,b.amount_micros::double precision AS amount,
       (a.ended_at IS NULL OR EXISTS(SELECT 1 FROM call_recordings cr
-        LEFT JOIN final_transcripts ft ON ft.call_recording_id=cr.id
+        JOIN final_transcripts ft ON ft.call_recording_id=cr.id AND ft.artifact_kind='recording_asr' AND ft.request_id IS NULL
         WHERE cr.call_attempt_id=a.id AND cr.status NOT IN ('failed','deleted')
           AND COALESCE(ft.status,'processing')<>'completed')) AS "postCallPending",
       CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('terminal',
