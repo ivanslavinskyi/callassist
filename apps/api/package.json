@@ -53,7 +53,7 @@
     "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.3.0",
     "dotenv": "^17.4.2",
-    "fastify": "^5.12.1",
+    "fastify": "^5.12.5",
     "fflate": "0.8.3",
     "fontkit": "^2.0.4",
     "postgres": "^3.4.9",
