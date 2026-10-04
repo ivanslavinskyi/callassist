@@ -45,8 +45,12 @@
       "fast-uri@>=4.0.0 <4.1.5": "4.1.5",
       "fflate@0.7.3": "0.7.5",
       "tsup>esbuild": "0.28.1",
+      "@next/eslint-plugin-next@15.5.26>fast-glob": "npm:glob@13.0.6",
       "postcss": "8.5.23",
       "sharp": "0.35.4"
+    },
+    "patchedDependencies": {
+      "@next/eslint-plugin-next@15.5.26": "patches/@next__eslint-plugin-next@15.5.26.patch"
     }
   },
   "license": "UNLICENSED"
