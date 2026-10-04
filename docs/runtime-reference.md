@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated 2026-10-01 after the preproduction audit. Current domain behavior is documented in [the engineer guide](engineer-guide.md).
+Updated 2026-10-04 after the hybrid consent, Live stability and preparation diagnostics review. Current domain behavior is documented in [the engineer guide](engineer-guide.md).
 The route inventory below was regenerated from source. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
@@ -13,8 +13,21 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 - `CALL_PREPARATION_TIMEOUT_MS` defaults to 120000 including queue/retries. Generation request timeout is 35000 ms; public progress exposes five localized provider stages.
 - Stage metadata stores planned pre-journal budgets; actual completion timing comes from result timestamps.
 - Runtime descriptor metadata is frozen for new attempts; historical missing metadata remains null.
+- GET/PUT `/api/admin/system/voice-consent` reads or changes recognition for new attempts. The migration default remains semantic; only an active superadmin can change it with an expected revision and audit reason.
 
 ## Saved transcript source
+
+The `live-managed-v9` implementation (2026-10-04) prepares task context silently after
+recording admission, waits for every correlated preparation ACK, then opens native
+audio before a separate short instruction to begin. The start instruction's ACK and
+first transcript no longer gate the first audio packet. Protected appointment playback
+retains its existing resume fence. Active farewell playback remains idempotent.
+The task decision deadline is `max(answerSettledAt + 5000, lastNativeVoicedAt + 2000)`;
+fresh-answer, speech and backend-occupancy checks still apply. These are server event
+times, not measured telephone playback boundaries. Recording admission is unchanged.
+A wholly muted assistant fragment is excluded from audible coverage; uncertain output
+on protected-playback resume remains a quality issue.
+See [implementation and telephone acceptance](live-runtime-stability-plan-2026-10-04.md).
 
 [Live primary implementation](archive/live-native-primary-implementation-2026-10-01.md) supersedes the automatic recording fallback.
 Migration 0093 extends encrypted `final_transcripts` into separate per-attempt
@@ -180,22 +193,36 @@ parity. See deployment preflight and the chosen first-release target (local oper
 Unified Live starts with no tools while the application plays the exact Speech API
 disclosure. Recipient audio still reaches Live immediately; barge-in clears playback and
 causes a complete cached replay after the recipient stops. Only an uninterrupted matching
-Twilio mark exposes `report_consent` with a strict decision enum; pre-mark speech is not
-reused as affirmative consent. A post-mark `unclear` decision also replays the complete
-cached disclosure once before the shorter DTMF recovery. A delayed native transcript is
+Twilio mark opens consent recognition; pre-mark speech is not reused as affirmative
+consent. The default `semantic_native` mode exposes `report_consent` with a strict
+decision enum after the existing 900 ms settle window. Admin System can select
+`hybrid_deterministic_v1` for new attempts: a bounded phrase classifier runs after
+200 ms settle, and only unclear candidates enable semantic delegation at the original
+900 ms total window. The unchanged activity detector adds its own 600 ms silence
+window. Live deltas have no finality signal, so a delayed qualification can arrive
+after a hybrid decision. Semantic `unclear` retains the existing clarification and
+DTMF recovery. A delayed native transcript is
 compared with the same audio-time boundary. Task tools (`end_call`, and authorized appointment tools)
 become available after recording
 startup and playback of any optional assistance disclosure. Live then receives a
 purpose/readiness instruction; the ordinary opening has no exact-script playback
 gate. `end_call` accepts a reason only, not a recap. Consent
-uses `live_delegation`; no new `live_consent_classification` operations are created.
+uses `live_delegation` when semantic interpretation is needed; deterministic decisions
+do not initiate a consent delegation. No new `live_consent_classification` operations are created.
 Speech synthesis is accounted under `live_disclosure_synthesis`; only protected
 appointment speech retains semantic pre-playback verification. Closing uses the
 normal tool-result/backend continuation, followed by a bounded completion check
 and playback confirmation; it does not verify business truth after speech.
 The historical consent
 stage stays readable for accounting. See [runtime details](archive/live-unified-runtime.md)
-and [real-call evidence](archive/live-call-review-2026-09-28.md). Source migrations extend through 0099.
+and [real-call evidence](archive/live-call-review-2026-09-28.md). Source migrations extend through 0100.
+Migration 0100 stores the revisioned consent mode and pins its policy to each attempt;
+existing attempts without a saved policy retain native semantic behavior. Changing the
+mode requires an active superadmin, the current revision and an audited reason. Unified
+Live persists linked disclosure playback, consent decision/method and recording request/start
+events without storing the recipient's pre-consent speech. Initial disclosure text,
+approved snapshots and the optional assistance reason are unchanged. See the
+[hybrid implementation report](hybrid-consent-implementation-2026-10-04.md).
 See [voice continuity](archive/live-voice-continuity-2026-09-28.md) for the two-voice catalog,
 provider confirmation checks and manual acoustic acceptance.
 
@@ -256,9 +283,20 @@ JSON and low verbosity. Incomplete Responses envelopes are rejected and retain
 usage evidence. Earlier [latency measurements](archive/plan-preparation-quality-2026-09-15.md)
 were taken at a 5,000-token ceiling and are not a benchmark of the new ceiling.
 
+Preparation transport diagnostics are stored with each provider result (schema
+0101) and shown in the existing admin preparation inspector. They distinguish
+database reservation, request/socket/body-send offsets, response headers, body
+read/parse and allowlisted network errors. Worker attempt history and retry gaps
+come from the existing durable job ledger. Optional processing/rate-limit headers
+are numeric only; request IDs and usage correlate the measurements. Missing
+historical/transport evidence remains unknown. Offsets overlap and must not be
+summed; waiting for headers alone cannot prove a provider-internal cause.
+No prompt, raw header, URL, exception message or audio is added to these fields.
+See [measurements and interpretation](preparation-latency-diagnostics-2026-10-04.md).
+
 ## Recent configuration and workers
 
-The current schema catalog ends at **0099**. Catalog availability is not deployment evidence. Operational procedures are local-only.
+The current schema catalog ends at **0101**. Catalog availability is not deployment evidence. Operational procedures are local-only.
 
 | Setting / subsystem | Current behavior |
 | --- | --- |

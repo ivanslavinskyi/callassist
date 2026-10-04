@@ -85,6 +85,7 @@ export async function captureTelemetryArchive(
     "Provider billing is account context, never additive to per-operation costs.",
     "Null content may be absent, pending, legacy or deleted; consult source status. No historical content is reconstructed.",
     "raw_usage/raw_cost keep numeric trees and allowlisted enums; arbitrary provider strings and audit metadata are omitted.",
+    "Consent policies are the values pinned to each attempt. Global consent settings and operator change notes are excluded; missing historical policies remain null.",
     "effective_provider_usage replaces missing measurements; do not add it to the original usage records."
   ];
   try {

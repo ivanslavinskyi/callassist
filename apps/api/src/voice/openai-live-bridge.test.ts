@@ -76,7 +76,7 @@ describe("native Live protocol and full duplex", () => {
     expect(h.socket.sent[0].session.instructions).toContain("/ˈʃprox.li/");
     expect(h.socket.sent[0].session.instructions).toContain(`${h.snapshot.plan.addressingStyle} address`);
     expect(h.context.telemetry).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ name: "realtime.ready",
-      metadata: expect.objectContaining({ runtimeVersion: "live-managed-v7" }) }));
+      metadata: expect.objectContaining({ runtimeVersion: "live-managed-v9" }) }));
   });
   it("buffers bounded input until session.started and relays PCMU byte-for-byte", async () => {
     const h = await harness(false, false);

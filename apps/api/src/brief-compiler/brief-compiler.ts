@@ -21,6 +21,7 @@ import { deterministicMockAppointmentIntent, appointmentClarification, canonical
   prepareAppointmentModelOutput, type AppointmentCompilationContext } from "./appointment-compilation";
 import { createCompilationSnapshotHash } from "./compilation-integrity";
 import { verifyExecutionLanguage } from "./execution-language";
+import { PreparationRequestDiagnostics } from "./request-diagnostics";
 
 const defaultCompilerModel = "gpt-5.6";
 const defaultResponsesEndpoint = "https://api.openai.com/v1/responses";
@@ -69,6 +70,7 @@ export type BriefCompilerRunOptions = {
 };
 
 export type BriefCompilerProviderRequestResult = {
+  diagnostics?: import("@callassist/contracts").PreparationTransportDiagnostics;
   clientRequestId: string;
   stage: BriefCompilerStage;
   outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
@@ -486,31 +488,39 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         this.#requestTimeoutMs ?? (paidGeneration ? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs),
         deadline - Date.now()
       );
+      const requestBody = JSON.stringify(body);
+      const diagnostics = new PreparationRequestDiagnostics(
+        Math.max(0, providerRequestStartedAtMs - reservedAtMs), requestTimeoutMs, Buffer.byteLength(requestBody, "utf8"));
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(new DOMException("Provider request timed out", "TimeoutError")), Math.max(0, requestTimeoutMs));
       try {
         if (requestTimeoutMs <= 0) throw new DOMException("Compilation deadline reached", "TimeoutError");
-        response = await awaitWithAbort(this.#fetch(endpoint, {
+        response = await awaitWithAbort(diagnostics.run(() => this.#fetch(endpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${this.#apiKey}`,
             "Content-Type": "application/json",
             "X-Client-Request-Id": clientRequestId
           },
-          body: JSON.stringify(body),
+          body: requestBody,
           signal: controller.signal
-        }), controller.signal);
+        })), controller.signal);
+        diagnostics.headers(response);
         if (response.ok) {
           try {
             // Keep the same timeout active after headers arrive: stalled response bodies consume real time too.
+            diagnostics.bodyStarted();
             payload = await awaitWithAbort(response.json(), controller.signal);
           } catch (error) {
+            diagnostics.failed(error);
             if (controller.signal.aborted || isTimeoutError(error)) throw error;
             payload = null;
           }
         }
       } catch (error) {
+        diagnostics.failed(error);
         await completeProviderRequest(requestBudget, {
+          diagnostics: diagnostics.finish(),
           clientRequestId,
           stage,
           outcome: "network_error",
@@ -540,12 +550,14 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           stage
         });
       } finally {
+        diagnostics.finish();
         clearTimeout(timeout);
       }
 
       const responseId = response.headers.get("x-request-id");
       if (!response.ok) {
         await completeProviderRequest(requestBudget, {
+          diagnostics: diagnostics.finish(),
           clientRequestId,
           stage,
           outcome: "provider_error",
@@ -570,6 +582,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       if (payload && typeof payload === "object") {
         const responsePayload = payload as Record<string, unknown>;
         await completeProviderRequest(requestBudget, {
+          diagnostics: diagnostics.finish(),
           clientRequestId,
           stage,
           outcome: paidGeneration && responsePayload.status !== undefined && responsePayload.status !== "completed"
@@ -585,6 +598,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         return payload;
       }
       await completeProviderRequest(requestBudget, {
+        diagnostics: diagnostics.finish(),
         clientRequestId,
         stage,
         outcome: "invalid_response",

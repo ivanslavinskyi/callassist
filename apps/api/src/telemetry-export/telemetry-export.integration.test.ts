@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { unzipSync, strFromU8 } from "fflate";
 import postgres from "postgres";
-import { normalizeCreateCallBriefInput, type CreateCallBriefInput, type TelemetryExportInput } from "@callassist/contracts";
+import { defaultVoiceConsentRuntimePolicy, normalizeCreateCallBriefInput, type CreateCallBriefInput, type TelemetryExportInput } from "@callassist/contracts";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
@@ -50,6 +50,7 @@ describe("durable telemetry export", () => {
     await sql`UPDATE call_briefs SET created_at=now()-interval '40 days' WHERE id=${callId}`;
     await repository.approveCompilation(callId, await originalPlanReview(repository, callId));
     const attempt = await repository.startAttempt(callId, { provider: "twilio" }); attemptId = attempt.attempt.id;
+    await repository.updateVoiceConsentSettings({ mode: "hybrid_deterministic_v1", expectedRevision: 1, reason: "PRIVATE-GLOBAL-CONSENT-NOTE" }, actor);
     const providerCallId = `CA-${randomUUID()}`, providerRecordingId = `RE-${randomUUID()}`;
     await repository.attachProviderCall(attemptId, providerCallId, "in-progress");
     const recording = await repository.beginRecording(callId);
@@ -65,8 +66,8 @@ describe("durable telemetry export", () => {
       VALUES(${preparationId},${owner},${randomUUID()},${"a".repeat(64)},'failed','PROVIDER_FAILED',now())`;
     await sql`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_preparation_id,started_at)
       VALUES(${operationId},'openai','brief_compilation','compile','fixture-model',${randomUUID()},${preparationId},now())`;
-    await sql`INSERT INTO provider_operation_results(operation_id,outcome,error_code,completed_at,duration_ms)
-      VALUES(${operationId},'provider_error','PROVIDER_FAILED',now(),100)`;
+    await sql`INSERT INTO provider_operation_results(operation_id,outcome,error_code,completed_at,duration_ms,response_metadata)
+      VALUES(${operationId},'provider_error','PROVIDER_FAILED',now(),100,${sql.json(preparationDiagnosticsFixture)})`;
     await sql`INSERT INTO provider_usage_records(id,operation_id,schema_version,request_count,input_text_tokens,raw_usage,observed_at)
       VALUES(${randomUUID()},${operationId},1,1,25,${sql.json({ input_tokens: 25, unsafe: "secret-provider-header" })},now())`;
     await sql`INSERT INTO provider_cost_records(id,operation_id,provider,provider_cost_id,cost_basis,component,amount_micros,currency,raw_cost,observed_at)
@@ -101,13 +102,18 @@ describe("durable telemetry export", () => {
     expect(result.counts.selected_attempts).toBe(1);
     const files = await archive(created.id);
     expect(lines(files, "call_briefs")[0]!.data.context).toContain("Привет\nsecond line");
-    expect(lines(files, "call_attempts")[0]).toMatchObject({ selectedInPeriod: true, data: { id: attemptId } });
+    expect(lines(files, "call_attempts")[0]).toMatchObject({ selectedInPeriod: true, data: { id: attemptId, consent_runtime_policy: defaultVoiceConsentRuntimePolicy } });
+    expect(files["data/voice_consent_settings.jsonl"]).toBeUndefined();
+    expect(files["data/voice_consent_settings_audit.jsonl"]).toBeUndefined();
     expect(lines(files, "final_transcript_revisions")).toHaveLength(2);
     expect(lines(files, "call_preparation_requests").some(row => row.data.id === preparationId)).toBe(true);
     expect(lines(files, "provider_operations").some(row => row.data.id === operationId)).toBe(true);
+    expect(lines(files, "provider_operation_results").find(row => row.data.operation_id === operationId)?.data.response_metadata)
+      .toEqual(preparationDiagnosticsFixture);
     expect(lines(files, "provider_cost_records")[0]!.data.amount_micros).toBe("100");
     const plain = Object.values(files).map(bytes => strFromU8(bytes)).join("");
     expect(plain).not.toContain("private-password-hash"); expect(plain).not.toContain("secret-provider-header");
+    expect(plain).not.toContain("PRIVATE-GLOBAL-CONSENT-NOTE");
     const manifest = JSON.parse(strFromU8(files["manifest.json"]!));
     for (const file of manifest.files) expect(createHash("sha256").update(files[file.path]!).digest("hex")).toBe(file.sha256);
     const [part] = await sql`SELECT payload_ciphertext FROM admin_telemetry_export_parts WHERE export_id=${created.id} LIMIT 1`;
@@ -236,6 +242,7 @@ describe("durable telemetry export", () => {
     const files = await archive(afterDeletion.id);
     expect(lines(files, "call_briefs")[0]!.availability).toBe("deleted_or_deletion_pending");
     expect(lines(files, "final_transcript_revisions")).toHaveLength(0);
+    expect(lines(files, "call_attempts")).toHaveLength(0);
     expect(Object.values(files).map(bytes => strFromU8(bytes)).join("")).not.toContain("NEW CONTEXT");
     await service.cancel(actor, afterDeletion.id);
   });
@@ -274,3 +281,4 @@ describe("durable telemetry export", () => {
     expect((await service.list(owner)).items).toHaveLength(0);
   });
 });
+import { preparationDiagnosticsFixture } from "../brief-compiler/request-diagnostics.fixture";

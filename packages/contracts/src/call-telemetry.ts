@@ -18,16 +18,38 @@ const safeTokenSchema = z.string()
 const emptyMetadataSchema = z.strictObject({});
 const providerSchema = z.enum(["mock", "twilio"]);
 
+export const consentDecisionMethodSchema = z.enum(["deterministic_voice", "semantic_voice", "dtmf"]);
+export const consentDisclosureInputSchema = z.strictObject({
+  callAttemptId: z.uuid(), compilationSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  generation: z.number().int().nonnegative(), version: safeTokenSchema,
+  textHash: z.string().regex(/^[a-f0-9]{64}$/), markId: safeTokenSchema, sessionId: safeTokenSchema,
+  sentAt: z.string().datetime(), acknowledgedAt: z.string().datetime(), durationMs: z.number().positive()
+}).refine(value => Date.parse(value.acknowledgedAt) >= Date.parse(value.sentAt));
+export type ConsentDisclosureInput = z.infer<typeof consentDisclosureInputSchema>;
+export const consentDecisionInputSchema = z.strictObject({
+  callAttemptId: z.uuid(), disclosureReceiptId: z.uuid(), revision: z.number().int().nonnegative(),
+  decision: z.enum(["affirmative", "negative", "unclear"]), decisionMethod: consentDecisionMethodSchema,
+  locale: callLocaleSchema, policyVersion: safeTokenSchema
+});
+export type ConsentDecisionInput = z.infer<typeof consentDecisionInputSchema>;
+const consentAuditBinding = {
+  decisionMethod: consentDecisionMethodSchema.optional(), callAttemptId: z.uuid().optional(),
+  disclosureReceiptId: z.uuid().optional(), decisionId: z.uuid().optional(),
+  consentDecision: consentDecisionInputSchema.optional()
+};
+
 export const consentEvidenceSchema = z.discriminatedUnion("method", [
   z.strictObject({
     method: z.literal("voice"),
     decision: z.literal("affirmative"),
-    locale: callLocaleSchema
+    locale: callLocaleSchema,
+    ...consentAuditBinding
   }),
   z.strictObject({
     method: z.literal("dtmf"),
     digit: z.literal("1"),
-    locale: callLocaleSchema
+    locale: callLocaleSchema,
+    ...consentAuditBinding
   })
 ]);
 export type ConsentEvidence = z.infer<typeof consentEvidenceSchema>;
@@ -57,7 +79,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     attempt: z.number().int().min(0).max(2)
   }) }),
   z.strictObject({ name: z.literal("conversation.task"), metadata: z.strictObject({
-    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
+    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7", "live-managed-v8", "live-managed-v9"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
     revision: z.number().int().nonnegative(), requestId: z.uuid().optional(),
     cause: safeTokenSchema.optional(), responseId: safeTokenSchema.optional(), released: z.boolean().optional(),
     actionState: z.enum(["sending", "delivered", "uncertain", "confirmed"]).optional(),
@@ -146,6 +168,11 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     name: z.literal("disclosure.started"),
     metadata: emptyMetadataSchema
   }),
+  z.strictObject({ name: z.literal("disclosure.completed"), metadata: consentDisclosureInputSchema }),
+  z.strictObject({ name: z.literal("consent.decision"), metadata: consentDecisionInputSchema }),
+  z.strictObject({ name: z.literal("recording.requested"), metadata: z.strictObject({
+    recordingId: z.uuid(), decisionId: z.uuid().optional(), disclosureReceiptId: z.uuid().optional()
+  }) }),
   z.strictObject({
     name: z.literal("consent.granted"),
     metadata: z.union([
@@ -167,7 +194,8 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   }),
   z.strictObject({
     name: z.literal("recording.started"),
-    metadata: z.strictObject({ providerStatus: safeTokenSchema })
+    metadata: z.strictObject({ providerStatus: safeTokenSchema, recordingId: z.uuid().optional(),
+      providerRecordingId: safeTokenSchema.optional(), providerReportedAt: z.string().datetime().optional() })
   }),
   z.strictObject({
     name: z.literal("recording.completed"),
@@ -185,7 +213,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     metadata: z.strictObject({
       model: safeTokenSchema,
       transcriptionModel: safeTokenSchema,
-      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7"]).optional()
+      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7", "live-managed-v8", "live-managed-v9"]).optional()
     })
   }),
   z.strictObject({
@@ -375,12 +403,15 @@ export function describeCallTelemetryEvent(
     case "connection.confirmed":
       return { source: "telephony", stage: "connection", severity: "info" };
     case "disclosure.started":
+    case "disclosure.completed":
       return { source: "realtime", stage: "disclosure", severity: "info" };
     case "consent.granted":
+    case "consent.decision":
       return { source: "realtime", stage: "consent", severity: "info" };
     case "consent.failed":
       return { source: "realtime", stage: "consent", severity: "warning" };
     case "recording.started":
+    case "recording.requested":
     case "recording.completed":
       return { source: "recording", stage: "recording", severity: "info" };
     case "recording.failed":

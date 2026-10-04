@@ -674,6 +674,18 @@ export class CallService {
     return this.repository.recordRuntimeDescriptor(callId, attemptId, descriptor);
   }
 
+  getVoiceConsentSettings() { return this.repository.getVoiceConsentSettings(); }
+  updateVoiceConsentSettings(input: import("@callassist/contracts").VoiceConsentSettingsUpdate, actorUserId: string) {
+    return this.repository.updateVoiceConsentSettings(input, actorUserId);
+  }
+  getConsentRuntimePolicy(callId: string, attemptId: string) { return this.repository.getConsentRuntimePolicy(callId, attemptId); }
+  recordConsentDisclosure(callId: string, input: import("@callassist/contracts").ConsentDisclosureInput) {
+    return this.repository.recordConsentDisclosure(callId, input);
+  }
+  recordConsentDecision(callId: string, input: import("@callassist/contracts").ConsentDecisionInput) {
+    return this.repository.recordConsentDecision(callId, input);
+  }
+
   completeProviderOperation(input: CompleteProviderOperationInput) {
     return this.repository.completeProviderOperation(input);
   }
@@ -1541,6 +1553,7 @@ export class CallService {
             ),
           afterProviderRequest: (result) =>
             this.repository.completeProviderOperation({
+              diagnostics: result.diagnostics,
               operationId: result.clientRequestId,
               outcome: result.outcome,
               providerRequestId: result.providerRequestId,

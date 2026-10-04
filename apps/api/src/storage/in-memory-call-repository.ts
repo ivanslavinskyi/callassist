@@ -1,4 +1,8 @@
-import { supportsSummaryAssessment } from "@callassist/contracts";
+import { supportsSummaryAssessment, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
+  defaultVoiceConsentRuntimePolicy, voiceConsentRuntimePolicy, voiceConsentSettingsUpdateSchema,
+  type ConsentDisclosureInput, type ConsentDecisionInput, type VoiceConsentSettingsUpdate } from "@callassist/contracts";
+import { initialVoiceConsentSettings, VoiceConsentPolicyError } from "./voice-consent-policy-store";
+import { consentDecisionKey, consentDisclosureKey, requireConsentReceipt, validateConsentGrant } from "./consent-audit";
 import { defaultBetaCreditPolicy, type BetaCreditPolicy, type CreditFunding } from "@callassist/contracts";
 import { betaCreditPeriod } from "../credits/beta-credit-period";
 import { terminalDecisionSchema, type TerminalDecision } from "@callassist/contracts";
@@ -224,6 +228,51 @@ function callPreparationFailureCode(
 }
 
 export class InMemoryCallRepository implements CallRepository {
+  #voiceConsentSettings = initialVoiceConsentSettings();
+  readonly #consentRuntimePolicies = new Map<string, import("@callassist/contracts").VoiceConsentRuntimePolicy>();
+  async getVoiceConsentSettings() { return copy(this.#voiceConsentSettings); }
+  async updateVoiceConsentSettings(input: VoiceConsentSettingsUpdate, actorUserId: string) {
+    const parsed = voiceConsentSettingsUpdateSchema.parse(input);
+    if (parsed.expectedRevision !== this.#voiceConsentSettings.policy.revision) throw new VoiceConsentPolicyError("VOICE_CONSENT_REVISION_CONFLICT");
+    this.#voiceConsentSettings = { policy: voiceConsentRuntimePolicy(parsed.mode, parsed.expectedRevision + 1),
+      updatedAt: new Date().toISOString(), updatedByUserId: actorUserId, reason: parsed.reason };
+    return copy(this.#voiceConsentSettings);
+  }
+  async getConsentRuntimePolicy(callId: string, attemptId: string) {
+    this.#require(callId);
+    if (!(this.#attempts.get(callId) ?? []).some(a => a.id === attemptId)) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return copy(this.#consentRuntimePolicies.get(attemptId) ?? defaultVoiceConsentRuntimePolicy);
+  }
+  #consentAttempt(callId: string, attemptId: string) {
+    this.#require(callId);
+    const attempt = this.#attempts.get(callId)?.at(-1);
+    if (!attempt || attempt.id !== attemptId || !["dialing", "in_progress"].includes(attempt.status) || this.#callDataDeletions.has(callId))
+      throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return attempt;
+  }
+  async recordConsentDisclosure(callId: string, input: ConsentDisclosureInput) {
+    const parsed = consentDisclosureInputSchema.parse(input), attempt = this.#consentAttempt(callId, parsed.callAttemptId);
+    if (attempt.compilationSnapshotHash !== parsed.compilationSnapshotHash) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    const event = this.#appendTelemetry(callId, { callAttemptId: attempt.id,
+      idempotencyKey: consentDisclosureKey(parsed),
+      occurredAt: parsed.acknowledgedAt, payload: { name: "disclosure.completed", metadata: parsed } });
+    if (JSON.stringify(event.payload.metadata) !== JSON.stringify(parsed)) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    return event.id;
+  }
+  #recordConsentDecision(callId: string, input: ConsentDecisionInput) {
+    const parsed = consentDecisionInputSchema.parse(input);
+    this.#consentAttempt(callId, parsed.callAttemptId);
+    const events = (this.#callTelemetryEvents.get(callId) ?? []).map(e => e.event);
+    requireConsentReceipt(events, parsed.callAttemptId, parsed.disclosureReceiptId);
+    const latest = events.findLast(e => e.callAttemptId === parsed.callAttemptId && e.payload.name === "consent.decision");
+    if (latest?.payload.name === "consent.decision" && latest.payload.metadata.revision > parsed.revision)
+      throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    const event = this.#appendTelemetry(callId, { callAttemptId: parsed.callAttemptId,
+      idempotencyKey: consentDecisionKey(parsed), payload: { name: "consent.decision", metadata: parsed } });
+    if (JSON.stringify(event.payload.metadata) !== JSON.stringify(parsed)) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    return event.id;
+  }
+  async recordConsentDecision(callId: string, input: ConsentDecisionInput) { return this.#recordConsentDecision(callId, input); }
   readonly #betaCreditEnrollments = new Map<string, { id: string; policy: BetaCreditPolicy; activated: boolean;
     lifetimeGrantAllowed: boolean; pending?: { id: string; policy: BetaCreditPolicy; effectiveAt: string } }>();
   readonly #betaCreditPeriods = new Map<string, { id: string; userId: string; policyId: string; startsAt: string; endsAt: string }>();
@@ -787,14 +836,24 @@ export class InMemoryCallRepository implements CallRepository {
       .slice(0,100).map(operation => ({ id: operation.id, stage: operation.stage, model: operation.requestedModel,
         startedAt: operation.startedAt, completedAt: operation.result?.completedAt ?? null,
         durationMs: operation.result?.durationMs ?? null, outcome: operation.result?.outcome ?? null,
-        errorCode: operation.result?.errorCode ?? null, metadata: operation.requestMetadata ?? null }));
+        errorCode: operation.result?.errorCode ?? null, metadata: operation.requestMetadata ?? null,
+        clientRequestId: operation.clientRequestId, providerRequestId: operation.result?.providerRequestId ?? null,
+        statusCode: operation.result?.statusCode ?? null, generation: operation.durableJobGeneration ?? null,
+        diagnostics: operation.result?.diagnostics ?? null,
+        tokens: { input: operation.result?.usage?.inputTextTokens ?? null,
+          cachedInput: operation.result?.usage?.cachedInputTextTokens ?? null,
+          output: operation.result?.usage?.outputTextTokens ?? null,
+          reasoning: operation.result?.usage?.reasoningOutputTokens ?? null } }));
     const preparation = this.#callPreparations.get(id)?.preparation;
     const jobs = (await this.listDurableJobs()).filter(job => job.callPreparationId === id);
     const attempts = (await Promise.all(jobs.map(job => this.listDurableJobAttempts(job.id)))).flat();
     const first = [...attempts.map(attempt => Date.parse(attempt.startedAt)),
       ...jobs.filter(job => job.attemptCount === 1 && job.leasedAt).map(job => Date.parse(job.leasedAt!))]
       .sort((a,b) => a-b)[0];
-    return { timeline, initialQueueMs: preparation && first !== undefined ? Math.max(0, first-Date.parse(preparation.createdAt)) : null };
+    return { timeline, initialQueueMs: preparation && first !== undefined ? Math.max(0, first-Date.parse(preparation.createdAt)) : null,
+      workerAttempts: attempts.sort((a,b) => a.startedAt.localeCompare(b.startedAt)).map(
+        ({ generation, attemptNumber, startedAt, completedAt, outcome, errorCode }) =>
+          ({ generation, attemptNumber, startedAt, completedAt, outcome, errorCode })) };
   }
 
   async findCallPreparationByRequest(
@@ -892,6 +951,7 @@ export class InMemoryCallRepository implements CallRepository {
       statusCode: input.statusCode,
       completedAt: input.completedAt,
       durationMs: input.durationMs,
+      ...(input.diagnostics ? { diagnostics: preparationTransportDiagnosticsSchema.parse(input.diagnostics) } : {}),
       errorCode: input.errorCode,
       usage: input.usage
     });
@@ -2739,6 +2799,7 @@ export class InMemoryCallRepository implements CallRepository {
     };
     const attempts = this.#attempts.get(id) ?? [];
     attempts.push(attempt);
+    this.#consentRuntimePolicies.set(attempt.id, copy(this.#voiceConsentSettings.policy));
     this.#attempts.set(id, attempts);
     if (userId !== null) {
       const period = this.#ensureBetaCredits(userId);
@@ -3111,6 +3172,20 @@ export class InMemoryCallRepository implements CallRepository {
         events.some(e => e.payload.name === "call.stop" && e.payload.metadata.phase === "requested"))) {
       throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
     }
+    if (evidence) {
+      evidence = consentEvidenceSchema.parse(evidence);
+      if (evidence.consentDecision) {
+        const decision = evidence.consentDecision;
+        if (evidence.callAttemptId !== attempt.id || decision.callAttemptId !== attempt.id ||
+            decision.disclosureReceiptId !== evidence.disclosureReceiptId || decision.decision !== "affirmative" ||
+            decision.decisionMethod !== evidence.decisionMethod || decision.locale !== evidence.locale ||
+            (evidence.method === "dtmf") !== (decision.decisionMethod === "dtmf")) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+        evidence = { ...evidence, decisionId: this.#recordConsentDecision(id, decision) };
+      }
+    }
+    const consentEvents = (this.#callTelemetryEvents.get(id) ?? []).map(e => e.event).filter(e => e.callAttemptId === attempt.id);
+    evidence = validateConsentGrant(evidence, attempt.id, consentEvents,
+      !!this.#runtimeDescriptors.get(attempt.id)?.consentPolicy || consentEvents.some(e => e.payload.name === "disclosure.completed"));
     const consentGrantedAt = new Date().toISOString();
     const recording: CallRecording = {
       id: randomUUID(),
@@ -3136,6 +3211,9 @@ export class InMemoryCallRepository implements CallRepository {
         metadata: evidence ?? { method: "dtmf_1" }
       }
     });
+    this.#appendTelemetry(id, { callAttemptId: attempt.id, idempotencyKey: `recording:${recording.id}:requested`,
+      occurredAt: consentGrantedAt, payload: { name: "recording.requested", metadata: { recordingId: recording.id,
+        ...(evidence?.decisionId ? { decisionId: evidence.decisionId, disclosureReceiptId: evidence.disclosureReceiptId } : {}) } } });
     return {
       providerCallId: attempt.providerCallId,
       recording: copy(recording),
@@ -3150,6 +3228,9 @@ export class InMemoryCallRepository implements CallRepository {
     reconciliationRunAfter?: string
   ) {
     const { callId, snapshot, recording } = this.#requireRecording(recordingId);
+    if (!["starting", "recording", "processing", "available"].includes(recording.status) ||
+        (recording.providerRecordingId && recording.providerRecordingId !== providerRecordingId))
+      throw new CallRepositoryError("RECORDING_NOT_FOUND");
     recording.providerRecordingId = providerRecordingId;
     if (recording.status === "starting") recording.status = "recording";
     recording.startedAt ??= new Date().toISOString();
@@ -3166,7 +3247,7 @@ export class InMemoryCallRepository implements CallRepository {
       occurredAt: recording.startedAt,
       payload: {
         name: "recording.started",
-        metadata: { providerStatus }
+        metadata: { providerStatus, recordingId, providerRecordingId }
       }
     });
     if (
@@ -3236,7 +3317,7 @@ export class InMemoryCallRepository implements CallRepository {
     recording.providerRecordingId = input.providerRecordingId;
     recording.durationSeconds = input.durationSeconds ?? recording.durationSeconds;
     recording.channels = input.channels ?? recording.channels;
-    recording.startedAt = input.startedAt ?? recording.startedAt;
+    if (input.providerStatus === "in-progress") recording.startedAt ??= input.startedAt ?? new Date().toISOString();
     if (
       input.providerStatus === "in-progress" &&
       recording.status !== "available" &&
@@ -3259,14 +3340,15 @@ export class InMemoryCallRepository implements CallRepository {
       recording.failureReason = input.failureReason ?? "recording_absent";
     }
     if(recording.consentGrantedAt && recording.startedAt) this.#consentedRecordingAttempts.add(attempt.id);
-    if (input.providerStatus === "in-progress") {
+    if (recording.status !== "deleted" && input.providerStatus === "in-progress") {
       this.#appendTelemetry(input.callBriefId, {
         callAttemptId: attempt.id,
         idempotencyKey: `recording:${input.recordingId}:started`,
         occurredAt: recording.startedAt ?? undefined,
         payload: {
           name: "recording.started",
-          metadata: { providerStatus: "in-progress" }
+          metadata: { providerStatus: "in-progress", recordingId: input.recordingId, providerRecordingId: input.providerRecordingId,
+            ...(input.startedAt ? { providerReportedAt: input.startedAt } : {}) }
         }
       });
     } else if (input.providerStatus === "completed") {

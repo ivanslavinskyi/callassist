@@ -2246,6 +2246,7 @@ describe("PostgresCallRepository", () => {
       operationId: acceptedOperationId,
       outcome: "succeeded" as const,
       providerRequestId: `req_postgres_usage_${providerUsageKey}`,
+      diagnostics: preparationDiagnosticsFixture,
       providerResponseId: `resp_postgres_usage_${providerUsageKey}`,
       providerModel: "gpt-5.6-2026-08-01",
       statusCode: 200,
@@ -2267,14 +2268,21 @@ describe("PostgresCallRepository", () => {
       }
     };
     await repository.completeProviderOperation(operationResult);
-    await repository.completeProviderOperation(operationResult);
+    await repository.completeProviderOperation({ ...operationResult,
+      diagnostics: { ...preparationDiagnosticsFixture, reservationMs: 999 } });
     const diagnostics = await repository.getPreparationDiagnostics(queued.id);
     expect(diagnostics.initialQueueMs).toBe(0);
     expect(diagnostics.timeline).toHaveLength(8);
     expect(diagnostics.timeline.find(row => row.id === acceptedOperationId)).toMatchObject({
       stage: "compilation", startedAt: lease.checkedAt, completedAt: operationResult.completedAt,
-      durationMs: 123, metadata: { repairKind: "none", transportAttempt: 1, timeoutMs: 35000 }
+      durationMs: 123, metadata: { repairKind: "none", transportAttempt: 1, timeoutMs: 35000 },
+      diagnostics: preparationDiagnosticsFixture, clientRequestId: acceptedOperationId,
+      providerRequestId: operationResult.providerRequestId, statusCode: 200, generation: job!.generation,
+      tokens: { input: 100, cachedInput: 25, output: 40, reasoning: 5 }
     });
+    expect(diagnostics.timeline.filter(row => row.id !== acceptedOperationId).every(row => row.diagnostics === null)).toBe(true);
+    // Attempt history is appended on completion, not reconstructed from a live lease.
+    expect(diagnostics.workerAttempts).toEqual([]);
     const compilation = await new DeterministicBriefCompiler().compile(
       normalizeCreateCallBriefInput(input)
     );
@@ -2290,6 +2298,10 @@ describe("PostgresCallRepository", () => {
       "postgres-preparation-worker",
       "2096-01-01T00:00:02.000Z"
     )).resolves.toBe(true);
+    expect((await repository.getPreparationDiagnostics(queued.id)).workerAttempts).toMatchObject([
+      { generation: job!.generation, attemptNumber: 1, startedAt: now,
+        completedAt: "2096-01-01T00:00:02.000Z", outcome: "succeeded" }
+    ]);
     await expect(repository.getCallPreparation(queued.id, ownerA))
       .resolves.toMatchObject({
         status: "succeeded",
@@ -3209,3 +3221,4 @@ describe("PostgresCallRepository", () => {
     `).rejects.toThrow("immutable");
   });
 });
+import { preparationDiagnosticsFixture } from "../brief-compiler/request-diagnostics.fixture";

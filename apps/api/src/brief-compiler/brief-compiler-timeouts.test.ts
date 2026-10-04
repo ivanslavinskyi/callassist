@@ -44,8 +44,68 @@ describe("stage-aware compiler deadlines", () => {
     await vi.advanceTimersByTimeAsync(8_000);
     expect(await pending).toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
-    expect(results[0]).toMatchObject({ errorCode:"OPENAI_RESPONSE_TIMEOUT", durationMs:8_000 });
+    expect(results[0]).toMatchObject({ errorCode:"OPENAI_RESPONSE_TIMEOUT", durationMs:8_000,
+      diagnostics: { actualTimeoutMs: 8_000, responseHeadersMs: null, bodyReadMs: null, failurePhase: "before_headers" } });
     expect(reservations[0]).toMatchObject({ repairKind:"none",repairNumber:0,transportAttempt:1,timeoutMs:8_000,remainingMs:8_000 });
+  });
+
+  it("does not report a dispatched request when the deadline expires during database reservation", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const results: BriefCompilerProviderRequestResult[] = [];
+    const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
+      deadlineAtMs: Date.now() + 1000,
+      beforeProviderRequest: async () => { await wait(1001); return true; },
+      afterProviderRequest: async result => { results.push(result); }
+    }).catch(error => error);
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(await pending).toMatchObject({ code: "OPENAI_REQUEST_FAILED" });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ statusCode: null, diagnostics: {
+      dispatchedAt: null, reservationMs: 1001, actualTimeoutMs: 0, failurePhase: "before_dispatch",
+      requestCreatedMs: null, socketWriteMs: null, requestBodySentMs: null, responseHeadersMs: null, bodyReadMs: null
+    } });
+  });
+
+  it("separates database reservation, waiting for headers and body parsing without charging journal time to the provider", async () => {
+    const results: BriefCompilerProviderRequestResult[] = [];
+    const fetchImplementation = vi.fn<typeof fetch>(async (_url, init) => {
+      expect(new Headers(init?.headers).get("X-Client-Request-Id")).toMatch(/^[a-f0-9-]{36}$/);
+      await wait(300);
+      const response = new Response("{}", { headers: { "openai-processing-ms": "220.5", "x-request-id": "req_test" } });
+      response.json = async () => { await wait(200); return { results: [{ flagged: true }] }; };
+      return response;
+    });
+    const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
+      deadlineAtMs: Date.now() + 1000,
+      beforeProviderRequest: async () => { await wait(100); return true; },
+      afterProviderRequest: async result => { await wait(50); results.push(result); }
+    });
+    await vi.advanceTimersByTimeAsync(650);
+    await pending;
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ durationMs: 500, providerRequestId: "req_test", diagnostics: {
+      reservationMs: 100, actualTimeoutMs: 900, responseHeadersMs: 300, bodyReadMs: 200,
+      requestCreatedMs: null, socketWriteMs: null, requestBodySentMs: null,
+      providerProcessingMs: 220.5, failurePhase: null
+    } });
+  });
+
+  it("retains HTTP failure diagnostics and keeps each retry's measurements separate", async () => {
+    const results: BriefCompilerProviderRequestResult[] = [];
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockImplementationOnce(async () => { await wait(250); return new Response("", { status: 429,
+        headers: { "x-request-id": "req_limited", "x-ratelimit-remaining-requests": "0" } }); })
+      .mockImplementationOnce(async () => { await wait(100); return new Response(JSON.stringify({ results: [{ flagged: true }] })); });
+    const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
+      afterProviderRequest: async result => { results.push(result); }
+    });
+    await vi.advanceTimersByTimeAsync(350); await pending;
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ statusCode: 429, errorCode: "OPENAI_HTTP_429", providerRequestId: "req_limited",
+      diagnostics: { responseHeadersMs: 250, bodyReadMs: null, remainingRequests: 0, failurePhase: null } });
+    expect(results[1]).toMatchObject({ statusCode: 200, diagnostics: { responseHeadersMs: 100, bodyReadMs: 0, remainingRequests: null } });
+    expect(results[0]!.clientRequestId).not.toBe(results[1]!.clientRequestId);
   });
 
   it("lets a 30-second generation finish while moderation keeps its own short deadline", async () => {
@@ -180,7 +240,8 @@ describe("stage-aware compiler deadlines", () => {
     expect(signals).toHaveLength(1);
     expect(signals[0]!.aborted).toBe(true);
     expect(results.at(-1)).toMatchObject({ outcome: "network_error", statusCode: 200,
-      providerRequestId: "headers_received_body_stalled", durationMs: 15_000, errorCode: "OPENAI_BODY_TIMEOUT" });
+      providerRequestId: "headers_received_body_stalled", durationMs: 15_000, errorCode: "OPENAI_BODY_TIMEOUT",
+      diagnostics: { responseHeadersMs: 0, bodyReadMs: 15_000, failurePhase: "response_body" } });
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 

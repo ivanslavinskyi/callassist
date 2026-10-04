@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { getAdminCallPreparationInspector } from "@/lib/api";
 import { adminCallMessages } from "@/lib/i18n/admin-call-messages";
 import { AdminCostBreakdown } from "./admin-cost-breakdown";
+import { AdminPreparationTiming } from "./admin-preparation-timing";
 
 export function AdminCallPreparationInspector({
   preparationId
@@ -81,33 +82,13 @@ export function AdminCallPreparationInspector({
               </Link>
             ) : null}
           </section>
-          <section className="admin-inspector-summary" aria-labelledby="preparation-timing-title">
-            <h2 id="preparation-timing-title">Preparation timing</h2>
-            <p>Times cover preparation requests. Review translation may finish afterward. Historical requests may not identify language audits or repairs.</p>
-            <dl>
-              <Fact label="Initial queue wait" value={inspector.initialQueueMs == null ? "Unknown" : seconds(inspector.initialQueueMs)} />
-              <Fact label="Preparation elapsed" value={seconds(Date.parse(inspector.preparation.completedAt ?? inspector.generatedAt) - Date.parse(inspector.preparation.createdAt))} />
-            </dl>
-            {inspector.timeline?.length ? <div style={{ overflowX: "auto" }}><table>
-              <caption>Provider requests in execution order</caption>
-              <thead><tr><th>Stage / model</th><th>Started after</th><th>Duration</th><th>Outcome</th><th>Attempt / repair</th></tr></thead>
-              <tbody>{inspector.timeline.map(request => <tr key={request.id}>
-                <td>{request.stage.replaceAll("_", " ")}<br /><small>{request.model}</small></td>
-                <td>{seconds(Date.parse(request.startedAt) - Date.parse(inspector.preparation.createdAt))}</td>
-                <td>{request.durationMs === null ? "Pending / unknown" : seconds(request.durationMs)}</td>
-                <td>{request.outcome ?? "No final response"}{request.errorCode ? <><br /><code>{request.errorCode}</code></> : null}</td>
-                <td>{request.metadata ? `${request.metadata.transportAttempt} / ${request.metadata.repairKind} ${request.metadata.repairNumber}` : "Not recorded"}</td>
-              </tr>)}</tbody>
-            </table></div> : <p>No provider timing records retained.</p>}
-          </section>
+          <AdminPreparationTiming inspector={inspector} />
           <AdminCostBreakdown cost={inspector.cost} locale={locale} />
         </>
       ) : null}
     </main>
   );
 }
-
-function seconds(milliseconds: number) { return `${(Math.max(0, milliseconds) / 1000).toFixed(2)} s`; }
 
 function Fact({ label, value }: { label: string; value: string }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>;

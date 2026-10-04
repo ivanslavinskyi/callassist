@@ -7,7 +7,7 @@ import {
 
 describe("durable call telemetry contracts", () => {
   it("retains historical task events and records recovery without recipient content", () => {
-    for (const runtimeVersion of ["live-managed-v2", "live-managed-v3"]) {
+    for (const runtimeVersion of ["live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9"]) {
       const payload = { name: "conversation.task", metadata: { runtimeVersion, phase: "stale", revision: 3,
         cause: "obsolete_backend_timeout", responseId: "old-response", released: false } };
       expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "recovery:1", payload }).success).toBe(true);
@@ -17,7 +17,7 @@ describe("durable call telemetry contracts", () => {
     }
   });
   it("accepts the stabilization runtime and typed task decisions without storing a spoken summary", () => {
-    for (const runtimeVersion of ["live-managed-v1", "live-managed-v2", "live-managed-v3"]) {
+    for (const runtimeVersion of ["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9"]) {
       expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: `live:${runtimeVersion}`, payload: {
         name: "realtime.ready", metadata: { model: "gpt-live-1", transcriptionModel: "gpt-live-1", runtimeVersion }
       } }).success).toBe(true);

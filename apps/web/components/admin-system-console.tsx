@@ -22,6 +22,8 @@ import { useAdminSession } from "./admin-session-provider";
 import { AdminOutboundControl } from "./admin-outbound-control";
 import { AdminBetaControls } from "./admin-beta-controls";
 import { AdminNotificationControls } from "./admin-notification-controls";
+import { AdminVoiceConsentSettings } from "./admin-voice-consent-settings";
+import { voiceConsentMessages } from "@/lib/i18n/voice-consent-messages";
 
 export function AdminSystemConsole() {
   const locale = "en" as const;
@@ -86,12 +88,14 @@ export function AdminSystemConsole() {
         </header>
         <nav className="section-navigation" aria-label="System sections">
           <a href="#system-components">{copy.componentsTitle}</a><a href="#system-jobs">{copy.jobsTitle}</a><a href="#system-alerts">{copy.alertsTitle}</a><a href="#outbound-control">Outbound control</a>
+          <a href="#voice-consent">{voiceConsentMessages[locale].title}</a>
           {role === "superadmin" && <a href="#superadmin-notifications">Notifications</a>}
         </nav>
         {loading && !status ? <p role="status">{copy.loading}</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
         <AdminOutboundControl role={role} />
+        <AdminVoiceConsentSettings role={role} />
         <AdminAnalyticsSettings />
       <AdminBetaControls role={role} />
         {role === "superadmin" && <AdminNotificationControls />}

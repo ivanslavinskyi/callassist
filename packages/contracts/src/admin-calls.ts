@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { preparationTransportDiagnosticsSchema } from "./preparation-diagnostics";
 import { callLifecycleSchema } from "./call-lifecycle";
 import {
   callBriefStatusSchema,
@@ -122,6 +123,17 @@ export const preparationRequestTraceSchema = z.strictObject({
   startedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
   outcome: z.string().nullable(), errorCode: z.string().nullable(),
+  clientRequestId: z.string().nullable().optional(),
+  providerRequestId: z.string().nullable().optional(),
+  statusCode: z.number().int().nullable().optional(),
+  generation: z.number().int().nonnegative().nullable().optional(),
+  diagnostics: preparationTransportDiagnosticsSchema.nullable().optional(),
+  tokens: z.strictObject({
+    input: z.number().int().nonnegative().nullable(),
+    cachedInput: z.number().int().nonnegative().nullable(),
+    output: z.number().int().nonnegative().nullable(),
+    reasoning: z.number().int().nonnegative().nullable()
+  }).optional(),
   metadata: z.strictObject({
     repairKind: z.enum(["none", "language", "integrity", "schema"]),
     repairNumber: z.number().int().nonnegative(), transportAttempt: z.number().int().positive(),
@@ -130,11 +142,20 @@ export const preparationRequestTraceSchema = z.strictObject({
 });
 export type PreparationRequestTrace = z.infer<typeof preparationRequestTraceSchema>;
 
+export const preparationWorkerAttemptTraceSchema = z.strictObject({
+  generation: z.number().int().nonnegative(),
+  attemptNumber: z.number().int().positive(),
+  startedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(),
+  outcome: z.string().nullable(), errorCode: z.string().nullable()
+});
+export type PreparationWorkerAttemptTrace = z.infer<typeof preparationWorkerAttemptTraceSchema>;
+
 export const adminCallPreparationInspectorSchema = z.strictObject({
   preparation: callPreparationSchema,
   generatedAt: z.iso.datetime(),
   cost: adminOperationsOverviewSchema.shape.cost,
   timeline: z.array(preparationRequestTraceSchema).optional(),
+  workerAttempts: z.array(preparationWorkerAttemptTraceSchema).optional(),
   initialQueueMs: z.number().nonnegative().nullable().optional()
 });
 export type AdminCallPreparationInspector = z.infer<

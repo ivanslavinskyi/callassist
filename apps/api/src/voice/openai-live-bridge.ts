@@ -16,6 +16,8 @@ export interface LiveLifecycle {
   backendFailed?(current?: () => boolean, code?: string): void;
   backendProgress?(): void;
   consentDecisionUnavailable?(reason?: "provider_failure" | "contract_violation"): void;
+  consentFragmentDiscarded?(): void;
+  consentSemanticReady?(): boolean;
   decisionReady?(): boolean;
   taskDecisionContext?(): { closing: boolean; waitingExpired: boolean; appointment?: unknown };
   closingBackendCompleted?(): void;

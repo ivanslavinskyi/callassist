@@ -3,6 +3,7 @@ import { liveRuntimeDescriptor } from "./runtime-descriptor";
 import { UnifiedLiveCall } from "./unified-live-call";
 import { approvedCall, flush, TestSocket } from "./voice-test-helpers";
 import type { VoiceConversationContext } from "./voice-runtime";
+import { voiceConsentRuntimePolicy } from "@callassist/contracts";
 
 describe("immutable runtime descriptor boundary", () => {
   it("keeps user content and arbitrary environment values out of the descriptor", async () => {
@@ -14,10 +15,14 @@ describe("immutable runtime descriptor boundary", () => {
       const descriptor = liveRuntimeDescriptor(context, snapshot.compilation!, "private runtime instructions Nina Keller",
         models, { SHPROHLI_RELEASE_SHA: "not-a-release-secret" });
       expect(descriptor.releaseSha).toBeNull();
+      expect(descriptor.runtimeVersion).toBe("live-managed-v9");
       expect(descriptor.promptHash).toMatch(/^[a-f0-9]{64}$/);
       expect(JSON.stringify(descriptor)).not.toMatch(/Nina|Keller|private runtime|not-a-release-secret|41710000001/);
       expect(liveRuntimeDescriptor(context, snapshot.compilation!, "private runtime instructions Nina Keller", models,
         { SHPROHLI_RELEASE_SHA: "A".repeat(40) }).releaseSha).toBe("a".repeat(40));
+      const policy = voiceConsentRuntimePolicy("hybrid_deterministic_v1", 3);
+      expect(liveRuntimeDescriptor(context, snapshot.compilation!, "instructions", models, {}, policy).consentPolicy)
+        .toEqual(policy);
     } finally { await call.service.close(); }
   });
 

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { executionSpokenIdentities } from "./spoken-execution";
-import { liveRuntimeDescriptor } from "./runtime-descriptor";
-import { projectSpokenIdentityText } from "@callassist/contracts";
+import { liveRuntimeDescriptor, type ConsentRuntimePolicy } from "./runtime-descriptor";
+import { defaultVoiceConsentRuntimePolicy, projectSpokenIdentityText } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { LIVE_VOICES, type AnsweringState, type CallLocale, type ConsentEvidence } from "@callassist/contracts";
 import { getTwilioCopy } from "../telephony/twilio-copy";
 import { ConsentFlow, type ConsentFlowAction } from "../realtime/consent-flow";
+import { classifyHybridConsent, type ConsentDecision } from "../realtime/consent-classifier";
 import { endCallReasons, type EndCallReason } from "../realtime/agent-hangup";
 import { getAppointmentAuthorization } from "@callassist/contracts";
 import type { VoiceConversationContext } from "./voice-runtime";
@@ -36,6 +37,15 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #live: OpenAILiveConversation | null = null;
   #speechFailure: { code: string; phase: Phase } | null = null;
   #consent = new ConsentFlow();
+  #consentPolicy: ConsentRuntimePolicy = defaultVoiceConsentRuntimePolicy;
+  #consentAnswerText = "";
+  #consentAnswerRevision = 0;
+  #consentDecisionToken = 0;
+  #consentAnswerUnsafe = false;
+  #hybridSemanticReady = false;
+  #hybridAcousticPending = false;
+  #dtmfDecisionPending: "affirmative" | "negative" | null = null;
+  #disclosureReceipt: Promise<string | null> = Promise.resolve(null);
   #timer: ReturnType<typeof setTimeout> | null = null;
   #consentPlayback: Promise<boolean> = Promise.resolve(false);
   #resolveConsentPlayback: ((played: boolean) => void) | null = null;
@@ -150,8 +160,22 @@ export class UnifiedLiveCall implements LiveLifecycle {
     } else if (event.event === "dtmf") {
       const digit = object(event.dtmf).digit;
       if (this.#phase === "consent") {
-        if (digit === "1" && this.#consent.acceptDtmfOne()) await this.#grant({ method: "dtmf", digit: "1", locale: this.#context!.snapshot.plan.callLocale });
-        else if (digit === "2") this.#consentAction("reject", "negative");
+        if (digit === "2" || (digit === "1" && this.#consent.stage === "dtmf_fallback")) {
+          const decision = digit === "2" ? "negative" : "affirmative";
+          if (this.#dtmfDecisionPending === "negative" || this.#dtmfDecisionPending === decision) return;
+          // Keypad input is a complete decision. Voice arriving during its audit
+          // write cannot revoke it; a later keypad refusal can still supersede 1.
+          this.#dtmfDecisionPending = decision;
+          this.#consentDecisionToken++;
+          this.#hybridSemanticReady = false;
+          if (this.#recipientTurnTimer) clearTimeout(this.#recipientTurnTimer);
+          this.#recipientTurnTimer = null;
+          this.#clearTimer();
+          this.#wait(15_000, () => this.#close("openai_error"));
+        }
+        if (digit === "1" && this.#consent.stage === "dtmf_fallback")
+          await this.#applyConsentDecision("affirmative", "dtmf");
+        else if (digit === "2") await this.#applyConsentDecision("negative", "dtmf");
       } else if (this.#phase === "conversation" && typeof digit === "string") this.#live?.keypad(digit);
     } else if (event.event === "stop") this.#close("stream_stopped");
   }
@@ -264,11 +288,13 @@ export class UnifiedLiveCall implements LiveLifecycle {
       fail: () => this.#close("openai_error")
     };
     this.#context = context;
+    this.#consentPolicy = await this.options.service.getConsentRuntimePolicy(snapshot.brief.id, attempt.id);
+    if (this.closed) return;
     await this.options.service.recordRuntimeDescriptor(snapshot.brief.id, attempt.id,
       liveRuntimeDescriptor(context, snapshot.compilation!, buildLiveInstructions(context, false), {
         live: this.options.liveModel ?? "gpt-live-1", delegation: this.options.delegationModel ?? "gpt-6-luna",
         speech: this.options.speechModel ?? "gpt-4o-mini-tts"
-      }));
+      }, process.env, this.#consentPolicy));
     if (this.closed) return;
     this.#live = new OpenAILiveConversation(this.options, context, this);
   }
@@ -276,8 +302,21 @@ export class UnifiedLiveCall implements LiveLifecycle {
     return { instructions: buildLiveInstructions(this.#context!, false),
       input: [] };
   }
-  ready() { this.#ready = true; if (this.#admitted && this.#phase === "starting") this.#disclosure(); }
+  ready() {
+    this.#ready = true;
+    this.#live!.suspendOutput();
+    if (this.#admitted && this.#phase === "starting") this.#disclosure();
+  }
   get #locale() { return this.#context!.snapshot.plan.callLocale; }
+  get #hybridConsent() { return this.#consentPolicy.mode === "hybrid_deterministic_v1"; }
+  #resetConsentAnswer() {
+    this.#consentAnswerText = "";
+    this.#consentAnswerUnsafe = false;
+    this.#hybridSemanticReady = false;
+    this.#hybridAcousticPending = false;
+    this.#dtmfDecisionPending = null;
+    this.#consentDecisionToken++;
+  }
   #disclosure() {
     if (!this.#consentOverallTimer) {
       this.#consentOverallTimer = setTimeout(() => {
@@ -294,6 +333,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#resolveConsentPlayback?.(false);
     this.#consentPlayback = new Promise(resolve => { this.#resolveConsentPlayback = resolve; });
     this.#phase = "disclosure";
+    this.#resetConsentAnswer();
+    this.#disclosureReceipt = Promise.resolve(null);
     this.#live!.suspendConsent();
     const text = resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).text;
     this.#requiredDisclosureText = text;
@@ -326,10 +367,10 @@ export class UnifiedLiveCall implements LiveLifecycle {
     const expectedPhase = segment === "required" ? "disclosure" : "consent";
     if (this.#isClosed() || this.#phase !== expectedPhase || generation !== this.#generation) return;
     if (segment === "required") {
-      // Enable semantic reasoning early, but fence transcript evidence at the
-      // estimated end of the mandatory audio. The real Twilio mark still owns
-      // authorization, so recording cannot start from an estimate or a timer.
-      this.#live!.configureConsent(rendered.durationMs);
+      // Fence transcript evidence at the estimated audio end. Native mode also
+      // configures semantic reasoning here; hybrid enables it only for unclear.
+      // Only the real Twilio mark can authorize the completed disclosure.
+      this.#live!.configureConsent(rendered.durationMs, !this.#hybridConsent);
       this.#requiredPlaybackEndsAt = Date.now() + rendered.durationMs;
     } else this.#pendingConsentQuestion = null;
     for (const payload of rendered.frames) this.#sendAudio(payload);
@@ -347,10 +388,11 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #promptConsent(text: string) {
     this.#phase = "consent";
+    this.#resetConsentAnswer();
     this.#answerObserved = false;
     this.#consentInfrastructureFailures = 0;
     this.#pendingConsentQuestion = text;
-    this.#live!.configureConsent();
+    this.#live!.configureConsent(0, !this.#hybridConsent);
     this.#clearTimer();
     if (this.#renderedPlayback) { clearTimeout(this.#renderedPlayback.timer); this.#renderedPlayback = null; }
     this.#clear();
@@ -436,8 +478,15 @@ export class UnifiedLiveCall implements LiveLifecycle {
     }
     clearTimeout(playback.timer); this.#renderedPlayback = null;
     const key = `rendered-consent-${playback.segment}:${this.#context!.attemptId}:${playback.generation}`;
-    this.#live!.recordApplicationPlayback(playback.text,key,{markId:name,sentAt:playback.sentAt,durationMs:playback.durationMs,acknowledgedAt:new Date().toISOString()});
+    const acknowledgedAt = new Date().toISOString();
+    this.#live!.recordApplicationPlayback(playback.text,key,{markId:name,sentAt:playback.sentAt,durationMs:playback.durationMs,acknowledgedAt});
     if (playback.segment === "required") {
+      this.#disclosureReceipt = this.options.service.recordConsentDisclosure(this.#context!.brief.id, {
+        callAttemptId: this.#context!.attemptId, compilationSnapshotHash: this.#context!.snapshot.compilationSnapshotHash,
+        generation: playback.generation, version: resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).version,
+        textHash: createHash("sha256").update(playback.text).digest("hex"), markId: name,
+        sessionId: this.#live!.sessionId!, sentAt: playback.sentAt, acknowledgedAt, durationMs: playback.durationMs
+      }).catch(() => { this.#close("openai_error"); return null; });
       this.#requiredDisclosureText = null;
       this.#requiredPlaybackEndsAt = 0;
       this.#phase = "consent";
@@ -522,13 +571,24 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (role === 'assistant') {
       return this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null;
     }
-    // Only timing evidence is needed here. Live's managed backend interprets
-    // the answer in its native context; never assemble or classify recipient text.
+    // Native mode needs timing evidence only. Hybrid text stays in this bounded
+    // pre-consent buffer and is never published, persisted or logged.
     // LiveConversation forwards disclosure-phase fragments only after the
     // mandatory audio boundary. Keep them provisional until the real mark.
+    if (this.#hybridConsent && (this.#phase === "disclosure" || this.#phase === "consent") && text.length) {
+      this.#consentDecisionToken++;
+      this.#hybridSemanticReady = false;
+      if (this.#phase === "disclosure" && (!this.#requiredPlaybackEndsAt || Date.now() < this.#requiredPlaybackEndsAt))
+        this.#consentAnswerUnsafe = true;
+      if (this.#consentAnswerText.length + text.length > 8_000) this.#consentAnswerUnsafe = true;
+      else this.#consentAnswerText += text;
+    }
     if ((this.#phase === "disclosure" || this.#phase === "consent") && text.trim()) {
       this.#answerObserved = true;
       this.#consentInfrastructureFailures = 0;
+      this.#consentAnswerRevision++;
+      if (!this.#hybridConsent) this.#consentDecisionToken++;
+      this.#hybridSemanticReady = false;
     }
     if (this.#phase === "consent") this.#settleRecipientTurn();
     if (this.#phase === "consent" && text.trim() && this.#renderedPlayback?.segment === "question") {
@@ -547,6 +607,22 @@ export class UnifiedLiveCall implements LiveLifecycle {
     return this.#consented && this.#phase !== "recording" && this.#phase !== "closed";
   }
   activity(event: "started" | "stopped" | null, voicedMs = 0) {
+    // The fast gate yields on the first energetic frame, before the shared
+    // 100 ms activity detector reports started. Do not alter task/AMD VAD.
+    if (this.#hybridConsent && (this.#phase === "disclosure" || this.#phase === "consent")) {
+      if (voicedMs > 0) {
+        if (!this.#hybridAcousticPending) {
+          this.#consentDecisionToken++;
+          this.#hybridSemanticReady = false;
+          if (this.#recipientTurnTimer) clearTimeout(this.#recipientTurnTimer);
+          this.#recipientTurnTimer = null;
+        }
+        this.#hybridAcousticPending = true;
+      } else if (this.#hybridAcousticPending && !this.#speaking) {
+        this.#hybridAcousticPending = false;
+        this.#settleRecipientTurn();
+      }
+    }
     // Energy is not semantic speech. Brief bursts do not clear mandatory audio;
     // sustained input still yields and requires a complete uncleared replay.
     if (this.#phase === "disclosure" && (this.#speaking || event === "started") && voicedMs >= 500 && !this.#disclosureInterrupted &&
@@ -560,6 +636,16 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (this.#criticalReleased && voicedMs >= 500) this.#cancelCritical("sustained_playback_interruption");
     if (event === "started") {
       this.#speaking = true;
+      if (this.#phase === "disclosure" || this.#phase === "consent") {
+        this.#consentDecisionToken++;
+        this.#hybridSemanticReady = false;
+        if (this.#phase === "consent" && !this.#consentAnswerText) this.#consentAnswerUnsafe = false;
+        // A span starting during mandatory playback cannot supply a local yes.
+        // Keep the entire candidate unsafe even if a later positive tail passes
+        // the transport's fragment boundary.
+        if (this.#phase === "disclosure" && (!this.#requiredPlaybackEndsAt || Date.now() < this.#requiredPlaybackEndsAt))
+          this.#consentAnswerUnsafe = true;
+      }
       if (this.#phase === "consent") {
         this.#wait(Math.max(0, this.#consentDeadlineAt - Date.now()), () => this.#consentAction(this.#consent.timeout(), "timeout"));
       }
@@ -574,6 +660,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       }
     } else if (event === "stopped") {
       this.#speaking = false;
+      this.#hybridAcousticPending = false;
       if (this.#backendFailurePending) this.#scheduleBackendFailure();
       if (this.#phase === "disclosure" && this.#disclosureInterrupted && this.#requiredDisclosureText) {
         if (this.#renderedPlayback) clearTimeout(this.#renderedPlayback.timer);
@@ -590,11 +677,33 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #settleRecipientTurn() {
     if (this.#recipientTurnTimer) clearTimeout(this.#recipientTurnTimer);
     this.#recipientTurnTimer = null;
-    if (!this.#speaking && this.#phase === "consent" && this.#hasConsentAnswer()) {
+    if (this.#dtmfDecisionPending) return;
+    if (!this.#speaking && !this.#hybridAcousticPending && this.#phase === "consent" && this.#hasConsentAnswer()) {
+      const token = this.#consentDecisionToken;
+      const current = () => token === this.#consentDecisionToken && this.#phase === "consent" && !this.#speaking && !this.#hybridAcousticPending;
       this.#recipientTurnTimer = setTimeout(() => {
         this.#recipientTurnTimer = null;
+        if (!current()) return;
+        if (this.#hybridConsent) {
+          const decision = this.#consentAnswerUnsafe ? "unclear" : classifyHybridConsent(this.#consentAnswerText, this.#locale);
+          if (decision !== "unclear") {
+            void this.#applyConsentDecision(decision, "deterministic_voice", current).catch(() => this.#close("openai_error"));
+            return;
+          }
+          // Both windows start at the same last speech/transcript boundary.
+          // The accepted 200 ms delta heuristic is not a transcript-final event.
+          this.#recipientTurnTimer = setTimeout(() => {
+            this.#recipientTurnTimer = null;
+            if (!current()) return;
+            this.#hybridSemanticReady = true;
+            this.#live?.enableConsentBackend();
+            this.#live?.requestConsentDecision();
+          }, Math.max(0, this.#consentPolicy.semanticSettleMs - this.#consentPolicy.fastSettleMs));
+          this.#recipientTurnTimer.unref?.();
+          return;
+        }
         this.#live?.requestConsentDecision();
-      }, 900);
+      }, this.#hybridConsent ? this.#consentPolicy.fastSettleMs : 900);
       this.#recipientTurnTimer.unref?.();
       return;
     }
@@ -628,6 +737,44 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#recipientTurnTimer.unref?.();
   }
   #hasConsentAnswer() { return this.#answerObserved; }
+  consentFragmentDiscarded() {
+    if (this.#hybridConsent) {
+      this.#consentAnswerUnsafe = true;
+      this.#consentDecisionToken++;
+      this.#hybridSemanticReady = false;
+      if (this.#phase === "consent") this.#settleRecipientTurn();
+    }
+  }
+  consentSemanticReady() { return !this.#dtmfDecisionPending && (!this.#hybridConsent || (this.#hybridSemanticReady && !this.#hybridAcousticPending)); }
+  async #applyConsentDecision(decision: ConsentDecision, method: "deterministic_voice" | "semantic_voice" | "dtmf",
+    fresh: () => boolean = () => true) {
+    const token = this.#consentDecisionToken;
+    const current = () => fresh() && this.#phase === "consent" && (method === "dtmf"
+      ? this.#dtmfDecisionPending === decision
+      : !this.#dtmfDecisionPending && token === this.#consentDecisionToken && !this.#speaking &&
+        !this.#hybridAcousticPending && this.#hasConsentAnswer());
+    if (!current()) return false;
+    const disclosureReceiptId = await this.#disclosureReceipt;
+    if (!disclosureReceiptId || !current()) return false;
+    const consentDecision = { callAttemptId: this.#context!.attemptId, disclosureReceiptId,
+      revision: this.#consentAnswerRevision, decision, decisionMethod: method, locale: this.#locale,
+      policyVersion: this.#consentPolicy.classifierVersion };
+    if (decision === "affirmative") {
+      if (method === "dtmf" && !this.#consent.acceptDtmfOne()) return false;
+      const evidence: ConsentEvidence = { ...(method === "dtmf" ? { method: "dtmf" as const, digit: "1" as const } :
+        { method: "voice" as const, decision: "affirmative" as const }), locale: this.#locale,
+        decisionMethod: method, callAttemptId: this.#context!.attemptId, disclosureReceiptId,
+        consentDecision: { ...consentDecision, decision: "affirmative" } };
+      if (method !== "dtmf" && this.#consent.decide(decision) !== "grant_voice") return false;
+      void this.#grant(evidence);
+      return true;
+    }
+    try { await this.options.service.recordConsentDecision(this.#context!.brief.id, consentDecision); }
+    catch (error) { if (current()) throw error; return false; }
+    if (!current()) return false;
+    this.#consentAction(this.#consent.decide(decision), decision === "negative" ? "negative" : "recognition_failed");
+    return true;
+  }
   #armTaskWait() {
     if (this.#phase !== "conversation" || this.#taskWaitTurn === this.#turnSequence) return;
     this.#taskWaitTurn = this.#turnSequence;
@@ -644,7 +791,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, action,
       reason: action === "grant_voice" ? "affirmative" : reason }, "Live consent transition");
     const copy = getTwilioCopy(this.#locale);
-    if (action === "grant_voice") { void this.#grant({ method: "voice", decision: "affirmative", locale: this.#locale }); return; }
+    // Voice grants must go through #applyConsentDecision and its audit binding.
+    if (action === "grant_voice") { this.#close("openai_error"); return; }
     if (action === "play_clarification") {
       this.#promptConsent(copy.clarification); return;
     }
@@ -652,12 +800,15 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#resolveConsentPlayback?.(false); this.#resolveConsentPlayback = null;
     this.#consentFailed = true;
     this.#context!.telemetry("live:consent:failed", { name: "consent.failed", metadata: { reason } });
+    this.#clearTimer();
     this.#phase = "ending";
+    this.#resetConsentAnswer();
     this.#say(copy.noConsent, () => this.#hangup());
   }
   async #grant(evidence: ConsentEvidence) {
     if (this.#phase !== "consent") return;
     this.#phase = "recording";
+    this.#resetConsentAnswer();
     if (this.#consentOverallTimer) clearTimeout(this.#consentOverallTimer);
     this.#consentOverallTimer = null;
     this.#pendingConsentQuestion = null;
@@ -727,7 +878,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#backendFailurePending = true;
     this.#backendFailureCurrent = current; this.#backendFailureCode = code;
     this.#context!.telemetry(`live:failure:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v7", phase: "failed", revision: this.#generation, cause: code } });
+      runtimeVersion: "live-managed-v9", phase: "failed", revision: this.#generation, cause: code } });
     this.options.logger?.warn({ callAttemptId: this.#context!.attemptId, code }, "Live owned backend failure pending");
     this.#backendFailureDeadlineAt = Date.now() + 8_000;
     this.#scheduleBackendFailure();
@@ -781,7 +932,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#criticalResolve) return;
     if (this.#criticalReleased) this.#noteTranscriptGap("application_interrupted");
     this.#context!.telemetry(`live:action-interrupted:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v7", phase: "stale", revision: this.#generation,
+      runtimeVersion: "live-managed-v9", phase: "stale", revision: this.#generation,
       cause, released: this.#criticalReleased } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, cause,
       released: this.#criticalReleased, generation: this.#generation }, "Live appointment playback cancelled");
@@ -821,6 +972,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (call.name === "report_consent") {
       if (Object.keys(value).join() !== "decision" || !["affirmative", "negative", "unclear"].includes(String(value.decision))) return reject("invalid_arguments");
       if (this.#phase !== "disclosure" && this.#phase !== "consent") return reject("stale_or_unauthorized_request");
+      if (!this.consentSemanticReady()) return reject("stale_or_unauthorized_request");
       // A native decision can arrive before Twilio acknowledges queued playback.
       // Keep it pending, and recheck freshness after the real mark (never a timer).
       const played = await this.#consentPlayback;
@@ -829,7 +981,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       const decision = value.decision as "affirmative" | "negative" | "unclear";
       this.options.logger?.info({ callAttemptId: this.#context!.attemptId, decision,
         stage: this.#consent.stage }, "Live delegated consent decision");
-      this.#consentAction(this.#consent.decide(decision), decision === "negative" ? "negative" : "recognition_failed");
+      if (!await this.#applyConsentDecision(decision, "semantic_voice", current)) return reject("stale_or_unauthorized_request");
       return { ok: true, decision, state: decision === "affirmative" ? "recording_start_pending" : this.#phase,
         instruction: "Consent decision accepted; this delegation is complete. No spoken reply is needed. The application confirms recording startup and enables the task separately." };
     }
@@ -941,6 +1093,14 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!evidence.length && !this.#waitingExpired) return reject("recipient_evidence_required");
     if (value.reason === "cannot_proceed" && this.#appointmentRejectedTurn === this.#turnSequence && !this.#waitingExpired)
       return reject("clarification_required");
+    // A repeated terminal tool cannot replace the decision underneath its render
+    // or mark. Material corrections must first use resume_conversation.
+    if (this.#phase === "closing" && this.#terminalDecision) {
+      this.#closingInputPending = false;
+      this.#startClosingSpeech();
+      return { ok: true, actionCompleted: false, state: "closing_authorized",
+        reason: this.#terminalDecision.reason, resultSummary: this.#terminalDecision.summary };
+    }
     const summary = evidence.length ? value.resultSummary.trim() : liveTaskFailureCopy[this.#locale];
     this.#terminalDecision = { revision: ++this.#terminalRevision, reason: value.reason as EndCallReason, summary,
       evidence, actionState: this.#action?.state ?? null };
@@ -955,7 +1115,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#action || this.#isClosed()) return;
     this.#live?.appointmentState(this.taskDecisionContext().appointment);
     this.#context!.telemetry(`live:action:${this.#action.id}:${this.#action.version}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v7", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
+      runtimeVersion: "live-managed-v9", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
       revision: this.#action.version, actionState: this.#action.state,
       ...(this.#action.delivery ? { deliveryKind: this.#action.delivery.kind, deliveryStatus: this.#action.delivery.status } : {}) } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, actionId: this.#action.id,
@@ -990,6 +1150,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #startClosingSpeech() {
     if (this.#phase !== "closing" || this.#closingInputPending || this.#speaking) return;
+    // Includes pending render: the existing promise, generation and mark already
+    // own this closing. A real interruption clears playback before resuming here.
+    if (this.#applicationPlayback?.current()) return;
     this.#live?.suspendOutput();
     this.#cancelApplicationPlayback();
     const decision = this.#terminalDecision;
@@ -1092,6 +1255,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#consentOverallTimer = null;
     this.#backendFailureTimer = null; this.#backendFailurePending = false;
     this.#recipientTurnText = ""; this.#recipientTurns = []; this.#recipientFragments = [];
+    this.#resetConsentAnswer();
     if (this.#warmSilence) clearInterval(this.#warmSilence);
     if (this.#renderedPlayback) clearTimeout(this.#renderedPlayback.timer);
     this.#renderedPlayback = null; this.#renderedSpeech.clear(); this.#requiredDisclosureText = null;

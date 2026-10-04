@@ -1,6 +1,7 @@
 import { decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
+import { voiceConsentRuntimePolicySchema, preparationTransportDiagnosticsSchema } from "@callassist/contracts";
 
 // Only these columns cross the export boundary. Names are source-database names;
 // decrypted *_ciphertext fields lose the suffix. Never export a database row wholesale.
@@ -14,7 +15,7 @@ const operations = "t.operation_id IN (SELECT id FROM export_operations)";
 const jobs = "t.job_id IN (SELECT id FROM export_jobs)";
 export const exportSources: ExportSource[] = [
   source("call_briefs", "id user_id recipient_name phone_number objective locale allow_language_switch fallback_locale allowed_facts_ciphertext status created_at updated_at context_ciphertext represented_person represented_person_first_name represented_person_last_name agent_name assistant_profile_id assistance_reason_ciphertext assistance_disclosure_ciphertext voice_gender audio_retention_days current_compilation_id data_deleted_at retry_source_call_id retry_source_attempt_id", "t.id IN (SELECT id FROM export_calls)"),
-  source("call_attempts", "id call_brief_id user_id provider provider_call_id provider_status status started_at ended_at failure_reason compilation_id compilation_revision compilation_snapshot_hash execution_snapshot_ciphertext review_receipt_id content_language max_duration_seconds native_transcript_capture runtime_descriptor created_at", calls),
+  source("call_attempts", "id call_brief_id user_id provider provider_call_id provider_status status started_at ended_at failure_reason compilation_id compilation_revision compilation_snapshot_hash execution_snapshot_ciphertext review_receipt_id content_language max_duration_seconds native_transcript_capture runtime_descriptor consent_runtime_policy created_at", calls),
   source("call_voice_actions", "id call_brief_id call_attempt_id snapshot_hash version state payload_ciphertext created_at updated_at", calls),
   source("call_events", "id call_brief_id call_attempt_id user_id sequence schema_version event_name source stage severity metadata occurred_at created_at", "t.call_brief_id IN (SELECT id FROM export_calls)", "t.call_brief_id,t.sequence"),
   source("call_compilations", "id call_brief_id revision snapshot_hash compilation_ciphertext origin created_at", calls),
@@ -39,7 +40,7 @@ export const exportSources: ExportSource[] = [
   source("call_preparation_requests", "id user_id status call_brief_id target_call_brief_id operation_kind failure_code created_at updated_at completed_at input_ciphertext expected_compilation_id target_revision provider_request_count", preparations),
   source("call_preparation_language_contexts", "preparation_id preferences account_preference request_version", "t.preparation_id IN (SELECT id FROM export_preparations WHERE available)", "t.preparation_id"),
   source("provider_operations", "id provider operation_type stage requested_model client_request_id call_preparation_id call_brief_id call_attempt_id recording_id recording_transcript_request_id durable_job_id durable_job_generation text_artifact_id parent_operation_id request_metadata started_at", "t.id IN (SELECT id FROM export_operations)"),
-  source("provider_operation_results", "operation_id outcome provider_request_id provider_response_id provider_model http_status error_code completed_at duration_ms", operations, "t.operation_id"),
+  source("provider_operation_results", "operation_id outcome provider_request_id provider_response_id provider_model http_status error_code completed_at duration_ms response_metadata", operations, "t.operation_id"),
   source("provider_usage_records", "id operation_id schema_version request_count input_text_tokens cached_input_text_tokens cache_write_input_text_tokens output_text_tokens reasoning_output_tokens input_audio_tokens cached_input_audio_tokens output_audio_tokens total_tokens duration_seconds billable_seconds raw_usage observed_at pricing_version", operations),
   source("provider_usage_supplements", "operation_id observation_key duration_seconds billable_seconds observed_at", operations, "t.operation_id,t.observation_key"),
   source("effective_provider_usage", "id operation_id schema_version request_count input_text_tokens cached_input_text_tokens cache_write_input_text_tokens output_text_tokens reasoning_output_tokens input_audio_tokens cached_input_audio_tokens output_audio_tokens total_tokens duration_seconds billable_seconds raw_usage observed_at pricing_version", operations),
@@ -113,6 +114,9 @@ export function sourceQuery(s: ExportSource) {
 }
 
 const safeMetadataKeys = new Set(["status", "decision", "provider", "providerStatus", "method", "revision", "compilationRevision", "recordingId", "approvalId", "reasonCode", "failureCode", "attemptId", "callAttemptId", "connected", "settlement", "credits"]);
+// Export only the policy actually pinned to the attempt. Global settings, actor
+// identities and operator change reasons are outside this call-content cohort.
+const exportedConsentPolicySchema = voiceConsentRuntimePolicySchema.strip();
 function metadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).filter(([k, v]) => safeMetadataKeys.has(k) &&
@@ -131,6 +135,8 @@ export function mapExportRow(s: ExportSource, data: Record<string, unknown>, key
   const mapped: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(data)) {
     if (field.endsWith("_ciphertext")) mapped[field.replace(/_ciphertext$/, "")] = value === null ? null : decryptJson(String(value), key);
+    else if (s.table === "call_attempts" && field === "consent_runtime_policy") mapped[field] = value === null ? null : exportedConsentPolicySchema.parse(value);
+    else if (s.table === "provider_operation_results" && field === "response_metadata") mapped[field] = value === null ? null : preparationTransportDiagnosticsSchema.strip().parse(value);
     else if (s.table === "audit_events" && field === "metadata") mapped[field] = metadata(value);
     else if (field === "raw_usage" || field === "raw_cost") mapped[field] = usage(value);
     else mapped[field] = value;

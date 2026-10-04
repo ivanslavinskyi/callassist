@@ -293,6 +293,7 @@ export type RealtimeProviderOperationInput = {
 };
 
 export type CompleteProviderOperationInput = {
+  diagnostics?: import("@callassist/contracts").PreparationTransportDiagnostics;
   operationId: string;
   outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
   providerRequestId: string | null;
@@ -759,6 +760,11 @@ export type FinalTranscriptMutationResult = {
 export interface CallRepository extends CallTextRepository {
   readonly recipientOptOut: RecipientOptOutStore;
   readonly betaControls?: BetaControls;
+  getVoiceConsentSettings(): Promise<import("@callassist/contracts").VoiceConsentSettingsView>;
+  updateVoiceConsentSettings(input: import("@callassist/contracts").VoiceConsentSettingsUpdate, actorUserId: string): Promise<import("@callassist/contracts").VoiceConsentSettingsView>;
+  getConsentRuntimePolicy(callId: string, attemptId: string): Promise<import("@callassist/contracts").VoiceConsentRuntimePolicy>;
+  recordConsentDisclosure(callId: string, input: import("@callassist/contracts").ConsentDisclosureInput): Promise<string>;
+  recordConsentDecision(callId: string, input: import("@callassist/contracts").ConsentDecisionInput): Promise<string>;
   getLanguageContext(id: string): Promise<CallLanguageContext | null>;
   updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number): Promise<CallLanguageContext>;
   readonly mode: "memory" | "postgres";
@@ -796,7 +802,7 @@ export interface CallRepository extends CallTextRepository {
   ): Promise<CallPreparation | null>;
   getAdminCallPreparation(id: string): Promise<CallPreparation | null>;
   recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor): Promise<void>;
-  getPreparationDiagnostics(id: string): Promise<{ timeline: import("@callassist/contracts").PreparationRequestTrace[]; initialQueueMs: number | null }>;
+  getPreparationDiagnostics(id: string): Promise<{ timeline: import("@callassist/contracts").PreparationRequestTrace[]; initialQueueMs: number | null; workerAttempts: import("@callassist/contracts").PreparationWorkerAttemptTrace[] }>;
   claimCallPreparation(
     id: string,
     lease: DurableJobLease

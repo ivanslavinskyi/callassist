@@ -11,6 +11,8 @@ import { createAuthorizedEventStream } from "./runtime/authorized-event-stream";
 import { betaControlsViewSchema, betaSettingsUpdateSchema, betaInvitationCreateSchema } from "@callassist/contracts";
 import { betaCreditPolicyUpdateSchema, betaCreditTransitionInputSchema } from "@callassist/contracts";
 import { BetaControlError } from "./beta/beta-controls";
+import { VoiceConsentPolicyError } from "./storage/voice-consent-policy-store";
+import { voiceConsentSettingsUpdateSchema, voiceConsentSettingsViewSchema } from "@callassist/contracts";
 import { trustedProxyPolicy } from "./config/proxy-policy";
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
@@ -1671,6 +1673,27 @@ export function buildApp({
         .send(adminOutboundCallControlViewSchema.parse({
           outboundCalls: await service.repository.getOutboundCallControl()
         }));
+    });
+
+    app.get("/api/admin/system/voice-consent", async (request, reply) => {
+      const actor = await authorizeAdminRead(request, reply);
+      if (!actor) return;
+      return reply.header("Cache-Control", "private, no-store")
+        .send(voiceConsentSettingsViewSchema.parse(await service.getVoiceConsentSettings()));
+    });
+    app.put("/api/admin/system/voice-consent", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "VOICE_CONSENT_FORBIDDEN" });
+      const parsed = voiceConsentSettingsUpdateSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_VOICE_CONSENT_SETTINGS" });
+      try {
+        const view = await service.updateVoiceConsentSettings(parsed.data, actor.id);
+        return reply.header("Cache-Control", "private, no-store").send(voiceConsentSettingsViewSchema.parse(view));
+      } catch (error) {
+        if (error instanceof VoiceConsentPolicyError) return reply.status(error.code === "VOICE_CONSENT_FORBIDDEN" ? 403 : 409).send({ error: error.code });
+        throw error;
+      }
     });
 
     app.get("/api/admin/system/analytics", async (request, reply) => {

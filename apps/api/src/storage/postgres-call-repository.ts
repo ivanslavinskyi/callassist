@@ -1,4 +1,8 @@
-import { initialDisclosureProjection } from "@callassist/contracts";
+import { initialDisclosureProjection, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
+  defaultVoiceConsentRuntimePolicy, voiceConsentRuntimePolicySchema,
+  type ConsentDisclosureInput, type ConsentDecisionInput, type VoiceConsentSettingsUpdate } from "@callassist/contracts";
+import { PostgresVoiceConsentPolicyStore, readVoiceConsentPolicy } from "./voice-consent-policy-store";
+import { consentDecisionKey, consentDisclosureKey, requireConsentReceipt, validateConsentGrant } from "./consent-audit";
 import { betaCreditFunding } from "../credits/postgres-beta-credits";
 import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
@@ -1298,8 +1302,13 @@ export class PostgresCallRepository implements CallRepository {
     const timeline = await this.#sql<import("@callassist/contracts").PreparationRequestTrace[]>`
       SELECT o.id,o.stage,o.requested_model AS model,o.started_at AS "startedAt",
         r.completed_at AS "completedAt",r.duration_ms AS "durationMs",r.outcome,r.error_code AS "errorCode",
-        o.request_metadata AS metadata
+        o.request_metadata AS metadata, o.client_request_id AS "clientRequestId",
+        o.durable_job_generation AS generation, r.provider_request_id AS "providerRequestId", r.http_status AS "statusCode",
+        r.response_metadata AS diagnostics,
+        jsonb_build_object('input',u.input_text_tokens,'cachedInput',u.cached_input_text_tokens,
+          'output',u.output_text_tokens,'reasoning',u.reasoning_output_tokens) AS tokens
       FROM provider_operations o LEFT JOIN provider_operation_results r ON r.operation_id=o.id
+      LEFT JOIN provider_usage_records u ON u.operation_id=o.id
       WHERE o.call_preparation_id=${id} ORDER BY o.started_at,o.id LIMIT 100
     `;
     const [queue] = await this.#sql<{ milliseconds: number | null }[]>`
@@ -1308,8 +1317,16 @@ export class PostgresCallRepository implements CallRepository {
       FROM call_preparation_requests p LEFT JOIN durable_jobs j ON j.call_preparation_id=p.id
       LEFT JOIN durable_job_attempts a ON a.job_id=j.id WHERE p.id=${id} GROUP BY p.created_at
     `;
-    return { timeline: timeline.map(row => ({ ...row, startedAt: new Date(row.startedAt).toISOString(),
-      completedAt: row.completedAt ? new Date(row.completedAt).toISOString() : null })), initialQueueMs: queue?.milliseconds ?? null };
+    const attempts = await this.#sql<import("@callassist/contracts").PreparationWorkerAttemptTrace[]>`
+      SELECT a.generation,a.attempt_number AS "attemptNumber",a.started_at AS "startedAt",
+        a.completed_at AS "completedAt",a.outcome,a.error_code AS "errorCode"
+      FROM durable_job_attempts a JOIN durable_jobs j ON j.id=a.job_id
+      WHERE j.call_preparation_id=${id} ORDER BY a.started_at,a.id LIMIT 100
+    `;
+    const normalizeTimes = <T extends { startedAt: string; completedAt: string | null }>(row: T) => ({ ...row,
+      startedAt: new Date(row.startedAt).toISOString(), completedAt: row.completedAt ? new Date(row.completedAt).toISOString() : null });
+    return { timeline: timeline.map(normalizeTimes), initialQueueMs: queue?.milliseconds ?? null,
+      workerAttempts: attempts.map(normalizeTimes) };
   }
 
   async recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor) {
@@ -1324,6 +1341,63 @@ export class PostgresCallRepository implements CallRepository {
         AND call_brief_id=${callId} AND status IN ('dialing','in_progress','awaiting_approval') FOR UPDATE`;
       if (!attempt) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
       if (attempt.runtime_descriptor === null) await tx`UPDATE call_attempts SET runtime_descriptor=${tx.json(descriptor)} WHERE id=${attemptId}`;
+    });
+  }
+
+  getVoiceConsentSettings() { return new PostgresVoiceConsentPolicyStore(this.#sql).get(); }
+  updateVoiceConsentSettings(input: VoiceConsentSettingsUpdate, actorUserId: string) {
+    return new PostgresVoiceConsentPolicyStore(this.#sql).update(input, actorUserId);
+  }
+  async getConsentRuntimePolicy(callId: string, attemptId: string) {
+    const [row] = await this.#sql`SELECT consent_runtime_policy FROM call_attempts a
+      JOIN call_briefs b ON b.id=a.call_brief_id WHERE a.id=${attemptId} AND b.id=${callId} AND b.data_deleted_at IS NULL`;
+    if (!row) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return voiceConsentRuntimePolicySchema.parse(row.consent_runtime_policy ?? defaultVoiceConsentRuntimePolicy);
+  }
+  async #lockConsentAttempt(tx: postgres.TransactionSql, callId: string, attemptId: string) {
+    const calls = await tx`SELECT id FROM call_briefs WHERE id=${callId} AND data_deleted_at IS NULL FOR UPDATE`;
+    if (!calls.length) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const [attempt] = await tx`SELECT id,compilation_snapshot_hash FROM call_attempts WHERE call_brief_id=${callId}
+      ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`;
+    const active = await tx`SELECT id FROM call_attempts WHERE id=${attemptId} AND status IN ('dialing','in_progress')`;
+    if (!attempt || attempt.id !== attemptId || !active.length) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    return attempt;
+  }
+  async #consentEvents(tx: postgres.TransactionSql, callId: string, attemptId: string) {
+    const rows = await tx<CallTelemetryEventRow[]>`SELECT id,call_brief_id AS "callBriefId",call_attempt_id AS "callAttemptId",
+      user_id AS "userId",sequence,schema_version AS "schemaVersion",event_name AS "eventName",source,stage,severity,metadata,
+      occurred_at AS "occurredAt" FROM call_events WHERE call_brief_id=${callId} AND call_attempt_id=${attemptId}
+      AND event_name IN ('disclosure.completed','consent.decision') ORDER BY sequence`;
+    return rows.map(mapCallTelemetryEvent);
+  }
+  async recordConsentDisclosure(callId: string, input: ConsentDisclosureInput) {
+    const parsed = consentDisclosureInputSchema.parse(input);
+    return this.#sql.begin(async tx => {
+      const attempt = await this.#lockConsentAttempt(tx, callId, parsed.callAttemptId);
+      if (attempt.compilation_snapshot_hash !== parsed.compilationSnapshotHash) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+      const event = await this.#appendTelemetry(tx, callId, { callAttemptId: parsed.callAttemptId,
+        idempotencyKey: consentDisclosureKey(parsed),
+        occurredAt: parsed.acknowledgedAt, payload: { name: "disclosure.completed", metadata: parsed } });
+      if (JSON.stringify(event.payload.metadata) !== JSON.stringify(parsed)) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+      return event.id;
+    });
+  }
+  async #recordConsentDecision(tx: postgres.TransactionSql, callId: string, input: ConsentDecisionInput) {
+    const parsed = consentDecisionInputSchema.parse(input), events = await this.#consentEvents(tx, callId, parsed.callAttemptId);
+    requireConsentReceipt(events, parsed.callAttemptId, parsed.disclosureReceiptId);
+    const latest = events.findLast(e => e.payload.name === "consent.decision");
+    if (latest?.payload.name === "consent.decision" && latest.payload.metadata.revision > parsed.revision)
+      throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    const event = await this.#appendTelemetry(tx, callId, { callAttemptId: parsed.callAttemptId,
+      idempotencyKey: consentDecisionKey(parsed), payload: { name: "consent.decision", metadata: parsed } });
+    if (JSON.stringify(event.payload.metadata) !== JSON.stringify(parsed)) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+    return event.id;
+  }
+  async recordConsentDecision(callId: string, input: ConsentDecisionInput) {
+    const parsed = consentDecisionInputSchema.parse(input);
+    return this.#sql.begin(async tx => {
+      await this.#lockConsentAttempt(tx, callId, parsed.callAttemptId);
+      return this.#recordConsentDecision(tx, callId, parsed);
     });
   }
 
@@ -1781,6 +1855,7 @@ export class PostgresCallRepository implements CallRepository {
         throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
       }
       await this.#insertProviderOperationResult(transaction, input.operationId, {
+        diagnostics: input.diagnostics,
         outcome: input.outcome,
         providerRequestId: input.providerRequestId,
         providerResponseId: input.providerResponseId,
@@ -4978,6 +5053,8 @@ export class PostgresCallRepository implements CallRepository {
           ${now}
         )
       `;
+      const consentPolicy = await readVoiceConsentPolicy(transaction);
+      await transaction`UPDATE call_attempts SET consent_runtime_policy=${transaction.json(consentPolicy)} WHERE id=${attemptId}`;
       if (this.betaControls) await transaction`UPDATE call_attempts SET max_duration_seconds=${maxDurationSeconds!} WHERE id=${attemptId}`;
       await transaction`UPDATE call_attempts SET recipient_contact_hash=${this.recipientOptOut.hash(call.phoneNumber)} WHERE id=${attemptId}`;
       if (userId) {
@@ -5559,7 +5636,6 @@ export class PostgresCallRepository implements CallRepository {
     evidence?: import("@callassist/contracts").ConsentEvidence
   ) {
     const recordingId = randomUUID();
-    const now = new Date();
     const providerCallId = await this.#sql.begin(async (transaction) => {
       // Match answering/Stop lock order: parent call, then attempt.
       await transaction`SELECT id FROM call_briefs WHERE id=${id} FOR UPDATE`;
@@ -5569,13 +5645,15 @@ export class PostgresCallRepository implements CallRepository {
           provider: CallAttemptRecord["provider"];
           providerCallId: string | null;
           attemptStatus: CallBrief["status"];
+          runtimeDescriptor: import("../voice/runtime-descriptor").RuntimeDescriptor | null;
         }[]
       >`
         SELECT
           id AS "attemptId",
           provider,
           provider_call_id AS "providerCallId",
-          status AS "attemptStatus"
+          status AS "attemptStatus",
+          runtime_descriptor AS "runtimeDescriptor"
         FROM call_attempts
         WHERE call_brief_id = ${id}
         ORDER BY created_at DESC
@@ -5605,6 +5683,25 @@ export class PostgresCallRepository implements CallRepository {
       if (existing.count > 0) {
         throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
       }
+
+      if (evidence) {
+        evidence = consentEvidenceSchema.parse(evidence);
+        if (evidence.consentDecision) {
+          const decision = evidence.consentDecision;
+          if (evidence.callAttemptId !== attempt.attemptId || decision.callAttemptId !== attempt.attemptId ||
+              decision.disclosureReceiptId !== evidence.disclosureReceiptId || decision.decision !== "affirmative" ||
+              decision.decisionMethod !== evidence.decisionMethod || decision.locale !== evidence.locale ||
+              (evidence.method === "dtmf") !== (decision.decisionMethod === "dtmf")) throw new CallRepositoryError("RECORDING_NOT_AVAILABLE");
+          evidence = { ...evidence, decisionId: await this.#recordConsentDecision(transaction, id, decision) };
+        }
+      }
+      const consentEvents = await this.#consentEvents(transaction, id, attempt.attemptId);
+      evidence = validateConsentGrant(evidence, attempt.attemptId, consentEvents,
+        !!attempt.runtimeDescriptor?.consentPolicy || consentEvents.some(e => e.payload.name === "disclosure.completed"));
+
+      // Admission follows its durable decision, including an embedded decision
+      // written above. Do not timestamp a request before waiting on the locks.
+      const now = new Date();
 
       await transaction`
         INSERT INTO call_recordings (
@@ -5642,6 +5739,10 @@ export class PostgresCallRepository implements CallRepository {
           metadata: evidence ?? { method: "dtmf_1" }
         }
       });
+      await this.#appendTelemetry(transaction, id, { callAttemptId: attempt.attemptId,
+        idempotencyKey: `recording:${recordingId}:requested`, occurredAt: now.toISOString(),
+        payload: { name: "recording.requested", metadata: { recordingId,
+          ...(evidence?.decisionId ? { decisionId: evidence.decisionId, disclosureReceiptId: evidence.disclosureReceiptId } : {}) } } });
       return attempt.providerCallId;
     });
 
@@ -5708,6 +5809,7 @@ export class PostgresCallRepository implements CallRepository {
           payload: {
             name: "recording.started",
             metadata: {
+              recordingId, providerRecordingId,
               providerStatus: safeTelemetryCode(
                 providerStatus,
                 "unknown_provider_status"
@@ -5880,14 +5982,15 @@ export class PostgresCallRepository implements CallRepository {
         providerStatus: input.providerStatus,
         recordingId: input.recordingId
       });
-      if (status === "recording" && input.providerStatus === "in-progress") {
+      if (status !== "deleted" && input.providerStatus === "in-progress") {
         await this.#appendTelemetry(transaction, row.callId, {
           callAttemptId: row.callAttemptId,
           idempotencyKey: `recording:${input.recordingId}:started`,
           occurredAt: startedAt.toISOString(),
           payload: {
             name: "recording.started",
-            metadata: { providerStatus: "in-progress" }
+            metadata: { providerStatus: "in-progress", recordingId: input.recordingId,
+              providerRecordingId: input.providerRecordingId, ...(input.startedAt ? { providerReportedAt: input.startedAt } : {}) }
           }
         });
       } else if (status === "available" && input.providerStatus === "completed") {
@@ -8205,12 +8308,13 @@ export class PostgresCallRepository implements CallRepository {
     const insertedResult = await transaction`
       INSERT INTO provider_operation_results (
         operation_id, outcome, provider_request_id, provider_response_id,
-        provider_model, http_status, error_code, completed_at, duration_ms
+        provider_model, http_status, error_code, completed_at, duration_ms, response_metadata
       ) VALUES (
         ${operationId}, ${input.outcome}, ${input.providerRequestId},
         ${input.providerResponseId}, ${input.providerModel},
         ${input.statusCode}, ${input.errorCode},
-        ${input.completedAt}::timestamptz, ${input.durationMs}
+        ${input.completedAt}::timestamptz, ${input.durationMs},
+        ${input.diagnostics ? transaction.json(preparationTransportDiagnosticsSchema.parse(input.diagnostics)) : null}
       )
       ON CONFLICT DO NOTHING
       RETURNING operation_id

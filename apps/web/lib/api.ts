@@ -2,6 +2,14 @@
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { betaMessages } from "./i18n/beta-messages";
 import { planReviewListSchema, planReviewDetailSchema, planReviewEvidenceSchema, type PlanReviewFilters, type PlanReviewUpdate } from "@callassist/contracts";
+import { voiceConsentSettingsViewSchema, type VoiceConsentSettingsUpdate } from "@callassist/contracts";
+
+export async function getVoiceConsentSettings() {
+  return voiceConsentSettingsViewSchema.parse(await apiRequest("/api/admin/system/voice-consent", { cache: "no-store" }));
+}
+export async function updateVoiceConsentSettings(input: VoiceConsentSettingsUpdate) {
+  return voiceConsentSettingsViewSchema.parse(await apiRequest("/api/admin/system/voice-consent", { method: "PUT", body: JSON.stringify(input) }));
+}
 
 export async function listPlanReviews(filters: Partial<PlanReviewFilters> = {}) {
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));

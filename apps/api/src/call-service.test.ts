@@ -481,6 +481,13 @@ describe("CallService", () => {
       .toHaveLength(2);
     expect(operations.every(({ result }) => result?.outcome === "succeeded"))
       .toBe(true);
+    const inspector = await service.getAdminCallPreparationInspector(preparation.id);
+    expect(inspector.timeline).toHaveLength(3);
+    expect(inspector.timeline!.every(request => request.diagnostics?.version === 1)).toBe(true);
+    expect(inspector.timeline!.find(request => request.providerRequestId === "req_invalid_one"))
+      .toMatchObject({ diagnostics: { requestCreatedMs: null, socketWriteMs: null, failurePhase: null },
+        statusCode: 200, tokens: { input: 200, output: 60 } });
+    expect(inspector.workerAttempts).toMatchObject([{ attemptNumber: 1, outcome: "dead_letter" }]);
     await expect(service.getAdminCallPreparationInspector(preparation.id))
       .resolves.toMatchObject({
         preparation: {
