@@ -1,6 +1,6 @@
 # SHPROHLI engineer guide
 
-Source checkpoint: 2026-10-01, schema catalog `0001`–`0099`. This describes the
+Source checkpoint: 2026-10-04, schema catalog `0001`–`0101`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
 The [implementation record](pre-production-implementation-2026-10-01.md) states
@@ -95,7 +95,7 @@ Default `VOICE_RUNTIME_DRIVER=live`, `VOICE_RUNTIME_LIVE_FALLBACK=false`. One
 `UnifiedLiveCall` manages the native session from admission/disclosure through
 conversation and closing. Realtime and legacy hybrid fallback remain deliberate
 compatibility code; removing them requires a separate supported-runtime decision.
-The source runtime identifier is `live-managed-v7`.
+The source runtime identifier is `live-managed-v9`.
 
 Live handles ordinary speech and native Responses delegation. The application owns
 the hard boundaries: validated tool schemas and permissions, consent, recording,
@@ -110,14 +110,36 @@ their own policy; `unknown` is inconclusive. A later AMD callback cannot reverse
 accepted consent. Consent tools are restricted to the consent stage. Recording
 and task access wait for the required consent/disclosure/recording conditions.
 Pre-consent recipient audio/transcript is not retained as conversational evidence.
+Admin System selects `semantic_native` (the default) or
+`hybrid_deterministic_v1`; each attempt pins the policy revision. Hybrid uses a
+200 ms fast settle window for deterministic replies and a 900 ms semantic settle
+window for ambiguous replies. Live transcript deltas do not guarantee utterance
+completion: the accepted short-window prefix risk remains explicit. Negative or
+qualified replies take precedence; unclear input retains semantic, clarification
+and DTMF fallback. `assistanceReason` defaults to `none`; the two assistance
+reasons remain explicit opt-ins in the approved disclosure snapshot.
+
+The audit binds disclosure playback to the consent decision and its method
+(`deterministic_voice`, `semantic_voice` or `dtmf`), recording request and provider
+recording ID. After recording admission, v9 prepares context silently, waits for
+context acknowledgements, opens audio forwarding and separately requests task
+speech. That instruction does not establish when speech will arrive. Background
+speech is a leading hypothesis for one delayed production opening; a quiet-room
+comparison is pending. See the [dated call analysis](live-runtime-stability-plan-2026-10-04.md).
+
 Application-owned speech and terminal playback are journaled; hangup waits for the
 correct uncleared playback mark. Recipient corrections and interrupted playback
 are handled explicitly rather than treating an attempted send as heard speech.
+Closing playback is idempotent. Managed task decisions use the later of the
+settled-answer grace (5 seconds) and last native voiced-packet quiet window
+(2 seconds), with readiness and backend-occupancy checks; these are not an
+opening-speech delay timer.
 
 Each new native attempt records a runtime descriptor before OpenAI Live/TTS startup:
 runtime version, optional validated release SHA, compiler/policy versions,
 hashes of instructions and compilation, models, voice, locale and disclosure
-version. The optional release value comes from a valid 40-hex `SHPROHLI_RELEASE_SHA`.
+version and pinned consent policy. The optional release value comes from a valid
+40-hex `SHPROHLI_RELEASE_SHA`.
 It contains hashes, not raw prompts, and is cleared by call/account deletion.
 Historical missing descriptors stay null. A code/config change does not
 retroactively identify an old call's runtime.
@@ -138,6 +160,13 @@ effective provider timeout. The admin preparation
 inspector shows initial queue delay, stage timing, errors and attempts. Historical
 rows without request metadata are explicitly incomplete. Public status uses localized
 stage labels; browser polling never authorizes a second paid compilation by itself.
+
+Optional result diagnostics now separate reservation, dispatch/socket/body send,
+response headers, body read/parse and numeric provider processing/rate-limit
+metadata. The inspector and export preserve missing historical evidence as
+unknown. Overlapping offsets must not be summed; waiting for headers does not
+prove provider processing time. No raw prompts, headers or audio are added.
+See [transport diagnostics and measurements](preparation-latency-diagnostics-2026-10-04.md).
 
 The audit found a small local sample's long tail dominated by provider/network
 failures and retries; short initial queue times do not prove zero congestion under
@@ -338,7 +367,9 @@ separate purposes/keys. Never log raw environment or decrypted rows in diagnosti
 Migration names/checksums are immutable once applied. `db:migrate:check` checks the
 catalog without applying it; ordinary migration application is a distinct explicit
 step. Migrations `0095`–`0099` add accounting/audio exports, beta allowances,
-plan-review cases, public-copy updates and preparation request metadata. Backfills
+plan-review cases, public-copy updates and preparation request metadata.
+Migration `0100` adds voice consent policy/audit support; `0101` adds preparation
+transport result metadata. Backfills
 and existing-account policy transitions remain explicit, reviewed actions.
 
 Deletion spans call inputs, transcripts, recordings, derived artifacts, safety

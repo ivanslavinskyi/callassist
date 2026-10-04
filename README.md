@@ -4,8 +4,10 @@ SHPROHLI helps people make everyday phone calls when speaking or the local langu
 is a barrier. Users prepare and approve a call plan, follow a conversation, and
 receive a saved transcript with optional translation, summary and recording transcription.
 
-The current source uses one native Live voice session (live-managed-v7) with
+The current source uses one native Live voice session (live-managed-v9) with
 application-owned consent, recording, tool authorization and closing playback.
+Consent recognition is configurable in Admin System: semantic mode remains the
+default; the hybrid mode checks short replies locally before semantic fallback.
 Realtime and legacy Live fallback remain explicit compatibility paths. The default
 is Live with fallback disabled. Production deployment is a separate operation;
 repository checks do not establish the currently deployed version.

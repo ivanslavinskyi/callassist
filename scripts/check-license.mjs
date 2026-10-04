@@ -9,7 +9,7 @@ export async function checkLicense(root = resolve(dirname(fileURLToPath(import.m
   const license = await readFile(join(root, 'LICENSE'), 'utf8').catch(() => '');
   if (!license) errors.push('Root LICENSE is missing or empty.');
   if (!license.includes('© 2026 Ivan Slavinskyi. All rights reserved.')) errors.push('LICENSE must name © 2026 Ivan Slavinskyi. All rights reserved.');
-  if (!license.includes('только с предварительного письменного согласия правообладателя')) errors.push('LICENSE must require prior written permission.');
+  if (!license.includes('only with the prior written consent of the copyright holder')) errors.push('LICENSE must require prior written permission.');
   const workspace = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
   const section = workspace.match(/^packages:\s*\r?\n((?:[ \t]+[^\r\n]*\r?\n|[ \t]*\r?\n)*)/m)?.[1] ?? '';
   const patterns = [...section.matchAll(/^\s*-\s*['"]?([^'"\s]+)['"]?\s*$/gm)].map(match => match[1]);

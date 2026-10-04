@@ -1,10 +1,17 @@
 # Documentation
 
-Current source reference, updated 2026-10-01:
+Current source reference, updated 2026-10-04:
 
 - [Engineer guide](engineer-guide.md): architecture, domain rules, runtime, API map,
   languages, storage, costs, telemetry, permissions and development workflow.
 - [Architecture entry point](architecture.md) and [API/configuration reference](runtime-reference.md).
+- [Hybrid consent implementation](hybrid-consent-implementation-2026-10-04.md):
+  pinned admin policy, deterministic recognition and consent/recording audit.
+- [Live v9 stability and call evidence](live-runtime-stability-plan-2026-10-04.md):
+  opening/closing transitions and the pending quiet-room comparison after a
+  delayed opening with background speech.
+- [Preparation latency diagnostics](preparation-latency-diagnostics-2026-10-04.md):
+  provider/transport measurements, interpretation and verification.
 - [Approved audit and implementation plan](pre-production-audit-and-implementation-plan-2026-10-01.md).
 - [Implementation and verification record](pre-production-implementation-2026-10-01.md).
 
