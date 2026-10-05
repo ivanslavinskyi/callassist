@@ -1,6 +1,6 @@
 # Documentation
 
-Current source reference, updated 2026-10-04:
+Current source reference, updated 2026-10-05:
 
 - [Engineer guide](engineer-guide.md): architecture, domain rules, runtime, API map,
   languages, storage, costs, telemetry, permissions and development workflow.
@@ -12,6 +12,14 @@ Current source reference, updated 2026-10-04:
   delayed opening with background speech.
 - [Preparation latency diagnostics](preparation-latency-diagnostics-2026-10-04.md):
   provider/transport measurements, interpretation and verification.
+- [Preparation implementation re-audit](preparation-implementation-audit-2026-10-05.md):
+  reproduced HTTP/retry/deadline defects, incident evidence and a smaller first change.
+- [Preparation performance and scaling plan](preparation-performance-and-scaling-plan-2026-10-05.md):
+  proposed streaming telemetry, admin model and Fast mode policy, worker roles,
+  multiuser concurrency and capacity validation. Not an implementation record.
+- [Preparation runtime](preparation-runtime.md): implemented policy, roles, shared
+  admission, streaming diagnostics, quality gates and verification tools.
+- [Preparation implementation evidence](preparation-performance-implementation-2026-10-05.md).
 - [Approved audit and implementation plan](pre-production-audit-and-implementation-plan-2026-10-01.md).
 - [Implementation and verification record](pre-production-implementation-2026-10-01.md).
 

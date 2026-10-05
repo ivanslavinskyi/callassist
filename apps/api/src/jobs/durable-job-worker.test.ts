@@ -34,7 +34,7 @@ function providerReservation(preparationId: string, generation: number) {
     requestedModel: "gpt-5.6",
     clientRequestId: id,
     startedAt: "2098-11-02T01:00:01.000Z",
-    maxRequests: 8,
+    maxRequests: 8, estimatedTokens: 100,
     durableJobGeneration: generation
   };
 }
@@ -303,10 +303,13 @@ describe("durable job worker", () => {
     };
     await repository.claimCallPreparation(preparation.id, firstLease);
     for (let request = 0; request < 5; request += 1) {
+      const reservation = providerReservation(preparation.id, firstJob!.generation);
       await expect(repository.reserveCallPreparationProviderRequest(
-        providerReservation(preparation.id, firstJob!.generation),
+        reservation,
         firstLease
       )).resolves.toBe(true);
+      await repository.completeProviderOperation({ operationId: reservation.id, outcome: "provider_error", providerRequestId: null,
+        providerResponseId: null, providerModel: null, statusCode: 500, completedAt: firstLease.checkedAt, durationMs: 1, errorCode: "TEST_PROVIDER_FAILURE", usage: null });
     }
     await repository.failDurableJob(
       firstJob!.id,
@@ -329,10 +332,13 @@ describe("durable job worker", () => {
     };
     await repository.claimCallPreparation(preparation.id, secondLease);
     for (let request = 0; request < 3; request += 1) {
+      const reservation = providerReservation(preparation.id, secondJob!.generation);
       await expect(repository.reserveCallPreparationProviderRequest(
-        providerReservation(preparation.id, secondJob!.generation),
+        reservation,
         secondLease
       )).resolves.toBe(true);
+      await repository.completeProviderOperation({ operationId: reservation.id, outcome: "provider_error", providerRequestId: null,
+        providerResponseId: null, providerModel: null, statusCode: 500, completedAt: secondLease.checkedAt, durationMs: 1, errorCode: "TEST_PROVIDER_FAILURE", usage: null });
     }
     await expect(repository.reserveCallPreparationProviderRequest(
       providerReservation(preparation.id, secondJob!.generation),

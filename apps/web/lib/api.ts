@@ -1,3 +1,13 @@
+import { preparationSettingsViewSchema, type PreparationSettingsUpdate, type PreparationProfileAdmission } from "@callassist/contracts";
+export async function getPreparationSettings() {
+  return preparationSettingsViewSchema.parse(await apiRequest("/api/admin/system/preparation", { cache: "no-store" }));
+}
+export async function updatePreparationSettings(input: PreparationSettingsUpdate) {
+  return preparationSettingsViewSchema.parse(await apiRequest("/api/admin/system/preparation", { method: "PUT", body: JSON.stringify(input) }));
+}
+export async function admitPreparationProfile(input: PreparationProfileAdmission) {
+  return preparationSettingsViewSchema.parse(await apiRequest("/api/admin/system/preparation/profiles", { method: "POST", body: JSON.stringify(input) }));
+}
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { betaMessages } from "./i18n/beta-messages";
@@ -778,7 +788,7 @@ export function getCallPreparationErrorMessage(
   if (error.code === "BETA_BUDGET_UNCONFIGURED") return copy.budgetUnconfigured;
   if (error.code === "BETA_BUDGET_EXHAUSTED") return copy.budgetExhausted;
   if (error.code === "BETA_SPENDING_PAUSED") return copy.spendingPaused;
-  if (error.code === "BRIEF_COMPILER_UNAVAILABLE") {
+  if (["BRIEF_COMPILER_UNAVAILABLE", "PREPARATION_QUEUE_FULL", "PREPARATION_USER_QUEUE_FULL"].includes(error.code)) {
     return copy.unavailable;
   }
   if (error.code === "CALL_PREPARATION_TIMEOUT") {

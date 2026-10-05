@@ -1,3 +1,4 @@
+import { workerCapacity } from "./worker-capacity";
 import { RuntimeConfigurationError, validateRuntimeEnvironment, type RuntimeProcess } from "./runtime-environment";
 import { emailBrandingFromEnv } from "../auth/email-branding";
 import { textCapabilitiesFromEnv } from "../text-processing/text-capabilities";
@@ -5,6 +6,7 @@ import { ANSWERING_POLICY_VERSION } from "@callassist/contracts";
 
 export function checkDeployment(environment: NodeJS.ProcessEnv) {
   const issues: string[] = [];
+  try { workerCapacity(environment); } catch (error) { issues.push(error instanceof Error ? error.message : "Invalid worker capacity"); }
   const production = { ...environment, NODE_ENV: "production" };
   for (const runtime of ["api", "worker"] satisfies RuntimeProcess[]) {
     try { validateRuntimeEnvironment(production, runtime); }

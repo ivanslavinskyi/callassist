@@ -10,6 +10,7 @@ export const durableJobTypes = [
   "provider_recording_reconciliation"
 ] as const;
 
+export type DurableWorkClass = "preparation" | "review" | "operations" | "background";
 export type DurableJobType = typeof durableJobTypes[number];
 export type DurableJobStatus =
   | "queued"
@@ -19,6 +20,7 @@ export type DurableJobStatus =
   | "cancelled";
 
 export type DurableJob = {
+  workClass?: DurableWorkClass;
   id: string;
   type: DurableJobType;
   recordingId: string | null;
@@ -59,6 +61,8 @@ export type DurableJobAttempt = {
 };
 
 export type DurableJobLease = {
+  signal?: AbortSignal;
+  useDatabaseTime?: boolean;
   jobId: string;
   workerId: string;
   checkedAt: string;
@@ -79,6 +83,8 @@ export type EnqueueDurableJobInput = {
 };
 
 export type ClaimDurableJobInput = {
+  workClasses?: DurableWorkClass[];
+  useDatabaseTime?: boolean;
   types: DurableJobType[];
   workerId: string;
   now: string;

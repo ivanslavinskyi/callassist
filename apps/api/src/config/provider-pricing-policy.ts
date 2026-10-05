@@ -1,3 +1,4 @@
+import { preparationPricingVersion, preparationRates } from "./preparation-pricing";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 
 export const openAIPublicPricingVersion = "openai-public-2026-09-25";
@@ -119,10 +120,16 @@ export function calculateProviderUsageCost(
 function calculateUsageCost(usage: AdminProviderUsageBucket, version: string): ProviderUsageCost {
   // The persisted version selects an immutable snapshot. Never change old cards
   // when adding new prices; register a new snapshot and change the insert default.
-  if (![openAIPublicPricingVersion, previousPricingVersion].includes(version)) {
+  const preparationTier = version.startsWith(`${preparationPricingVersion}:`) ? version.slice(preparationPricingVersion.length+1) : null;
+  if (![openAIPublicPricingVersion, previousPricingVersion].includes(version) && !["default","fast"].includes(preparationTier ?? "")) {
     return { ...unmatchedCost(), pricingVersion: version, unpricedMetrics: ["pricing_version"] };
   }
-  const cards = version === previousPricingVersion ? openAIPublicRateCards : [...openAIPublicRateCards, ...liveRateCards];
+  const cards: ProviderRateCard[] = preparationTier ? Object.entries(preparationRates).map(([model, rates]) => {
+    const multiplier = preparationTier === "fast" ? 2 : 1;
+    return { provider: "openai", model: new RegExp(`^${model.replaceAll(".", "\\.")}${model === "gpt-5.6" ? "(?:-sol)?" : ""}(?:-\\d{4}-\\d{2}-\\d{2})?$`), billing: "tokens",
+      rates: { inputTextUsdMicrosPerMillion: rates.input*multiplier, cachedInputTextUsdMicrosPerMillion: rates.cached*multiplier,
+        cacheWriteInputTextUsdMicrosPerMillion: rates.write*multiplier, outputTextUsdMicrosPerMillion: rates.output*multiplier } };
+  }) : version === previousPricingVersion ? openAIPublicRateCards : [...openAIPublicRateCards, ...liveRateCards];
   const card = cards.find((candidate) =>
     candidate.provider === usage.provider && candidate.model.test(usage.model)
   );

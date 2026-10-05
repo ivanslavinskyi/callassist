@@ -133,9 +133,10 @@ export function callTextRepositorySuite(makeRepository:()=>CallRepository,owner:
       expect(await repository.getTextArtifactChunks(artifact.id,currentLease)).toEqual([{index:0,payload:{safe:true}}]);
       for(let index=0;index<8;index++) {
         const request={id:randomUUID(),artifactId:artifact.id,provider:"openai" as const,operationType:"text_translation" as const,
-          stage:`text.translation.${generation}.${index}`,requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),maxRequests:24,durableJobGeneration:generation};
+          stage:`text.translation.${generation}.${index}`,requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),estimatedTokens:100,maxRequests:24,durableJobGeneration:generation};
         expect(await repository.reserveTextArtifactProviderRequest(request,currentLease)).toBe(true);
         expect(await repository.reserveTextArtifactProviderRequest(request,currentLease)).toBe(true);
+        await finishProviderRequest(repository, request.id);
       }
       if(generation===3) expect(await repository.reserveTextArtifactProviderRequest({id:randomUUID(),artifactId:artifact.id,provider:"openai",operationType:"text_translation",
         stage:"text.translation.exhausted",requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),maxRequests:100,durableJobGeneration:3},currentLease)).toBe(false);
@@ -158,8 +159,10 @@ export function callTextRepositorySuite(makeRepository:()=>CallRepository,owner:
     const currentLease=lease(job);
     await repository.claimTextArtifact(artifact.id,currentLease);
     if(code==="TEXT_REQUEST_BUDGET_EXHAUSTED") for(let index=0;index<24;index++) {
-      await repository.reserveTextArtifactProviderRequest({id:randomUUID(),artifactId:artifact.id,provider:"openai",operationType:"text_translation",
-        stage:`text.${index}`,requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),maxRequests:24,durableJobGeneration:job.generation},currentLease);
+      const id=randomUUID();
+      await repository.reserveTextArtifactProviderRequest({id,artifactId:artifact.id,provider:"openai",operationType:"text_translation",
+        stage:`text.${index}`,requestedModel:"test-model",clientRequestId:randomUUID(),startedAt:new Date().toISOString(),estimatedTokens:100,maxRequests:24,durableJobGeneration:job.generation},currentLease);
+      await finishProviderRequest(repository,id);
     }
     // A worker can die after claiming the artifact, without writing failTextArtifact.
     await repository.failDurableJob(job.id,job.leaseOwner!,code,new Date().toISOString(),new Date().toISOString(),false);
@@ -189,4 +192,9 @@ export function callTextRepositorySuite(makeRepository:()=>CallRepository,owner:
     await repository.completeTextArtifact(artifact.id,{fields:[{id:"question",text:"Які години роботи?"}]},lease(job));
     expect(await repository.getTextArtifact(brief.id,artifact.id)).toMatchObject({status:"ready",retryable:false});
   });
+}
+
+async function finishProviderRequest(repository: CallRepository, operationId: string) {
+  await repository.completeProviderOperation({operationId,outcome:"provider_error",providerRequestId:null,providerResponseId:null,providerModel:null,
+    statusCode:500,completedAt:new Date().toISOString(),durationMs:1,errorCode:"TEST_PROVIDER_FAILURE",usage:null});
 }

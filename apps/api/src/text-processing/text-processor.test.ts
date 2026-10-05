@@ -287,6 +287,18 @@ describe("OpenAI text transformations", () => {
     })).rejects.toThrow("accounting unavailable");
     expect(fixture.fetchImplementation).toHaveBeenCalledTimes(1);
   });
+  it("bounds a stalled reservation before dispatching a review request",async()=>{
+    const fetchImplementation=vi.fn<typeof fetch>();
+    const processor=new OpenAITextProcessor({apiKey:"fixture",timeoutMs:10,fetchImplementation});
+    await expect(processor.process(plan,{beforeProviderRequest:()=>new Promise(()=>{})})).rejects.toMatchObject({code:"TEXT_REQUEST_TIMEOUT"});
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+  it("bounds terminal accounting without publishing a generated review",async()=>{
+    const fetchImplementation=vi.fn<typeof fetch>().mockResolvedValue(response(translatedPlan));
+    const processor=new OpenAITextProcessor({apiKey:"fixture",timeoutMs:10,fetchImplementation});
+    await expect(processor.process(plan,{afterProviderRequest:()=>new Promise(()=>{})})).rejects.toMatchObject({code:"TEXT_REQUEST_TIMEOUT"});
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
 
   it("rejects oversized, duplicate or reversed-time sources before a paid request", async () => {
     const fixture = setup(translatedPlan);

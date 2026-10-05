@@ -1,3 +1,4 @@
+import { lockPreparationProviderCapacity, insertPreparationProviderPermit } from "./preparation-provider-capacity";
 import { randomUUID } from "node:crypto";
 import { assertSummaryArtifactOutput } from "../text-processing/summary-calendar";
 import type { VoiceActionInput } from "./voice-action";
@@ -219,7 +220,8 @@ export class PostgresCallTextStore {
 
   async reserveTextArtifactProviderRequest(input:TextArtifactProviderReservationInput,lease:DurableJobLease) {
     return this.sql.begin(async tx=>{
-      if (this.betaControlsEnabled) await reserveBetaSpend(tx,"text",`provider:${input.id}`);
+      await lockPreparationProviderCapacity(tx,input.id,input.estimatedTokens);
+      if (this.betaControlsEnabled) await reserveBetaSpend(tx,"text",`provider:${input.id}`, undefined, input.reserveUsdMicros ?? 0);
       const row=await requireTextLease(tx,input.artifactId,lease);
       if(row.status!=="processing"||input.durableJobGeneration!==lease.generation) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
       const existing=await tx`SELECT id FROM provider_operations WHERE id=${input.id} AND text_artifact_id=${input.artifactId} AND durable_job_id=${lease.jobId}`;
@@ -227,8 +229,9 @@ export class PostgresCallTextStore {
       const reserved=await tx`UPDATE call_text_artifacts SET provider_request_count=provider_request_count+1
         WHERE id=${input.artifactId} AND provider_request_count<${Math.min(input.maxRequests,textArtifactMaximumRequests)}`;
       if(!reserved.count) return false;
-      await tx`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,text_artifact_id,durable_job_id,durable_job_generation,started_at)
-        VALUES(${input.id},${input.provider},${input.operationType},${input.stage},${input.requestedModel},${input.clientRequestId},${row.call_brief_id},${input.artifactId},${lease.jobId},${input.durableJobGeneration},${input.startedAt})`;
+      await tx`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,text_artifact_id,durable_job_id,durable_job_generation,started_at,requested_service_tier,pricing_version)
+        VALUES(${input.id},${input.provider},${input.operationType},${input.stage},${input.requestedModel},${input.clientRequestId},${row.call_brief_id},${input.artifactId},${lease.jobId},${input.durableJobGeneration},${input.startedAt},${input.requestedServiceTier ?? null},${input.pricingVersion ?? null})`;
+      await insertPreparationProviderPermit(tx,input.id,lease,120000,input.estimatedTokens);
       return true;
     });
   }
@@ -352,7 +355,7 @@ async function requireTextLease(tx:postgres.TransactionSql,id:string,lease:Durab
   await requireTextMutationCall(tx,target.call_brief_id);
   const valid=await tx`SELECT id FROM durable_jobs WHERE id=${lease.jobId} AND text_artifact_id=${id} AND status='running'
     AND lease_owner=${lease.workerId} AND generation=${lease.generation??-1} AND attempt_count=${lease.attemptNumber??-1}
-    AND lease_expires_at>GREATEST(now(),${lease.checkedAt}::timestamptz) FOR UPDATE`;
+    AND lease_expires_at>CASE WHEN ${lease.useDatabaseTime ?? false} THEN clock_timestamp() ELSE GREATEST(clock_timestamp(),${lease.checkedAt}::timestamptz) END FOR UPDATE`;
   if(!valid.count) throw new CallRepositoryError("DURABLE_JOB_LEASE_LOST");
   const [row]=await tx<ArtifactRow[]>`SELECT * FROM call_text_artifacts WHERE id=${id} FOR UPDATE`;
   if(!row||row.status==="cancelled") throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");

@@ -1,3 +1,4 @@
+import { PreparationPolicyError } from "../storage/preparation-policy-store";
 import { uncertainAssessment } from "../credits/final-assessment";
 import {
   TEXT_LANGUAGES, callSummaryPayloadSchema, planReviewPayloadSchema, transcriptTranslationPayloadSchema, isPlanPreparationFailure, supportsSummaryAssessment,
@@ -10,7 +11,7 @@ import { textArtifactMaximumRequests } from "../storage/call-text-repository";
 import { DurableJobExecutionError, type DurableJob, type DurableJobLease } from "../jobs/durable-job";
 import { planReviewFields } from "./plan-review-fields";
 import { textDirectionEnabled, type TextCapabilities } from "./text-capabilities";
-import { TextProcessingError, textGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
+import { TEXT_PROCESSOR_VERSION, TextProcessingError, textGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
 import { summaryInput } from "./summary-input";
 import { buildSummarySourceContext, assertSummaryContext } from "./summary-source";
 import { composeCalendarSummary } from "./summary-calendar";
@@ -30,11 +31,13 @@ export class TextArtifactService {
       throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
     }
     const kind = reviewKind(snapshot.compilation);
-    const existing = await this.#find(callId, kind, source.compilationId, null, source.snapshotHash, input.targetLanguage);
+    const policy=await this.repository.getCompilationPreparationPolicy(callId,source.compilationId);
+    const generatorVersion=policy && this.processor.driver==='openai' ? `${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}` : textGeneratorVersion(this.processor,kind);
+    const existing = await this.#find(callId, kind, source.compilationId, null, source.snapshotHash, input.targetLanguage,generatorVersion);
     if (existing) return existing;
     this.#assertDirection(kind, reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage), input.targetLanguage);
     return this.repository.enqueueTextArtifact({ callId, kind, compilationId: source.compilationId, sourceHash: source.snapshotHash,
-      targetLanguage: input.targetLanguage, generatorVersion: textGeneratorVersion(this.processor, kind) });
+      targetLanguage: input.targetLanguage, generatorVersion });
   }
 
   async requestTranscriptArtifact(callId: string, kind: "transcript_translation" | "call_summary", input: { sourceRevisionId: string; targetLanguage: TextLanguage }) {
@@ -89,12 +92,15 @@ export class TextArtifactService {
     try {
       let artifact = await this.repository.claimTextArtifact(job.textArtifactId, lease());
       if (["ready", "stale", "cancelled"].includes(artifact.status)) return;
+      const policy = ["plan_review", "clarification_review"].includes(artifact.kind) && artifact.compilationId
+        ? await this.repository.getCompilationPreparationPolicy(artifact.callId,artifact.compilationId) : null;
       const snapshot = await this.repository.get(artifact.callId);
       if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
       const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
         ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
       this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
-      if (artifact.generatorVersion !== textGeneratorVersion(this.processor, artifact.kind)) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
+      const expectedGenerator=policy && this.processor.driver==='openai' ? `${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}` : textGeneratorVersion(this.processor,artifact.kind);
+      if (artifact.generatorVersion !== expectedGenerator) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
       if (artifact.kind === "call_summary") {
         artifact = await this.repository.freezeTextArtifactContext(artifact.id,
           artifact.sourceContext ?? await buildSummarySourceContext(this.repository, artifact), lease());
@@ -113,19 +119,20 @@ export class TextArtifactService {
         }
         this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
         const output = await this.processor.process(input, {
-          maxProviderRequests: 1,
+          maxProviderRequests: 1, signal: baseLease.signal, profile: policy?.review,
           beforeProviderRequest: (request) => {
             this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
             return this.repository.reserveTextArtifactProviderRequest({
             id: request.clientRequestId, artifactId: artifact.id, provider: request.provider, operationType: request.operationType,
-            stage: `${artifact.kind}.${index}`, requestedModel: request.model, clientRequestId: request.clientRequestId,
+            stage: `${artifact.kind}.${index}`, requestedModel: request.model, requestedServiceTier: request.requestedServiceTier, pricingVersion: policy?.pricingVersion, reserveUsdMicros: request.reserveUsdMicros, estimatedTokens: request.estimatedTokens, clientRequestId: request.clientRequestId,
             startedAt: request.startedAt, maxRequests: maximumRequests, durableJobGeneration: job.generation
             }, lease());
           },
           afterProviderRequest: (result) => this.repository.completeProviderOperation({
+            actualServiceTier: result.actualServiceTier, retryAfterMs: result.retryAfterMs,
             operationId: result.clientRequestId, outcome: result.outcome, providerRequestId: result.providerRequestId,
             providerResponseId: result.providerResponseId, providerModel: result.providerModel, statusCode: result.statusCode,
-            completedAt: result.completedAt, durationMs: result.durationMs, usage: result.usage,
+            completedAt: result.completedAt, durationMs: result.durationMs, usage: result.usage && policy ? { ...result.usage, pricingVersion: `${policy.pricingVersion}:${result.actualServiceTier === "fast" || result.actualServiceTier === "priority" ? "fast" : result.actualServiceTier === "default" ? "default" : "unknown"}` } : result.usage,
             errorCode: result.outcome === "succeeded" ? null : result.validationCode ?? result.errorCode ?? "TEXT_PROVIDER_REQUEST_FAILED"
           })
         });
@@ -157,6 +164,7 @@ export class TextArtifactService {
       }
       await this.repository.completeTextArtifact(artifact.id, payload, lease());
     } catch (error) {
+      if (error instanceof PreparationPolicyError) throw new DurableJobExecutionError(error.code, { cause: error, defer: true, retryAfterMs: error.retryAfterMs });
       const code = error instanceof TextProcessingError || error instanceof DurableJobExecutionError || error instanceof CallRepositoryError || error instanceof TextArtifactServiceError || error instanceof BetaControlError ? error.code : "TEXT_ARTIFACT_GENERATION_FAILED";
       const retryable = error instanceof TextProcessingError || error instanceof DurableJobExecutionError ? error.retryable :
         !(error instanceof CallRepositoryError) && !(error instanceof TextArtifactServiceError) && !(error instanceof BetaControlError);
@@ -214,9 +222,9 @@ export class TextArtifactService {
     return {...input,assessmentMode:"evaluate"};
   }
 
-  async #find(callId: string, kind: TextArtifactKind, compilationId: string | null, transcriptRevisionId: string | null, sourceHash: string, targetLanguage: TextLanguage) {
+  async #find(callId: string, kind: TextArtifactKind, compilationId: string | null, transcriptRevisionId: string | null, sourceHash: string, targetLanguage: TextLanguage, generatorVersion=textGeneratorVersion(this.processor,kind)) {
     return (await this.repository.listTextArtifacts(callId)).find((item) => item.kind === kind && item.compilationId === compilationId &&
-      item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && item.generatorVersion === textGeneratorVersion(this.processor, kind) && !["stale", "cancelled"].includes(item.status));
+      item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && item.generatorVersion === generatorVersion && !["stale", "cancelled"].includes(item.status));
   }
   #assertDirection(kind: TextArtifactKind, sourceLanguage: string, targetLanguage: TextLanguage) {
     if (!this.capabilities.enabled) throw new TextArtifactServiceError("TEXT_GENERATION_DISABLED");

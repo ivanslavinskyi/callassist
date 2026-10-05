@@ -198,6 +198,10 @@ worker или платного диагностического запроса �
 
 ## Основания для полей транспорта
 
+Следующий этап описан отдельно в
+[плане ускорения подготовки и масштабирования](preparation-performance-and-scaling-plan-2026-10-05.md).
+Это предложение будущих изменений, не изменение результатов этого исследования.
+
 - [OpenAI API: request IDs и response headers](https://developers.openai.com/api/reference/overview).
 - [Undici 7.16.0: DiagnosticsChannel](https://github.com/nodejs/undici/blob/v7.16.0/docs/docs/api/DiagnosticsChannel.md).
 

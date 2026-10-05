@@ -54,15 +54,17 @@ export async function admitBetaRegistration(tx: postgres.TransactionSql, invitat
     await tx`UPDATE beta_controls SET public_accounts=public_accounts+1 WHERE id=true`;
   }
 }
-export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendKind, key: string, settings?: BetaSettings) {
+export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendKind, key: string, settings?: BetaSettings, minimumReserveMicros = 0) {
   const policy = settings ?? (await lockBetaControls(tx)).settings;
   if (!policy.spendingEnabled) throw new BetaControlError("BETA_SPENDING_PAUSED");
   if (policy.rollingDayBudgetMicros === null) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
   const existing = await tx`SELECT reservation_key FROM beta_spend_reservations WHERE reservation_key=${key} AND kind=${kind}`;
   if (existing.count) return;
-  const amount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros + 10_000 :
+  const configuredAmount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros + 10_000 :
     kind === "text" ? policy.textRequestReserveMicros : kind === "transcription" ? policy.transcriptionRequestReserveMicros * (key.startsWith("postcall:") ? postCallReserveSlots : 1) :
     kind === "sms" ? policy.smsReserveMicros : policy.emailReserveMicros;
+  if (!Number.isSafeInteger(minimumReserveMicros) || minimumReserveMicros < 0) throw new Error("Invalid request reserve");
+  const amount = Math.max(configuredAmount, minimumReserveMicros);
   const { reservedMicros: total } = await readBetaSpend(tx);
   if (total + amount > policy.rollingDayBudgetMicros) {
     budgetSignal("beta_budget_request_blocked", total, policy.rollingDayBudgetMicros, policy.currency);

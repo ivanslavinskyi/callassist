@@ -6,6 +6,15 @@ import {
 } from "./provider-pricing-policy";
 
 describe("provider pricing policy", () => {
+  it("prices the actual Standard/Fast tier from its saved rate card and leaves unknown tiers unpriced", () => {
+    const usage = { model: "gpt-5.6-terra", inputTextTokens: 1000000, inputTextTokenSamples: 1,
+      cachedInputTextTokens: 250000, cachedInputTextTokenSamples: 1, outputTextTokens: 100000, outputTextTokenSamples: 1 };
+    const standard=calculateProviderUsageCost(bucket({...usage,pricingVersion:"openai-preparation-2026-10-05:default"}));
+    const fast=calculateProviderUsageCost(bucket({...usage,pricingVersion:"openai-preparation-2026-10-05:fast"}));
+    expect(standard.calculatedUsdMicros).toBe(2750000);
+    expect(fast.calculatedUsdMicros).toBe(5500000);
+    expect(calculateProviderUsageCost(bucket({...usage,pricingVersion:"openai-preparation-2026-10-05:unknown"})).calculatedUsdMicros).toBeNull();
+  });
   it("prices voicemail from the persisted issued character count and refuses unknown snapshots", () => {
     const saved = bucket({ provider: "twilio", operationType: "voicemail_tts", model: "polly-standard-voicemail-v1:en-GB",
       pricingVersion: "twilio-answering-public-2026-09-26", billableCharacters: 101 });

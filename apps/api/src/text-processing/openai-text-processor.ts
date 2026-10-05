@@ -1,3 +1,6 @@
+import { preparationRequestReserve } from "../config/preparation-pricing";
+import { awaitWithAbort } from "../runtime/await-with-abort";
+import { providerBackoffMs } from "../brief-compiler/response-reader";
 import { randomUUID } from "node:crypto";
 import { parseOpenAITextTokenUsage } from "../brief-compiler/brief-compiler";
 import {
@@ -73,12 +76,29 @@ export class OpenAITextProcessor implements TextProcessor {
       (!Number.isSafeInteger(options.maxProviderRequests) || options.maxProviderRequests < 1)) {
       throw new TextProcessingError("TEXT_REQUEST_BUDGET_EXHAUSTED");
     }
+    const model = options.profile?.model ?? this.model;
+    const serviceTier = options.profile?.serviceTier ?? "default";
+    const requestBody = JSON.stringify({
+      model, service_tier: serviceTier, store: false, max_output_tokens: 16_384,
+      reasoning: { effort: "low" },
+      input: [{ role: "system", content: instructions }, { role: "user", content: JSON.stringify(providerTextInput(input)) }],
+      text: { verbosity: "low", format: { type: "json_schema", name: `callassist_${input.kind}`, strict: true, schema: textOutputJsonSchema(input) } }
+    });
+    const timeout = AbortSignal.timeout(input.kind === "call_summary" ? this.#summaryTimeoutMs : this.#timeoutMs);
+    const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
     const clientRequestId = randomUUID();
-    if (options.beforeProviderRequest && !await options.beforeProviderRequest({
+    try {
+    if (options.beforeProviderRequest && !await awaitWithAbort(options.beforeProviderRequest({
       clientRequestId, kind: input.kind,
       operationType: input.kind === "call_summary" ? "call_summary" : "text_translation",
-      provider: "openai", model: this.model, startedAt: new Date().toISOString()
-    })) throw new TextProcessingError("TEXT_REQUEST_BUDGET_EXHAUSTED");
+      provider: "openai", model, requestedServiceTier: serviceTier,
+      estimatedTokens: Buffer.byteLength(requestBody) + 4096 + 16384,
+      reserveUsdMicros: options.profile ? preparationRequestReserve(options.profile, Buffer.byteLength(requestBody), 16384) : undefined, startedAt: new Date().toISOString()
+    }), signal)) throw new TextProcessingError("TEXT_REQUEST_BUDGET_EXHAUSTED");
+    } catch (cause) {
+      if (signal.aborted) throw new TextProcessingError(options.signal?.aborted ? "TEXT_REQUEST_CANCELLED" : "TEXT_REQUEST_TIMEOUT", {cause});
+      throw cause;
+    }
 
     const startedAt = Date.now();
     const result: TextProcessingProviderRequestResult = {
@@ -88,10 +108,10 @@ export class OpenAITextProcessor implements TextProcessor {
     };
     let failure: TextProcessingError | null = null;
     let output: TextProcessingPayload | null = null;
-    const timeout = AbortSignal.timeout(input.kind === "call_summary" ? this.#summaryTimeoutMs : this.#timeoutMs);
-    const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
+    let response: Response | undefined;
     try {
-      const response = await this.#fetch(this.#endpoint, {
+      signal.throwIfAborted();
+      response = await awaitWithAbort(this.#fetch(this.#endpoint, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.#apiKey}`,
@@ -99,31 +119,22 @@ export class OpenAITextProcessor implements TextProcessor {
           "X-Client-Request-Id": clientRequestId
         },
         signal,
-        body: JSON.stringify({
-          model: this.model, store: false, max_output_tokens: 16_384,
-          reasoning: { effort: "low" },
-          input: [
-            { role: "system", content: instructions },
-            { role: "user", content: JSON.stringify(providerTextInput(input)) }
-          ],
-          text: { verbosity: "low", format: {
-            type: "json_schema", name: `callassist_${input.kind}`,
-            strict: true, schema: textOutputJsonSchema(input)
-          } }
-        })
-      });
+        body: requestBody
+      }), signal);
       result.providerRequestId = response.headers.get("x-request-id");
       result.statusCode = response.status;
+      result.retryAfterMs = providerBackoffMs(response.headers);
       if (!response.ok) {
         result.outcome = "provider_error";
         await response.body?.cancel().catch(() => undefined);
         failure = new TextProcessingError(response.status === 429 ? "TEXT_RATE_LIMITED" : response.status === 408 ? "TEXT_REQUEST_TIMEOUT" :
           response.status >= 500 ? "TEXT_PROVIDER_UNAVAILABLE" : "TEXT_REQUEST_REJECTED",
-          { retryAfterMs: parseTextRetryAfter(response.headers.get("retry-after")) });
+          { retryAfterMs: result.retryAfterMs });
       } else {
-        const envelope = await readResponse(response);
+        const envelope = await readResponse(response, signal);
         result.providerResponseId = typeof envelope.id === "string" ? envelope.id : null;
         result.providerModel = typeof envelope.model === "string" ? envelope.model : null;
+        result.actualServiceTier = typeof envelope.service_tier === "string" ? envelope.service_tier : null;
         result.usage = parseOpenAITextTokenUsage(envelope.usage);
         try {
           output = validateTextProcessingOutput(input, JSON.parse(responseText(envelope)));
@@ -142,13 +153,22 @@ export class OpenAITextProcessor implements TextProcessor {
           result.outcome === "invalid_response" ? "TEXT_RESPONSE_INVALID" : "TEXT_REQUEST_FAILED",
         { cause }
       );
+    } finally {
+      if (response?.body && !response.body.locked) void response.body.cancel().catch(() => undefined);
     }
     result.completedAt = new Date().toISOString();
     result.errorCode = failure?.code ?? null;
+    result.retryAfterMs = failure?.retryAfterMs ?? result.retryAfterMs;
     result.durationMs = Math.max(0, Date.now() - startedAt);
     // Completion errors propagate, so a successfully generated result is never
     // published while its provider accounting failed. The durable worker retries.
-    await options.afterProviderRequest?.(result);
+    // Start terminal accounting even on timeout; cancellation cannot authorize publication.
+    try { await awaitWithAbort(Promise.resolve(options.afterProviderRequest?.(result)), signal); }
+    catch (cause) {
+      if (signal.aborted) throw new TextProcessingError(options.signal?.aborted ? "TEXT_REQUEST_CANCELLED" : "TEXT_REQUEST_TIMEOUT", { cause });
+      throw cause;
+    }
+    if (options.signal?.aborted) throw new TextProcessingError("TEXT_REQUEST_CANCELLED");
     if (failure) throw failure;
     if (!output) throw new TextProcessingError("TEXT_RESPONSE_INVALID");
     return output;
@@ -163,14 +183,14 @@ export function parseTextRetryAfter(value: string | null, now = Date.now()): num
   return Number.isFinite(delay) ? Math.min(900_000, Math.max(0, delay)) : undefined;
 }
 
-async function readResponse(response: Response): Promise<Record<string, unknown>> {
+async function readResponse(response: Response, signal: AbortSignal): Promise<Record<string, unknown>> {
   const reader = response.body?.getReader();
   if (!reader) throw new TextProcessingError("TEXT_RESPONSE_INVALID");
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   try {
     while (true) {
-      const chunk = await reader.read();
+      const chunk = await awaitWithAbort(reader.read(), signal);
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes > maximumResponseBytes) {
@@ -180,6 +200,7 @@ async function readResponse(response: Response): Promise<Record<string, unknown>
       chunks.push(chunk.value);
     }
   } finally {
+    void reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
   try {

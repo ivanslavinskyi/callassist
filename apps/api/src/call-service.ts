@@ -1,3 +1,4 @@
+import { PreparationPolicyError } from "./storage/preparation-policy-store";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { isLiveTranscript } from "@callassist/contracts";
@@ -147,6 +148,7 @@ export class CallService {
   readonly #durableWorkerConfigured: boolean;
   readonly #durableWorkerMode: DurableWorkerMode;
   readonly #liveEventMode: LiveEventMode;
+  readonly #workerRole: "all" | "preparation" | "operations" | "background";
   readonly #sourceId = randomUUID();
   readonly #pendingCallChangePublications = new Set<Promise<void>>();
   #unsubscribeCallChanges: (() => Promise<void>) | null = null;
@@ -163,6 +165,9 @@ export class CallService {
     operationalCostPolicy: OperationalCostPolicy =
       unavailableOperationalCostPolicy,
     runtime: {
+      workerRole?: "all" | "preparation" | "operations" | "background";
+      preparationSlots?: number;
+      reviewSlots?: number;
       durableWorkerMode?: DurableWorkerMode;
       durableWorkerKeepAlive?: boolean;
       durableWorkerEnabled?: boolean;
@@ -173,6 +178,7 @@ export class CallService {
       preparationTimeoutMs?: number;
     } = {}
   ) {
+    this.#workerRole = runtime.workerRole ?? "all";
     this.#onBackgroundError = onBackgroundError;
     this.#postCallTranscriber = postCallTranscriber;
     this.#briefCompiler = briefCompiler;
@@ -197,10 +203,13 @@ export class CallService {
           if (snapshot) this.#publish(job.callId, { type: "call.updated", brief: snapshot.brief });
         }
       }
-    }, onBackgroundError, { enabled: durableWorkerEnabled, keepAlive: runtime.durableWorkerKeepAlive });
+    }, onBackgroundError, { enabled: durableWorkerEnabled && this.#workerRole !== "operations", keepAlive: runtime.durableWorkerKeepAlive,
+      role: this.#workerRole === "preparation" ? "review" : this.#workerRole, reportRuntimeHeartbeat: runtime.reportDurableWorkerHeartbeat,
+      workClasses: this.#workerRole === "preparation" ? ["review"] : this.#workerRole === "background" ? ["background"] : undefined,
+      laneConcurrency: { text_artifact_generation: runtime.reviewSlots ?? 1 }, useDatabaseTime: this.#workerRole !== "all" });
     this.#durableJobWorker = new DurableJobWorker(
       repository,
-      {
+      workerRoleHandlers({
         brief_compilation: (
           job: DurableJob,
           lease: DurableJobLease
@@ -232,10 +241,12 @@ export class CallService {
               ) => this.#reconcileProviderRecording(job, lease)
             }
           : {})
-      },
+      }, this.#workerRole),
       onBackgroundError,
       {
-        enabled: durableWorkerEnabled,
+        enabled: durableWorkerEnabled, role: this.#workerRole,
+        workClasses: this.#workerRole === "all" ? undefined : [this.#workerRole],
+        laneConcurrency: { brief_compilation: runtime.preparationSlots ?? 1 }, useDatabaseTime: this.#workerRole !== "all",
         lanes: [
           ["brief_compilation"],
           ["final_transcription"],
@@ -255,7 +266,7 @@ export class CallService {
 
   async initialize() {
     await this.repository.ping();
-    await this.repository.recipientOptOut.backfill();
+    if (["all","operations"].includes(this.#workerRole)) await this.repository.recipientOptOut.backfill();
     if (
       !this.#unsubscribeCallChanges &&
       ["subscribe", "both"].includes(this.#liveEventMode)
@@ -269,8 +280,10 @@ export class CallService {
       );
     }
     if (!this.#durableWorkerConfigured) return 0;
-    const recoveredCalls = await this.repository.recoverInterruptedCalls();
-    await this.repository.seedDurableJobs(new Date().toISOString());
+    // Legacy embedded startup keeps its recovery contract. Role workers only seed
+    // fenced reconciliation jobs: starting another process is not evidence of call failure.
+    const recoveredCalls = this.#workerRole === "all" ? await this.repository.recoverInterruptedCalls() : 0;
+    if (["all","operations","background"].includes(this.#workerRole)) await this.repository.seedDurableJobs(new Date().toISOString());
     this.#durableJobWorker.start();
     this.#textJobWorker.start();
     return recoveredCalls;
@@ -1522,7 +1535,7 @@ export class CallService {
         retryable: false
       });
     }
-    const preparationDeadline = Date.parse(work.preparation.createdAt) + this.#preparationTimeoutMs;
+    const preparationDeadline = Date.parse(work.preparation.createdAt) + Math.min(this.#preparationTimeoutMs, work.runtimePolicy.timeoutMs);
     if (Date.now() >= preparationDeadline) {
       throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { retryable: false,
         cause: new Error("PREPARATION_DEADLINE_EXCEEDED") });
@@ -1532,7 +1545,9 @@ export class CallService {
         normalizeCreateCallBriefInput(work.input),
         work.targetRevision,
         {
-          maxProviderRequests: briefCompilationProviderRequestBudget,
+          policy: work.runtimePolicy, signal: lease.signal,
+          checkpoint: (id, event) => this.repository.recordPreparationCheckpoint(id, event),
+          maxProviderRequests: work.runtimePolicy.maxProviderRequests,
           deadlineAtMs: preparationDeadline,
           beforeProviderRequest: (request) =>
             this.repository.reserveCallPreparationProviderRequest(
@@ -1542,17 +1557,18 @@ export class CallService {
                 provider: request.provider,
                 operationType: request.operationType,
                 stage: request.stage,
-                requestedModel: request.model,
+                requestedModel: request.model, requestedServiceTier: request.requestedServiceTier, pricingVersion: request.pricingVersion, reserveUsdMicros: request.reserveUsdMicros, estimatedTokens: request.estimatedTokens,
                 clientRequestId: request.clientRequestId,
                 startedAt: request.startedAt,
                 requestMetadata: request.requestMetadata,
-                maxRequests: briefCompilationProviderRequestBudget,
+                maxRequests: work.runtimePolicy.maxProviderRequests,
                 durableJobGeneration: job.generation
               },
               currentLease(lease)
             ),
           afterProviderRequest: (result) =>
             this.repository.completeProviderOperation({
+              actualServiceTier: result.actualServiceTier, retryAfterMs: result.retryAfterMs,
               diagnostics: result.diagnostics,
               operationId: result.clientRequestId,
               outcome: result.outcome,
@@ -1567,10 +1583,12 @@ export class CallService {
                 : result.outcome === "invalid_response"
                   ? "OPENAI_RESPONSE_INVALID"
                   : "OPENAI_REQUEST_FAILED"),
-              usage: result.usage
+              usage: result.usage ? { ...result.usage, pricingVersion: `${work.runtimePolicy.pricingVersion}:${result.actualServiceTier === "priority" || result.actualServiceTier === "fast" ? "fast" : result.actualServiceTier === "default" ? "default" : "unknown"}` } : null
             })
         }
       );
+      lease.signal?.throwIfAborted();
+      if (Date.now() >= preparationDeadline) throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { retryable: false });
       const publication = {
         preparationId: job.callPreparationId,
         lease: currentLease(lease)
@@ -1603,11 +1621,14 @@ export class CallService {
           mapBriefCompilerError(error).code,
           {
             cause: error,
-            retryable: isBriefCompilerErrorRetryable(error) && Date.now() + 5_000 < preparationDeadline
+            retryAfterMs: error.retryAfterMs,
+            retryable: isBriefCompilerErrorRetryable(error) && Date.now() + Math.max(5_000,error.retryAfterMs) < preparationDeadline
           }
         );
       }
       if (error instanceof DurableJobExecutionError) throw error;
+      if (error instanceof PreparationPolicyError && error.code === "PREPARATION_PROVIDER_BUSY") throw new DurableJobExecutionError(error.code,
+        { cause: error, defer: true, retryAfterMs: error.retryAfterMs, retryable: Date.now()+error.retryAfterMs < preparationDeadline });
       if (error instanceof BetaControlError) {
         throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { cause: error, retryable: false });
       }
@@ -2101,4 +2122,11 @@ function mapBriefCompilerError(error: BriefCompilerError) {
       }
     }
   );
+}
+
+function workerRoleHandlers(handlers: ConstructorParameters<typeof DurableJobWorker>[1], role: "all" | "preparation" | "operations" | "background") {
+  if (role === "all") return handlers;
+  return Object.fromEntries(Object.entries(handlers).filter(([type]) => role === "preparation" ? type === "brief_compilation" :
+    role === "operations" ? ["answer_detection_timeout","provider_call_reconciliation","live_transcript_finalization"].includes(type) :
+      !["brief_compilation","answer_detection_timeout","provider_call_reconciliation","live_transcript_finalization"].includes(type))) as typeof handlers;
 }
