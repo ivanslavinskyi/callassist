@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
+import { preparationLocalTestingEnabled } from "../config/preparation-local-testing";
 import { defaultPreparationCapacity, defaultPreparationRuntimePolicy, preparationProfileAdmissionSchema,
   preparationProfileKey, preparationSettingsUpdateSchema, preparationSettingsViewSchema,
   type PreparationProfileAdmission, type PreparationSettingsUpdate, type PreparationSettingsView } from "@callassist/contracts";
@@ -16,7 +17,7 @@ type Row = { policy: PreparationSettingsView["policy"]; capacity: PreparationSet
   approved_profiles: string[]; updated_at: Date | null; updated_by_user_id: string | null; reason: string | null };
 const view = (row: Row): PreparationSettingsView => preparationSettingsViewSchema.parse({ policy: row.policy,
   capacity: row.capacity, approvedProfiles: row.approved_profiles, updatedAt: row.updated_at?.toISOString() ?? null,
-  updatedByUserId: row.updated_by_user_id, reason: row.reason, history: [] });
+  updatedByUserId: row.updated_by_user_id, reason: row.reason, history: [], localTesting: preparationLocalTestingEnabled() });
 export class PostgresPreparationPolicyStore {
   constructor(private readonly sql: postgres.Sql) {}
   async get(): Promise<PreparationSettingsView> {
@@ -27,7 +28,8 @@ export class PostgresPreparationPolicyStore {
         FROM preparation_settings_audit ORDER BY created_at DESC,id DESC LIMIT 50`;
       return { ...view(row), history: history.map(entry => ({ revision: entry.next_settings.policy.revision,
         createdAt: entry.created_at.toISOString(), actorUserId: entry.actor_user_id, reason: entry.reason,
-        generation: entry.next_settings.policy.generation, capacity: entry.next_settings.capacity, reportSha256: entry.report_sha256 })) };
+        generation: entry.next_settings.policy.generation, capacity: entry.next_settings.capacity, reportSha256: entry.report_sha256,
+        localTest: entry.next_settings.localTesting === true && entry.report_sha256 === null })) };
     });
   }
   async update(input: PreparationSettingsUpdate, actorUserId: string) {
@@ -45,7 +47,9 @@ export class PostgresPreparationPolicyStore {
       const previous = view(row);
       const next = structuredClone(previous);
       if ("generation" in input) {
-        if (!next.approvedProfiles.includes(preparationProfileKey(input.generation))) throw new PreparationPolicyError("PREPARATION_PROFILE_NOT_APPROVED");
+        if (!next.approvedProfiles.includes(preparationProfileKey(input.generation)) && !next.localTesting) {
+          throw new PreparationPolicyError("PREPARATION_PROFILE_NOT_APPROVED");
+        }
         next.policy.generation = input.generation;
         next.capacity = input.capacity;
       } else {

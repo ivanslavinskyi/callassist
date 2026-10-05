@@ -22,6 +22,18 @@ zero critical errors). It records that attestation; it does not independently
 prove the report's quality, authenticity or model availability. No paid probe is
 triggered by saving settings. Retain the corresponding report and signed review.
 
+For manual development tests, `PREPARATION_LOCAL_TESTING=true` permits a superadmin
+to select any listed model/tier without an evaluation report. It is effective only
+with `NODE_ENV=development`, an explicit loopback `API_HOST`, and a loopback PostgreSQL
+`DATABASE_URL`. Production startup rejects the flag. The server reports this
+capability as `localTesting`; clients cannot grant it in a settings request.
+The panel explains the test mode and hides the report-admission form. Saves retain
+actor/reason/revision, are labelled as local tests in the audit history, and leave
+`approvedProfiles` unchanged. New plans for all users of that local database use the
+selected profile; existing preparations retain their snapshot. Saving itself makes
+no provider request. Keep test data/settings local; restore an evaluated profile
+before disabling test mode. This mode does not certify quality or provider access.
+
 Each preparation snapshots policy revision, stage models and tiers, prompt/pricing
 versions, request/output limits and the absolute deadline. Retries and review use
 that snapshot. Old rows have `runtime_policy_source=legacy_unknown`: the migration's

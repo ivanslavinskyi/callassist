@@ -1,4 +1,5 @@
 import { initialPreparationSettings, PreparationPolicyError } from "./preparation-policy-store";
+import { preparationLocalTestingEnabled } from "../config/preparation-local-testing";
 import { preparationSettingsUpdateSchema, preparationProfileAdmissionSchema, preparationProfileKey, preparationCheckpointSchema, type PreparationCheckpoint } from "@callassist/contracts";
 import { supportsSummaryAssessment, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
   defaultVoiceConsentRuntimePolicy, voiceConsentRuntimePolicy, voiceConsentSettingsUpdateSchema,
@@ -246,11 +247,13 @@ export class InMemoryCallRepository implements CallRepository {
   async preparationWorkersReady() { return true; }
   async maintainPreparationTelemetry() {}
   async getPreparationRuntimeStatus() { return { workers: [], queue: [], metrics: [] }; }
-  async getPreparationSettings() { return copy(this.#preparationSettings); }
+  async getPreparationSettings() { return { ...copy(this.#preparationSettings), localTesting: preparationLocalTestingEnabled() }; }
   async updatePreparationSettings(input: import("@callassist/contracts").PreparationSettingsUpdate, actorUserId: string) {
     const parsed = preparationSettingsUpdateSchema.parse(input);
     if (parsed.expectedRevision !== this.#preparationSettings.policy.revision) throw new PreparationPolicyError("PREPARATION_REVISION_CONFLICT");
-    if (!this.#preparationSettings.approvedProfiles.includes(preparationProfileKey(parsed.generation))) throw new PreparationPolicyError("PREPARATION_PROFILE_NOT_APPROVED");
+    if (!this.#preparationSettings.approvedProfiles.includes(preparationProfileKey(parsed.generation)) && !preparationLocalTestingEnabled()) {
+      throw new PreparationPolicyError("PREPARATION_PROFILE_NOT_APPROVED");
+    }
     this.#preparationSettings.policy.generation = copy(parsed.generation);
     this.#preparationSettings.capacity = copy(parsed.capacity);
     this.#preparationSettings.policy.revision++;
@@ -269,7 +272,7 @@ export class InMemoryCallRepository implements CallRepository {
     const settings = this.#preparationSettings;
     settings.updatedAt = new Date().toISOString(); settings.updatedByUserId = actorUserId; settings.reason = reason;
     settings.history.unshift({ revision: settings.policy.revision, actorUserId, reason, reportSha256, createdAt: settings.updatedAt,
-      generation: copy(settings.policy.generation), capacity: copy(settings.capacity) });
+      generation: copy(settings.policy.generation), capacity: copy(settings.capacity), localTest: reportSha256 === null && preparationLocalTestingEnabled() });
     settings.history = settings.history.slice(0,50);
   }
   async recordPreparationCheckpoint(operationId: string, checkpoint: PreparationCheckpoint) {

@@ -18,3 +18,11 @@ it("prevents saving an unapproved profile and protects a pending save",()=>{
   expect(html).toContain('type="submit" disabled=""');expect(html).toContain('<fieldset disabled=""');
   expect(html).toContain(preparationSettingsMessages.ru.pending);
 });
+it("enables manual local profile selection without pretending that the profile is evaluated",()=>{
+  const local={...view,localTesting:true,policy:{...view.policy,generation:{model:"gpt-6-luna" as const,serviceTier:"fast" as const}}};
+  const html=renderToStaticMarkup(<PreparationSettingsForm view={local} copy={preparationSettingsMessages.ru} role="superadmin" busy={false} onSubmit={()=>{}} />);
+  expect(html).not.toContain('type="submit" disabled=""');
+  expect(html).toContain(preparationSettingsMessages.ru.localTest);
+  expect(html).not.toContain(preparationSettingsMessages.ru.pending);
+  expect(html).toContain('name="reason"');
+});

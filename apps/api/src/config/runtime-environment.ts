@@ -39,6 +39,9 @@ export function validateRuntimeEnvironment(
   }
 
   const issues: string[] = [];
+  if (environment.PREPARATION_LOCAL_TESTING === "true") {
+    issues.push("PREPARATION_LOCAL_TESTING is only supported in loopback development environments");
+  }
   requireExact(environment, "STORAGE_DRIVER", "postgres", issues);
   requireExact(environment, "TELEPHONY_DRIVER", "twilio", issues);
   requireExact(environment, "DURABLE_WORKER_MODE", "external", issues);

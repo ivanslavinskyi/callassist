@@ -35,13 +35,13 @@ export function AdminPreparationSettings({ role }: { role: UserRole }) {
     finally { if (request === version.current) setBusy(false); }
   }
   return <section className="admin-system-panel" id="preparation-settings" aria-busy={busy}>
-    <h2>{copy.title}</h2><p>{copy.scope}</p><p>{copy.fastHelp}</p>
+    <h2>{copy.title}</h2><p>{copy.scope}</p><p>{view?.localTesting ? copy.localTestingHelp : copy.fastHelp}</p>
     <button type="button" className="secondary-button" disabled={busy} onClick={() => void load()}>{copy.refresh}</button>
     {error && <p role="alert" className="form-error">{copy.error}</p>}{saved && <p role="status">{copy.saved}</p>}
     {view && <>
       <p>{copy.revision}: {view.policy.revision}</p>
       <PreparationSettingsForm key={view.policy.revision} view={view} copy={copy} busy={busy} role={role} onSubmit={e=>void submit(e)} />
-      {role === "superadmin" && <details><summary>{copy.admission}</summary><form onSubmit={e => void submit(e, true)}>
+      {role === "superadmin" && !view.localTesting && <details><summary>{copy.admission}</summary><form onSubmit={e => void submit(e, true)}>
         <fieldset disabled={busy}><ProfileFields view={view} copy={copy} admission />
           <label className="field"><span>{copy.evidence}</span><input name="report" pattern="[a-f0-9]{64}" required /></label>
           <label><input type="checkbox" name="reviewed" required /> {copy.reviewed}</label>
@@ -50,6 +50,7 @@ export function AdminPreparationSettings({ role }: { role: UserRole }) {
         </fieldset></form></details>}
       <details><summary>{copy.history}</summary><ul>{view.history.map(item => <li key={item.revision}>
         {formatDateTime(item.createdAt, locale)} · {item.generation.model} · {item.generation.serviceTier} · {item.reason}
+        {item.localTest && <span> · {copy.localTest}</span>}
         {item.reportSha256 && <code> {item.reportSha256}</code>}
       </li>)}</ul></details>
     </>}
@@ -69,7 +70,7 @@ export function PreparationSettingsForm({view,copy,busy,role,onSubmit}: {view:Pr
         max={{generationSlots:64,reviewSlots:32,providerSlots:64,queueLimit:1000,perUserWaiting:10,providerRequestsPerMinute:100000,providerTokensPerMinute:1000000000,voiceReservePercent:90}[key]}
         defaultValue={view.capacity[key]} required /></label>)}</fieldset>
     <label className="field"><span>{copy.reason}</span><textarea name="reason" minLength={3} maxLength={500} required /></label>
-    <button className="primary-button" type="submit" disabled={!approved}>{copy.save}</button>
+    <button className="primary-button" type="submit" disabled={!approved && !view.localTesting}>{copy.save}</button>
   </fieldset></form>;
 }
 function ProfileFields({ view, copy, admission = false }: { view: PreparationSettingsView; copy: typeof preparationSettingsMessages.en; admission?: boolean }) {
@@ -81,6 +82,6 @@ function ProfileFields({ view, copy, admission = false }: { view: PreparationSet
       {preparationModelSchema.options.map(value => <option key={value} value={value}>{value}</option>)}
     </select></label>
     <label><input name="fast" type="checkbox" checked={fast} onChange={event => setFast(event.target.checked)} /> {copy.fast}</label>
-    {!approved && <p role="status">{copy.pending}</p>}
+    {!approved && <p role="status">{view.localTesting ? copy.localTest : copy.pending}</p>}
   </>;
 }

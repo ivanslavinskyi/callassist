@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "./postgres-call-repository";
 import type { DurableJob } from "../jobs/durable-job";
@@ -21,6 +21,7 @@ describe("preparation admission across PostgreSQL connections", () => {
       VALUES(${id},${`${id}@example.test`},'test',${`+4171000${String(index).padStart(4,'0')}`},'Test','Owner',${index === 0 ? 'superadmin' : 'user'},'active','en',now(),now())`;
   });
   afterAll(async () => { await Promise.all([first?.close(),second?.close(),sql?.end()]); await database.teardown(); });
+  afterEach(() => { vi.unstubAllEnvs(); });
   const enqueue = (userId: string, key = randomUUID()) => first.enqueueCallPreparation({ userId, idempotencyKey: key,
     inputFingerprint: "a".repeat(64), input, now: new Date().toISOString() });
   const claim = (repo: PostgresCallRepository, workerId: string = randomUUID()) => repo.claimDueDurableJob({ types: ["brief_compilation"],
@@ -66,5 +67,24 @@ describe("preparation admission across PostgreSQL connections", () => {
     expect((await enqueue(owner,key)).id).toBe(original.id);
     await expect(enqueue(owner)).rejects.toMatchObject({ message: "PREPARATION_USER_QUEUE_FULL" });
     expect(await first.claimDueDurableJob({ types:["brief_compilation"],workClasses:["operations"],workerId:"ops",now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+120000).toISOString() })).toBeNull();
+  });
+  it("persists local test evidence separately from quality admission and pins the chosen model", async () => {
+    vi.stubEnv("PREPARATION_LOCAL_TESTING","true"); vi.stubEnv("NODE_ENV","development");
+    vi.stubEnv("API_HOST","127.0.0.1"); vi.stubEnv("DATABASE_URL",database.url);
+    const settings = await first.getPreparationSettings();
+    const update = {generation:{model:"gpt-6-luna" as const,serviceTier:"fast" as const},capacity:settings.capacity,
+      expectedRevision:settings.policy.revision,reason:"Local manual test"};
+    await expect(first.updatePreparationSettings(update,owners[1]!)).rejects.toMatchObject({code:"PREPARATION_FORBIDDEN"});
+    const saved = await first.updatePreparationSettings(update,owners[0]!);
+    expect(saved.localTesting).toBe(true);
+    expect(saved.approvedProfiles).toEqual(["gpt-5.6:default"]);
+    expect(saved.history[0]).toMatchObject({localTest:true,reportSha256:null,actorUserId:owners[0]});
+    const request = await enqueue(owners[9]!);
+    const [pinned] = await sql`select runtime_policy from call_preparation_requests where id=${request.id}`;
+    expect(pinned!.runtime_policy.generation).toEqual(update.generation);
+    vi.stubEnv("PREPARATION_LOCAL_TESTING","false");
+    expect((await second.getPreparationSettings()).history[0]!.localTest).toBe(true);
+    await expect(second.updatePreparationSettings({...update,expectedRevision:saved.policy.revision},owners[0]!))
+      .rejects.toMatchObject({code:"PREPARATION_PROFILE_NOT_APPROVED"});
   });
 });

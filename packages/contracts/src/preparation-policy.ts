@@ -65,10 +65,12 @@ export const preparationSettingsViewSchema = z.strictObject({
   policy: preparationRuntimePolicySchema,
   capacity: preparationCapacitySchema,
   approvedProfiles: z.array(z.string().max(64)).max(6),
+  // Runtime capability, not a quality attestation or a client-writable setting.
+  localTesting: z.boolean().optional(),
   updatedAt: z.string().datetime().nullable(), updatedByUserId: z.uuid().nullable(), reason: z.string().nullable(),
   history: z.array(z.strictObject({ revision: z.number().int().positive(), createdAt: z.string().datetime(),
     actorUserId: z.uuid().nullable(), reason: z.string(), generation: preparationProfileSchema,
-    capacity: preparationCapacitySchema, reportSha256: z.string().nullable() })).max(50)
+    capacity: preparationCapacitySchema, reportSha256: z.string().nullable(), localTest: z.boolean().optional() })).max(50)
 });
 export type PreparationSettingsView = z.infer<typeof preparationSettingsViewSchema>;
 
