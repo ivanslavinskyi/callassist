@@ -1008,5 +1008,12 @@
   "Deleted automatically when the recording becomes available after the call.": "Suppression automatique dès que l’enregistrement est disponible après l’appel.",
   "Deleted automatically {0} days after the recording becomes available.": "Suppression automatique {0} jours après la disponibilité de l’enregistrement.",
   "Beta allowance": "Quota bêta",
-  "Beta access is limited": "L’accès à la bêta est limité"
+  "Beta access is limited": "L’accès à la bêta est limité",
+  "Only Swiss numbers for registration and phone changes": "Numéros suisses uniquement pour l’inscription et le changement de numéro",
+  "Require a Swiss (+41) number for registration and phone changes. Existing verified accounts keep access.": "Un numéro suisse (+41) est requis pour l’inscription et le changement de numéro. Les comptes déjà vérifiés conservent leur accès.",
+  "Use a Swiss phone number (+41). We will send an SMS verification code. Spaces and the national format are accepted.": "Utilisez un numéro suisse (+41). Nous y enverrons un code de vérification par SMS. Les espaces et le format national sont acceptés.",
+  "A valid Swiss phone number (+41) is required. Numbers from other countries are not accepted.": "Un numéro suisse valide (+41) est requis. Les numéros d’autres pays ne sont pas acceptés.",
+  "Choose the country of your number. We will send an SMS verification code. Spaces are accepted.": "Choisissez le pays du numéro. Nous y enverrons un code de vérification par SMS. Les espaces sont acceptés.",
+  "Use the email and password you registered with. Enter a new phone number and verify it by SMS.": "Utilisez l’adresse e-mail et le mot de passe de votre inscription. Saisissez un nouveau numéro et vérifiez-le par SMS.",
+  "Loading phone requirements…": "Chargement des conditions relatives au numéro…"
 }

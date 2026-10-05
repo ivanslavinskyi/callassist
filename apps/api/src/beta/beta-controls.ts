@@ -1,4 +1,4 @@
-import { registrationPolicySchema, type RegistrationPolicy, analyticsSettingsSchema, type AnalyticsSettingsView, type AnalyticsSettings } from "@callassist/contracts";
+import { registrationPolicySchema, type RegistrationPolicySettingsUpdate, analyticsSettingsSchema, type AnalyticsSettingsView, type AnalyticsSettings } from "@callassist/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import { betaSettingsSchema, type BetaSettings, type BetaSettingsUpdate, type BetaControlsView } from "@callassist/contracts";
@@ -21,7 +21,7 @@ export interface BetaControls {
   getView(): Promise<BetaControlsView>;
   getRegistrationPolicy(): Promise<import("@callassist/contracts").RegistrationPolicy>;
   getAnalytics(): Promise<AnalyticsSettingsView>;
-  updateRegistration(settings: RegistrationPolicy, expectedRevision: number, actor: string, reason: string): Promise<void>;
+  updateRegistration(settings: RegistrationPolicySettingsUpdate, expectedRevision: number, actor: string, reason: string): Promise<void>;
   updateAnalytics(settings: AnalyticsSettings, expectedRevision: number, actor: string): Promise<void>;
   update(settings: BetaSettingsUpdate["settings"], expectedRevision: number, actor: string, reason: string): Promise<void>;
   createInvitation(actor: string, reason: string): Promise<{ id: string; code: string; expiresAt: string }>;
@@ -157,12 +157,12 @@ export class PostgresBetaControls implements BetaControls {
     const [row] = await this.sql<Row[]>`SELECT settings,revision FROM beta_controls WHERE id=true`;
     return { settings: betaSettingsSchema.parse(row?.settings).analytics, revision: row!.revision };
   }
-  async updateRegistration(settings: RegistrationPolicy, expectedRevision: number, actor: string, reason: string) {
-    const registration = registrationPolicySchema.parse(settings);
+  async updateRegistration(settings: RegistrationPolicySettingsUpdate, expectedRevision: number, actor: string, reason: string) {
     await this.sql.begin(async tx => {
       const row = await lockBetaControls(tx);
       await requireBetaAdmin(tx, actor);
       if (row.revision !== expectedRevision) throw new BetaControlError("BETA_SETTINGS_STALE");
+      const registration = registrationPolicySchema.parse({ ...settings, swissPhonesOnly: settings.swissPhonesOnly ?? row.settings.registration.swissPhonesOnly });
       const next = { ...row.settings, registration };
       await tx`UPDATE beta_controls SET settings=${tx.json(next)},revision=revision+1,updated_at=now(),reason=${reason} WHERE id=true`;
       await tx`INSERT INTO beta_control_audit(id,actor_user_id,action,reason,previous_settings,next_settings)

@@ -1,5 +1,5 @@
 "use client";
-import { PhoneInput } from "./phone-input";
+import { PhoneInput, refreshAccountPhonePolicy } from "./phone-input";
 import { CreditFundingDetails, CreditSourceDetails } from "./credit-funding-details";
 import { formatLocale } from "@callassist/contracts";
 
@@ -263,6 +263,7 @@ export function AccountConsole() {
       setPhoneChangePassword("");
       setPhoneChangeCode("");
     } catch (error) {
+      refreshAccountPhonePolicy();
       setPhoneChangeError(getAccountContactChangeErrorMessage(error, locale, "phone"));
     } finally {
       setPhoneChangeBusy(false);
@@ -297,6 +298,7 @@ export function AccountConsole() {
       setPhoneChangeOpen(false);
       returnContactFocus.current = phoneChangeButton.current;
     } catch (error) {
+      refreshAccountPhonePolicy();
       setPhoneChangeError(getAccountContactChangeErrorMessage(error, locale, "phone"));
     } finally {
       setPhoneChangeBusy(false);
@@ -586,8 +588,7 @@ export function AccountConsole() {
                           <label>
                             <span>{copy.phoneChangeNewPhone}</span>
                             <PhoneInput inputId="new-mobile" inputRef={focusContactControl} name="newPhoneE164" value={newPhoneE164} onChange={setNewPhoneE164}
-                              describedBy={phoneChangeError ? "new-mobile-hint phone-change-error" : "new-mobile-hint"} invalid={Boolean(phoneChangeError)} />
-                            <small id="new-mobile-hint">{copy.phoneChangeFormatHint}</small>
+                              describedBy={phoneChangeError ? "phone-change-error" : undefined} invalid={Boolean(phoneChangeError)} />
                           </label>
                           <label>
                             <span>{copy.phoneChangeCurrentPassword}</span>

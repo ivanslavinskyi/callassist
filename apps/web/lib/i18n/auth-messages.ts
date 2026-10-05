@@ -1,3 +1,4 @@
+import { accountPhoneMessages } from "./account-phone-messages";
 import { extendMessages } from "./extend-messages";
 import { ApiError } from "@/lib/api";
 import type { UiLocale } from "./messages";
@@ -211,6 +212,7 @@ export function getAuthErrorMessage(error: unknown, locale: UiLocale) {
   const copy = authMessages[locale].errors;
   if (!(error instanceof ApiError)) return copy.generic;
   switch (error.code) {
+    case "SWISS_PHONE_REQUIRED": return accountPhoneMessages[locale].swissPhoneRequired;
     case "PHONE_CORRECTION_NOT_AVAILABLE":
       return copy.phoneCorrection;
     case "SMS_DESTINATION_NOT_ALLOWED":

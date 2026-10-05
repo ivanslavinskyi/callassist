@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { RegistrationOptions } from "@callassist/contracts";
-import { PhoneInput } from "./phone-input";
+import { PhoneInput, refreshAccountPhonePolicy } from "./phone-input";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
@@ -109,8 +109,9 @@ export function RegistrationForm() {
       if (caught instanceof ApiError && caught.code === "LEGAL_REVISION_CHANGED") {
         setError(extra.legalChanged); setReload(value => value + 1);
       } else {
+        if (caught instanceof ApiError && caught.code === "SWISS_PHONE_REQUIRED") refreshAccountPhonePolicy();
         setError(getAuthErrorMessage(caught, locale));
-        if (caught instanceof ApiError && caught.code === "BETA_REGISTRATION_FULL") setReload(value => value + 1);
+        if (caught instanceof ApiError && ["BETA_REGISTRATION_FULL", "SWISS_PHONE_REQUIRED"].includes(caught.code)) setReload(value => value + 1);
       }
       setBusy(false);
     }
@@ -150,8 +151,7 @@ export function RegistrationForm() {
         </label>
         <label className="field">
           <span>{copy.register.phone}</span>
-          <PhoneInput name="phoneE164" countries={options?.smsCountries} />
-          <small>{copy.register.phoneHelp}</small>
+          <PhoneInput name="phoneE164" countries={options?.smsCountries} swissOnly={options?.policy.swissPhonesOnly} />
         </label>
         <div className="field registration-password-field">
           <label htmlFor="registration-password">{copy.register.password}</label>
@@ -246,6 +246,7 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
       router.push(localizePathname(user.emailVerifiedAt ? "/app" : "/verify-email", nextLocale));
       router.refresh();
     } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "SWISS_PHONE_REQUIRED") refreshAccountPhonePolicy();
       setError(getAuthErrorMessage(caught, locale));
       setBusy(false);
     }
@@ -262,6 +263,7 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
       setNotice(copy.verify.resent);
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "RATE_LIMITED") setResendSeconds(caught.retryAfterSeconds ?? 60);
+      if (caught instanceof ApiError && caught.code === "SWISS_PHONE_REQUIRED") refreshAccountPhonePolicy();
       setError(getAuthErrorMessage(caught, locale));
     } finally {
       setResending(false);
@@ -271,7 +273,7 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
   return (
     <AuthFrame>
       <h1>{copy.verify.title}</h1>
-      <p className="auth-intro">{correctingPhone ? copy.verify.correctionHelp : copy.verify.intro}</p>
+      <p className="auth-intro">{correctingPhone ? registrationCallMessages[locale].phoneCorrectionHelp : copy.verify.intro}</p>
       <form className="auth-form" onSubmit={submit}>
         <label className="field">
           <span>{copy.verify.email}</span>

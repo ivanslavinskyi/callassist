@@ -1,4 +1,5 @@
 import { preparationRequestReserve } from "../config/preparation-pricing";
+import { equivalentIdentityLabel, preservesIdentityLabel } from "./identity-label";
 import { readProviderResponse, ResponseReadError, providerBackoffMs } from "./response-reader";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import { preparationCheckpointSchema, type PreparationRuntimePolicy, type PreparationCheckpoint } from "@callassist/contracts";
@@ -664,12 +665,9 @@ export function evaluateCompiledBrief(
   if (context?.authorizationMismatch || (appointment && (compiledBrief.schemaVersion !== "4" || compiledBrief.taskType !== "appointment_coordination" || appointment.operation !== requestedOperation))) {
     return blockedDecision("plan_constraint_failure");
   }
-  const requiredVerbatimEntities = [
-    rawBrief.recipientName,
-    rawBrief.representedPerson,
-    ...protectedPostalAddresses(sourceText)
-  ];
-  if (!requiredVerbatimEntities.every((value) => executionText.includes(value))) {
+  if (![rawBrief.recipientName, rawBrief.representedPerson].every(value =>
+    preservesIdentityLabel(value, executionText, sourceText)) ||
+    !protectedPostalAddresses(sourceText).every(value => executionText.includes(value))) {
     return blockedDecision("fact_integrity_failure");
   }
   if (!protectedPostalAddresses(executionText).every((address) =>
@@ -679,7 +677,8 @@ export function evaluateCompiledBrief(
   }
   if (compiledBrief.namedEntities.some(({ type, value }) =>
     ["person", "organisation", "location"].includes(type) &&
-    !sourceText.includes(value)
+    !sourceText.includes(value) && ![rawBrief.recipientName, rawBrief.representedPerson].some(original =>
+      equivalentIdentityLabel(original, value, sourceText))
   )) {
     return blockedDecision("fact_integrity_failure");
   }

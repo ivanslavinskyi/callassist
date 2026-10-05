@@ -46,7 +46,7 @@ export const preparationSettingsUpdateSchema = z.strictObject({
   generation: preparationProfileSchema,
   capacity: preparationCapacitySchema,
   expectedRevision: z.number().int().positive(),
-  reason: z.string().trim().min(3).max(500)
+  reason: z.string().trim().max(500).default("")
 });
 export type PreparationSettingsUpdate = z.infer<typeof preparationSettingsUpdateSchema>;
 export const preparationProfileAdmissionSchema = z.strictObject({

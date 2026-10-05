@@ -1,4 +1,5 @@
 import { VerificationSendError } from "./bounded-verification-provider";
+import { assertAccountPhonePolicy } from "./account-phone-policy";
 import { BetaControlError, type BetaControls } from "../beta/beta-controls";
 import type {
   AccountSessionBrowser,
@@ -120,6 +121,7 @@ export class AuthService {
   }
 
   async register(input: RegistrationInput, context: AuthRequestContext, accept?: import("./auth-repository").RegistrationAcceptanceWriter) {
+    await this.#assertAccountPhone(input.phoneE164);
     try { this.verificationProvider.validateDestination?.(input.phoneE164); } catch (error) { throw verificationServiceError(error); }
     await this.#limitMany([
       limitEntry("register:ip", context.ip, authHourlyLimit("AUTH_REGISTER_IP_PER_HOUR", 5), 60 * minute),
@@ -140,6 +142,7 @@ export class AuthService {
       throw error;
     }
     try {
+      await this.#assertAccountPhone(user.phoneE164);
       await this.verificationProvider.send(user.phoneE164, user.uiLocale);
     } catch (error) {
       throw verificationServiceError(error);
@@ -159,6 +162,7 @@ export class AuthService {
     if (!user || user.phoneVerifiedAt || user.status !== "active") {
       return { status: "verification_required" as const };
     }
+    await this.#assertAccountPhone(user.phoneE164);
     await this.#limit("verification-send:phone", user.phoneE164, authHourlyLimit("AUTH_VERIFICATION_SEND_PHONE_PER_HOUR", 3), 60 * minute);
     try {
       await this.verificationProvider.send(user.phoneE164, user.uiLocale ?? input.uiLocale);
@@ -169,6 +173,7 @@ export class AuthService {
   }
 
   async correctUnverifiedPhone(input: UnverifiedPhoneCorrectionInput, context: AuthRequestContext) {
+    await this.#assertAccountPhone(input.newPhoneE164);
     try { this.verificationProvider.validateDestination?.(input.newPhoneE164); } catch (error) { throw verificationServiceError(error); }
     await this.#limitMany([
       limitEntry("phone-correction:ip", context.ip, 10, 60 * minute),
@@ -181,6 +186,7 @@ export class AuthService {
     const corrected = await this.repository.correctUnverifiedPhone({ userId: user.id, expectedPasswordHash: user.passwordHash, newPhoneE164: input.newPhoneE164 });
     if (!corrected) throw new AuthServiceError("PHONE_CORRECTION_NOT_AVAILABLE");
     // The number remains unverified if delivery fails; resend/correction can recover.
+    await this.#assertAccountPhone(corrected.phoneE164);
     try { await this.verificationProvider.send(corrected.phoneE164, corrected.uiLocale ?? input.uiLocale); }
     catch (error) { throw verificationServiceError(error); }
     return { status: "verification_required" as const };
@@ -195,6 +201,7 @@ export class AuthService {
     if (!user || user.status !== "active" || user.phoneVerifiedAt) {
       throw new AuthServiceError("INVALID_VERIFICATION");
     }
+    await this.#assertAccountPhone(user.phoneE164);
     await this.#limit("verification-attempt:phone", user.phoneE164, 8, 15 * minute);
     let approved = false;
     try {
@@ -203,6 +210,7 @@ export class AuthService {
       throw verificationServiceError(error);
     }
     if (!approved) throw new AuthServiceError("INVALID_VERIFICATION");
+    await this.#assertAccountPhone(user.phoneE164);
     const verified = await this.repository.markPhoneVerified(user.id, this.#now().toISOString(), user.phoneE164)
       .catch((error) => {
         if (error instanceof AuthRepositoryError && error.code === "PHONE_VERIFICATION_CHANGED") throw new AuthServiceError("INVALID_VERIFICATION");
@@ -359,6 +367,7 @@ export class AuthService {
     input: PhoneChangeStartInput,
     context: AuthRequestContext
   ) {
+    await this.#assertAccountPhone(input.newPhoneE164);
     try { this.verificationProvider.validateDestination?.(input.newPhoneE164); } catch (error) { throw verificationServiceError(error); }
     await this.#limitMany([
       limitEntry("phone-change-start:ip", context.ip, 10, 60 * minute),
@@ -391,6 +400,7 @@ export class AuthService {
       throw new AuthServiceError("PHONE_CHANGE_NOT_AVAILABLE");
     }
     try {
+      await this.#assertAccountPhone(input.newPhoneE164);
       await this.verificationProvider.send(input.newPhoneE164, user.uiLocale);
     } catch (error) {
       await this.repository.invalidatePhoneChangeChallenge(
@@ -423,6 +433,7 @@ export class AuthService {
       now: now.toISOString()
     });
     if (!challenge) throw new AuthServiceError("INVALID_PHONE_CHANGE");
+    await this.#assertAccountPhone(challenge.newPhoneE164);
     await this.#limit(
       "phone-change-confirm:phone",
       challenge.newPhoneE164,
@@ -440,6 +451,7 @@ export class AuthService {
       throw verificationServiceError(error);
     }
     if (!approved) throw new AuthServiceError("INVALID_PHONE_CHANGE");
+    await this.#assertAccountPhone(challenge.newPhoneE164);
     const completed = await this.repository.completePhoneChange({
       phoneChangeId: challenge.id,
       userId: user.id,
@@ -829,6 +841,10 @@ export class AuthService {
     return this.#limitMany([limitEntry(scope, identifier, limit, windowMs)]);
   }
 
+  async #assertAccountPhone(phone: string) {
+    assertAccountPhonePolicy(phone, await this.#betaControls?.getRegistrationPolicy());
+  }
+
   async #limitMany(entries: RateLimitEntry[]) {
     try {
       const result = await this.#rateLimiter.consumeMany(entries);
@@ -975,6 +991,7 @@ function mapAdminRepositoryError(error: unknown) {
 }
 
 function verificationServiceError(error: unknown) {
+  if (error instanceof AuthRepositoryError && error.code === "SWISS_PHONE_REQUIRED") return error;
   if (error instanceof BetaControlError) return error;
   if (error instanceof VerificationSendError) return new AuthServiceError(error.code, { retryAfterSeconds: error.retryAfterSeconds });
   if (error instanceof RateLimiterUnavailableError) return new AuthServiceError("RATE_LIMIT_UNAVAILABLE");

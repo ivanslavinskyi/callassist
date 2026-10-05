@@ -1008,5 +1008,12 @@
   "Deleted automatically when the recording becomes available after the call.": "Stizzà automaticamain uschespert che la registraziun è disponibla suenter il telefonat.",
   "Deleted automatically {0} days after the recording becomes available.": "Stizzà automaticamain {0} dis suenter che la registraziun è disponibla.",
   "Beta allowance": "Quota beta",
-  "Beta access is limited": "L’access a la beta è limità"
+  "Beta access is limited": "L’access a la beta è limità",
+  "Only Swiss numbers for registration and phone changes": "Mo numers svizzers per la registraziun e la midada dal numer",
+  "Require a Swiss (+41) number for registration and phone changes. Existing verified accounts keep access.": "Per sa registrar e midar il numer dovri in numer svizzer (+41). Contos gia confermads mantegnan lur access.",
+  "Use a Swiss phone number (+41). We will send an SMS verification code. Spaces and the national format are accepted.": "Inditgescha in numer svizzer (+41). Nus tramettain in code da confermaziun per SMS. Spazis ed il format naziunal èn admess.",
+  "A valid Swiss phone number (+41) is required. Numbers from other countries are not accepted.": "I dovra in numer svizzer valaivel (+41). Numers d’auters pajais na vegnan betg acceptads.",
+  "Choose the country of your number. We will send an SMS verification code. Spaces are accepted.": "Tscherna il pajais dal numer. Nus tramettain in code da confermaziun per SMS. Spazis èn admess.",
+  "Use the email and password you registered with. Enter a new phone number and verify it by SMS.": "Dovra l’e-mail ed il pled-clav da la registraziun. Endatescha in nov numer e conferma quel per SMS.",
+  "Loading phone requirements…": "Las pretensiuns al numer vegnan chargiadas…"
 }

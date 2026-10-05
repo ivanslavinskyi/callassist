@@ -1008,5 +1008,12 @@
   "Deleted automatically when the recording becomes available after the call.": "Удаляется автоматически, как только запись станет доступна после звонка.",
   "Deleted automatically {0} days after the recording becomes available.": "Удаляется автоматически через {0} дней после готовности записи.",
   "Beta allowance": "Квота беты",
-  "Beta access is limited": "Доступ к бете ограничен"
+  "Beta access is limited": "Доступ к бете ограничен",
+  "Only Swiss numbers for registration and phone changes": "Только швейцарские номера при регистрации и смене номера",
+  "Require a Swiss (+41) number for registration and phone changes. Existing verified accounts keep access.": "Для регистрации и смены номера требуется швейцарский номер (+41). Подтверждённые аккаунты сохраняют доступ.",
+  "Use a Swiss phone number (+41). We will send an SMS verification code. Spaces and the national format are accepted.": "Укажите швейцарский номер (+41). На него мы отправим SMS с кодом подтверждения. Можно вводить пробелы и номер в национальном формате.",
+  "A valid Swiss phone number (+41) is required. Numbers from other countries are not accepted.": "Нужен корректный швейцарский номер (+41). Номера других стран не принимаются.",
+  "Choose the country of your number. We will send an SMS verification code. Spaces are accepted.": "Выберите страну номера. На него мы отправим SMS с кодом подтверждения. Пробелы допустимы.",
+  "Use the email and password you registered with. Enter a new phone number and verify it by SMS.": "Используйте email и пароль, указанные при регистрации. Введите новый номер и подтвердите его по SMS.",
+  "Loading phone requirements…": "Загружаем требования к номеру…"
 }

@@ -12,17 +12,16 @@ it.each(["admin","superadmin"] as const)("renders role protection and the saved 
   expect(html).toContain('name="fast"');expect(html).toContain('name="voiceReservePercent"');
   expect(html).toContain('name="reason"');expect(html).not.toContain('name="audit"');
 });
-it("prevents saving an unapproved profile and protects a pending save",()=>{
-  const unapproved={...view,policy:{...view.policy,generation:{model:"gpt-6-luna" as const,serviceTier:"fast" as const}}};
-  const html=renderToStaticMarkup(<PreparationSettingsForm view={unapproved} copy={preparationSettingsMessages.ru} role="superadmin" busy onSubmit={()=>{}} />);
-  expect(html).toContain('type="submit" disabled=""');expect(html).toContain('<fieldset disabled=""');
-  expect(html).toContain(preparationSettingsMessages.ru.pending);
+it.each(["en","de","ru","uk","fr","it","rm"] as const)("allows every profile with an optional comment in %s",locale=>{
+  for(const model of ["gpt-5.6","gpt-5.6-terra","gpt-6-luna"] as const) {
+    const selected={...view,policy:{...view.policy,generation:{model,serviceTier:"fast" as const}}};
+    const html=renderToStaticMarkup(<PreparationSettingsForm view={selected} copy={preparationSettingsMessages[locale]} role="superadmin" busy={false} onSubmit={()=>{}} />);
+    expect(html).not.toContain('type="submit" disabled=""');
+    expect(html).toContain('name="reason" maxLength="500"');
+    expect(html).not.toContain('name="report"');
+  }
 });
-it("enables manual local profile selection without pretending that the profile is evaluated",()=>{
-  const local={...view,localTesting:true,policy:{...view.policy,generation:{model:"gpt-6-luna" as const,serviceTier:"fast" as const}}};
-  const html=renderToStaticMarkup(<PreparationSettingsForm view={local} copy={preparationSettingsMessages.ru} role="superadmin" busy={false} onSubmit={()=>{}} />);
-  expect(html).not.toContain('type="submit" disabled=""');
-  expect(html).toContain(preparationSettingsMessages.ru.localTest);
-  expect(html).not.toContain(preparationSettingsMessages.ru.pending);
-  expect(html).toContain('name="reason"');
+it("disables controls while saving",()=>{
+  const html=renderToStaticMarkup(<PreparationSettingsForm view={view} copy={preparationSettingsMessages.en} role="superadmin" busy onSubmit={()=>{}} />);
+  expect(html).toContain('<fieldset disabled=""');
 });

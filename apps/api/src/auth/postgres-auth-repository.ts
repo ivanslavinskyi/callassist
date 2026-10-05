@@ -7,6 +7,7 @@ import type {
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { admitBetaRegistration } from "../beta/beta-controls";
+import { assertAccountPhonePolicy, lockAccountPhonePolicy } from "./account-phone-policy";
 import {
   AuthRepositoryError,
   type AccountAdminInput,
@@ -173,23 +174,24 @@ export class PostgresAuthRepository implements AuthRepository {
     const now = new Date();
     try {
       return await this.#sql.begin(async tx => {
-      if (this.betaControlsEnabled) await admitBetaRegistration(tx, input.invitationCode);
-      const [row] = await tx<UserRow[]>`
-        INSERT INTO users (
-          id, email, password_hash, phone_e164, phone_verified_at,
-          first_name, last_name, role, status, ui_locale, created_at, last_login_at
-        ) VALUES (
-          ${id}, ${input.email}, ${input.passwordHash}, ${input.phoneE164}, ${null},
-          ${input.firstName}, ${input.lastName}, 'user', 'active', ${input.uiLocale},
-          ${now}, ${null}
-        )
-        RETURNING ${this.#userColumns()}
-      `;
-      if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
-      if (this.betaControlsEnabled) await tx`INSERT INTO beta_credit_enrollments(user_id,policy_id,effective_at)
-        SELECT ${id},credit_policy_id,${now} FROM beta_controls WHERE id=true`;
-      await accept?.(id, tx);
-      return this.#mapUser(row);
+        assertAccountPhonePolicy(input.phoneE164, await lockAccountPhonePolicy(tx, this.betaControlsEnabled));
+        if (this.betaControlsEnabled) await admitBetaRegistration(tx, input.invitationCode);
+        const [row] = await tx<UserRow[]>`
+          INSERT INTO users (
+            id, email, password_hash, phone_e164, phone_verified_at,
+            first_name, last_name, role, status, ui_locale, created_at, last_login_at
+          ) VALUES (
+            ${id}, ${input.email}, ${input.passwordHash}, ${input.phoneE164}, ${null},
+            ${input.firstName}, ${input.lastName}, 'user', 'active', ${input.uiLocale},
+            ${now}, ${null}
+          )
+          RETURNING ${this.#userColumns()}
+        `;
+        if (!row) throw new AuthRepositoryError("USER_NOT_FOUND");
+        if (this.betaControlsEnabled) await tx`INSERT INTO beta_credit_enrollments(user_id,policy_id,effective_at)
+          SELECT ${id},credit_policy_id,${now} FROM beta_controls WHERE id=true`;
+        await accept?.(id, tx);
+        return this.#mapUser(row);
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -325,30 +327,38 @@ export class PostgresAuthRepository implements AuthRepository {
 
   async correctUnverifiedPhone(input: { userId: string; expectedPasswordHash: string; newPhoneE164: string }) {
     try {
-      const [row] = await this.#sql<UserRow[]>`
-        UPDATE users SET phone_e164 = ${input.newPhoneE164}
-        WHERE id = ${input.userId} AND password_hash = ${input.expectedPasswordHash}
-          AND status = 'active' AND phone_verified_at IS NULL
-          AND NOT EXISTS (SELECT 1 FROM account_deletion_requests WHERE user_id = users.id AND status <> 'completed')
-        RETURNING ${this.#userColumns()}
-      `;
-      return row ? this.#mapUser(row) : null;
+      return await this.#sql.begin(async tx => {
+        assertAccountPhonePolicy(input.newPhoneE164, await lockAccountPhonePolicy(tx, this.betaControlsEnabled));
+        const [row] = await tx<UserRow[]>`
+          UPDATE users SET phone_e164 = ${input.newPhoneE164}
+          WHERE id = ${input.userId} AND password_hash = ${input.expectedPasswordHash}
+            AND status = 'active' AND phone_verified_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM account_deletion_requests WHERE user_id = users.id AND status <> 'completed')
+          RETURNING ${this.#userColumns()}
+        `;
+        return row ? this.#mapUser(row) : null;
+      });
     } catch (error) { if (isUniqueViolation(error)) return null; throw error; }
   }
 
   async markPhoneVerified(userId: string, verifiedAt: string, expectedPhoneE164?: string) {
-    const [row] = await this.#sql<UserRow[]>`
-      UPDATE users
-      SET phone_verified_at = COALESCE(phone_verified_at, ${new Date(verifiedAt)})
-      WHERE id = ${userId}
-        AND (${expectedPhoneE164 ?? null}::text IS NULL OR (
-          phone_e164 = ${expectedPhoneE164 ?? null} AND phone_verified_at IS NULL AND status = 'active'
-          AND NOT EXISTS (SELECT 1 FROM account_deletion_requests WHERE user_id = users.id AND status <> 'completed')
-        ))
-      RETURNING ${this.#userColumns()}
-    `;
-    if (!row) throw new AuthRepositoryError("PHONE_VERIFICATION_CHANGED");
-    return this.#mapUser(row);
+    return this.#sql.begin(async tx => {
+      const policy = await lockAccountPhonePolicy(tx, this.betaControlsEnabled);
+      const [current] = await tx<{ phone: string; verified: Date | null }[]>`SELECT phone_e164 AS phone, phone_verified_at AS verified FROM users WHERE id=${userId} FOR UPDATE`;
+      if (current && !current.verified) assertAccountPhonePolicy(current.phone, policy);
+      const [row] = await tx<UserRow[]>`
+        UPDATE users
+        SET phone_verified_at = COALESCE(phone_verified_at, ${new Date(verifiedAt)})
+        WHERE id = ${userId}
+          AND (${expectedPhoneE164 ?? null}::text IS NULL OR (
+            phone_e164 = ${expectedPhoneE164 ?? null} AND phone_verified_at IS NULL AND status = 'active'
+            AND NOT EXISTS (SELECT 1 FROM account_deletion_requests WHERE user_id = users.id AND status <> 'completed')
+          ))
+        RETURNING ${this.#userColumns()}
+      `;
+      if (!row) throw new AuthRepositoryError("PHONE_VERIFICATION_CHANGED");
+      return this.#mapUser(row);
+    });
   }
 
   async createSession(input: CreateAuthSessionInput) {
@@ -1204,6 +1214,7 @@ export class PostgresAuthRepository implements AuthRepository {
     expiresAt: string;
   }) {
     return this.#sql.begin(async (transaction) => {
+      assertAccountPhonePolicy(input.newPhoneE164, await lockAccountPhonePolicy(transaction, this.betaControlsEnabled));
       const now = new Date(input.now);
       const [user] = await transaction<UserRow[]>`
         SELECT ${this.#userColumns()}
@@ -1338,6 +1349,7 @@ export class PostgresAuthRepository implements AuthRepository {
     now: string;
   }) {
     return this.#sql.begin(async (transaction) => {
+      const phonePolicy = await lockAccountPhonePolicy(transaction, this.betaControlsEnabled);
       const now = new Date(input.now);
       const [user] = await transaction<UserRow[]>`
         SELECT ${this.#userColumns()}
@@ -1383,6 +1395,7 @@ export class PostgresAuthRepository implements AuthRepository {
         FOR UPDATE
       `;
       if (!challenge) return null;
+      assertAccountPhonePolicy(challenge.newPhoneE164, phonePolicy);
       const [updated] = await transaction<UserRow[]>`
         UPDATE users
         SET

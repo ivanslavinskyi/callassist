@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
-import { preparationLocalTestingEnabled } from "../config/preparation-local-testing";
 import { defaultPreparationCapacity, defaultPreparationRuntimePolicy, preparationProfileAdmissionSchema,
   preparationProfileKey, preparationSettingsUpdateSchema, preparationSettingsViewSchema,
   type PreparationProfileAdmission, type PreparationSettingsUpdate, type PreparationSettingsView } from "@callassist/contracts";
@@ -17,7 +16,7 @@ type Row = { policy: PreparationSettingsView["policy"]; capacity: PreparationSet
   approved_profiles: string[]; updated_at: Date | null; updated_by_user_id: string | null; reason: string | null };
 const view = (row: Row): PreparationSettingsView => preparationSettingsViewSchema.parse({ policy: row.policy,
   capacity: row.capacity, approvedProfiles: row.approved_profiles, updatedAt: row.updated_at?.toISOString() ?? null,
-  updatedByUserId: row.updated_by_user_id, reason: row.reason, history: [], localTesting: preparationLocalTestingEnabled() });
+  updatedByUserId: row.updated_by_user_id, reason: row.reason, history: [] });
 export class PostgresPreparationPolicyStore {
   constructor(private readonly sql: postgres.Sql) {}
   async get(): Promise<PreparationSettingsView> {
@@ -47,9 +46,6 @@ export class PostgresPreparationPolicyStore {
       const previous = view(row);
       const next = structuredClone(previous);
       if ("generation" in input) {
-        if (!next.approvedProfiles.includes(preparationProfileKey(input.generation)) && !next.localTesting) {
-          throw new PreparationPolicyError("PREPARATION_PROFILE_NOT_APPROVED");
-        }
         next.policy.generation = input.generation;
         next.capacity = input.capacity;
       } else {

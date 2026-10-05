@@ -37,11 +37,9 @@ describe("preparation admission across PostgreSQL connections", () => {
     expect(new Set(work.map(w => w.userId)).size).toBe(4);
     await Promise.all(claims.map(j => first.failDurableJob(j.id,j.leaseOwner!,"TEST_FINISHED",new Date().toISOString(),new Date().toISOString(),false,false,fence(j))));
   });
-  it("pins policy, guards updates with a revision, and rejects an unreviewed Fast profile", async () => {
+  it("pins existing policy and serializes concurrent model switches without reports", async () => {
     const settings = await first.getPreparationSettings();
-    await expect(first.updatePreparationSettings({ generation: { model: "gpt-5.6", serviceTier: "fast" }, capacity: settings.capacity,
-      expectedRevision: settings.policy.revision, reason: "test profile" },owners[0]!)).rejects.toMatchObject({ code: "PREPARATION_PROFILE_NOT_APPROVED" });
-    const updates = await Promise.allSettled([first,second].map(repo => repo.updatePreparationSettings({ generation: settings.policy.generation,
+    const updates = await Promise.allSettled([first,second].map(repo => repo.updatePreparationSettings({ generation: {model:"gpt-6-luna",serviceTier:"fast"},
       capacity: { ...settings.capacity, generationSlots: 2 }, expectedRevision: settings.policy.revision, reason: "test capacity" },owners[0]!)));
     expect(updates.filter(r=>r.status === "fulfilled")).toHaveLength(1);
     expect((await first.getPreparationSettings()).history).toHaveLength(1);
@@ -68,7 +66,7 @@ describe("preparation admission across PostgreSQL connections", () => {
     await expect(enqueue(owner)).rejects.toMatchObject({ message: "PREPARATION_USER_QUEUE_FULL" });
     expect(await first.claimDueDurableJob({ types:["brief_compilation"],workClasses:["operations"],workerId:"ops",now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+120000).toISOString() })).toBeNull();
   });
-  it("persists local test evidence separately from quality admission and pins the chosen model", async () => {
+  it("pins an operator model choice without requiring local testing", async () => {
     vi.stubEnv("PREPARATION_LOCAL_TESTING","true"); vi.stubEnv("NODE_ENV","development");
     vi.stubEnv("API_HOST","127.0.0.1"); vi.stubEnv("DATABASE_URL",database.url);
     const settings = await first.getPreparationSettings();
@@ -76,15 +74,15 @@ describe("preparation admission across PostgreSQL connections", () => {
       expectedRevision:settings.policy.revision,reason:"Local manual test"};
     await expect(first.updatePreparationSettings(update,owners[1]!)).rejects.toMatchObject({code:"PREPARATION_FORBIDDEN"});
     const saved = await first.updatePreparationSettings(update,owners[0]!);
-    expect(saved.localTesting).toBe(true);
+    expect(saved.localTesting).toBeUndefined();
     expect(saved.approvedProfiles).toEqual(["gpt-5.6:default"]);
-    expect(saved.history[0]).toMatchObject({localTest:true,reportSha256:null,actorUserId:owners[0]});
+    expect(saved.history[0]).toMatchObject({localTest:false,reportSha256:null,actorUserId:owners[0]});
     const request = await enqueue(owners[9]!);
     const [pinned] = await sql`select runtime_policy from call_preparation_requests where id=${request.id}`;
     expect(pinned!.runtime_policy.generation).toEqual(update.generation);
     vi.stubEnv("PREPARATION_LOCAL_TESTING","false");
-    expect((await second.getPreparationSettings()).history[0]!.localTest).toBe(true);
+    expect((await second.getPreparationSettings()).history[0]!.localTest).toBe(false);
     await expect(second.updatePreparationSettings({...update,expectedRevision:saved.policy.revision},owners[0]!))
-      .rejects.toMatchObject({code:"PREPARATION_PROFILE_NOT_APPROVED"});
+      .resolves.toMatchObject({policy:{generation:update.generation}});
   });
 });

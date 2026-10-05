@@ -69,7 +69,7 @@ it("uses protected post-call capacity at a full budget and does not release unce
 it("revision-checks registration policies, rejects non-superadmins and preserves them for old beta clients", async () => {
   const f = await fixture();
   const view = await f.controls.getView();
-  const policy = { onboarding: "registration", emailVerification: "deferrable" } as const;
+  const policy = { onboarding: "registration", emailVerification: "deferrable", swissPhonesOnly: true } as const;
   const owner = await f.owner();
   await expect(f.controls.updateRegistration(policy, view.revision, owner.id, "Not authorized"))
     .rejects.toMatchObject({ code: "BETA_ADMIN_FORBIDDEN" });
@@ -78,6 +78,9 @@ it("revision-checks registration policies, rejects non-superadmins and preserves
     .rejects.toMatchObject({ code: "BETA_SETTINGS_STALE" });
   await f.controls.update(f.settings, (await f.controls.getView()).revision, f.admin.id, "Old settings client");
   expect(await f.controls.getRegistrationPolicy()).toEqual(policy);
+  await f.controls.updateRegistration({ onboarding: "registration", emailVerification: "deferrable" },
+    (await f.controls.getView()).revision, f.admin.id, "Legacy registration client");
+  expect((await f.controls.getRegistrationPolicy()).swissPhonesOnly).toBe(true);
   expect(await f.sql`SELECT action FROM beta_control_audit WHERE reason='Registration simplification'`).toHaveLength(1);
 }, 30_000);
 

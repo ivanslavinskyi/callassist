@@ -633,9 +633,10 @@ export function buildApp({
     app.get<{ Querystring: { locale?: string } }>("/api/auth/registration-options", async (request, reply) => {
       const locale = contentLocaleSchema.safeParse(request.query.locale ?? "en");
       if (!locale.success) return reply.status(400).send({ error: "INVALID_LOCALE" });
+      const policy = await registrationPolicy();
       return reply.header("Cache-Control", "no-store").send(registrationOptionsSchema.parse({
         beta: await service.repository.betaControls?.getPublicRegistration?.(),
-        policy: await registrationPolicy(), smsCountries: smsAllowedCountries(), documents: contentService ? await contentService.getRegistrationDocuments(locale.data) : null
+        policy, smsCountries: smsAllowedCountries().filter(country => !policy.swissPhonesOnly || country === "CH"), documents: contentService ? await contentService.getRegistrationDocuments(locale.data) : null
       }));
     });
     app.post("/api/auth/email-verification/defer", async (request, reply) => {
@@ -3066,6 +3067,9 @@ function sendAuthError(
   },
   error: unknown
 ) {
+  if (error instanceof AuthRepositoryError && error.code === "SWISS_PHONE_REQUIRED") {
+    return reply.status(403).send({ error: error.code });
+  }
   if (error instanceof BetaControlError) return sendBetaError(reply, error);
   if (!(error instanceof AuthServiceError)) throw error;
   if (error.code === "RATE_LIMITED") {

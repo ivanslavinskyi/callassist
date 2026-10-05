@@ -11,28 +11,40 @@ ignored `docs/local-operations/` directory.
 
 `GET/PUT /api/admin/system/preparation` reads or changes the policy. Only a current,
 active superadmin can mutate it; origin/session checks, database authorization,
-expected revision and an audit reason apply. A conflict returns 409. Reads are
+expected revision and an audit record apply; the comment is optional. A conflict returns 409. Reads are
 private/no-store. A lost response requires refresh before another save.
 
 The admin System panel selects `gpt-5.6`, `gpt-5.6-terra` or `gpt-6-luna` and
 Standard/Fast for **generation**. Audit and review stay on `gpt-5.6:default`.
-Only `gpt-5.6:default` starts admitted. `POST /profiles` requires a superadmin's
-explicit attestation of a reviewed report (SHA-256, at least 200 cases, two runs,
-zero critical errors). It records that attestation; it does not independently
-prove the report's quality, authenticity or model availability. No paid probe is
-triggered by saving settings. Retain the corresponding report and signed review.
+All supported model/tier combinations can be selected by a superadmin in every
+environment, without an evaluation report or admission step. The historical
+`approvedProfiles`/report fields and optional evidence endpoint are retained for
+compatibility and history only; they never gate selection. Saving makes no paid
+provider request. The former `PREPARATION_LOCAL_TESTING` bypass has been removed;
+the old environment variable has no effect. Evaluations remain an optional tool,
+and switching a profile is not proof of model quality or provider availability.
+New preparations use the selected profile; existing ones retain their snapshot.
 
-For manual development tests, `PREPARATION_LOCAL_TESTING=true` permits a superadmin
-to select any listed model/tier without an evaluation report. It is effective only
-with `NODE_ENV=development`, an explicit loopback `API_HOST`, and a loopback PostgreSQL
-`DATABASE_URL`. Production startup rejects the flag. The server reports this
-capability as `localTesting`; clients cannot grant it in a settings request.
-The panel explains the test mode and hides the report-admission form. Saves retain
-actor/reason/revision, are labelled as local tests in the audit history, and leave
-`approvedProfiles` unchanged. New plans for all users of that local database use the
-selected profile; existing preparations retain their snapshot. Saving itself makes
-no provider request. Keep test data/settings local; restore an evaluated profile
-before disabling test mode. This mode does not certify quality or provider access.
+Recipient integrity is independent of whether the label names a person, practice
+or organisation. Raw identity and snapshots retain the original spelling. Speech
+comparison accepts complete-token Unicode/case/diacritic normalization and the
+existing deterministic Cyrillic transliteration. Inflected Cyrillic forms must be
+attested in the user's source. It does not guess translations, abbreviations or
+approximate spellings. Postal addresses and protected identifiers retain their
+strict checks. Unknown transformations still require repair/review.
+
+## Account phone policy
+
+`registration.swissPhonesOnly` controls registration, unverified phone correction,
+verification/resend and account phone changes. The API checks it before provider
+IO; PostgreSQL mutation transactions lock current policy before account/challenge
+rows and revalidate before persisting changes. Existing verified accounts retain
+login and recovery. UI country selection and explanatory/error copy follow this
+policy in all seven locales. An old settings client omitting the new field preserves
+the current value. Migration 0108 preserves existing behaviour; production rollout
+explicitly enables this setting through the audited policy before reopening traffic.
+
+## Preparation snapshots
 
 Each preparation snapshots policy revision, stage models and tiers, prompt/pricing
 versions, request/output limits and the absolute deadline. Retries and review use
