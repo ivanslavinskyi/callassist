@@ -1,4 +1,4 @@
-import { registrationPolicySchema, type RegistrationPolicy, analyticsSettingsSchema, type AnalyticsSettingsView, type AnalyticsSettings } from "@callassist/contracts";
+import { registrationPolicySchema, type RegistrationPolicySettingsUpdate, analyticsSettingsSchema, type AnalyticsSettingsView, type AnalyticsSettings } from "@callassist/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import { betaSettingsSchema, type BetaSettings, type BetaSettingsUpdate, type BetaControlsView } from "@callassist/contracts";
@@ -21,7 +21,7 @@ export interface BetaControls {
   getView(): Promise<BetaControlsView>;
   getRegistrationPolicy(): Promise<import("@callassist/contracts").RegistrationPolicy>;
   getAnalytics(): Promise<AnalyticsSettingsView>;
-  updateRegistration(settings: RegistrationPolicy, expectedRevision: number, actor: string, reason: string): Promise<void>;
+  updateRegistration(settings: RegistrationPolicySettingsUpdate, expectedRevision: number, actor: string, reason: string): Promise<void>;
   updateAnalytics(settings: AnalyticsSettings, expectedRevision: number, actor: string): Promise<void>;
   update(settings: BetaSettingsUpdate["settings"], expectedRevision: number, actor: string, reason: string): Promise<void>;
   createInvitation(actor: string, reason: string): Promise<{ id: string; code: string; expiresAt: string }>;
@@ -54,15 +54,17 @@ export async function admitBetaRegistration(tx: postgres.TransactionSql, invitat
     await tx`UPDATE beta_controls SET public_accounts=public_accounts+1 WHERE id=true`;
   }
 }
-export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendKind, key: string, settings?: BetaSettings) {
+export async function reserveBetaSpend(tx: postgres.TransactionSql, kind: SpendKind, key: string, settings?: BetaSettings, minimumReserveMicros = 0) {
   const policy = settings ?? (await lockBetaControls(tx)).settings;
   if (!policy.spendingEnabled) throw new BetaControlError("BETA_SPENDING_PAUSED");
   if (policy.rollingDayBudgetMicros === null) throw new BetaControlError("BETA_BUDGET_UNCONFIGURED");
   const existing = await tx`SELECT reservation_key FROM beta_spend_reservations WHERE reservation_key=${key} AND kind=${kind}`;
   if (existing.count) return;
-  const amount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros + 10_000 :
+  const configuredAmount = kind === "call" ? Math.ceil(policy.maxDurationSeconds / 60) * policy.callMinuteReserveMicros + 10_000 :
     kind === "text" ? policy.textRequestReserveMicros : kind === "transcription" ? policy.transcriptionRequestReserveMicros * (key.startsWith("postcall:") ? postCallReserveSlots : 1) :
     kind === "sms" ? policy.smsReserveMicros : policy.emailReserveMicros;
+  if (!Number.isSafeInteger(minimumReserveMicros) || minimumReserveMicros < 0) throw new Error("Invalid request reserve");
+  const amount = Math.max(configuredAmount, minimumReserveMicros);
   const { reservedMicros: total } = await readBetaSpend(tx);
   if (total + amount > policy.rollingDayBudgetMicros) {
     budgetSignal("beta_budget_request_blocked", total, policy.rollingDayBudgetMicros, policy.currency);
@@ -155,12 +157,12 @@ export class PostgresBetaControls implements BetaControls {
     const [row] = await this.sql<Row[]>`SELECT settings,revision FROM beta_controls WHERE id=true`;
     return { settings: betaSettingsSchema.parse(row?.settings).analytics, revision: row!.revision };
   }
-  async updateRegistration(settings: RegistrationPolicy, expectedRevision: number, actor: string, reason: string) {
-    const registration = registrationPolicySchema.parse(settings);
+  async updateRegistration(settings: RegistrationPolicySettingsUpdate, expectedRevision: number, actor: string, reason: string) {
     await this.sql.begin(async tx => {
       const row = await lockBetaControls(tx);
       await requireBetaAdmin(tx, actor);
       if (row.revision !== expectedRevision) throw new BetaControlError("BETA_SETTINGS_STALE");
+      const registration = registrationPolicySchema.parse({ ...settings, swissPhonesOnly: settings.swissPhonesOnly ?? row.settings.registration.swissPhonesOnly });
       const next = { ...row.settings, registration };
       await tx`UPDATE beta_controls SET settings=${tx.json(next)},revision=revision+1,updated_at=now(),reason=${reason} WHERE id=true`;
       await tx`INSERT INTO beta_control_audit(id,actor_user_id,action,reason,previous_settings,next_settings)

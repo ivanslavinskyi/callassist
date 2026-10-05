@@ -1,3 +1,4 @@
+import { preparationCheckpointSchema, preparationRuntimePolicySchema } from "@callassist/contracts";
 import { decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
@@ -37,15 +38,16 @@ export const exportSources: ExportSource[] = [
   source("plan_review_audit", "id case_id actor_id action reason_ciphertext metadata created_at", "t.case_id IN (SELECT id FROM plan_review_cases WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))"),
   source("call_outcome_revisions", "id call_brief_id revision schema_version outcome provenance actor_user_id reason technical created_at", calls),
   source("call_feedback_revisions", "id call_brief_id user_id revision schema_version goal_result transcript_quality comment_ciphertext created_at", calls),
-  source("call_preparation_requests", "id user_id status call_brief_id target_call_brief_id operation_kind failure_code created_at updated_at completed_at input_ciphertext expected_compilation_id target_revision provider_request_count", preparations),
+  source("call_preparation_requests", "id user_id status call_brief_id target_call_brief_id operation_kind failure_code created_at updated_at completed_at input_ciphertext expected_compilation_id target_revision provider_request_count runtime_policy runtime_policy_source deadline_at", preparations),
   source("call_preparation_language_contexts", "preparation_id preferences account_preference request_version", "t.preparation_id IN (SELECT id FROM export_preparations WHERE available)", "t.preparation_id"),
-  source("provider_operations", "id provider operation_type stage requested_model client_request_id call_preparation_id call_brief_id call_attempt_id recording_id recording_transcript_request_id durable_job_id durable_job_generation text_artifact_id parent_operation_id request_metadata started_at", "t.id IN (SELECT id FROM export_operations)"),
-  source("provider_operation_results", "operation_id outcome provider_request_id provider_response_id provider_model http_status error_code completed_at duration_ms response_metadata", operations, "t.operation_id"),
+  source("provider_operations", "id provider operation_type stage requested_model client_request_id call_preparation_id call_brief_id call_attempt_id recording_id recording_transcript_request_id durable_job_id durable_job_generation text_artifact_id parent_operation_id request_metadata started_at requested_service_tier pricing_version", "t.id IN (SELECT id FROM export_operations)"),
+  source("provider_operation_results", "operation_id outcome provider_request_id provider_response_id provider_model http_status error_code completed_at duration_ms response_metadata actual_service_tier", operations, "t.operation_id"),
+  source("preparation_request_checkpoints", "operation_id kind metadata created_at", operations, "t.operation_id,t.kind"),
   source("provider_usage_records", "id operation_id schema_version request_count input_text_tokens cached_input_text_tokens cache_write_input_text_tokens output_text_tokens reasoning_output_tokens input_audio_tokens cached_input_audio_tokens output_audio_tokens total_tokens duration_seconds billable_seconds raw_usage observed_at pricing_version", operations),
   source("provider_usage_supplements", "operation_id observation_key duration_seconds billable_seconds observed_at", operations, "t.operation_id,t.observation_key"),
   source("effective_provider_usage", "id operation_id schema_version request_count input_text_tokens cached_input_text_tokens cache_write_input_text_tokens output_text_tokens reasoning_output_tokens input_audio_tokens cached_input_audio_tokens output_audio_tokens total_tokens duration_seconds billable_seconds raw_usage observed_at pricing_version", operations),
   source("provider_cost_records", "id operation_id provider provider_cost_id cost_basis component amount_micros currency raw_cost observed_at", operations),
-  source("durable_jobs", "id job_type recording_id call_attempt_id call_preparation_id text_artifact_id status generation attempt_count max_attempts run_after force_requested lease_expires_at last_error_code created_at updated_at completed_at", "t.id IN (SELECT id FROM export_jobs)"),
+  source("durable_jobs", "id job_type work_class recording_id call_attempt_id call_preparation_id text_artifact_id status generation attempt_count max_attempts run_after force_requested lease_expires_at last_error_code created_at updated_at completed_at", "t.id IN (SELECT id FROM export_jobs)"),
   source("durable_job_attempts", "id job_id generation attempt_number started_at completed_at outcome error_code", jobs),
   source("durable_job_admin_events", "id job_id actor_user_id action reason created_at", jobs),
   source("credit_transactions", "id user_id amount type call_attempt_id reason qualification beta_period_id created_at", "t.call_attempt_id IN (SELECT id FROM call_attempts WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))"),
@@ -137,6 +139,8 @@ export function mapExportRow(s: ExportSource, data: Record<string, unknown>, key
     if (field.endsWith("_ciphertext")) mapped[field.replace(/_ciphertext$/, "")] = value === null ? null : decryptJson(String(value), key);
     else if (s.table === "call_attempts" && field === "consent_runtime_policy") mapped[field] = value === null ? null : exportedConsentPolicySchema.parse(value);
     else if (s.table === "provider_operation_results" && field === "response_metadata") mapped[field] = value === null ? null : preparationTransportDiagnosticsSchema.strip().parse(value);
+    else if (s.table === "preparation_request_checkpoints" && field === "metadata") mapped[field] = preparationCheckpointSchema.strip().parse(value);
+    else if (s.table === "call_preparation_requests" && field === "runtime_policy") mapped[field] = preparationRuntimePolicySchema.parse(value);
     else if (s.table === "audit_events" && field === "metadata") mapped[field] = metadata(value);
     else if (field === "raw_usage" || field === "raw_cost") mapped[field] = usage(value);
     else mapped[field] = value;

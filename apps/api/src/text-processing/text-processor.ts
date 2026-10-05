@@ -30,6 +30,9 @@ export type TextProcessingInput = (
 
 export type TextProcessingPayload = PlanReviewPayload | TranscriptTranslationPayload | CallSummaryPayload;
 export type TextProcessingProviderRequest = {
+  reserveUsdMicros?: number;
+  estimatedTokens?: number;
+  requestedServiceTier?: string;
   clientRequestId: string;
   kind: TextArtifactKind;
   operationType: "text_translation" | "call_summary";
@@ -38,6 +41,8 @@ export type TextProcessingProviderRequest = {
   startedAt: string;
 };
 export type TextProcessingProviderRequestResult = {
+  actualServiceTier?: string | null;
+  retryAfterMs?: number;
   clientRequestId: string;
   kind: TextArtifactKind;
   outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
@@ -52,6 +57,7 @@ export type TextProcessingProviderRequestResult = {
   validationCode?: string;
 };
 export type TextProcessingRunOptions = {
+  profile?: import("@callassist/contracts").PreparationProfile;
   maxProviderRequests?: number;
   signal?: AbortSignal;
   beforeProviderRequest?: (request: TextProcessingProviderRequest) => Promise<boolean>;

@@ -1,3 +1,5 @@
+import { preparationSettingsViewSchema, preparationSettingsUpdateSchema, preparationProfileAdmissionSchema } from "@callassist/contracts";
+import { PreparationPolicyError } from "./storage/preparation-policy-store";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { smsAllowedCountries, VerificationSendError } from "./auth/bounded-verification-provider";
@@ -631,9 +633,10 @@ export function buildApp({
     app.get<{ Querystring: { locale?: string } }>("/api/auth/registration-options", async (request, reply) => {
       const locale = contentLocaleSchema.safeParse(request.query.locale ?? "en");
       if (!locale.success) return reply.status(400).send({ error: "INVALID_LOCALE" });
+      const policy = await registrationPolicy();
       return reply.header("Cache-Control", "no-store").send(registrationOptionsSchema.parse({
         beta: await service.repository.betaControls?.getPublicRegistration?.(),
-        policy: await registrationPolicy(), smsCountries: smsAllowedCountries(), documents: contentService ? await contentService.getRegistrationDocuments(locale.data) : null
+        policy, smsCountries: smsAllowedCountries().filter(country => !policy.swissPhonesOnly || country === "CH"), documents: contentService ? await contentService.getRegistrationDocuments(locale.data) : null
       }));
     });
     app.post("/api/auth/email-verification/defer", async (request, reply) => {
@@ -1675,6 +1678,33 @@ export function buildApp({
         }));
     });
 
+    app.get("/api/admin/system/preparation/runtime", async (request,reply) => {
+      if (!await authorizeAdminRead(request,reply)) return;
+      return reply.header("Cache-Control","private, no-store").send(await service.repository.getPreparationRuntimeStatus());
+    });
+    app.get("/api/admin/system/preparation", async (request, reply) => {
+      if (!await authorizeAdminRead(request, reply)) return;
+      return reply.header("Cache-Control", "private, no-store").send(preparationSettingsViewSchema.parse(await service.repository.getPreparationSettings()));
+    });
+    app.put("/api/admin/system/preparation", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "PREPARATION_FORBIDDEN" });
+      const input = preparationSettingsUpdateSchema.safeParse(request.body);
+      if (!input.success) return reply.status(400).send({ error: "INVALID_PREPARATION_SETTINGS" });
+      try { return reply.header("Cache-Control", "private, no-store").send(await service.repository.updatePreparationSettings(input.data, actor.id)); }
+      catch (error) { if (error instanceof PreparationPolicyError) return reply.status(error.code === "PREPARATION_FORBIDDEN" ? 403 : 409).send({ error: error.code }); throw error; }
+    });
+    app.post("/api/admin/system/preparation/profiles", async (request, reply) => {
+      const actor = await authorizeAdminMutation(request, reply);
+      if (!actor) return;
+      if (actor.role !== "superadmin") return reply.status(403).send({ error: "PREPARATION_FORBIDDEN" });
+      const input = preparationProfileAdmissionSchema.safeParse(request.body);
+      if (!input.success) return reply.status(400).send({ error: "INVALID_PREPARATION_EVALUATION" });
+      try { return reply.header("Cache-Control", "private, no-store").send(await service.repository.admitPreparationProfile(input.data, actor.id)); }
+      catch (error) { if (error instanceof PreparationPolicyError) return reply.status(error.code === "PREPARATION_FORBIDDEN" ? 403 : 409).send({ error: error.code }); throw error; }
+    });
+
     app.get("/api/admin/system/voice-consent", async (request, reply) => {
       const actor = await authorizeAdminRead(request, reply);
       if (!actor) return;
@@ -2220,6 +2250,10 @@ export function buildApp({
       .send(serviceLivenessSchema.parse({ status: "alive" }));
   });
 
+  app.get("/health/workers", async (_request,reply) => {
+    const ready = await service.repository.preparationWorkersReady().catch(() => false);
+    return reply.header("Cache-Control","no-store").code(ready ? 200 : 503).send({ status: ready ? "ready" : "not_ready" });
+  });
   app.get("/health/ready", async (_request, reply) => {
     try {
       await service.ping();
@@ -3033,6 +3067,9 @@ function sendAuthError(
   },
   error: unknown
 ) {
+  if (error instanceof AuthRepositoryError && error.code === "SWISS_PHONE_REQUIRED") {
+    return reply.status(403).send({ error: error.code });
+  }
   if (error instanceof BetaControlError) return sendBetaError(reply, error);
   if (!(error instanceof AuthServiceError)) throw error;
   if (error.code === "RATE_LIMITED") {
@@ -3068,7 +3105,7 @@ function sendAuthError(
 }
 
 function sendAccountDeletionError(
-  reply: { status(code: number): { send(payload: unknown): unknown } },
+  reply: { status(code: number): { send(payload: unknown): unknown }; header?: (name: string,value: string) => unknown },
   error: unknown
 ) {
   if (error instanceof AccountDeletionServiceError) {
@@ -3466,7 +3503,7 @@ export function buildWebhookApp({
 }
 
 function sendContentError(
-  reply: { status(code: number): { send(payload: unknown): unknown } },
+  reply: { status(code: number): { send(payload: unknown): unknown }; header?: (name: string,value: string) => unknown },
   error: unknown
 ) {
   if (error instanceof ContentRepositoryError) {
@@ -3557,9 +3594,13 @@ function isValidTwilioMediaStream(
 }
 
 function sendRepositoryError(
-  reply: { status(code: number): { send(payload: unknown): unknown } },
+  reply: { status(code: number): { send(payload: unknown): unknown }; header?: (name: string,value: string) => unknown },
   error: unknown
 ) {
+  const preparationCode = error instanceof PreparationPolicyError ? error.code : error && typeof error === "object" && "message" in error &&
+    ["PREPARATION_QUEUE_FULL", "PREPARATION_USER_QUEUE_FULL"].includes(String(error.message)) ? String(error.message) : null;
+  if (preparationCode) { reply.header?.("Retry-After", "5"); return reply.status(429).send({ error: preparationCode }); }
+
   if (error instanceof BetaControlError) return sendBetaError(reply, error);
   if (error instanceof TextArtifactServiceError) {
     return reply.status(error.code === "TEXT_GENERATION_DISABLED" ? 503 : 422).send({ error: error.code });
@@ -3612,7 +3653,7 @@ function sendRepositoryError(
   throw error;
 }
 
-function sendBetaError(reply: { status(code: number): { send(payload: unknown): unknown } }, error: BetaControlError) {
+function sendBetaError(reply: { status(code: number): { send(payload: unknown): unknown }; header?: (name: string,value: string) => unknown }, error: BetaControlError) {
   const status = error.code === "BETA_ADMIN_FORBIDDEN" ? 403 :
     error.code === "BETA_INVITATION_INVALID" ? 400 :
     error.code === "BETA_SETTINGS_STALE" ? 409 :

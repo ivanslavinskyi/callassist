@@ -330,6 +330,7 @@ export class AuthRepositoryError extends Error {
       | "USER_ALREADY_EXISTS"
       | "USER_NOT_FOUND"
       | "PHONE_VERIFICATION_CHANGED"
+      | "SWISS_PHONE_REQUIRED"
       | "SESSION_CREATION_DENIED"
       | "ADMIN_ACTION_FORBIDDEN"
       | "SELF_ADMIN_ACTION_FORBIDDEN"

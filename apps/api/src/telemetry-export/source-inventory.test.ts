@@ -16,7 +16,8 @@ const excluded: Record<string, string[]> = {
     "rate_limit_buckets", "rate_limit_hourly_metrics", "provider_webhook_delivery_buckets", "durable_worker_heartbeats", "beta_controls", "beta_invitations", "beta_control_audit", "beta_recipient_starts",
     // Global operator history is not scoped to a selected call. Its attempt's
     // immutable policy is exported through call_attempts instead.
-    "voice_consent_settings", "voice_consent_settings_audit"],
+    "voice_consent_settings", "voice_consent_settings_audit", "preparation_settings", "preparation_settings_audit",
+    "preparation_dispatch_users", "preparation_provider_permits", "preparation_provider_cooldown", "preparation_provider_admissions", "preparation_daily_metrics"],
   notification_content_and_delivery: ["superadmin_notification_settings", "superadmin_notifications", "superadmin_notification_audit"],
   export_storage_and_audit: ["admin_telemetry_privacy_epoch", "admin_telemetry_exports", "admin_telemetry_export_parts", "admin_telemetry_export_events", "admin_telemetry_export_recordings"]
 };

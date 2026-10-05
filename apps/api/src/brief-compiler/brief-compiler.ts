@@ -1,3 +1,8 @@
+import { preparationRequestReserve } from "../config/preparation-pricing";
+import { equivalentIdentityLabel, preservesIdentityLabel } from "./identity-label";
+import { readProviderResponse, ResponseReadError, providerBackoffMs } from "./response-reader";
+import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
+import { preparationCheckpointSchema, type PreparationRuntimePolicy, type PreparationCheckpoint } from "@callassist/contracts";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { randomUUID } from "node:crypto";
@@ -53,6 +58,9 @@ export type PreparationRequestMetadata = {
 };
 
 export type BriefCompilerRunOptions = {
+  policy?: PreparationRuntimePolicy;
+  signal?: AbortSignal;
+  checkpoint?: (clientRequestId: string, checkpoint: PreparationCheckpoint) => Promise<void>;
   maxProviderRequests?: number;
   /** Persisted preparation creation time bounds all durable retries together. */
   deadlineAtMs?: number;
@@ -64,12 +72,18 @@ export type BriefCompilerRunOptions = {
     model: string;
     startedAt: string;
     requestMetadata?: PreparationRequestMetadata;
+    requestedServiceTier?: string;
+    pricingVersion?: string;
+    reserveUsdMicros?: number;
+    estimatedTokens?: number;
   }) => Promise<boolean>;
   afterProviderRequest?: (result: BriefCompilerProviderRequestResult) =>
     Promise<void>;
 };
 
 export type BriefCompilerProviderRequestResult = {
+  actualServiceTier?: string | null;
+  retryAfterMs?: number;
   diagnostics?: import("@callassist/contracts").PreparationTransportDiagnostics;
   clientRequestId: string;
   stage: BriefCompilerStage;
@@ -104,6 +118,7 @@ export interface BriefCompiler {
 }
 
 export class BriefCompilerError extends Error {
+  readonly retryAfterMs: number;
   readonly responseId: string | null;
   readonly clientRequestId: string | null;
   readonly validationPaths: string[];
@@ -116,6 +131,7 @@ export class BriefCompilerError extends Error {
       | "OPENAI_REQUEST_BUDGET_EXHAUSTED"
       | "OPENAI_RESPONSE_INVALID",
     options?: {
+      retryAfterMs?: number;
       cause?: unknown;
       responseId?: string | null;
       clientRequestId?: string | null;
@@ -126,6 +142,7 @@ export class BriefCompilerError extends Error {
   ) {
     super(code, options);
     this.name = "BriefCompilerError";
+    this.retryAfterMs = options?.retryAfterMs ?? 0;
     this.responseId = options?.responseId ?? null;
     this.clientRequestId = options?.clientRequestId ?? null;
     this.validationPaths = options?.validationPaths ?? [];
@@ -187,7 +204,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     revision = 1,
     options: BriefCompilerRunOptions = {}
   ) {
-    const deadline = Math.min(Date.now() + this.#timeoutMs, options.deadlineAtMs ?? Infinity);
+    const deadline = Math.min(Date.now() + Math.min(options.policy?.timeoutMs ?? Infinity, this.#timeoutMs), options.deadlineAtMs ?? Infinity);
     if (deadline <= Date.now()) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
       cause: new Error("PREPARATION_DEADLINE_EXCEEDED")
     });
@@ -195,7 +212,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     const compilationDeadline = deadline - Math.min(
       this.#requestTimeoutMs ?? defaultModerationRequestTimeoutMs, Math.floor((deadline - Date.now()) / 4)
     );
-    const requestBudget = createRequestBudget(options);
+    const model = options.policy?.generation.model ?? this.model;
+    const requestBudget = createRequestBudget({ ...options, deadlineAtMs: deadline });
     const rawBrief = createCallBriefInputSchema.parse(input);
     const currentDateTime = this.#now().toISOString();
     if (await this.#isFlaggedByModeration(rawBrief, deadline, requestBudget)) {
@@ -203,7 +221,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         rawBrief,
         compiledBrief: null,
         policyDecision: blockedDecision("input_moderation_flagged"),
-        compilerModel: this.model,
+        compilerModel: model,
         compilerResponseId: null,
         revision
       });
@@ -235,7 +253,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           rawBrief,
           compiledBrief: null,
           policyDecision: blockedDecision("model_refusal"),
-          compilerModel: this.model,
+          compilerModel: model,
           compilerResponseId: stringOrNull(response.id),
           revision
         });
@@ -257,7 +275,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           let languageIssues: string[];
           try {
             languageIssues = await verifyExecutionLanguage(compiledBrief, rawBrief, body => this.#request(
-              this.#responsesEndpoint, body, compilationDeadline, "language_audit", this.model, requestBudget), this.model);
+              this.#responsesEndpoint, body, compilationDeadline, "language_audit", options.policy?.audit.model ?? model, requestBudget), options.policy?.audit.model ?? model);
           } catch (cause) {
             if (cause instanceof BriefCompilerError) throw cause;
             throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "language_audit", validationPaths: ["execution_language_audit"] });
@@ -306,11 +324,12 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       buildRuntimeModerationText(compiledBrief), deadline, "output_moderation", requestBudget
     ) ? blockedDecision("prohibited_content") : localPolicy;
 
+    if (Date.now() >= deadline || options.signal?.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { cause: new Error("PREPARATION_DEADLINE_EXCEEDED") });
     return createCompilation({
       rawBrief,
       compiledBrief,
       policyDecision,
-      compilerModel: this.model,
+      compilerModel: model,
       compilerResponseId: stringOrNull(response.id),
       displayObjective,
       revision
@@ -375,9 +394,9 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     return (await this.#request(
       this.#responsesEndpoint,
       {
-        model: this.model,
+        model: requestBudget.policy?.generation.model ?? this.model,
         store: false,
-        max_output_tokens: 20_000,
+        max_output_tokens: requestBudget.policy?.maxOutputTokens ?? 20_000,
         reasoning: { effort: "low" },
         input: [
           {
@@ -419,210 +438,127 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       },
       deadline,
       requestBudget.repairNumber > 0 ? "compilation_repair" : "compilation",
-      this.model,
+      requestBudget.policy?.generation.model ?? this.model,
       requestBudget
     )) as OpenAIResponsePayload;
   }
 
-  async #request(
-    endpoint: string,
-    body: unknown,
-    deadline: number,
-    stage: BriefCompilerStage,
-    model: string,
-    requestBudget: ProviderRequestBudget
-  ) {
-    let lastError: unknown;
-    let lastClientRequestId: string | null = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) {
-        throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-          cause: new Error("BRIEF_COMPILATION_TIMEOUT"),
-          clientRequestId: lastClientRequestId,
-          stage
-        });
+  async #request(endpoint: string, body: unknown, deadline: number, stage: BriefCompilerStage,
+    model: string, budget: ProviderRequestBudget) {
+    const paid = ["compilation", "compilation_repair", "language_audit"].includes(stage);
+    const profile = stage === "language_audit" ? budget.policy?.audit : budget.policy?.generation;
+    const tier = paid ? profile?.serviceTier ?? "default" : undefined;
+    const deadlineController = new AbortController();
+    const deadlineTimer = setTimeout(() => deadlineController.abort(new DOMException("Preparation deadline reached", "TimeoutError")), Math.max(0,deadline-Date.now()));
+    const deadlineSignal = AbortSignal.any([deadlineController.signal, ...(budget.signal ? [budget.signal] : [])]);
+    try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() >= deadline || deadlineSignal.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage });
+      const clientRequestId = randomUUID(), reservedAt = Date.now();
+      const remainingMs = Math.max(0, deadline - reservedAt);
+      const timeoutMs = Math.min(this.#requestTimeoutMs ?? (paid ? budget.policy?.requestTimeoutMs ?? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs), remainingMs);
+      const requestMetadata: PreparationRequestMetadata = { repairKind: budget.repairKind, repairNumber: budget.repairNumber,
+        transportAttempt: attempt + 1, timeoutMs, remainingMs };
+      if (budget.used >= budget.max) throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", { clientRequestId, stage });
+      const requestBody = JSON.stringify(paid ? { ...(body as object), model, service_tier: tier, stream: true } : body);
+      const reserveUsdMicros = paid && profile ? preparationRequestReserve(profile, Buffer.byteLength(requestBody),
+        Number((body as { max_output_tokens?: number }).max_output_tokens ?? 20000)) : undefined;
+      // Reservation is part of the preparation deadline, including a slow SQL pool.
+      if (budget.beforeProviderRequest && !await awaitWithAbort(budget.beforeProviderRequest({ clientRequestId, stage,
+        operationType: paid ? "brief_compilation" : "brief_moderation", provider: "openai", model,
+        startedAt: new Date(reservedAt).toISOString(), requestMetadata, requestedServiceTier: tier,
+        pricingVersion: budget.policy?.pricingVersion, reserveUsdMicros,
+        estimatedTokens: Buffer.byteLength(requestBody) + 4096 + (paid ? Number((body as { max_output_tokens?: number }).max_output_tokens ?? 20000) : 0) }), deadlineSignal)) {
+        throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", { clientRequestId, stage });
       }
-
-      const clientRequestId = randomUUID();
-      lastClientRequestId = clientRequestId;
-      const reservedAtMs = Date.now();
-      const startedAt = new Date(reservedAtMs).toISOString();
-      const paidGeneration = stage === "compilation" || stage === "compilation_repair" || stage === "language_audit";
-      const requestMetadata: PreparationRequestMetadata = {
-        repairKind: requestBudget.repairKind, repairNumber: requestBudget.repairNumber,
-        transportAttempt: attempt + 1,
-        timeoutMs: Math.max(0, Math.min(this.#requestTimeoutMs ?? (paidGeneration ? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs), remainingMs)),
-        remainingMs
-      };
-      if (requestBudget.used >= requestBudget.max) {
-        throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
-          clientRequestId,
-          stage
-        });
-      }
-      if (
-        requestBudget.beforeProviderRequest &&
-        !(await requestBudget.beforeProviderRequest({
-          clientRequestId,
-          stage,
-          operationType: paidGeneration
-            ? "brief_compilation"
-            : "brief_moderation",
-          provider: "openai",
-          model,
-          startedAt,
-          requestMetadata
-        }))
-      ) {
-        throw new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", {
-          clientRequestId,
-          stage
-        });
-      }
-      requestBudget.used += 1;
-      const providerRequestStartedAtMs = Date.now();
-      let response: Response | undefined;
-      let payload: unknown = null;
-      const requestTimeoutMs = Math.min(
-        this.#requestTimeoutMs ?? (paidGeneration ? defaultGenerationRequestTimeoutMs : defaultModerationRequestTimeoutMs),
-        deadline - Date.now()
-      );
-      const requestBody = JSON.stringify(body);
-      const diagnostics = new PreparationRequestDiagnostics(
-        Math.max(0, providerRequestStartedAtMs - reservedAtMs), requestTimeoutMs, Buffer.byteLength(requestBody, "utf8"));
+      budget.used++;
+      const started = Date.now();
+      const actualTimeout = Math.max(0, Math.min(timeoutMs, deadline - started));
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(new DOMException("Provider request timed out", "TimeoutError")), Math.max(0, requestTimeoutMs));
-      try {
-        if (requestTimeoutMs <= 0) throw new DOMException("Compilation deadline reached", "TimeoutError");
-        response = await awaitWithAbort(diagnostics.run(() => this.#fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.#apiKey}`,
-            "Content-Type": "application/json",
-            "X-Client-Request-Id": clientRequestId
-          },
-          body: requestBody,
-          signal: controller.signal
-        })), controller.signal);
-        diagnostics.headers(response);
-        if (response.ok) {
-          try {
-            // Keep the same timeout active after headers arrive: stalled response bodies consume real time too.
-            diagnostics.bodyStarted();
-            payload = await awaitWithAbort(response.json(), controller.signal);
-          } catch (error) {
-            diagnostics.failed(error);
-            if (controller.signal.aborted || isTimeoutError(error)) throw error;
-            payload = null;
+      const signal = AbortSignal.any([controller.signal, deadlineSignal]);
+      const timer = setTimeout(() => controller.abort(new DOMException("Provider request timed out", "TimeoutError")), actualTimeout);
+      const diagnostics = new PreparationRequestDiagnostics(started - reservedAt, actualTimeout, Buffer.byteLength(requestBody));
+      let response: Response | undefined, payload: Record<string, unknown> | null = null, error: unknown;
+      let requestId: string | null = null, responseId: string | null = null, actualTier: string | null = null;
+      const seen = new Set<PreparationCheckpoint["kind"]>();
+      const checkpoint = async (kind: PreparationCheckpoint["kind"]) => {
+        if (!budget.checkpoint || seen.has(kind)) return;
+        seen.add(kind);
+        const parsed = preparationCheckpointSchema.safeParse({ version: 1, kind, elapsedMs: Math.max(0, Date.now() - started),
+          providerRequestId: requestId, providerResponseId: responseId, actualServiceTier: actualTier });
+        if (parsed.success) {
+          try { await awaitWithAbort(budget.checkpoint(clientRequestId, parsed.data), deadlineSignal); }
+          catch (cause) {
+            deadlineSignal.throwIfAborted();
+            writePiiSafeOperationalError("preparation_checkpoint_failed", cause);
           }
         }
-      } catch (error) {
-        diagnostics.failed(error);
-        await completeProviderRequest(requestBudget, {
-          diagnostics: diagnostics.finish(),
-          clientRequestId,
-          stage,
-          outcome: "network_error",
-          providerRequestId: response?.headers.get("x-request-id") ?? null,
-          providerResponseId: null,
-          providerModel: null,
-          statusCode: response?.status ?? null,
-          completedAt: new Date().toISOString(),
-          durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
-          errorCode: controller.signal.aborted || isTimeoutError(error)
-            ? (response ? "OPENAI_BODY_TIMEOUT" : "OPENAI_RESPONSE_TIMEOUT")
-            : "OPENAI_NETWORK_ERROR",
-          usage: null
-        });
-        lastError = error;
-        if (attempt === 0 && Date.now() < deadline) continue;
-        if (isTimeoutError(error) || Date.now() >= deadline) {
-          throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-            cause: error,
-            clientRequestId,
-            stage
-          });
+      };
+      try {
+        if (Date.now() >= deadline) throw new DOMException("Preparation deadline reached", "TimeoutError");
+        signal.throwIfAborted();
+        await checkpoint("dispatched");
+        response = await awaitWithAbort(diagnostics.run(() => this.#fetch(endpoint, { method: "POST",
+          headers: { Authorization: `Bearer ${this.#apiKey}`, "Content-Type": "application/json", "X-Client-Request-Id": clientRequestId },
+          body: requestBody, signal })), signal);
+        diagnostics.headers(response);
+        requestId = response.headers.get("x-request-id");
+        await checkpoint("headers");
+        if (response.ok) {
+          diagnostics.bodyStarted();
+          const value = await awaitWithAbort(readProviderResponse(response, signal, async (type, eventResponse) => {
+            responseId = stringOrNull(eventResponse?.id) ?? responseId;
+            actualTier = serviceTier(eventResponse?.service_tier) ?? actualTier;
+            await checkpoint("first_event");
+            if (type === "response.created") await checkpoint("response_created");
+            if (type === "response.output_text.delta") await checkpoint("first_output");
+            if (["response.completed", "response.failed", "response.incomplete"].includes(type)) await checkpoint("terminal");
+          }), signal);
+          payload = objectOrNull(value);
+          responseId = stringOrNull(payload?.id) ?? responseId;
+          actualTier = serviceTier(payload?.service_tier) ?? actualTier;
+          if (!payload || (paid && payload.status !== undefined && payload.status !== "completed")) throw new ResponseReadError("OPENAI_STREAM_FAILED", payload);
         }
-        throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-          cause: error,
-          clientRequestId,
-          stage
-        });
+      } catch (cause) {
+        error = cause; diagnostics.failed(cause);
+        if (cause instanceof ResponseReadError && cause.response) payload = cause.response;
       } finally {
-        diagnostics.finish();
-        clearTimeout(timeout);
+        clearTimeout(timer);
+        // Always release rejected/aborted responses, including 429 and 503.
+        if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined);
       }
-
-      const responseId = response.headers.get("x-request-id");
-      if (!response.ok) {
-        await completeProviderRequest(requestBudget, {
-          diagnostics: diagnostics.finish(),
-          clientRequestId,
-          stage,
-          outcome: "provider_error",
-          providerRequestId: responseId,
-          providerResponseId: null,
-          providerModel: null,
-          statusCode: response.status,
-          completedAt: new Date().toISOString(),
-          durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
-          errorCode: `OPENAI_HTTP_${response.status}`,
-          usage: null
-        });
-        if (attempt === 0 && isRetryableOpenAIStatus(response.status)) continue;
-        throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-          responseId,
-          clientRequestId,
-          statusCode: response.status,
-          stage
-        });
-      }
-
-      if (payload && typeof payload === "object") {
-        const responsePayload = payload as Record<string, unknown>;
-        await completeProviderRequest(requestBudget, {
-          diagnostics: diagnostics.finish(),
-          clientRequestId,
-          stage,
-          outcome: paidGeneration && responsePayload.status !== undefined && responsePayload.status !== "completed"
-            ? "invalid_response" : "succeeded",
-          providerRequestId: responseId,
-          providerResponseId: stringOrNull(responsePayload.id),
-          providerModel: stringOrNull(responsePayload.model),
-          statusCode: response.status,
-          completedAt: new Date().toISOString(),
-          durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
-          usage: parseOpenAITextTokenUsage(responsePayload.usage)
-        });
-        return payload;
-      }
-      await completeProviderRequest(requestBudget, {
-        diagnostics: diagnostics.finish(),
-        clientRequestId,
-        stage,
-        outcome: "invalid_response",
-        providerRequestId: responseId,
-        providerResponseId: null,
-        providerModel: null,
-        statusCode: response.status,
-        completedAt: new Date().toISOString(),
-        durationMs: Math.max(0, Date.now() - providerRequestStartedAtMs),
-        usage: null
-      });
-      if (attempt === 0) continue;
-      throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", {
-        responseId,
-        clientRequestId,
-        stage
-      });
+      const delay = response ? providerBackoffMs(response.headers) : 0;
+      const invalid = error instanceof ResponseReadError || error instanceof SyntaxError;
+      const result: BriefCompilerProviderRequestResult = {
+        diagnostics: diagnostics.finish(), clientRequestId, stage,
+        outcome: error ? invalid ? "invalid_response" : "network_error" : response?.ok ? "succeeded" : "provider_error",
+        providerRequestId: requestId, providerResponseId: responseId, providerModel: stringOrNull(payload?.model),
+        actualServiceTier: actualTier, retryAfterMs: delay,
+        statusCode: response?.status ?? null, completedAt: new Date().toISOString(), durationMs: Math.max(0, Date.now() - started),
+        errorCode: error ? invalid ? "OPENAI_RESPONSE_INVALID" : signal.aborted || isTimeoutError(error)
+          ? response ? "OPENAI_BODY_TIMEOUT" : "OPENAI_RESPONSE_TIMEOUT" : "OPENAI_NETWORK_ERROR"
+          : response?.ok ? null : `OPENAI_HTTP_${response?.status ?? 0}`,
+        usage: parseOpenAITextTokenUsage(payload?.usage)
+      };
+      // Accounting may finish late, but the caller must never publish after its deadline.
+      await awaitWithAbort(completeProviderRequest(budget, result), deadlineSignal);
+      if (Date.now() >= deadline || budget.signal?.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, clientRequestId });
+      if ((!error && response?.ok) || (error instanceof ResponseReadError && payload?.status === "incomplete")) return payload;
+      const status = response?.status ?? null;
+      // A provider cooldown is persisted and deferred to the durable queue, never slept in a slot.
+      if (status === 429 || delay > 0) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
+        stage, clientRequestId, statusCode: status, retryAfterMs: Math.max(1000, delay) + Math.floor(Math.random() * 251) });
+      if (invalid) throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { stage, clientRequestId, responseId, cause: error });
+      if (attempt === 0 && !budget.signal?.aborted && (error || (status !== null && isRetryableOpenAIStatus(status)))) continue;
+      throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, clientRequestId, responseId, statusCode: status, cause: error });
     }
-    throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
-      cause: lastError,
-      clientRequestId: lastClientRequestId,
-      stage
-    });
+    throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage });
+    } catch (error) {
+      if (deadlineSignal.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, cause: error });
+      throw error;
+    } finally { clearTimeout(deadlineTimer); }
   }
+
 }
 
 export class DeterministicBriefCompiler implements BriefCompiler {
@@ -729,12 +665,9 @@ export function evaluateCompiledBrief(
   if (context?.authorizationMismatch || (appointment && (compiledBrief.schemaVersion !== "4" || compiledBrief.taskType !== "appointment_coordination" || appointment.operation !== requestedOperation))) {
     return blockedDecision("plan_constraint_failure");
   }
-  const requiredVerbatimEntities = [
-    rawBrief.recipientName,
-    rawBrief.representedPerson,
-    ...protectedPostalAddresses(sourceText)
-  ];
-  if (!requiredVerbatimEntities.every((value) => executionText.includes(value))) {
+  if (![rawBrief.recipientName, rawBrief.representedPerson].every(value =>
+    preservesIdentityLabel(value, executionText, sourceText)) ||
+    !protectedPostalAddresses(sourceText).every(value => executionText.includes(value))) {
     return blockedDecision("fact_integrity_failure");
   }
   if (!protectedPostalAddresses(executionText).every((address) =>
@@ -744,7 +677,8 @@ export function evaluateCompiledBrief(
   }
   if (compiledBrief.namedEntities.some(({ type, value }) =>
     ["person", "organisation", "location"].includes(type) &&
-    !sourceText.includes(value)
+    !sourceText.includes(value) && ![rawBrief.recipientName, rawBrief.representedPerson].some(original =>
+      equivalentIdentityLabel(original, value, sourceText))
   )) {
     return blockedDecision("fact_integrity_failure");
   }
@@ -999,7 +933,14 @@ export function isBriefCompilerErrorRetryable(error: BriefCompilerError) {
   return error.statusCode === null || isRetryableOpenAIStatus(error.statusCode);
 }
 
+function serviceTier(value: unknown): string | null {
+  return typeof value === "string" ? (["default", "fast", "priority", "flex", "auto"].includes(value) ? value : "unknown") : null;
+}
+
 type ProviderRequestBudget = {
+  policy?: PreparationRuntimePolicy;
+  signal?: AbortSignal;
+  checkpoint?: BriefCompilerRunOptions["checkpoint"];
   used: number;
   max: number;
   repairKind: PreparationRequestMetadata["repairKind"];
@@ -1018,6 +959,7 @@ function createRequestBudget(
   }
   return {
     used: 0,
+    policy: options.policy, signal: options.signal, checkpoint: options.checkpoint,
     max,
     repairKind: "none",
     repairNumber: 0,

@@ -1,3 +1,4 @@
+import { preparationCheckpointSchema } from "./preparation-policy";
 import { z } from "zod";
 import { preparationTransportDiagnosticsSchema } from "./preparation-diagnostics";
 import { callLifecycleSchema } from "./call-lifecycle";
@@ -119,6 +120,8 @@ export type AdminCallCostBreakdown = z.infer<
 >;
 
 export const preparationRequestTraceSchema = z.strictObject({
+  requestedServiceTier: z.string().nullable().optional(), actualServiceTier: z.string().nullable().optional(),
+  checkpoints: z.array(preparationCheckpointSchema).max(6).optional(),
   id: z.uuid(), stage: z.string(), model: z.string(),
   startedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(),
   durationMs: z.number().int().nonnegative().nullable(),

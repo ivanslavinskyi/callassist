@@ -22,6 +22,7 @@ import { useAdminSession } from "./admin-session-provider";
 import { AdminOutboundControl } from "./admin-outbound-control";
 import { AdminBetaControls } from "./admin-beta-controls";
 import { AdminNotificationControls } from "./admin-notification-controls";
+import { AdminPreparationSettings } from "./admin-preparation-settings";
 import { AdminVoiceConsentSettings } from "./admin-voice-consent-settings";
 import { voiceConsentMessages } from "@/lib/i18n/voice-consent-messages";
 
@@ -95,6 +96,7 @@ export function AdminSystemConsole() {
         {error ? <p className="form-error" role="alert">{error}</p> : null}
 
         <AdminOutboundControl role={role} />
+        <AdminPreparationSettings role={role} />
         <AdminVoiceConsentSettings role={role} />
         <AdminAnalyticsSettings />
       <AdminBetaControls role={role} />

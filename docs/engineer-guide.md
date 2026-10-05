@@ -56,10 +56,12 @@ and mock development, with the same public contracts where supported.
 PostgreSQL is authoritative. Persist state and an idempotent operation before
 network work, then record provider completion. Do not infer a durable state solely
 from a websocket event or browser timer. Jobs are leased and renewed, bounded by
-generation/attempt budgets and checked before publication. Separate serial worker
-lanes prevent recording work from occupying the preparation lane. Across processes,
-database claims and lease checks prevent duplicate job ownership. The worker drains
-current work on shutdown; expired leases permit bounded recovery.
+generation/attempt budgets and checked before publication. Dedicated preparation,
+operations and background roles have separate lanes; preparation/review support
+bounded concurrent slots. Database admission enforces global/user/provider limits
+across processes. Unique claim ownership and lease fencing prevent stale publication.
+Workers abort provider IO after lease loss and bound shutdown drain. See the
+[preparation runtime](preparation-runtime.md) for limits, policy and diagnostics.
 
 ## User and call lifecycle
 
@@ -146,8 +148,9 @@ retroactively identify an old call's runtime.
 
 ## Preparation latency and diagnostics
 
-`CALL_PREPARATION_TIMEOUT_MS` defaults to 120000 and covers queue time, provider
-requests and durable retries from the preparation creation timestamp.
+Each new preparation pins its model/tier policy and 120000 ms deadline, including
+queue time, provider requests and durable retries. `CALL_PREPARATION_TIMEOUT_MS`
+can impose a smaller process ceiling.
 `OPENAI_BRIEF_COMPILER_TIMEOUT_MS` is a second compile-level ceiling. Generation requests
 default to 35 seconds; moderation retains its own bounded timeout. Output moderation
 gets reserved time. No safety stage is removed to shorten waiting.

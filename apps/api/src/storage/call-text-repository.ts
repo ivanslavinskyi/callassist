@@ -13,6 +13,10 @@ export type EnqueueTextArtifactInput = {
 };
 export type TextArtifactChunk = { index: number; payload: unknown };
 export type TextArtifactProviderReservationInput = {
+  reserveUsdMicros?: number;
+  estimatedTokens?: number;
+  requestedServiceTier?: string;
+  pricingVersion?: string;
   id: string; artifactId: string; provider: "openai";
   operationType: "text_translation" | "call_summary"; stage: string;
   requestedModel: string; clientRequestId: string; startedAt: string;

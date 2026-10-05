@@ -1,3 +1,4 @@
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { randomUUID } from "node:crypto";
 import type { CallRepository } from "../storage/call-repository";
 import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
@@ -18,7 +19,12 @@ type DurableJobHandler = (
 
 type WorkerLane = { types: DurableJobType[]; drain: Promise<void> | null; wakeRequested: boolean };
 
-type DurableJobWorkerOptions = {
+export type DurableJobWorkerOptions = {
+  role?: "all" | "preparation" | "review" | "operations" | "background";
+  workClasses?: import("./durable-job").DurableWorkClass[];
+  laneConcurrency?: Partial<Record<DurableJobType, number>>;
+  useDatabaseTime?: boolean;
+  drainTimeoutMs?: number;
   workerId?: string;
   pollIntervalMs?: number;
   leaseDurationMs?: number;
@@ -32,6 +38,9 @@ type DurableJobWorkerOptions = {
 };
 
 export class DurableJobWorker {
+  readonly #eventLoop = monitorEventLoopDelay({ resolution: 20 });
+  readonly #options: DurableJobWorkerOptions;
+  readonly #controllers = new Set<AbortController>();
   readonly #workerId: string;
   readonly #pollIntervalMs: number;
   readonly #leaseDurationMs: number;
@@ -50,6 +59,7 @@ export class DurableJobWorker {
   #activeJobs = 0;
   #assessmentSweep: Promise<void> | null = null;
   #closed = false;
+  #heartbeatStopped = false;
 
   constructor(
     readonly repository: CallRepository,
@@ -58,6 +68,7 @@ export class DurableJobWorker {
       writePiiSafeOperationalError("durable_worker_operation_failed", error),
     options: DurableJobWorkerOptions = {}
   ) {
+    this.#options = options;
     this.#workerId = options.workerId ?? `api-${randomUUID()}`;
     this.#pollIntervalMs = options.pollIntervalMs ?? 1_000;
     this.#leaseDurationMs = options.leaseDurationMs ?? 120_000;
@@ -70,7 +81,11 @@ export class DurableJobWorker {
     if (new Set(scheduledTypes).size !== scheduledTypes.length || this.#types.some(type => !scheduledTypes.includes(type))) {
       throw new Error("Durable worker lanes must include every handled type exactly once");
     }
-    this.#lanes = lanes.map(types => ({ types, drain: null, wakeRequested: false }));
+    this.#lanes = lanes.flatMap(types => {
+      const slots = Math.max(...types.map(type => options.laneConcurrency?.[type] ?? 1));
+      if (!Number.isInteger(slots) || slots < 1 || slots > 64) throw new Error("Worker slots must be between 1 and 64");
+      return Array.from({ length: slots }, () => ({ types, drain: null, wakeRequested: false }));
+    });
     this.#configured = options.enabled ?? true;
     this.#keepAlive = options.keepAlive ?? false;
     this.#reportRuntimeHeartbeat = options.reportRuntimeHeartbeat ?? false;
@@ -94,9 +109,10 @@ export class DurableJobWorker {
       this.#timer ||
       this.#types.length === 0
     ) return;
+    this.#eventLoop.enable();
     this.#timer = setInterval(() => {
       // A slow transcription/model request must not hold an expired credit reservation.
-      if (!this.#assessmentSweep) {
+      if ((!this.#options.role || ["all","operations"].includes(this.#options.role)) && !this.#assessmentSweep) {
         this.#assessmentSweep = this.repository.expireCallAssessments(this.#now().toISOString())
           .catch(this.onError).finally(() => { this.#assessmentSweep = null; });
       }
@@ -126,13 +142,22 @@ export class DurableJobWorker {
 
   async close() {
     this.#closed = true;
+    this.#eventLoop.disable();
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
-    if (this.#runtimeHeartbeatTimer) {
-      clearInterval(this.#runtimeHeartbeatTimer);
+    this.#writeRuntimeHeartbeat();
+    const abortTimer = setTimeout(() => {
+      for (const controller of this.#controllers) controller.abort(new Error("DURABLE_WORKER_DRAIN_TIMEOUT"));
+    }, this.#options.drainTimeoutMs ?? 30_000);
+    let hardTimer: NodeJS.Timeout | undefined;
+    try { await Promise.race([Promise.allSettled(this.#lanes.map(lane => lane.drain)), new Promise<never>((_,reject) => {
+      hardTimer=setTimeout(() => reject(new Error("DURABLE_WORKER_DRAIN_TIMEOUT")),(this.#options.drainTimeoutMs ?? 30000)+5000);
+    })]); }
+    finally {
+      clearTimeout(abortTimer); clearTimeout(hardTimer); this.#heartbeatStopped=true;
+      if (this.#runtimeHeartbeatTimer) clearInterval(this.#runtimeHeartbeatTimer);
+      this.#runtimeHeartbeatTimer=null;
     }
-    this.#runtimeHeartbeatTimer = null;
-    await Promise.allSettled(this.#lanes.map(lane => lane.drain));
     await this.#assessmentSweep;
     await this.#runtimeHeartbeatWrite;
     if (this.#reportRuntimeHeartbeat) {
@@ -144,7 +169,7 @@ export class DurableJobWorker {
   }
 
   #writeRuntimeHeartbeat() {
-    if (!this.#reportRuntimeHeartbeat || this.#closed) return;
+    if (!this.#reportRuntimeHeartbeat || this.#heartbeatStopped) return;
     if (this.#runtimeHeartbeatWrite) {
       this.#runtimeHeartbeatDirty = true;
       return;
@@ -153,6 +178,10 @@ export class DurableJobWorker {
       workerId: this.#workerId,
       startedAt: this.#startedAt,
       seenAt: this.#now().toISOString(),
+      role: this.#options.role ?? "all",
+      metrics: { draining: this.#closed, rssBytes: process.memoryUsage().rss, heapUsedBytes: process.memoryUsage().heapUsed,
+        eventLoopP99Ms: Math.round(this.#eventLoop.percentile(99)/1e6), cpuUserMs: Math.round(process.cpuUsage().user/1000),
+        cpuSystemMs: Math.round(process.cpuUsage().system/1000), slots: this.#lanes.length },
       activeJobs: this.#activeJobs
     }).catch(this.onError).finally(() => {
       this.#runtimeHeartbeatWrite = null;
@@ -185,7 +214,8 @@ export class DurableJobWorker {
       const now = this.#now();
       const job = await this.repository.claimDueDurableJob({
         types,
-        workerId: this.#workerId,
+        workClasses: this.#options.workClasses, useDatabaseTime: this.#options.useDatabaseTime,
+        workerId: `${this.#workerId}:${randomUUID()}`,
         now: now.toISOString(),
         leaseExpiresAt: new Date(
           now.getTime() + this.#leaseDurationMs
@@ -201,27 +231,33 @@ export class DurableJobWorker {
     if (!handler) return;
     this.#activeJobs += 1;
     this.#writeRuntimeHeartbeat();
+    const controller = new AbortController();
+    this.#controllers.add(controller);
+    const fence: DurableJobLease = { jobId: job.id, workerId: job.leaseOwner!, checkedAt: this.#now().toISOString(),
+      generation: job.generation, attemptNumber: job.attemptCount, signal: controller.signal, useDatabaseTime: this.#options.useDatabaseTime };
+    let renewing = false;
     const heartbeat = setInterval(() => {
+      if (renewing || controller.signal.aborted) return;
+      renewing = true;
       const now = this.#now();
       void this.repository.renewDurableJobLease(
         job.id,
-        this.#workerId,
+        job.leaseOwner!,
         now.toISOString(),
-        new Date(now.getTime() + this.#leaseDurationMs).toISOString()
-      ).catch(this.onError);
+        new Date(now.getTime() + this.#leaseDurationMs).toISOString(), fence
+      ).then(renewed => { if (!renewed) controller.abort(new Error("DURABLE_JOB_LEASE_LOST")); })
+        .catch(error => { controller.abort(new Error("DURABLE_JOB_LEASE_UNCERTAIN")); this.onError(error); })
+        .finally(() => { renewing = false; });
     }, Math.max(1_000, Math.floor(this.#leaseDurationMs / 3)));
     heartbeat.unref();
 
     try {
-      await handler(job, {
-        jobId: job.id,
-        workerId: this.#workerId,
-        checkedAt: this.#now().toISOString()
-      });
+      await handler(job, fence);
+      controller.signal.throwIfAborted();
       const completed = await this.repository.completeDurableJob(
         job.id,
-        this.#workerId,
-        this.#now().toISOString()
+        job.leaseOwner!,
+        this.#now().toISOString(), fence
       );
       if (!completed) {
         this.onError(new Error("DURABLE_JOB_LEASE_LOST"));
@@ -230,18 +266,19 @@ export class DurableJobWorker {
       const now = this.#now();
       const failed = await this.repository.failDurableJob(
         job.id,
-        this.#workerId,
+        job.leaseOwner!,
         durableJobErrorCode(error),
         now.toISOString(),
         new Date(
           now.getTime() + Math.max(durableJobRetryDelayMs(job.attemptCount), error instanceof DurableJobExecutionError ? error.retryAfterMs : 0)
         ).toISOString(),
         durableJobErrorIsRetryable(error),
-        error instanceof DurableJobExecutionError && error.defer
+        error instanceof DurableJobExecutionError && error.defer, fence
       );
       if (failed && failed.status !== "cancelled") this.onError(error);
     } finally {
       clearInterval(heartbeat);
+      this.#controllers.delete(controller);
       this.#activeJobs -= 1;
       this.#writeRuntimeHeartbeat();
     }

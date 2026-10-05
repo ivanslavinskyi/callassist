@@ -1,3 +1,4 @@
+import { accountPhoneMessages } from "./account-phone-messages";
 import { extendMessages } from "./extend-messages";
 import type {
   AccountDeletionStatus,
@@ -396,6 +397,7 @@ export function getAccountContactChangeErrorMessage(
     return kind === "email" ? copy.emailChangeError : copy.phoneChangeError;
   }
   switch (error.code) {
+    case "SWISS_PHONE_REQUIRED": return accountPhoneMessages[locale].swissPhoneRequired;
     case "INVALID_CREDENTIALS":
       return copy.changeInvalidPassword;
     case "INVALID_EMAIL_CHANGE":

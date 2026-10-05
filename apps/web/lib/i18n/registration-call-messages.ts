@@ -1,6 +1,7 @@
+import { accountPhoneMessages } from "./account-phone-messages";
 import { extendMessages } from "./extend-messages";
 
-export const registrationCallMessages = extendMessages({
+const baseRegistrationCallMessages = extendMessages({
   en: {
     switzerland: "Switzerland", ukraine: "Ukraine",
     later: "Confirm later", optionalEmail: "Confirm your email now, or continue and confirm it later in account settings.",
@@ -40,3 +41,5 @@ export const registrationCallMessages = extendMessages({
     saveChanges: "Änderungen speichern", feedbackLoadingError: "Ihr Feedback konnte nicht geladen werden. Versuchen Sie es vor der Bearbeitung erneut."
   }
 });
+
+export const registrationCallMessages = Object.fromEntries(Object.entries(baseRegistrationCallMessages).map(([locale, copy]) => [locale, { ...copy, ...accountPhoneMessages[locale as keyof typeof accountPhoneMessages] }])) as { [L in keyof typeof accountPhoneMessages]: typeof baseRegistrationCallMessages.en & typeof accountPhoneMessages.en };

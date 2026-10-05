@@ -62,6 +62,11 @@ function RequestDetails({ request, previous }: { request: PreparationRequestTrac
   return <details><summary>Request details</summary><dl>
     <Fact label="Client request ID" value={request.clientRequestId ?? "Unknown"} />
     <Fact label="Provider request ID" value={request.providerRequestId ?? "Unknown"} />
+    <Fact label="Requested / actual service tier" value={`${request.requestedServiceTier ?? "Unknown"} / ${request.actualServiceTier ?? "Unknown"}`} />
+    <Fact label="First stream event" value={seconds(request.checkpoints?.find(event => event.kind === "first_event")?.elapsedMs)} />
+    <Fact label="First output" value={seconds(request.checkpoints?.find(event => event.kind === "first_output")?.elapsedMs)} />
+    <Fact label="Stream terminal event" value={seconds(request.checkpoints?.find(event => event.kind === "terminal")?.elapsedMs)} />
+    <Fact label="Early response ID" value={request.checkpoints?.find(event => event.providerResponseId)?.providerResponseId ?? "Unknown"} />
     <Fact label="HTTP status" value={count(request.statusCode)} />
     <Fact label="Worker generation" value={count(request.generation)} />
     <Fact label="Gap since previous response" value={seconds(previous?.completedAt ? Date.parse(request.startedAt) - Date.parse(previous.completedAt) : null)} />

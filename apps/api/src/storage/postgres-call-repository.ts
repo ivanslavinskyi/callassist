@@ -1,3 +1,7 @@
+import { maintainPreparationTelemetry, preparationRuntimeStatus } from "./preparation-observability";
+import { lockPreparationProviderCapacity, insertPreparationProviderPermit } from "./preparation-provider-capacity";
+import { PostgresPreparationPolicyStore, PreparationPolicyError } from "./preparation-policy-store";
+import { preparationRuntimePolicySchema, preparationCheckpointSchema, type PreparationCheckpoint } from "@callassist/contracts";
 import { initialDisclosureProjection, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
   defaultVoiceConsentRuntimePolicy, voiceConsentRuntimePolicySchema,
   type ConsentDisclosureInput, type ConsentDecisionInput, type VoiceConsentSettingsUpdate } from "@callassist/contracts";
@@ -487,6 +491,7 @@ type DurableJobRow = {
 };
 
 type CallPreparationRow = {
+  runtimePolicy: import("@callassist/contracts").PreparationRuntimePolicy;
   id: string;
   userId: string;
   idempotencyKey: string;
@@ -576,10 +581,12 @@ export class PostgresCallRepository implements CallRepository {
   readonly #callText: PostgresCallTextStore;
   readonly #assessments: PostgresCallAssessmentStore;
 
-  constructor(databaseUrl: string, encryptionKey: DataEncryptionMaterial, betaControlsEnabled = false) {
+  constructor(databaseUrl: string, encryptionKey: DataEncryptionMaterial, betaControlsEnabled = false, poolMax = 10) {
     this.#encryptionKey = encryptionKey;
     this.#sql = postgres(databaseUrl, {
-      max: 10,
+      max: poolMax,
+      connect_timeout: 5,
+      connection: { statement_timeout: 10000, idle_in_transaction_session_timeout: 10000 },
       onnotice: () => undefined
     });
     this.betaControls = betaControlsEnabled ? new PostgresBetaControls(this.#sql) : undefined;
@@ -751,6 +758,9 @@ export class PostgresCallRepository implements CallRepository {
     const callBriefId = await this.#sql.begin(async (transaction) => {
       if (publication) {
         await requirePostgresDurableJobLease(transaction, publication.lease);
+        const deadline = await transaction`SELECT id FROM call_preparation_requests WHERE id=${publication.preparationId}
+          AND (status='succeeded' OR deadline_at>clock_timestamp()) FOR UPDATE`;
+        if (!deadline.count) throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
         const [target] = await transaction<{
           userId: string;
           idempotencyKey: string;
@@ -940,6 +950,7 @@ export class PostgresCallRepository implements CallRepository {
             updated_at = ${publication.lease.checkedAt}::timestamptz,
             completed_at = ${publication.lease.checkedAt}::timestamptz
           WHERE id = ${publication.preparationId}
+            AND deadline_at > clock_timestamp()
             AND status IN ('queued', 'processing', 'retrying')
         `;
         if (updated.count !== 1) {
@@ -974,6 +985,8 @@ export class PostgresCallRepository implements CallRepository {
       this.#encryptionKey
     );
     const preparationId = await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT id FROM preparation_settings WHERE id=true FOR UPDATE`;
+      await transaction`SELECT expire_preparation_queue()`;
       await this.#lockActiveUser(transaction, input.userId);
       await transaction`
         INSERT INTO call_preparation_requests (
@@ -1041,6 +1054,8 @@ export class PostgresCallRepository implements CallRepository {
       this.#encryptionKey
     );
     const preparationId = await this.#sql.begin(async (transaction) => {
+      await transaction`SELECT id FROM preparation_settings WHERE id=true FOR UPDATE`;
+      await transaction`SELECT expire_preparation_queue()`;
       // Text mutations and account deletion lock owner -> brief. Acquire the
       // owner first, including the implicit users FK lock needed by the insert.
       if (input.userId) await this.#lockActiveUser(transaction, input.userId);
@@ -1233,6 +1248,7 @@ export class PostgresCallRepository implements CallRepository {
         row.updatedAt = lease.checkedAt;
       }
       return {
+        runtimePolicy: preparationRuntimePolicySchema.parse(row.runtimePolicy),
         preparation: mapCallPreparationRow(row),
         userId: row.userId,
         idempotencyKey: row.idempotencyKey,
@@ -1254,7 +1270,8 @@ export class PostgresCallRepository implements CallRepository {
     lease: DurableJobLease
   ) {
     return this.#sql.begin(async (transaction) => {
-      if (this.betaControls && !isFreeProviderOperation(input)) await reserveBetaSpend(transaction, "text", `provider:${input.id}`);
+      await lockPreparationProviderCapacity(transaction,input.id,input.estimatedTokens);
+      if (this.betaControls && !isFreeProviderOperation(input)) await reserveBetaSpend(transaction, "text", `provider:${input.id}`, undefined, input.reserveUsdMicros ?? 0);
       await requirePostgresDurableJobLease(transaction, lease);
       const existing = await transaction`
         SELECT id
@@ -1285,15 +1302,16 @@ export class PostgresCallRepository implements CallRepository {
         INSERT INTO provider_operations (
           id, provider, operation_type, stage, requested_model,
           client_request_id, call_preparation_id, durable_job_id,
-          durable_job_generation, started_at, request_metadata
+          durable_job_generation, started_at, request_metadata, requested_service_tier, pricing_version
         ) VALUES (
           ${input.id}, ${input.provider}, ${input.operationType}, ${input.stage},
           ${input.requestedModel}, ${input.clientRequestId},
           ${input.preparationId}, ${lease.jobId},
           ${input.durableJobGeneration}, ${input.startedAt}::timestamptz,
-          ${input.requestMetadata ? transaction.json(input.requestMetadata) : null}
+          ${input.requestMetadata ? transaction.json(input.requestMetadata) : null}, ${input.requestedServiceTier ?? null}, ${input.pricingVersion ?? null}
         )
       `;
+      await insertPreparationProviderPermit(transaction, input.id, lease, input.requestMetadata?.timeoutMs ?? 35000, input.estimatedTokens);
       return true;
     });
   }
@@ -1304,7 +1322,8 @@ export class PostgresCallRepository implements CallRepository {
         r.completed_at AS "completedAt",r.duration_ms AS "durationMs",r.outcome,r.error_code AS "errorCode",
         o.request_metadata AS metadata, o.client_request_id AS "clientRequestId",
         o.durable_job_generation AS generation, r.provider_request_id AS "providerRequestId", r.http_status AS "statusCode",
-        r.response_metadata AS diagnostics,
+        r.response_metadata AS diagnostics, o.requested_service_tier AS "requestedServiceTier",r.actual_service_tier AS "actualServiceTier",
+        coalesce((SELECT jsonb_agg(c.metadata ORDER BY c.created_at) FROM preparation_request_checkpoints c WHERE c.operation_id=o.id),'[]'::jsonb) AS checkpoints,
         jsonb_build_object('input',u.input_text_tokens,'cachedInput',u.cached_input_text_tokens,
           'output',u.output_text_tokens,'reasoning',u.reasoning_output_tokens) AS tokens
       FROM provider_operations o LEFT JOIN provider_operation_results r ON r.operation_id=o.id
@@ -1344,6 +1363,38 @@ export class PostgresCallRepository implements CallRepository {
     });
   }
 
+  async getCompilationPreparationPolicy(callId: string, compilationId: string) {
+    const [row] = await this.#sql`SELECT p.runtime_policy FROM call_preparation_requests p JOIN call_compilations c
+      ON c.call_brief_id=p.call_brief_id AND c.revision=p.target_revision
+      WHERE c.id=${compilationId} AND c.call_brief_id=${callId} AND p.status='succeeded' AND p.runtime_policy_source='pinned' LIMIT 1`;
+    return row ? preparationRuntimePolicySchema.parse(row.runtime_policy) : null;
+  }
+  async preparationWorkersReady() {
+    const rows = await this.#sql`SELECT DISTINCT role FROM durable_worker_heartbeats WHERE stopped_at IS NULL
+      AND last_seen_at>clock_timestamp()-interval '15 seconds' AND coalesce((metrics->>'draining')::boolean,false)=false`;
+    const roles = rows.map(row=>row.role);
+    return roles.includes("all") ? roles.every(role=>role === "all") : ["preparation","review","operations","background"].every(role=>roles.includes(role));
+  }
+  maintainPreparationTelemetry() { return maintainPreparationTelemetry(this.#sql); }
+  getPreparationRuntimeStatus() { return preparationRuntimeStatus(this.#sql); }
+  getPreparationSettings() { return new PostgresPreparationPolicyStore(this.#sql).get(); }
+  updatePreparationSettings(input: import("@callassist/contracts").PreparationSettingsUpdate, actorUserId: string) {
+    return new PostgresPreparationPolicyStore(this.#sql).update(input, actorUserId);
+  }
+  admitPreparationProfile(input: import("@callassist/contracts").PreparationProfileAdmission, actorUserId: string) {
+    return new PostgresPreparationPolicyStore(this.#sql).admit(input, actorUserId);
+  }
+  async recordPreparationCheckpoint(operationId: string, checkpoint: PreparationCheckpoint) {
+    const parsed = preparationCheckpointSchema.parse(checkpoint);
+    await this.#sql`INSERT INTO preparation_request_checkpoints(operation_id,kind,metadata)
+      SELECT o.id,${parsed.kind},${this.#sql.json(parsed)} FROM provider_operations o
+      LEFT JOIN call_preparation_requests p ON p.id=o.call_preparation_id
+      LEFT JOIN call_briefs b ON b.id=coalesce(o.call_brief_id,p.call_brief_id,p.target_call_brief_id)
+      LEFT JOIN users u ON u.id=coalesce(p.user_id,b.user_id)
+      WHERE o.id=${operationId} AND b.data_deleted_at IS NULL AND (u.id IS NULL OR u.status='active')
+        AND coalesce(p.status,'processing')<>'cancelled'
+      ON CONFLICT DO NOTHING`;
+  }
   getVoiceConsentSettings() { return new PostgresVoiceConsentPolicyStore(this.#sql).get(); }
   updateVoiceConsentSettings(input: VoiceConsentSettingsUpdate, actorUserId: string) {
     return new PostgresVoiceConsentPolicyStore(this.#sql).update(input, actorUserId);
@@ -1849,12 +1900,12 @@ export class PostgresCallRepository implements CallRepository {
     await this.#sql.begin(async (transaction) => {
       const operation = await transaction`
         SELECT id FROM provider_operations WHERE id = ${input.operationId}
-        FOR SHARE
       `;
       if (operation.count !== 1) {
         throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
       }
       await this.#insertProviderOperationResult(transaction, input.operationId, {
+        actualServiceTier: input.actualServiceTier,
         diagnostics: input.diagnostics,
         outcome: input.outcome,
         providerRequestId: input.providerRequestId,
@@ -1866,6 +1917,10 @@ export class PostgresCallRepository implements CallRepository {
         errorCode: input.errorCode,
         usage: input.usage
       });
+      // Keep unknown remote work reserved until expiry after a local timeout/abort.
+      if (input.outcome !== "network_error") await transaction`DELETE FROM preparation_provider_permits WHERE operation_id=${input.operationId}`;
+      if (input.retryAfterMs || input.statusCode===429) await transaction`UPDATE preparation_provider_cooldown
+        SET until_at=greatest(until_at,clock_timestamp()+(${Math.max(1000,input.retryAfterMs ?? 0)}*interval '1 millisecond')) WHERE id=true`;
     });
   }
 
@@ -2676,6 +2731,9 @@ export class PostgresCallRepository implements CallRepository {
       let expectedCompilationId: string | null = null;
       if (publication) {
         await requirePostgresDurableJobLease(transaction, publication.lease);
+        const deadline = await transaction`SELECT id FROM call_preparation_requests WHERE id=${publication.preparationId}
+          AND (status='succeeded' OR deadline_at>clock_timestamp()) FOR UPDATE`;
+        if (!deadline.count) throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
         const [target] = await transaction<{
           status: CallPreparation["status"];
           callBriefId: string | null;
@@ -2786,6 +2844,7 @@ export class PostgresCallRepository implements CallRepository {
             updated_at = ${publication.lease.checkedAt}::timestamptz,
             completed_at = ${publication.lease.checkedAt}::timestamptz
           WHERE id = ${publication.preparationId}
+            AND deadline_at > clock_timestamp()
             AND status IN ('queued', 'processing', 'retrying')
         `;
         if (updated.count !== 1) {
@@ -3969,19 +4028,19 @@ export class PostgresCallRepository implements CallRepository {
           started_at,
           last_seen_at,
           stopped_at,
-          active_jobs
+          active_jobs, role, metrics
         ) VALUES (
           ${input.workerId},
           ${input.startedAt}::timestamptz,
           ${input.seenAt}::timestamptz,
           NULL,
-          ${input.activeJobs}
+          ${input.activeJobs}, ${input.role ?? "all"}, ${input.metrics ? transaction.json(input.metrics) : null}
         )
         ON CONFLICT (worker_id) DO UPDATE SET
           started_at = EXCLUDED.started_at,
           last_seen_at = EXCLUDED.last_seen_at,
           stopped_at = NULL,
-          active_jobs = EXCLUDED.active_jobs
+          active_jobs = EXCLUDED.active_jobs, role=EXCLUDED.role, metrics=EXCLUDED.metrics
       `;
     });
   }
@@ -6697,8 +6756,15 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async claimDueDurableJob(input: ClaimDurableJobInput) {
+    if (input.useDatabaseTime) {
+      const [clock] = await this.#sql`SELECT clock_timestamp() AS now`;
+      const duration = Math.max(1000, Math.min(300000, Date.parse(input.leaseExpiresAt)-Date.parse(input.now)));
+      input = { ...input, now: clock!.now.toISOString(), leaseExpiresAt: new Date(clock!.now.getTime()+duration).toISOString() };
+    }
     await this.#assessments.expire(input.now);
     const claimed = await this.#sql.begin(async (transaction) => {
+      const [settings] = await transaction`SELECT capacity FROM preparation_settings WHERE id=true FOR UPDATE`;
+      if (input.useDatabaseTime) await transaction`SELECT expire_preparation_queue()`;
       const expired = await transaction<{
         id: string;
         generation: number;
@@ -6784,18 +6850,28 @@ export class PostgresCallRepository implements CallRepository {
           WHERE id=(SELECT text_artifact_id FROM durable_jobs WHERE id=${job.id}) AND status IN ('queued','processing','failed')`;
       }
 
+      const [capacity] = await transaction`SELECT
+        count(*) FILTER(WHERE work_class='preparation')::int AS preparation,
+        count(*) FILTER(WHERE work_class='review')::int AS review FROM durable_jobs WHERE status='running'`;
       const [candidate] = await transaction<{
         id: string;
         forceRequested: boolean;
       }[]>`
-        SELECT id, force_requested AS "forceRequested"
-        FROM durable_jobs
-        WHERE status = 'queued'
-          AND run_after <= ${input.now}::timestamptz
-          AND job_type = ANY(${input.types}::text[])
-        ORDER BY run_after ASC, created_at ASC, id ASC
+        SELECT j.id, j.force_requested AS "forceRequested"
+        FROM durable_jobs j
+        LEFT JOIN call_preparation_requests p ON p.id=j.call_preparation_id
+        LEFT JOIN preparation_dispatch_users fairness ON fairness.user_id=p.user_id
+        WHERE j.status = 'queued'
+          AND j.run_after <= ${input.now}::timestamptz
+          AND j.job_type = ANY(${input.types}::text[])
+          AND j.work_class = ANY(${input.workClasses ?? ["preparation","review","operations","background"]}::text[])
+          AND (j.work_class<>'preparation' OR (${capacity!.preparation} < ${settings!.capacity.generationSlots} AND NOT EXISTS(
+            SELECT 1 FROM durable_jobs active JOIN call_preparation_requests owner ON owner.id=active.call_preparation_id
+            WHERE active.status='running' AND active.work_class='preparation' AND owner.user_id IS NOT DISTINCT FROM p.user_id)))
+          AND (j.work_class<>'review' OR ${capacity!.review} < ${settings!.capacity.reviewSlots})
+        ORDER BY fairness.last_started_at ASC NULLS FIRST,j.run_after ASC,j.created_at ASC,j.id ASC
         LIMIT 1
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE OF j SKIP LOCKED
       `;
       if (!candidate) return null;
       await transaction`
@@ -6810,6 +6886,10 @@ export class PostgresCallRepository implements CallRepository {
           updated_at = ${input.now}::timestamptz
         WHERE id = ${candidate.id}
       `;
+      await transaction`INSERT INTO preparation_dispatch_users(user_id,last_started_at)
+        SELECT p.user_id,${input.now}::timestamptz FROM call_preparation_requests p JOIN durable_jobs j ON j.call_preparation_id=p.id
+        WHERE j.id=${candidate.id} AND p.user_id IS NOT NULL
+        ON CONFLICT(user_id) DO UPDATE SET last_started_at=excluded.last_started_at`;
       return candidate;
     });
     if (!claimed) return null;
@@ -6821,8 +6901,14 @@ export class PostgresCallRepository implements CallRepository {
     jobId: string,
     workerId: string,
     now: string,
-    leaseExpiresAt: string
+    leaseExpiresAt: string,
+    fence?: DurableJobLease
   ) {
+    if (fence?.useDatabaseTime) {
+      const duration = Math.max(1000,Math.min(300000,Date.parse(leaseExpiresAt)-Date.parse(now)));
+      const [clock] = await this.#sql`SELECT clock_timestamp() AS now`;
+      now=clock!.now.toISOString();leaseExpiresAt=new Date(clock!.now.getTime()+duration).toISOString();
+    }
     const rows = await this.#sql`
       UPDATE durable_jobs
       SET
@@ -6831,13 +6917,17 @@ export class PostgresCallRepository implements CallRepository {
       WHERE id = ${jobId}
         AND status = 'running'
         AND lease_owner = ${workerId}
+        AND (${fence?.generation ?? null}::int IS NULL OR lease_expires_at>clock_timestamp())
+        AND (${fence?.generation ?? null}::int IS NULL OR generation=${fence?.generation ?? null})
+        AND (${fence?.attemptNumber ?? null}::int IS NULL OR attempt_count=${fence?.attemptNumber ?? null})
         AND lease_expires_at > ${now}::timestamptz
       RETURNING id
     `;
     return rows.count === 1;
   }
 
-  async completeDurableJob(jobId: string, workerId: string, now: string) {
+  async completeDurableJob(jobId: string, workerId: string, now: string, fence?: DurableJobLease) {
+    if (fence?.useDatabaseTime) { const [clock]=await this.#sql`SELECT clock_timestamp() AS now`;now=clock!.now.toISOString(); }
     return this.#sql.begin(async (transaction) => {
       const [job] = await transaction<{
         generation: number;
@@ -6856,6 +6946,9 @@ export class PostgresCallRepository implements CallRepository {
         WHERE id = ${jobId}
           AND status = 'running'
           AND lease_owner = ${workerId}
+        AND (${fence?.generation ?? null}::int IS NULL OR lease_expires_at>clock_timestamp())
+        AND (${fence?.generation ?? null}::int IS NULL OR generation=${fence?.generation ?? null})
+        AND (${fence?.attemptNumber ?? null}::int IS NULL OR attempt_count=${fence?.attemptNumber ?? null})
           AND lease_expires_at > ${now}::timestamptz
         FOR UPDATE
       `;
@@ -6904,8 +6997,13 @@ export class PostgresCallRepository implements CallRepository {
     now: string,
     retryAt: string,
     retryable = true,
-    defer = false
+    defer = false,
+    fence?: DurableJobLease
   ) {
+    if (fence?.useDatabaseTime) {
+      const delay=Math.max(0,Math.min(86400000,Date.parse(retryAt)-Date.parse(now)));
+      const [clock]=await this.#sql`SELECT clock_timestamp() AS now`;now=clock!.now.toISOString();retryAt=new Date(clock!.now.getTime()+delay).toISOString();
+    }
     const found = await this.#sql.begin(async (transaction) => {
       const [job] = await transaction<{
         generation: number;
@@ -6926,15 +7024,22 @@ export class PostgresCallRepository implements CallRepository {
         WHERE id = ${jobId}
           AND status = 'running'
           AND lease_owner = ${workerId}
+        AND (${fence?.generation ?? null}::int IS NULL OR lease_expires_at>clock_timestamp())
+        AND (${fence?.generation ?? null}::int IS NULL OR generation=${fence?.generation ?? null})
+        AND (${fence?.attemptNumber ?? null}::int IS NULL OR attempt_count=${fence?.attemptNumber ?? null})
           AND lease_expires_at > ${now}::timestamptz
         FOR UPDATE
       `;
       if (!job) return false;
       // Admission did not reach a provider: preserve the retry budget and chunk generation.
-      if (defer && job.type === "final_transcription" && /^BETA_(BUDGET_EXHAUSTED|BUDGET_UNCONFIGURED|SPENDING_PAUSED)$/.test(errorCode)) {
+      if (defer && ((job.type === "final_transcription" && /^BETA_(BUDGET_EXHAUSTED|BUDGET_UNCONFIGURED|SPENDING_PAUSED)$/.test(errorCode)) || errorCode === "PREPARATION_PROVIDER_BUSY")) {
         await transaction`UPDATE durable_jobs SET status='queued', attempt_count=greatest(0,attempt_count-1),
           run_after=${retryAt}::timestamptz, lease_owner=NULL, leased_at=NULL, lease_expires_at=NULL,
           last_error_code=${errorCode}, updated_at=${now}::timestamptz, completed_at=NULL WHERE id=${jobId}`;
+        if (job.callPreparationId) await transaction`UPDATE call_preparation_requests SET status='retrying',updated_at=${now}::timestamptz
+          WHERE id=${job.callPreparationId} AND status='processing'`;
+        if (job.type==='text_artifact_generation') await transaction`UPDATE call_text_artifacts SET status='queued',updated_at=${now}::timestamptz
+          WHERE id=(SELECT text_artifact_id FROM durable_jobs WHERE id=${jobId}) AND status='processing'`;
         return true;
       }
       const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
@@ -7478,6 +7583,7 @@ export class PostgresCallRepository implements CallRepository {
         call_preparation_requests.idempotency_key AS "idempotencyKey",
         call_preparation_requests.input_fingerprint AS "inputFingerprint",
         call_preparation_requests.input_ciphertext AS "inputCiphertext",
+        call_preparation_requests.runtime_policy AS "runtimePolicy",
         call_preparation_requests.provider_request_count AS "providerRequestCount",
         call_preparation_requests.operation_kind AS "operationKind",
         call_preparation_requests.target_call_brief_id AS "targetCallBriefId",
@@ -8308,13 +8414,13 @@ export class PostgresCallRepository implements CallRepository {
     const insertedResult = await transaction`
       INSERT INTO provider_operation_results (
         operation_id, outcome, provider_request_id, provider_response_id,
-        provider_model, http_status, error_code, completed_at, duration_ms, response_metadata
+        provider_model, http_status, error_code, completed_at, duration_ms, response_metadata, actual_service_tier
       ) VALUES (
         ${operationId}, ${input.outcome}, ${input.providerRequestId},
         ${input.providerResponseId}, ${input.providerModel},
         ${input.statusCode}, ${input.errorCode},
         ${input.completedAt}::timestamptz, ${input.durationMs},
-        ${input.diagnostics ? transaction.json(preparationTransportDiagnosticsSchema.parse(input.diagnostics)) : null}
+        ${input.diagnostics ? transaction.json(preparationTransportDiagnosticsSchema.parse(input.diagnostics)) : null}, ${input.actualServiceTier ?? null}
       )
       ON CONFLICT DO NOTHING
       RETURNING operation_id
@@ -8325,7 +8431,7 @@ export class PostgresCallRepository implements CallRepository {
         FROM provider_operation_results
         WHERE operation_id = ${operationId}
       `;
-      if (existingResult.count === 0) return;
+      return;
     }
     if (!input.usage) return;
     await transaction`
@@ -8389,13 +8495,17 @@ async function requirePostgresDurableJobLease(
   transaction: postgres.TransactionSql,
   lease: DurableJobLease
 ) {
+  lease.signal?.throwIfAborted();
   const rows = await transaction`
     SELECT id
     FROM durable_jobs
     WHERE id = ${lease.jobId}
       AND status = 'running'
       AND lease_owner = ${lease.workerId}
-      AND lease_expires_at > ${lease.checkedAt}::timestamptz
+      AND (${lease.generation ?? null}::int IS NULL OR lease_expires_at>clock_timestamp())
+      AND (${lease.generation ?? null}::int IS NULL OR generation=${lease.generation ?? null})
+      AND (${lease.attemptNumber ?? null}::int IS NULL OR attempt_count=${lease.attemptNumber ?? null})
+      AND (${lease.useDatabaseTime ?? false} OR lease_expires_at > ${lease.checkedAt}::timestamptz)
     FOR UPDATE
   `;
   if (rows.count !== 1) {

@@ -21,7 +21,7 @@ export function RegistrationPolicyControls({ role }: { role: UserRole }) {
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!view || busy || role !== "superadmin") return;
     const data = new FormData(event.currentTarget);
-    const policy = { onboarding: data.get("onboarding"), emailVerification: data.get("emailVerification") } as RegistrationPolicy;
+    const policy = { onboarding: data.get("onboarding"), emailVerification: data.get("emailVerification"), swissPhonesOnly: data.has("swissPhonesOnly") } as RegistrationPolicy;
     setBusy(true); setStatus("idle");
     try {
       await updateRegistrationPolicy(policy, view.revision, String(data.get("reason")));
@@ -38,6 +38,8 @@ export function RegistrationPolicyControls({ role }: { role: UserRole }) {
       <label className="field"><span>{copy.emailPolicy}</span><select name="emailVerification" defaultValue={view.settings.registration.emailVerification}>
         <option value="required">{copy.required}</option><option value="deferrable">{copy.deferrable}</option>
       </select></label>
+      <label><input name="swissPhonesOnly" type="checkbox" defaultChecked={view.settings.registration.swissPhonesOnly} /> {copy.swissPhonesOnly}</label>
+      <p>{copy.swissPhonesOnlyHelp}</p>
       <label className="field"><span>{copy.reason}</span><input name="reason" required minLength={3} maxLength={500} /></label>
       <button type="submit" className="primary-button">{copy.savePolicy}</button>
     </fieldset></form> : <button type="button" disabled={busy} onClick={() => void load()}>{copy.reload}</button>}

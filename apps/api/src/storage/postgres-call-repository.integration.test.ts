@@ -2228,10 +2228,13 @@ describe("PostgresCallRepository", () => {
           clientRequestId: id,
           startedAt: lease.checkedAt,
           maxRequests: 8,
+          estimatedTokens: 100,
           requestMetadata: { repairKind: "none" as const, repairNumber: 0, transportAttempt: 1, timeoutMs: 35000, remainingMs: 119000 },
           durableJobGeneration: job!.generation
       };
     });
+    // This assertion exercises the request budget independently of slot capacity.
+    await inspection`UPDATE preparation_settings SET capacity=jsonb_set(capacity,'{providerSlots}','12')`;
     const reservations = await Promise.all(
       reservationInputs.map((reservation) =>
         repository.reserveCallPreparationProviderRequest(reservation, lease)

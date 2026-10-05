@@ -1,3 +1,5 @@
+import { initialPreparationSettings, PreparationPolicyError } from "./preparation-policy-store";
+import { preparationSettingsUpdateSchema, preparationProfileAdmissionSchema, preparationProfileKey, preparationCheckpointSchema, type PreparationCheckpoint } from "@callassist/contracts";
 import { supportsSummaryAssessment, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
   defaultVoiceConsentRuntimePolicy, voiceConsentRuntimePolicy, voiceConsentSettingsUpdateSchema,
   type ConsentDisclosureInput, type ConsentDecisionInput, type VoiceConsentSettingsUpdate } from "@callassist/contracts";
@@ -191,6 +193,7 @@ type StoredWorkerHeartbeat = DurableWorkerHeartbeatInput & {
 };
 
 type StoredCallPreparation = {
+  runtimePolicy: import("@callassist/contracts").PreparationRuntimePolicy;
   language?: PreparationLanguageOptions;
   preparation: Omit<CallPreparation, "attemptCount">;
   userId: string | null;
@@ -228,6 +231,65 @@ function callPreparationFailureCode(
 }
 
 export class InMemoryCallRepository implements CallRepository {
+  #preparationSettings = initialPreparationSettings();
+  readonly #preparationCheckpoints = new Map<string, PreparationCheckpoint[]>();
+  readonly #diagnosticRevokedUsers = new Set<string>();
+  readonly #preparationDispatch = new Map<string, string>();
+  readonly #preparationPermits = new Map<string, number>();
+  readonly #preparationAdmissions = new Map<string, { at: number; tokens: number }>();
+  #preparationCooldown = 0;
+  async getCompilationPreparationPolicy(callId: string, compilationId: string) {
+    const compilation = (this.#compilations.get(callId) ?? []).find(c => c.id === compilationId);
+    const work = [...this.#callPreparations.values()].find(p => p.preparation.callBriefId === callId && p.targetRevision === compilation?.revision);
+    return work ? copy(work.runtimePolicy) : null;
+  }
+  async preparationWorkersReady() { return true; }
+  async maintainPreparationTelemetry() {}
+  async getPreparationRuntimeStatus() { return { workers: [], queue: [], metrics: [] }; }
+  async getPreparationSettings() { return copy(this.#preparationSettings); }
+  async updatePreparationSettings(input: import("@callassist/contracts").PreparationSettingsUpdate, actorUserId: string) {
+    const parsed = preparationSettingsUpdateSchema.parse(input);
+    if (parsed.expectedRevision !== this.#preparationSettings.policy.revision) throw new PreparationPolicyError("PREPARATION_REVISION_CONFLICT");
+    this.#preparationSettings.policy.generation = copy(parsed.generation);
+    this.#preparationSettings.capacity = copy(parsed.capacity);
+    this.#preparationSettings.policy.revision++;
+    this.#recordPreparationSettings(actorUserId, parsed.reason, null);
+    return this.getPreparationSettings();
+  }
+  async admitPreparationProfile(input: import("@callassist/contracts").PreparationProfileAdmission, actorUserId: string) {
+    const parsed = preparationProfileAdmissionSchema.parse(input);
+    if (parsed.expectedRevision !== this.#preparationSettings.policy.revision) throw new PreparationPolicyError("PREPARATION_REVISION_CONFLICT");
+    this.#preparationSettings.approvedProfiles = [...new Set([...this.#preparationSettings.approvedProfiles, preparationProfileKey(parsed.profile)])];
+    this.#preparationSettings.policy.revision++;
+    this.#recordPreparationSettings(actorUserId,parsed.reason,parsed.reportSha256);
+    return this.getPreparationSettings();
+  }
+  #recordPreparationSettings(actorUserId: string, reason: string, reportSha256: string | null) {
+    const settings = this.#preparationSettings;
+    settings.updatedAt = new Date().toISOString(); settings.updatedByUserId = actorUserId; settings.reason = reason;
+    settings.history.unshift({ revision: settings.policy.revision, actorUserId, reason, reportSha256, createdAt: settings.updatedAt,
+      generation: copy(settings.policy.generation), capacity: copy(settings.capacity) });
+    settings.history = settings.history.slice(0,50);
+  }
+  async recordPreparationCheckpoint(operationId: string, checkpoint: PreparationCheckpoint) {
+    if (!this.#canRecordPreparationDiagnostic(operationId)) return;
+    const rows = this.#preparationCheckpoints.get(operationId) ?? [];
+    if (!rows.some(row => row.kind === checkpoint.kind)) rows.push(preparationCheckpointSchema.parse(checkpoint));
+    this.#preparationCheckpoints.set(operationId, rows);
+  }
+  #canRecordPreparationDiagnostic(operationId: string) {
+    const operation=this.#providerOperations.get(operationId);if(!operation)return false;
+    const preparation="callPreparationId" in operation ? this.#callPreparations.get(operation.callPreparationId) : undefined;
+    const callId=("callBriefId" in operation ? operation.callBriefId : null) ?? preparation?.preparation.callBriefId ?? preparation?.targetCallBriefId;
+    const owner=preparation?.userId ?? (callId ? this.#owners.get(callId) : null);
+    return preparation?.preparation.status!=="cancelled" && !(owner && this.#diagnosticRevokedUsers.has(owner)) && !(callId && this.#callDataDeletions.has(callId));
+  }
+  #admitPreparation(userId: string | null) {
+    const active = [...this.#callPreparations.values()].filter(p => ["queued","processing","retrying"].includes(p.preparation.status));
+    if (active.length >= this.#preparationSettings.capacity.queueLimit) throw new PreparationPolicyError("PREPARATION_QUEUE_FULL");
+    if (active.filter(p => p.userId === userId && p.preparation.status !== "processing").length >= this.#preparationSettings.capacity.perUserWaiting)
+      throw new PreparationPolicyError("PREPARATION_USER_QUEUE_FULL");
+  }
   #voiceConsentSettings = initialVoiceConsentSettings();
   readonly #consentRuntimePolicies = new Map<string, import("@callassist/contracts").VoiceConsentRuntimePolicy>();
   async getVoiceConsentSettings() { return copy(this.#voiceConsentSettings); }
@@ -551,6 +613,9 @@ export class InMemoryCallRepository implements CallRepository {
     let preparation: StoredCallPreparation | null = null;
     if (publication) {
       this.#assertDurableJobLease(publication.lease);
+      const pinned = this.#callPreparations.get(publication.preparationId);
+      if (pinned && Date.parse(publication.lease.checkedAt)>=Date.parse(pinned.preparation.createdAt)+pinned.runtimePolicy.timeoutMs)
+        throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       preparation = this.#callPreparations.get(publication.preparationId) ?? null;
       if (
         !preparation ||
@@ -684,7 +749,9 @@ export class InMemoryCallRepository implements CallRepository {
     }
 
     const id = randomUUID();
+    this.#admitPreparation(input.userId);
     const stored: StoredCallPreparation = {
+      runtimePolicy: copy(this.#preparationSettings.policy),
       language: input.language ? copy(input.language) : undefined,
       preparation: {
         id,
@@ -775,7 +842,9 @@ export class InMemoryCallRepository implements CallRepository {
     }
 
     const id = randomUUID();
+    this.#admitPreparation(input.userId);
     const stored: StoredCallPreparation = {
+      runtimePolicy: copy(this.#preparationSettings.policy),
       language: input.language ? copy(input.language) : undefined,
       preparation: {
         id,
@@ -839,7 +908,8 @@ export class InMemoryCallRepository implements CallRepository {
         errorCode: operation.result?.errorCode ?? null, metadata: operation.requestMetadata ?? null,
         clientRequestId: operation.clientRequestId, providerRequestId: operation.result?.providerRequestId ?? null,
         statusCode: operation.result?.statusCode ?? null, generation: operation.durableJobGeneration ?? null,
-        diagnostics: operation.result?.diagnostics ?? null,
+        diagnostics: operation.result?.diagnostics ?? null, requestedServiceTier: operation.requestedServiceTier ?? null, actualServiceTier: operation.result?.actualServiceTier ?? null,
+        checkpoints: copy(this.#preparationCheckpoints.get(operation.id) ?? []),
         tokens: { input: operation.result?.usage?.inputTextTokens ?? null,
           cachedInput: operation.result?.usage?.cachedInputTextTokens ?? null,
           output: operation.result?.usage?.outputTextTokens ?? null,
@@ -887,6 +957,7 @@ export class InMemoryCallRepository implements CallRepository {
       stored.preparation.updatedAt = lease.checkedAt;
     }
     return copy({
+      runtimePolicy: stored.runtimePolicy,
       preparation: this.#mapCallPreparation(stored),
       userId: stored.userId,
       idempotencyKey: stored.idempotencyKey,
@@ -912,8 +983,11 @@ export class InMemoryCallRepository implements CallRepository {
       throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
     }
     if (this.#providerOperations.has(input.id)) return true;
+    this.#checkPreparationPermit(input.estimatedTokens);
     if (stored.providerRequestCount >= input.maxRequests) return false;
     const { preparationId, maxRequests: _maxRequests, ...operation } = input;
+    this.#preparationPermits.set(input.id,Date.now()+(input.requestMetadata?.timeoutMs ?? 35000)+5000);
+    this.#preparationAdmissions.set(input.id,{ at: Date.now(), tokens: input.estimatedTokens ?? 250000 });
     stored.providerRequestCount += 1;
     stored.preparation.updatedAt = lease.checkedAt;
     this.#providerOperations.set(input.id, {
@@ -933,17 +1007,36 @@ export class InMemoryCallRepository implements CallRepository {
       if(!("artifactId" in existing)||existing.artifactId!==input.artifactId||existing.durableJobId!==lease.jobId) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
       return true;
     }
+    this.#checkPreparationPermit(input.estimatedTokens);
     if(!this.#callText.reserveRequest(input.artifactId,input.maxRequests,lease)) return false;
+    this.#preparationPermits.set(input.id,Date.now()+125000);
+    this.#preparationAdmissions.set(input.id,{ at: Date.now(), tokens: input.estimatedTokens ?? 250000 });
     const {maxRequests:_maxRequests,...operation}=input;
     this.#providerOperations.set(input.id,{...operation,callBriefId:artifact.callId,durableJobId:lease.jobId,result:null});
     return true;
   }
 
+  #checkPreparationPermit(estimatedTokens = 250000) {
+    if (!Number.isSafeInteger(estimatedTokens) || estimatedTokens < 0 || estimatedTokens > 1000000) throw new Error("Invalid provider token reservation");
+    for (const [id,expiry] of this.#preparationPermits) if (expiry<=Date.now()) this.#preparationPermits.delete(id);
+    if (this.#preparationCooldown>Date.now() || this.#preparationPermits.size>=this.#preparationSettings.capacity.providerSlots)
+      throw new PreparationPolicyError("PREPARATION_PROVIDER_BUSY",Math.max(1000,this.#preparationCooldown-Date.now()));
+    for (const [id, row] of this.#preparationAdmissions) if (row.at <= Date.now()-60000) this.#preparationAdmissions.delete(id);
+    const capacity = this.#preparationSettings.capacity, fraction = (100-capacity.voiceReservePercent)/100;
+    const rows = [...this.#preparationAdmissions.values()];
+    if (rows.length >= Math.floor(capacity.providerRequestsPerMinute*fraction) ||
+        rows.reduce((sum,row) => sum+row.tokens,0)+estimatedTokens > Math.floor(capacity.providerTokensPerMinute*fraction)) {
+      throw new PreparationPolicyError("PREPARATION_PROVIDER_BUSY", rows.length ? Math.max(1000,Math.min(...rows.map(row=>row.at))+60000-Date.now()) : 60000);
+    }
+  }
   async completeProviderOperation(input: CompleteProviderOperationInput) {
     const stored = this.#providerOperations.get(input.operationId);
     if (!stored) throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
     if (stored.result) return;
+    if (input.outcome !== "network_error") this.#preparationPermits.delete(input.operationId);
+    if (input.retryAfterMs || input.statusCode===429) this.#preparationCooldown=Math.max(this.#preparationCooldown,Date.now()+Math.max(1000,input.retryAfterMs ?? 0));
     stored.result = copy({
+      actualServiceTier: input.actualServiceTier,
       outcome: input.outcome,
       providerRequestId: input.providerRequestId,
       providerResponseId: input.providerResponseId,
@@ -951,7 +1044,7 @@ export class InMemoryCallRepository implements CallRepository {
       statusCode: input.statusCode,
       completedAt: input.completedAt,
       durationMs: input.durationMs,
-      ...(input.diagnostics ? { diagnostics: preparationTransportDiagnosticsSchema.parse(input.diagnostics) } : {}),
+      ...(input.diagnostics && this.#canRecordPreparationDiagnostic(input.operationId) ? { diagnostics: preparationTransportDiagnosticsSchema.parse(input.diagnostics) } : {}),
       errorCode: input.errorCode,
       usage: input.usage
     });
@@ -1228,6 +1321,14 @@ export class InMemoryCallRepository implements CallRepository {
   }
 
   async cancelCallPreparations(userId: string, now: string) {
+    this.#diagnosticRevokedUsers.add(userId);
+    for (const operation of this.#providerOperations.values()) {
+      if (!this.#canRecordPreparationDiagnostic(operation.id)) {
+        this.#preparationCheckpoints.delete(operation.id);
+        if ("requestMetadata" in operation) delete operation.requestMetadata;
+        if (operation.result) delete operation.result.diagnostics;
+      }
+    }
     for (const [id, stored] of this.#callPreparations) {
       if (
         stored.userId !== userId ||
@@ -1341,6 +1442,15 @@ export class InMemoryCallRepository implements CallRepository {
       updatedAt: input.deletedAt
     };
     this.#callText.redact(input.callId);
+    for (const operation of this.#providerOperations.values()) {
+      const preparation = "callPreparationId" in operation ? this.#callPreparations.get(operation.callPreparationId) : undefined;
+      if (("callBriefId" in operation && operation.callBriefId === input.callId) ||
+          preparation?.preparation.callBriefId === input.callId || preparation?.targetCallBriefId === input.callId) {
+        this.#preparationCheckpoints.delete(operation.id);
+        if ("requestMetadata" in operation) delete operation.requestMetadata;
+        if (operation.result) delete operation.result.diagnostics;
+      }
+    }
     for (const [id, action] of this.#voiceActions) if (action.callBriefId === input.callId) this.#voiceActions.delete(id);
     for (const [id, decision] of this.#terminalDecisions) if (decision.callBriefId === input.callId) this.#terminalDecisions.delete(id);
     for (const [id, assessment] of this.#assessmentRevisions) if (this.#attempts.get(input.callId)?.some(a => a.id === assessment.callAttemptId)) this.#assessmentRevisions.delete(id);
@@ -1705,6 +1815,9 @@ export class InMemoryCallRepository implements CallRepository {
     let preparation: StoredCallPreparation | null = null;
     if (publication) {
       this.#assertDurableJobLease(publication.lease);
+      const pinned = this.#callPreparations.get(publication.preparationId);
+      if (pinned && Date.parse(publication.lease.checkedAt)>=Date.parse(pinned.preparation.createdAt)+pinned.runtimePolicy.timeoutMs)
+        throw new CallRepositoryError("DURABLE_JOB_TARGET_INVALID");
       preparation = this.#callPreparations.get(publication.preparationId) ?? null;
       if (
         !preparation ||
@@ -3801,18 +3914,27 @@ export class InMemoryCallRepository implements CallRepository {
         );
       }
     }
+    const active = [...this.#durableJobs.values()].filter(j => j.status === "running");
+    const workClass = (job: DurableJob) => job.workClass ?? this.#workClass(job);
+    const owner = (job: DurableJob) => job.callPreparationId ? this.#callPreparations.get(job.callPreparationId)?.userId ?? "" : "";
     const job = [...this.#durableJobs.values()]
       .filter((candidate) =>
         candidate.status === "queued" &&
         candidate.runAfter <= input.now &&
-        input.types.includes(candidate.type)
+        input.types.includes(candidate.type) &&
+        (!input.workClasses || input.workClasses.includes(workClass(candidate))) &&
+        (workClass(candidate) !== "preparation" || (active.filter(j => workClass(j) === "preparation").length < this.#preparationSettings.capacity.generationSlots &&
+          !active.some(j => workClass(j) === "preparation" && owner(j) === owner(candidate)))) &&
+        (workClass(candidate) !== "review" || active.filter(j => workClass(j) === "review").length < this.#preparationSettings.capacity.reviewSlots)
       )
       .sort((left, right) =>
+        (this.#preparationDispatch.get(owner(left)) ?? "").localeCompare(this.#preparationDispatch.get(owner(right)) ?? "") ||
         left.runAfter.localeCompare(right.runAfter) ||
         left.createdAt.localeCompare(right.createdAt) ||
         left.id.localeCompare(right.id)
       )[0];
     if (!job) return null;
+    if (job.callPreparationId) this.#preparationDispatch.set(owner(job),input.now);
     const forceRequested = job.forceRequested;
     job.status = "running";
     job.attemptCount += 1;
@@ -3828,18 +3950,19 @@ export class InMemoryCallRepository implements CallRepository {
     jobId: string,
     workerId: string,
     now: string,
-    leaseExpiresAt: string
+    leaseExpiresAt: string,
+    fence?: DurableJobLease
   ) {
     const job = this.#findDurableJob(jobId);
-    if (!job || !durableJobLeaseIsValid(job, workerId, now)) return false;
+    if (!job || !durableJobLeaseIsValid(job, workerId, now) || (fence?.generation !== undefined && job.generation !== fence.generation) || (fence?.attemptNumber !== undefined && job.attemptCount !== fence.attemptNumber)) return false;
     job.leaseExpiresAt = leaseExpiresAt;
     job.updatedAt = now;
     return true;
   }
 
-  async completeDurableJob(jobId: string, workerId: string, now: string) {
+  async completeDurableJob(jobId: string, workerId: string, now: string, fence?: DurableJobLease) {
     const job = this.#findDurableJob(jobId);
-    if (!job || !durableJobLeaseIsValid(job, workerId, now)) return false;
+    if (!job || !durableJobLeaseIsValid(job, workerId, now) || (fence?.generation !== undefined && job.generation !== fence.generation) || (fence?.attemptNumber !== undefined && job.attemptCount !== fence.attemptNumber)) return false;
     if (job.callPreparationId) {
       const preparation = this.#callPreparations.get(job.callPreparationId);
       if (preparation?.preparation.status !== "succeeded") {
@@ -3874,15 +3997,20 @@ export class InMemoryCallRepository implements CallRepository {
     now: string,
     retryAt: string,
     retryable = true,
-    defer = false
+    defer = false,
+    fence?: DurableJobLease
   ) {
     const job = this.#findDurableJob(jobId);
-    if (!job || !durableJobLeaseIsValid(job, workerId, now)) return null;
-    if (defer && job.type === "final_transcription" && /^BETA_(BUDGET_EXHAUSTED|BUDGET_UNCONFIGURED|SPENDING_PAUSED)$/.test(errorCode)) {
+    if (!job || !durableJobLeaseIsValid(job, workerId, now) || (fence?.generation !== undefined && job.generation !== fence.generation) || (fence?.attemptNumber !== undefined && job.attemptCount !== fence.attemptNumber)) return null;
+    if (defer && ((job.type === "final_transcription" && /^BETA_(BUDGET_EXHAUSTED|BUDGET_UNCONFIGURED|SPENDING_PAUSED)$/.test(errorCode)) || errorCode === "PREPARATION_PROVIDER_BUSY")) {
       job.attemptCount = Math.max(0, job.attemptCount - 1);
       job.status = "queued"; job.runAfter = retryAt; job.lastErrorCode = errorCode;
       job.leaseOwner = null; job.leasedAt = null; job.leaseExpiresAt = null;
       job.updatedAt = now; job.completedAt = null;
+      const preparation=job.callPreparationId ? this.#callPreparations.get(job.callPreparationId) : undefined;
+      if (preparation?.preparation.status==='processing') { preparation.preparation.status='retrying'; preparation.preparation.updatedAt=now; }
+      const artifact=job.textArtifactId ? this.#callText.artifacts.get(job.textArtifactId) : undefined;
+      if (artifact?.status==='processing') { artifact.status='queued'; artifact.updatedAt=now; }
       return copy(job);
     }
     const deadLetter = !retryable || job.attemptCount >= job.maxAttempts;
@@ -4499,14 +4627,20 @@ export class InMemoryCallRepository implements CallRepository {
     job.updatedAt = now;
   }
 
+  #workClass(job: Pick<DurableJob, "type" | "textArtifactId">): import("../jobs/durable-job").DurableWorkClass {
+    if (job.type === "brief_compilation") return "preparation";
+    if (job.type === "text_artifact_generation" && job.textArtifactId && ["plan_review","clarification_review"].includes(this.#callText.artifacts.get(job.textArtifactId)?.kind ?? "")) return "review";
+    return ["answer_detection_timeout","provider_call_reconciliation","live_transcript_finalization"].includes(job.type) ? "operations" : "background";
+  }
   #assertDurableJobLease(lease?: DurableJobLease) {
     if (!lease) return;
+    lease.signal?.throwIfAborted();
     const job = this.#findDurableJob(lease.jobId);
     if (!job || !durableJobLeaseIsValid(
       job,
       lease.workerId,
       lease.checkedAt
-    )) {
+    ) || (lease.generation !== undefined && job.generation !== lease.generation) || (lease.attemptNumber !== undefined && job.attemptCount !== lease.attemptNumber)) {
       throw new CallRepositoryError("DURABLE_JOB_LEASE_LOST");
     }
   }

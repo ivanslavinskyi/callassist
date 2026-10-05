@@ -1,3 +1,4 @@
+import { workerCapacity } from "../config/worker-capacity";
 import { parseDataEncryptionKeyring } from "../security/encryption";
 import type { CallRepository } from "./call-repository";
 import { InMemoryCallRepository } from "./in-memory-call-repository";
@@ -15,7 +16,7 @@ export function createCallRepositoryFromEnv(): CallRepository {
     return new PostgresCallRepository(
       databaseUrl,
       parseDataEncryptionKeyring(process.env),
-      true
+      true, workerCapacity().poolMax
     );
   }
 

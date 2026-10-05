@@ -44,9 +44,33 @@ active_path=$(readlink -f "$current")
 active_sha=$(release_sha "$active_path") || die 'Invalid active release marker.'
 [[ $(stat -c '%U:%G %a' "$base") == 'root:shprohli 750' ]] || die 'Invalid application root permissions.'
 
+# Root-managed inventory: one systemd worker unit per line. Empty/missing uses the legacy unit.
+worker_units=(shprohli-worker.service)
+worker_inventory=/etc/shprohli/worker-units
+if [[ -f $worker_inventory ]]; then
+  [[ $(stat -c '%U:%G %a' "$worker_inventory") =~ ^root:root\ (600|640|644)$ ]] || die 'Invalid worker inventory permissions.'
+  worker_units=()
+  while IFS= read -r unit || [[ -n $unit ]]; do
+    [[ -z $unit || $unit == \#* ]] && continue
+    [[ $unit =~ ^shprohli-(worker|preparation|operations|background)(@[a-zA-Z0-9_-]+)?\.service$ ]] || die 'Invalid worker unit.'
+    [[ " ${worker_units[*]} " != *" $unit "* ]] || die 'Duplicate worker unit.'
+    worker_units+=("$unit")
+  done < "$worker_inventory"
+  (( ${#worker_units[@]} > 0 )) || die 'Empty worker inventory.'
+fi
+worker_runtime_ok() {
+  local wanted=$1 unit pid
+  for unit in "${worker_units[@]}"; do
+    systemctl is-active --quiet "$unit" || return 1
+    pid=$(systemctl show -P MainPID "$unit")
+    [[ $pid =~ ^[1-9][0-9]*$ && $(readlink -f "/proc/$pid/cwd") == "$wanted/apps/api" ]] || return 1
+  done
+  if [[ -f $worker_inventory ]]; then curl -fsS --max-time 4 -o /dev/null http://127.0.0.1:4100/health/workers || return 1; fi
+}
+
 service_gate() {
   systemctl is-active --quiet shprohli-api.service shprohli-web.service \
-    shprohli-worker.service shprohli-db-backup.timer \
+    "${worker_units[@]}" shprohli-db-backup.timer \
     postgresql@17-shprohli.service postgresql@16-main.service \
     ukrainedirekt.service nginx.service
   curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:4100/health/ready
@@ -128,6 +152,7 @@ catalog_gate() {
     case $name in
       0085_voice_action_intents.sql|0086_live_voice_telemetry.sql|0087_native_transcript_source.sql|0088_conversation_transcript_copy.sql|0089_realtime_error_telemetry.sql|0090_summary_calendar_context.sql|0091_freeze_summary_context.sql|0092_application_playback_transcript.sql|0093_live_primary_optional_recording_asr.sql|0094_optional_transcript_public_copy.sql|0095_accounting_telemetry_audio_exports.sql|0096_beta_credit_allowances.sql|0097_plan_review_cases.sql|0098_beta_credit_public_copy.sql|0099_preparation_request_diagnostics.sql) ;;
       0100_voice_consent_policy.sql|0101_preparation_transport_diagnostics.sql) ;;
+      0102_preparation_runtime.sql|0103_preparation_observability.sql|0104_preparation_queue_expiry.sql|0105_preparation_provider_quota.sql|0106_preparation_diagnostic_deletion_guard.sql|0107_preparation_policy_provenance.sql|0108_swiss_account_phone_policy.sql) ;;
       *) die "Unreviewed schema rollout migration: $name" ;;
     esac
   done
@@ -185,7 +210,7 @@ wait_for_idle() {
   for ((attempt=1; attempt<=300; attempt++)); do
     state=$(work_state)
     IFS='|' read -r calls jobs workers <<< "$state"
-    if [[ $calls == 0 && $jobs == 0 && $workers == 1 ]]; then
+    if [[ $calls == 0 && $jobs == 0 && $workers -ge ${#worker_units[@]} ]]; then
       printf 'Idle: calls=%s worker_jobs=%s workers=%s\n' "$calls" "$jobs" "$workers"
       return 0
     fi
@@ -218,23 +243,20 @@ replace_link() {
 }
 
 runtime_ok() {
-  local wanted=$1 api_pid web_pid worker_pid heartbeat ready=0
+  local wanted=$1 api_pid web_pid heartbeat ready=0
   for ((attempt=1; attempt<=45; attempt++)); do
     api_pid=$(systemctl show -P MainPID shprohli-api.service)
     web_pid=$(systemctl show -P MainPID shprohli-web.service)
-    worker_pid=$(systemctl show -P MainPID shprohli-worker.service)
-    if [[ $api_pid =~ ^[1-9][0-9]*$ && $web_pid =~ ^[1-9][0-9]*$ &&
-          $worker_pid =~ ^[1-9][0-9]*$ ]] &&
+    if [[ $api_pid =~ ^[1-9][0-9]*$ && $web_pid =~ ^[1-9][0-9]*$ ]] &&
        [[ $(readlink -f "/proc/$api_pid/cwd") == "$wanted/apps/api" &&
-          $(readlink -f "/proc/$worker_pid/cwd") == "$wanted/apps/api" &&
           $(readlink -f "/proc/$web_pid/cwd") == "$wanted/apps/web" ]] &&
        systemctl is-active --quiet shprohli-api.service shprohli-web.service \
-         shprohli-worker.service &&
+         "${worker_units[@]}" && worker_runtime_ok "$wanted" &&
        curl -fsS --max-time 4 -o /dev/null http://127.0.0.1:4100/health/ready 2>/dev/null &&
        site_ok 2>/dev/null; then
       heartbeat=$(db "SELECT count(*) FROM durable_worker_heartbeats
         WHERE stopped_at IS NULL AND last_seen_at > now()-interval '30 seconds'")
-      if [[ $heartbeat == 1 ]]; then ready=1; break; fi
+      if [[ $heartbeat -ge ${#worker_units[@]} ]]; then ready=1; break; fi
     fi
     sleep 2
   done
@@ -264,7 +286,7 @@ recover_cutover() {
   if (( rc != 0 )); then
     if (( cutover_schema_started == 1 )); then
       run_call_toggle disable "Schema rollout recovery: keep admission closed"
-      systemctl stop shprohli-api.service shprohli-web.service shprohli-worker.service
+      systemctl stop shprohli-api.service shprohli-web.service "${worker_units[@]}"
       printf 'Schema rollout stopped. Call admission remains disabled. Keep the database and new revisions; recover with a compatible release. Automatic downgrade is disabled.\n' >&2
       exit "$rc"
     fi
@@ -272,11 +294,11 @@ recover_cutover() {
     if (( cutover_switched == 1 )); then
       replace_link current "$active_path"
       if [[ $(readlink -f "$current") == "$active_path" ]]; then
-        systemctl restart shprohli-api.service shprohli-web.service shprohli-worker.service
+        systemctl restart shprohli-api.service shprohli-web.service "${worker_units[@]}"
         runtime_ok "$active_path" && cutover_recovery_ok=1
       fi
     elif (( cutover_worker_stopped == 1 )); then
-      systemctl start shprohli-worker.service
+      systemctl start "${worker_units[@]}"
       runtime_ok "$active_path" && cutover_recovery_ok=1
     else
       runtime_ok "$active_path" && cutover_recovery_ok=1
@@ -319,7 +341,7 @@ cutover() {
   fi
   wait_for_idle
   fresh_backup
-  systemctl stop shprohli-worker.service
+  systemctl stop "${worker_units[@]}"
   cutover_worker_stopped=1
   if [[ $action == deploy-schema ]]; then
     cutover_schema_started=1
@@ -331,7 +353,7 @@ cutover() {
   replace_link current "$target_path"
   cutover_switched=1
   [[ $(readlink -f "$current") == "$target_path" ]] || die 'Release switch failed.'
-  systemctl restart shprohli-api.service shprohli-web.service shprohli-worker.service
+  systemctl restart shprohli-api.service shprohli-web.service "${worker_units[@]}"
   cutover_worker_stopped=0
   runtime_ok "$target_path" || die 'Candidate health or parity check failed.'
   if [[ $cutover_original_gate == true ]]; then

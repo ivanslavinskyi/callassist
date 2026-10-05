@@ -45,7 +45,10 @@
     "start": "node --use-system-ca dist/index.js",
     "start:worker": "node --use-system-ca dist/worker.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eval:preparation": "node --use-system-ca --import tsx scripts/evaluate-preparation.ts",
+    "load:preparation": "node --import tsx scripts/load-preparation.ts",
+    "test:isolated": "node --import tsx scripts/test-isolated.ts"
   },
   "dependencies": {
     "@callassist/contracts": "workspace:*",

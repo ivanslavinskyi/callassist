@@ -219,6 +219,7 @@ export type EnqueueCallRecompilationRepositoryInput =
   };
 
 export type CallPreparationWork = {
+  runtimePolicy: import("@callassist/contracts").PreparationRuntimePolicy;
   preparation: CallPreparation;
   userId: string | null;
   idempotencyKey: string;
@@ -236,6 +237,10 @@ export type CallPreparationPublication = {
 };
 
 export type ProviderOperationReservationInput = {
+  reserveUsdMicros?: number;
+  estimatedTokens?: number;
+  requestedServiceTier?: string;
+  pricingVersion?: string;
   id: string;
   preparationId: string;
   provider: "openai";
@@ -293,6 +298,8 @@ export type RealtimeProviderOperationInput = {
 };
 
 export type CompleteProviderOperationInput = {
+  actualServiceTier?: string | null;
+  retryAfterMs?: number;
   diagnostics?: import("@callassist/contracts").PreparationTransportDiagnostics;
   operationId: string;
   outcome: "succeeded" | "provider_error" | "network_error" | "invalid_response";
@@ -668,6 +675,8 @@ export type CallChangeSignal = {
 };
 
 export type DurableWorkerHeartbeatInput = {
+  role?: "all" | "preparation" | "review" | "operations" | "background";
+  metrics?: { draining: boolean; rssBytes: number; heapUsedBytes: number; eventLoopP99Ms: number; cpuUserMs: number; cpuSystemMs: number; slots: number };
   workerId: string;
   startedAt: string;
   seenAt: string;
@@ -760,6 +769,14 @@ export type FinalTranscriptMutationResult = {
 export interface CallRepository extends CallTextRepository {
   readonly recipientOptOut: RecipientOptOutStore;
   readonly betaControls?: BetaControls;
+  getCompilationPreparationPolicy(callId: string, compilationId: string): Promise<import("@callassist/contracts").PreparationRuntimePolicy | null>;
+  preparationWorkersReady(): Promise<boolean>;
+  maintainPreparationTelemetry(): Promise<void>;
+  getPreparationRuntimeStatus(): Promise<unknown>;
+  getPreparationSettings(): Promise<import("@callassist/contracts").PreparationSettingsView>;
+  updatePreparationSettings(input: import("@callassist/contracts").PreparationSettingsUpdate, actorUserId: string): Promise<import("@callassist/contracts").PreparationSettingsView>;
+  admitPreparationProfile(input: import("@callassist/contracts").PreparationProfileAdmission, actorUserId: string): Promise<import("@callassist/contracts").PreparationSettingsView>;
+  recordPreparationCheckpoint(operationId: string, checkpoint: import("@callassist/contracts").PreparationCheckpoint): Promise<void>;
   getVoiceConsentSettings(): Promise<import("@callassist/contracts").VoiceConsentSettingsView>;
   updateVoiceConsentSettings(input: import("@callassist/contracts").VoiceConsentSettingsUpdate, actorUserId: string): Promise<import("@callassist/contracts").VoiceConsentSettingsView>;
   getConsentRuntimePolicy(callId: string, attemptId: string): Promise<import("@callassist/contracts").VoiceConsentRuntimePolicy>;
@@ -1023,12 +1040,14 @@ export interface CallRepository extends CallTextRepository {
     jobId: string,
     workerId: string,
     now: string,
-    leaseExpiresAt: string
+    leaseExpiresAt: string,
+    fence?: DurableJobLease
   ): Promise<boolean>;
   completeDurableJob(
     jobId: string,
     workerId: string,
-    now: string
+    now: string,
+    fence?: DurableJobLease
   ): Promise<boolean>;
   failDurableJob(
     jobId: string,
@@ -1037,7 +1056,8 @@ export interface CallRepository extends CallTextRepository {
     now: string,
     retryAt: string,
     retryable?: boolean,
-    defer?: boolean
+    defer?: boolean,
+    fence?: DurableJobLease
   ): Promise<DurableJob | null>;
   listDurableJobs(): Promise<DurableJob[]>;
   listDurableJobAttempts(jobId: string): Promise<DurableJobAttempt[]>;

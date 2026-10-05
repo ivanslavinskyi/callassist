@@ -153,6 +153,9 @@ parity. See deployment preflight and the chosen first-release target (local oper
 | `TELEPHONY_DRIVER` | `mock`; production requires `twilio` |
 | `REALTIME_AGENT_HANGUP_ENABLED` | `false` by default; apply migration 0062 first. Exact `true` enables ordinary-call `end_call` in the task stage. Unified Live enters this stage after recording starts and any optional assistance disclosure finishes playing; its ordinary opening is native. Read at API startup; restart required. Does not affect consent/error hangup. |
 | `DURABLE_WORKER_MODE` | `embedded`; production requires `external` |
+| `WORKER_ROLE` | `all` compatibility default; scalable roles: `preparation`, `operations`, `background`; never mix role workers with `all` |
+| `PREPARATION_WORKER_SLOTS` / `REVIEW_WORKER_SLOTS` | Per-process slots; prep defaults 2/1, other roles 1/1; global limits remain in the preparation settings |
+| `CALL_REPOSITORY_POOL_MAX` | Call SQL pool only: default prep 4, operations 3, background/all/API 6; 1–32; additional component pools are separate |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Required for real outbound telephony |
 | `VERIFICATION_DRIVER` | Example `mock`; factory infers Twilio from real telephony if unset; production API requires explicit `twilio` |
 | `TWILIO_VERIFY_SERVICE_SID` | Required for Twilio SMS verification |

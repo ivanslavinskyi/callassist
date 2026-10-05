@@ -6,13 +6,15 @@ const micros = z.number().int().min(1).max(1_000_000_000);
 export const MAX_STARTS_PER_RECIPIENT_PER_DAY = 100;
 export const registrationPolicySchema = z.strictObject({
   onboarding: z.enum(["full", "registration"]),
-  emailVerification: z.enum(["required", "deferrable"])
+  emailVerification: z.enum(["required", "deferrable"]),
+  swissPhonesOnly: z.boolean().default(false)
 });
 export type RegistrationPolicy = z.infer<typeof registrationPolicySchema>;
-export const defaultRegistrationPolicy: RegistrationPolicy = { onboarding: "full", emailVerification: "required" };
+export const defaultRegistrationPolicy: RegistrationPolicy = { onboarding: "full", emailVerification: "required", swissPhonesOnly: false };
 export const registrationPolicyUpdateSchema = z.strictObject({
-  settings: registrationPolicySchema, expectedRevision: z.number().int().positive(), reason: z.string().trim().min(3).max(500)
+  settings: registrationPolicySchema.extend({ swissPhonesOnly: z.boolean().optional() }), expectedRevision: z.number().int().positive(), reason: z.string().trim().min(3).max(500)
 });
+export type RegistrationPolicySettingsUpdate = z.infer<typeof registrationPolicyUpdateSchema>["settings"];
 export const betaSettingsSchema = z.strictObject({
   creditAllowance: betaCreditPolicySchema.default(defaultBetaCreditPolicy),
   showRegistrationRemaining: z.boolean().default(true),
