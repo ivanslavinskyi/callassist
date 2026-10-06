@@ -378,6 +378,18 @@ describe("OpenAIBriefCompiler", () => {
     expect(isBriefCompilerErrorRetryable(
       new BriefCompilerError("OPENAI_REQUEST_FAILED")
     )).toBe(true);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED", { statusCode: 200, cause: new DOMException("Timed out", "TimeoutError") })
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_RESPONSE_INVALID", { statusCode: 200 })
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_BUDGET_EXHAUSTED", { statusCode: 200 })
+    )).toBe(false);
+    expect(isBriefCompilerErrorRetryable(
+      new BriefCompilerError("OPENAI_REQUEST_FAILED", { statusCode: 401 })
+    )).toBe(false);
   });
 
   it("moderates input and requests a strict Structured Output", async () => {

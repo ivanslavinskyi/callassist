@@ -1,6 +1,6 @@
 /** A completed Responses object is the only publishable stream result. */
 export class ResponseReadError extends Error {
-  constructor(readonly code: "OPENAI_BODY_LIMIT" | "OPENAI_STREAM_INCOMPLETE" | "OPENAI_STREAM_FAILED" | "OPENAI_STREAM_INVALID",
+  constructor(readonly code: "OPENAI_BODY_LIMIT" | "OPENAI_STREAM_INCOMPLETE" | "OPENAI_STREAM_FAILED" | "OPENAI_STREAM_INVALID" | "OPENAI_STREAM_PADDING",
     readonly response: Record<string, unknown> | null = null) { super(code); }
 }
 export function retryAfterMs(value: string | null, now = Date.now()): number {
@@ -23,13 +23,31 @@ export function providerBackoffMs(headers: Headers, now = Date.now()): number {
   return Math.min(900000, Math.ceil(delay));
 }
 export async function readProviderResponse(response: Response, signal: AbortSignal,
-  event?: (type: string, response: Record<string, unknown> | null) => Promise<void>): Promise<unknown> {
+  event?: (type: string, response: Record<string, unknown> | null, outputBytes: number) => Promise<void>): Promise<unknown> {
   if (!response.body) throw new ResponseReadError("OPENAI_STREAM_INCOMPLETE");
   const reader = response.body.getReader();
   const stream = response.headers.get("content-type")?.toLowerCase().includes("text/event-stream");
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let bytes = 0, buffer = "", data: string[] = [], eventBytes = 0;
   let terminal: Record<string, unknown> | null = null;
+  // Structured output can degenerate into endless JSON whitespace while the
+  // connection remains healthy. Preserve whitespace inside strings verbatim;
+  // bound only consecutive formatting outside them, across SSE delta boundaries.
+  let inString = false, escaped = false, padding = 0;
+  const checkJsonProgress = (delta: string) => {
+    for (const character of delta) {
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      if (character === ' ' || character === '\n' || character === '\r' || character === '\t') {
+        if (++padding > 256) throw new ResponseReadError("OPENAI_STREAM_PADDING");
+      } else padding = 0;
+    }
+  };
   const abort = () => { void reader.cancel(signal.reason).catch(() => undefined); };
   signal.addEventListener("abort", abort, { once: true });
   const dispatch = async () => {
@@ -41,7 +59,10 @@ export async function readProviderResponse(response: Response, signal: AbortSign
     if (!value || typeof value !== "object" || typeof value.type !== "string") throw new ResponseReadError("OPENAI_STREAM_INVALID");
     const payload = value.response && typeof value.response === "object" && !Array.isArray(value.response)
       ? value.response as Record<string, unknown> : null;
-    await event?.(value.type, payload);
+    const outputBytes = value.type === "response.output_text.delta" && typeof value.delta === "string"
+      ? new TextEncoder().encode(value.delta).byteLength : 0;
+    await event?.(value.type, payload, outputBytes);
+    if (outputBytes) checkJsonProgress(value.delta as string);
     if (value.type === "response.completed") {
       if (!payload || payload.status !== "completed") throw new ResponseReadError("OPENAI_STREAM_INVALID", payload);
       terminal = payload;

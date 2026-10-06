@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import { normalizeCreateCallBriefInput } from "@callassist/contracts";
-import { DeterministicBriefCompiler, OpenAIBriefCompiler, type BriefCompilerProviderRequestResult } from "./brief-compiler";
+import { DeterministicBriefCompiler, OpenAIBriefCompiler, isBriefCompilerErrorRetryable, type BriefCompilerProviderRequestResult } from "./brief-compiler";
 import { createBriefCompilerFromEnv } from "./create-brief-compiler";
 
 const input = normalizeCreateCallBriefInput({
@@ -23,6 +23,34 @@ describe("stage-aware compiler deadlines", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each([false,true])("bounds padding recovery to one corrected request (repeat padding: %s)", async repeatPadding => {
+    const response = await compilationResponse(), results: BriefCompilerProviderRequestResult[] = [], requests: any[] = [];
+    const cancel = vi.fn();
+    const fetchImplementation = vi.fn<typeof fetch>(async (url,init) => {
+      if (String(url).endsWith("moderations")) return moderationResponse();
+      requests.push(JSON.parse(String(init?.body)));
+      await wait(2000);
+      if (requests.length > 1 && !repeatPadding) return new Response(JSON.stringify(response));
+      return new Response(new ReadableStream<Uint8Array>({start(controller) {
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({type:"response.output_text.delta",delta:'{"orderedQuestions":[{"purpose":"Ask"'+'\n'.repeat(300)})}\n\n`));
+      },cancel}),{headers:{"content-type":"text/event-stream"}});
+    });
+    const started = Date.now();
+    const pending = new OpenAIBriefCompiler({apiKey:"test",fetchImplementation}).compile(input,1,{
+      deadlineAtMs:started+30_000,afterProviderRequest:async result=>{results.push(result);}
+    }).catch(error=>error);
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await pending;
+    expect(requests).toHaveLength(2);
+    expect(requests[1].input[0].content).toContain("previous response stalled in whitespace");
+    expect(results.filter(r=>r.stage==='compilation' || r.stage==='compilation_repair').map(r=>r.errorCode))
+      .toEqual(repeatPadding ? ['OPENAI_STREAM_PADDING','OPENAI_STREAM_PADDING'] : ['OPENAI_STREAM_PADDING',null]);
+    expect(cancel).toHaveBeenCalledTimes(repeatPadding ? 2 : 1);
+    if (repeatPadding) expect(result).toMatchObject({code:'OPENAI_RESPONSE_INVALID',validationPaths:['stream_padding']});
+    else expect(result.policyDecision.status).toBe('ready_for_review');
+    expect(Date.now()-started).toBeLessThan(30_000);
   });
 
   it("does not dispatch when the shared preparation deadline has already expired", async () => {
@@ -241,6 +269,36 @@ describe("stage-aware compiler deadlines", () => {
       providerRequestId: "headers_received_body_stalled", durationMs: 15_000, errorCode: "OPENAI_BODY_TIMEOUT",
       diagnostics: { responseHeadersMs: 0, bodyReadMs: 15_000, failurePhase: "response_body" } });
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not add durable retries after two HTTP 200 body timeouts", async () => {
+    const results: BriefCompilerProviderRequestResult[] = [];
+    const cancel = vi.fn();
+    const fetchImplementation = vi.fn<typeof fetch>(async url => {
+      if (String(url).endsWith("moderations")) return moderationResponse();
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"type":"response.created","response":{"id":"resp_stalled","status":"in_progress"}}\n\n'));
+        },
+        cancel
+      }), { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+    const deadline = Date.now() + 120_000;
+    const pending = new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation }).compile(input, 1, {
+      deadlineAtMs: deadline,
+      afterProviderRequest: async result => { results.push(result); }
+    }).catch(error => error);
+    await vi.advanceTimersByTimeAsync(70_000);
+    const failure = await pending;
+    expect(failure).toMatchObject({ code: "OPENAI_REQUEST_FAILED", stage: "compilation", statusCode: 200,
+      cause: { name: "TimeoutError" } });
+    expect(results.filter(result => result.stage === "compilation")).toMatchObject([
+      { errorCode: "OPENAI_BODY_TIMEOUT", statusCode: 200, durationMs: 35_000 },
+      { errorCode: "OPENAI_BODY_TIMEOUT", statusCode: 200, durationMs: 35_000 }
+    ]);
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(deadline - Date.now()).toBe(50_000);
+    expect(isBriefCompilerErrorRetryable(failure)).toBe(false);
   });
 
   it("caps final moderation by the global deadline even when its second request would normally have 25 seconds", async () => {

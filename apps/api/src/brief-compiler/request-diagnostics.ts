@@ -61,6 +61,17 @@ export class PreparationRequestDiagnostics {
     } catch { /* Missing or malformed optional headers are unknown. */ }
   }
   bodyStarted() { this.#bodyStartedAt = Date.now(); }
+  streamStarted() {
+    this.#data.stream = { outputEvents: 0, outputBytes: 0,
+      firstOutputMs: null, lastOutputMs: null };
+  }
+  streamOutput(bytes: number) {
+    const stream = this.#data.stream;
+    if (!this.active || !stream || bytes <= 0) return;
+    const elapsed = Math.max(0, Date.now() - this.#startedAt);
+    stream.outputEvents++; stream.outputBytes += bytes;
+    stream.firstOutputMs ??= elapsed; stream.lastOutputMs = elapsed;
+  }
   bodyFinished() {
     if (this.#bodyStartedAt !== null) this.#data.bodyReadMs = Math.max(0, Date.now() - this.#bodyStartedAt);
   }

@@ -9,11 +9,30 @@ function streamed(text: string, chunkSize = 1) {
   } }), { headers: { "content-type": "text/event-stream; charset=utf-8" } });
 }
 describe("bounded Responses stream", () => {
+  it("cancels runaway JSON padding across deltas before waiting for completion", async () => {
+    const delta = (text: string) => `data: ${JSON.stringify({type:"response.output_text.delta",delta:text})}\n\n`;
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({start(controller) {
+      controller.enqueue(new TextEncoder().encode(delta('{"text":"Lunch", "purpose":"Ask"') + delta('\n'.repeat(180)) + delta(' \r\n'.repeat(30))));
+      // No terminal event: the real failure kept streaming whitespace until timeout.
+    }, cancel}), {headers:{"content-type":"text/event-stream"}});
+    await expect(readProviderResponse(response, AbortSignal.timeout(1000))).rejects.toMatchObject({code:"OPENAI_STREAM_PADDING"});
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it("allows quoted whitespace, escaped quotes across deltas and ordinary JSON formatting", async () => {
+    const value = {text:`quoted \" ${' '.repeat(300)} \\ ending`, required:true};
+    const output = JSON.stringify(value,null,2);
+    const frames = [...output].map(delta=>`data: ${JSON.stringify({type:"response.output_text.delta",delta})}\n\n`).join('');
+    const completed = {status:'completed',output_text:output};
+    await expect(readProviderResponse(streamed(frames + `data: ${JSON.stringify({type:'response.completed',response:completed})}\n\n`,64),new AbortController().signal))
+      .resolves.toEqual(completed);
+  });
   it("handles split UTF-8, CRLF, comments and several frames without publishing deltas", async () => {
     const events = vi.fn(async () => {});
     const value = await readProviderResponse(streamed(': ping\r\ndata: {"type":"response.output_text.delta","delta":"Grüezi Юлія"}\r\n\r\ndata: {"type":"response.completed","response":{"status":"completed","id":"resp_final","output_text":"Zürich"}}\r\n\r\n'), new AbortController().signal, events);
     expect(value).toEqual({ status: "completed", id: "resp_final", output_text: "Zürich" });
     expect(events).toHaveBeenCalledTimes(2);
+    expect(events).toHaveBeenNthCalledWith(1, "response.output_text.delta", null, new TextEncoder().encode("Grüezi Юлія").byteLength);
   });
   it.each(['data: {"type":"response.output_text.delta","delta":"{}"}\n\n', 'data: [DONE]\n\n', ''])
     ("rejects EOF without a completed response", async body => {
