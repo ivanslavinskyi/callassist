@@ -51,3 +51,25 @@ it("keeps the 28-fragment opening in one stable card across every persistence ac
     expect(rows).toHaveLength(1); expect(rows[0].id).toBe(initial[0].id); expect(rows[0].text).toBe(initial[0].text);
   }
 });
+
+it("keeps streamed words after the saved prefix when persistence arrives later than speech", () => {
+  let state = emptyLiveTranscript();
+  const saved: TranscriptSegment[] = [];
+  const parts = ["Good", " morning", ", how", " can", " I help?"];
+  let cardId: string | undefined;
+  for (const [i, text] of parts.entries()) {
+    const nativeTiming = { sessionId: "delayed", eventId: `word-${i}`, sessionStartedAt: "2026-10-06T13:41:19.000Z", startMs: 16400 + i * 200, endMs: 16600 + i * 200 };
+    const part: TranscriptSegment = { ...segment(`saved-${i}`), text, nativeTiming,
+      createdAt: new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs).toISOString(),
+      receivedAt: new Date(Date.parse(nativeTiming.sessionStartedAt) + nativeTiming.startMs + 2500).toISOString(), ingestionSequence: 100 + i };
+    state = applyLiveTranscriptEvent(state, { ...delta(`stream-${i}`, text), nativeTiming } as CallEvent);
+    const streaming = liveTranscriptRows(saved, state);
+    cardId ??= streaming[0].id;
+    expect(streaming.map(row => row.text)).toEqual([parts.slice(0, i + 1).join("")]);
+    expect(streaming[0].id).toBe(cardId);
+    saved.push(part);
+    expect(liveTranscriptRows(saved, state)).toMatchObject([{ id: cardId, text: parts.slice(0, i + 1).join("") }]);
+    state = applyLiveTranscriptEvent(state, { type: "transcript.added", key: `stream-${i}`, segment: part });
+    expect(liveTranscriptRows(saved, state)).toMatchObject([{ id: cardId, text: parts.slice(0, i + 1).join("") }]);
+  }
+});

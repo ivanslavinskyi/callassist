@@ -724,7 +724,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                           {segment.role === "system" ? consentTimeline[uiLocale].system : segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : brief.recipientName}
                         </strong>
                         <time>
-                          {!segment.final ? copy.liveTime : new Date(segment.createdAt).toLocaleTimeString(uiLocale, {
+                          {!segment.final && !segment.nativeTiming ? copy.liveTime : new Date(segment.createdAt).toLocaleTimeString(uiLocale, {
                             hour: "2-digit",
                             minute: "2-digit",
                             second: "2-digit"
