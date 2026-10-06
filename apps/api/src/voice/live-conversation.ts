@@ -212,10 +212,18 @@ export class OpenAILiveConversation implements VoiceConversation {
     this.#consentBackend = false;
     this.#consentEvidenceEnabled = false;
     this.#backendRevision++;
-    if (this.lifecycle) { this.suspendOutput(); this.#taskOpeningPending = true; }
+    if (this.lifecycle) {
+      this.suspendOutput(); this.#taskOpeningPending = true;
+      // Recording is confirmed. Open before sending task context: Live can
+      // speak while that context is arriving, before its acknowledgements.
+      this.#outputFenceMs = Math.max(this.#outputFenceMs, this.#transcriptBoundaryMs);
+      const interval = this.#outputSuppression.at(-1);
+      if (interval) interval.end = Math.max(interval.start, this.#outputFenceMs);
+      this.#outputSuspended = false; this.#outputEpochReady = true;
+    }
     const send = (payload: object) => this.lifecycle ? this.#sendOutputContext(payload) : this.#send(payload);
-    // Prepare silently. Context ACKs describe ingestion, not speech boundaries;
-    // asking Live to speak in this batch would let it start behind the audio gate.
+    // Keep the explicit start instruction after context delivery, but do not
+    // discard speech if Live starts early despite the preparation instruction.
     if (this.lifecycle) send({ type: "session.instructions.append", delegation_id: null,
       content: "Prepare the approved task silently. The application has played the full introduction and recording/transcription disclosure, received affirmative consent, and started recording. Stop any pending introduction or permission question. Wait for the separate instruction 'Begin the approved task now.' Context updates and tool results alone do not authorize speech. When instructed to begin, continue from the recipient's latest answer. Introduce the purpose and check readiness only if the recipient has not already invited continuation or answered the task. Do not repeat the greeting, identity, assistance reason or disclosures, ask permission to record again, or read internal task fields aloud." });
     send({ type: "session.update", session: { delegation: { type: "responses", responses: this.#backendConfiguration(true) } } });
@@ -433,7 +441,7 @@ export class OpenAILiveConversation implements VoiceConversation {
     } else if (event.type === "session.output_audio.delta" && this.#ready) {
       if (!decodePcmu(event.delta)) { this.#fail("LIVE_INVALID_OUTPUT_AUDIO"); return; }
       // Protected playback resumes behind a transcript fence. The task opening
-      // instead opens before its separate speech instruction, preserving its onset.
+      // opens before task context is sent, preserving speech ahead of its ACKs.
       if (this.lifecycle && (this.#outputSuspended || !this.#outputEpochReady)) {
         // Without chunk timing, audio ahead of its first fresh transcript cannot
         // be attributed safely. Retain only a count for honest capture diagnostics.
@@ -479,20 +487,20 @@ export class OpenAILiveConversation implements VoiceConversation {
       if (typeof event.end_ms !== "number" || !Number.isFinite(event.end_ms) || event.end_ms < 0) {
         this.#fail("LIVE_OUTPUT_BOUNDARY_INVALID"); return;
       }
-      this.#outputFenceMs = Math.max(this.#outputFenceMs, event.end_ms);
+      if (!this.#taskOpeningPending) this.#outputFenceMs = Math.max(this.#outputFenceMs, event.end_ms);
     }
     this.#outputResumeCommands.delete(id);
     if (this.#outputResumeCommands.size) return;
-    const interval = this.#outputSuppression.at(-1);
-    if (interval) interval.end = Math.max(interval.start, this.#outputFenceMs);
-    this.#outputSuspended = false;
+    if (!this.#taskOpeningPending) {
+      const interval = this.#outputSuppression.at(-1);
+      if (interval) interval.end = Math.max(interval.start, this.#outputFenceMs);
+      this.#outputSuspended = false;
+    }
     this.options.logger?.info({ callAttemptId: this.context.attemptId, outputGeneration: this.#outputGeneration,
       fenceMs: this.#outputFenceMs, acknowledgedAt: Date.now() }, "Live output context acknowledged");
     if (this.#taskOpeningPending) {
       this.#taskOpeningPending = false;
-      // Open BEFORE asking for speech. Its first audio may precede both the ACK
-      // and transcript; neither is a valid delimiter for cutting that audio.
-      this.#outputEpochReady = true;
+      // Audio is already open. Context ACKs must not move its transcript fence.
       this.options.logger?.info({ callAttemptId: this.context.attemptId, outputGeneration: this.#outputGeneration,
         contextFenceMs: this.#outputFenceMs, suppressedPreparationAudioMs: this.#outputUnattributedAudioMs,
         requestedAt: Date.now() }, "Live task opening requested");
@@ -549,7 +557,8 @@ export class OpenAILiveConversation implements VoiceConversation {
         if (retry) this.#outputResumeCommands.add(retry);
       } else {
         this.#recordLiveError(fields, command.phase, command.type, "fatal", command.retries + 1, providerEventId);
-        this.lifecycle?.backendFailed?.(() => this.#outputSuspended && this.#outputGeneration === command.outputGeneration, "LIVE_OUTPUT_RESUME_FAILED");
+        this.lifecycle?.backendFailed?.(() => (this.#outputSuspended || this.#taskOpeningPending) &&
+          this.#outputGeneration === command.outputGeneration, "LIVE_OUTPUT_RESUME_FAILED");
       }
       return;
     }

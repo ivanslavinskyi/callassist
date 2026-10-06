@@ -1593,7 +1593,7 @@ describe("stable Live transitions", () => {
     expect(h.speechRequests).toHaveLength(method === "dtmf" ? 3 : 1);
   });
 
-  it("prepares every context chunk before starting speech and preserves audio ahead of the start ACK and transcript", async () => {
+  it("preserves a whole opening across delayed context ACKs and transcript delivery", async () => {
     const h = await harness("human", false, false, "en-GB", false, "anna", "none", "hybrid_deterministic_v1");
     await h.play(); h.live.autoAcknowledge = false;
     const commandsBefore = h.live.sent.length;
@@ -1608,26 +1608,26 @@ describe("stable Live transitions", () => {
       ? { type: "session.updated", client_event_id: event.event_id, session: h.live.liveSession }
       : { type: `${event.type}ed`, client_event_id: event.event_id, start_ms: 900, end_ms: 1000 });
     for (const command of commands.slice(1).reverse()) acknowledge(command);
-    h.live.receive({ type: "session.output_transcript.delta", delta: "MUTED DISCLOSURE", start_ms: 150, end_ms: 500 });
-    h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    expect(h.twilio.sent.filter(e => e.event === "media")).toHaveLength(mediaBefore);
-    // Input remains live and persistable after recording, even while output waits.
+    h.live.receive({ type: "session.output_transcript.delta", delta: "MUTED DISCLOSURE", start_ms: 0, end_ms: 100 });
+    const firstFrame = Buffer.alloc(800, 129).toString("base64");
+    // Live may start speaking before the last context ACK. Preserve its first
+    // packet even when both the ACK and the matching transcript arrive later.
+    h.live.receive({ type: "session.output_audio.delta", delta: firstFrame });
+    expect(h.twilio.sent.filter(e => e.event === "media").slice(mediaBefore).map(e => e.media.payload)).toEqual([firstFrame]);
+    // Recording admission also keeps recipient input live and persistable.
     expect(starts()).toHaveLength(0);
     h.twilio.receive({ event: "media", media: { payload: silence } });
     h.live.receive({ type: "session.input_transcript.delta", delta: "Go ahead with the task.", start_ms: 1100, end_ms: 1200 });
     acknowledge(commands[0]); acknowledge(commands[0]);
     expect(starts()).toHaveLength(1);
-    h.live.receive({ type: "session.output_transcript.delta", delta: "OLD TAIL", start_ms: 500, end_ms: 600 });
-    const firstFrame = Buffer.alloc(800, 129).toString("base64");
-    h.live.receive({ type: "session.output_audio.delta", delta: firstFrame });
-    expect(h.twilio.sent.filter(e => e.event === "media").slice(mediaBefore).map(e => e.media.payload)).toEqual([firstFrame]);
-    // The start command's later ACK is not an audio or transcript boundary.
+    h.live.receive({ type: "session.output_transcript.delta", delta: "OLD TAIL", start_ms: 100, end_ms: 150 });
+    // Neither the context ACK nor the start ACK may trim the same utterance.
     h.live.receive({ type: "session.instructions.appended", client_event_id: starts()[0].event_id, start_ms: 1000, end_ms: 1800 });
     h.live.receive({ type: "session.output_audio.delta", delta: speech });
-    h.live.receive({ type: "session.output_transcript.delta", delta: "Wh", start_ms: 1000, end_ms: 1100 });
-    h.live.receive({ type: "session.output_transcript.delta", delta: "at would you like?", start_ms: 1100, end_ms: 1500 });
+    h.live.receive({ type: "session.output_transcript.delta", delta: "Wh", start_ms: 700, end_ms: 1000 });
+    h.live.receive({ type: "session.output_transcript.delta", delta: "at would you like?", start_ms: 1000, end_ms: 1500 });
     expect(h.twilio.sent.filter(e => e.event === "media").slice(mediaBefore).map(e => e.media.payload)).toEqual([firstFrame, speech]);
-    expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({ suppressedPreparationAudioMs: 100 }), "Live task opening requested");
+    expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({ suppressedPreparationAudioMs: 0 }), "Live task opening requested");
     await flush(); await flush();
     const transcript = (await h.repository.get(h.brief.id))!.transcript;
     expect(transcript.some(t => t.text === "Go ahead with the task.")).toBe(true);
@@ -1640,7 +1640,7 @@ describe("stable Live transitions", () => {
     expect(capture?.issues?.some(issue => issue.code === "consent_boundary")).toBe(false);
   });
 
-  it.each(["rejection", "timeout", "disconnect"] as const)("does not open output after a task-context %s", async failure => {
+  it.each(["rejection", "timeout", "disconnect"] as const)("does not reopen task audio after a terminal context %s", async failure => {
     const h = await harness("human", false, false, "en-GB", false, "anna", "none", "hybrid_deterministic_v1");
     await h.play(); h.live.autoAcknowledge = false;
     h.transcript("input", "Yes"); await vi.advanceTimersByTimeAsync(201); await flush();
@@ -1652,11 +1652,14 @@ describe("stable Live transitions", () => {
       expect(retry.event_id).not.toBe(command.event_id);
       // A stale successful ACK for the rejected command cannot release the retry.
       h.live.receive({ type: "session.instructions.appended", client_event_id: command.event_id, end_ms: 1000 });
+      expect(h.live.sent.some(e => e.type === "session.instructions.append" && String(e.content).startsWith("Begin the approved task now."))).toBe(false);
+      h.live.receive({ type: "error", error: { code: "invalid_request_error", client_event_id: retry.event_id } });
+      await vi.advanceTimersByTimeAsync(2_001);
     } else if (failure === "timeout") await vi.advanceTimersByTimeAsync(15_001);
     else h.twilio.close();
     await flush(); await flush();
     const afterRecovery = h.twilio.sent.filter(e => e.event === "media").length;
-    if (failure === "timeout") expect(h.requestedSpeech()).toContain("can't reliably continue");
+    if (failure !== "disconnect") expect(h.requestedSpeech()).toContain("can't reliably continue");
     else expect(afterRecovery).toBe(before);
     h.live.receive({ type: "session.instructions.appended", client_event_id: command.event_id, end_ms: 1000 });
     h.live.receive({ type: "session.output_transcript.delta", delta: "UNAUTHORIZED OUTPUT", start_ms: 2000, end_ms: 2100 });

@@ -123,9 +123,10 @@ reasons remain explicit opt-ins in the approved disclosure snapshot.
 
 The audit binds disclosure playback to the consent decision and its method
 (`deterministic_voice`, `semantic_voice` or `dtmf`), recording request and provider
-recording ID. After recording admission, v9 prepares context silently, waits for
-context acknowledgements, opens audio forwarding and separately requests task
-speech. That instruction does not establish when speech will arrive. Background
+recording ID. After recording admission, v9 opens audio forwarding before sending
+task context, so early native speech is preserved. Context acknowledgements gate
+the separate task-start instruction, without moving the audio or transcript
+boundary. That instruction does not establish when speech will arrive. Background
 speech is a leading hypothesis for one delayed production opening; a quiet-room
 comparison is pending. See the [dated call analysis](live-runtime-stability-plan-2026-10-04.md).
 

@@ -32,12 +32,16 @@ export function mergeTranscriptSegments(current: TranscriptSegment[], incoming: 
  * replaces a speaker card; event identity also deduplicates snapshot/SSE races. */
 export function liveTranscriptRows(segments: TranscriptSegment[], state: LiveTranscriptState): TranscriptSegment[] {
   const nativeKey = (s: TranscriptSegment) => s.nativeTiming ? `${s.nativeTiming.sessionId}:${s.nativeTiming.eventId}` : s.id;
-  const all = new Map(segments.map(s => [nativeKey(s), s]));
+  const all = new Map([...segments].sort(transcriptArrivalOrder).map(s => [nativeKey(s), s]));
   for (const [key, partial] of Object.entries(state.partials)) {
     const timing = partial.nativeTiming;
     const segment = { ...partial, id: key, final: false,
       createdAt: timing ? new Date(Date.parse(timing.sessionStartedAt) + timing.startMs).toISOString() : new Date(8640000000000000).toISOString() };
     if (!all.has(nativeKey(segment))) all.set(nativeKey(segment), segment);
   }
-  return groupNativeTranscriptSegments([...all.values()]).map(s => ({ ...s, id: nativeKey(s) }));
+  // Persistence is ordered; pending SSE fragments follow the saved prefix.
+  // Never compare their speech timestamps with saved fragments' receivedAt:
+  // that moves each new word before the prefix until its DB acknowledgment.
+  const ordered = [...all.values()].map((s, index) => ({ ...s, ingestionSequence: index }));
+  return groupNativeTranscriptSegments(ordered).map(s => ({ ...s, id: nativeKey(s) }));
 }
