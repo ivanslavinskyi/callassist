@@ -24,6 +24,13 @@ export const preparationTransportDiagnosticsSchema = z.strictObject({
   networkErrorCode: preparationNetworkErrorSchema.nullable(),
   providerProcessingMs: z.number().nonnegative().max(86_400_000).nullable(),
   remainingRequests: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
-  remainingTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+  remainingTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  // Optional for historical rows and non-streaming responses. No output text is retained.
+  stream: z.strictObject({
+    outputEvents: z.number().int().nonnegative().max(8_000_000),
+    outputBytes: z.number().int().nonnegative().max(8_000_000),
+    firstOutputMs: milliseconds.nullable(),
+    lastOutputMs: milliseconds.nullable()
+  }).optional()
 });
 export type PreparationTransportDiagnostics = z.infer<typeof preparationTransportDiagnosticsSchema>;

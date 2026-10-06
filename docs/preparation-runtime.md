@@ -146,6 +146,17 @@ Checkpoint persistence is best effort and cannot trigger another paid request;
 provider reservation and terminal accounting still fail closed for publication.
 Existing transport v1 evidence remains compatible and absent evidence remains null.
 
+The stream reader bounds consecutive JSON formatting whitespace outside quoted
+strings to 256 characters, across event/chunk boundaries. Exceeding it cancels the
+reader with `OPENAI_STREAM_PADDING`; whitespace and escapes inside strings are
+preserved. Initial compilation may use its existing single schema repair with
+explicit compact-output feedback. Repeated padding fails; deadlines and request
+budgets never reset. Aborted padding retains its provider permit until expiry,
+because cancellation does not prove remote work or billing stopped. Diagnostics
+add optional numeric output-event/UTF-8-byte counts and first/last-output offsets,
+without storing generated text. This is protection against a reproduced runaway
+output pattern, not proof of a 30-second end-to-end latency guarantee.
+
 The inspector and call export include checkpoints and requested/actual tier.
 `GET /api/admin/system/preparation/runtime` returns fresh role heartbeats, queue
 counts/ages and daily stage aggregates. Heartbeats include slots, active jobs,

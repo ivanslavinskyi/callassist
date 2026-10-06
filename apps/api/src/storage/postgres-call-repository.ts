@@ -1918,7 +1918,7 @@ export class PostgresCallRepository implements CallRepository {
         usage: input.usage
       });
       // Keep unknown remote work reserved until expiry after a local timeout/abort.
-      if (input.outcome !== "network_error") await transaction`DELETE FROM preparation_provider_permits WHERE operation_id=${input.operationId}`;
+      if (input.outcome !== "network_error" && input.errorCode !== "OPENAI_STREAM_PADDING") await transaction`DELETE FROM preparation_provider_permits WHERE operation_id=${input.operationId}`;
       if (input.retryAfterMs || input.statusCode===429) await transaction`UPDATE preparation_provider_cooldown
         SET until_at=greatest(until_at,clock_timestamp()+(${Math.max(1000,input.retryAfterMs ?? 0)}*interval '1 millisecond')) WHERE id=true`;
     });

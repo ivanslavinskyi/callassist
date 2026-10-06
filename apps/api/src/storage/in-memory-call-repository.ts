@@ -1033,7 +1033,7 @@ export class InMemoryCallRepository implements CallRepository {
     const stored = this.#providerOperations.get(input.operationId);
     if (!stored) throw new CallRepositoryError("PROVIDER_OPERATION_NOT_FOUND");
     if (stored.result) return;
-    if (input.outcome !== "network_error") this.#preparationPermits.delete(input.operationId);
+    if (input.outcome !== "network_error" && input.errorCode !== "OPENAI_STREAM_PADDING") this.#preparationPermits.delete(input.operationId);
     if (input.retryAfterMs || input.statusCode===429) this.#preparationCooldown=Math.max(this.#preparationCooldown,Date.now()+Math.max(1000,input.retryAfterMs ?? 0));
     stored.result = copy({
       actualServiceTier: input.actualServiceTier,

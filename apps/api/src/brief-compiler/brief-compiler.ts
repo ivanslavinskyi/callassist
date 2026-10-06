@@ -240,13 +240,22 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     for (let attempt = 0; attempt < 2 + executionLanguageRepairLimit; attempt += 1) {
       requestBudget.repairKind = repairKind;
       requestBudget.repairNumber = attempt;
-      response = await this.#requestCompilation(
-        rawBrief,
-        validationFeedback,
-        compilationDeadline,
-        requestBudget,
-        currentDateTime
-      );
+      try {
+        response = await this.#requestCompilation(
+          rawBrief, validationFeedback, compilationDeadline, requestBudget, currentDateTime
+        );
+      } catch (cause) {
+        // A live connection emitting padding is not a slow useful generation.
+        // Cancel it early and use the existing single schema repair, with the
+        // original deadline/budget and without replaying the identical prompt.
+        if (attempt === 0 && cause instanceof BriefCompilerError && cause.code === "OPENAI_RESPONSE_INVALID" &&
+          cause.validationPaths.includes("stream_padding")) {
+          repairKind = "schema";
+          validationFeedback = ["output: the previous response stalled in whitespace between JSON fields. Return one complete compact JSON object, no indentation, blank lines or padding. Include every required property, including required on each ordered question. Keep the plan proportional to the task."];
+          continue;
+        }
+        throw cause;
+      }
       const refusal = extractRefusal(response);
       if (refusal) {
         return createCompilation({
@@ -506,7 +515,10 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         await checkpoint("headers");
         if (response.ok) {
           diagnostics.bodyStarted();
-          const value = await awaitWithAbort(readProviderResponse(response, signal, async (type, eventResponse) => {
+          if (paid && response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) diagnostics.streamStarted();
+          const value = await awaitWithAbort(readProviderResponse(response, signal, async (type, eventResponse, outputBytes) => {
+            signal.throwIfAborted();
+            diagnostics.streamOutput(outputBytes);
             responseId = stringOrNull(eventResponse?.id) ?? responseId;
             actualTier = serviceTier(eventResponse?.service_tier) ?? actualTier;
             await checkpoint("first_event");
@@ -535,7 +547,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         providerRequestId: requestId, providerResponseId: responseId, providerModel: stringOrNull(payload?.model),
         actualServiceTier: actualTier, retryAfterMs: delay,
         statusCode: response?.status ?? null, completedAt: new Date().toISOString(), durationMs: Math.max(0, Date.now() - started),
-        errorCode: error ? invalid ? "OPENAI_RESPONSE_INVALID" : signal.aborted || isTimeoutError(error)
+        errorCode: error ? error instanceof ResponseReadError && error.code === "OPENAI_STREAM_PADDING" ? error.code : invalid ? "OPENAI_RESPONSE_INVALID" : signal.aborted || isTimeoutError(error)
           ? response ? "OPENAI_BODY_TIMEOUT" : "OPENAI_RESPONSE_TIMEOUT" : "OPENAI_NETWORK_ERROR"
           : response?.ok ? null : `OPENAI_HTTP_${response?.status ?? 0}`,
         usage: parseOpenAITextTokenUsage(payload?.usage)
@@ -548,7 +560,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       // A provider cooldown is persisted and deferred to the durable queue, never slept in a slot.
       if (status === 429 || delay > 0) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
         stage, clientRequestId, statusCode: status, retryAfterMs: Math.max(1000, delay) + Math.floor(Math.random() * 251) });
-      if (invalid) throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { stage, clientRequestId, responseId, cause: error });
+      if (invalid) throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { stage, clientRequestId, responseId, cause: error,
+        validationPaths: error instanceof ResponseReadError && error.code === "OPENAI_STREAM_PADDING" ? ["stream_padding"] : [] });
       if (attempt === 0 && !budget.signal?.aborted && (error || (status !== null && isRetryableOpenAIStatus(status)))) continue;
       throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, clientRequestId, responseId, statusCode: status, cause: error });
     }

@@ -6,6 +6,20 @@ import { PreparationRequestDiagnostics } from "./request-diagnostics";
 
 afterEach(() => vi.useRealTimers());
 
+it("keeps stream progress counts without retaining output and ignores late output", () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  const diagnostics = new PreparationRequestDiagnostics(2, 35000, 100);
+  diagnostics.run(() => undefined); diagnostics.streamStarted();
+  vi.setSystemTime(4000); diagnostics.streamOutput(12);
+  vi.setSystemTime(28000); diagnostics.streamOutput(18);
+  vi.setSystemTime(35000); diagnostics.failed(new DOMException("Timed out", "TimeoutError"));
+  const stopped = diagnostics.finish();
+  expect(stopped.stream).toEqual({ outputEvents: 2, outputBytes: 30, firstOutputMs: 4000, lastOutputMs: 28000 });
+  expect(preparationTransportDiagnosticsSchema.parse(stopped)).toEqual(stopped);
+  diagnostics.streamOutput(50);
+  expect(diagnostics.finish()).toEqual(stopped);
+});
+
 it("observes real concurrent Node fetch requests without collecting request or response content", async () => {
   const server = createServer((request, response) => {
     request.resume();

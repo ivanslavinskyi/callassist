@@ -34,13 +34,14 @@ describe("distributed provider admission and diagnostic retention",()=>{
   }
   const terminal=(operationId:string,overrides:Partial<CompleteProviderOperationInput>={}):CompleteProviderOperationInput=>({operationId,outcome:"succeeded",providerRequestId:null,providerResponseId:null,
     providerModel:"gpt-5.6",statusCode:200,completedAt:new Date().toISOString(),durationMs:1,errorCode:null,usage:null,...overrides});
-  it("atomically limits two pools, preserves idempotency, and keeps unknown remote requests reserved",async()=>{
+  it.each(["network_error", "invalid_response"] as const)("atomically limits two pools, preserves idempotency, and keeps cancelled remote work reserved: %s",async outcome=>{
     const f=await fixture();await sql`UPDATE preparation_settings SET capacity=jsonb_set(capacity,'{providerSlots}','2')`;
     const requests=Array.from({length:6},()=>f.request());
     const results=await Promise.allSettled(requests.map((request,i)=>(i%2 ? first : second).reserveCallPreparationProviderRequest(request,f.lease)));
     const accepted=requests.filter((_,i)=>results[i]!.status==='fulfilled');expect(accepted).toHaveLength(2);
     expect(await second.reserveCallPreparationProviderRequest(accepted[0]!,f.lease)).toBe(true);
-    await first.completeProviderOperation(terminal(accepted[0]!.id,{outcome:"network_error",statusCode:null}));
+    await first.completeProviderOperation(terminal(accepted[0]!.id,{outcome,statusCode:outcome === "network_error" ? null : 200,
+      errorCode:outcome === "invalid_response" ? "OPENAI_STREAM_PADDING" : null}));
     await expect(second.reserveCallPreparationProviderRequest(f.request(),f.lease)).rejects.toMatchObject({code:"PREPARATION_PROVIDER_BUSY"});
     await second.completeProviderOperation(terminal(accepted[1]!.id));
     const next=f.request();expect(await first.reserveCallPreparationProviderRequest(next,f.lease)).toBe(true);

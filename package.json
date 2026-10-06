@@ -47,6 +47,7 @@
       "tsup>esbuild": "0.28.1",
       "@next/eslint-plugin-next@15.5.26>fast-glob": "npm:glob@13.0.6",
       "postcss": "8.5.23",
+      "source-map-js@>=1.0.0 <1.2.2": "1.2.2",
       "sharp": "0.35.4"
     },
     "patchedDependencies": {

@@ -18,7 +18,13 @@ it("accepts missing historical diagnostics and preserves unknown fields as null"
 });
 it.each([
   { headers: { authorization: "secret" } }, { prompt: "private plan" }, { networkErrorCode: "raw server error" },
-  { responseHeadersMs: -1 }, { requestBytes: Infinity }, { providerProcessingMs: 999999999999 }, { version: 2 }
+  { responseHeadersMs: -1 }, { requestBytes: Infinity }, { providerProcessingMs: 999999999999 }, { version: 2 },
+  { stream: { outputEvents: 1, outputBytes: 3, firstOutputMs: 2, lastOutputMs: 2, text: "private plan" } },
+  { stream: { outputEvents: 1, outputBytes: 8_000_001, firstOutputMs: 2, lastOutputMs: 2 } }
 ])("rejects unsafe or invalid transport diagnostics %j", extra => {
   expect(preparationTransportDiagnosticsSchema.safeParse({ ...diagnostics, ...extra }).success).toBe(false);
+});
+it("retains only numeric progress from a streamed response", () => {
+  const value = { ...diagnostics, stream: { outputEvents: 2, outputBytes: 80, firstOutputMs: 3700, lastOutputMs: 29000 } };
+  expect(preparationTransportDiagnosticsSchema.parse(value)).toEqual(value);
 });
