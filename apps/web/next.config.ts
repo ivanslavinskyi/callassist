@@ -16,6 +16,9 @@ if (existsSync(workspaceEnv)) {
 }
 
 const nextConfig: NextConfig = {
+  // Keep canonical/hreflang in the initial <head>, including for Googlebot.
+  // Streaming metadata can otherwise place these links in the response body.
+  htmlLimitedBots: /.*/,
   // Parallel local QA must not replace a running dev server's build artifacts.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   transpilePackages: ["@callassist/contracts"],

@@ -506,6 +506,15 @@ catalog, fresh schema, privacy/re-encryption/recovery, dependency audit, copy,
 license, lint, types, tests and build. CI result and real-provider acceptance are
 separate evidence.
 
+For public SEO changes, run `node scripts/check-public-seo.mjs https://shprohli.ch`
+against the deployed site, or pass a local server origin followed by its configured
+canonical origin. The read-only check requests every sitemap URL as a browser,
+Googlebot and Twitterbot and verifies the raw HTML head: self-canonical, published
+language alternates, title, indexability and document language. Metadata streaming
+is disabled in `next.config.ts` so canonical/hreflang do not depend on JavaScript
+or on how quickly the CMS responds. This makes the initial response wait for
+metadata; it does not guarantee Google's choice of canonical or indexing time.
+
 The optional `scripts/preproduction-browser-smoke.mts` exercises the new admin
 and registration flows against its own database and mock providers. From
 `apps/api`, run `node --import tsx ../../scripts/preproduction-browser-smoke.mts`.
