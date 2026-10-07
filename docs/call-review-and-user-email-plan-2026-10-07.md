@@ -126,6 +126,19 @@ vulnerabilities. OG rendering/API/database regression tests passed (3 files,
 10 tests); the schema catalog check confirmed 109 migrations. Maintained document
 links, public-copy consistency, license and whitespace checks passed.
 
+The first pushed candidate exposed missing schema-maintenance coverage in full CI:
+the telemetry inventory lacked the new table/column, the rotation count was stale,
+and the populated `0094` upgrade fixture incorrectly used the current SQL repository
+before migration. Follow-up changes export the creation UI locale, explicitly exclude
+private notification delivery bodies from telemetry, and seed the old schema using
+only its historical columns. The upgrade check now includes a previously completed
+attempt and verifies frozen locale fallback without historical owner mail.
+The owner outbox is also a required recovery table, with a nonempty encrypted email
+fixture checked after key rotation and a real isolated PostgreSQL dump/restore.
+Final targeted verification passed: 16 upgrade/inventory/recovery-validation tests,
+the rotation integration test with dump/restore enabled, API TypeScript and public
+copy/whitespace checks. A fresh full CI run is required for the follow-up commit.
+
 Deployment must apply `0109_user_call_notifications.sql` before starting the new
 API/background worker. The migration freezes legacy call locales with the stated
 fallback and does not enqueue historical calls. New completions use the existing

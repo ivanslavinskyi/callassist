@@ -18,11 +18,20 @@ const excluded: Record<string, string[]> = {
     // immutable policy is exported through call_attempts instead.
     "voice_consent_settings", "voice_consent_settings_audit", "preparation_settings", "preparation_settings_audit",
     "preparation_dispatch_users", "preparation_provider_permits", "preparation_provider_cooldown", "preparation_provider_admissions", "preparation_daily_metrics"],
-  notification_content_and_delivery: ["superadmin_notification_settings", "superadmin_notifications", "superadmin_notification_audit"],
+  // Recipient addresses and rendered mail are delivery data, not call telemetry.
+  // Original transcript/assessment and creation UI locale have their own sources.
+  notification_content_and_delivery: ["superadmin_notification_settings", "superadmin_notifications", "superadmin_notification_audit", "user_call_notifications"],
   export_storage_and_audit: ["admin_telemetry_privacy_epoch", "admin_telemetry_exports", "admin_telemetry_export_parts", "admin_telemetry_export_events", "admin_telemetry_export_recordings"]
 };
 const directory = new URL("../db/migrations/", import.meta.url);
 describe("telemetry source inventory", () => {
+  it("preserves creation UI locale without exporting private email delivery payloads", () => {
+    const source = exportSources.find(source => source.table === "call_briefs")!;
+    expect(source.fields).toContain("creation_ui_locale");
+    expect(mapExportRow(source, { locale: "de-CH", creation_ui_locale: "ru" }, Buffer.alloc(32)).data)
+      .toEqual({ locale: "de-CH", creation_ui_locale: "ru" });
+    expect(exportSources.some(source => source.table === "user_call_notifications")).toBe(false);
+  });
   it("exports bounded preparation measurements without extra headers or request content", () => {
     const source = exportSources.find(source => source.table === "provider_operation_results")!;
     expect(source.fields).toContain("response_metadata");

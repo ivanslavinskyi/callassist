@@ -35,6 +35,7 @@ const criticalTables = [
   "superadmin_notification_settings",
   "superadmin_notifications",
   "superadmin_notification_audit",
+  "user_call_notifications",
   "audit_events",
   "call_briefs",
   "call_voice_actions",

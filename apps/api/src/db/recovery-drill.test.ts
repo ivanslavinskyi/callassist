@@ -56,6 +56,7 @@ describe("database recovery drill", () => {
       "superadmin_notification_settings",
       "superadmin_notifications",
       "superadmin_notification_audit",
+      "user_call_notifications",
       "audit_events",
       "call_briefs",
       "call_voice_actions",
@@ -82,7 +83,7 @@ describe("database recovery drill", () => {
       "sessions",
       "users"
     ];
-    expect(tables).toHaveLength(38);
+    expect(tables).toHaveLength(39);
     expect(() => validateCriticalTables(tables)).not.toThrow();
     for (const table of tables) {
       expect(() => validateCriticalTables(tables.filter((name) => name !== table)))

@@ -386,6 +386,9 @@ cancel pending delivery and redact payloads; accepted/cancelled payloads are cle
 failed payloads are purged after seven days by the running consumer. Provider
 `accepted` means API acceptance, not confirmed mailbox delivery. Limits and provider
 configuration are in the [runtime reference](runtime-reference.md#owner-result-email-delivery).
+Telemetry exports include creation UI locale alongside the source call; destination
+addresses and rendered notification bodies remain outside the call-telemetry export
+boundary. The owner outbox is covered by key rotation and database recovery checks.
 
 ## Language and content model
 
