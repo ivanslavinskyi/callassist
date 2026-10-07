@@ -1,6 +1,6 @@
 # Call-plan preparation runtime
 
-Source specification for `codex/preparation-performance`, 2026-10-05. This describes
+Source specification checked against `879dec5`, 2026-10-07. This describes
 code, not the state or measured capacity of any deployed server. The original
 [plan](preparation-performance-and-scaling-plan-2026-10-05.md) remains the design record;
 [implementation evidence](preparation-performance-implementation-2026-10-05.md)
@@ -33,6 +33,12 @@ attested in the user's source. It does not guess translations, abbreviations or
 approximate spellings. Postal addresses and protected identifiers retain their
 strict checks. Unknown transformations still require repair/review.
 
+Known limitation in this source checkpoint: protected-reference extraction remains
+heuristic. Local replay reproduced a false `fact_integrity_failure` for generated
+`finish-by-16:30` versus source `finish by 16:30`; this wording can be mistaken for
+an invented identifier and cause unnecessary repair. The padding fix does not
+correct this validator. Model selection is not a guarantee against such failures.
+
 ## Account phone policy
 
 `registration.swissPhonesOnly` controls registration, unverified phone correction,
@@ -57,6 +63,13 @@ request, at most 12 provider requests across durable attempts, and 20,000 output
 tokens. The process preparation timeout can impose a smaller ceiling. Moderation,
 language audit, local validation and user approval remain mandatory. Unsupported
 prompt/generator versions must be rejected rather than silently replayed differently.
+
+The preparation deadline ends at plan publication/failure; automatic review
+translation is a separate durable job with its own timeout and retry budget.
+Pinning the review profile does not give it the same absolute deadline. Browser
+submission recovery currently waits up to eight minutes. The desired 10–15 second
+target and 30-second total ceiling are not implemented end-to-end. Neither more
+workers nor the padding guard proves that target or model quality.
 
 ## Scheduling and isolation
 

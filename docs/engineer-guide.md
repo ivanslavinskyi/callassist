@@ -1,10 +1,10 @@
 # SHPROHLI engineer guide
 
-Source checkpoint: 2026-10-04, schema catalog `0001`–`0101`. This describes the
+Source checkpoint: 2026-10-07 at `879dec5`, schema catalog `0001`–`0108`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
-The [implementation record](pre-production-implementation-2026-10-01.md) states
-what was actually verified and which acceptance checks remain external.
+The dated implementation records in the [documentation index](README.md) retain
+their original verification scope; they are not current deployment status.
 
 ## Repository and ownership
 
@@ -69,6 +69,13 @@ Registration verifies phone possession and captures the configured legal agreeme
 Email verification is required by default; explicit deferral is available only when
 enabled. Deferral does not mark an address verified. Current policy gates new calls.
 Roles and sensitive reads are checked server-side, not only by hiding controls.
+
+Admin registration policy can restrict account phones to Switzerland. It applies
+to registration, unverified-phone correction, verification/resend and phone changes,
+including pending confirmations. The server rechecks policy before provider IO
+and within mutations. Verified foreign accounts retain login and recovery. All
+seven UI locales hide the country selector and change guidance when enabled.
+Outbound recipient eligibility remains a separate policy.
 
 A preparation request is idempotent for the account and request key. It stores the
 input and a durable compilation job. Compilation produces an immutable revision
@@ -149,12 +156,31 @@ retroactively identify an old call's runtime.
 
 ## Preparation latency and diagnostics
 
-Each new preparation pins its model/tier policy and 120000 ms deadline, including
+Each new preparation pins its model/tier policy and, by default, a 120000 ms deadline, including
 queue time, provider requests and durable retries. `CALL_PREPARATION_TIMEOUT_MS`
 can impose a smaller process ceiling.
 `OPENAI_BRIEF_COMPILER_TIMEOUT_MS` is a second compile-level ceiling. Generation requests
 default to 35 seconds; moderation retains its own bounded timeout. Output moderation
 gets reserved time. No safety stage is removed to shorten waiting.
+
+Superadmins select generation model (`gpt-5.6`, `gpt-5.6-terra`, `gpt-6-luna`)
+and Standard/Fast directly; no evaluation report is required and the comment is
+optional. Audit and automatic plan review retain `gpt-5.6:default`. Existing jobs
+retain their policy snapshot; saving settings does not issue a provider request.
+Recipient labels may be people or organisations; supported full-token normalization
+and source-attested forms do not permit invented names, addresses or references.
+
+Generation/audit use SSE. The reader cancels more than 256 consecutive JSON
+formatting whitespace characters outside strings (`OPENAI_STREAM_PADDING`). Initial
+compilation can use one compact-JSON schema repair without resetting deadlines or
+request limits. Repeated padding fails. Numeric stream counts/timing are recorded;
+raw output is not. Unknown cancelled remote work keeps its permit until expiry.
+
+The requested 10–15 second target and 30-second end-to-end ceiling are not enforced
+by this implementation. Automatic review translation is a separate durable job;
+its profile is pinned, but it does not share the preparation deadline. Browser
+recovery polling can last eight minutes. Faster failure is not faster successful
+preparation. See [preparation runtime](preparation-runtime.md) for exact boundaries.
 
 Provider requests identify input moderation, initial compilation, compilation repair,
 language audit and output moderation. Metadata includes repair kind/number,
@@ -262,6 +288,13 @@ source, not automatic recovery triggered by page reads or callbacks. Transcript
 revisions are immutable; summaries and translations reference their source/hash.
 Incomplete native captures retain quality flags. Recording retention does not
 imply deleting the retained textual source unless the wider deletion policy applies.
+
+In the live browser view, persisted fragments are sorted by arrival order and
+pending SSE fragments follow the saved prefix. Session/event identity deduplicates
+snapshot/SSE overlap; grouping uses that combined order rather than comparing
+speech timestamps with database receipt times. Native partials display their speech
+timestamp instead of the generic live label. These UI changes do not rewrite
+stored transcript boundaries or certify that a fragment was audibly played.
 
 Admin telemetry export v2 includes native captures, immutable contexts/revisions,
 terminal/action evidence, preparation diagnostics, runtime descriptors, budget and
@@ -373,7 +406,10 @@ catalog without applying it; ordinary migration application is a distinct explic
 step. Migrations `0095`–`0099` add accounting/audio exports, beta allowances,
 plan-review cases, public-copy updates and preparation request metadata.
 Migration `0100` adds voice consent policy/audit support; `0101` adds preparation
-transport result metadata. Backfills
+transport result metadata. `0102`–`0107` add preparation settings/snapshots, queue
+and provider admission, observability/retention, deletion guards and policy
+provenance; `0108` adds the Swiss-only account-phone policy with a compatible false
+default. Backfills
 and existing-account policy transitions remain explicit, reviewed actions.
 
 Deletion spans call inputs, transcripts, recordings, derived artifacts, safety

@@ -42,7 +42,11 @@ Do not point tests at a working or production database. Build with corepack pnpm
 - Public application and content in DE, FR, IT, RM, EN, RU and UK; separate interface,
   task and call languages, with original or translated plan approval receipts.
 - Immutable approved plans, durable preparation with stage diagnostics, bounded
-  retries, independent worker queues and recorded provider usage.
+  retries, shared multiuser admission, role workers and recorded provider usage.
+- Admin selection of the generation model and Standard/Fast without an evaluation
+  prerequisite; fixed audit/review profiles and policy snapshots for existing jobs.
+- Optional Swiss-only account phones for registration and phone changes, with
+  matching forms and copy across all seven interface locales.
 - Post-consent recording, Live transcripts and explicitly requested recording ASR;
   retention and deletion apply to recordings and derived export archives.
 - Transactional credit reserve/charge/refund and versioned beta allowances by
@@ -51,7 +55,7 @@ Do not point tests at a working or production database. Build with corepack pnpm
   localized superadmin alerts, and telemetry exports with retained audio.
 
 [Documentation index](docs/README.md) · [Current engineer guide](docs/engineer-guide.md) ·
-[Implementation record](docs/pre-production-implementation-2026-10-01.md).
+[Preparation runtime](docs/preparation-runtime.md).
 Historical evidence is under docs/archive/. Deployment runbooks and VPS topology
 are local only under the ignored docs/local-operations/ directory.
 

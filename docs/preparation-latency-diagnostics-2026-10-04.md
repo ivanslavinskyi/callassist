@@ -1,5 +1,10 @@
 # Диагностика задержек подготовки плана — 4 октября 2026
 
+Датированный отчёт измерений и первоначальной транспортной диагностики.
+Срез и перечисленные границы изменения ниже исторические. Реализованные позже
+SSE/checkpoints, policy, concurrency и защита от JSON padding описаны в
+[актуальном runtime](preparation-runtime.md); они не меняют старые измерения.
+
 ## Исходный срез до расширения диагностики
 
 Источник: локальные `call_preparation_requests`, `provider_operations`,
@@ -200,7 +205,8 @@ worker или платного диагностического запроса �
 
 Следующий этап описан отдельно в
 [плане ускорения подготовки и масштабирования](preparation-performance-and-scaling-plan-2026-10-05.md).
-Это предложение будущих изменений, не изменение результатов этого исследования.
+План впоследствии реализован в объёме [отчёта](preparation-performance-implementation-2026-10-05.md);
+результаты этого исходного исследования остаются неизменными.
 
 - [OpenAI API: request IDs и response headers](https://developers.openai.com/api/reference/overview).
 - [Undici 7.16.0: DiagnosticsChannel](https://github.com/nodejs/undici/blob/v7.16.0/docs/docs/api/DiagnosticsChannel.md).
