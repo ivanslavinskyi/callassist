@@ -236,24 +236,25 @@ export function CreateCallForm({
     }
 
     let brief: CallBrief;
+    const creationLanguagePreferences = { ...languagePreferences, uiLocaleHint: uiLocale };
     const onProgress = (progress: CallPreparationProgress) => {
       if (mounted.current) setPreparationProgress(progress);
     };
     try {
       if (!userId) {
-        brief = await saveCallBrief(input, undefined, languagePreferences, onProgress);
+        brief = await saveCallBrief(input, undefined, creationLanguagePreferences, onProgress);
       } else {
         const storage = getCallPreparationSessionStorage();
         let activeAttemptKey = draftRef.current.preparationAttempt?.idempotencyKey;
         brief = await prepareCallBriefCreation({
           input,
-          languagePreferences,
+          languagePreferences: creationLanguagePreferences,
           scope: draftId,
           userId,
           current: draftRef.current.preparationAttempt,
           storage,
           save: (value, idempotencyKey) =>
-            saveCallBrief(value, idempotencyKey, languagePreferences, onProgress),
+            saveCallBrief(value, idempotencyKey, creationLanguagePreferences, onProgress),
           load: async (callBriefId) =>
             (await getCallSnapshot(callBriefId)).brief,
           onAttempt: (attempt) => {

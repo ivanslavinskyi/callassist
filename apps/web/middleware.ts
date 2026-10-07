@@ -25,6 +25,7 @@ export function middleware(request: NextRequest) {
   }
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-callassist-ui-locale", pathLocale);
+  requestHeaders.set("x-callassist-pathname", pathname);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.cookies.set(uiLocaleCookie, pathLocale, {
     maxAge: 60 * 60 * 24 * 365, path: "/", sameSite: "lax"

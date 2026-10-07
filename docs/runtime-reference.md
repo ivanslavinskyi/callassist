@@ -1,6 +1,7 @@
 # Runtime and API reference
 
-Checked 2026-10-07 against `879dec5`, schema 0001–0108. Current domain behavior is documented in [the engineer guide](engineer-guide.md).
+Updated 2026-10-07 for call review and owner result emails, schema 0001–0109.
+Current domain behavior is documented in [the engineer guide](engineer-guide.md).
 The route inventory below was regenerated from source. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
 environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.yaml).
@@ -93,6 +94,11 @@ unchanged plans do not invoke the compiler. Migration 0083 preserves provenance.
 Settled `completed` attempts with `consent_not_received` also qualify; explicit
 refusal, granted consent, conversation evidence and recordings do not. Technical
 connection is not treated as proof of a human answer.
+The optional repeat body `uiLocale` accepts the seven supported UI languages and
+captures the interface language of the new draft; omitted values fall back to the
+account UI language. New preparation requests similarly snapshot `uiLocaleHint` at
+submission. Neither changes the spoken call language or an existing call's immutable
+`creation_ui_locale`.
 See [registration/call behavior and tests](archive/registration-and-call-improvements-2026-09-25.md).
 
 ## Call lifecycle and history
@@ -100,6 +106,33 @@ See [registration/call behavior and tests](archive/registration-and-call-improve
 Migrations 0073/0074 add stop events and final assessments. List/snapshot/Inspector responses share the `lifecycle` projection, including `assessment_pending` and `assessment_unavailable`. Operations exposes independent `lifecycle.goals` and `userGoalFeedback` counts. Those two migrations introduce no production environment variable; migration 0075 and opt-out require the additional settings below. Apply migrations before restarting all API/worker processes; do not leave an old worker using immediate refunds. History lives at `/[locale]/app/history`. [Final assessment semantics and verification](archive/post-call-assessment-diagnosis-2026-09-15.md).
 
 `summary-v4:grounded-v3` combines the final summary, cited appointment extraction and canonical assessment, followed by pure server calendar composition. Legacy `summary-v3` remains readable. Normal short calls use one request; transient failures allow one automatic retry per generation. The five-minute reservation deadline starts when termination is first processed and survives restarts. Worker maintenance releases expired reservations independently of slow model/transcription work. Actual model availability and diarization still affect assessment quality. Optional billable smoke evaluations: `ALLOW_BILLABLE_EVAL=true pnpm --filter @callassist/api eval:call-assessment` (eight synthetic examples; `ASSESSMENT_EVAL_CASE` selects one) and `eval:summary-calendar` (six synthetic examples, five languages; no calls).
+
+## Owner result email delivery
+
+Migration `0109_user_call_notifications.sql` must precede the new API/worker build.
+It freezes `call_briefs.creation_ui_locale` and creates the owner outbox. Legacy
+locale fallback is earliest initial preparation UI hint, account UI language, then
+`en`. Only new completion transitions enqueue; there is no historical email backfill.
+Reports use the exact attempt, approved compilation and original transcript revision.
+See [eligibility and content rules](engineer-guide.md#owner-result-emails).
+
+| Boundary | Current behavior |
+| --- | --- |
+| Eligibility | Active owner with verified email, undeleted call and no pending account deletion; qualifying conversation, not just transport connection or goal success |
+| Assessment wait | Five minutes before evidence-based fallback; missing evidence rechecked every 30 seconds for at most 24 hours after completion |
+| Consumer | PostgreSQL only; embedded API in development or external `background`/`all` worker; no new environment flag or superadmin-notification opt-in |
+| Queue | Poll every 5 seconds, up to 10 claims per drain, 120-second claim lease; one row per attempt |
+| Provider retries | Up to 8 attempts, 30-second exponential delay capped at 15 minutes, respecting a longer provider `Retry-After`; at most 20 hours from the persisted first-send window |
+| Idempotency | Frozen encrypted destination/body plus original transcript revision, stable key across provider retries and process restarts |
+| Privacy | Recheck recipient/source under locks before send; cancel/redact on deletion, deactivation, verification loss or destination change; accepted/cancelled bodies cleared, failed bodies purged after 7 days by consumer |
+| Status | `queued`, `processing`, `accepted`, `failed`, `cancelled`; `accepted` is provider acceptance, not inbox confirmation; no owner retry/admin toggle endpoint |
+| Email languages | Subject/static copy use immutable creation UI locale; saved assessment prose and full original transcript are unchanged; no translation request or transcript attachment |
+| Result link | Authenticated `/<creation-ui-locale>/app/calls/<id>`, preserved through login/onboarding with a strict internal-path allow-list |
+
+Use existing `EMAIL_DRIVER`, `RESEND_API_KEY`, `EMAIL_FROM`, encryption keyring and
+`NEXT_PUBLIC_SITE_URL` consistently on API and delivering workers. Real email uses
+the existing Resend spending controls. The shared branded shell embeds the inline
+logo; transcript content is in HTML/text bodies. No new secret is required.
 
 ## Processes and configuration loading
 
@@ -148,7 +181,7 @@ does not activate the API production validator: it checks `NODE_ENV` exactly.
 | `PUBLIC_BASE_URL` | Public HTTPS Twilio ingress origin | Signature validation, callback and Media Stream URLs |
 | `WEB_ORIGIN` | Example localhost/127.0.0.1 port 3000 | Comma-separated browser-origin allow-list; production HTTPS required |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` fallback | Browser HTTP/SSE, web CSP; public build-time value |
-| `NEXT_PUBLIC_SITE_URL` | Example `http://localhost:3000` | Canonical metadata, sitemap, robots, SEO, HTTPS web HSTS |
+| `NEXT_PUBLIC_SITE_URL` | Example `http://localhost:3000` | Canonical metadata, sitemap, robots, SEO, HTTPS web HSTS; API/worker email branding and authenticated result links |
 | `INTERNAL_API_URL` | Falls back to public API URL then localhost:4000 | Private web SSR session/content lookups |
 | `NEXT_DIST_DIR` | `.next` | Optional separate output for a parallel local QA web server, e.g. `.next-r21`; use the same value with direct Next build/start commands |
 
@@ -181,7 +214,7 @@ parity. See deployment preflight and the chosen first-release target (local oper
 | `MOCK_VERIFICATION_CODE` | `000000`, local only |
 | `EMAIL_DRIVER` | `mock`; production API requires `resend` |
 | `MOCK_EMAIL_VERIFICATION_CODE` | `000000`; six digits for local mock email only; real Resend uses random codes |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Required for initial email verification/change/security notices; local sender `SHPROHLI <mail@shprohli.ch>` requires verified Resend domain |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Required for real verification/change/security, superadmin and owner result emails; local sender `SHPROHLI <mail@shprohli.ch>` requires verified Resend domain |
 | `NEXT_PUBLIC_SITE_URL` | Also required by the API for production email footer links: public HTTPS origin, no credentials/path/query; localhost HTTP is allowed in development. Logo is embedded as a CID PNG, independent of this URL. |
 | `OPENAI_API_KEY` | Required for real Realtime/Live/Responses/ASR and OpenAI compiler |
 | `BRIEF_COMPILER_DRIVER` | Example `mock`; factory infers `openai` when key exists if unset. API and worker production validation both require explicit `openai`; missing/mock is rejected |
@@ -325,8 +358,9 @@ an implemented end-to-end deadline. Include review and UI completion in measurem
 
 ## Recent configuration and workers
 
-The current schema catalog ends at **0108**. Migrations 0102–0107 implement preparation
-policy/admission/observability; 0108 adds Swiss-only account-phone settings. Catalog
+The current schema catalog ends at **0109**. Migrations 0102–0107 implement preparation
+policy/admission/observability; 0108 adds Swiss-only account-phone settings; 0109 adds
+immutable creation UI language and the owner result-email outbox. Catalog
 availability is not deployment evidence. Operational procedures are local-only.
 
 | Setting / subsystem | Current behavior |
@@ -335,6 +369,7 @@ availability is not deployment evidence. Operational procedures are local-only.
 | Twilio billing | Uses existing account SID/auth token; account-level daily context is separate from call charges |
 | Billing worker | PostgreSQL-only; external background/all roles run startup/hourly sync under advisory locking; manual API command `billing:sync` / `billing:sync:prod` |
 | Superadmin notifications | PostgreSQL queue/settings, disabled by default; external background/all roles deliver; returned-plan alerts support all returns or signals-only; API and the delivering worker need EMAIL_DRIVER/RESEND_API_KEY/EMAIL_FROM/public site origin; recipients/categories are configured in Admin System |
+| Owner result notifications | Separate PostgreSQL outbox, independent of superadmin settings; embedded API or external background/all worker; existing email provider, keyring and public site origin; [delivery rules](#owner-result-email-delivery) |
 | `ADMIN_TELEMETRY_EXPORT_ENABLED` | Enabled with PostgreSQL unless exactly `false`; use the same setting on API and worker; memory reports unavailable |
 | Export worker | Embedded API or external background/all role according to DURABLE_WORKER_MODE; independent 2-second queue poll, one global builder, Calls panel heartbeat; PostgreSQL 17 |
 | Export storage | Same database/keyring; encrypted parts ≤1 MiB, ready TTL at most 24 hours and no later than the earliest eligible source retention deadline, source-deletion/access-change revocation; cleanup requires running consumer |
@@ -519,7 +554,9 @@ not durable replay history. See [transcripts and telemetry](engineer-guide.md#te
 
 ## Registered routes
 
-Generated from source route declarations on 2026-10-07 at `879dec5` (148 routes).
+Route inventory: 148 registrations. Source links refreshed on 2026-10-07 for the
+owner-email change; no new HTTP route was added. Shared dynamic declarations link
+to their registration helper.
 Bounded template families and conditional OG routes are expanded into concrete paths;
 inspect the linked module for authorization and validation. This inventory does not imply that
 an optional subsystem is enabled in a particular environment.
@@ -624,32 +661,32 @@ an optional subsystem is enabled in a particular environment.
 | POST | `/api/auth/verification/resend` | [app.ts:686](../apps/api/src/app.ts#L686) |
 | POST | `/api/auth/verify-phone` | [app.ts:713](../apps/api/src/app.ts#L713) |
 | GET | `/api/call-briefs` | [app.ts:2277](../apps/api/src/app.ts#L2277) |
-| GET | `/api/call-briefs/:id` | [app.ts:2507](../apps/api/src/app.ts#L2507) |
-| PUT | `/api/call-briefs/:id` | [app.ts:2566](../apps/api/src/app.ts#L2566) |
-| POST | `/api/call-briefs/:id/approvals/:approvalId` | [app.ts:2894](../apps/api/src/app.ts#L2894) |
-| POST | `/api/call-briefs/:id/approve` | [app.ts:2799](../apps/api/src/app.ts#L2799) |
-| POST | `/api/call-briefs/:id/approve-and-start` | [app.ts:2820](../apps/api/src/app.ts#L2820) |
+| GET | `/api/call-briefs/:id` | [app.ts:2508](../apps/api/src/app.ts#L2508) |
+| PUT | `/api/call-briefs/:id` | [app.ts:2567](../apps/api/src/app.ts#L2567) |
+| POST | `/api/call-briefs/:id/approvals/:approvalId` | [app.ts:2897](../apps/api/src/app.ts#L2897) |
+| POST | `/api/call-briefs/:id/approve` | [app.ts:2802](../apps/api/src/app.ts#L2802) |
+| POST | `/api/call-briefs/:id/approve-and-start` | [app.ts:2823](../apps/api/src/app.ts#L2823) |
 | PATCH | `/api/call-briefs/:id/content-language` | [app.ts:2352](../apps/api/src/app.ts#L2352) |
-| POST | `/api/call-briefs/:id/data-deletion` | [app.ts:2694](../apps/api/src/app.ts#L2694) |
-| GET | `/api/call-briefs/:id/events` | [app.ts:2919](../apps/api/src/app.ts#L2919) |
-| PUT | `/api/call-briefs/:id/feedback` | [app.ts:2537](../apps/api/src/app.ts#L2537) |
-| POST | `/api/call-briefs/:id/final-transcript/retry` | [app.ts:2766](../apps/api/src/app.ts#L2766) |
+| POST | `/api/call-briefs/:id/data-deletion` | [app.ts:2695](../apps/api/src/app.ts#L2695) |
+| GET | `/api/call-briefs/:id/events` | [app.ts:2922](../apps/api/src/app.ts#L2922) |
+| PUT | `/api/call-briefs/:id/feedback` | [app.ts:2538](../apps/api/src/app.ts#L2538) |
+| POST | `/api/call-briefs/:id/final-transcript/retry` | [app.ts:2767](../apps/api/src/app.ts#L2767) |
 | POST | `/api/call-briefs/:id/final-transcript/translations` | [app.ts:2392](../apps/api/src/app.ts#L2392) |
 | GET | `/api/call-briefs/:id/language-context` | [app.ts:2347](../apps/api/src/app.ts#L2347) |
-| GET | `/api/call-briefs/:id/outcome` | [app.ts:2520](../apps/api/src/app.ts#L2520) |
+| GET | `/api/call-briefs/:id/outcome` | [app.ts:2521](../apps/api/src/app.ts#L2521) |
 | POST | `/api/call-briefs/:id/plan-review` | [app.ts:2378](../apps/api/src/app.ts#L2378) |
-| DELETE | `/api/call-briefs/:id/recording` | [app.ts:2678](../apps/api/src/app.ts#L2678) |
-| GET | `/api/call-briefs/:id/recording` | [app.ts:2648](../apps/api/src/app.ts#L2648) |
-| POST | `/api/call-briefs/:id/recording-transcript` | [app.ts:2741](../apps/api/src/app.ts#L2741) |
-| POST | `/api/call-briefs/:id/repeat` | [app.ts:2791](../apps/api/src/app.ts#L2791) |
-| POST | `/api/call-briefs/:id/start` | [app.ts:2853](../apps/api/src/app.ts#L2853) |
-| POST | `/api/call-briefs/:id/stop` | [app.ts:2878](../apps/api/src/app.ts#L2878) |
+| DELETE | `/api/call-briefs/:id/recording` | [app.ts:2679](../apps/api/src/app.ts#L2679) |
+| GET | `/api/call-briefs/:id/recording` | [app.ts:2649](../apps/api/src/app.ts#L2649) |
+| POST | `/api/call-briefs/:id/recording-transcript` | [app.ts:2742](../apps/api/src/app.ts#L2742) |
+| POST | `/api/call-briefs/:id/repeat` | [app.ts:2792](../apps/api/src/app.ts#L2792) |
+| POST | `/api/call-briefs/:id/start` | [app.ts:2856](../apps/api/src/app.ts#L2856) |
+| POST | `/api/call-briefs/:id/stop` | [app.ts:2881](../apps/api/src/app.ts#L2881) |
 | POST | `/api/call-briefs/:id/summaries` | [app.ts:2392](../apps/api/src/app.ts#L2392) |
 | GET | `/api/call-briefs/:id/text-artifacts` | [app.ts:2366](../apps/api/src/app.ts#L2366) |
 | GET | `/api/call-briefs/:id/text-artifacts/:artifactId` | [app.ts:2371](../apps/api/src/app.ts#L2371) |
 | POST | `/api/call-briefs/:id/text-artifacts/:artifactId/retry` | [app.ts:2406](../apps/api/src/app.ts#L2406) |
 | POST | `/api/call-preparations` | [app.ts:2418](../apps/api/src/app.ts#L2418) |
-| GET | `/api/call-preparations/:id` | [app.ts:2489](../apps/api/src/app.ts#L2489) |
+| GET | `/api/call-preparations/:id` | [app.ts:2490](../apps/api/src/app.ts#L2490) |
 | GET | `/api/content/faq` | [app.ts:513](../apps/api/src/app.ts#L513) |
 | GET | `/api/content/index` | [app.ts:507](../apps/api/src/app.ts#L507) |
 | GET | `/api/content/landing` | [app.ts:530](../apps/api/src/app.ts#L530) |
@@ -668,9 +705,9 @@ an optional subsystem is enabled in a particular environment.
 | GET | `/health/live` | [app.ts:2247](../apps/api/src/app.ts#L2247) |
 | GET | `/health/ready` | [app.ts:2257](../apps/api/src/app.ts#L2257) |
 | GET | `/health/workers` | [app.ts:2253](../apps/api/src/app.ts#L2253) |
-| POST | `/webhooks/twilio/amd` | [app.ts:3276](../apps/api/src/app.ts#L3276) |
-| GET | `/webhooks/twilio/media` | [app.ts:3327](../apps/api/src/app.ts#L3327) |
-| POST | `/webhooks/twilio/recording` | [app.ts:3430](../apps/api/src/app.ts#L3430) |
-| POST | `/webhooks/twilio/status` | [app.ts:3342](../apps/api/src/app.ts#L3342) |
-| POST | `/webhooks/twilio/voice` | [app.ts:3183](../apps/api/src/app.ts#L3183) |
-| POST | `/webhooks/twilio/voicemail-complete` | [app.ts:3300](../apps/api/src/app.ts#L3300) |
+| POST | `/webhooks/twilio/amd` | [app.ts:3279](../apps/api/src/app.ts#L3279) |
+| GET | `/webhooks/twilio/media` | [app.ts:3330](../apps/api/src/app.ts#L3330) |
+| POST | `/webhooks/twilio/recording` | [app.ts:3433](../apps/api/src/app.ts#L3433) |
+| POST | `/webhooks/twilio/status` | [app.ts:3345](../apps/api/src/app.ts#L3345) |
+| POST | `/webhooks/twilio/voice` | [app.ts:3186](../apps/api/src/app.ts#L3186) |
+| POST | `/webhooks/twilio/voicemail-complete` | [app.ts:3303](../apps/api/src/app.ts#L3303) |

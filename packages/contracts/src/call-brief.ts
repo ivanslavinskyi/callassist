@@ -4,6 +4,7 @@ import { answeringApproval, answeringApprovalSchema } from "./call-answering";
 import { ASSISTANT_NAME } from "./assistant-identity";
 import { buildInitialDisclosure, INITIAL_DISCLOSURE_VERSION } from "./initial-disclosure";
 import { z } from "zod";
+import { uiLocales } from "./ui-locales";
 import { callLifecycleSchema } from "./call-lifecycle";
 import { appointmentAuthorizationSchema } from "./appointment";
 import { swissDestinationPhoneSchema } from "./phone";
@@ -747,6 +748,7 @@ export const callBriefSchema = callBriefStoredFieldsSchema
     status: callBriefStatusSchema,
     lifecycle: callLifecycleSchema.optional(),
     retrySourceCallId: z.string().uuid().nullable().optional(),
+    creationUiLocale: z.enum(uiLocales).optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })

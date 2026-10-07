@@ -1,6 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import type { EmailProvider } from "./email-provider";
-import { EmailDeliveryError, type AdminNotificationEmail } from "./email-provider";
+import { EmailDeliveryError, type AdminNotificationEmail, type UserCallEmail } from "./email-provider";
 import type { BetaControls } from "../beta/beta-controls";
 import { emailChangeRequestNotice, securityNoticeEmail, verificationEmail, type EmailContent } from "./email-templates";
 import { emailIdentity, type EmailBranding } from "./email-branding";
@@ -15,6 +15,9 @@ export class ResendEmailProvider implements EmailProvider {
 
   async sendAdminNotification(input: AdminNotificationEmail) {
     return this.send(input.to, input.content, input.idempotencyKey, "superadmin_notification", "en");
+  }
+  async sendUserCallNotification(input: UserCallEmail) {
+    return this.send(input.to, input.content, input.idempotencyKey, "user_call_result", input.locale);
   }
 
   async sendEmailChangeVerification(input: Parameters<EmailProvider["sendEmailChangeVerification"]>[0]) {

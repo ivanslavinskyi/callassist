@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import { headers } from "next/headers";
+import { callResultReturnPath } from "@/lib/auth-return-path";
 import type { ReactNode } from "react";
 import { authenticatedAppRedirect } from "@/lib/route-access";
 import {
@@ -23,6 +25,10 @@ export default async function AuthenticatedAppLayout({ children, params }: {
     getServerOnboardingStatus(locale)
   ]);
   const destination = authenticatedAppRedirect(user, onboarding, locale);
-  if (destination) redirect(destination);
+  if (destination) {
+    const returnTo = callResultReturnPath((await headers()).get("x-callassist-pathname"));
+    redirect(returnTo && (destination.endsWith("/login") || destination.endsWith("/onboarding"))
+      ? `${destination}?returnTo=${encodeURIComponent(returnTo)}` : destination);
+  }
   return children;
 }

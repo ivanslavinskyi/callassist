@@ -703,7 +703,7 @@ export class CallService {
     return this.repository.completeProviderOperation(input);
   }
 
-  async repeatUnansweredCall(id: string, userId: string | null, role = "user") {
+  async repeatUnansweredCall(id: string, userId: string | null, role = "user", uiLocale?: import("@callassist/contracts").UiLocale) {
     await this.assertOwned(id, userId);
     const current = await this.#require(id);
     const attempt = await this.repository.getLatestAttempt(id);
@@ -712,7 +712,7 @@ export class CallService {
     const input = applyCallBriefDefaults(compilation.rawBrief, role);
     // Validate the visible legacy delivery text without truncation before creating a copy.
     normalizeCreateCallBriefInput(input);
-    const copy = await this.repository.create(compilation.rawBrief, compilation, userId, attempt!.id, undefined, { callId: id, attemptId: attempt!.id });
+    const copy = await this.repository.create(compilation.rawBrief, compilation, userId, attempt!.id, undefined, { callId: id, attemptId: attempt!.id, uiLocale });
     if (JSON.stringify(input) !== JSON.stringify(compilation.rawBrief)) {
       return this.recompile(copy.id, input, userId, attempt!.id);
     }

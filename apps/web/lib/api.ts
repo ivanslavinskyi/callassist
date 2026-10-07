@@ -1150,8 +1150,8 @@ export function updateRegistrationPolicy(settings: import("@callassist/contracts
   return apiRequest("/api/admin/system/registration", { method: "PUT", body: JSON.stringify({ settings, expectedRevision, reason }) });
 }
 
-export async function repeatUnansweredCall(id: string) {
-  const result = await apiRequest<CallBrief | CallPreparation>(`/api/call-briefs/${id}/repeat`, { method: "POST" });
+export async function repeatUnansweredCall(id: string, uiLocale?: import("@callassist/contracts").UiLocale) {
+  const result = await apiRequest<CallBrief | CallPreparation>(`/api/call-briefs/${id}/repeat`, { method: "POST", body: JSON.stringify({ uiLocale }) });
   if (!("failureCode" in result)) return result;
   const preparation = await waitForCallPreparation(async () => result);
   return (await getCallSnapshot(preparation.callBriefId!)).brief;

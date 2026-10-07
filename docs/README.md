@@ -1,6 +1,7 @@
 # Documentation
 
-Current source reference, checked 2026-10-07 against `879dec5` (schema 0001–0108):
+Current source reference, updated 2026-10-07 for call review and owner result emails
+(schema 0001–0109; implementation verification is recorded below):
 
 - [Engineer guide](engineer-guide.md): architecture, domain rules, runtime, API map,
   languages, storage, costs, telemetry, permissions and development workflow.
@@ -9,6 +10,10 @@ Current source reference, checked 2026-10-07 against `879dec5` (schema 0001–01
   shared admission, deadlines, streaming protection and verification tools.
 
 Dated design and verification records (their tests and observations retain their original dates):
+
+- [Call review and user result email implementation](call-review-and-user-email-plan-2026-10-07.md):
+  approved behavior, completed implementation and local verification of demo contrast,
+  responsive approval, creation-language snapshots and durable owner emails.
 
 - [Hybrid consent implementation](hybrid-consent-implementation-2026-10-04.md):
   pinned admin policy, deterministic recognition and consent/recording audit.

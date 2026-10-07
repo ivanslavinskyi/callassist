@@ -1,4 +1,5 @@
 import { initialPreparationSettings, PreparationPolicyError } from "./preparation-policy-store";
+import { resolveUiLocale } from "@callassist/contracts";
 import { preparationSettingsUpdateSchema, preparationProfileAdmissionSchema, preparationProfileKey, preparationCheckpointSchema, type PreparationCheckpoint } from "@callassist/contracts";
 import { supportsSummaryAssessment, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
   defaultVoiceConsentRuntimePolicy, voiceConsentRuntimePolicy, voiceConsentSettingsUpdateSchema,
@@ -661,6 +662,7 @@ export class InMemoryCallRepository implements CallRepository {
     const brief: CallBrief = {
       ...storedBriefIdentity(parsed),
       retrySourceCallId: retrySource?.callId ?? null,
+      creationUiLocale: resolveUiLocale(preparation?.language?.preferences?.uiLocaleHint, retrySource?.uiLocale),
       ...runtime,
       id: randomUUID(),
       createdAt: now,

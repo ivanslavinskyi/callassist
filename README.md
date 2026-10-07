@@ -3,6 +3,8 @@
 SHPROHLI helps people make everyday phone calls when speaking or the local language
 is a barrier. Users prepare and approve a call plan, follow a conversation, and
 receive a saved transcript with optional translation, summary and recording transcription.
+After a qualifying conversation, the verified owner also receives a branded result
+email with the saved AI assessment, full original transcript and authenticated call link.
 
 The current source uses one native Live voice session (live-managed-v9) with
 application-owned consent, recording, tool authorization and closing playback.
@@ -43,6 +45,11 @@ Do not point tests at a working or production database. Build with corepack pnpm
   task and call languages, with original or translated plan approval receipts.
 - Immutable approved plans, durable preparation with stage diagnostics, bounded
   retries, shared multiuser admission, role workers and recorded provider usage.
+- Compact approval summary with expandable details, a sticky desktop action panel
+  and mobile bottom actions; the existing final confirmation remains required.
+- Result emails use the UI language captured when the call was created. Saved AI
+  prose and original transcript retain their own languages, without extra translation
+  or transcript attachments. Delivery uses a separate durable owner outbox.
 - Admin selection of the generation model and Standard/Fast without an evaluation
   prerequisite; fixed audit/review profiles and policy snapshots for existing jobs.
 - Optional Swiss-only account phones for registration and phone changes, with

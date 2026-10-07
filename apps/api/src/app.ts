@@ -1,4 +1,4 @@
-import { preparationSettingsViewSchema, preparationSettingsUpdateSchema, preparationProfileAdmissionSchema } from "@callassist/contracts";
+import { preparationSettingsViewSchema, preparationSettingsUpdateSchema, preparationProfileAdmissionSchema, resolveUiLocale, uiLocales } from "@callassist/contracts";
 import { PreparationPolicyError } from "./storage/preparation-policy-store";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
@@ -2434,10 +2434,11 @@ export function buildApp({
       const briefInput = normalizedInput.data;
     if (!authorizeCallLanguages(reply, briefInput, access.user)) return;
     if (briefInput.locale === "en-US" || briefInput.fallbackLocale === "en-US") return reply.status(422).send({ error: "CALL_LANGUAGE_NOT_SELECTABLE" });
-    const language = "requestVersion" in parsed.data ? {
-      preferences: parsed.data.languagePreferences,
+    const language = {
+      preferences: { ...("requestVersion" in parsed.data ? parsed.data.languagePreferences : { mode: "auto" as const }),
+        uiLocaleHint: resolveUiLocale("requestVersion" in parsed.data ? parsed.data.languagePreferences.uiLocaleHint : undefined, access.user?.uiLocale) },
       accountPreference: supportedTextLanguage(access.user?.preferredContentLanguage)
-    } : undefined;
+    };
     const idempotencyHeader = request.headers["idempotency-key"];
     if (
       typeof idempotencyHeader !== "string" ||
@@ -2792,7 +2793,9 @@ export function buildApp({
     const access = await authorizeCallAccess(request, reply, { callId: request.params.id, mutation: true });
     if (!access) return;
     if (!(await enforceEndpointRateLimit(request, reply, access.userId, "call-start", endpointRateLimitPolicy.callStart))) return;
-    try { return reply.send(await service.repeatUnansweredCall(request.params.id, access.userId, access.user?.role)); }
+    const locale = request.body && typeof request.body === "object" && "uiLocale" in request.body ? request.body.uiLocale : undefined;
+    if (locale !== undefined && (typeof locale !== "string" || !uiLocales.some(value => value === locale))) return reply.status(400).send({ error: "INVALID_UI_LOCALE" });
+    try { return reply.send(await service.repeatUnansweredCall(request.params.id, access.userId, access.user?.role, resolveUiLocale(locale as string | undefined, access.user?.uiLocale))); }
     catch (error) { return sendRepositoryError(reply, error); }
   });
 

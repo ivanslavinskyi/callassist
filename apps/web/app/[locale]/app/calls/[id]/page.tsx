@@ -12,6 +12,6 @@ export default async function CallPage({ params }: {
 }) {
   const { id, locale } = await params;
   const user = await getServerCurrentUser();
-  if (!user) redirect(`/${locale}/login`);
+  if (!user) redirect(`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/app/calls/${id}`)}`);
   return <LiveCall key={`${user.id}:${user.role}:${id}`} callId={id} userId={user.id} userRole={user.role} />;
 }

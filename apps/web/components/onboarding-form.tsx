@@ -9,8 +9,10 @@ import { useUiLocale } from "./ui-locale-provider";
 import { acceptOnboarding, ApiError, logout } from "@/lib/api";
 import { contentPath } from "@/lib/i18n/content-routing";
 import { onboardingMessages } from "@/lib/i18n/onboarding-messages";
+import { callResultReturnPath } from "@/lib/auth-return-path";
 
-export function OnboardingForm({ initialStatus }: {
+export function OnboardingForm({ initialStatus, returnTo = null }: {
+  returnTo?: string | null;
   initialStatus: OnboardingStatus;
 }) {
   const router = useRouter();
@@ -37,7 +39,7 @@ export function OnboardingForm({ initialStatus }: {
         acknowledgeUseLimits: true,
         acknowledgeCredits: true
       });
-      router.replace(localizeHref("/app"));
+      router.replace(callResultReturnPath(returnTo) ?? localizeHref("/app"));
       router.refresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "LEGAL_REVISION_CHANGED") {

@@ -96,14 +96,29 @@ const defaultBranding: EmailBranding = { siteUrl: "https://shprohli.ch" };
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
 }
-export function renderEmail(locale: EmailLocale, subject: string, paragraphs: string[], branding: EmailBranding, code?: string): EmailContent {
+export type EmailBlock =
+  | { kind: "heading"; text: string }
+  | { kind: "paragraph"; text: string; lang?: string }
+  | { kind: "assessment"; title: string; status: string; paragraphs: string[]; lang?: string }
+  | { kind: "button"; label: string; url: string };
+
+function renderBlock(block: EmailBlock): string {
+  if (block.kind === "heading") return `<h2 style="margin:24px 0 12px;font-size:19px;line-height:26px">${escapeHtml(block.text)}</h2>`;
+  if (block.kind === "button") return `<p style="margin:24px 0"><a href="${escapeHtml(block.url)}" style="display:inline-block;background:#0d7045;color:#fff;border-radius:8px;padding:14px 20px;font-size:16px;line-height:24px;text-decoration:none;font-weight:bold">${escapeHtml(block.label)}</a></p>`;
+  const language = block.lang ? ` lang="${escapeHtml(block.lang)}"` : "";
+  const paragraph = (text: string) => `<p${language} style="margin:0 0 16px;font-size:16px;line-height:25px;white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(text)}</p>`;
+  if (block.kind === "paragraph") return paragraph(block.text);
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:20px 0;border:1px solid #dce2dd;border-radius:8px"><tr><td style="padding:16px"><h2 style="margin:0 0 8px;font-size:16px;line-height:24px">${escapeHtml(block.title)}</h2><p style="margin:0 0 12px;font-size:18px;line-height:26px;font-weight:bold">${escapeHtml(block.status)}</p>${block.paragraphs.map(paragraph).join("")}</td></tr></table>`;
+}
+
+export function renderEmail(locale: EmailLocale, subject: string, paragraphs: string[], branding: EmailBranding, code?: string, blocks?: EmailBlock[]): EmailContent {
   const footer = emailMessages[locale].footer;
   const imprintUrl = new URL(`/${locale}/${uiLocaleRegistry[locale].slugs.imprint}`, branding.siteUrl).href;
   const imprintLabel = footer.imprint;
   const slogan = uiLocaleRegistry[locale].slogan;
   const text = ["SHPROHLI", slogan, subject, ...paragraphs, "---",
     `${imprintLabel}: ${imprintUrl}`, `${footer.support}: ${emailIdentity.supportAddress}`].join("\n\n");
-  const body = paragraphs.map((value) => `<p style="margin:0 0 20px;${value === code ? 'font-family:Consolas,Menlo,monospace;font-size:36px;line-height:48px;letter-spacing:5px;font-weight:700;white-space:nowrap' : 'font-size:16px;line-height:25px'}">${escapeHtml(value)}</p>`).join("");
+  const body = blocks ? blocks.map(renderBlock).join("") : paragraphs.map((value) => `<p style="margin:0 0 20px;${value === code ? 'font-family:Consolas,Menlo,monospace;font-size:36px;line-height:48px;letter-spacing:5px;font-weight:700;white-space:nowrap' : 'font-size:16px;line-height:25px'}">${escapeHtml(value)}</p>`).join("");
   const link = (url: string, label: string) => `<a href="${escapeHtml(url)}" style="color:#35614b;text-decoration:underline">${escapeHtml(label)}</a>`;
   // Mail clients strip semantic wrappers such as <main>. Tables and inline styles
   // preserve spacing; transparent surfaces avoid a second card/background in Gmail.

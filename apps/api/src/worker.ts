@@ -4,7 +4,7 @@ import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
-import { createNotificationsFromEnv } from "./notifications/create-notifications";
+import { createNotificationsFromEnv, createUserCallNotificationsFromEnv } from "./notifications/create-notifications";
 import "./config/load-env";
 import { createTelemetryExportsFromEnv } from "./telemetry-export/service";
 import { createBriefCompilerFromEnv, preparationTimeoutMsFromEnv } from "./brief-compiler/create-brief-compiler";
@@ -35,6 +35,7 @@ const {
 const authRepository = background ? createAuthRepositoryFromEnv() : undefined;
 const telemetryExports = background ? createTelemetryExportsFromEnv() : undefined;
 const notifications = background ? createNotificationsFromEnv(repository, true) : undefined;
+const userCallNotifications = background ? createUserCallNotificationsFromEnv(repository, true) : undefined;
 const textProcessor = createTextProcessorFromEnv();
 const service = new CallService(
   repository,
@@ -73,6 +74,7 @@ const shutdown = createGracefulShutdown(
     await initialization.catch(() => undefined);
     await maintenance;
     await notifications?.close();
+    await userCallNotifications?.close();
     await telemetryExports?.close();
     await accountDeletionService?.close();
     await stopBillingSync();
@@ -91,6 +93,7 @@ const recoveredCalls = await initialization.catch(async (error) => {
   await maintenance;
   await stopBillingSync();
   await notifications?.close();
+  await userCallNotifications?.close();
   await telemetryExports?.close();
   await accountDeletionService?.close();
   await service.close();
@@ -100,6 +103,7 @@ const recoveredCalls = await initialization.catch(async (error) => {
 accountDeletionService?.start();
 telemetryExports?.start(true);
 notifications?.start();
+userCallNotifications?.start();
 process.stdout.write(`${JSON.stringify({
   event: "durable_worker_ready",
   role: capacity.role, preparationSlots: capacity.preparationSlots, reviewSlots: capacity.reviewSlots, poolMax: capacity.poolMax, recoveredCalls

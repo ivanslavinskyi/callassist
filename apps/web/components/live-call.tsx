@@ -568,7 +568,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           {canRepeatUnansweredCall(brief) ? <button type="button" className="primary-button compact-button" disabled={busy} onClick={async () => {
             if (busy) return;
             setBusy(true); setActionError(null);
-            try { const repeated = await repeatUnansweredCall(callId); router.push(localizeHref(`/app/calls/${repeated.id}`)); }
+            try { const repeated = await repeatUnansweredCall(callId, uiLocale); router.push(localizeHref(`/app/calls/${repeated.id}`)); }
             catch { setActionError(registrationCallMessages[uiLocale].retryError); }
             finally { setBusy(false); }
           }}>{busy ? registrationCallMessages[uiLocale].retryBusy : registrationCallMessages[uiLocale].retryCall}</button> : null}

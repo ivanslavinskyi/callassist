@@ -1,4 +1,5 @@
 import { maintainPreparationTelemetry, preparationRuntimeStatus } from "./preparation-observability";
+import { resolveUiLocale, type UiLocale } from "@callassist/contracts";
 import { lockPreparationProviderCapacity, insertPreparationProviderPermit } from "./preparation-provider-capacity";
 import { PostgresPreparationPolicyStore, PreparationPolicyError } from "./preparation-policy-store";
 import { preparationRuntimePolicySchema, preparationCheckpointSchema, type PreparationCheckpoint } from "@callassist/contracts";
@@ -183,6 +184,7 @@ type CallBriefRow = {
   phoneNumber: string;
   objective: string;
   retrySourceCallId: string | null;
+  creationUiLocale: UiLocale;
   assistantProfileId: AssistantProfileId | null;
   agentName: string;
   representedPerson: string;
@@ -814,11 +816,15 @@ export class PostgresCallRepository implements CallRepository {
           return existing.id;
         }
       }
+      const [preparedLocale] = publication ? await transaction<{ locale: string | null }[]>`
+        SELECT preferences->>'uiLocaleHint' AS locale FROM call_preparation_language_contexts WHERE preparation_id=${publication.preparationId}` : [];
+      const [ownerLocale] = userId ? await transaction<{ locale: string }[]>`SELECT ui_locale AS locale FROM users WHERE id=${userId}` : [];
+      const creationUiLocale = resolveUiLocale(preparedLocale?.locale, retrySource?.uiLocale, ownerLocale?.locale);
       const insertedRows = await transaction<{ id: string }[]>`
         INSERT INTO call_briefs (
           id,
           user_id,
-          creation_idempotency_key, retry_source_call_id, retry_source_attempt_id,
+          creation_idempotency_key, retry_source_call_id, retry_source_attempt_id, creation_ui_locale,
           recipient_name,
           phone_number,
           objective,
@@ -844,7 +850,7 @@ export class PostgresCallRepository implements CallRepository {
         ) VALUES (
           ${id},
           ${userId},
-          ${creationIdempotencyKey}, ${retrySource?.callId ?? null}, ${retrySource?.attemptId ?? null},
+          ${creationIdempotencyKey}, ${retrySource?.callId ?? null}, ${retrySource?.attemptId ?? null}, ${creationUiLocale},
           ${parsed.recipientName},
           ${parsed.phoneNumber},
           ${runtime.objective},
@@ -7338,6 +7344,7 @@ export class PostgresCallRepository implements CallRepository {
         phone_number AS "phoneNumber",
         objective,
         retry_source_call_id AS "retrySourceCallId",
+        creation_ui_locale AS "creationUiLocale",
         assistant_profile_id AS "assistantProfileId",
         agent_name AS "agentName",
         represented_person AS "representedPerson",
@@ -7406,6 +7413,7 @@ export class PostgresCallRepository implements CallRepository {
       phoneNumber: row.phoneNumber,
       objective: row.objective,
       retrySourceCallId: row.retrySourceCallId ?? null,
+      creationUiLocale: row.creationUiLocale,
       assistantProfileId: row.assistantProfileId,
       agentName: row.agentName,
       representedPerson: row.representedPerson,

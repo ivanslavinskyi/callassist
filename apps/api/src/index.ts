@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { voiceRuntimeMode } from "./config/voice-runtime";
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
-import { createNotificationsFromEnv } from "./notifications/create-notifications";
+import { createNotificationsFromEnv, createUserCallNotificationsFromEnv } from "./notifications/create-notifications";
 import { createPlanReviewsFromEnv } from "./safety/plan-review-service";
 import "./config/load-env";
 import { createTelemetryExportsFromEnv } from "./telemetry-export/service";
@@ -98,6 +98,7 @@ const creditService = new CreditService({
   )
 });
 const notifications = createNotificationsFromEnv(repository);
+const userCallNotifications = createUserCallNotificationsFromEnv(repository);
 const telemetryExports = createTelemetryExportsFromEnv();
 const app = buildApp({
   planReviews: createPlanReviewsFromEnv(),
@@ -118,6 +119,7 @@ const app = buildApp({
   endpointRateLimitPolicy: endpointRateLimitPolicyFromEnv(),
   realtimeConfigured: telephonyProvider instanceof TwilioTelephonyProvider
 });
+app.addHook("onClose", async () => { await userCallNotifications?.close(); });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? createVoiceRuntime({
@@ -159,6 +161,7 @@ const recoveredCalls = await service.initialize();
 if (durableWorkerMode === "embedded") {
   telemetryExports?.start();
   notifications?.start();
+  userCallNotifications?.start();
   const stopBillingSync = startProviderBillingSync(result => app.log.info({ event: "provider_billing_sync", result }));
   app.addHook("onClose", stopBillingSync);
 }

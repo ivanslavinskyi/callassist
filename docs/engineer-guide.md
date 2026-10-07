@@ -1,6 +1,7 @@
 # SHPROHLI engineer guide
 
-Source checkpoint: 2026-10-07 at `879dec5`, schema catalog `0001`–`0108`. This describes the
+Source checkpoint: 2026-10-07, including call review and owner result emails,
+schema catalog `0001`–`0109`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
 The dated implementation records in the [documentation index](README.md) retain
@@ -21,7 +22,7 @@ their original verification scope; they are not current deployment status.
 | `apps/api/src/credits`, `beta` | Period allowances, credit funding and service admission/spending controls |
 | `apps/api/src/safety` | Recipient suppression and returned-plan case review |
 | `apps/api/src/telemetry-export` | Snapshot selection, ZIP generation, retained audio, expiry/revocation |
-| `apps/api/src/notifications` | Superadmin delivery outbox, reports and localized plan-review alerts |
+| `apps/api/src/notifications` | Separate superadmin and owner delivery outboxes, reports and localized emails |
 | `apps/api/src/content` | CMS seeds, editorial collections and exact public-copy upgrades |
 | `apps/web/lib/i18n` | Static interface dictionaries; distinct from published CMS content |
 
@@ -84,6 +85,15 @@ versions and snapshot hash. Edits create another revision. Approval binds a prec
 revision/hash and original or translated review receipt. A stale approval cannot
 authorize a changed plan. A recompile that fails before publication preserves the
 previous revision; a published returned plan still needs correction and fresh approval.
+
+The approval page starts with a compact objective, recipient and important conditions;
+the full plan is collapsed in expandable details. Approval/edit actions stay in a
+sticky desktop sidebar or a fixed mobile bottom bar, with reserved content space,
+device safe area and clearance for the privacy notice. Very short viewports use an
+in-flow action panel. Revision/translation evidence, blocking/expiry checks and the
+final confirmation dialog still govern approval. The landing demo owns a complete
+light token palette so nested plan/result components remain readable in either
+outer theme.
 
 New call attempts pass recipient suppression, account/email/phone eligibility,
 service limits, budget admission, approved-plan and credit checks transactionally.
@@ -344,12 +354,54 @@ reason. Read and mutation permissions, CSRF, account deletion and source deletio
 are rechecked server-side. Email delivery retries create an audited fresh generation;
 they do not manufacture or overwrite the original incident.
 
+## Owner result emails
+
+Migration `0109` creates `user_call_notifications`, separate from superadmin settings
+and recipients. An attempt's first `ended_at` transition enqueues in the completion
+transaction for an active owner with a verified email, available call data and no
+pending account deletion. Existing completed attempts are not backfilled. The
+PostgreSQL-only consumer runs in embedded development or external `background`/`all`
+workers; memory development does not run a durable owner queue.
+
+The report binds the exact attempt, executed compilation, transcript revision and
+saved assessment. Confirmed substantive conversations qualify regardless of goal
+success. No-answer, busy, voicemail-only and refused-consent attempts do not. If the
+assessment is unavailable after five minutes, fallback requires recorded consent,
+task-conversation admission and original post-consent turns from both parties;
+application playback/consent text cannot supply that evidence. Missing evidence is
+rechecked for at most 24 hours. A partial transcript is explicitly marked.
+
+HTML and plain-text email reuse the existing logo, typography and footer. They
+contain a compact saved assessment, complete original transcript and an authenticated
+`/[locale]/app/calls/[id]` link. No transcript attachment or silent truncation is
+introduced; the shared inline logo remains. There are no extra LLM calls to render
+or translate email. The strict internal return URL survives login and onboarding,
+while the call page retains ordinary owner authorization.
+
+The rendered destination/content and transcript revision are frozen in encrypted
+storage before provider IO, with a stable idempotency key. Workers claim leases,
+retry within bounded limits, and recheck ownership, verified destination and source
+availability before dispatch. Account/email changes and call/account deletion
+cancel pending delivery and redact payloads; accepted/cancelled payloads are cleared,
+failed payloads are purged after seven days by the running consumer. Provider
+`accepted` means API acceptance, not confirmed mailbox delivery. Limits and provider
+configuration are in the [runtime reference](runtime-reference.md#owner-result-email-delivery).
+
 ## Language and content model
 
 Public UI locales: `de`, `fr`, `it`, `rm`, `en`, `ru`, `uk`. UI locale, task-content
 language, spoken call locale and communication locale are distinct. A user's UI
 switch must not change the frozen call language or authorize a different translated
 plan. Approval binds source and review artifact revision/hash.
+
+`call_briefs.creation_ui_locale` separately freezes interface language at creation.
+New preparation and repeat requests capture the active UI language; recompilation
+and later account/UI changes do not change it. Owner email subject, status labels,
+speaker labels, button and footer use this snapshot. Saved AI assessment prose and
+transcript text are passed through in their original languages. For example, RU UI
++ UK prompt/assessment + DE call yields RU static email copy, UK saved assessment
+and DE transcript. Migration `0109` resolves legacy calls from the earliest initial
+preparation's valid UI hint, then account UI language, then `en`.
 
 Static interface strings live in web dictionaries. CMS page/collection content is
 versioned in PostgreSQL with seeds for empty installations. Updating a seed does
@@ -409,8 +461,10 @@ Migration `0100` adds voice consent policy/audit support; `0101` adds preparatio
 transport result metadata. `0102`–`0107` add preparation settings/snapshots, queue
 and provider admission, observability/retention, deletion guards and policy
 provenance; `0108` adds the Swiss-only account-phone policy with a compatible false
-default. Backfills
-and existing-account policy transitions remain explicit, reviewed actions.
+default. `0109` adds immutable creation UI language and the encrypted owner-email
+outbox with enqueue/redaction triggers; its payload is in the encryption rotation
+inventory. It does not enqueue historical calls. Backfills and existing-account
+policy transitions remain explicit, reviewed actions.
 
 Deletion spans call inputs, transcripts, recordings, derived artifacts, safety
 notes and generated archives. Do not extend source retention merely to complete an

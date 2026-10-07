@@ -25,12 +25,21 @@ export type AdminNotificationEmail = { to: string; content: EmailContent; idempo
 export interface AdminNotificationEmailProvider {
   sendAdminNotification(input: AdminNotificationEmail): Promise<string>;
 }
+export type UserCallEmail = AdminNotificationEmail & { locale: EmailLocale };
+export interface UserCallEmailProvider { sendUserCallNotification(input: UserCallEmail): Promise<string>; }
 
 export class EmailDeliveryError extends Error {
   constructor(readonly retryable: boolean, readonly retryAfterMs = 0) { super("Email delivery unavailable"); }
 }
 
 export class MockEmailProvider implements EmailProvider {
+  readonly userCallMessages: UserCallEmail[] = [];
+  async sendUserCallNotification(input: UserCallEmail) {
+    const existing = this.userCallMessages.findIndex(message => message.idempotencyKey === input.idempotencyKey);
+    if (existing >= 0) return `mock-user-call-${existing + 1}`;
+    this.userCallMessages.push(structuredClone(input));
+    return `mock-user-call-${this.userCallMessages.length}`;
+  }
   readonly adminMessages: AdminNotificationEmail[] = [];
   async sendAdminNotification(input: AdminNotificationEmail) {
     const existing = this.adminMessages.findIndex(message => message.idempotencyKey === input.idempotencyKey);

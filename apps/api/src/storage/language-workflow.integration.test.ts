@@ -42,6 +42,8 @@ it("atomically publishes language metadata beside unchanged plans and preserves 
     expect(p.status).toBe("succeeded"); callId = p.callBriefId!;
   }, { timeout: 8000, interval: 30 });
   const first = (await service.get(callId))!;
+  expect(first.brief.creationUiLocale).toBe("en");
+  await sql`UPDATE users SET ui_locale='fr' WHERE id=${owner}`;
   expect(first.languageContext).toMatchObject({ taskContentLanguage: "ru", selectionSource: "task", compilationRevision: 1 });
   const originalHash = first.compilation!.snapshotHash;
   await repository.updateContentLanguage(callId, "uk", 1);
@@ -50,6 +52,7 @@ it("atomically publishes language metadata beside unchanged plans and preserves 
   const next = await service.recompile(callId, { ...input, objective: input.objective + " next week" }, owner, randomUUID(), { preferences: { mode: "auto", uiLocaleHint: "de" } });
   await vi.waitFor(async () => { expect((await service.getPreparation(next.id, owner)).status).toBe("succeeded"); }, { timeout: 8000, interval: 30 });
   expect((await service.get(callId))?.languageContext).toMatchObject({ taskContentLanguage: "uk", selectionRevision: 2, compilationRevision: 2 });
+  expect((await service.get(callId))?.brief.creationUiLocale).toBe("en");
   const [stored] = await sql`SELECT count(*)::int AS count FROM call_preparation_language_contexts`;
   expect(stored?.count).toBe((iteration + 1) * 2);
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { callResultReturnPath } from "@/lib/auth-return-path";
 import type { RegistrationOptions } from "@callassist/contracts";
 import { PhoneInput, refreshAccountPhonePolicy } from "./phone-input";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
@@ -301,7 +302,7 @@ export function VerificationForm({ initialEmail }: { initialEmail: string }) {
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ returnTo = null }: { returnTo?: string | null }) {
   const router = useRouter();
   const { locale, localizeHref } = useUiLocale();
   const copy = authMessages[locale];
@@ -325,7 +326,7 @@ export function LoginForm() {
       clearExplicitGuestLocale();
       const policy = await getRegistrationOptions(nextLocale);
       const canContinue = user.emailVerifiedAt || (user.emailVerificationDeferredAt && policy.policy.emailVerification === "deferrable");
-      router.push(localizePathname(canContinue ? "/app" : "/verify-email", nextLocale));
+      router.push(canContinue ? callResultReturnPath(returnTo) ?? localizePathname("/app", nextLocale) : localizePathname("/verify-email", nextLocale));
       router.refresh();
     } catch (caught) {
       setError(getAuthErrorMessage(caught, locale));

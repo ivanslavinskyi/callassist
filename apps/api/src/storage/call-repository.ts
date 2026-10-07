@@ -229,7 +229,7 @@ export type CallPreparationWork = {
   targetRevision: number;
 };
 
-export type CallRetrySource = { callId: string; attemptId: string };
+export type CallRetrySource = { callId: string; attemptId: string; uiLocale?: import("@callassist/contracts").UiLocale };
 
 export type CallPreparationPublication = {
   preparationId: string;
