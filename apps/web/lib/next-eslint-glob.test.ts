@@ -17,7 +17,7 @@ const roots = (rootDir?: string | string[]) => getRootDirs({ cwd: web, settings:
 
 describe("Next ESLint glob dependency replacement", () => {
   it("loads glob through the scoped fast-glob alias", () => {
-    expect(pluginRequire("fast-glob/package.json")).toMatchObject({ name: "glob", version: "13.0.6" });
+    expect(pluginRequire("fast-glob/package.json")).toMatchObject({ name: "glob", version: "14.0.2" });
   });
 
   it("keeps the default and explicit directory as one root, without descendants", () => {

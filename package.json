@@ -27,6 +27,7 @@
     "env:init": "node scripts/init-env.mjs",
     "lint": "turbo lint",
     "security:audit": "corepack pnpm audit --audit-level low",
+    "test:dependency-compat": "node --test scripts/dependency-compat.test.mjs",
     "test": "turbo test",
     "tunnel:twilio": "node scripts/start-twilio-tunnel.mjs",
     "typecheck": "turbo typecheck",
@@ -41,17 +42,22 @@
       "brace-expansion@<1.1.21": "1.1.21",
       "brace-expansion@>=5.0.0 <5.0.12": "5.0.12",
       "axios@>=1.0.0 <1.20.0": "1.20.0",
-      "fast-uri@>=3.0.0 <3.1.8": "3.1.8",
-      "fast-uri@>=4.0.0 <4.1.5": "4.1.5",
+      "fast-uri@>=3.0.0 <3.1.9": "3.1.9",
+      "fast-uri@>=4.0.0 <4.2.3": "4.2.3",
+      "follow-redirects@<1.16.2": "1.16.2",
+      "qs@<6.16.1": "6.16.1",
+      "minimatch@<11.0.1": "11.0.1",
       "fflate@0.7.3": "0.7.5",
       "tsup>esbuild": "0.28.1",
-      "@next/eslint-plugin-next@15.5.26>fast-glob": "npm:glob@13.0.6",
+      "@next/eslint-plugin-next@15.5.29>fast-glob": "npm:glob@14.0.2",
       "postcss": "8.5.23",
       "source-map-js@>=1.0.0 <1.2.2": "1.2.2",
       "sharp": "0.35.5"
     },
     "patchedDependencies": {
-      "@next/eslint-plugin-next@15.5.26": "patches/@next__eslint-plugin-next@15.5.26.patch"
+      "@next/eslint-plugin-next@15.5.29": "patches/@next__eslint-plugin-next@15.5.29.patch",
+      "minimatch@11.0.1": "patches/minimatch@11.0.1.patch",
+      "eslint-plugin-import@2.32.0": "patches/eslint-plugin-import@2.32.0.patch"
     }
   },
   "license": "UNLICENSED"

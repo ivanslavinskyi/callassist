@@ -1,0 +1,22 @@
+diff --git a/lib/rules/no-internal-modules.js b/lib/rules/no-internal-modules.js
+--- a/lib/rules/no-internal-modules.js
++++ b/lib/rules/no-internal-modules.js
+@@ -49,4 +49,4 @@
+   create: function () {function noReachingInside(context) {
+       var options = context.options[0] || {};
+-      var allowRegexps = (options.allow || []).map(function (p) {return _minimatch2['default'].makeRe(p);});
+-      var forbidRegexps = (options.forbid || []).map(function (p) {return _minimatch2['default'].makeRe(p);});
++      var allowMatchers = (options.allow || []).map(function (p) {return new _minimatch.Minimatch(p);});
++      var forbidMatchers = (options.forbid || []).map(function (p) {return new _minimatch.Minimatch(p);});
+@@ -72,4 +72,4 @@
+       // test if reaching to this destination is allowed
+       function reachingAllowed(importPath) {
+-        return allowRegexps.some(function (re) {return re.test(importPath);});
++        return allowMatchers.some(function (re) {return re.match(importPath);});
+       }
+@@ -77,4 +77,4 @@
+       // test if reaching to this destination is forbidden
+       function reachingForbidden(importPath) {
+-        return forbidRegexps.some(function (re) {return re.test(importPath);});
++        return forbidMatchers.some(function (re) {return re.match(importPath);});
+       }

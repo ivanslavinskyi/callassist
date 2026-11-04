@@ -73,6 +73,8 @@ jobs:
         run: pnpm copy:check
       - name: Lint
         run: pnpm lint
+      - name: Check patched dependency compatibility
+        run: pnpm test:dependency-compat
       - name: Typecheck
         run: pnpm typecheck
       - name: Test

@@ -56,7 +56,7 @@
     "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.3.0",
     "dotenv": "^17.4.2",
-    "fastify": "^5.12.5",
+    "fastify": "5.12.8",
     "fflate": "0.8.3",
     "fontkit": "^2.0.4",
     "postgres": "^3.4.9",
@@ -72,7 +72,8 @@
     "tsup": "^8.5.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
-    "vitest": "^4.1.11"
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
   },
   "license": "UNLICENSED"
 }

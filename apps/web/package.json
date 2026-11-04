@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@callassist/contracts": "workspace:*",
-    "next": "^15.5.26",
+    "next": "15.5.29",
     "pdfmake": "^0.3.11",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
@@ -25,10 +25,11 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "eslint": "^9.30.0",
-    "eslint-config-next": "^15.5.26",
+    "eslint-config-next": "15.5.29",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
-    "vitest": "^4.1.11"
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
   },
   "license": "UNLICENSED"
 }

@@ -15,12 +15,13 @@
   },
   "dependencies": {
     "libphonenumber-js": "1.13.10",
-    "zod": "^4.0.0"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "tsup": "^8.5.0",
     "typescript": "^5.8.0",
-    "vitest": "^4.1.11"
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
   },
   "license": "UNLICENSED"
 }
