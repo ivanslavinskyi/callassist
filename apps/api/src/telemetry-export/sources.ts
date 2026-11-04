@@ -1,4 +1,4 @@
-import { preparationCheckpointSchema, preparationRuntimePolicySchema } from "@callassist/contracts";
+import { preparationCheckpointSchema, preparationRuntimePolicySchema, applicationPlaybackDiagnosticSchema } from "@callassist/contracts";
 import { decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
@@ -142,6 +142,10 @@ export function mapExportRow(s: ExportSource, data: Record<string, unknown>, key
     else if (s.table === "preparation_request_checkpoints" && field === "metadata") mapped[field] = preparationCheckpointSchema.strip().parse(value);
     else if (s.table === "call_preparation_requests" && field === "runtime_policy") mapped[field] = preparationRuntimePolicySchema.parse(value);
     else if (s.table === "audit_events" && field === "metadata") mapped[field] = metadata(value);
+    else if (s.table === "call_events" && data.event_name === "conversation.task" && field === "metadata" &&
+      value && typeof value === "object" && "playback" in value) {
+      mapped[field] = { ...value, playback: applicationPlaybackDiagnosticSchema.strip().parse(value.playback) };
+    }
     else if (field === "raw_usage" || field === "raw_cost") mapped[field] = usage(value);
     else mapped[field] = value;
   }

@@ -25,6 +25,9 @@ describe("durable telemetry export", () => {
   const repository = new PostgresCallRepository(db.url, key);
   const service = new TelemetryExportService(db.url, key);
   let callId: string, attemptId: string, preparationId: string, operationId: string;
+  const playback = { markId: "live-application-4-export-fixture", owner: "closing", outcome: "interrupted", reason: "acoustic_activity",
+    requestedAt: "2026-11-02T08:35:25.830Z", renderedAt: "2026-11-02T08:35:27.824Z",
+    releasedAt: "2026-11-02T08:35:27.824Z", endedAt: "2026-11-02T08:35:33.204Z", durationMs: 12350 } as const;
   const request = (): TelemetryExportInput => ({ requestId: randomUUID(), reason: "Integration quality review", timezone: "Europe/Zurich", preset: "last7" });
   async function archive(id: string) {
     const chunks: Buffer[] = [];
@@ -53,6 +56,10 @@ describe("durable telemetry export", () => {
     await repository.updateVoiceConsentSettings({ mode: "hybrid_deterministic_v1", expectedRevision: 1, reason: "PRIVATE-GLOBAL-CONSENT-NOTE" }, actor);
     const providerCallId = `CA-${randomUUID()}`, providerRecordingId = `RE-${randomUUID()}`;
     await repository.attachProviderCall(attemptId, providerCallId, "in-progress");
+    const diagnostic = { callAttemptId: attemptId, idempotencyKey: "playback:fixture", payload: { name: "conversation.task",
+      metadata: { runtimeVersion: "live-managed-v9", phase: "speak", revision: 4, cause: "application_playback", playback } } } as const;
+    const first = await repository.appendCallTelemetryEvent(callId, diagnostic);
+    expect((await repository.appendCallTelemetryEvent(callId, diagnostic)).id).toBe(first.id);
     const recording = await repository.beginRecording(callId);
     await repository.attachProviderRecording(recording.recording.id, providerRecordingId, "in-progress");
     await repository.applyRecordingStatus({ callBriefId: callId, recordingId: recording.recording.id, providerCallId, providerRecordingId, providerStatus: "completed", durationSeconds: 20, channels: 2 });
@@ -106,6 +113,9 @@ describe("durable telemetry export", () => {
     expect(files["data/voice_consent_settings.jsonl"]).toBeUndefined();
     expect(files["data/voice_consent_settings_audit.jsonl"]).toBeUndefined();
     expect(lines(files, "final_transcript_revisions")).toHaveLength(2);
+    expect(lines(files, "call_events").filter(row => (row.data.metadata as any)?.playback))
+      .toEqual([expect.objectContaining({ data: expect.objectContaining({ call_attempt_id: attemptId,
+        metadata: expect.objectContaining({ playback }) }) })]);
     expect(lines(files, "call_preparation_requests").some(row => row.data.id === preparationId)).toBe(true);
     expect(lines(files, "provider_operations").some(row => row.data.id === operationId)).toBe(true);
     expect(lines(files, "provider_operation_results").find(row => row.data.operation_id === operationId)?.data.response_metadata)
@@ -243,6 +253,9 @@ describe("durable telemetry export", () => {
     expect(lines(files, "call_briefs")[0]!.availability).toBe("deleted_or_deletion_pending");
     expect(lines(files, "final_transcript_revisions")).toHaveLength(0);
     expect(lines(files, "call_attempts")).toHaveLength(0);
+    // Existing retention keeps content-free technical call events after content deletion.
+    expect(lines(files, "call_events").filter(row => (row.data.metadata as any)?.playback))
+      .toEqual([expect.objectContaining({ data: expect.objectContaining({ metadata: expect.objectContaining({ playback }) }) })]);
     expect(Object.values(files).map(bytes => strFromU8(bytes)).join("")).not.toContain("NEW CONTEXT");
     await service.cancel(actor, afterDeletion.id);
   });

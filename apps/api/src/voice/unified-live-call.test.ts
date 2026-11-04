@@ -1,8 +1,9 @@
-import type { CallLocale, AssistantProfileId, AssistanceReason } from "@callassist/contracts";
+import type { CallLocale, AssistantProfileId, AssistanceReason, AppointmentAuthorization } from "@callassist/contracts";
 import { ANSWERING_POLICY_VERSION, getAssistanceDisclosure, buildInitialDisclosure, SUPPORTED_CALL_LOCALES } from "@callassist/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createVoiceRuntime } from "./create-voice-runtime";
 import { approvedCall, authorization, proposal, TestSocket, flush, silence, speech } from "./voice-test-helpers";
+import backendReplay from './fixtures/appointment-backend-replay-2026-11-02.json';
 
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -201,6 +202,7 @@ describe("opt-in hybrid consent", () => {
     await vi.advanceTimersByTimeAsync(901); expect(h.recording).not.toHaveBeenCalled();
     release(); await flush(); await flush();
     expect(h.requestedSpeech()).toContain("cannot continue");
+    await h.play(); expect(await playbackDiagnostics(h)).toEqual([]);
     expect(h.recording).not.toHaveBeenCalled();
     expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(0);
   });
@@ -237,9 +239,9 @@ describe("opt-in hybrid consent", () => {
   });
 });
 
-async function harness(answer: string | null = "human", recordingFailure = false, appointment = false, locale: CallLocale = "en-GB", asyncAnswering = false, profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", consentMode: "semantic_native" | "hybrid_deterministic_v1" = "semantic_native") {
+async function harness(answer: string | null = "human", recordingFailure = false, appointment: boolean | AppointmentAuthorization = false, locale: CallLocale = "en-GB", asyncAnswering = false, profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", consentMode: "semantic_native" | "hybrid_deterministic_v1" = "semantic_native", allowedFacts?: string[]) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
-  const call = await approvedCall(appointment ? authorization : undefined, undefined, locale, "CA-LIVE", profile, assistanceReason);
+  const call = await approvedCall(typeof appointment === 'object' ? appointment : appointment ? authorization : undefined, undefined, locale, "CA-LIVE", profile, assistanceReason, allowedFacts);
   if (consentMode === "hybrid_deterministic_v1") vi.spyOn(call.service, "getConsentRuntimePolicy").mockResolvedValue({
     mode: consentMode, revision: 1, classifierVersion: "consent-phrases-v1", fastSettleMs: 200, semanticSettleMs: 900
   });
@@ -350,6 +352,292 @@ async function harness(answer: string | null = "human", recordingFailure = false
     speechRequests, providerOperation, logger, transcript, requestedSpeech, play, accept, closeNaturally, tool, continueClosing, result, start };
 }
 
+describe('recorded no-call backend findings: full runtime reproduction', () => {
+  // Recorded 2026-11-02 Luna outputs; only date/time rebased to the approved
+  // future fixture. Both consent and the production action journal run here.
+  it('reproduces a premature request on an unanswered previous-visit question', async () => {
+    const h = await harness('human', false, true, 'de-CH', false, 'anna', 'none'); await h.accept();
+    h.transcript('input', '15:00 ist frei. Das unbekannte Geburtsdatum ist kein Problem.');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    await h.tool('request_appointment', { intent: 'request', proposal }, 'War Nina Keller schon einmal bei uns?');
+    // Characterization: scope validation cannot detect a skipped semantic answer.
+    const actions = (await h.repository.exportCallTextData(h.brief.id)).voiceActions!;
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ state: 'sending', delivery: { kind: 'request', attempt: 1 } });
+    expect(h.requestedSpeech()).toBeTruthy();
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects the recorded operation change without a second action, then recovers the original', async () => {
+    const h = await harness('human', false, true, 'en-GB', false, 'anna', 'none'); await h.accept();
+    await h.tool('request_appointment', { intent: 'request', proposal }, 'That time is available.');
+    await h.play(false);
+    h.transcript('input', 'I already booked that exact appointment. Do not create a second one.');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    const original = (await h.repository.exportCallTextData(h.brief.id)).voiceActions![0];
+    expect(original.state).toBe('uncertain');
+    const speechCount = h.speechRequests.length;
+    const wrong = await h.tool('request_appointment', { intent: 'status_check', proposal: { ...proposal, operation: 'confirm_existing' } });
+    expect(h.result(wrong)).toMatchObject({ ok: false, reason: 'operation_mismatch' });
+    expect(h.speechRequests).toHaveLength(speechCount);
+    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions).toEqual([original]);
+    await h.tool('request_appointment', { intent: 'status_check', proposal });
+    expect(h.requestedSpeech()).toContain('Do not create another booking'); await h.play();
+    const confirmed = await h.tool('confirm_appointment', { proposal, confirmation: 'affirmative' }, 'Yes, that exact appointment is already booked.');
+    expect(h.result(confirmed)).toMatchObject({ ok: true, state: 'confirmed', externallyVerified: false });
+    const actions = (await h.repository.exportCallTextData(h.brief.id)).voiceActions!;
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ id: original.id, proposal, state: 'confirmed', delivery: { kind: 'status_check', attempt: 2 } });
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
+  });
+});
+
+type RecordedBackendOutput = Array<{ type: string; name?: string; arguments?: string;
+  content?: Array<{ type: string; text?: string }> }>;
+
+async function replayBackendOutput(h: Awaited<ReturnType<typeof harness>>, output: RecordedBackendOutput) {
+  for (const item of output) {
+    if (item.type === 'function_call') {
+      const args = JSON.parse(item.arguments!);
+      // Only rebase the synthetic slot; preserve every observed decision/flag.
+      if (args.proposal) args.proposal = { ...args.proposal, date: proposal.date, startTime: proposal.startTime };
+      const id = await h.tool(item.name!, args);
+      if (item.name === 'report_task_state') {
+        expect(h.result(id).ok).toBe(true); await h.continueClosing(id);
+      }
+    } else if (item.type === 'message') {
+      const id = 'recorded-factual-note';
+      const backend = (event: object) => h.live.receive({ type: 'response.event', delegation_id: id, event });
+      backend({ type: 'response.created', response: { id } });
+      backend({ type: 'response.output_item.done', item: { ...item, role: 'assistant' } });
+      backend({ type: 'response.completed', response: { id, status: 'completed', output: [] } });
+      await flush(); await flush();
+    } else throw new Error(`Unexpected recorded output type: ${item.type}`);
+  }
+}
+
+describe('recorded corrected backend outputs through the full runtime', () => {
+  it('includes all reviewed final candidate outputs', () => {
+    expect(backendReplay.cases).toHaveLength(22);
+    for (const scenario of ['visit-unknown-de', 'status-only-de', 'dob-known-de']) {
+      expect(backendReplay.cases.filter(c => c.scenario === scenario)).toHaveLength(5);
+    }
+    expect(backendReplay.cases.filter(c => c.scenario === 'dob-withheld-de')).toHaveLength(3);
+  });
+  it.each(backendReplay.cases.filter(c => c.scenario === 'visit-unknown-de'))('$id answers unknown visits before allowing a booking', async record => {
+    const h = await harness('human', false, true, 'de-CH', false, 'anna', 'none'); await h.accept();
+    h.transcript('input', '15:00 ist frei. Das unbekannte Geburtsdatum ist kein Problem.');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    h.transcript('input', 'War Test Patient schon einmal bei uns?');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    const speechCount = h.speechRequests.length;
+    await replayBackendOutput(h, record.output);
+    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions ?? []).toEqual([]);
+    expect(h.speechRequests).toHaveLength(speechCount);
+    expect(h.hangup).not.toHaveBeenCalled();
+    // Native speech is simulated, not an acoustic or model-quality assertion.
+    h.transcript('output', 'Ob es frühere Besuche gab, ist mir nicht bekannt.');
+    h.live.receive({ type: 'session.output_audio.delta', delta: speech });
+    await h.tool('request_appointment', { intent: 'request', proposal }, 'Das ist kein Problem. Alle Angaben reichen aus, der Termin um 15:00 ist frei.');
+    expect(h.requestedSpeech()).toBeTruthy(); await h.play();
+    const confirmed = await h.tool('confirm_appointment', { proposal, confirmation: 'affirmative' }, 'Ja, dieser eine Termin ist eingetragen.');
+    expect(h.result(confirmed)).toMatchObject({ ok: true, state: 'confirmed' });
+    const actions = (await h.repository.exportCallTextData(h.brief.id)).voiceActions!;
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ proposal, state: 'confirmed', delivery: { kind: 'request', attempt: 1 } });
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
+  });
+
+  describe.each([true, false])('existing uncertain action=%s', pending => {
+    it.each(backendReplay.cases.filter(c => c.scenario === 'status-only-de'))('$id reconciles exactly one appointment', async record => {
+      const h = await harness('human', false, true, 'en-GB', false, 'anna', 'none'); await h.accept();
+      if (pending) { await h.tool('request_appointment', { intent: 'request', proposal }, 'That time is available.'); await h.play(false); }
+      h.transcript('input', 'I already booked that exact appointment. Please do not create a second one.');
+      await vi.advanceTimersByTimeAsync(901); await flush();
+      const original = (await h.repository.exportCallTextData(h.brief.id)).voiceActions?.[0];
+      if (pending) expect(original?.state).toBe('uncertain');
+      await replayBackendOutput(h, record.output);
+      expect(h.requestedSpeech()).toContain('Do not create another booking');
+      const early = await h.tool('confirm_appointment', { proposal, confirmation: 'affirmative' });
+      expect(h.result(early)).toMatchObject({ ok: false, reason: 'another_action_pending' });
+      await h.play();
+      const confirmed = await h.tool('confirm_appointment', { proposal, confirmation: 'affirmative' }, 'Yes, that exact appointment was already booked.');
+      expect(h.result(confirmed)).toMatchObject({ ok: true, state: 'confirmed', externallyVerified: false });
+      const duplicate = await h.tool('request_appointment', { intent: 'request', proposal });
+      expect(h.result(duplicate)).toMatchObject({ ok: false, reason: 'appointment_already_requested' });
+      const actions = (await h.repository.exportCallTextData(h.brief.id)).voiceActions!;
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({ ...(pending ? { id: original!.id } : {}), proposal, state: 'confirmed',
+        delivery: { kind: 'status_check', attempt: pending ? 2 : 1 } });
+      expect(h.unexpectedFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(backendReplay.cases.filter(c => ['visit-accepted-de', 'confirm-existing-de'].includes(c.scenario)))('$id preserves both authorized appointment operations', async record => {
+    const existing = record.scenario === 'confirm-existing-de';
+    const exact = { ...proposal, operation: existing ? 'confirm_existing' as const : 'book' as const };
+    const permission = existing ? { ...authorization, operation: 'confirm_existing' as const,
+      windows: [{ date: proposal.date, startTime: proposal.startTime, endTime: proposal.startTime }] } : authorization;
+    const h = await harness('human', false, permission, 'en-GB', false, 'anna', 'none'); await h.accept();
+    h.transcript('input', existing ? 'That exact existing appointment is in our calendar.' :
+      'The unknown birth date and previous visits are no problem. All details suffice; that exact time is available.');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    await replayBackendOutput(h, record.output);
+    expect(h.requestedSpeech()).toBeTruthy(); await h.play();
+    const confirmed = await h.tool('confirm_appointment', { proposal: exact, confirmation: 'affirmative' }, 'Yes, that one exact appointment is booked.');
+    expect(h.result(confirmed)).toMatchObject({ ok: true, state: 'confirmed' });
+    const actions = (await h.repository.exportCallTextData(h.brief.id)).voiceActions!;
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ proposal: exact, state: 'confirmed',
+      delivery: { kind: existing ? 'status_check' : 'request', attempt: 1 } });
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(backendReplay.cases.filter(c => c.scenario === 'dob-withheld-de'))('$id closes an explicit impossibility without another question or booking', async record => {
+    const h = await harness('human', false, true, 'de-CH', false, 'anna', 'none', 'semantic_native',
+      ['Das Geburtsdatum darf nicht weitergegeben werden.']); await h.accept();
+    h.transcript('input', 'Ohne Geburtsdatum kann ich keinen Termin bestätigen.');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    await replayBackendOutput(h, record.output);
+    expect(h.requestedSpeech()).toBeTruthy();
+    expect(h.hangup).not.toHaveBeenCalled();
+    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions ?? []).toEqual([]);
+    await h.play(); expect(h.hangup).toHaveBeenCalledOnce();
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(backendReplay.cases.filter(c => ['dob-known-de', 'dob-unknown-de', 'dob-unknown-ru'].includes(c.scenario)))('$id answers a factual question without a commitment', async record => {
+    if (record.scenario === 'dob-known-de') {
+      for (const item of record.output) if ('arguments' in item) {
+        expect(item.type).toBe('function_call');
+        expect(item.name).toBe('report_task_state');
+        expect(JSON.parse(item.arguments!)).toMatchObject({ state: 'continue' });
+      }
+    }
+    const h = await harness('human', false, true, record.scenario.endsWith('-ru') ? 'ru-RU' : 'de-CH', false, 'anna', 'none',
+      'semantic_native', record.scenario === 'dob-known-de' ? ['Geburtsdatum: 12. April 1990.'] : []); await h.accept();
+    h.transcript('input', record.scenario.endsWith('-ru') ? 'Какая дата рождения у Test Patient?' : 'Wie lautet das Geburtsdatum von Test Patient?');
+    await vi.advanceTimersByTimeAsync(901); await flush();
+    const before = h.speechRequests.length;
+    await replayBackendOutput(h, record.output);
+    expect(h.speechRequests).toHaveLength(before);
+    expect(h.hangup).not.toHaveBeenCalled();
+    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions ?? []).toEqual([]);
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
+  });
+});
+
+async function playbackDiagnostics(h: Awaited<ReturnType<typeof harness>>) {
+  return (await h.repository.listCallTelemetryEvents(h.brief.id)).flatMap(event =>
+    event.payload.name === 'conversation.task' && event.payload.metadata.playback
+      ? [{ generation: event.payload.metadata.revision, ...event.payload.metadata.playback }] : []);
+}
+
+describe('application playback diagnostics', () => {
+  it('records interrupted and acknowledged generations without treating sent text as heard', async () => {
+    const h = await harness(); await h.accept();
+    expect(await playbackDiagnostics(h)).toEqual([]);
+    const summary = 'The application arrived yesterday.';
+    await h.tool('end_call', { reason: 'objective_resolved', resultSummary: summary }, 'It arrived yesterday.');
+    const old = await h.play(false);
+    expect(await playbackDiagnostics(h)).toEqual([]); // No per-frame writes.
+    h.twilio.receive({ event: 'media', media: { payload: speech } }); await flush();
+    const interrupted = (await playbackDiagnostics(h))[0]!;
+    expect(interrupted).toMatchObject({ owner: 'closing', markId: old, outcome: 'interrupted', reason: 'acoustic_activity',
+      requestedAt: expect.any(String), renderedAt: expect.any(String), releasedAt: expect.any(String), endedAt: expect.any(String), durationMs: expect.any(Number) });
+    expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text.includes(summary))).toBe(false);
+    for (let i = 0; i < 30; i++) h.twilio.receive({ event: 'media', media: { payload: silence } });
+    await vi.advanceTimersByTimeAsync(901);
+    h.twilio.receive({ event: 'mark', mark: { name: old } }); await flush();
+    expect(h.hangup).not.toHaveBeenCalled(); expect(await playbackDiagnostics(h)).toHaveLength(1);
+    const current = await h.play();
+    h.twilio.receive({ event: 'mark', mark: { name: current } }); await flush();
+    const diagnostics = await playbackDiagnostics(h);
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics[1]).toMatchObject({ outcome: 'acknowledged', reason: 'mark', markId: current });
+    expect(diagnostics[1]!.generation).toBeGreaterThan(interrupted.generation);
+    expect(JSON.stringify(diagnostics)).not.toContain(summary);
+    expect(JSON.stringify(diagnostics)).not.toContain(h.brief.representedPerson);
+    expect(Buffer.byteLength(JSON.stringify(diagnostics[0]))).toBeLessThan(700);
+    expect((await h.service.get(h.brief.id))!.transcript.filter(t => t.text.includes(summary))).toHaveLength(1);
+    expect(h.hangup).toHaveBeenCalledOnce();
+    h.live.receive({ type: 'session.closed', reason: 'close_requested', usage: { seconds: 12 } }); await flush(); await flush();
+    expect((await h.repository.getNativeTranscriptAttemptWork(h.brief.id, h.attempt.id)).capture?.issues)
+      .toContainEqual({ code: 'application_interrupted' });
+  });
+  it('records cancellation before render without inventing release or a transcript', async () => {
+    const h = await harness(); await h.accept();
+    let release!: (value: Response) => void;
+    h.speechFetch.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const summary = 'The application arrived.';
+    await h.tool('end_call', { reason: 'objective_resolved', resultSummary: summary }, 'It arrived.');
+    h.transcript('input', 'Wait, there is a correction.'); await flush();
+    const diagnostics = await playbackDiagnostics(h);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ outcome: 'not_released', reason: 'recipient_transcript', durationMs: null });
+    expect(diagnostics[0]).not.toHaveProperty('renderedAt'); expect(diagnostics[0]).not.toHaveProperty('releasedAt');
+    release(new Response(Buffer.alloc(4_800))); await flush(); await flush();
+    expect(await playbackDiagnostics(h)).toEqual(diagnostics);
+    expect((await h.service.get(h.brief.id))!.transcript.some(t => t.text.includes(summary))).toBe(false);
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it('records render failure separately from successful retry', async () => {
+    const h = await harness(); await h.accept();
+    h.speechFetch.mockRejectedValueOnce(new Error('PRIVATE_PROVIDER_ERROR'));
+    await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.');
+    await h.play(); await flush();
+    const diagnostics = await playbackDiagnostics(h);
+    expect(diagnostics.map(d => [d.outcome, d.reason])).toEqual([['not_released', 'render_failed'], ['acknowledged', 'mark']]);
+    expect(JSON.stringify(diagnostics)).not.toContain('PRIVATE_PROVIDER_ERROR');
+  });
+  it('distinguishes rendered audio held for speech from audio actually released', async () => {
+    const h = await harness('human', false, true); await h.accept();
+    let release!: (value: Response) => void;
+    h.speechFetch.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await h.tool('request_appointment', { proposal }, 'That time is available.');
+    h.twilio.receive({ event: 'media', media: { payload: speech } });
+    release(new Response(Buffer.alloc(4_800))); await flush(); await flush();
+    h.transcript('input', 'Wait, a required detail is missing.'); await flush();
+    const diagnostics = await playbackDiagnostics(h);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ owner: 'appointment', outcome: 'not_released', renderedAt: expect.any(String), durationMs: expect.any(Number) });
+    expect(diagnostics[0]).not.toHaveProperty('releasedAt');
+  });
+  it.each(['deadline', 'disconnect'] as const)('records %s without an acknowledged outcome', async end => {
+    const h = await harness(); await h.accept();
+    await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.');
+    await h.play(false);
+    if (end === 'deadline') await vi.advanceTimersByTimeAsync(30_001);
+    else h.twilio.close();
+    await flush();
+    expect(await playbackDiagnostics(h)).toEqual([expect.objectContaining({ outcome: 'interrupted', reason: end === 'deadline' ? 'deadline' : 'closed' })]);
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it.each(['pending', 'failed'] as const)('does not delay audio or hangup when a diagnostic write is %s', async mode => {
+    const h = await harness(); await h.accept();
+    const record = h.service.recordTelemetry.bind(h.service);
+    let reject!: (error: Error) => void;
+    const pending = new Promise<never>((_, fail) => { reject = fail; });
+    vi.spyOn(h.service, 'recordTelemetry').mockImplementation((id, input) =>
+      input.payload.name === 'conversation.task' && input.payload.metadata.playback
+        ? mode === 'pending' ? pending : Promise.reject(new Error('PRIVATE_DIAGNOSTIC_ERROR')) : record(id, input));
+    await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.');
+    await h.play(); await flush();
+    expect(h.hangup).toHaveBeenCalledOnce();
+    if (mode === 'pending') { reject(new Error('PRIVATE_DIAGNOSTIC_ERROR')); await flush(); }
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ code: 'LIVE_PLAYBACK_DIAGNOSTIC_FAILED' }), 'Playback diagnostic unavailable');
+    expect(JSON.stringify(h.logger.warn.mock.calls)).not.toContain('PRIVATE_DIAGNOSTIC_ERROR');
+  });
+  it('records interrupted appointment playback without changing its uncertain action', async () => {
+    const h = await harness('human', false, true); await h.accept();
+    const id = await h.tool('request_appointment', { proposal }, 'That time is available.');
+    await h.play(false);
+    h.transcript('input', 'Wait, I need a detail first.'); await vi.advanceTimersByTimeAsync(901);
+    expect(h.result(id)).toMatchObject({ ok: false, state: 'uncertain' });
+    expect(await playbackDiagnostics(h)).toEqual([expect.objectContaining({ owner: 'appointment', outcome: 'interrupted', reason: 'recipient_transcript' })]);
+  });
+});
+
 describe('inline assistance reason admission', () => {
   const cases = SUPPORTED_CALL_LOCALES.flatMap(locale => (['none', 'speech_impairment', 'language_barrier'] as const)
     .flatMap(reason => (['anna', 'sebastian'] as const).map(profile => [locale, reason, profile] as const)));
@@ -443,6 +731,70 @@ describe("complex-call orchestration regression", () => {
     expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before + 1);
     expect(h.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ disposition: "continued" }), "Live command failed");
     expect(h.hangup).not.toHaveBeenCalled(); await h.continueClosing(fresh);
+  });
+  it('settles a known continuation across a recipient revision without waiting for command timeout', async () => {
+    const h = await harness(); await h.accept();
+    const old = await h.tool('report_task_state', { state: 'continue', summary: 'Ask the next question.' }, 'The first detail is ready.');
+    const command = h.live.sent.findLast(e => e.type === 'response.create');
+    const before = h.live.sent.filter(e => e.type === 'response.create').length;
+    const answeredAt = Date.now();
+    h.transcript('input', 'Here is a correction to that detail.'); await vi.advanceTimersByTimeAsync(601);
+    await h.continueClosing(old);
+    await vi.advanceTimersByTimeAsync(4_998);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before + 1);
+    expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({ requestedAt: answeredAt + 5_600 }), 'Live task decision requested');
+    // A late error for the settled command must not retry or consume the fresh one.
+    h.live.receive({ type: 'error', error: { code: 'invalid_request_error', client_event_id: command.event_id } }); await flush();
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before + 1);
+    expect(h.hangup).not.toHaveBeenCalled(); expect(h.twilio.readyState).toBe(1);
+  });
+  it('starts a queued newer continuation when the known older continuation completes', async () => {
+    const h = await harness(); await h.accept();
+    const old = await h.tool('report_task_state', { state: 'continue', summary: 'First progress.' }, 'The first detail is ready.');
+    const fresh = await h.tool('report_task_state', { state: 'continue', summary: 'Newer progress in the same answer.' });
+    const before = h.live.sent.filter(e => e.type === 'response.create').length;
+    await h.continueClosing(old);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before + 1);
+    await h.continueClosing(fresh); await vi.advanceTimersByTimeAsync(15_001);
+    expect(h.logger.warn).not.toHaveBeenCalledWith(expect.objectContaining({ code: 'ack_timeout' }), 'Live command failed');
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before + 1);
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it('keeps a recognized stale continuation physically occupied past the command deadline until it finishes', async () => {
+    const h = await harness(); await h.accept();
+    const old = await h.tool('report_task_state', { state: 'continue', summary: 'Ask the next question.' }, 'The first detail is ready.');
+    const before = h.live.sent.filter(e => e.type === 'response.create').length;
+    h.transcript('input', 'Here is a newer detail.'); await vi.advanceTimersByTimeAsync(601);
+    const id = old + '-slow';
+    const backend = (event: object) => h.live.receive({ type: 'response.event', delegation_id: old, event });
+    backend({ type: 'response.created', response: { id } });
+    await vi.advanceTimersByTimeAsync(15_001);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before);
+    expect(h.logger.warn).not.toHaveBeenCalledWith(expect.objectContaining({ code: 'ack_timeout' }), 'Live command failed');
+    backend({ type: 'response.completed', response: { id, status: 'completed', output: [] } });
+    await flush(); await vi.advanceTimersByTimeAsync(1);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(before + 1);
+    expect(h.hangup).not.toHaveBeenCalled(); expect(h.twilio.readyState).toBe(1);
+  });
+  it.each(['answer', 'progress'] as const)('does not refresh an old continuation appointment tool after newer %s', async changed => {
+    const h = await harness('human', false, true); await h.accept();
+    const old = await h.tool('report_task_state', { state: 'continue', summary: 'Collect required details.' }, 'That time is available.');
+    if (changed === 'answer') {
+      h.transcript('input', 'Wait, that time is no longer available.'); await vi.advanceTimersByTimeAsync(601);
+    } else {
+      await h.tool('report_task_state', { state: 'continue', summary: 'Newer progress invalidates the older decision.' });
+    }
+    const backend = (event: object) => h.live.receive({ type: 'response.event', delegation_id: old, event });
+    const id = old + '-late';
+    backend({ type: 'response.created', response: { id } });
+    backend({ type: 'response.completed', response: { id, status: 'completed', output: [{
+      type: 'function_call', call_id: 'stale-booking', name: 'request_appointment', arguments: JSON.stringify({ proposal, intent: 'request' })
+    }] } }); await flush(); await flush();
+    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions).toEqual([]);
+    expect(h.result('stale-booking')).toMatchObject({ ok: false, reason: 'stale_or_unauthorized_request' });
+    expect(h.speechRequests).toHaveLength(1);
   });
   it("keeps the total pre-consent wait finite even while input energy continues", async () => {
     const h = await harness("human", false, false, "en-GB", false, "anna", "none");
@@ -748,6 +1100,7 @@ describe("one Live session, application-owned lifecycle", () => {
     const h = await harness("human", true); await h.accept();
     expect(h.requestedSpeech()).toContain("recording could not");
     expect(h.live.sent.filter(e => e.type === "session.update").every(e => e.session.delegation.responses.tools.every((t: {name: string}) => t.name === "report_consent"))).toBe(true);
+    await h.play(); expect(await playbackDiagnostics(h)).toEqual([]);
   });
   it("streams native transcripts and unchanged audio after consent, with full-duplex clear", async () => {
     const h = await harness(); await h.accept();
@@ -1362,15 +1715,87 @@ describe("autonomous conversation and protected effects", () => {
     const h = await harness(); await h.accept();
     await h.tool("end_call", { reason: "recipient_requested_end" }, "Goodbye.");
     const staleMark = await h.closeNaturally(false);
+    const renders = h.speechFetch.mock.calls.length;
+    const requests = h.live.sent.filter(e => e.type === 'response.create').length;
+    const decisions = (await h.repository.exportCallTextData(h.brief.id)).terminalDecisions;
+    const marks = h.twilio.sent.filter(e => e.event === 'mark').length;
     h.twilio.receive({ event: "media", media: { payload: speech } });
     for (let i = 0; i < 30; i++) h.twilio.receive({ event: "media", media: { payload: silence } });
-    await vi.advanceTimersByTimeAsync(901);
+    await vi.advanceTimersByTimeAsync(899);
+    expect(h.twilio.sent.filter(e => e.event === 'mark')).toHaveLength(marks);
+    await vi.advanceTimersByTimeAsync(1); await flush();
+    expect(h.twilio.sent.filter(e => e.event === 'mark')).toHaveLength(marks + 1);
+    expect(h.speechFetch).toHaveBeenCalledTimes(renders);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(requests);
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toEqual(decisions);
+    const events = await h.repository.listCallTelemetryEvents(h.brief.id);
+    expect(events.filter(e => e.payload.name === 'conversation.hangup' && e.payload.metadata.phase === 'requested')).toHaveLength(2);
+    expect(events.some(e => e.payload.name === 'conversation.hangup' && e.payload.metadata.phase === 'interrupted')).toBe(false);
     expect(h.requestedSpeech()).toBe("The recipient's answer was recorded. Thank you. Goodbye.");
     h.twilio.receive({ event: "mark", mark: { name: staleMark } }); await flush();
     expect(h.hangup).not.toHaveBeenCalled();
     const fallbackMark = await h.play(false);
     h.twilio.receive({ event: "mark", mark: { name: fallbackMark } }); await flush();
     expect(h.hangup).toHaveBeenCalledOnce();
+  });
+  it('does not restart closing for an 80ms energy burst without transcript', async () => {
+    const h = await harness(); await h.accept();
+    await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.');
+    const mark = await h.play(false);
+    const clears = h.twilio.sent.filter(e => e.event === 'clear').length;
+    const marks = h.twilio.sent.filter(e => e.event === 'mark').length;
+    const frame = Buffer.alloc(160, 128).toString('base64');
+    for (let i = 0; i < 4; i++) {
+      h.twilio.receive({ event: 'media', media: { payload: frame } }); await vi.advanceTimersByTimeAsync(20);
+    }
+    for (let i = 0; i < 30; i++) {
+      h.twilio.receive({ event: 'media', media: { payload: silence } }); await vi.advanceTimersByTimeAsync(20);
+    }
+    await vi.advanceTimersByTimeAsync(901);
+    expect(h.twilio.sent.filter(e => e.event === 'clear')).toHaveLength(clears);
+    expect(h.twilio.sent.filter(e => e.event === 'mark')).toHaveLength(marks);
+    expect(h.hangup).not.toHaveBeenCalled();
+    h.twilio.receive({ event: 'mark', mark: { name: mark } }); await flush();
+    expect(h.hangup).toHaveBeenCalledOnce();
+  });
+  it('lets delayed correction text cancel acoustic closing recovery before its replay', async () => {
+    const h = await harness(); await h.accept();
+    await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.');
+    const staleMark = await h.play(false);
+    const marks = h.twilio.sent.filter(e => e.event === 'mark').length;
+    h.twilio.receive({ event: 'media', media: { payload: speech } });
+    for (let i = 0; i < 30; i++) h.twilio.receive({ event: 'media', media: { payload: silence } });
+    await vi.advanceTimersByTimeAsync(850);
+    h.transcript('input', 'Wait, I need to correct the answer.');
+    await vi.advanceTimersByTimeAsync(601);
+    expect(h.twilio.sent.filter(e => e.event === 'mark')).toHaveLength(marks);
+    h.twilio.receive({ event: 'mark', mark: { name: staleMark } }); await flush();
+    expect(h.hangup).not.toHaveBeenCalled();
+    const resumed = await h.tool('report_task_state', { state: 'resume_conversation', summary: 'A material correction requires an answer.' });
+    expect(h.result(resumed).ok).toBe(true); await h.continueClosing(resumed);
+    h.transcript('output', 'What needs correcting?');
+    const media = h.twilio.sent.filter(e => e.event === 'media').length;
+    h.live.receive({ type: 'session.output_audio.delta', delta: speech }); await flush();
+    expect(h.twilio.sent.filter(e => e.event === 'media')).toHaveLength(media + 1);
+    expect(h.hangup).not.toHaveBeenCalled(); expect(h.twilio.readyState).toBe(1);
+  });
+  it('keeps the original closing deadline through repeated acoustic-only interruptions', async () => {
+    const h = await harness(); await h.accept();
+    const end = await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.', false);
+    const startedAt = Date.now();
+    await h.continueClosing(end);
+    for (let cycle = 0; cycle < 5; cycle++) {
+      await h.play(false);
+      h.twilio.receive({ event: 'media', media: { payload: speech } });
+      for (let i = 0; i < 30; i++) h.twilio.receive({ event: 'media', media: { payload: silence } });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(h.twilio.readyState).toBe(1);
+    }
+    await vi.advanceTimersByTimeAsync(startedAt + 29_999 - Date.now());
+    expect(h.twilio.readyState).toBe(1);
+    await vi.advanceTimersByTimeAsync(1); await flush();
+    expect(h.twilio.readyState).toBe(3); expect(h.hangup).not.toHaveBeenCalled();
+    expect(h.speechRequests).toHaveLength(2);
   });
   it("rejects unsupported tools and invented evidence", async () => {
     const h = await harness(); await h.accept();
@@ -1456,9 +1881,12 @@ describe("autonomous conversation and protected effects", () => {
     expect(h.requestedSpeech()).not.toBe(previous);
     h.live.receive({ type: "session.output_audio.delta", delta: speech });
     await vi.advanceTimersByTimeAsync(501);
-    expect(h.requestedSpeech()).toContain("15:00 (Europe/Zurich)");
+    expect(h.requestedSpeech()).toContain("15:00");
+    expect(h.requestedSpeech()).not.toContain("Europe/Zurich");
     await h.play();
-    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions![0].state).toBe("delivered");
+    expect((await h.repository.exportCallTextData(h.brief.id)).voiceActions![0]).toMatchObject({
+      state: "delivered", proposal: { date: proposal.date, startTime: "15:00", timeZone: "Europe/Zurich" }
+    });
     expect(h.twilio.readyState).toBe(1);
   });
   it("continues the appointment tool with the actual subsequent answer, never a premature waiting report", async () => {
@@ -1765,6 +2193,68 @@ describe("bounded orchestration recovery", () => {
     expect(h.live.sent.filter(e => e.type === "response.item.create" && e.item.call_id === id)).toHaveLength(1);
     expect(h.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ command: "response.item.create", disposition: "continued" }), "Live command failed");
     expect(h.twilio.readyState).toBe(1);
+  });
+  it('installs separate internal-adviser and recipient-facing speech instructions', async () => {
+    const h = await harness();
+    const instructions = h.live.sent.find(e => e.type === 'session.start').session.instructions;
+    expect(instructions).toContain('Backend messages and task-state summaries are internal context, not lines to speak or paraphrase.');
+    expect(instructions).toContain("Address the recipient's latest question using approved facts; if the answer is unknown, say so.");
+    expect(instructions).toContain('After end_call is authorized, stay silent');
+    expect(instructions).toContain('Information supplied by the user for this task is already authorized for disclosure');
+    expect(instructions).toContain('using the approved call-language wording');
+    expect(instructions).toContain('An explicit user instruction to withhold information');
+    await h.accept();
+    const backend = h.live.sent.findLast(e => e.type === 'session.update').session.delegation.responses;
+    expect(backend.instructions).toContain('You advise Live internally; you do not speak to the called recipient.');
+    expect(backend.instructions).not.toContain('You are speaking to the called recipient');
+    expect(backend.instructions).toContain('Ordinary answers and clarifications may return concise facts without an application tool.');
+    expect(backend.instructions).toContain('This summary is spoken to the called recipient');
+    expect(backend.instructions).toContain('Information supplied by the user for this task is already authorized for disclosure');
+    expect(backend.instructions).toContain('using the approved call-language wording');
+    for (const prompt of [instructions, backend.instructions]) {
+      expect(prompt).toContain("The customer's approved conditions determine whether an offer suits the customer.");
+      expect(prompt).toContain('Do not ask the called recipient to decide or reconfirm whether an offer suits the absent customer.');
+      expect(prompt).toContain('Ask the recipient about their own availability, required details and confirmation of the requested action.');
+      expect(prompt).toContain('This does not expand authorization or replace required recipient confirmation of completion.');
+    }
+    expect(backend.tool_choice).toBe('auto');
+  });
+  it.each(['completed', 'delta', 'item'] as const)('keeps %s backend notes off application speech while allowing native replies and the closing summary', async mode => {
+    const h = await harness('human', false, false, 'de-CH', false, 'anna', 'none'); await h.accept();
+    h.transcript('output', 'Kann die Abklärung ohne Geburtsdatum weitergehen?');
+    h.transcript('input', 'Ist das der erste Besuch?'); await vi.advanceTimersByTimeAsync(901);
+    const mediaBefore = h.twilio.sent.filter(e => e.event === 'media').length;
+    const speechBefore = h.speechRequests.length;
+    const requestsBefore = h.live.sent.filter(e => e.type === 'response.create').length;
+    const transcriptBefore = (await h.service.get(h.brief.id))!.transcript;
+    // Synthetic provider output tests routing, not what a real model would choose to say.
+    const note = 'Die Praxis hat noch nicht geantwortet. Warten wir ihre Rückmeldung ab.';
+    const item = { type: 'message', content: [{ type: 'output_text', text: note }] };
+    const id = 'internal-note';
+    const backend = (event: object) => h.live.receive({ type: 'response.event', delegation_id: id, event });
+    backend({ type: 'response.created', response: { id } });
+    if (mode === 'delta') backend({ type: 'response.output_text.delta', delta: note });
+    if (mode === 'item') backend({ type: 'response.output_item.done', item });
+    backend({ type: 'response.completed', response: { id, status: 'completed', output: mode === 'completed' ? [item] : [] } });
+    await flush(); await vi.advanceTimersByTimeAsync(6_001);
+    expect(h.twilio.sent.filter(e => e.event === 'media')).toHaveLength(mediaBefore);
+    expect(h.speechRequests).toHaveLength(speechBefore);
+    expect((await h.service.get(h.brief.id))!.transcript).toEqual(transcriptBefore);
+    expect(h.live.sent.some(e => e.type === 'session.commentary.append')).toBe(false);
+    expect(h.live.sent.filter(e => e.type === 'response.create')).toHaveLength(requestsBefore);
+    h.transcript('output', 'Das ist mir nicht bekannt.');
+    h.live.receive({ type: 'session.output_audio.delta', delta: speech }); await flush();
+    expect(h.twilio.sent.filter(e => e.event === 'media')).toHaveLength(mediaBefore + 1);
+    expect(h.twilio.sent.findLast(e => e.event === 'media').media.payload).toBe(speech);
+    expect(h.speechRequests).toHaveLength(speechBefore);
+    expect(h.hangup).not.toHaveBeenCalled();
+    const resultSummary = 'Der erste Besuch konnte nicht geklärt werden.';
+    const closing = await h.tool('end_call', { reason: 'cannot_proceed', resultSummary }, 'Ohne diese Angabe geht es leider nicht.');
+    expect(h.result(closing).ok).toBe(true);
+    expect(h.speechRequests.at(-1)?.input).toContain(resultSummary);
+    expect(h.speechRequests.some(request => request.input.includes(note))).toBe(false);
+    await h.closeNaturally(); expect(h.hangup).toHaveBeenCalledOnce();
+    expect(h.unexpectedFetch).not.toHaveBeenCalled();
   });
   it('accepts factual backend answers without forcing a task-state tool', async () => {
     const h = await harness(); await h.accept();

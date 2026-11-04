@@ -42,6 +42,7 @@ import { useCallDraftStore } from "./call-draft-provider";
 import type { CallDraft } from "@/lib/call-draft-store";
 import { normalizeCallFormLanguages } from "@/lib/call-form-languages";
 import { CallPreparationStatus } from "./call-preparation-status";
+import { clinicPreparationMessages } from "@/lib/i18n/clinic-preparation-messages";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -106,6 +107,7 @@ export function CreateCallForm({
 }: CreateCallFormProps) {
   const { messages, locale: uiLocale } = useUiLocale();
   const design = designMessages[uiLocale];
+  const clinicCopy = clinicPreparationMessages[uiLocale];
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const copy = messages.form.copy;
   const resolvedHeading = heading ?? copy.defaultHeading;
@@ -608,6 +610,16 @@ export function CreateCallForm({
             <span className="section-label">{copy.shareableInformation}</span>
             <p>{copy.shareableInformationHelp}</p>
           </div>
+          <details>
+            <summary>{clinicCopy.title}</summary>
+            <p>{clinicCopy.intro}</p>
+            <ul>
+              <li>{clinicCopy.dateOfBirth}</li>
+              <li>{clinicCopy.previousVisit}</li>
+            </ul>
+            <p>{clinicCopy.choices}</p>
+            <p>{clinicCopy.review}</p>
+          </details>
           <label className="field field-wide">
             <span>{copy.approvedInformation}</span>
             <textarea

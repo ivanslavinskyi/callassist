@@ -11,19 +11,29 @@ const copy: Record<TextLanguage, { label: string; within: string; outside: strin
   uk: { label: "Допустимий час", within: "Дата й час відповідають затвердженому розкладу.", outside: "Дата або час виходять за межі затвердженого розкладу.", unknown: "Не вдалося однозначно зіставити погоджені дату й час із затвердженим розкладом.", source: "Затверджений розклад", unconfirmed: "Підтвердження дії в застосунку не завершено.", confirmed: "У застосунку збережено підтвердження співрозмовника." }
 };
 
+const unmatchedAction: Record<TextLanguage, string> = {
+  en: "The saved action could not be matched unambiguously to the appointment in the conversation.",
+  de: "Die gespeicherte Aktion lässt sich dem Termin im Gespräch nicht eindeutig zuordnen.",
+  fr: "L'action enregistrée ne peut pas être reliée sans ambiguïté au rendez-vous évoqué.",
+  it: "L'azione salvata non può essere associata in modo univoco all'appuntamento nella conversazione.",
+  ru: "Не удалось однозначно сопоставить сохранённое действие с записью, обсуждённой в разговоре.",
+  uk: "Не вдалося однозначно зіставити збережену дію із записом, обговореним у розмові."
+};
+
 /** Publication repeats the provenance/computation check, including cached chunks. */
 export function assertSummaryArtifactOutput(artifact: CallTextArtifact, payload: unknown) {
-  if (artifact.kind !== "call_summary" || !artifact.generatorVersion.startsWith("summary-v4:")) return;
+  if (artifact.kind !== "call_summary" || !/^summary-v[45]:/.test(artifact.generatorVersion)) return;
   const context = summarySourceContextSchema.parse(artifact.sourceContext);
   const parsed = callSummaryPayloadSchema.parse(payload);
   if (parsed.schemaVersion !== 3 || artifact.contextHash !== textPayloadHash(context) ||
       context.compilationId !== artifact.compilationId || context.transcriptRevisionId !== artifact.transcriptRevisionId || context.transcriptSourceHash !== artifact.sourceHash ||
-      textPayloadHash(composeCalendarSummary(parsed, context, artifact.targetLanguage)) !== textPayloadHash(parsed))
+      textPayloadHash(composeCalendarSummary(parsed, context, artifact.targetLanguage, artifact.generatorVersion)) !== textPayloadHash(parsed))
     throw new Error("SUMMARY_CONTEXT_INVALID");
 }
 
 /** Server-owned projection. It never upgrades a spoken offer to a confirmed action. */
-export function composeCalendarSummary(summary: CallSummaryPayload, context: SummarySourceContext, language: TextLanguage): CallSummaryPayload {
+export function composeCalendarSummary(summary: CallSummaryPayload, context: SummarySourceContext, language: TextLanguage,
+  generatorVersion = "summary-v5:"): CallSummaryPayload {
   const result = structuredClone(summary);
   if (summary.schemaVersion !== 3 || !summary.appointmentExtraction) return result;
   result.unresolved = [...new Set((summary.unresolvedDetails ?? []).map(d => d.text))];
@@ -31,9 +41,15 @@ export function composeCalendarSummary(summary: CallSummaryPayload, context: Sum
   const candidates = summary.appointmentExtraction.candidates;
   const superseded = new Set(candidates.flatMap(c => c.supersedes));
   const active = candidates.filter(c => !superseded.has(c.id) && c.status !== "corrected");
-  const distinct = new Set(active.map(c => JSON.stringify([c.date, c.startTime, c.timeZone])));
-  const chosen = distinct.size === 1 && active.every(c => c.status !== "ambiguous")
-    ? active.find(c => c.status === "reported_confirmed") ?? active[0] : undefined;
+  // Preserve the projection pinned to historical artifacts and queued v4 jobs.
+  const legacy = generatorVersion.startsWith("summary-v4:");
+  const confirmed = active.filter(c => c.status === "reported_confirmed");
+  // An unselected offer is not a second booking. Corrections were applied above;
+  // conditions, ambiguity and competing confirmations must still block success.
+  const relevant = !legacy && confirmed.length ? active.filter(c => c.status !== "offered") : active;
+  const distinct = new Set(relevant.map(c => JSON.stringify([c.date, c.startTime, c.timeZone])));
+  const chosen = distinct.size === 1 && relevant.every(c => c.status !== "ambiguous" && (legacy || c.status !== "conditional"))
+    ? relevant.find(c => c.status === "reported_confirmed") ?? relevant[0] : undefined;
   const evaluation: CalendarEvaluation = active.length && !chosen
     ? { eligibility: "unknown", reason: "conflicting_candidates", windowIndex: null, startsAt: null, pastAtReference: null }
     : evaluateAppointmentCalendar({ authorization: context.appointmentAuthorization, candidate: chosen ?? null,
@@ -45,11 +61,13 @@ export function composeCalendarSummary(summary: CallSummaryPayload, context: Sum
   const action = context.actionEvidence;
   const actionMatches = !!chosen && !!action && action.date === chosen.date && action.startTime === chosen.startTime && action.timeZone === chosen.timeZone;
   const actionState = actionMatches ? action.state : "unconfirmed";
+  const actionText = !legacy && action && !actionMatches ? unmatchedAction[language]
+    : actionState === "confirmed" ? words.confirmed : words.unconfirmed;
   const windows = evaluation.windowIndex === null ? context.appointmentAuthorization.windows : [context.appointmentAuthorization.windows[evaluation.windowIndex]!];
   const sourceText = windows.map(w => `${calendarDateDetails(w.date, language).dateLabel}, ${w.startTime}–${w.endTime}`).join("; ");
   result.calendar = { version: APPOINTMENT_CALENDAR_VERSION, contextHash: textPayloadHash(context), candidateId: chosen?.id ?? null,
     ...evaluation, sourceSegmentIds: chosen?.sourceSegmentIds ?? [], label: words.label, text,
-    sourceLabel: words.source, sourceText, actionState, actionText: actionState === "confirmed" ? words.confirmed : words.unconfirmed };
+    sourceLabel: words.source, sourceText, actionState, actionText };
   for (const condition of summary.appointmentExtraction.conditions) {
     const finding = result.findings.find(f => f.id === condition.checkId);
     if (!finding) throw new Error("SUMMARY_CALENDAR_CONDITION_INVALID");

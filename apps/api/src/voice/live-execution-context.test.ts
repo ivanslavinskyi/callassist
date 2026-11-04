@@ -2,6 +2,25 @@ import { expect, it } from "vitest";
 import { SUPPORTED_CALL_LOCALES } from "@callassist/contracts";
 import { approvedCall, authorization } from "./voice-test-helpers";
 import { executionData, liveExecutionContext, liveManagedTools, managedBackendInstructions, type LiveExecutionParties } from "./live-managed-tools";
+import { APPOINTMENT_AUTHORIZATION_TOOL } from "../realtime/appointment-authorization";
+
+it.each(['book', 'confirm_existing'] as const)('keeps %s as the only authorized proposal operation across status and confirmation', async operation => {
+  const call = await approvedCall({ ...authorization, operation,
+    windows: operation === 'confirm_existing' ? [{ date: '2099-09-16', startTime: '15:00', endTime: '15:00' }] : authorization.windows });
+  try {
+    const originalSchema = JSON.stringify(APPOINTMENT_AUTHORIZATION_TOOL);
+    const tools = liveManagedTools(call.snapshot, true);
+    for (const name of ['request_appointment', 'confirm_appointment']) {
+      expect(tools.find(tool => tool.name === name)?.parameters).toMatchObject({
+        properties: { proposal: { properties: { operation: { enum: [operation] } }, additionalProperties: false } }
+      });
+    }
+    expect(tools.find(tool => tool.name === 'request_appointment')?.parameters).toMatchObject({
+      properties: { intent: { enum: ['request', 'status_check'] } }
+    });
+    expect(JSON.stringify(APPOINTMENT_AUTHORIZATION_TOOL)).toBe(originalSchema);
+  } finally { await call.service.close(); }
+});
 
 it("gives Live bounded, self-contained approved task sections", async () => {
   const call = await approvedCall();

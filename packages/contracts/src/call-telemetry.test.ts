@@ -6,6 +6,19 @@ import {
 } from "./call-telemetry";
 
 describe("durable call telemetry contracts", () => {
+  it("accepts bounded playback milestones while rejecting content and invalid values", () => {
+    const playback = { markId: "live-application-4-test", owner: "closing", outcome: "interrupted", reason: "acoustic_activity",
+      requestedAt: "2026-11-02T08:35:25.830Z", renderedAt: "2026-11-02T08:35:27.824Z",
+      releasedAt: "2026-11-02T08:35:27.824Z", endedAt: "2026-11-02T08:35:33.204Z", durationMs: 12350 };
+    const input = { idempotencyKey: "playback:4", payload: { name: "conversation.task", metadata: {
+      runtimeVersion: "live-managed-v9", phase: "speak", revision: 4, cause: "application_playback", playback } } };
+    expect(callTelemetryEventInputSchema.safeParse(input).success).toBe(true);
+    for (const extra of [{ text: "private summary" }, { heardPrefix: "private words" }, { audio: "bytes" },
+      { reason: "private arbitrary reason" }, { durationMs: -1 }, { durationMs: Infinity }, { endedAt: "unknown" }, { markId: "x".repeat(161) }]) {
+      expect(callTelemetryEventInputSchema.safeParse({ ...input, payload: { ...input.payload,
+        metadata: { ...input.payload.metadata, playback: { ...playback, ...extra } } } }).success).toBe(false);
+    }
+  });
   it("retains historical task events and records recovery without recipient content", () => {
     for (const runtimeVersion of ["live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9"]) {
       const payload = { name: "conversation.task", metadata: { runtimeVersion, phase: "stale", revision: 3,

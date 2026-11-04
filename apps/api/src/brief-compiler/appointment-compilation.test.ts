@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("./execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import { readFileSync } from "node:fs";
-import { appointmentAuthorizationSchema, createApprovedExecutionPlan, getAppointmentAuthorization, normalizeCreateCallBriefInput,
+import { appointmentAuthorizationSchema, createApprovedExecutionPlan, createApprovedExecutionSnapshot, getAppointmentAuthorization, normalizeCreateCallBriefInput,
   type AppointmentAuthorization, type CurrentCompiledCallBrief } from "@callassist/contracts";
 import { DeterministicBriefCompiler, evaluateCompiledBrief, OpenAIBriefCompiler } from "./brief-compiler";
 import { deterministicMockAppointmentIntent, enforceAppointmentPlan, isAuthorizedAppointmentDateIdentifier,
   appointmentClarification, prepareAppointmentModelOutput, type AppointmentCompilationContext } from "./appointment-compilation";
+import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
+import { originalPlanReview } from "../test-helpers/original-plan-review";
+import { hasValidCompilationSnapshotHash } from "./compilation-integrity";
 
 const input = (objective: string) => normalizeCreateCallBriefInput({
   recipientName: "Dental Office", phoneNumber: "+41525550123", representedPersonFirstName: "QA", representedPersonLastName: "Tester",
@@ -39,6 +42,46 @@ function modelResponse(compiled: CurrentCompiledCallBrief, objective: string) {
 }
 
 describe("preapproved appointment compilation", () => {
+  it.each([
+    { label: "omitted", facts: [] },
+    { label: "authorized DOB and returning patient", facts: ["Date of birth: 1990-04-12", "QA Tester has visited this clinic before."] },
+    { label: "explicit first visit", facts: ["QA Tester has never visited this clinic."] },
+    { label: "explicit unknown", facts: ["Date of birth: unknown", "Previous visit: unknown"] },
+    { label: "explicit withholding", facts: ["Do not share the date of birth.", "Do not share previous visit history."] }
+  ])("preserves only authorized clinic facts through review and approval: $label", async ({ facts }) => {
+    const { raw, compiled } = await plan("Book me a dental appointment tomorrow between 09:00 and 12:00");
+    raw.allowedFacts = facts;
+    compiled.approvedFacts = facts.map(text => ({ sourceText: text, callLanguageText: text }));
+    // Exercise the production parser/validator with controlled provider output, not a live model.
+    const fetchImplementation = vi.fn<typeof fetch>(async (url) => new Response(JSON.stringify(String(url).endsWith("moderations")
+      ? { results: [{ flagged: false }] } : { output_text: JSON.stringify(modelResponse(compiled, raw.objective)) }), { status: 200 }));
+    const result = await new OpenAIBriefCompiler({ apiKey: "test", fetchImplementation, now: () => new Date("2026-09-10T08:00:00Z") }).compile(raw);
+    expect(result.policyDecision.status).toBe("ready_for_review");
+    expect(result.compiledBrief!.blockingIssues).toEqual([]);
+    expect(result.rawBrief.allowedFacts).toEqual(facts);
+    expect(result.compiledBrief!.approvedFacts).toEqual(compiled.approvedFacts);
+    expect(hasValidCompilationSnapshotHash(result)).toBe(true);
+    const repository = new InMemoryCallRepository();
+    const brief = await repository.create(raw, result);
+    const beforeApproval = (await repository.get(brief.id))!;
+    expect(() => createApprovedExecutionSnapshot(beforeApproval)).toThrow("CALL_EXECUTION_SNAPSHOT_NOT_APPROVED");
+    const approved = await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
+    const snapshot = createApprovedExecutionSnapshot(approved);
+    expect(snapshot.plan.approvedFacts).toEqual(facts);
+    expect(snapshot.compilationSnapshotHash).toBe(result.snapshotHash);
+    expect(getAppointmentAuthorization(snapshot.plan)).toEqual(authorization);
+    expect(hasValidCompilationSnapshotHash(approved.compilation!)).toBe(true);
+  });
+
+  it.each(["QA Tester has never visited this clinic.", "Do not share the date of birth."])(
+    "rejects converting an omitted clinic answer into an approved fact: %s", async invented => {
+      const { raw, compiled } = await plan("Book me a dental appointment tomorrow between 09:00 and 12:00");
+      expect(evaluateCompiledBrief(raw, { ...compiled,
+        approvedFacts: [{ sourceText: invented, callLanguageText: invented }]
+      })).toMatchObject({ status: "blocked", reasonCodes: ["fact_integrity_failure"] });
+    }
+  );
+
   it.each([
     ["Book me a dental appointment tomorrow between 09:00 and 12:00", "book"],
     ["Bitte einen Termin am Freitag vereinbaren", "book"],

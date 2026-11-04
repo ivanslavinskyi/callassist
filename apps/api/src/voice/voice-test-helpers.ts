@@ -50,7 +50,7 @@ export const authorization: AppointmentAuthorization = {
 export const proposal = { operation: "book", date: "2099-09-16", startTime: "15:00", timeZone: "Europe/Zurich",
   serviceMatches: true, recipientMatches: true, requiresPaymentOrNewTerms: false, detailsConfirmed: true };
 
-export async function approvedCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment") {
+export async function approvedCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", allowedFacts: string[] = ["Application sent: 12 July"]) {
   const compiler = new DeterministicBriefCompiler();
   if (appointment) {
     const compile = compiler.compile.bind(compiler);
@@ -66,7 +66,7 @@ export async function approvedCall(appointment?: AppointmentAuthorization, repos
   const brief = await service.create({ recipientName: "Example AG", phoneNumber: "+41710000001",
     objective: "Ask whether the application sent on 12 July was received", assistantProfileId: profile,
     representedPersonFirstName: "Nina", representedPersonLastName: "Keller", assistanceReason,
-    locale, audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: ["Application sent: 12 July"] });
+    locale, audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts });
   await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
   const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
   await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");

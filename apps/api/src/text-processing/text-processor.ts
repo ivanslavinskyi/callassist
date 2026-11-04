@@ -13,7 +13,7 @@ import { MockTextProcessor } from "./mock-text-processor";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
 export const TEXT_PROCESSOR_VERSION = "text-processing-v2";
-export const SUMMARY_PROCESSOR_VERSION = "summary-v4";
+export const SUMMARY_PROCESSOR_VERSION = "summary-v5";
 export const MAX_TEXT_PROCESSING_SOURCE_CHARACTERS = 60_000;
 
 export type TextProcessingInput = (
@@ -74,6 +74,12 @@ export interface TextProcessor {
 /** Summary changes must not invalidate queued translations or their reusable chunks. */
 export function textGeneratorVersion(processor: Pick<TextProcessor, "generatorVersion">, kind: TextArtifactKind) {
   return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:grounded-v3:${processor.generatorVersion}` : processor.generatorVersion;
+}
+
+/** v4 uses the same extraction contract; its calendar projection stays pinned. */
+export function compatibleTextGeneratorVersion(actual: string, expected: string, kind: TextArtifactKind): boolean {
+  return actual === expected || (kind === "call_summary" && actual.startsWith("summary-v4:grounded-v3:") &&
+    actual.replace(/^summary-v4:/, "summary-v5:") === expected);
 }
 
 export class TextProcessingError extends Error {

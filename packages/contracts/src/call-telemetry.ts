@@ -16,6 +16,17 @@ const safeTokenSchema = z.string()
   .max(160)
   .regex(/^[a-z0-9_.:/-]+$/i);
 const emptyMetadataSchema = z.strictObject({});
+// Technical playback milestones only. Released audio is not evidence of heard words.
+export const applicationPlaybackDiagnosticSchema = z.strictObject({
+  markId: safeTokenSchema,
+  owner: z.enum(["appointment", "closing", "failure"]),
+  outcome: z.enum(["acknowledged", "interrupted", "not_released"]),
+  reason: z.enum(["mark", "acoustic_activity", "recipient_transcript", "stale", "render_failed", "deadline", "superseded", "closed", "action_cancelled"]),
+  requestedAt: z.string().datetime(), renderedAt: z.string().datetime().optional(),
+  releasedAt: z.string().datetime().optional(), endedAt: z.string().datetime(),
+  durationMs: z.number().finite().nonnegative().nullable()
+});
+export type ApplicationPlaybackDiagnostic = z.infer<typeof applicationPlaybackDiagnosticSchema>;
 const providerSchema = z.enum(["mock", "twilio"]);
 
 export const consentDecisionMethodSchema = z.enum(["deterministic_voice", "semantic_voice", "dtmf"]);
@@ -84,7 +95,8 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     cause: safeTokenSchema.optional(), responseId: safeTokenSchema.optional(), released: z.boolean().optional(),
     actionState: z.enum(["sending", "delivered", "uncertain", "confirmed"]).optional(),
     deliveryKind: z.enum(["request", "status_check"]).optional(),
-    deliveryStatus: z.enum(["not_sent", "unacknowledged", "played"]).optional()
+    deliveryStatus: z.enum(["not_sent", "unacknowledged", "played"]).optional(),
+    playback: applicationPlaybackDiagnosticSchema.optional()
   }) }),
   z.strictObject({ name: z.literal("answering.updated"), metadata: answeringStateSchema }),
   z.strictObject({ name: z.literal("provider.sip_response"), metadata: z.strictObject({ code: z.number().int().min(100).max(699) }) }),

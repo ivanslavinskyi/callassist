@@ -6,7 +6,8 @@ import type { AppointmentProposal } from "../realtime/appointment-authorization"
 export function appointmentRequestCopy(locale: CallLocale, person: string,
   authorization: AppointmentAuthorization, proposal: AppointmentProposal): string {
   const date = calendarDateDetails(proposal.date, locale).dateLabel;
-  const details = `${authorization.serviceDescription}, ${date}, ${proposal.startTime} (${proposal.timeZone})`;
+  // The validated zone remains in the proposal; its IANA city is not the venue.
+  const details = `${authorization.serviceDescription}, ${date}, ${proposal.startTime}`;
   const confirm = authorization.operation === "confirm_existing";
   switch (locale) {
     case "de-CH": case "de-DE": return confirm
@@ -30,7 +31,7 @@ export function appointmentRequestCopy(locale: CallLocale, person: string,
 /** Reconcile the existing arrangement only; this is never another booking request. */
 export function appointmentStatusCopy(locale: CallLocale, person: string,
   authorization: AppointmentAuthorization, proposal: AppointmentProposal): string {
-  const details = `${authorization.serviceDescription}, ${calendarDateDetails(proposal.date, locale).dateLabel}, ${proposal.startTime} (${proposal.timeZone})`;
+  const details = `${authorization.serviceDescription}, ${calendarDateDetails(proposal.date, locale).dateLabel}, ${proposal.startTime}`;
   switch (locale) {
     case "de-CH": case "de-DE": return `Bitte prüfen Sie nur den Status dieses Termins für ${person}: ${details}. Ist er bereits gebucht? Bitte keinen weiteren Termin anlegen.`;
     case "fr-CH": return `Veuillez vérifier uniquement le statut de ce rendez-vous pour ${person} : ${details}. Est-il déjà réservé ? Ne créez pas de deuxième réservation.`;

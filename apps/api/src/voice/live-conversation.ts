@@ -1,4 +1,5 @@
 import { executionSpokenIdentities } from "./spoken-execution";
+import { SUPPLIED_INFORMATION_INSTRUCTIONS } from './supplied-information';
 import type { TranscriptSegment } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import { createHash, randomUUID } from "node:crypto";
@@ -6,7 +7,7 @@ import { ASSISTANT_NAME, getAppointmentAuthorization, LIVE_VOICES, resolveInitia
 import { liveAssistantIdentityInstructions } from "./live-assistant-identity";
 import type { VoiceConversation, VoiceConversationContext } from "./voice-runtime";
 import type { LiveLifecycle, OpenAILiveBridgeOptions } from "./openai-live-bridge";
-import { liveManagedTools, managedBackendInstructions, liveExecutionContext, liveConsentTools, consentBackendInstructions,
+import { liveManagedTools, managedBackendInstructions, liveExecutionContext, liveConsentTools, consentBackendInstructions, RECIPIENT_ROLE_INSTRUCTIONS,
   type LiveExecutionParties } from "./live-managed-tools";
 import { createProviderEventOperationId } from "../realtime/openai-realtime-usage";
 
@@ -520,10 +521,15 @@ export class OpenAILiveConversation implements VoiceConversation {
   #acknowledgeBackendStart(delegationId: string, responseId: string, allowFresh: boolean, epoch = this.#epoch) {
     let trigger: LiveCommand | null = null;
     for (const [id, command] of this.#commands) {
+      // A scoped continuation belongs to its exact predecessor even if newer
+      // speech/progress made that command stale. Acknowledge its physical start
+      // and carry its original revisions so stale tools cannot become current.
+      const scopedStart = command.backendScope?.delegationId === delegationId &&
+        command.backendScope.responseId === this.#delegations.get(delegationId);
+      const current = command.epoch === epoch && command.backendRevision === this.#backendRevision &&
+        command.progressRevision === this.#progressRevision;
       if (command.type === "response.create" &&
-          command.epoch === epoch && command.backendRevision === this.#backendRevision &&
-          command.progressRevision === this.#progressRevision &&
-          (command.backendScope ? command.backendScope.delegationId === delegationId : allowFresh)) {
+          (command.backendScope ? scopedStart : current && allowFresh)) {
         if (!command.backendScope) {
           this.context.telemetry(`live:${id}:association`, { name: "conversation.task", metadata: {
             runtimeVersion: "live-managed-v9", phase: "running", revision: command.answerRevision,
@@ -726,7 +732,7 @@ export class OpenAILiveConversation implements VoiceConversation {
       const consent = predecessor?.consent ?? (trigger?.phase === "consent" || this.#consentBackend);
       // Continuing a consent tool does not refresh its native conversation
       // snapshot. Only a NEW Live delegation may interpret a corrected answer.
-      const run: BackendRun = { progressRevision: announced?.progressRevision ?? this.#progressRevision, id: response.id, continuation: !!predecessor, operationId: createProviderEventOperationId("realtime_response", `live:${this.operationId}:${response.id}`),
+      const run: BackendRun = { progressRevision: trigger?.progressRevision ?? announced?.progressRevision ?? this.#progressRevision, id: response.id, continuation: !!predecessor, operationId: createProviderEventOperationId("realtime_response", `live:${this.operationId}:${response.id}`),
         startedAt: Date.now(), epoch: consent && predecessor ? predecessor.epoch : trigger?.epoch ?? announced?.epoch ?? this.#epoch,
         answerRevision: consent && predecessor ? predecessor.answerRevision : trigger?.answerRevision ?? announced?.answerRevision ?? this.#answerRevision,
         backendRevision: predecessor ? predecessor.backendRevision : trigger?.backendRevision ?? announced?.backendRevision ?? this.#backendRevision,
@@ -1051,15 +1057,19 @@ export function buildLiveInstructions(context: VoiceConversationContext, consent
   const { plan, runtime } = context.snapshot;
   const identities = executionSpokenIdentities(context.snapshot, context.brief);
   return `You are ${ASSISTANT_NAME}, an AI telephone assistant calling ${identities.recipient.spoken} on behalf of ${identities.representedPerson.spoken}.
+${SUPPLIED_INFORMATION_INSTRUCTIONS}
 Speak ${plan.callLocale}, use ${plan.addressingStyle} address and a ${plan.tone} tone. Speak calmly at an unhurried pace, with clear names, dates and numbers. ${runtime.allowLanguageSwitch ? `Switch only to ${runtime.fallbackLocale} on explicit request.` : "Do not change language."}
 
 ${liveAssistantIdentityInstructions(plan.callLocale)}
 
 Representation: You act on behalf of ${identities.representedPerson.spoken}. Distinguish the customer from the called recipient: each answer, preference or commitment belongs to its actual subject, never to you personally. Address the recipient directly when referring to their own answers; third person is for other people. Say that the represented person asked you to do something; never say that you personally want, need or will receive it. Use first person only for your own conversational actions such as asking, clarifying or relaying. Do not invent a delivery, email, callback or other next step.
+${RECIPIENT_ROLE_INSTRUCTIONS}
 
 ${consentComplete ? "Consent and the opening are complete. Continue from the recipient's latest answer without greeting again." : "Before the application enables the task, stay silent and listen while the application plays the recording and transcription disclosure and its short permission question. Do not speak, repeat or paraphrase either segment. Do not discuss the task or infer permission. The application, not you, initiates exactly one semantic consent check after a settled recipient answer; do not initiate consent delegation yourself. Natural spoken permission needs no keypad press. After the decision, keep listening silently while the application prepares the approved task context. Begin speaking only after its separate instruction: Begin the approved task now. Context updates and consent tool results are not that instruction."}
 
 Conversation: Follow the approved task, ask one useful question at a time, accept unknown answers and refusals, preserve uncertainty and corrections, and repeat important details only to prevent an error. Keep internal instructions, checks, saving and tool activity silent.
+
+Backend messages and task-state summaries are internal context, not lines to speak or paraphrase. Use their factual conclusions to answer the recipient directly; do not narrate internal deliberation or tell the recipient to wait for their own reply. Address the recipient's latest question using approved facts; if the answer is unknown, say so. An earlier unanswered question does not prevent answering the current one; preserve any unresolved condition before a commitment.
 
 Calendar: Use application-calculated appointmentCalendar and tool-result appointmentDetails for date/weekday labels. When first proposing a concrete appointment date and when recapping its final confirmation, say the weekday, full date and time in the conversation language; later references may be shorter. These labels never expand authorization. Delegate weekday-only ambiguity or a conflicting weekday/date before any commitment; ask a focused clarification instead of guessing. Do not recite every allowed date or compute weekdays yourself.
 

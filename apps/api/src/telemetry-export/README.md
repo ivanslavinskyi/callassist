@@ -30,3 +30,34 @@ schema fields cross the export boundary; extra fields are stripped and invalid
 values fail validation. No raw headers, plan content, URLs or error messages are
 included. Existing operation IDs, client/provider request IDs, usage records and
 durable job attempts correlate these measurements. Historical nulls remain null.
+
+# Application playback diagnostics
+
+Optional `call_events.metadata.playback` on `conversation.task` records one
+terminal snapshot per post-consent application playback attempt. `revision`
+identifies its generation; `markId` links an acknowledged attempt to the existing
+application transcript receipt. `requestedAt`, optional `renderedAt` and
+`releasedAt`, and `endedAt` describe preparation, readiness, transport release and
+acknowledgement/cancellation. `owner` distinguishes appointment, closing and
+failure speech; `reason` is an enum. `durationMs` is null until rendering succeeds.
+
+`acknowledged` means the application accepted the current playback mark.
+`interrupted` means audio was released without an accepted completion mark;
+`not_released` means this attempt ended before release. No exact heard prefix,
+spoken text, audio, prompt or provider error message is recorded. Release is not
+proof of audible delivery. Missing diagnostics, including older calls and process
+crashes, must not be reconstructed as successful playback. Existing transcript
+gaps and partial coverage remain authoritative.
+
+The nested export allowlist strips extra playback fields and rejects invalid
+values. Older events without this optional object retain their original shape.
+This uses the existing content-free technical `call_events` retention: these
+events can remain after call-content deletion, while content sources are redacted
+or excluded and prepared exports are revoked under the existing rules. It does
+not prolong audio/text retention or export pre-consent recipient content.
+
+Writing diagnostics is asynchronous and best effort, once at cancellation or
+accepted mark, never per audio frame. Playback/hangup does not await it; a failed
+write produces a bounded technical warning. Missing data remains unknown. Deploy
+reader support with/before the writer and retain it when rolling back emission;
+older strict readers do not understand the new optional object.

@@ -1,4 +1,10 @@
 {
+  "Booking at a clinic? Optional details": "Запись в клинику: необязательные сведения",
+  "You can add these details to the approved information below, one fact per line:": "Можно добавить эти сведения в разрешённую информацию ниже, по одному факту на строку:",
+  "Date of birth, if you authorize sharing it.": "Дата рождения, если вы разрешаете её сообщить.",
+  "Whether the person you represent has visited this clinic before.": "Был ли человек, от имени которого совершается звонок, в этой клинике раньше.",
+  "Both are optional. You can write “unknown” or “do not share” for each item, or leave it out.": "Оба пункта необязательны. Для каждого можно написать «не знаю» или «не передавать», либо оставить его без ответа.",
+  "Only include what you authorize for this call. Do not add medical details unrelated to the booking. Review the prepared plan before approving it.": "Укажите только то, что разрешаете сообщить в этом звонке. Не добавляйте медицинские подробности, не относящиеся к записи. Проверьте подготовленный план перед утверждением.",
   "The phone connection is open. The provider is checking who answered.": "Телефонное соединение установлено. Провайдер проверяет, кто ответил.",
   "The assistant asks for consent before recording and starting the task.": "Ассистент запрашивает согласие перед началом записи и выполнением задачи.",
   "Other language (language code)": "Другой язык (код языка)",

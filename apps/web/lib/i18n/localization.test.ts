@@ -21,7 +21,8 @@ import * as m14 from "./text-artifact-messages";
 import * as m15 from "./system-messages";
 import * as m16 from "./lifecycle-messages";
 import * as m17 from "./registration-call-messages";
-const namespaces = [m0,m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16,m17];
+import * as m18 from "./clinic-preparation-messages";
+const namespaces = [m0,m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16,m17,m18];
 const identities = new Set(["SHPROHLI", "Europe/Zurich", "Ivan Slavinskyi", "Anna Keller", "Chrome", "Microsoft Edge", "Firefox", "Safari", "Windows", "macOS", "iOS", "Android", "Linux"]);
 function strings(value: unknown): string[] {
  if (typeof value === "string") return value && !/^[a-z0-9_:+.\/{}-]+$/.test(value) && !identities.has(value) && !value.endsWith(" \u2014 SHPROHLI") ? [value] : [];

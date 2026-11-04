@@ -4,6 +4,7 @@ import { callCompilationSchema, finalTranscriptRevisionSchema, callAssessmentDec
 import { encryptJson, decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { assessmentDeadlineMs, assessmentVersion, validateFinalAssessment } from "../credits/final-assessment";
 import { CallRepositoryError } from "./call-repository";
+import { unavailableHistoryAssessment } from "./history-read-model";
 
 export type FinalCreditEvidence = { version: 2; transcriptRevisionId: string; sourceHash: string; evaluatorVersion: string; category: string };
 type Settle = (tx: postgres.TransactionSql, attemptId: string, type: "call_charge" | "call_refund", evidence?: FinalCreditEvidence) => Promise<unknown>;
@@ -23,17 +24,17 @@ export class PostgresCallAssessmentStore {
       WHERE a.call_brief_id=${callId} AND a.call_attempt_id=${attemptId} AND b.data_deleted_at IS NULL`;
     return row ? (await this.displayRevisions([this.map(row, true)]))[0]! : null;
   }
-  async forCalls(ids: string[], sql: postgres.Sql | postgres.TransactionSql = this.sql) {
+  async forCalls(ids: string[], sql: postgres.Sql | postgres.TransactionSql = this.sql, forHistory = false) {
     const grouped = new Map<string, CallAssessmentRecord[]>();
     if (!ids.length) return grouped;
     const rows = await sql<Row[]>`SELECT a.call_attempt_id,a.call_brief_id,a.compilation_id,a.source_hash,a.transcript_revision_id,a.evaluator_version,
       NULL::text AS payload_ciphertext,a.status,a.conversation,a.goal,a.reason,a.updated_at,a.deadline_at FROM call_assessments a JOIN call_briefs b ON b.id=a.call_brief_id
       WHERE a.call_brief_id IN ${sql(ids)} AND b.data_deleted_at IS NULL`;
-    const displays = await this.displayRevisions(rows.map(row => this.map(row)), sql);
+    const displays = await this.displayRevisions(rows.map(row => this.map(row)), sql, forHistory);
     for (const [index, row] of rows.entries()) grouped.set(row.call_brief_id, [...(grouped.get(row.call_brief_id) ?? []), displays[index]!]);
     return grouped;
   }
-  async displayRevisions(records: CallAssessmentRecord[], sql: postgres.Sql | postgres.TransactionSql = this.sql) {
+  async displayRevisions(records: CallAssessmentRecord[], sql: postgres.Sql | postgres.TransactionSql = this.sql, forHistory = false) {
     if (!records.length) return records;
     const revisions = await sql`SELECT DISTINCT ON (r.call_attempt_id) r.*,a.compilation_id,a.source_hash
       FROM call_assessment_revisions r JOIN call_text_artifacts a ON a.id=r.artifact_id
@@ -44,7 +45,12 @@ export class PostgresCallAssessmentStore {
     return records.map(original => {
       const row = revisions.find(r => r.call_attempt_id === original.callAttemptId);
       if (!row) return original;
-      const decision = callAssessmentDecisionSchema.parse(decryptJson(row.payload_ciphertext, this.key));
+      const parsed = callAssessmentDecisionSchema.safeParse(decryptJson(row.payload_ciphertext, this.key));
+      if (!parsed.success) {
+        if (forHistory) return unavailableHistoryAssessment(original);
+        throw parsed.error;
+      }
+      const decision = parsed.data;
       return { ...original, artifactId: row.artifact_id, contextHash: row.context_hash, compilationId: row.compilation_id,
         sourceHash: row.source_hash, decision, summary: { ...original.summary, status: "ready" as const,
           conversation: decision.conversation.status, goal: decision.goal.status,

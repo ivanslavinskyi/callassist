@@ -11,7 +11,7 @@ import { textArtifactMaximumRequests } from "../storage/call-text-repository";
 import { DurableJobExecutionError, type DurableJob, type DurableJobLease } from "../jobs/durable-job";
 import { planReviewFields } from "./plan-review-fields";
 import { textDirectionEnabled, type TextCapabilities } from "./text-capabilities";
-import { TEXT_PROCESSOR_VERSION, TextProcessingError, textGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
+import { TEXT_PROCESSOR_VERSION, TextProcessingError, textGeneratorVersion, compatibleTextGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
 import { summaryInput } from "./summary-input";
 import { buildSummarySourceContext, assertSummaryContext } from "./summary-source";
 import { composeCalendarSummary } from "./summary-calendar";
@@ -82,7 +82,7 @@ export class TextArtifactService {
     const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
       ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
     this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
-    if (artifact.generatorVersion !== textGeneratorVersion(this.processor, artifact.kind)) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
+    if (!compatibleTextGeneratorVersion(artifact.generatorVersion, textGeneratorVersion(this.processor, artifact.kind), artifact.kind)) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
     return this.repository.retryTextArtifact(callId, artifactId);
   }
 
@@ -100,7 +100,7 @@ export class TextArtifactService {
         ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
       this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
       const expectedGenerator=policy && this.processor.driver==='openai' ? `${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}` : textGeneratorVersion(this.processor,artifact.kind);
-      if (artifact.generatorVersion !== expectedGenerator) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
+      if (!compatibleTextGeneratorVersion(artifact.generatorVersion, expectedGenerator, artifact.kind)) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
       if (artifact.kind === "call_summary") {
         artifact = await this.repository.freezeTextArtifactContext(artifact.id,
           artifact.sourceContext ?? await buildSummarySourceContext(this.repository, artifact), lease());
@@ -160,7 +160,7 @@ export class TextArtifactService {
         }
       }
       if (artifact.kind === "call_summary" && artifact.sourceContext) {
-        payload = composeCalendarSummary(callSummaryPayloadSchema.parse(payload), artifact.sourceContext, artifact.targetLanguage);
+        payload = composeCalendarSummary(callSummaryPayloadSchema.parse(payload), artifact.sourceContext, artifact.targetLanguage, artifact.generatorVersion);
       }
       await this.repository.completeTextArtifact(artifact.id, payload, lease());
     } catch (error) {
@@ -223,8 +223,11 @@ export class TextArtifactService {
   }
 
   async #find(callId: string, kind: TextArtifactKind, compilationId: string | null, transcriptRevisionId: string | null, sourceHash: string, targetLanguage: TextLanguage, generatorVersion=textGeneratorVersion(this.processor,kind)) {
-    return (await this.repository.listTextArtifacts(callId)).find((item) => item.kind === kind && item.compilationId === compilationId &&
-      item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && item.generatorVersion === generatorVersion && !["stale", "cancelled"].includes(item.status));
+    const matching = (await this.repository.listTextArtifacts(callId)).filter(item => item.kind === kind && item.compilationId === compilationId &&
+      item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && !["stale", "cancelled"].includes(item.status));
+    // A projection upgrade must not regenerate an existing result or duplicate a queued job.
+    return matching.find(item => item.generatorVersion === generatorVersion) ??
+      matching.find(item => compatibleTextGeneratorVersion(item.generatorVersion, generatorVersion, kind));
   }
   #assertDirection(kind: TextArtifactKind, sourceLanguage: string, targetLanguage: TextLanguage) {
     if (!this.capabilities.enabled) throw new TextArtifactServiceError("TEXT_GENERATION_DISABLED");

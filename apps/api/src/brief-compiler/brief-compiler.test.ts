@@ -5,6 +5,11 @@ import {
   type CreateCallBriefInput
 } from "@callassist/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { createApprovedExecutionSnapshot } from '@callassist/contracts';
+import { InMemoryCallRepository } from '../storage/in-memory-call-repository';
+import { originalPlanReview } from '../test-helpers/original-plan-review';
+import { executionData, liveExecutionContext, managedBackendInstructions } from '../voice/live-managed-tools';
+import { SUPPLIED_INFORMATION_INSTRUCTIONS } from '../voice/supplied-information';
 // Language/provider contracts have a dedicated suite; isolate existing compiler policy/request tests.
 vi.mock("./execution-language", () => ({ verifyExecutionLanguage: vi.fn(async () => []) }));
 import {
@@ -484,6 +489,23 @@ describe("OpenAIBriefCompiler", () => {
       "Application sent: 12 July"
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    // Preparation -> approval -> both voice consumers: the source language stays
+    // in audit data, while the known fact reaches the call in German.
+    expect(body.input[0].content).toContain(SUPPLIED_INFORMATION_INSTRUCTIONS);
+    const repository = new InMemoryCallRepository();
+    const brief = await repository.create(result.rawBrief, result);
+    const approved = await repository.approveCompilation(brief.id, await originalPlanReview(repository, brief.id));
+    const snapshot = createApprovedExecutionSnapshot(approved);
+    expect(executionData(snapshot).facts).toEqual(['Antrag gesendet: 12. Juli']);
+    const liveContext = liveExecutionContext(snapshot).join('\n');
+    const backend = managedBackendInstructions(snapshot);
+    for (const context of [liveContext, backend]) {
+      expect(context).toContain('Antrag gesendet: 12. Juli');
+      expect(context).not.toContain('Application sent: 12 July');
+      expect(context).not.toContain(rawInput.objective);
+      expect(context).not.toContain(rawInput.context);
+    }
+    expect(backend).toContain(SUPPLIED_INFORMATION_INSTRUCTIONS);
     for (const [, init] of fetchMock.mock.calls) {
       expect(
         new Headers(init?.headers).get("X-Client-Request-Id")

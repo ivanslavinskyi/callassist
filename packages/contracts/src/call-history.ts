@@ -39,7 +39,9 @@ export function summarizeCallFeedback(
     scope: callFeedbackScope(feedback.createdAt, attemptStarts) } : null;
 }
 
-export const callHistoryItemSchema = callBriefSchema.and(z.object({
+// Older stored objectives can exceed today's input limit. History is read-only;
+// creation, approval and execution continue to use the unchanged brief schema.
+export const callHistoryItemSchema = callBriefSchema.safeExtend({ objective: z.string().trim().min(10) }).and(z.object({
   feedback: callFeedbackSummarySchema.nullable(), displayObjective: z.string().nullable().optional(), objectiveLanguage: z.string().nullable().optional()
 }));
 export type CallHistoryItem = z.infer<typeof callHistoryItemSchema>;

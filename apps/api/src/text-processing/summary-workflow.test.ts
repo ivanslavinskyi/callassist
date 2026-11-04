@@ -6,7 +6,8 @@ import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { MockTextProcessor } from "./mock-text-processor";
 import { TextArtifactService } from "./text-artifact-service";
 import { summaryInput } from "./summary-input";
-import { textGeneratorVersion, TextProcessingError, type TextProcessingInput, type TextProcessor } from "./text-processor";
+import { buildSummarySourceContext } from "./summary-source";
+import { textGeneratorVersion, compatibleTextGeneratorVersion, TextProcessingError, type TextProcessingInput, type TextProcessor } from "./text-processor";
 import { allTextDirections } from "./text-capabilities";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
@@ -14,7 +15,7 @@ const raw = normalizeCreateCallBriefInput({ recipientName: "Office", phoneNumber
   assistantProfileId: "sebastian", representedPersonFirstName: "Anna", representedPersonLastName: "Example", locale: "en-GB",
   audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: [] });
 
-async function setup(long = false, failCompaction = false, override?: TextProcessor, automatic = false) {
+async function setup(long = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy = false) {
   const repository = new InMemoryCallRepository();
   const compilation = await new DeterministicBriefCompiler().compile(raw);
   const brief = await repository.create(raw, compilation);
@@ -34,7 +35,7 @@ async function setup(long = false, failCompaction = false, override?: TextProces
   });
   const processor: TextProcessor = override ?? { ...mock, driver: "mock", model: mock.model, generatorVersion: mock.generatorVersion, process };
   await repository.completeFinalTranscript(recording.id, segments.map(s => s.text).join("\n"), segments, undefined,
-    automatic ? { summaryGeneratorVersion: textGeneratorVersion(processor, "call_summary") } : undefined);
+    automatic ? { summaryGeneratorVersion: textGeneratorVersion(processor, "call_summary").replace(/^summary-v5:/, legacy ? "summary-v4:" : "summary-v5:") } : undefined);
   const service = new TextArtifactService(repository, processor, { enabled: true, directions: allTextDirections() });
   const revision = (await repository.getCurrentTranscriptRevision(brief.id))!;
   const artifact = automatic ? (await repository.listTextArtifacts(brief.id)).find(a => a.kind === "call_summary")!
@@ -45,6 +46,46 @@ async function setup(long = false, failCompaction = false, override?: TextProces
 }
 
 describe("summary execution", () => {
+  it("finishes a queued v4 job with the original version and reuses its ready result", async () => {
+    const h = await setup(false, false, undefined, true, true);
+    expect(h.artifact.generatorVersion).toContain("summary-v4:");
+    expect((await h.service.requestTranscriptArtifact(h.artifact.callId, "call_summary", {
+      sourceRevisionId: h.revision.id, targetLanguage: "en"
+    })).id).toBe(h.artifact.id);
+    await h.service.process(h.job, h.lease);
+    const saved = (await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id))!;
+    expect(saved.status).toBe("ready");
+    expect(saved.generatorVersion).toBe(h.artifact.generatorVersion);
+    expect(await h.service.requestTranscriptArtifact(h.artifact.callId, "call_summary", {
+      sourceRevisionId: h.revision.id, targetLanguage: "en"
+    })).toEqual(saved);
+    expect(await h.service.retry(h.artifact.callId, h.artifact.id)).toEqual(saved);
+    expect(h.process).toHaveBeenCalledTimes(1);
+  });
+  it("retries a recoverable v4 job without changing its generator or cached extraction", async () => {
+    const h = await setup(false, false, undefined, true, true);
+    await h.repository.claimTextArtifact(h.artifact.id, h.lease);
+    const sourceContext = await buildSummarySourceContext(h.repository, h.artifact);
+    await h.repository.freezeTextArtifactContext(h.artifact.id, sourceContext, h.lease);
+    const cached = await new MockTextProcessor().process({ ...summaryInput(h.compilation, h.revision.segments, "en"), sourceContext });
+    await h.repository.saveTextArtifactChunk(h.artifact.id, 0, cached, h.lease);
+    await h.repository.failDurableJob(h.job.id, h.job.leaseOwner!, "TEXT_RESPONSE_INVALID", new Date().toISOString(), new Date().toISOString(), false);
+    await h.service.retry(h.artifact.callId, h.artifact.id);
+    const job = (await h.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: h.lease.workerId,
+      now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }))!;
+    await h.service.process(job, { ...h.lease, generation: job.generation, attemptNumber: job.attemptCount });
+    expect(await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id)).toMatchObject({
+      status: "ready", generatorVersion: h.artifact.generatorVersion
+    });
+    expect(h.process).not.toHaveBeenCalled();
+  });
+  it("does not treat different providers or extraction versions as compatible", () => {
+    const expected = "summary-v5:grounded-v3:openai:model-a";
+    expect(compatibleTextGeneratorVersion("summary-v4:grounded-v3:openai:model-a", expected, "call_summary")).toBe(true);
+    for (const actual of ["summary-v4:grounded-v3:openai:model-b", "summary-v4:grounded-v2:openai:model-a", "summary-v3:grounded-v3:openai:model-a"])
+      expect(compatibleTextGeneratorVersion(actual, expected, "call_summary")).toBe(false);
+    expect(compatibleTextGeneratorVersion("summary-v4:grounded-v3:openai:model-a", expected, "transcript_translation")).toBe(false);
+  });
   it("automatically queues the stored transcript, retries invalid output and publishes without a user request", async () => {
     let count = 0;
     const processor = new OpenAITextProcessor({ apiKey: "test", fetchImplementation: async (_url, init) => {
@@ -114,7 +155,7 @@ describe("summary execution", () => {
     const processor = new MockTextProcessor();
     expect(textGeneratorVersion(processor, "plan_review")).toBe(processor.generatorVersion);
     expect(textGeneratorVersion(processor, "transcript_translation")).toBe(processor.generatorVersion);
-    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v4:grounded-v3:${processor.generatorVersion}`);
+    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v5:grounded-v3:${processor.generatorVersion}`);
   });
 
   it("uses one request for an ordinary transcript, persists new format and never regenerates a ready result", async () => {

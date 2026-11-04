@@ -70,12 +70,12 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     expect(facts.lifecycle?.goals?.[category==="task_answer"?"achieved":"notAchieved"]).toBe(1);
     expect(facts.userGoalFeedback).toEqual({yes:0,partly:0,no:0,notProvided:1});
   });
-  it("freezes a new summary context and publishes an immutable assessment revision without rebilling", async () => {
+  it.each(["summary-v4", "summary-v5"])("freezes a %s context and publishes an immutable assessment revision without rebilling", async version => {
     const f = await fixture(); await f.r.updateStatus(f.brief.id,"completed");
     const old = await final(f); await f.r.completeTextArtifact(old.artifact.id,old.payload,old.lease);
     await f.r.completeDurableJob(old.lease.jobId,old.lease.workerId,new Date().toISOString());
     const artifact = await f.r.enqueueTextArtifact({ callId:f.brief.id,kind:"call_summary",compilationId:f.attempt.compilationId!,
-      transcriptRevisionId:old.revision.id,sourceHash:old.revision.sourceHash,targetLanguage:f.attempt.contentLanguage??"en",generatorVersion:"summary-v4:grounded-v3:openai:fixture" });
+      transcriptRevisionId:old.revision.id,sourceHash:old.revision.sourceHash,targetLanguage:f.attempt.contentLanguage??"en",generatorVersion:`${version}:grounded-v3:openai:fixture` });
     const job = (await f.r.claimDueDurableJob({types:["text_artifact_generation"],workerId:randomUUID(),now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+60000).toISOString()}))!;
     const lease = {jobId:job.id,workerId:job.leaseOwner!,checkedAt:new Date().toISOString(),generation:job.generation,attemptNumber:job.attemptCount};
     await f.r.claimTextArtifact(artifact.id,lease);
@@ -86,7 +86,7 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     const frozen = await f.r.freezeTextArtifactContext(artifact.id,context,lease);
     expect((await f.r.freezeTextArtifactContext(artifact.id,{...context,callEndedAt:"2099-01-01T00:00:00Z"},lease)).contextHash).toBe(frozen.contextHash);
     const payload = composeCalendarSummary({...old.payload,schemaVersion:3,appointmentExtraction:{candidates:[],conditions:[]},unresolvedDetails:[],
-      assessment:{...old.decision,goal:{...old.decision.goal,status:"partial"}}},context,f.attempt.contentLanguage??"en");
+      assessment:{...old.decision,goal:{...old.decision.goal,status:"partial"}}},context,f.attempt.contentLanguage??"en",artifact.generatorVersion);
     await f.r.completeTextArtifact(artifact.id,payload,lease);
     await f.r.completeTextArtifact(artifact.id,payload,lease);
     const display = await f.r.getCallAssessment(f.brief.id,f.attempt.id);

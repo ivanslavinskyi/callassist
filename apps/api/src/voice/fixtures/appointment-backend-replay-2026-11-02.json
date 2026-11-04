@@ -1,0 +1,367 @@
+{
+  "source": "Synthetic no-phone Responses evaluation fix-4, 2026-11-02. Full runtime replay rebases only date/time to its future authorized slot; native voice is simulated.",
+  "cases": [
+    {
+      "id": "backend-confirm-existing-de-1-candidate",
+      "scenario": "confirm-existing-de",
+      "responseId": "resp_0a6a54045f82b0b5016ae874899ecc87d2875617f406a16232",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "4807f37193ec6014d7c41be0da6014a1650f7648f90b2659659e67e4132b1edf",
+      "requestSha256": "f9e3ed95ba9fe82c6636e8f1903493b1687baf4a4fb043ab6240679a3a2ecddf",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"status_check\",\"proposal\":{\"operation\":\"confirm_existing\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-known-de-1-candidate",
+      "scenario": "dob-known-de",
+      "responseId": "resp_0b1858f838e7e625016ae8741609e487d294145458e9bbea1b",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "28ff2342cddd2a7ed3396d5477e316e02253f4199cee09a4b1857c09cbddbd55",
+      "requestSha256": "fed351740ba3878cfc2318b954a640943c087f20786454dc797efc15c6d6d66d",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Das Geburtsdatum von Test Patient ist der 12. April 1990."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-known-de-2-candidate",
+      "scenario": "dob-known-de",
+      "responseId": "resp_0fbf2935226f7e0f016ae87417be1887d2b337459d6f32b841",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "28ff2342cddd2a7ed3396d5477e316e02253f4199cee09a4b1857c09cbddbd55",
+      "requestSha256": "fed351740ba3878cfc2318b954a640943c087f20786454dc797efc15c6d6d66d",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Das Geburtsdatum von Test Patient ist der 12. April 1990."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-known-de-3-candidate",
+      "scenario": "dob-known-de",
+      "responseId": "resp_013594f96de38b26016ae8741dcb0c87d2b0e3e474b547aca9",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "28ff2342cddd2a7ed3396d5477e316e02253f4199cee09a4b1857c09cbddbd55",
+      "requestSha256": "fed351740ba3878cfc2318b954a640943c087f20786454dc797efc15c6d6d66d",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Geburtsdatum von Test Patient: 12. April 1990."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-known-de-4-candidate",
+      "scenario": "dob-known-de",
+      "responseId": "resp_02e1d5931c1ada01016ae8741ffc9087d28e22c490319b8ece",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "28ff2342cddd2a7ed3396d5477e316e02253f4199cee09a4b1857c09cbddbd55",
+      "requestSha256": "fed351740ba3878cfc2318b954a640943c087f20786454dc797efc15c6d6d66d",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Das Geburtsdatum von Test Patient ist der 12. April 1990."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-known-de-5-candidate",
+      "scenario": "dob-known-de",
+      "responseId": "resp_0dba7cb62f590bea016ae8742644a487d28e4a0b93afabee92",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "28ff2342cddd2a7ed3396d5477e316e02253f4199cee09a4b1857c09cbddbd55",
+      "requestSha256": "fed351740ba3878cfc2318b954a640943c087f20786454dc797efc15c6d6d66d",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "report_task_state",
+          "arguments": "{\"state\":\"continue\",\"summary\":\"Das bestätigte Geburtsdatum von Test Patient ist der 12. April 1990; noch keine Terminbuchung anfragen.\"}"
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-unknown-de-1-candidate",
+      "scenario": "dob-unknown-de",
+      "responseId": "resp_0f9286dd315d596d016ae874816c7487d28f91f584a96bc198",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "670c418fb9bd85f6ce5676981a73ac817d5b396264d016ba7b3f7b90fef34a93",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Das Geburtsdatum von Test Patient ist in den freigegebenen Angaben nicht enthalten. Die konkrete Zeit 09:45 Uhr wurde zwar angeboten, aber es wurde noch kein Buchungsantrag gestellt."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-unknown-ru-1-candidate",
+      "scenario": "dob-unknown-ru",
+      "responseId": "resp_005396e1b42102da016ae8748f1bec87d2a94a9a54b66d53fb",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "2b61c7611e220dc793df7c8d0c98442da1baf9ebb4b9c285434887ea6e3024d6",
+      "requestSha256": "f465f871b7ad63348c53b36da0743b10bbf88d07d62e5d8b4a361fe45b53b5b4",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Дата рождения Test Patient в предоставленных данных не указана. Не сообщайте её как известную и пока не отправляйте запрос на запись."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-withheld-de-1-candidate",
+      "scenario": "dob-withheld-de",
+      "responseId": "resp_08b5345b9a45e4e3016ae87457b54c87d2ab72b845e72a71d6",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "c440a9736f8bbcfb4e2e8e048fbc7c1966ee877ddb0927d14043f493718a380f",
+      "requestSha256": "e58eb138739516927bfd83875cd61b70f9be6e5a0364a0e9f0540b355aab33d7",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "end_call",
+          "arguments": "{\"reason\":\"cannot_proceed\",\"resultSummary\":\"Ohne das Geburtsdatum können Sie den Termin für Test Patient nicht bestätigen.\"}"
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-withheld-de-2-candidate",
+      "scenario": "dob-withheld-de",
+      "responseId": "resp_0b224906ebbb19f4016ae87459919087d2b90a5e641d589706",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "c440a9736f8bbcfb4e2e8e048fbc7c1966ee877ddb0927d14043f493718a380f",
+      "requestSha256": "e58eb138739516927bfd83875cd61b70f9be6e5a0364a0e9f0540b355aab33d7",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "end_call",
+          "arguments": "{\"reason\":\"cannot_proceed\",\"resultSummary\":\"Sie können den Termin ohne Geburtsdatum nicht bestätigen.\"}"
+        }
+      ]
+    },
+    {
+      "id": "backend-dob-withheld-de-3-candidate",
+      "scenario": "dob-withheld-de",
+      "responseId": "resp_0ab2a188bfeb157a016ae87461536487d28ce0c7a97d64600e",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "c440a9736f8bbcfb4e2e8e048fbc7c1966ee877ddb0927d14043f493718a380f",
+      "requestSha256": "e58eb138739516927bfd83875cd61b70f9be6e5a0364a0e9f0540b355aab33d7",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "end_call",
+          "arguments": "{\"reason\":\"cannot_proceed\",\"resultSummary\":\"Das Geburtsdatum von Test Patient darf nicht weitergegeben werden; deshalb ist kein Termin bestätigt.\"}"
+        }
+      ]
+    },
+    {
+      "id": "backend-status-only-de-1-candidate",
+      "scenario": "status-only-de",
+      "responseId": "resp_0358be51331a60b2016ae8742bb7c487d2b517e344f2ab6d4e",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "dacf4af9c114e1ba67a7e12b8b264e0b13880df22078754eb4b206c0937873f0",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"status_check\",\"proposal\":{\"operation\":\"book\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-status-only-de-2-candidate",
+      "scenario": "status-only-de",
+      "responseId": "resp_093cd13c913cd1d6016ae8742d6a7c87d288f2c4bd038c064f",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "dacf4af9c114e1ba67a7e12b8b264e0b13880df22078754eb4b206c0937873f0",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"status_check\",\"proposal\":{\"operation\":\"book\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-status-only-de-3-candidate",
+      "scenario": "status-only-de",
+      "responseId": "resp_04ecf192119118cc016ae87433258887d28e741dc1cffdd684",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "dacf4af9c114e1ba67a7e12b8b264e0b13880df22078754eb4b206c0937873f0",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"status_check\",\"proposal\":{\"operation\":\"book\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-status-only-de-4-candidate",
+      "scenario": "status-only-de",
+      "responseId": "resp_0462ec693b39382f016ae87434ac4c87d29e2ce4b50db99a00",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "dacf4af9c114e1ba67a7e12b8b264e0b13880df22078754eb4b206c0937873f0",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"status_check\",\"proposal\":{\"operation\":\"book\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-status-only-de-5-candidate",
+      "scenario": "status-only-de",
+      "responseId": "resp_01cf21c0b1b44e94016ae87439a04487d2871f3938e91a2568",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "dacf4af9c114e1ba67a7e12b8b264e0b13880df22078754eb4b206c0937873f0",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"status_check\",\"proposal\":{\"operation\":\"book\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-visit-accepted-de-1-candidate",
+      "scenario": "visit-accepted-de",
+      "responseId": "resp_09052f668cb22bd0016ae87485eb9487d2a437d477d5d243b9",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "76fc061d4e9c11ea6dfc6c81cd95a4881da5366ea19187a8bb9e67aa2b26960e",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "request_appointment",
+          "arguments": "{\"intent\":\"request\",\"proposal\":{\"operation\":\"book\",\"date\":\"2026-11-10\",\"startTime\":\"09:45\",\"timeZone\":\"Europe/Zurich\",\"serviceMatches\":true,\"recipientMatches\":true,\"requiresPaymentOrNewTerms\":false,\"detailsConfirmed\":true}}"
+        }
+      ]
+    },
+    {
+      "id": "backend-visit-unknown-de-1-candidate",
+      "scenario": "visit-unknown-de",
+      "responseId": "resp_093ec9653dc70899016ae873e617f487d2abbedaec67f17690",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "c9bd9a7623fb69ffc9565ba57e11020735438d9b16461534987283c3c4238007",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Es ist nicht bekannt, ob Test Patient schon einmal bei Ihnen war."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-visit-unknown-de-2-candidate",
+      "scenario": "visit-unknown-de",
+      "responseId": "resp_0ff129a0e446eb61016ae873e81a1887d2989e6df874a16e97",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "c9bd9a7623fb69ffc9565ba57e11020735438d9b16461534987283c3c4238007",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "report_task_state",
+          "arguments": "{\"state\":\"wait_for_recipient\",\"summary\":\"Es ist nicht bekannt, ob Test Patient schon früher dort war. Bitte teilen Sie Test Desk diese Information mit; noch keine Buchung anfragen.\"}"
+        }
+      ]
+    },
+    {
+      "id": "backend-visit-unknown-de-3-candidate",
+      "scenario": "visit-unknown-de",
+      "responseId": "resp_07fa348ad6348229016ae873f74e1087d2b5bda82c982e85c3",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "c9bd9a7623fb69ffc9565ba57e11020735438d9b16461534987283c3c4238007",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "report_task_state",
+          "arguments": "{\"state\":\"wait_for_recipient\",\"summary\":\"Es gibt keine freigegebene Information dazu, ob Test Patient schon einmal dort war. Diese Angabe ist unbekannt; vor einer Terminanfrage muss geklärt werden, ob sie erforderlich ist.\"}"
+        }
+      ]
+    },
+    {
+      "id": "backend-visit-unknown-de-4-candidate",
+      "scenario": "visit-unknown-de",
+      "responseId": "resp_0191bbc2b9593c46016ae873fc935887d29aa545cebc5bbf8d",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "c9bd9a7623fb69ffc9565ba57e11020735438d9b16461534987283c3c4238007",
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "In den freigegebenen Angaben ist nicht festgehalten, ob Test Patient schon einmal dort war. Die Antwort ist unbekannt."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backend-visit-unknown-de-5-candidate",
+      "scenario": "visit-unknown-de",
+      "responseId": "resp_06a8b0a521349a56016ae8740dd05887d28b79eb5013369595",
+      "model": "gpt-6-luna",
+      "instructionsSha256": "bc44a389067573d7157d79724067a6a8e22972bc10a720d8c5ffc1af87aa72fa",
+      "requestSha256": "c9bd9a7623fb69ffc9565ba57e11020735438d9b16461534987283c3c4238007",
+      "output": [
+        {
+          "type": "function_call",
+          "name": "report_task_state",
+          "arguments": "{\"state\":\"wait_for_recipient\",\"summary\":\"Der approveden Daten ist nicht zu entnehmen, ob Test Patient schon einmal dort war; diese Information ist unbekannt. Das muss Test Desk mitgeteilt werden, bevor die Terminvereinbarung weitergeführt wird.\"}"
+        }
+      ]
+    }
+  ]
+}

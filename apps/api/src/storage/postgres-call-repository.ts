@@ -16,6 +16,7 @@ import { answeringUsage } from "../telephony/answering-usage";
 import { answeringStateSchema } from "@callassist/contracts";
 import { transitionAnswering, type AnsweringTransitionInput } from "../telephony/answering-policy";
 import { historyObjective } from "./history-objective";
+import { readHistoryCompilation, readHistoryTelemetry } from "./history-read-model";
 import { assertRetryableCall } from "./call-retry";
 import { appointmentPlanExpired } from "@callassist/contracts";
 import { readProviderBilling } from "../billing/read-provider-billing";
@@ -637,8 +638,9 @@ export class PostgresCallRepository implements CallRepository {
     const hasMore = rows.length > input.limit;
     const selected = rows.slice(0, input.limit);
     const ids = selected.map(row => row.id);
-    const events = groupTelemetryByCall(await this.#selectTelemetryForCallIds(ids, sql));
-    const { settlements, assessments } = await this.#lifecycleFacts(ids, sql);
+    const historyTelemetry = await this.#selectHistoryTelemetryForCallIds(ids, sql);
+    const events = groupTelemetryByCall(historyTelemetry.events);
+    const { settlements, assessments } = await this.#lifecycleFacts(ids, sql, true);
     const feedback = new Map<string, CallFeedbackSummary>();
     if (ids.length) {
       const feedbackRows = await sql<Array<{ callBriefId: string; goalResult: CallGoalResult; revision: number; createdAt: Date; attemptStarts: Date[] }>>`
@@ -659,7 +661,7 @@ export class PostgresCallRepository implements CallRepository {
         FROM call_text_artifacts a JOIN call_briefs b ON b.current_compilation_id=a.compilation_id WHERE b.id IN ${sql(ids)}
           AND a.kind='plan_review' AND a.status='ready' AND a.payload_ciphertext IS NOT NULL ORDER BY a.updated_at DESC`;
       for (const row of compilations) {
-        const compilation = row.ciphertext ? callCompilationSchema.parse(decryptJson(row.ciphertext, this.#encryptionKey)) : null;
+        const compilation = row.ciphertext ? readHistoryCompilation(decryptJson(row.ciphertext, this.#encryptionKey)) : null;
         objectives.set(row.callId, historyObjective(compilation, translations.filter(t => t.callId === row.callId).map(t => ({
           kind: "plan_review", status: "ready", sourceHash: t.hash, targetLanguage: t.language, payload: decryptJson(t.ciphertext, this.#encryptionKey)
         }))));
@@ -667,7 +669,8 @@ export class PostgresCallRepository implements CallRepository {
     }
     const items = selected.map((row) => ({ ...this.#mapBrief(row),
       ...objectives.get(row.id),
-      lifecycle: deriveCallLifecycle(row.status, events.get(row.id) ?? [], settlements.get(row.id), assessments.get(row.id)),
+      lifecycle: { ...deriveCallLifecycle(row.status, events.get(row.id) ?? [], settlements.get(row.id), assessments.get(row.id)),
+        eventSequence: historyTelemetry.sequences.get(row.id) ?? 0 },
       feedback: feedback.get(row.id) ?? null }));
     const last = items.at(-1);
     return {
@@ -3139,13 +3142,13 @@ export class PostgresCallRepository implements CallRepository {
         batchSize
       );
       if (rows.length === 0) break;
-      const events = await this.#selectTelemetryForCallIds(
+      const historyTelemetry = await this.#selectHistoryTelemetryForCallIds(
         rows.map(({ id }) => id)
       );
-      const byCall = groupTelemetryByCall(events);
-      const { settlements, assessments } = await this.#lifecycleFacts(rows.map(row=>row.id));
+      const byCall = groupTelemetryByCall(historyTelemetry.events);
+      const { settlements, assessments } = await this.#lifecycleFacts(rows.map(row=>row.id), undefined, true);
       matched.push(...rows
-        .map((row) => mapAdminCallSummary(row, byCall.get(row.id) ?? [], settlements.get(row.id), assessments.get(row.id)))
+        .map((row) => mapAdminCallSummary(row, byCall.get(row.id) ?? [], settlements.get(row.id), assessments.get(row.id), historyTelemetry.sequences.get(row.id)))
         .filter((summary) =>
           !input.consent || summary.technical.consent === input.consent
         )
@@ -3174,8 +3177,8 @@ export class PostgresCallRepository implements CallRepository {
     const rows = await this.#selectAdminCallRows({}, id, 1);
     const row = rows[0];
     if (!row) throw new CallRepositoryError("CALL_NOT_FOUND");
-    const [timeline, outcomeRows] = await Promise.all([
-      this.listCallTelemetryEvents(id),
+    const [historyTelemetry, outcomeRows] = await Promise.all([
+      this.#selectHistoryTelemetryForCallIds([id]),
       this.#sql<CallOutcomeRevisionRow[]>`
         SELECT
           id,
@@ -3193,9 +3196,10 @@ export class PostgresCallRepository implements CallRepository {
         ORDER BY revision ASC
       `
     ]);
-    const { settlements, assessments } = await this.#lifecycleFacts([id]);
+    const timeline = historyTelemetry.events;
+    const { settlements, assessments } = await this.#lifecycleFacts([id], undefined, true);
     return adminCallInspectorSchema.parse({
-      summary: mapAdminCallSummary(row, timeline, settlements.get(id), assessments.get(id)),
+      summary: mapAdminCallSummary(row, timeline, settlements.get(id), assessments.get(id), historyTelemetry.sequences.get(id)),
       timeline: timeline.map(
         ({ callBriefId: _callBriefId, userId: _userId, ...event }) => event
       ),
@@ -3235,21 +3239,39 @@ export class PostgresCallRepository implements CallRepository {
         )
       `;
     });
-    const [snapshot, outcome] = await Promise.all([
-      this.#require(id),
-      this.#buildOutcomeView(id)
+    // Content inspection must not parse an executable plan, diagnostics or an
+    // assessment merely to display retained user text. Access auditing above and
+    // the sensitive-content response schema remain unchanged.
+    const [briefRow] = await this.#sql<CallBriefRow[]>`${this.#briefSelect()}
+      WHERE id=${id} AND data_deleted_at IS NULL`;
+    if (!briefRow) throw new CallRepositoryError("CALL_NOT_FOUND");
+    const brief = this.#mapBrief(briefRow);
+    const [transcripts, finals, feedback] = await Promise.all([
+      this.#sql<TranscriptRow[]>`SELECT id,role,text,locale,final,created_at AS "createdAt",
+        native_timing AS "nativeTiming",application_playback AS "applicationPlayback",
+        ingestion_sequence::float8 AS "ingestionSequence",received_at AS "receivedAt",call_attempt_id AS "callAttemptId"
+        FROM transcript_segments WHERE call_brief_id=${id} ORDER BY ingestion_sequence ASC`,
+      this.#sql<FinalTranscriptRow[]>`SELECT f.id,f.status,f.artifact_kind AS "artifactKind",f.quality,f.source,
+        f.text_ciphertext AS "textCiphertext",f.segments_ciphertext AS "segmentsCiphertext",f.model,
+        f.failure_reason AS "failureReason",f.created_at AS "createdAt",f.updated_at AS "updatedAt",f.completed_at AS "completedAt"
+        FROM final_transcripts f JOIN call_attempts a ON a.id=f.call_attempt_id
+        WHERE a.id=(SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1)
+          AND (f.artifact_kind='live' OR a.native_transcript_capture IS NULL)
+        ORDER BY (f.artifact_kind='live') DESC LIMIT 1`,
+      this.#sql<{ comment: string | null }[]>`SELECT comment_ciphertext AS comment FROM call_feedback_revisions
+        WHERE call_brief_id=${id} ORDER BY revision DESC LIMIT 1`
     ]);
     return adminCallSensitiveContentSchema.parse({
       callBriefId: id,
-      recipientName: snapshot.brief.recipientName,
-      phoneNumber: snapshot.brief.phoneNumber,
-      representedPerson: snapshot.brief.representedPerson,
-      objective: snapshot.brief.objective,
-      context: snapshot.brief.context,
-      allowedFacts: snapshot.brief.allowedFacts,
-      transcript: snapshot.transcript,
-      finalTranscript: snapshot.finalTranscript,
-      feedbackComment: outcome.latestFeedback?.comment ?? null
+      recipientName: brief.recipientName,
+      phoneNumber: brief.phoneNumber,
+      representedPerson: brief.representedPerson,
+      objective: brief.objective,
+      context: brief.context,
+      allowedFacts: brief.allowedFacts,
+      transcript: transcripts.map(row => this.#mapTranscript(row)),
+      finalTranscript: finals[0] ? this.#mapFinalTranscript(finals[0]) : null,
+      feedbackComment: feedback[0]?.comment ? decryptJson<string>(feedback[0].comment, this.#encryptionKey) : null
     });
   }
 
@@ -3481,8 +3503,8 @@ export class PostgresCallRepository implements CallRepository {
         ORDER BY id LIMIT 200
       `;
       if (!batch.length) break;
-      const byCall = groupTelemetryByCall(await this.#selectTelemetryForCallIds(batch.map(({ id }) => id)));
-      const { settlements, assessments } = await this.#lifecycleFacts(batch.map(row=>row.id));
+      const byCall = groupTelemetryByCall((await this.#selectHistoryTelemetryForCallIds(batch.map(({ id }) => id))).events);
+      const { settlements, assessments } = await this.#lifecycleFacts(batch.map(row=>row.id), undefined, true);
       for (const brief of batch) {
         const events = byCall.get(brief.id) ?? [];
         const projected = deriveCallLifecycle(brief.status, events, settlements.get(brief.id), assessments.get(brief.id));
@@ -4359,7 +4381,7 @@ export class PostgresCallRepository implements CallRepository {
         WHERE (${afterId}::uuid IS NULL OR id > ${afterId}) ORDER BY id LIMIT 200
       `;
       if (!batch.length) break;
-      const byCall = groupTelemetryByCall(await this.#selectTelemetryForCallIds(batch.map(({ id }) => id)));
+      const byCall = groupTelemetryByCall((await this.#selectHistoryTelemetryForCallIds(batch.map(({ id }) => id))).events);
       for (const brief of batch) {
         const stage = deriveTechnicalCallOutcome(brief.status, byCall.get(brief.id) ?? []).failureStage;
         if (stage) metrics.technicalFailures[stage] += 1;
@@ -7685,6 +7707,15 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async #selectTelemetryForCallIds(ids: string[], sql: postgres.Sql | postgres.TransactionSql = this.#sql) {
+    return (await this.#selectTelemetryRowsForCallIds(ids, sql)).map(mapCallTelemetryEvent);
+  }
+
+  // Display only: never use this compatibility projection for execution or writes.
+  async #selectHistoryTelemetryForCallIds(ids: string[], sql: postgres.Sql | postgres.TransactionSql = this.#sql) {
+    return readHistoryTelemetry((await this.#selectTelemetryRowsForCallIds(ids, sql)).map(callTelemetryValue));
+  }
+
+  async #selectTelemetryRowsForCallIds(ids: string[], sql: postgres.Sql | postgres.TransactionSql = this.#sql) {
     if (ids.length === 0) return [];
     const rows = await sql<CallTelemetryEventRow[]>`
       SELECT
@@ -7704,7 +7735,7 @@ export class PostgresCallRepository implements CallRepository {
       WHERE call_brief_id IN ${sql(ids)}
       ORDER BY call_brief_id ASC, sequence ASC
     `;
-    return rows.map(mapCallTelemetryEvent);
+    return rows;
   }
 
   async #lifecycle(id: string, status: CallBrief["status"]) {
@@ -7713,15 +7744,15 @@ export class PostgresCallRepository implements CallRepository {
     return deriveCallLifecycle(status,events,settlements.get(id),assessments.get(id));
   }
 
-  async #lifecycleFacts(ids: string[], sql?: postgres.TransactionSql) {
+  async #lifecycleFacts(ids: string[], sql?: postgres.TransactionSql, forHistory = false) {
     if (sql) return {
       settlements: await this.#selectSettlementFactsForCallIds(ids, sql),
-      assessments: await this.#assessments.forCalls(ids, sql)
+      assessments: await this.#assessments.forCalls(ids, sql, forHistory)
     };
     // Assessment and settlement publish atomically. Read the same database snapshot too.
     return this.#sql.begin("ISOLATION LEVEL REPEATABLE READ READ ONLY",async tx=>({
       settlements:await this.#selectSettlementFactsForCallIds(ids,tx),
-      assessments:await this.#assessments.forCalls(ids,tx)
+      assessments:await this.#assessments.forCalls(ids,tx,forHistory)
     }));
   }
 
@@ -8637,7 +8668,11 @@ function parseCallChangeSignal(payload: string): CallChangeSignal | null {
 }
 
 function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {
-  return durableCallEventSchema.parse({
+  return durableCallEventSchema.parse(callTelemetryValue(row));
+}
+
+function callTelemetryValue(row: CallTelemetryEventRow) {
+  return {
     id: row.id,
     callBriefId: row.callBriefId,
     callAttemptId: row.callAttemptId,
@@ -8654,7 +8689,7 @@ function mapCallTelemetryEvent(row: CallTelemetryEventRow): DurableCallEvent {
         ? JSON.parse(row.metadata)
         : row.metadata
     }
-  });
+  };
 }
 
 function callOutcomeRevisionSelect(sql: postgres.TransactionSql) {
@@ -8745,8 +8780,10 @@ function mapAdminCallSummary(
   row: AdminCallReadRow,
   events: DurableCallEvent[],
   settlements: CallSettlementFact[] = [],
-  assessments: CallAssessmentRecord[] = []
+  assessments: CallAssessmentRecord[] = [],
+  eventSequence?: number
 ): AdminCallSummary {
+  const lifecycle = deriveCallLifecycle(row.status, events, settlements, assessments);
   return adminCallSummarySchema.parse({
     id: row.id,
     ownerUserId: row.ownerUserId,
@@ -8755,7 +8792,7 @@ function mapAdminCallSummary(
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
     technical: deriveTechnicalCallOutcome(row.status, events),
-    lifecycle: deriveCallLifecycle(row.status, events, settlements, assessments),
+    lifecycle: { ...lifecycle, eventSequence: eventSequence ?? lifecycle.eventSequence },
     semanticOutcome: row.semanticOutcome,
     outcomeProvenance: row.outcomeProvenance,
     feedback: row.feedbackRevision && row.goalResult && row.feedbackCreatedAt

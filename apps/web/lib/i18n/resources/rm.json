@@ -1,4 +1,10 @@
 {
+  "Booking at a clinic? Optional details": "Appuntament en ina pratica da medi? Indicaziuns facultativas",
+  "You can add these details to the approved information below, one fact per line:": "Vus pudais agiuntar questas indicaziuns a las infurmaziuns permessas qua sut, in fatg per lingia:",
+  "Date of birth, if you authorize sharing it.": "La data da naschientscha, sche Vus permettais da communitgar ella.",
+  "Whether the person you represent has visited this clinic before.": "Sche la persuna represchentada è gia stada en questa pratica.",
+  "Both are optional. You can write “unknown” or “do not share” for each item, or leave it out.": "Tuttas duas indicaziuns èn facultativas. Per mintgina pudais Vus scriver «betg enconuschent» u «betg communitgar», u laschar ella davent.",
+  "Only include what you authorize for this call. Do not add medical details unrelated to the booking. Review the prepared plan before approving it.": "Inditgai mo quai che Vus permettais da communitgar durant quest telefonat. N’agiuntai nagins detagls medicinals che n’han nagut da far cun l’appuntament. Controllai il plan preparà avant d’al approvar.",
   "The phone connection is open. The provider is checking who answered.": "La colliaziun è stabilida. Il purschider controlla tgi che ha respundì.",
   "The assistant asks for consent before recording and starting the task.": "L’assistent dumonda il consentiment avant che la registraziun e l’incumbensa cumenzan.",
   "Other language (language code)": "Autra lingua (code da lingua)",

@@ -22,6 +22,12 @@ import {
 import { adminCallMessages } from "@/lib/i18n/admin-call-messages";
 import { AdminCostBreakdown } from "./admin-cost-breakdown";
 
+export function AdminTimelineCoverage({ total, shown, locale }: { total: number; shown: number; locale: "en" | "de" }) {
+  if (shown >= total) return null;
+  return <p role="status">{adminCallMessages[locale].partialTimeline
+    .replace("{shown}", String(shown)).replace("{total}", String(total))}</p>;
+}
+
 export function AdminCallInspector({ callId }: { callId: string }) {
   const locale = "en" as const;
   const user = useAdminSession();
@@ -149,7 +155,8 @@ export function AdminCallInspector({ callId }: { callId: string }) {
             <div className="admin-inspector-grid">
               <section className="admin-inspector-panel" id="call-timeline">
                 <h2>{copy.timeline}</h2>
-                {inspector.timeline.length === 0 ? <p>{copy.noTimeline}</p> : (
+                <AdminTimelineCoverage total={summary.eventCount} shown={inspector.timeline.length} locale={locale} />
+                {inspector.timeline.length === 0 ? (summary.eventCount === 0 ? <p>{copy.noTimeline}</p> : null) : (
                   <ol className="admin-call-timeline">
                     {inspector.timeline.map((event) => (
                       <li data-severity={event.severity} key={event.id}>

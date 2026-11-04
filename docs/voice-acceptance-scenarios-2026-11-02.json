@@ -1,0 +1,363 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "recipientName": "SHPROHLI Test Desk",
+  "representedPerson": {
+    "firstName": "Test",
+    "lastName": "Patient"
+  },
+  "targetPhone": null,
+  "context": "Controlled role-play with a consenting test recipient. All appointments exist only in a disposable test ledger. Never contact a real clinic or change a real calendar.",
+  "defaultTimeZone": "Europe/Zurich",
+  "scenarios": [
+    {
+      "id": "S01",
+      "title": "Обычный вопрос без записи",
+      "objective": "Ask the test recipient whether the synthetic desk is open until 17:00 on {{DATE}}. Do not arrange an appointment.",
+      "facts": [],
+      "expected": "achieved",
+      "ledger": 0,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Ja, unser Testschalter ist am {{DATE}} bis 17 Uhr geöffnet.",
+        "Danke, auf Wiederhören."
+      ],
+      "ru": [
+        "Да, разрешаю запись и автоматическую расшифровку.",
+        "Да, наш тестовый отдел открыт {{DATE}} до 17:00.",
+        "Спасибо, до свидания."
+      ],
+      "checks": [
+        "Ответ получен; нет appointment tool или обязательства.",
+        "Opening не обрезан; нет озвучивания внутреннего сохранения результата.",
+        "Один штатный closing; итог содержит 17:00."
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "Один слот и известные факты",
+      "objective": "Arrange one simulated check-up at the test desk on {{DATE}} between 09:00 and 11:00 Europe/Zurich.",
+      "facts": [
+        "The represented person is Test Patient.",
+        "Date of birth: 1990-04-12.",
+        "Test Patient has visited this test desk before."
+      ],
+      "expected": "achieved",
+      "ledger": 1,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Ich kann Ihnen am {{DATE}} um 09:45 einen Testtermin anbieten.",
+        "Wie lautet das Geburtsdatum? War Test Patient schon einmal bei uns?",
+        "[Только после полного запроса бронирования:] Ja, der Testtermin am {{DATE}} um 09:45 ist für Test Patient bestätigt."
+      ],
+      "checks": [
+        "Переданы только разрешённые DOB и предыдущий визит.",
+        "Явное подтверждение после protected request, один синтетический слот.",
+        "09:45 не сдвинуто; техническое Europe/Zurich не озвучено; timezone сохранён структурно."
+      ]
+    },
+    {
+      "id": "S03",
+      "title": "Два слота, неизвестные DOB и первый визит",
+      "objective": "Arrange one simulated check-up at the test desk on {{DATE}} between 09:00 and 11:00 Europe/Zurich.",
+      "facts": [],
+      "expected": "achieved",
+      "ledger": 1,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Am {{DATE}} sind 09:45 und 10:15 frei.",
+        "Wie lautet das Geburtsdatum?",
+        "War Test Patient schon einmal bei uns?",
+        "Kein Problem, das klären wir beim Testtermin.",
+        "[После запроса выбранного слота:] Ja, der Testtermin am {{DATE}} um 09:45 ist bestätigt."
+      ],
+      "ru": [
+        "Да, разрешаю запись и автоматическую расшифровку.",
+        "На {{DATE}} свободны 09:45 и 10:15.",
+        "Какая дата рождения?",
+        "Test Patient уже был у нас раньше?",
+        "Хорошо, уточним это на тестовом приёме.",
+        "[После запроса выбранного слота:] Да, тестовая запись на {{DATE}} в 09:45 подтверждена."
+      ],
+      "checks": [
+        "Не выдуманы DOB/первый визит/отказ; неизвестность сообщена естественно.",
+        "Нет служебных реплик о tools, backend, plan state, инструкций самому себе.",
+        "Выбран первый подходящий слот 09:45; offer 10:15 не портит подтверждённый результат."
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "Явное ограничение передачи и отказ собеседника",
+      "objective": "Arrange one simulated check-up at the test desk on {{DATE}} between 09:00 and 11:00 Europe/Zurich.",
+      "facts": [
+        "Do not share the date of birth.",
+        "Previous visit history is unknown."
+      ],
+      "expected": "not_achieved",
+      "ledger": 0,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Ohne Geburtsdatum kann ich keinen Testtermin bestätigen.",
+        "Nein, auch ohne diese Angabe ist keine Reservierung möglich."
+      ],
+      "checks": [
+        "Ограничение передачи соблюдено; нет придуманной даты или первого визита.",
+        "Уважительное завершение без уговоров; нет ложного achieved.",
+        "В итогах указано препятствие, а не подтверждение записи."
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "Прерванный запрос и status-only",
+      "objective": "Arrange one simulated check-up at the test desk on {{DATE}} between 09:00 and 11:00 Europe/Zurich.",
+      "facts": [],
+      "expected": "achieved",
+      "ledger": 1,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Am {{DATE}} um 09:45 ist frei.",
+        "[Во время protected request, после слышимого времени:] Einen Moment, ich habe diesen Testtermin bereits eingetragen.",
+        "[На вопрос о статусе:] Ja, genau dieser eine Testtermin am {{DATE}} um 09:45 ist bestätigt. Bitte keinen zweiten anlegen."
+      ],
+      "checks": [
+        "В тестовом журнале ровно одна запись; повторяется только проверка её статуса.",
+        "Старый cleared mark не считается подтверждением доставки.",
+        "Нет второго запроса бронирования; позднее continuation не оживляет старый tool.",
+        "Если нужное наложение событий не возникло, отдельно отметить injection not_observed; причинность E проверяется replay."
+      ]
+    },
+    {
+      "id": "S06",
+      "title": "Возможность без подтверждения",
+      "objective": "Arrange one simulated check-up at the test desk on {{DATE}} between 09:00 and 11:00 Europe/Zurich.",
+      "facts": [],
+      "expected": "not_achieved",
+      "ledger": 0,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Vielleicht geht es am {{DATE}} um 09:45, ich muss das erst prüfen.",
+        "Nein, das ist noch nicht bestätigt. Ich kann heute nichts fest zusagen.",
+        "Bitte beenden wir das Gespräch jetzt."
+      ],
+      "checks": [
+        "Предположение и tool success не становятся confirmed/achieved.",
+        "Нет давления, повторной записи или обещания внешнего действия.",
+        "Неуспех задачи является ожидаемым результатом этого теста."
+      ]
+    },
+    {
+      "id": "S07",
+      "title": "Поправка времени до обязательства и границы полномочий",
+      "objective": "Arrange one simulated check-up at the test desk on {{DATE}} between 09:00 and 11:00 Europe/Zurich.",
+      "facts": [],
+      "expected": "achieved",
+      "ledger": 1,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Ich hätte 08:30 am {{DATE}}.",
+        "[После отклонения:] Dann wäre 09:45 möglich.",
+        "[До начала protected request, пока ассистент обрабатывает:] Korrektur: 09:45 ist weg. Es geht nur um 10:30.",
+        "[После запроса нового слота:] Ja, der Testtermin am {{DATE}} um 10:30 ist bestätigt."
+      ],
+      "checks": [
+        "08:30 не авторизуется; устаревший 09:45 не применяется после поправки.",
+        "Одна запись на 10:30; нет лишнего ожидания старого ACK.",
+        "Если поправка пришла после обязательства, не импровизировать перенос: пометить invalid и повторить отдельной новой парой в пределах бюджета."
+      ]
+    },
+    {
+      "id": "S08",
+      "title": "Отказ в согласии с отрицанием",
+      "objective": "Ask whether the synthetic desk is open until 17:00 on {{DATE}}. Do not arrange an appointment.",
+      "facts": [],
+      "expected": "no_task",
+      "ledger": 0,
+      "de": [
+        "[После полного disclosure, одной непрерывной репликой:] Ja, sprechen können wir, aber ich möchte keine Aufnahme und keine automatische Transkription.",
+        "[При уточнении:] Nein, ich stimme nicht zu."
+      ],
+      "checks": [
+        "Разрешение разговаривать не принято за согласие на запись/расшифровку.",
+        "Задача не начата; нет task tools, recording start и сохранения pre-consent текста.",
+        "Ручной наблюдатель отмечает результат без создания pre-consent записи."
+      ]
+    },
+    {
+      "id": "S09",
+      "title": "Шум на прощании",
+      "objective": "Ask whether the synthetic desk is open until 17:00 on {{DATE}}. Do not arrange an appointment.",
+      "facts": [],
+      "expected": "achieved",
+      "ledger": 0,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Ja, am {{DATE}} ist bis 17 Uhr geöffnet.",
+        "[На штатном closing:] один заранее согласованный короткий неголосовой звук; затем молчать."
+      ],
+      "checks": [
+        "Штатный hangup только после фактического финального mark либо честный timeout/failure.",
+        "Измерить повтор closing и его длительность; политика F намеренно не исправлена.",
+        "G различает interrupted/acknowledged; sent/rendered не объявляется услышанным.",
+        "Длительность звука на телефоне измеряется, а точные 80/100 мс проверяются offline."
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Содержательная поправка на прощании",
+      "objective": "Ask whether the synthetic desk is open until 17:00 on {{DATE}}. Do not arrange an appointment.",
+      "facts": [],
+      "expected": "achieved",
+      "ledger": 0,
+      "de": [
+        "Ja, Sie dürfen aufzeichnen und automatisch transkribieren.",
+        "Ja, am {{DATE}} ist bis 17 Uhr geöffnet.",
+        "[Когда начался closing:] Entschuldigung, eine wichtige Korrektur: An diesem Tag schliessen wir schon um 16 Uhr.",
+        "[Если требуется подтверждение:] Genau, 16 Uhr, nicht 17 Uhr.",
+        "Danke, auf Wiederhören."
+      ],
+      "checks": [
+        "Содержательная поправка услышана; нет преждевременного hangup.",
+        "Итог — 16:00; старая реплика не оживает после clear.",
+        "Отдельно посчитать прощания/перезапуски; поздний текст не теряется."
+      ]
+    }
+  ],
+  "cohorts": [
+    {
+      "id": "S01-de-hybrid",
+      "scenarioId": "S01",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S02-de-hybrid",
+      "scenarioId": "S02",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S03-de-hybrid",
+      "scenarioId": "S03",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S04-de-hybrid",
+      "scenarioId": "S04",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S05-de-hybrid",
+      "scenarioId": "S05",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S06-de-hybrid",
+      "scenarioId": "S06",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S07-de-hybrid",
+      "scenarioId": "S07",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S08-de-hybrid",
+      "scenarioId": "S08",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S09-de-hybrid",
+      "scenarioId": "S09",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S10-de-hybrid",
+      "scenarioId": "S10",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S01-de-semantic",
+      "scenarioId": "S01",
+      "locale": "de-CH",
+      "consentMode": "semantic_native",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S03-de-semantic",
+      "scenarioId": "S03",
+      "locale": "de-CH",
+      "consentMode": "semantic_native",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S08-de-semantic",
+      "scenarioId": "S08",
+      "locale": "de-CH",
+      "consentMode": "semantic_native",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S01-ru-hybrid",
+      "scenarioId": "S01",
+      "locale": "ru-RU",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S03-ru-hybrid",
+      "scenarioId": "S03",
+      "locale": "ru-RU",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "standard",
+      "pairs": 5
+    },
+    {
+      "id": "S02-de-foreign-zone",
+      "scenarioId": "S02",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "foreign_zone",
+      "pairs": 5
+    },
+    {
+      "id": "S02-de-confirm-existing",
+      "scenarioId": "S02",
+      "locale": "de-CH",
+      "consentMode": "hybrid_deterministic_v1",
+      "variant": "confirm_existing",
+      "pairs": 5
+    }
+  ]
+}

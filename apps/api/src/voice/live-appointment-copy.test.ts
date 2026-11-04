@@ -5,6 +5,7 @@ import { authorization, proposal } from "./voice-test-helpers";
 describe("canonical appointment commitments", () => {
   it.each(["de-CH", "de-DE", "fr-CH", "it-CH", "ru-RU", "en-GB", "en-US"] as const)(
     "distinguishes booking from confirming an existing appointment in %s", locale => {
+      const before = structuredClone({ authorization, proposal });
       const booking = appointmentRequestCopy(locale, "Nina Keller", authorization, { ...proposal, operation: "book" });
       const existing = appointmentRequestCopy(locale, "Nina Keller", { ...authorization, operation: "confirm_existing" },
         { ...proposal, operation: "confirm_existing" });
@@ -14,9 +15,13 @@ describe("canonical appointment commitments", () => {
       for (const text of [booking, existing, status]) {
         expect(text).toContain("Nina Keller"); expect(text).toContain(authorization.serviceDescription);
         expect(text).toContain("2099"); expect(text).toContain("16");
-        expect(text).toContain("15:00 (Europe/Zurich)");
+        expect(text).toContain("15:00");
+        expect(text).not.toContain("Europe/Zurich");
+        expect(text).not.toContain("Zurich");
         const weekdays = { "de-CH": "Mittwoch", "de-DE": "Mittwoch", "fr-CH": "mercredi", "it-CH": "mercoledì", "ru-RU": "среда", "en-GB": "Wednesday", "en-US": "Wednesday" };
         expect(text).toContain(weekdays[locale]);
       }
+      expect({ authorization, proposal }).toEqual(before);
+      expect(proposal.timeZone).toBe("Europe/Zurich");
     });
 });

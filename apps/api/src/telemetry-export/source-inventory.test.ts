@@ -25,6 +25,19 @@ const excluded: Record<string, string[]> = {
 };
 const directory = new URL("../db/migrations/", import.meta.url);
 describe("telemetry source inventory", () => {
+  it("exports playback milestones with a nested allowlist and leaves historical events unchanged", () => {
+    const source = exportSources.find(source => source.table === "call_events")!;
+    const playback = { markId: "live-application-4-test", owner: "closing", outcome: "interrupted", reason: "acoustic_activity",
+      requestedAt: "2026-11-02T08:35:25.830Z", renderedAt: "2026-11-02T08:35:27.824Z",
+      releasedAt: "2026-11-02T08:35:27.824Z", endedAt: "2026-11-02T08:35:33.204Z", durationMs: 12350 };
+    const historical = { event_name: "conversation.task", metadata: { phase: "speak", revision: 4, runtimeVersion: "live-managed-v9" } };
+    expect(mapExportRow(source, historical, Buffer.alloc(32)).data).toEqual(historical);
+    const record = mapExportRow(source, { ...historical, metadata: { ...historical.metadata,
+      playback: { ...playback, text: "private words", audio: "private audio", heardPrefix: "not evidence" } } }, Buffer.alloc(32));
+    expect(record.data).toEqual({ ...historical, metadata: { ...historical.metadata, playback } });
+    expect(JSON.stringify(record)).not.toContain("private");
+    expect(() => mapExportRow(source, { ...historical, metadata: { playback: { ...playback, durationMs: -1 } } }, Buffer.alloc(32))).toThrow();
+  });
   it("preserves creation UI locale without exporting private email delivery payloads", () => {
     const source = exportSources.find(source => source.table === "call_briefs")!;
     expect(source.fields).toContain("creation_ui_locale");

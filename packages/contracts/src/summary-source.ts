@@ -40,5 +40,5 @@ export const summaryCalendarSchema = z.strictObject({
 export type SummaryCalendar = z.infer<typeof summaryCalendarSchema>;
 
 export function supportsSummaryAssessment(version: string): boolean {
-  return version.startsWith("summary-v3:") || version.startsWith("summary-v4:grounded-v3:");
+  return version.startsWith("summary-v3:") || /^summary-v[45]:grounded-v3:/.test(version);
 }

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { executionSpokenIdentities } from "./spoken-execution";
 import { liveRuntimeDescriptor, type ConsentRuntimePolicy } from "./runtime-descriptor";
-import { defaultVoiceConsentRuntimePolicy, projectSpokenIdentityText } from "@callassist/contracts";
+import { defaultVoiceConsentRuntimePolicy, projectSpokenIdentityText, type ApplicationPlaybackDiagnostic } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import { createHash, randomUUID } from "node:crypto";
 import { LIVE_VOICES, type AnsweringState, type CallLocale, type ConsentEvidence } from "@callassist/contracts";
@@ -23,6 +23,7 @@ import { appointmentRequestCopy, appointmentStatusCopy } from "./live-appointmen
 import { resolveInitialDisclosure, calendarDateDetails } from "@callassist/contracts";
 
 type Phase = "starting" | "disclosure" | "consent" | "recording" | "opening" | "conversation" | "closing" | "ending" | "closed";
+type PlaybackMilestones = Omit<ApplicationPlaybackDiagnostic, "outcome" | "reason" | "endedAt">;
 /** Owns Twilio admission, privacy/consent and playback. Live owns no application state. */
 export class UnifiedLiveCall implements LiveLifecycle {
   #phase: Phase = "starting";
@@ -96,7 +97,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #criticalResolve: ((played: boolean) => void) | null = null;
   #criticalReleased = false;
   #applicationPlayback: { mark: string; text: string; generation: number; current: () => boolean;
-    resolve: (played: boolean) => void; timer: ReturnType<typeof setTimeout>; released: boolean; sentAt: string; durationMs: number } | null = null;
+    resolve: (played: boolean) => void; timer: ReturnType<typeof setTimeout>; released: boolean; sentAt: string; durationMs: number;
+    diagnostic: PlaybackMilestones | null } | null = null;
   #appointmentReply: { afterTurn: number; resolve: (turn: { id: string; text: string } | null) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   #taskWaitTimer: ReturnType<typeof setTimeout> | null = null;
   #taskWaitTurn = -1;
@@ -503,10 +505,27 @@ export class UnifiedLiveCall implements LiveLifecycle {
     void this.#playApplicationText(text, protectedSpeech?.current ?? (() => !this.#isClosed()), limits?.deadlineMs)
       .then(completed => { if (completed) played(); });
   }
-  #cancelApplicationPlayback() {
+  #recordPlaybackDiagnostic(playback: { generation: number; released: boolean; diagnostic: PlaybackMilestones | null }, reason: ApplicationPlaybackDiagnostic["reason"]) {
+    if (!playback.diagnostic || !this.#context) return;
+    const { attemptId, brief } = this.#context;
+    const diagnostic: ApplicationPlaybackDiagnostic = { ...playback.diagnostic, reason,
+      outcome: reason === "mark" ? "acknowledged" : playback.released ? "interrupted" : "not_released",
+      endedAt: new Date().toISOString() };
+    // One bounded, best-effort record per attempt; never gate playback or hangup
+    // on diagnostics, and never route a diagnostic write failure to context.fail.
+    void Promise.resolve().then(() => this.options.service.recordTelemetry(brief.id, {
+      callAttemptId: attemptId, idempotencyKey: `live:playback:${diagnostic.markId}`,
+      payload: { name: "conversation.task", metadata: { runtimeVersion: "live-managed-v9", phase: "speak",
+        revision: playback.generation, cause: "application_playback", playback: diagnostic } }
+    })).catch(() => this.options.logger?.warn({ callAttemptId: attemptId, generation: playback.generation,
+      code: "LIVE_PLAYBACK_DIAGNOSTIC_FAILED" }, "Playback diagnostic unavailable"));
+  }
+  #cancelApplicationPlayback(reason: ApplicationPlaybackDiagnostic["reason"] = "superseded") {
     const playback = this.#applicationPlayback;
     if (!playback) return;
     clearTimeout(playback.timer); this.#applicationPlayback = null;
+    this.#recordPlaybackDiagnostic(playback, this.#isClosed()
+      ? this.#speechFailure?.code === "LIVE_CLOSING_DEADLINE" ? "deadline" : "closed" : reason);
     // A released clip without its matching mark may have been heard partially.
     if (playback.released && this.#consented) this.#noteTranscriptGap("application_interrupted");
     this.#clear(); playback.resolve(false);
@@ -519,23 +538,31 @@ export class UnifiedLiveCall implements LiveLifecycle {
       const mark = 'live-application-' + generation + '-' + randomUUID();
       const timer = setTimeout(() => {
         if (this.#applicationPlayback?.mark !== mark) return;
-        this.#cancelApplicationPlayback();
+        this.#cancelApplicationPlayback("deadline");
         if (!current() || this.#isClosed()) return;
         this.#speechFailure = { code: 'LIVE_APPLICATION_PLAYBACK_DEADLINE', phase: this.#phase };
         if (!recoverable) this.#close('openai_error');
       }, deadlineMs);
       timer.unref?.();
-      const playback = { mark, text, generation, current, resolve, timer, released: false, sentAt: "", durationMs: 0 };
+      const diagnostic: PlaybackMilestones | null = this.#consented ? { markId: mark,
+        owner: this.#phase === "closing" ? "closing" : this.#criticalResolve ? "appointment" : "failure",
+        requestedAt: new Date().toISOString(), durationMs: null } : null;
+      const playback = { mark, text, generation, current, resolve, timer, released: false, sentAt: "", durationMs: 0, diagnostic };
       this.#applicationPlayback = playback;
       void this.#render(text).then(rendered => {
+        if (this.#applicationPlayback === playback && playback.diagnostic) {
+          playback.diagnostic.renderedAt = new Date().toISOString();
+          playback.diagnostic.durationMs = rendered.durationMs;
+        }
         const release = () => {
           if (this.#applicationPlayback !== playback || this.#isClosed()) return;
-          if (!current()) { this.#cancelApplicationPlayback(); return; }
+          if (!current()) { this.#cancelApplicationPlayback("stale"); return; }
           if (this.#speaking || this.#recipientTurnText.trim()) {
             const wait = setTimeout(release, 100); wait.unref?.(); return;
           }
           playback.released = true;
           playback.sentAt = new Date().toISOString();
+          if (playback.diagnostic) playback.diagnostic.releasedAt = playback.sentAt;
           playback.durationMs = rendered.durationMs;
           if (this.#criticalResolve) this.#criticalReleased = true;
           for (const payload of rendered.frames) this.#sendAudio(payload);
@@ -544,7 +571,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
         release();
       }).catch(() => {
         if (this.#applicationPlayback !== playback) return;
-        this.#cancelApplicationPlayback();
+        this.#cancelApplicationPlayback("render_failed");
         if (!current() || this.#isClosed()) return;
         this.#speechFailure = { code: 'LIVE_APPLICATION_RENDER_FAILED', phase: this.#phase };
         this.#renderedSpeech.delete(text);
@@ -555,8 +582,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #acknowledgeApplicationPlayback(mark: string) {
     const playback = this.#applicationPlayback;
     if (!playback || playback.mark !== mark || !playback.released) return false;
-    if (!playback.current() || playback.generation !== this.#generation) { this.#cancelApplicationPlayback(); return true; }
+    if (!playback.current() || playback.generation !== this.#generation) { this.#cancelApplicationPlayback("stale"); return true; }
     clearTimeout(playback.timer); this.#applicationPlayback = null;
+    this.#recordPlaybackDiagnostic(playback, "mark");
     const key = 'rendered-application:' + this.#context!.attemptId + ':' + playback.generation;
     this.options.service.publishTranscriptDelta(this.#context!.brief.id, key, 'assistant', playback.text, this.#locale);
     this.#playbackUntil = 0;
@@ -596,7 +624,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     }
     if (this.#consented) {
       if (text.trim()) {
-        if (this.#phase === "closing") this.#pauseClosing();
+        if (this.#phase === "closing") this.#pauseClosing("recipient_transcript");
       }
       if (text.trim() && this.#phase === "conversation") this.#cancelCritical("recipient_transcript");
       this.#recipientFragments.push({ text, start: _startMs, end: _endMs });
@@ -655,7 +683,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       if (this.#phase === "conversation" || this.#phase === "closing") {
         if (!this.#criticalResolve) this.#clear();
         if (this.#phase === "closing") {
-          this.#pauseClosing();
+          this.#pauseClosing("acoustic_activity");
         }
       }
     } else if (event === "stopped") {
@@ -938,7 +966,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
       released: this.#criticalReleased, generation: this.#generation }, "Live appointment playback cancelled");
     this.#clearTimer();
 
-    this.#cancelApplicationPlayback();
+    this.#cancelApplicationPlayback(cause === "recipient_transcript" ? "recipient_transcript" :
+      cause === "sustained_playback_interruption" ? "acoustic_activity" : "action_cancelled");
     this.#clear(); this.#criticalResolve(false); this.#criticalResolve = null;
   }
   #protectedSay(text: string, current: () => boolean) {
@@ -1174,11 +1203,11 @@ export class UnifiedLiveCall implements LiveLifecycle {
       else this.#fallbackClosing();
     });
   }
-  #pauseClosing() {
+  #pauseClosing(reason: "acoustic_activity" | "recipient_transcript") {
     if (this.#closingInputPending) return;
     this.#closingInputPending = true;
     if (this.#applicationPlayback) this.#closingAttempts = Math.max(0, this.#closingAttempts - 1);
-    this.#cancelApplicationPlayback();
+    this.#cancelApplicationPlayback(reason);
     this.#clearTimer(); this.#clear();
     this.#live?.instruct("The recipient interrupted closing audio. Listen silently while the backend interprets the complete answer. Closing remains authorized unless the backend identifies a material new request or correction. Do not repeat the task or announce this check.");
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId }, "Live closing awaiting recipient interpretation");

@@ -1,4 +1,10 @@
 {
+  "Booking at a clinic? Optional details": "Appuntamento in uno studio medico? Informazioni facoltative",
+  "You can add these details to the approved information below, one fact per line:": "Puoi aggiungere questi dati alle informazioni autorizzate qui sotto, un fatto per riga:",
+  "Date of birth, if you authorize sharing it.": "La data di nascita, se ne autorizzi la comunicazione.",
+  "Whether the person you represent has visited this clinic before.": "Se la persona rappresentata è già stata in questo studio medico.",
+  "Both are optional. You can write “unknown” or “do not share” for each item, or leave it out.": "Entrambi i dati sono facoltativi. Per ciascuno puoi scrivere «non lo so» o «non comunicare», oppure non indicare nulla.",
+  "Only include what you authorize for this call. Do not add medical details unrelated to the booking. Review the prepared plan before approving it.": "Inserisci solo ciò che autorizzi a comunicare durante questa chiamata. Non aggiungere dettagli medici estranei alla prenotazione. Controlla il piano preparato prima di approvarlo.",
   "The phone connection is open. The provider is checking who answered.": "La connessione è stabilita. Il fornitore verifica chi ha risposto.",
   "The assistant asks for consent before recording and starting the task.": "L’assistente chiede il consenso prima di registrare e iniziare l’attività.",
   "Other language (language code)": "Altra lingua (codice lingua)",
