@@ -8,7 +8,8 @@ export type ServiceLiveness = z.infer<typeof serviceLivenessSchema>;
 export const serviceReadinessSchema = z.strictObject({
   status: z.enum(["ready", "not_ready"]),
   checks: z.strictObject({
-    database: z.enum(["ready", "unavailable"])
+    database: z.enum(["ready", "unavailable"]),
+    runtimeProfile: z.enum(["ready", "mismatch"]).optional()
   })
 });
 export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>;

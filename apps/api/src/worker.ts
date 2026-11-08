@@ -1,4 +1,5 @@
 import { workerCapacity } from "./config/worker-capacity";
+import { assertRuntimeProfileReady } from "./runtime/runtime-profile-readiness";
 import { createCallRepositoryFromEnv } from "./storage/create-call-repository";
 import { MockTelephonyProvider } from "./telephony/mock-telephony-provider";
 // SPDX-License-Identifier: LicenseRef-Proprietary
@@ -32,6 +33,8 @@ const {
   telephonyProvider,
   postCallTranscriber
 } = capacity.role === "preparation" ? { repository: createCallRepositoryFromEnv(), telephonyProvider: new MockTelephonyProvider(), postCallTranscriber: undefined } : createCallRuntimeDependenciesFromEnv();
+const runtimeProfile = await assertRuntimeProfileReady(repository).catch(async error => { await repository.close(); throw error; });
+if (runtimeProfile) process.stdout.write(`${JSON.stringify({ event: "runtime_profile_ready", ...runtimeProfile })}\n`);
 const authRepository = background ? createAuthRepositoryFromEnv() : undefined;
 const telemetryExports = background ? createTelemetryExportsFromEnv() : undefined;
 const notifications = background ? createNotificationsFromEnv(repository, true) : undefined;

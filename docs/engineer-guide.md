@@ -135,11 +135,12 @@ are fetched only when needed. General/book/confirm_existing/reschedule/cancel pr
 follow approved authority; numeric terms are checked against recipient quotes.
 Recording starts at connection; refusal triggers durable deletion. This mode requires
 explicit selection, Live without fallback and agent hangup enabled; production is
-supported. The old local-admission flag is ignored. This does not change default deployment
-configuration. See the maintained [native runtime specification](native-live-runtime.md)
-and [validation guide](native-live-validation.md). Runtime flags and preparation
-policy selection are independent; a model change in Admin System does not select
-the integrity compiler.
+supported. The old local-admission flag is ignored. The environment example selects
+`CALL_RUNTIME_PROFILE=native_v2`; this binds the runtime and required preparation policy.
+The audited configuration command applies that policy and startup verifies alignment.
+See [runtime profiles](runtime-profiles.md), the [native specification](native-live-runtime.md)
+and [validation guide](native-live-validation.md). Low-level compatibility flags or a
+model change in Admin System alone do not select the integrity compiler.
 
 ### Managed default and compatibility paths
 

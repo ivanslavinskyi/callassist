@@ -91,3 +91,5 @@ jobs:
         run: pnpm db:recovery:drill
       - name: Build
         run: pnpm build
+      - name: Verify built runtime profiles and managed rollback
+        run: pnpm --filter @callassist/api runtime:test:build

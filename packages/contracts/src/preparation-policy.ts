@@ -71,6 +71,11 @@ export const preparationSettingsViewSchema = z.strictObject({
   approvedProfiles: z.array(z.string().max(64)).max(6),
   // Runtime capability, not a quality attestation or a client-writable setting.
   localTesting: z.boolean().optional(),
+  runtimeProfile: z.strictObject({
+    name: z.enum(["native_v2", "managed"]), release: z.string(), mode: z.enum(["live_native_v2", "unified_live"]),
+    runtimeVersion: z.string(), compilerVersion: z.string(), planSchemaVersion: z.string(),
+    expectedPromptVersion: z.string(), actualPromptVersion: z.string(), ready: z.boolean()
+  }).optional(),
   updatedAt: z.string().datetime().nullable(), updatedByUserId: z.uuid().nullable(), reason: z.string().nullable(),
   history: z.array(z.strictObject({ revision: z.number().int().positive(), createdAt: z.string().datetime(),
     actorUserId: z.uuid().nullable(), reason: z.string(), generation: preparationProfileSchema,

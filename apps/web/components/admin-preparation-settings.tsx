@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { formatDateTime, preparationModelSchema, preparationSettingsUpdateSchema,
-  type PreparationSettingsView, type UserRole } from "@callassist/contracts";
+  type PreparationSettingsView, type UserRole, type UiLocale } from "@callassist/contracts";
 import { getPreparationSettings, updatePreparationSettings } from "@/lib/api";
 import { preparationSettingsMessages } from "@/lib/i18n/preparation-settings-messages";
+import { runtimeProfileMessages } from "@/lib/i18n/admin-runtime-profile-messages";
 import { useUiLocale } from "./ui-locale-provider";
 
 export function AdminPreparationSettings({ role }: { role: UserRole }) {
@@ -38,6 +39,7 @@ export function AdminPreparationSettings({ role }: { role: UserRole }) {
     {error && <p role="alert" className="form-error">{copy.error}</p>}{saved && <p role="status">{copy.saved}</p>}
     {view && <>
       <p>{copy.revision}: {view.policy.revision}</p>
+      {view.runtimeProfile && <RuntimeProfileStatus profile={view.runtimeProfile} locale={locale} />}
       <PreparationSettingsForm key={view.policy.revision} view={view} copy={copy} busy={busy} role={role} onSubmit={e=>void submit(e)} />
       <details><summary>{copy.history}</summary><ul>{view.history.map(item => <li key={item.revision}>
         {formatDateTime(item.createdAt, locale)} · {item.generation.model} · {item.generation.serviceTier} · {item.reason}
@@ -46,6 +48,16 @@ export function AdminPreparationSettings({ role }: { role: UserRole }) {
       </li>)}</ul></details>
     </>}
     {role !== "superadmin" && <p>{copy.restricted}</p>}
+  </section>;
+}
+export function RuntimeProfileStatus({ profile, locale }: { profile: NonNullable<PreparationSettingsView["runtimeProfile"]>; locale: UiLocale }) {
+  const copy = runtimeProfileMessages[locale];
+  return <section aria-label={copy.title}>
+    <h3>{copy.title}: {profile.name === "native_v2" ? "Native v2" : "Managed Live"}</h3>
+    <p className={profile.ready ? undefined : "form-error"} role="status">{profile.ready ? copy.ready : copy.mismatch}</p>
+    <p><code>{profile.release}</code> · {copy.compiler}: <code>{profile.compilerVersion}</code></p>
+    <p>{copy.policy}: <code>{profile.actualPromptVersion}</code></p>
+    {!profile.ready && <p>{copy.expected}: <code>{profile.expectedPromptVersion}</code></p>}
   </section>;
 }
 export function PreparationSettingsForm({view,copy,busy,role,onSubmit}: {view:PreparationSettingsView;copy:typeof preparationSettingsMessages.en;

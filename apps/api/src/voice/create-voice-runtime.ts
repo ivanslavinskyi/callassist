@@ -3,6 +3,7 @@ import { OpenAILiveBridge, type OpenAILiveBridgeOptions } from "./openai-live-br
 import type { VoiceRuntime } from "./voice-runtime";
 import { LIVE_VOICES } from "@callassist/contracts";
 import { voiceRuntimeMode } from "../config/voice-runtime";
+import { selectedRuntimeProfile } from "../config/runtime-profile";
 export { voiceRuntimeDriver } from "../config/voice-runtime";
 
 export function createVoiceRuntime(options: OpenAILiveBridgeOptions, environment: NodeJS.ProcessEnv = process.env): VoiceRuntime {
@@ -15,6 +16,7 @@ export function createVoiceRuntime(options: OpenAILiveBridgeOptions, environment
     }
   }
   return new OpenAILiveBridge({ ...options,
+    agentHangupEnabled: selectedRuntimeProfile(environment) ? true : options.agentHangupEnabled,
     nativeExperiment: mode === "live_native_v1",
     nativeV2: mode === "live_native_v2",
     liveModel: environment.OPENAI_LIVE_MODEL?.trim() || "gpt-live-1",

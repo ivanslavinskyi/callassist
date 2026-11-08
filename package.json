@@ -8,6 +8,8 @@
   },
   "scripts": {
     "deployment:check": "corepack pnpm --filter @callassist/api deployment:check",
+    "runtime:configure": "corepack pnpm --filter @callassist/api runtime:configure",
+    "runtime:check": "corepack pnpm --filter @callassist/api runtime:check",
     "communications:check": "corepack pnpm --filter @callassist/api communications:check",
     "build": "turbo build",
     "copy:check": "node scripts/check-public-copy.mjs",

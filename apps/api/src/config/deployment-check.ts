@@ -3,9 +3,12 @@ import { RuntimeConfigurationError, validateRuntimeEnvironment, type RuntimeProc
 import { emailBrandingFromEnv } from "../auth/email-branding";
 import { textCapabilitiesFromEnv } from "../text-processing/text-capabilities";
 import { ANSWERING_POLICY_VERSION } from "@callassist/contracts";
+import { selectedRuntimeProfile } from "./runtime-profile";
 
 export function checkDeployment(environment: NodeJS.ProcessEnv) {
   const issues: string[] = [];
+  let profile: ReturnType<typeof selectedRuntimeProfile> = null;
+  try { profile = selectedRuntimeProfile(environment); } catch { /* Runtime validation reports the precise conflict. */ }
   try { workerCapacity(environment); } catch (error) { issues.push(error instanceof Error ? error.message : "Invalid worker capacity"); }
   const production = { ...environment, NODE_ENV: "production" };
   for (const runtime of ["api", "worker"] satisfies RuntimeProcess[]) {
@@ -30,6 +33,7 @@ export function checkDeployment(environment: NodeJS.ProcessEnv) {
   } catch { issues.push("web: INTERNAL_API_URL must be an HTTP(S) origin without credentials or a path"); }
   try { emailBrandingFromEnv(production); } catch { issues.push("email: invalid site origin or branding configuration"); }
   for (const name of ["TEXT_ARTIFACT_GENERATION_ENABLED", "REALTIME_AGENT_HANGUP_ENABLED"]) {
+    if (name === "REALTIME_AGENT_HANGUP_ENABLED" && profile) continue;
     if (!["true", "false"].includes(environment[name]?.trim() ?? "")) issues.push(`${name} must be explicitly true or false`);
   }
   if (environment.TEXT_ARTIFACT_GENERATION_ENABLED === "true" && !environment.TEXT_ARTIFACT_DIRECTIONS?.trim()) {
@@ -40,6 +44,7 @@ export function checkDeployment(environment: NodeJS.ProcessEnv) {
   return { configurationValid: issues.length === 0, issues: [...new Set(issues)],
     answeringPolicy: environment.TELEPHONY_DRIVER === "twilio" ? ANSWERING_POLICY_VERSION : null,
     providerTraffic: false, databaseChecked: false, publicReleaseApproved: false,
+    runtimeProfile: profile,
     remaining: ["Apply/check migrations", "Set USD budget and review provider allocations", "Verify edge header stripping, TLS, secure cookies, SSE and Twilio WS externally",
       "Verify API/worker deployment parity and restart recovery", "Complete provider, alert, backup/restore and support acceptance"] };
 }

@@ -23,6 +23,12 @@ describe("deployment preflight", () => {
     expect(checkDeployment({ ...config(), VOICE_RUNTIME_LIVE_EXPERIMENT: "native_v2" }))
       .toMatchObject({ configurationValid: true, issues: [], providerTraffic: false, databaseChecked: false });
   });
+  it("accepts a single named profile and reports the pinned release without requiring low-level flags", () => {
+    expect(checkDeployment({ ...config(), REALTIME_AGENT_HANGUP_ENABLED: undefined, CALL_RUNTIME_PROFILE: "native_v2" }))
+      .toMatchObject({ configurationValid: true, databaseChecked: false, runtimeProfile: {
+        name: "native_v2", compilerVersion: "brief-compiler-13", promptVersion: "preparation-live-native-integrity-2026-11-08"
+      } });
+  });
   it.each([undefined, "false"])("rejects Native v2 before dialing when hangup is %s", flag => {
     const report = checkDeployment({ ...config(), VOICE_RUNTIME_LIVE_EXPERIMENT: "native_v2", REALTIME_AGENT_HANGUP_ENABLED: flag });
     expect(report.configurationValid).toBe(false);

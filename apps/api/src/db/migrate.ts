@@ -1,7 +1,7 @@
 import "../config/load-env";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import postgres from "postgres";
 import {
@@ -220,7 +220,8 @@ export async function runMigrations(
 }
 
 const isEntrypoint =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+  process.argv[1] && ["migrate.ts", "migrate.js"].includes(basename(fileURLToPath(import.meta.url))) &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isEntrypoint) {
   if (process.argv.includes("--check")) {

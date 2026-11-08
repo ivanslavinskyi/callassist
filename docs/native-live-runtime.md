@@ -63,14 +63,19 @@ Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 
 | Selection | Result |
 | --- | --- |
+| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 13 policy required, hangup enabled; recommended |
+| `CALL_RUNTIME_PROFILE=managed` | Managed Live, compiler 6 policy required, hangup enabled; rollback |
 | `VOICE_RUNTIME_DRIVER=live`, fallback `false`, experiment `off` | Managed `unified_live`; default selection |
 | Same settings, experiment `native_v1` | Earlier informational experiment; eligibility may select managed control |
 | Same settings, experiment `native_v2`, in development or production | `live_native_v2` |
 | Live with fallback `true`, experiment `off` | Retained `legacy_hybrid` path |
 | Driver `realtime`, experiment `off` | Retained `legacy_realtime` path |
 
-Native v2 also requires `REALTIME_AGENT_HANGUP_ENABLED=true` at process startup and
-call initialization. The historical environment-variable name applies to Live too.
+Named profiles require the saved preparation policy to match at startup; use
+`runtime:configure --apply` and `runtime:check` after migrations. See
+[runtime profiles](runtime-profiles.md) for preview, audit and rollback.
+Without a named profile, Native v2 requires `REALTIME_AGENT_HANGUP_ENABLED=true`
+at process startup and call initialization. The historical name applies to Live too.
 Automatic fallback and the Realtime driver remain incompatible with native v2.
 `VOICE_RUNTIME_NATIVE_V2_LOCAL` is obsolete and ignored. Selection is enforced by
 [voice-runtime.ts](../apps/api/src/config/voice-runtime.ts); startup requirements are

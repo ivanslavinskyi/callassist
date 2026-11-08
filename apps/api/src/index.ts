@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { voiceRuntimeMode } from "./config/voice-runtime";
+import { voiceAgentHangupEnabled } from "./config/runtime-profile";
+import { assertRuntimeProfileReady } from "./runtime/runtime-profile-readiness";
 import { MemoryTestingStore } from "./testing/store";
 import { PostgresTestingStore } from "./testing/postgres-store";
 import { parseDataEncryptionKeyring as testingKeyring } from "./security/encryption";
@@ -57,6 +59,7 @@ const {
   realtimeApiKey,
   postCallTranscriber
 } = createCallRuntimeDependenciesFromEnv();
+const runtimeProfile = await assertRuntimeProfileReady(repository).catch(async error => { await repository.close(); throw error; });
 const authRepository = createAuthRepositoryFromEnv();
 const rateLimiter = createRateLimiterFromEnv();
 const durableWorkerMode = durableWorkerModeFromEnv();
@@ -142,13 +145,13 @@ const realtimeBridge =
         ),
         maleVoice: process.env.OPENAI_REALTIME_MALE_VOICE,
         femaleVoice: process.env.OPENAI_REALTIME_FEMALE_VOICE,
-        agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true",
+        agentHangupEnabled: voiceAgentHangupEnabled(process.env),
         logger: app.log
       })
     : null;
 if (realtimeBridge) {
   app.log.info(
-    { driver: voiceRuntimeDriver(process.env), mode: voiceRuntimeMode(process.env), agentHangupEnabled: process.env.REALTIME_AGENT_HANGUP_ENABLED === "true" },
+    { driver: voiceRuntimeDriver(process.env), mode: voiceRuntimeMode(process.env), agentHangupEnabled: voiceAgentHangupEnabled(process.env), runtimeProfile },
     "Voice runtime configuration"
   );
 }

@@ -24,7 +24,7 @@ flowchart LR
 
 ## Runtime boundaries
 
-The default voice configuration selects managed `UnifiedLiveCall`
+Without a named profile, the default voice configuration selects managed `UnifiedLiveCall`
 (`live-managed-v9`). It retains application-controlled disclosure, affirmative
 consent and rendered closing. The opt-in `NativeLiveV2Call` implementation gives
 GPT-Live the opening, ordinary conversation and brief spoken closing. Responses
@@ -38,9 +38,11 @@ integration keeps runtime selection explicit; see the
 [acceptance decision](reports/native-v2-stable-acceptance-2026-11-08.md) and subsequent
 [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
-Runtime selection and preparation-policy selection are independent. The latest
-integrity path uses compiler 13, plan schema 9 and approval 8; selecting a voice mode
-or generation model does not automatically switch the preparation prompt policy.
+The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the integrity
+preparation policy: compiler 13, plan schema 9 and approval 8. The audited configuration
+command applies the policy; API and worker startup require a matching saved value.
+The [profile contract](runtime-profiles.md) defines activation and rollback. Low-level
+compatibility flags and model choices alone do not switch the preparation policy.
 See the [native runtime specification](native-live-runtime.md) for the version matrix.
 
 ## Data and evidence boundaries

@@ -1697,7 +1697,8 @@ export function buildApp({
     });
     app.get("/api/admin/system/preparation", async (request, reply) => {
       if (!await authorizeAdminRead(request, reply)) return;
-      return reply.header("Cache-Control", "private, no-store").send(preparationSettingsViewSchema.parse(await service.repository.getPreparationSettings()));
+      const settings = await service.repository.getPreparationSettings();
+      return reply.header("Cache-Control", "private, no-store").send(preparationSettingsViewSchema.parse({ ...settings, runtimeProfile: runtimeProfileStatus(settings) }));
     });
     app.put("/api/admin/system/preparation", async (request, reply) => {
       const actor = await authorizeAdminMutation(request, reply);
@@ -1705,7 +1706,10 @@ export function buildApp({
       if (actor.role !== "superadmin") return reply.status(403).send({ error: "PREPARATION_FORBIDDEN" });
       const input = preparationSettingsUpdateSchema.safeParse(request.body);
       if (!input.success) return reply.status(400).send({ error: "INVALID_PREPARATION_SETTINGS" });
-      try { return reply.header("Cache-Control", "private, no-store").send(await service.repository.updatePreparationSettings(input.data, actor.id)); }
+      try {
+        const settings = await service.repository.updatePreparationSettings(input.data, actor.id);
+        return reply.header("Cache-Control", "private, no-store").send({ ...settings, runtimeProfile: runtimeProfileStatus(settings) });
+      }
       catch (error) { if (error instanceof PreparationPolicyError) return reply.status(error.code === "PREPARATION_FORBIDDEN" ? 403 : 409).send({ error: error.code }); throw error; }
     });
     app.post("/api/admin/system/preparation/profiles", async (request, reply) => {
@@ -1714,7 +1718,10 @@ export function buildApp({
       if (actor.role !== "superadmin") return reply.status(403).send({ error: "PREPARATION_FORBIDDEN" });
       const input = preparationProfileAdmissionSchema.safeParse(request.body);
       if (!input.success) return reply.status(400).send({ error: "INVALID_PREPARATION_EVALUATION" });
-      try { return reply.header("Cache-Control", "private, no-store").send(await service.repository.admitPreparationProfile(input.data, actor.id)); }
+      try {
+        const settings = await service.repository.admitPreparationProfile(input.data, actor.id);
+        return reply.header("Cache-Control", "private, no-store").send({ ...settings, runtimeProfile: runtimeProfileStatus(settings) });
+      }
       catch (error) { if (error instanceof PreparationPolicyError) return reply.status(error.code === "PREPARATION_FORBIDDEN" ? 403 : 409).send({ error: error.code }); throw error; }
     });
 
@@ -2270,11 +2277,14 @@ export function buildApp({
   app.get("/health/ready", async (_request, reply) => {
     try {
       await service.ping();
+      const profile = selectedRuntimeProfile() ? runtimeProfileStatus(await service.repository.getPreparationSettings()) : undefined;
+      const ready = profile?.ready !== false;
       return reply
         .header("Cache-Control", "no-store")
+        .status(ready ? 200 : 503)
         .send(serviceReadinessSchema.parse({
-          status: "ready",
-          checks: { database: "ready" }
+          status: ready ? "ready" : "not_ready",
+          checks: { database: "ready", ...(profile ? { runtimeProfile: ready ? "ready" : "mismatch" } : {}) }
         }));
     } catch {
       return reply
@@ -3697,3 +3707,5 @@ function logCallPreparationError(log: FastifyBaseLogger, error: unknown) {
     "Call brief preparation failed"
   );
 }
+import { selectedRuntimeProfile } from "./config/runtime-profile";
+import { runtimeProfileStatus } from "./runtime/runtime-profile-readiness";

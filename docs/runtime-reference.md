@@ -17,11 +17,15 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 - GET/PUT `/api/admin/system/voice-consent` reads or changes recognition for new attempts. The migration default remains semantic; only an active superadmin can change it with an expected revision and audit reason.
 - GET/PUT `/api/admin/system/preparation` reads/updates generation profile and shared limits. Mutations require an active superadmin, expected revision and audit record; comment is optional. No report is required to select a supported model or Standard/Fast. Existing jobs keep their snapshot; audit/review remain `gpt-5.6:default`.
 - GET `/api/admin/system/preparation/runtime` exposes role heartbeats, queues and aggregates to authorized admins. POST `/api/admin/system/preparation/profiles` retains optional evaluation evidence for compatibility, not an activation prerequisite.
-- `/health/workers` checks fresh required worker roles independently from API/database `/health/ready`. See [preparation runtime](preparation-runtime.md) for capacity, fencing and shutdown boundaries.
+- `/health/workers` checks fresh required worker roles independently from `/health/ready`, which checks the database and selected runtime/preparation profile alignment. See [preparation runtime](preparation-runtime.md) for capacity, fencing and shutdown boundaries.
 
 ## Voice runtime selection
 
-The default is managed `unified_live` with experiment `off`. Native v2 requires
+The recommended profile is `CALL_RUNTIME_PROFILE=native_v2`, as selected by
+`.env.example`. It binds the Native v2 voice mode, compiler 13 policy and enabled
+hangup. Use [runtime profiles](runtime-profiles.md) for the audited application command,
+read-only check and startup diagnostics. Without a profile, the default is managed
+`unified_live` with experiment `off`; low-level Native v2 requires
 `VOICE_RUNTIME_DRIVER=live`, fallback disabled, `VOICE_RUNTIME_LIVE_EXPERIMENT=native_v2`,
 and `REALTIME_AGENT_HANGUP_ENABLED=true`. Production is supported; the obsolete
 `VOICE_RUNTIME_NATIVE_V2_LOCAL` flag is ignored.
@@ -29,9 +33,11 @@ See the maintained [native specification](native-live-runtime.md) for complete
 startup context, prompt responsibilities, action profiles, declared recording,
 privacy, closing and summary-v8 behavior.
 
-The integrity preparation path uses compiler 13 / schema 9 / approval 8; it must be
-selected separately from voice mode and generation model. The code default is the
-earlier native-v2 preparation policy. The settings API has no `promptVersion` setter.
+The integrity preparation path uses compiler 13 / schema 9 / approval 8. A named
+profile declares the policy; its configuration command saves it and startup validates
+it. Low-level voice flags and model changes alone do not update the policy.
+The settings API has no `promptVersion` setter; its read-only `runtimeProfile` field
+reports the selected release, compiler, expected/actual policy and alignment.
 See [preparation runtime](preparation-runtime.md) and
 [dated implementation evidence](reports/native-live-integrity-2026-11-08.md).
 
@@ -255,7 +261,7 @@ parity. See deployment preflight and the chosen first-release target (local oper
 | Variable | Repository default / requirement |
 | --- | --- |
 | `TELEPHONY_DRIVER` | `mock`; production requires `twilio` |
-| `REALTIME_AGENT_HANGUP_ENABLED` | `false` by default. Enables ordinary agent hangup in managed/Realtime modes; native v2 requires `true` at initialization. Read at API startup. Consent/error termination remains separate. |
+| `REALTIME_AGENT_HANGUP_ENABLED` | Named profiles enable hangup and reject a `false` override. Without a profile: defaults false; low-level native v2 requires true at startup/initialization. Consent/error termination remains separate. |
 | `DURABLE_WORKER_MODE` | `embedded`; production requires `external` |
 | `WORKER_ROLE` | `all` compatibility default; scalable roles: `preparation`, `operations`, `background`; never mix role workers with `all` |
 | `PREPARATION_WORKER_SLOTS` / `REVIEW_WORKER_SLOTS` | Per-process slots; prep defaults 2/1, other roles 1/1; global limits remain in the preparation settings |
@@ -284,7 +290,8 @@ parity. See deployment preflight and the chosen first-release target (local oper
 | `TEXT_ARTIFACT_GENERATION_ENABLED` | Explicit `true`/`false`; absent means enabled for mock and disabled for OpenAI. Disabling generation preserves reads of retained artifacts |
 | `TEXT_ARTIFACT_DIRECTIONS` | Comma-separated `kind:source:target`, e.g. `plan_review:de:ru,transcript_translation:*:ru,call_summary:*:ru`. Real provider has no enabled directions when empty. Final transcripts can contain mixed/unknown languages, so transcript translation and summary use source `*`; do not infer it from the call locale |
 | `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
-| `VOICE_RUNTIME_DRIVER` | `live`; accepts `realtime` or `live`, invalid values fail startup; API restart required. Set `realtime` explicitly only for rollback. |
+| `CALL_RUNTIME_PROFILE` | Example `native_v2`; accepts `native_v2` or `managed`. Binds voice, hangup and required preparation policy. Unset preserves low-level compatibility. Conflicting overrides fail; all processes must match. |
+| `VOICE_RUNTIME_DRIVER` | Without a profile: `live`; accepts `realtime` or `live`. Named profiles require Live. Invalid/conflicting values fail startup; restart required. |
 | `VOICE_RUNTIME_LIVE_FALLBACK` | `false`; one Live voice session with no Realtime sockets. Explicit `true` retains the legacy hybrid pilot and startup fallback |
 | `VOICE_RUNTIME_LIVE_EXPERIMENT` | `off`; accepts `native_v1` or `native_v2`. Native v1 may choose managed control for ineligible tasks; native v2 supports production with Live, fallback disabled and agent hangup enabled. |
 | `VOICE_RUNTIME_NATIVE_V2_LOCAL` | Obsolete and ignored; retained configurations do not affect selection. |

@@ -5,8 +5,8 @@
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
 Its current configuration supports explicit activation in development and production.
-Deployment remains a separate step. Managed Live remains the
-configuration default and rollback path. Source availability and local verification
+The environment example selects the stable native profile; managed Live remains the
+default without a profile and the named rollback option. Deployment remains separate. Source availability and local verification
 do not establish what is deployed. See the [release decision](reports/native-v2-stable-acceptance-2026-11-08.md)
 and [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
@@ -18,6 +18,7 @@ and [production preparation](reports/native-v2-production-readiness-2026-11-08.m
 | [Engineer guide](engineer-guide.md) | Repository map, shared domain rules, development and operations interfaces |
 | [Preparation runtime](preparation-runtime.md) | Policy/compiler versions, input limits, user-facing failures, admission and diagnostics |
 | [Native GPT-Live runtime](native-live-runtime.md) | Startup context, prompts, action profiles, recording, closing, assessment, telemetry and costs |
+| [Runtime profiles](runtime-profiles.md) | One environment selector, audited activation, startup alignment and managed rollback |
 | [Runtime and API reference](runtime-reference.md) | Environment settings, API inventory and managed/legacy compatibility behavior |
 | [Native validation](native-live-validation.md) | Reproducible checks, paid-probe boundaries, telephone scenarios and troubleshooting |
 | [Task information and testing](task-input-and-testing.md) | Information sources, 30-day audio default, tester grants, scenario catalog, expense attribution and PDF assessment |

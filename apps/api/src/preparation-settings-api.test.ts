@@ -27,6 +27,23 @@ async function fixture() {
   return { auth, user, repository, app, cookie: String(login.headers["set-cookie"]) };
 }
 const input = { generation: { model: "gpt-5.6", serviceTier: "default" }, capacity: defaultPreparationCapacity, expectedRevision: 1, reason: "Test capacity" };
+it("reports the selected release to admins and rejects readiness when the saved policy drifts", async () => {
+  vi.stubEnv("CALL_RUNTIME_PROFILE", "native_v2");
+  vi.stubEnv("VOICE_RUNTIME_DRIVER", "live"); vi.stubEnv("VOICE_RUNTIME_LIVE_FALLBACK", "false");
+  vi.stubEnv("VOICE_RUNTIME_LIVE_EXPERIMENT", "native_v2"); vi.stubEnv("REALTIME_AGENT_HANGUP_ENABLED", "true");
+  const f = await fixture(); await f.auth.setUserRoleForTest(f.user.id, "superadmin");
+  const initial = await f.app.inject({ method: "GET", url, headers: { cookie: f.cookie } });
+  expect(initial.json().runtimeProfile).toMatchObject({ name: "native_v2", compilerVersion: "brief-compiler-13", ready: false });
+  expect((await f.app.inject({ method: "GET", url: "/health/ready" })).statusCode).toBe(503);
+  const settings = await f.repository.getPreparationSettings();
+  vi.spyOn(f.repository, "getPreparationSettings").mockResolvedValue({ ...settings,
+    policy: { ...settings.policy, promptVersion: "preparation-live-native-integrity-2026-11-08" } });
+  const ready = await f.app.inject({ method: "GET", url: "/health/ready" });
+  expect(ready.statusCode).toBe(200);
+  expect(ready.json()).toEqual({ status: "ready", checks: { database: "ready", runtimeProfile: "ready" } });
+  expect((await f.app.inject({ method: "GET", url, headers: { cookie: f.cookie } })).json().runtimeProfile.ready).toBe(true);
+  expect((await f.app.inject({ method: "PUT", url, headers: { cookie: f.cookie }, payload: { ...input, runtimeProfile: "managed" } })).statusCode).toBe(400);
+});
 it("protects profile and capacity mutations with role, session and origin checks", async () => {
   const f = await fixture(), writes = vi.spyOn(f.repository,"updatePreparationSettings");
   expect((await f.app.inject({method:"GET",url})).statusCode).toBe(401);

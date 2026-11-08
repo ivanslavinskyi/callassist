@@ -263,6 +263,9 @@ export class InMemoryCallRepository implements CallRepository {
     }
   });
   #preparationSettings = initialPreparationSettings();
+  constructor(options?: { preparationPromptVersion: import("@callassist/contracts").PreparationRuntimePolicy["promptVersion"] }) {
+    if (options) this.#preparationSettings.policy.promptVersion = options.preparationPromptVersion;
+  }
   readonly #preparationCheckpoints = new Map<string, PreparationCheckpoint[]>();
   readonly #diagnosticRevokedUsers = new Set<string>();
   readonly #preparationDispatch = new Map<string, string>();

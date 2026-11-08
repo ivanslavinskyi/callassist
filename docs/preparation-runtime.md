@@ -12,15 +12,18 @@ Local native checkpoint, 8 November 2026: policy
 `preparation-live-native-integrity-2026-11-08` selects `brief-compiler-13`, plan schema 9
 and approval 8. The previous progressive instruction remains: resolve prerequisites
 before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
-Full original task sources and facts remain available at Live startup. The default
-policy remains `preparation-live-native-v2-2026-11-06`; historical jobs retain their
-pinned policy. The verified local setup selected the integrity policy separately,
-with a new revision and audit record. The public settings API does not expose a
-`promptVersion` setter. See [dated evidence](reports/native-live-integrity-2026-11-08.md).
+Full original task sources and facts remain available at Live startup.
+`CALL_RUNTIME_PROFILE=native_v2` selects this integrity policy through the audited
+`runtime:configure --apply` command. Startup checks that the saved policy matches.
+Historical jobs retain their pinned policy. The unprofiled in-memory default remains
+`preparation-live-native-v2-2026-11-06`; the historical SQL seed uses the managed policy.
+Neither default is a substitute for explicit deployment activation. The public settings
+API has no `promptVersion` setter. See [runtime profiles](runtime-profiles.md) and
+[dated evidence](reports/native-live-integrity-2026-11-08.md).
 
 | Prompt policy suffix | Compiler | Plan schema | Native approval |
 | --- | --- | --- | --- |
-| `live-native-v2-2026-11-06` (code default) | `brief-compiler-10` | 8 | 7 |
+| `live-native-v2-2026-11-06` (unprofiled memory default) | `brief-compiler-10` | 8 | 7 |
 | `live-native-actions-2026-11-06` | `brief-compiler-11` | 9 | 8 |
 | `live-native-progressive-2026-11-07` | `brief-compiler-12` | 9 | 8 |
 | `live-native-integrity-2026-11-08` | `brief-compiler-13` | 9 | 8 |

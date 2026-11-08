@@ -1,10 +1,15 @@
+import { selectedRuntimeProfile } from "./runtime-profile";
+
 export function voiceRuntimeDriver(environment: NodeJS.ProcessEnv): "realtime" | "live" {
+  if (selectedRuntimeProfile(environment)) return "live";
   const driver = environment.VOICE_RUNTIME_DRIVER?.trim() || "live";
   if (driver !== "realtime" && driver !== "live") throw new Error("VOICE_RUNTIME_DRIVER must be realtime or live");
   return driver;
 }
 
 export function voiceRuntimeMode(environment: NodeJS.ProcessEnv) {
+  const profile = selectedRuntimeProfile(environment);
+  if (profile) return profile.mode;
   const experiment = environment.VOICE_RUNTIME_LIVE_EXPERIMENT?.trim() || "off";
   if (!["off", "native_v1", "native_v2"].includes(experiment)) throw new Error("VOICE_RUNTIME_LIVE_EXPERIMENT must be off, native_v1 or native_v2");
   const driver = voiceRuntimeDriver(environment);

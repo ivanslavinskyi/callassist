@@ -46,22 +46,19 @@ Use the normal local setup in the [README](../README.md) and
 | Requirement | Expected state |
 | --- | --- |
 | Database | Catalog through `0115`; API and workers use the same intended database |
-| Driver | `VOICE_RUNTIME_DRIVER=live` |
-| Fallback | `VOICE_RUNTIME_LIVE_FALLBACK=false` |
-| Experiment | `VOICE_RUNTIME_LIVE_EXPERIMENT=native_v2` |
+| Profile | `CALL_RUNTIME_PROFILE=native_v2` on API and every worker |
+| Configuration | `runtime:configure --apply` completed; `runtime:check` passes |
 | Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
-| Completion | `REALTIME_AGENT_HANGUP_ENABLED=true` |
+| Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
 | Latest integrity plan | Policy `preparation-live-native-integrity-2026-11-08`, compiler 13, schema 9, approval 8 |
 | Native instructions | Newly described attempts use `live-native-context-2026-11-08` |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
 
-The public admin preparation API cannot set `promptVersion`. The repository's
-default policy is the earlier native-v2 policy. Selecting a generation model does
-not activate compiler 13. Use the separately maintained local setup procedure to
-select the integrity policy with revision/audit provenance; this guide does not
-provide an unaudited database update or a nonexistent environment switch.
+The public admin preparation API cannot set `promptVersion`. The
+[runtime profile command](runtime-profiles.md) applies the policy with revision/audit
+provenance. Selecting a generation model alone does not activate compiler 13.
 An existing approved plan retains its version. Create and approve a new plan to
 exercise new preparation instructions.
 

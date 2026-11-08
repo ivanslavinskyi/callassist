@@ -6,8 +6,9 @@ receive a saved transcript with optional translation, summary and recording tran
 After a qualifying conversation, the verified owner also receives a branded result
 email with the saved AI assessment, full original transcript and authenticated call link.
 
-The default uses managed GPT-Live (`live-managed-v9`) with application-owned
-consent, recording and closing playback. The opt-in native v2 implementation
+The environment example selects the stable `CALL_RUNTIME_PROFILE=native_v2`.
+Existing configurations without a profile retain managed GPT-Live (`live-managed-v9`)
+as their default, with application-owned consent, recording and closing playback. Native v2
 lets Live conduct the opening, conversation and brief closing, with full approved
 task context available at startup. Responses delegation handles reasoning; the
 application validates action authority, evidence, privacy and hangup. Native v2
@@ -17,6 +18,7 @@ cancellation. Native v2 was accepted as stable after local telephone testing on
 Realtime and legacy hybrid remain
 explicit compatibility paths. Repository checks do not establish the deployed version.
 See the [native runtime specification](docs/native-live-runtime.md).
+Use [runtime profiles](docs/runtime-profiles.md) to align voice and preparation without manual SQL.
 
 ## Develop
 
@@ -26,6 +28,8 @@ Requires Node.js >=22.19, Corepack/pnpm 10.12.4 and PostgreSQL 17 (Docker is pro
     corepack pnpm env:init
     corepack pnpm db:up
     corepack pnpm db:migrate
+    corepack pnpm runtime:configure --apply
+    corepack pnpm runtime:check
     corepack pnpm dev
 
 Use an isolated development database and mock providers before opting into paid

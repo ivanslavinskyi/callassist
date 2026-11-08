@@ -8,6 +8,7 @@ export default defineConfig({
     worker: "src/worker.ts",
     "db/sync-provider-billing": "src/db/sync-provider-billing.ts",
     "db/migrate": "src/db/migrate.ts",
+    "db/configure-runtime-profile": "src/db/configure-runtime-profile.ts",
     "db/backfill-call-compilations": "src/db/backfill-call-compilations.ts",
     "db/backfill-live-transcripts": "src/db/backfill-live-transcripts.ts",
     "db/backfill-objectives": "src/db/backfill-objectives.ts",

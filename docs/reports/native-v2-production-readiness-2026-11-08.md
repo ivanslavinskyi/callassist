@@ -9,6 +9,11 @@ This follow-up supersedes the production restriction recorded at the
 Production credentials, database contents, CMS revisions and provider connections
 were not inspected or changed during this work. No calls or paid model tests were run.
 
+Subsequent implementation: [runtime profiles](../runtime-profiles.md) replace the
+separate low-level rollout settings below with one explicit profile, an audited
+configuration command and startup alignment checks. The verification evidence here
+remains the record of the preceding migration rehearsal.
+
 ## Runtime configuration
 
 Native v2 can now be selected under `NODE_ENV=production`. The same runtime,

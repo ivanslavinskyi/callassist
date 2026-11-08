@@ -7,6 +7,7 @@ import {
 
 import { apiHost, trustedProxyPolicy, twilioWebhookHost } from "./proxy-policy";
 import { voiceRuntimeMode } from "./voice-runtime";
+import { voiceAgentHangupEnabled } from "./runtime-profile";
 
 export type RuntimeProcess = "api" | "worker";
 
@@ -22,7 +23,7 @@ export function validateRuntimeEnvironment(
   runtime: RuntimeProcess
 ) {
   try {
-    if (voiceRuntimeMode(environment) === "live_native_v2" && environment.REALTIME_AGENT_HANGUP_ENABLED !== "true") {
+    if (voiceRuntimeMode(environment) === "live_native_v2" && !voiceAgentHangupEnabled(environment)) {
       throw new Error("native_v2 requires REALTIME_AGENT_HANGUP_ENABLED=true");
     }
   }
