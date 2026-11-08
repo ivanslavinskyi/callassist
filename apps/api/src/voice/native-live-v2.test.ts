@@ -269,9 +269,9 @@ describe("native Live v2",()=>{
     h.call.transcript("assistant"," Nina Keller is booked. Thank you, goodbye.",4100,5000,()=>{});h.call.audio(speech);
     expect(await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:"Nina Keller is booked. Thank you, goodbye.",recipientQuote:"Nina Keller is booked for that time."})},()=>true)).toMatchObject({ok:true});expect(h.tts).not.toHaveBeenCalled();
   });
-  it("requires explicit local configuration and rejects production",()=>{
-    const env={VOICE_RUNTIME_LIVE_EXPERIMENT:"native_v2",VOICE_RUNTIME_NATIVE_V2_LOCAL:"true"};
-    expect(voiceRuntimeMode(env)).toBe("live_native_v2");expect(()=>voiceRuntimeMode({...env,NODE_ENV:"production"})).toThrow();
+  it("selects the same explicit native runtime in development and production",()=>{
+    const env={VOICE_RUNTIME_LIVE_EXPERIMENT:"native_v2"};
+    expect(voiceRuntimeMode(env)).toBe("live_native_v2");expect(voiceRuntimeMode({...env,NODE_ENV:"production"})).toBe("live_native_v2");
   });
 });
 it("traces text and tool events separately, omits audio/credentials, and reports a bounded queue gap",async()=>{

@@ -30,12 +30,13 @@ consent and rendered closing. The opt-in `NativeLiveV2Call` implementation gives
 GPT-Live the opening, ordinary conversation and brief spoken closing. Responses
 delegation handles reasoning and tools; application checks still own authority,
 action evidence, privacy and telephone termination. Native v2 starts recording
-with a declarative notice and discards content on refusal. Production activation
-is rejected. Realtime and legacy hybrid implementations remain compatibility paths.
+with a declarative notice and discards content on refusal. Explicit production selection
+is supported. Realtime and legacy hybrid implementations remain compatibility paths.
 
 Native v2 was accepted as stable on 2026-11-08 after local telephone testing. This
-integration preserves the production gate until the separate rollout; see the
-[acceptance decision](reports/native-v2-stable-acceptance-2026-11-08.md).
+integration keeps runtime selection explicit; see the
+[acceptance decision](reports/native-v2-stable-acceptance-2026-11-08.md) and subsequent
+[production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
 Runtime selection and preparation-policy selection are independent. The latest
 integrity path uses compiler 13, plan schema 9 and approval 8; selecting a voice mode

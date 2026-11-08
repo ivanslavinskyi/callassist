@@ -1,8 +1,8 @@
 # Task information, recordings and testing scenarios
 
-**Implemented:** 2026-11-08, current experimental branch. This document describes
-code behavior, not a production deployment. Native v2 remains restricted to the
-explicit local configuration.
+**Implemented:** 2026-11-08, integrated into `main`. This document describes
+code behavior, not a production deployment. Native v2 supports explicit selection
+in development and production.
 
 ## Task information
 

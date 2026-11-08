@@ -125,16 +125,17 @@ can count as substantive. Assessment uncertainty has a bounded settlement path.
 
 ## Current voice runtime
 
-### Local native v2
+### Native v2
 
-The local `native_v2` experiment uses `NativeLiveV2Call`, version
+The explicit `native_v2` mode uses `NativeLiveV2Call`, version
 `live-native-context-2026-11-08`. Live receives complete task sources and facts at
 startup, owns the declarative opening, ordinary replies and short closing, and uses
 backend tools at action/refusal/termination boundaries. Optional indexed references
 are fetched only when needed. General/book/confirm_existing/reschedule/cancel profiles
 follow approved authority; numeric terms are checked against recipient quotes.
 Recording starts at connection; refusal triggers durable deletion. This mode requires
-explicit local flags and rejects production. It does not change default deployment
+explicit selection, Live without fallback and agent hangup enabled; production is
+supported. The old local-admission flag is ignored. This does not change default deployment
 configuration. See the maintained [native runtime specification](native-live-runtime.md)
 and [validation guide](native-live-validation.md). Runtime flags and preparation
 policy selection are independent; a model change in Admin System does not select
@@ -576,9 +577,9 @@ native appointment action revisions. `0113` adds encrypted objective projections
 and the fresh-call 30-day default; `0114` adds testing grants, scenario heads and
 encrypted revisions, audit and preparation attribution; `0115` upgrades known public
 retention copy while preserving historical publications and acceptances.
-These are additive contracts, not permission
-to activate native v2 in production. Backfills and existing-account policy transitions
-remain explicit, reviewed actions.
+These are additive contracts. Production selection is supported, while deployment,
+backfills and existing-account policy transitions remain explicit actions. See the
+[production preparation record](reports/native-v2-production-readiness-2026-11-08.md).
 
 Legacy plaintext objective projections remain readable until explicitly backfilled
 using the existing keyring. The backfill defaults to a count-only dry run, encrypts

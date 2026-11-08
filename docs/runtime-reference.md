@@ -21,9 +21,10 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 
 ## Voice runtime selection
 
-The default is managed `unified_live` with experiment `off`. Local native v2 requires
+The default is managed `unified_live` with experiment `off`. Native v2 requires
 `VOICE_RUNTIME_DRIVER=live`, fallback disabled, `VOICE_RUNTIME_LIVE_EXPERIMENT=native_v2`,
-`VOICE_RUNTIME_NATIVE_V2_LOCAL=true`, agent hangup enabled and non-production mode.
+and `REALTIME_AGENT_HANGUP_ENABLED=true`. Production is supported; the obsolete
+`VOICE_RUNTIME_NATIVE_V2_LOCAL` flag is ignored.
 See the maintained [native specification](native-live-runtime.md) for complete
 startup context, prompt responsibilities, action profiles, declared recording,
 privacy, closing and summary-v8 behavior.
@@ -285,8 +286,8 @@ parity. See deployment preflight and the chosen first-release target (local oper
 | `API_RATE_LIMIT_TEXT_ARTIFACTS_PER_HOUR` | `30` owner/IP generation/retry requests per hour |
 | `VOICE_RUNTIME_DRIVER` | `live`; accepts `realtime` or `live`, invalid values fail startup; API restart required. Set `realtime` explicitly only for rollback. |
 | `VOICE_RUNTIME_LIVE_FALLBACK` | `false`; one Live voice session with no Realtime sockets. Explicit `true` retains the legacy hybrid pilot and startup fallback |
-| `VOICE_RUNTIME_LIVE_EXPERIMENT` | `off`; accepts `native_v1` or `native_v2`. Native v1 may choose managed control for ineligible tasks; native v2 has explicit local guards. |
-| `VOICE_RUNTIME_NATIVE_V2_LOCAL` | `false`; native v2 requires exact `true`, Live driver, fallback disabled and non-production mode. |
+| `VOICE_RUNTIME_LIVE_EXPERIMENT` | `off`; accepts `native_v1` or `native_v2`. Native v1 may choose managed control for ineligible tasks; native v2 supports production with Live, fallback disabled and agent hangup enabled. |
+| `VOICE_RUNTIME_NATIVE_V2_LOCAL` | Obsolete and ignored; retained configurations do not affect selection. |
 | `OPENAI_LIVE_MODEL` | `gpt-live-1`; Live speech/listening. Opening, consent and closing ownership depend on the selected runtime; native v2 owns the notice and brief closing. |
 | `OPENAI_LIVE_DELEGATION_MODEL` | `gpt-6-luna`; Responses task delegation (and consent in managed mode), `parallel_tool_calls=false`. Application checks own authority and action journals. |
 | `OPENAI_SPEECH_MODEL` | `gpt-4o-mini-tts`; renderer retained for managed disclosure/recovery/requests/closing and failure paths. Buffered 24 kHz PCM is converted to PCMU and cached per call. Native-v2 ordinary speech, notice and closing use Live. |

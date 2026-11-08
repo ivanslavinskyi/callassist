@@ -1,6 +1,6 @@
 # Native GPT-Live runtime
 
-**Status:** accepted as the stable Native v2 implementation on 2026-11-08 after local telephone acceptance. Production activation remains gated pending the separate rollout.\
+**Status:** stable Native v2 implementation accepted on 2026-11-08; explicit production selection supported. Deployment remains a separate step.\
 **Source reviewed:** 2026-11-08, current working tree.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
@@ -65,14 +65,16 @@ Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 | --- | --- |
 | `VOICE_RUNTIME_DRIVER=live`, fallback `false`, experiment `off` | Managed `unified_live`; default selection |
 | Same settings, experiment `native_v1` | Earlier informational experiment; eligibility may select managed control |
-| Same settings, experiment `native_v2`, local flag `true`, non-production | `live_native_v2` |
+| Same settings, experiment `native_v2`, in development or production | `live_native_v2` |
 | Live with fallback `true`, experiment `off` | Retained `legacy_hybrid` path |
 | Driver `realtime`, experiment `off` | Retained `legacy_realtime` path |
 
-Native v2 also requires `REALTIME_AGENT_HANGUP_ENABLED=true` at initialization. The
-historical environment-variable name applies to Live too. `NODE_ENV=production`,
-automatic fallback or a missing local flag prevents native-v2 selection. These are
-code-enforced conditions in [voice-runtime.ts](../apps/api/src/config/voice-runtime.ts).
+Native v2 also requires `REALTIME_AGENT_HANGUP_ENABLED=true` at process startup and
+call initialization. The historical environment-variable name applies to Live too.
+Automatic fallback and the Realtime driver remain incompatible with native v2.
+`VOICE_RUNTIME_NATIVE_V2_LOCAL` is obsolete and ignored. Selection is enforced by
+[voice-runtime.ts](../apps/api/src/config/voice-runtime.ts); startup requirements are
+checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.ts).
 
 | Contract | Current native integrity path | Compatibility |
 | --- | --- | --- |
@@ -185,7 +187,8 @@ commentary when media is ready. Live chooses the wording and includes:
 - a natural readiness question, then a pause before the first task question.
 
 Readiness is conversational, not affirmative recording consent. Native v2 requests
-recording from connection with `recording_basis=declarative_local`. It does not
+recording from connection with `recording_basis=declarative_local`. The stored value
+is a historical identifier, also used for production native calls. It does not
 fabricate an affirmative-consent timestamp. The managed consent classifier and its
 admin policy are a different path. Opening copy supports the advertised call
 languages; seven UI languages do not imply seven selectable voice locales.
@@ -194,7 +197,7 @@ Fresh forms and omitted creation settings default to 30-day audio retention. Exp
 0/7/30 settings and historical policies remain valid. The completed-recording callback
 uses the frozen attempt policy and preserves an established deadline on repeat
 callbacks; transcript or summary retries do not extend it. This retention default
-does not change the managed consent requirement or native local-only guard. See
+does not change the managed consent requirement or native refusal handling. See
 [audio retention](task-input-and-testing.md#audio-retention).
 
 `stop_and_discard` takes priority when conversation, recording or transcription is
@@ -414,8 +417,8 @@ Sources: [trace writer](../apps/api/src/voice/live-protocol-trace.ts),
   not inferred from shorter timers or caption timestamps.
 
 The [validation guide](native-live-validation.md) defines the software checks and
-remaining acoustic acceptance. Production support requires a separate reviewed change;
-this document does not remove the local-only guard.
+remaining acoustic acceptance. See [production preparation](reports/native-v2-production-readiness-2026-11-08.md)
+for configuration, migration evidence and the remaining deployment steps.
 
 ## Related feature contracts
 

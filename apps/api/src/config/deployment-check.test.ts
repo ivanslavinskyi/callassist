@@ -19,6 +19,17 @@ describe("deployment preflight", () => {
   it("checks both production entry points without claiming provider or release acceptance", () => {
     expect(checkDeployment(config())).toMatchObject({ configurationValid: true, issues: [], providerTraffic: false, databaseChecked: false, publicReleaseApproved: false });
   });
+  it("accepts explicit production Native v2 without a local admission flag", () => {
+    expect(checkDeployment({ ...config(), VOICE_RUNTIME_LIVE_EXPERIMENT: "native_v2" }))
+      .toMatchObject({ configurationValid: true, issues: [], providerTraffic: false, databaseChecked: false });
+  });
+  it.each([undefined, "false"])("rejects Native v2 before dialing when hangup is %s", flag => {
+    const report = checkDeployment({ ...config(), VOICE_RUNTIME_LIVE_EXPERIMENT: "native_v2", REALTIME_AGENT_HANGUP_ENABLED: flag });
+    expect(report.configurationValid).toBe(false);
+    for (const runtime of ["api", "worker"]) {
+      expect(report.issues).toContain(`${runtime}: native_v2 requires REALTIME_AGENT_HANGUP_ENABLED=true`);
+    }
+  });
   it("detects an SSR cookie split and untrusted proxy policy", () => {
     const report = checkDeployment({ ...config(), NEXT_PUBLIC_API_URL: "https://api.example.com", TRUSTED_PROXY_CIDRS: "true" });
     expect(report.configurationValid).toBe(false);

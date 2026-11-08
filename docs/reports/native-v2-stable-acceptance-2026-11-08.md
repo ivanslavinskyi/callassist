@@ -55,3 +55,7 @@ CI. No production deployment is claimed by this acceptance record.
 See [runtime contracts](../native-live-runtime.md), [validation procedures](../native-live-validation.md)
 and [the feature implementation record](task-input-testing-implementation-2026-11-08.md)
 for implementation details and prior verification evidence.
+
+Subsequent change: [production preparation](native-v2-production-readiness-2026-11-08.md)
+removes the environment restriction and records the migration rehearsal. The guard
+statements above describe the original integration checkpoint, not the later code.

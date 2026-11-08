@@ -11,8 +11,8 @@ export function voiceRuntimeMode(environment: NodeJS.ProcessEnv) {
   const fallback = environment.VOICE_RUNTIME_LIVE_FALLBACK?.trim() || "false";
   if (!["true", "false"].includes(fallback)) throw new Error("VOICE_RUNTIME_LIVE_FALLBACK must be true or false");
   if (experiment === "native_v2") {
-    if (driver !== "live" || fallback !== "false" || environment.VOICE_RUNTIME_NATIVE_V2_LOCAL !== "true" || environment.NODE_ENV === "production")
-      throw new Error("native_v2 requires live, fallback=false and explicit local pilot configuration");
+    if (driver !== "live" || fallback !== "false")
+      throw new Error("native_v2 requires live with fallback=false");
     return "live_native_v2";
   }
   if (experiment === "native_v1") {

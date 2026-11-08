@@ -2,7 +2,7 @@
 
 **Status:** maintained engineering procedure.\
 **Source reviewed:** 2026-11-08.\
-**Scope:** local `live_native_v2`; no production activation implied.
+**Scope:** `live_native_v2` verification; commands do not imply a production deployment.
 
 Use the [runtime specification](native-live-runtime.md) for behavior and the
 [dated implementation record](reports/native-live-integrity-2026-11-08.md) for
@@ -38,7 +38,7 @@ PostgreSQL role with database-creation rights. Read
 configuring it; do not run fixtures against a working or production database.
 Mock-provider tests do not establish real model or telephone performance.
 
-## Local runtime prerequisites
+## Runtime prerequisites
 
 Use the normal local setup in the [README](../README.md) and
 [engineer guide](engineer-guide.md#development-and-verification), then check:
@@ -49,7 +49,7 @@ Use the normal local setup in the [README](../README.md) and
 | Driver | `VOICE_RUNTIME_DRIVER=live` |
 | Fallback | `VOICE_RUNTIME_LIVE_FALLBACK=false` |
 | Experiment | `VOICE_RUNTIME_LIVE_EXPERIMENT=native_v2` |
-| Local admission | `VOICE_RUNTIME_NATIVE_V2_LOCAL=true`; `NODE_ENV` is not `production` |
+| Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
 | Completion | `REALTIME_AGENT_HANGUP_ENABLED=true` |
 | Preparation | Verify the saved policy revision, not just the selected model |
 | Latest integrity plan | Policy `preparation-live-native-integrity-2026-11-08`, compiler 13, schema 9, approval 8 |
@@ -68,8 +68,9 @@ exercise new preparation instructions.
 Provider session admission precedes dialing and can accrue usage before a human
 answers. Health checks do not start calls. Restart processes only after confirming
 that no active call or relevant job would be interrupted; configuration is read at
-startup. Public-beta activation remains separate work because the current code
-rejects native v2 in production.
+startup. Public-beta deployment remains separate work. The code supports explicit
+production selection; use the [release preparation record](reports/native-v2-production-readiness-2026-11-08.md)
+for the migration rehearsal and deployment sequence.
 
 For the new feature checks, verify objective encryption/backfill separately from
 migration application. The [backfill command](task-input-and-testing.md#objective-storage-and-backfill)

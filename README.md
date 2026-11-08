@@ -13,7 +13,7 @@ task context available at startup. Responses delegation handles reasoning; the
 application validates action authority, evidence, privacy and hangup. Native v2
 supports general tasks and approved booking, confirmation, rescheduling and
 cancellation. Native v2 was accepted as stable after local telephone testing on
-8 November 2026; production activation remains gated until the separate rollout.
+8 November 2026. Explicit production selection is supported; deployment is a separate step.
 Realtime and legacy hybrid remain
 explicit compatibility paths. Repository checks do not establish the deployed version.
 See the [native runtime specification](docs/native-live-runtime.md).
@@ -65,7 +65,7 @@ Do not point tests at a working or production database. Build with corepack pnpm
   prerequisite; fixed audit/review profiles and policy snapshots for existing jobs.
 - Optional Swiss-only account phones for registration and phone changes, with
   matching forms and copy across all seven interface locales.
-- Managed recording after affirmative consent; local native v2 recording from
+- Managed recording after affirmative consent; native v2 recording from
   connection with a declarative notice and durable deletion on refusal. Live
   transcripts are primary; recording ASR requires an explicit request.
 - Summary-v8 uses original task context and grounded evidence, with explicit partial

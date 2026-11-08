@@ -4,10 +4,11 @@
 
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
-Its current configuration still requires explicit local activation and blocks
-production activation until the separate rollout. Managed Live remains the
+Its current configuration supports explicit activation in development and production.
+Deployment remains a separate step. Managed Live remains the
 configuration default and rollback path. Source availability and local verification
-do not establish what is deployed. See the [release decision](reports/native-v2-stable-acceptance-2026-11-08.md).
+do not establish what is deployed. See the [release decision](reports/native-v2-stable-acceptance-2026-11-08.md)
+and [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
 ## Maintained references
 

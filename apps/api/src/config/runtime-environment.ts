@@ -21,7 +21,11 @@ export function validateRuntimeEnvironment(
   environment: NodeJS.ProcessEnv,
   runtime: RuntimeProcess
 ) {
-  try { voiceRuntimeMode(environment); }
+  try {
+    if (voiceRuntimeMode(environment) === "live_native_v2" && environment.REALTIME_AGENT_HANGUP_ENABLED !== "true") {
+      throw new Error("native_v2 requires REALTIME_AGENT_HANGUP_ENABLED=true");
+    }
+  }
   catch (error) { throw new RuntimeConfigurationError([(error as Error).message]); }
   if (environment.NODE_ENV !== "production") {
     const compilerDriver = environment.BRIEF_COMPILER_DRIVER?.trim() ||
