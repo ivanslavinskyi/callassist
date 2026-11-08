@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
 import { voiceRuntimeMode } from "./config/voice-runtime";
+import { MemoryTestingStore } from "./testing/store";
+import { PostgresTestingStore } from "./testing/postgres-store";
+import { parseDataEncryptionKeyring as testingKeyring } from "./security/encryption";
 import { startProviderBillingSync } from "./billing/sync-provider-billing";
 import { createNotificationsFromEnv, createUserCallNotificationsFromEnv } from "./notifications/create-notifications";
 import { createPlanReviewsFromEnv } from "./safety/plan-review-service";
@@ -100,7 +103,11 @@ const creditService = new CreditService({
 const notifications = createNotificationsFromEnv(repository);
 const userCallNotifications = createUserCallNotificationsFromEnv(repository);
 const telemetryExports = createTelemetryExportsFromEnv();
+const testingStore = process.env.STORAGE_DRIVER === "postgres"
+  ? new PostgresTestingStore(process.env.DATABASE_URL!, testingKeyring(process.env))
+  : new MemoryTestingStore(authRepository, "testingPreparationAttribution" in repository ? repository.testingPreparationAttribution : undefined);
 const app = buildApp({
+  testingStore,
   planReviews: createPlanReviewsFromEnv(),
   telemetryExports,
   ogService: createOgServiceFromEnv(),
@@ -120,6 +127,7 @@ const app = buildApp({
   realtimeConfigured: telephonyProvider instanceof TwilioTelephonyProvider
 });
 app.addHook("onClose", async () => { await userCallNotifications?.close(); });
+app.addHook("onClose", async () => { await testingStore.close(); });
 const realtimeBridge =
   telephonyProvider instanceof TwilioTelephonyProvider
     ? createVoiceRuntime({

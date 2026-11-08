@@ -202,6 +202,7 @@ function buildProviderUsageCost(
   };
   const records: AdminOperationsOverview["cost"]["providerUsage"]["records"] = [];
   const versions = new Set<string>();
+  const breakdown = new Map<string, NonNullable<AdminOperationsOverview["cost"]["providerUsage"]["breakdown"]>[number]>();
   let relevantBuckets = 0;
   let unpricedBuckets = 0;
   for (const bucket of usage.buckets) {
@@ -209,21 +210,31 @@ function buildProviderUsageCost(
     if (destinations.length === 0) continue;
     if (bucket.operationType !== "telephony_leg") relevantBuckets += 1;
     const cost = calculateProviderUsageCost(bucket);
-    const incomplete = (
+    const provisional = bucket.operationType === "realtime_session" && bucket.stage === "live_conversation" && bucket.usageFinalized !== true;
+    const incomplete = (provisional ||
       !cost.matched ||
       cost.calculatedUsdMicros === null ||
       cost.unpricedMetrics.length > 0
     );
+    const breakdownKey = JSON.stringify([bucket.operationType,bucket.stage,bucket.model]);
+    const part = breakdown.get(breakdownKey) ?? { operationType: bucket.operationType, stage: bucket.stage, model: bucket.model, operations: 0, incompleteOperations: 0, calculatedUsdMicros: null };
+    part.operations++; part.incompleteOperations += incomplete ? 1 : 0;
+    if (cost.calculatedUsdMicros !== null) part.calculatedUsdMicros = (part.calculatedUsdMicros ?? 0) + cost.calculatedUsdMicros;
+    breakdown.set(breakdownKey, part);
     if (bucket.operationType !== "telephony_leg") {
       versions.add(cost.pricingVersion);
       if (incomplete) unpricedBuckets += Math.max(1, bucket.usageRecords);
     }
     if (bucket.operationId && bucket.startedAt) records.push({
+      testingAttribution: bucket.testingAttribution ?? null,
       id: bucket.operationId, startedAt: bucket.startedAt, operationType: bucket.operationType,
       stage: bucket.stage, model: bucket.model, provider: bucket.provider, outcome: bucket.outcome ?? null,
       costBasis: bucket.operationType === "telephony_leg" ? "provider_reported" : "usage_estimate",
+      finality: provisional ? "provisional" : bucket.usageRecords > 0 || bucket.reportedUsdMicros != null ? "final" : "unknown",
+      usageSource: bucket.operationType === "telephony_leg" ? "provider_reported" : bucket.usageFinalized === true ? "provider_final" : bucket.usageRecords > 0 ? "provider_observed" : "unknown",
+      pricingVersion: bucket.pricingVersion ?? null, requestedServiceTier: bucket.requestedServiceTier ?? null, actualServiceTier: bucket.actualServiceTier ?? null,
       calculatedUsdMicros: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros ?? null : cost.calculatedUsdMicros,
-      missingMetrics: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : bucket.usageRecords === 0 ? ["usage_unknown_possible_charge"] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics
+      missingMetrics: bucket.operationType === "telephony_leg" ? bucket.reportedUsdMicros == null ? ["pending_price"] : [] : [...(bucket.usageRecords === 0 ? ["usage_unknown_possible_charge"] : !cost.matched ? ["pricing_version_or_model"] : cost.unpricedMetrics), ...(provisional ? ["final_session_usage_missing"] : [])]
     });
     for (const destination of destinations) {
       const component = components[destination.name];
@@ -265,6 +276,15 @@ function buildProviderUsageCost(
     incompleteSessions: usage.incompleteSessions ?? 0,
     firstRecordedAt: usage.firstRecordedAt ?? null,
     pricingVersions: [...versions].sort(),
+    testingCohorts: (["tester","ordinary","unclassified"] as const).flatMap(cohort =>
+      (["usage_estimate","provider_reported"] as const).map(costBasis => {
+        const selected = records.filter(record => record.costBasis === costBasis &&
+          (record.testingAttribution ? record.testingAttribution.tester ? "tester" : "ordinary" : "unclassified") === cohort);
+        const amounts = selected.flatMap(record => record.calculatedUsdMicros === null ? [] : [record.calculatedUsdMicros]);
+        return { cohort, costBasis, operations: selected.length, amountMicros: amounts.length ? amounts.reduce((a,b)=>a+b,0) : null,
+          incompleteOperations: selected.filter(record => record.missingMetrics.length > 0).length };
+      })),
+    breakdown: [...breakdown.values()].sort((a,b)=>a.operationType.localeCompare(b.operationType)||a.stage.localeCompare(b.stage)||a.model.localeCompare(b.model)),
     records: records.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.id.localeCompare(b.id)).filter(record => {
       const count = (recentCounts.get(record.operationType) ?? 0) + 1;
       recentCounts.set(record.operationType, count);

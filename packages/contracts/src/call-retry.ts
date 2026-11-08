@@ -1,13 +1,17 @@
 import { answeringResultSchema } from "./call-answering";
 import { getAppointmentAuthorization } from "./appointment";
-import type { CallBrief, CallCompilation } from "./call-brief";
+import type { CallBrief, CallCompilation, CallSnapshot } from "./call-brief";
+import { nativeAutomatedAnswerHandled } from "./call-lifecycle";
 
-export function canRepeatUnansweredCall(brief: Pick<CallBrief, "status" | "lifecycle">) {
+export function canRepeatUnansweredCall(brief: Pick<CallBrief, "status" | "lifecycle">,
+  actions?: Pick<CallSnapshot, "appointmentAction" | "nativeAppointmentAction">) {
   const lifecycle = brief.lifecycle;
   if (!["failed", "stopped", "completed"].includes(brief.status) || !lifecycle ||
       lifecycle.credit === "reserved" || lifecycle.credit === "used" ||
       lifecycle.consent === "granted" || lifecycle.consent === "declined" ||
-      lifecycle.conversationStartedAt || lifecycle.substantiveAnswerConfirmed) return false;
+      lifecycle.substantiveAnswerConfirmed || actions?.appointmentAction || actions?.nativeAppointmentAction) return false;
+  if (nativeAutomatedAnswerHandled(lifecycle)) return answeringResultSchema.safeParse(lifecycle.result).success;
+  if (lifecycle.conversationStartedAt) return false;
   if (!lifecycle.connected && ["no_answer", "busy", "canceled", "technical_failure"].includes(lifecycle.result ?? "")) return true;
   if (answeringResultSchema.safeParse(lifecycle.result).success || (lifecycle.result === "technical_failure" && lifecycle.answering && !lifecycle.answering.streamAdmitted && lifecycle.consent === "not_requested")) return true;
   // A voicemail or IVR can answer the telephone leg without a consenting conversation.

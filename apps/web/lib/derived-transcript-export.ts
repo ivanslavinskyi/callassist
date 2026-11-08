@@ -1,6 +1,7 @@
 import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
 import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
 import { summaryExportLines } from "./summary-presentation";
+import { summaryCoverageMessages } from "@callassist/contracts";
 import type { CallSummaryPayload } from "@callassist/contracts";
 import type { CallBrief, CallSnapshot, FinalTranscriptRevision, SourceSegment, TextLanguage } from "@callassist/contracts";
 import { appointmentResultState } from "./call-result-projection";
@@ -12,6 +13,8 @@ import { textArtifactMessages } from "./i18n/text-artifact-messages";
 import { formatTranscriptOffset, transcriptExportCopy } from "./final-transcript-export";
 import { buildTranscriptPdfLayout, formatTranscriptPdfDate } from "./transcript-pdf-layout";
 import { consentTimeline } from "./i18n/consent-timeline";
+import { transcriptAssessment } from "./transcript-assessment";
+import type { CallAssessmentSummary } from "@callassist/contracts";
 
 export type DerivedTranscriptExport = {
   brief: CallBrief;
@@ -22,11 +25,13 @@ export type DerivedTranscriptExport = {
   uiLocale: UiLocale;
   appointmentAction?: CallSnapshot["appointmentAction"];
   summary?: CallSummaryPayload | null;
+  assessment?: CallAssessmentSummary | null;
+  assessmentPending?: boolean;
 };
 
 export function buildDerivedTranscriptCopyText(input: DerivedTranscriptExport) {
   const copy = textArtifactMessages[input.uiLocale];
-  return [...exportHeader(input), "", ...summaryExportLines(input.summary), "", appointmentNote(input), transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
+  return [...exportHeader(input), "", coverageNote(input), ...summaryExportLines(input.summary), "", appointmentNote(input), transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
     const timestamp = segment.startSeconds === null ? "" : `[~${formatTranscriptOffset(segment.startSeconds)}] `;
     return `${timestamp}[${segment.id}] ${speaker(input, segment)}: ${segment.text}`;
   }), ...(input.segments.length ? [] : [input.text]), "", input.translationLanguage ? copy.translationNote : "", messages[input.uiLocale].live.aiWarning].filter((value, index, values) => value || values[index - 1]).join("\n");
@@ -44,6 +49,8 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
     variant: translationLabel ? `${copy.translated} · ${translationLabel}` : copy.originalSource,
     recipient: input.brief.recipientName,
     language: input.translationLanguage ?? input.brief.locale,
+    assessment: transcriptAssessment({ locale: input.uiLocale, summary: input.summary, assessment: input.assessment,
+      revisionId: input.revision.id, pending: input.assessmentPending }),
     metadata: [
       { label: common.recipient, value: input.brief.recipientName },
       { label: common.assistant, value: ASSISTANT_DISPLAY_NAME },
@@ -57,7 +64,7 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
       offset: segment.startSeconds === null ? null : `~${formatTranscriptOffset(segment.startSeconds)}`
     })),
     text: input.text,
-    notes: [...summaryExportLines(input.summary), appointmentNote(input), messages[input.uiLocale].live.aiWarning].filter(Boolean),
+    notes: [coverageNote(input), ...summaryExportLines(input.summary), appointmentNote(input), messages[input.uiLocale].live.aiWarning].filter(Boolean),
     source: { title: common.source, rows: [
       { label: copy.sourceRevision, value: `${input.revision.revision} · ${input.revision.id}` },
       { label: "SHA-256", value: input.revision.sourceHash }
@@ -65,6 +72,9 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
   });
 }
 
+function coverageNote(input: DerivedTranscriptExport) {
+  return input.summary?.evaluationCoverage?.status === "partial" ? summaryCoverageMessages[input.uiLocale] : "";
+}
 function appointmentNote(input: DerivedTranscriptExport) {
   if (input.summary?.calendar) return "";
   const state = appointmentResultState(input.appointmentAction, input.revision);

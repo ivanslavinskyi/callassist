@@ -7,6 +7,7 @@ import { voiceConsentRuntimePolicy } from "@callassist/contracts";
 // Every persisted table needs an explicit export or exclusion decision. New
 // migrations must update this inventory; existence-only SELECT tests miss gaps.
 const excluded: Record<string, string[]> = {
+  testing_configuration: ["testing_access", "test_scenarios", "test_scenario_revisions", "testing_audit"],
   identity_and_authentication: ["users", "sessions", "user_onboarding_acceptances", "account_admin_events", "account_session_events",
     "phone_change_challenges", "phone_change_events", "password_recovery_challenges", "password_recovery_grants", "password_recovery_events", "email_change_challenges", "email_change_events"],
   public_content: ["content_pages", "content_page_localizations", "content_page_revisions", "content_page_revision_localizations", "content_admin_events",
@@ -25,6 +26,15 @@ const excluded: Record<string, string[]> = {
 };
 const directory = new URL("../db/migrations/", import.meta.url);
 describe("telemetry source inventory", () => {
+  it("strips private extras from runtime diagnostics and rejects invalid measurements", () => {
+    const source = exportSources.find(source => source.table === "call_events")!;
+    const diagnostic = { kind: "task_context", durationMs: 30, firstAckMs: 20, commands: 3, utf8Bytes: 1000 };
+    const row = { event_name: "conversation.task", metadata: { phase: "diagnostic", revision: 1, runtimeVersion: "live-managed-v9", diagnostic } };
+    expect(mapExportRow(source, { ...row, metadata: { ...row.metadata,
+      diagnostic: { ...diagnostic, text: "private speech", audio: "private audio" } } }, Buffer.alloc(32)).data).toEqual(row);
+    for (const extra of [{ kind: "unknown" }, { durationMs: -1 }])
+      expect(() => mapExportRow(source, { ...row, metadata: { ...row.metadata, diagnostic: { ...diagnostic, ...extra } } }, Buffer.alloc(32))).toThrow();
+  });
   it("exports playback milestones with a nested allowlist and leaves historical events unchanged", () => {
     const source = exportSources.find(source => source.table === "call_events")!;
     const playback = { markId: "live-application-4-test", owner: "closing", outcome: "interrupted", reason: "acoustic_activity",

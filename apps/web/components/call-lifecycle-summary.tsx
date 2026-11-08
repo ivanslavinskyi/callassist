@@ -1,22 +1,23 @@
 import { answeringMessages } from "@/lib/i18n/answering-messages";
-import { formatLocale } from "@callassist/contracts";
+import { formatLocale, nativeAutomatedAnswerHandled } from "@callassist/contracts";
 import { lifecycleMessages } from "@/lib/i18n/lifecycle-messages";
 import type { UiLocale } from "@callassist/contracts";
 import type { CallLifecycle } from "@callassist/contracts";
-import { callResultCopy, callResultLabel } from "@/lib/call-status";
+import { callResultHelp, callResultLabel } from "@/lib/call-status";
 import { callPresentationCopy } from "@/lib/i18n/call-presentation";
 
 export function CallLifecycleSummary({ lifecycle, locale, message }: { lifecycle?: CallLifecycle; locale: UiLocale; message?: string | null }) {
   if (!lifecycle?.result) return null;
   const label = callResultLabel({ status: "completed", lifecycle }, locale)!;
-  const help = callResultCopy[locale][lifecycle.result][1];
+  const help = callResultHelp(lifecycle, locale);
+  const automatedAnswer = nativeAutomatedAnswerHandled(lifecycle);
   const stages = [
     [lifecycleMessages[locale].started, lifecycle.attemptedAt],
     [lifecycleMessages[locale].ringing, lifecycle.ringingAt],
     [lifecycleMessages[locale].connected, lifecycle.connectedAt],
     [lifecycleMessages[locale].disclosure, lifecycle.disclosureAt],
     [lifecycle.consent === "granted" ? (lifecycleMessages[locale].consentGranted) : lifecycle.consent === "declined" ? (lifecycleMessages[locale].consentDeclined) : (lifecycleMessages[locale].consentMissing), lifecycle.consentAt],
-    [lifecycleMessages[locale].conversation, lifecycle.conversationStartedAt],
+    [lifecycleMessages[locale].conversation, automatedAnswer ? null : lifecycle.conversationStartedAt],
     [lifecycleMessages[locale].ended, lifecycle.endedAt]
   ] as const;
   const credit = { not_recorded: "", reserved: lifecycleMessages[locale].creditReserved, used: lifecycleMessages[locale].creditUsed, returned: lifecycleMessages[locale].creditReturned }[lifecycle.credit];
@@ -24,7 +25,7 @@ export function CallLifecycleSummary({ lifecycle, locale, message }: { lifecycle
   return <section className={`call-lifecycle-summary result-${lifecycle.result}`} aria-label={label}>
     <div className="lifecycle-heading"><h2>{callPresentationCopy[locale].result}: {label}</h2>{credit ? <span className="lifecycle-credit">{credit}</span> : null}</div>
     <p>{help}</p>
-    {lifecycle.answering && lifecycle.answering.decision !== "consent" && lifecycle.consent !== "granted" && !lifecycle.conversationStartedAt ? <>
+    {lifecycle.answering && lifecycle.answering.decision !== "consent" && lifecycle.consent !== "granted" && (!lifecycle.conversationStartedAt || automatedAnswer) ? <>
       <p>{answeringMessages[locale].message[lifecycle.answering.message === "issued" ? "unknown" : lifecycle.answering.message]}</p>
       {message ? <><p>{answeringMessages[locale].approvedMessage}</p><blockquote>{message}</blockquote></> : null}
       <p className="muted-text">{answeringMessages[locale].uncertainty}</p>

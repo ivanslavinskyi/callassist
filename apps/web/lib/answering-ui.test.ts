@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { answeringMessages } from "./i18n/answering-messages";
-import { callResultCopy, callConsentLabel } from "./call-status";
+import { callResultCopy, callConsentLabel, callResultHelp } from "./call-status";
+import { nativeRecordingCopy } from "./i18n/native-live-messages";
 import { callActivityPhase } from "./call-activity";
 import { deriveCallLifecycle, emptyCallLifecycleCounts, countCallLifecycle, uiLocales, type AnsweringState } from "@callassist/contracts";
 
@@ -11,6 +12,7 @@ describe("answering presentation", () => {
   it("shows early disclosure as consent and keeps accepted conversations connected despite AMD", () => {
     const lifecycle = { ...deriveCallLifecycle("in_progress", []), disclosureAt: answering.observedAt, answering };
     expect(callActivityPhase("in_progress", false, "connected", lifecycle)).toBe("consent");
+    expect(callActivityPhase("in_progress", false, "connected", { ...lifecycle, consent: "not_requested", conversationStartedAt: answering.observedAt })).toBe("connected");
     expect(callActivityPhase("in_progress", false, "connected", { ...lifecycle, consent: "granted",
       answering: { ...answering, phase: "resolved", answeredBy: "machine_start", decision: "hang_up" } })).toBe("connected");
   });
@@ -48,6 +50,9 @@ describe("answering presentation", () => {
       if (locale !== "en") expect(copy.results[result][1]).not.toBe(answeringMessages.en.results[result][1]);
     }
     expect(callConsentLabel({ ...deriveCallLifecycle("completed", []), consent: "not_requested" }, locale, "fallback")).toBe(copy.notRequested);
+    const declared = { ...deriveCallLifecycle("completed", []), consent: "not_requested" as const, recordingBasis: "declarative_local" as const };
+    expect(callConsentLabel(declared, locale, "fallback")).toBe(nativeRecordingCopy[locale].basis);
+    expect(callResultHelp({ ...declared, result: "conversation_completed" }, locale)).toBe(nativeRecordingCopy[locale].completed);
   });
   it("distinguishes telephone connection, detection, consent and a machine response", () => {
     const lifecycle = { ...deriveCallLifecycle("in_progress", []), answering };
@@ -55,5 +60,12 @@ describe("answering presentation", () => {
     expect(callActivityPhase("in_progress", false, "connected", { ...lifecycle, answering: { ...answering, phase: "resolved", answeredBy: "human", decision: "consent" } })).toBe("consent");
     expect(callActivityPhase("in_progress", false, "connected", { ...lifecycle, answering: { ...answering, phase: "resolved", answeredBy: "machine_start", decision: "hang_up" } })).toBe("machine");
     expect(callActivityPhase("completed", false, "connected", lifecycle)).toBeNull();
+  });
+  it("shows a dispatched native machine answer after the assistant's greeting",()=>{
+    const lifecycle={...deriveCallLifecycle("in_progress",[]),recordingBasis:"declarative_local" as const,consent:"not_requested" as const,
+      conversationStartedAt:answering.observedAt,answering:{...answering,execution:"async" as const,phase:"resolved" as const,
+        actionDispatched:true,streamAdmitted:true,answeredBy:"machine_start" as const,decision:"hang_up" as const}};
+    expect(callActivityPhase("in_progress",false,"connected",lifecycle)).toBe("machine");
+    expect(callActivityPhase("in_progress",false,"connected",{...lifecycle,consent:"granted"})).toBe("connected");
   });
 });

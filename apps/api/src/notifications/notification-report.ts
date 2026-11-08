@@ -1,5 +1,5 @@
 import type postgres from "postgres";
-import { approvedExecutionSnapshotSchema, callAssessmentDecisionSchema, callSummaryPayloadSchema, callCompilationSchema } from "@callassist/contracts";
+import { approvedExecutionSnapshotSchema, callSummaryPayloadSchema, callCompilationSchema } from "@callassist/contracts";
 import { decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import type { CallRepository } from "../storage/call-repository";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
@@ -39,30 +39,35 @@ export class NotificationReportReader {
       compilation_ciphertext:string|null;
       provider_status:string|null;has_consent:boolean;
       recipient_name:string;phone_number:string;locale:string;objective:string;owner:string|null;
-      assessment_status:string|null;assessment_reason:string|null;assessment_payload:string|null;summary_payload:string|null;
       connected_at:Date|null;connected_seconds:number|null;
     }[]>`SELECT a.status,a.provider_status,a.failure_reason,a.started_at,a.ended_at,a.execution_snapshot_ciphertext,
-      EXISTS(SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND cr.consent_granted_at IS NOT NULL) AS has_consent,
+      EXISTS(SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND (cr.consent_granted_at IS NOT NULL OR cr.recording_basis='declarative_local')) AS has_consent,
       b.recipient_name,b.phone_number,b.locale,b.objective,compilation.compilation_ciphertext,
       concat_ws(' ',u.first_name,u.last_name,u.email) AS owner,
-      assessment.status AS assessment_status,assessment.reason AS assessment_reason,assessment.payload_ciphertext AS assessment_payload,
-      (SELECT t.payload_ciphertext FROM call_text_artifacts t JOIN final_transcript_revisions r ON r.id=t.transcript_revision_id
-        WHERE r.call_attempt_id=a.id AND t.kind='call_summary' AND t.status='ready'
-          AND t.compilation_id=a.compilation_id AND t.target_language=COALESCE(a.content_language,l.context->>'taskContentLanguage')
-          AND (assessment.transcript_revision_id IS NULL OR t.transcript_revision_id=assessment.transcript_revision_id)
-        ORDER BY t.updated_at DESC LIMIT 1) AS summary_payload,
       (SELECT min(e.occurred_at) FROM call_events e WHERE e.call_attempt_id=a.id AND e.event_name='connection.confirmed' AND e.metadata->>'providerStatus'='in-progress') AS connected_at,
       (SELECT max(usage.duration_seconds)::double precision FROM effective_provider_usage usage JOIN provider_operations o ON o.id=usage.operation_id
         WHERE o.call_attempt_id=a.id AND o.operation_type='telephony_leg') AS connected_seconds
       FROM call_attempts a JOIN call_briefs b ON b.id=a.call_brief_id LEFT JOIN users u ON u.id=b.user_id
       LEFT JOIN call_compilations compilation ON compilation.id=a.compilation_id
-      LEFT JOIN call_assessments assessment ON assessment.call_attempt_id=a.id
-      LEFT JOIN call_language_contexts l ON l.call_brief_id=b.id
       WHERE a.id=${event.call_attempt_id} AND b.data_deleted_at IS NULL AND (u.id IS NULL OR u.status<>'deleted')
         AND NOT EXISTS(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.id AND d.status<>'completed')`;
     if (!row) return null;
+    const display = await this.calls.getCallAssessment(event.call_brief_id!, event.call_attempt_id!);
     // Also bound waiting when transcription has not produced an assessment row.
-    if (row.has_consent && (!row.assessment_status || row.assessment_status === "pending") && now.getTime() < event.occurred_at.getTime() + 5 * 60_000) return "pending";
+    if (row.has_consent && (!display || display.summary.status === "pending") && now.getTime() < event.occurred_at.getTime() + 5 * 60_000) return "pending";
+    const [summaryRow] = display?.summary.status === "ready" ? await this.sql<{payload:string}[]>`
+      SELECT t.payload_ciphertext AS payload FROM call_text_artifacts t
+      JOIN final_transcript_revisions r ON r.id=t.transcript_revision_id
+      JOIN call_attempts a ON a.id=r.call_attempt_id
+      LEFT JOIN call_language_contexts l ON l.call_brief_id=a.call_brief_id
+      WHERE t.call_brief_id=${event.call_brief_id} AND r.call_attempt_id=${event.call_attempt_id}
+        AND t.kind='call_summary' AND t.status='ready' AND t.payload_ciphertext IS NOT NULL
+        AND (${display.artifactId ?? null}::uuid IS NULL OR t.id=${display.artifactId ?? null})
+        AND (${display.artifactId ?? null}::uuid IS NOT NULL OR (
+          t.transcript_revision_id=${display.summary.transcriptRevisionId} AND t.source_hash=${display.sourceHash}
+          AND t.compilation_id=${display.compilationId} AND t.target_language=COALESCE(a.content_language,l.context->>'taskContentLanguage')
+          AND right(${display.summary.evaluatorVersion}::text,length(t.generator_version)+1)=':'||t.generator_version))
+      ORDER BY t.updated_at DESC,t.id DESC LIMIT 1` : [];
     const execution = row.execution_snapshot_ciphertext ? approvedExecutionSnapshotSchema.parse(decryptJson(row.execution_snapshot_ciphertext,this.key)) : null;
     const original = row.compilation_ciphertext ? callCompilationSchema.parse(decryptJson(row.compilation_ciphertext,this.key)).rawBrief : null;
     const costs = await this.costs(event.call_brief_id!,event.call_attempt_id!,now);
@@ -72,9 +77,9 @@ export class NotificationReportReader {
       status:statusLabels[row.provider_status ?? ""] ?? statusLabels[row.status] ?? row.status,failure:row.failure_reason,startedAt:row.started_at.toISOString(),endedAt:row.ended_at.toISOString(),
       elapsedSeconds:Math.max(0,Math.round((row.ended_at.getTime()-row.started_at.getTime())/1000)),
       connectedSeconds:row.connected_seconds ?? (row.connected_at ? Math.max(0,Math.round((row.ended_at.getTime()-row.connected_at.getTime())/1000)) : ["no-answer","busy","canceled"].includes(row.provider_status ?? "") ? 0 : null),
-      assessmentStatus:!row.has_consent ? "Not assessed (no recording consent)" : row.assessment_status === "ready" ? "Ready" : `Unavailable${row.assessment_reason ? ` (${row.assessment_reason})` : " (processing deadline reached)"}`,
-      assessment:row.assessment_payload ? callAssessmentDecisionSchema.parse(decryptJson(row.assessment_payload,this.key)) : null,
-      criteria:execution?.plan.successCriteria ?? [],summary:row.summary_payload ? callSummaryPayloadSchema.parse(decryptJson(row.summary_payload,this.key)) : null,
+      assessmentStatus:!row.has_consent ? "Not assessed (no recording consent)" : display?.summary.status === "ready" ? "Ready" : `Unavailable${display?.summary.reason ? ` (${display.summary.reason})` : " (processing deadline reached)"}`,
+      assessment:display?.decision ?? null,
+      criteria:execution?.plan.successCriteria ?? [],summary:summaryRow ? callSummaryPayloadSchema.parse(decryptJson(summaryRow.payload,this.key)) : null,
       costs:costs.items,costsIncomplete:costs.incomplete,preparedAt:now.toISOString()
     };
   }
@@ -95,7 +100,7 @@ export class NotificationReportReader {
     const facts = await this.calls.getAdminOperationsFacts("1970-01-01T00:00:00.000Z",now.toISOString(),callId);
     const usageIds = new Set(facts.providerUsage.buckets.map(b=>b.operationId));
     let incomplete = included.some(o=>o.provider === "openai" &&
-      (o.operation_type === "realtime_session" ? o.outcome !== "succeeded" : o.operation_type !== "brief_moderation" && !usageIds.has(o.id)));
+      o.operation_type !== "brief_moderation" && !usageIds.has(o.id));
     const groups = new Map<string,{label:string;amountMicros:number|null;currency:string;basis:string}>();
     const add = (label:string, amount:number|null, currency:string, basis:string) => {
       const key = `${label}:${currency}:${basis}`, old = groups.get(key);
@@ -103,9 +108,11 @@ export class NotificationReportReader {
     };
     for (const bucket of facts.providerUsage.buckets) {
       const operation = byId.get(bucket.operationId ?? "");
-      if (!operation || bucket.provider !== "openai" || ["brief_moderation","realtime_session"].includes(bucket.operationType)) continue;
+      if (!operation || bucket.provider !== "openai" || bucket.operationType === "brief_moderation" ||
+        (bucket.operationType === "realtime_session" && bucket.stage !== "live_conversation")) continue;
       const price = calculateProviderUsageCost(bucket);
       incomplete ||= price.calculatedUsdMicros === null || price.unpricedMetrics.length > 0;
+      incomplete ||= bucket.operationType === "realtime_session" && bucket.usageFinalized !== true;
       add(`${operation.attempt_id ? "Attempt" : "Shared"} — ${costLabels[bucket.operationType] ?? bucket.operationType}`,
         price.calculatedUsdMicros,"USD",`usage estimate; ${price.pricingVersion}`);
     }
@@ -125,5 +132,5 @@ export class NotificationReportReader {
     return {items,incomplete};
   }
 }
-const costLabels: Record<string,string> = { brief_compilation:"Plan preparation",text_translation:"Translation",call_summary:"Summary and assessment",realtime_response:"Realtime AI",transcription:"Transcription" };
+const costLabels: Record<string,string> = { brief_compilation:"Plan preparation",text_translation:"Translation",call_summary:"Summary and assessment",realtime_response:"Realtime AI",realtime_session:"Live voice",transcription:"Transcription" };
 const statusLabels: Record<string,string> = {completed:"Completed",failed:"Failed",stopped:"Stopped","no-answer":"No answer",busy:"Busy",canceled:"Canceled"};

@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { appointmentAuthorizationSchema, appointmentDateSchema, appointmentTimeSchema, appointmentTimeZoneSchema } from "./appointment";
 
+import { nativeAppointmentAuthorizationSchema, nativeAppointmentActionSchema } from "./native-appointment";
+
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const ids = z.array(z.string().min(1).max(160)).max(30);
-export const summarySourceContextSchema = z.strictObject({
+const legacySummarySourceContextSchema = z.strictObject({
   version: z.literal(1), callAttemptId: z.uuid(), compilationId: z.uuid(), compilationSnapshotHash: hash,
   transcriptRevisionId: z.uuid(), transcriptSourceHash: hash,
   callCreatedAt: z.iso.datetime(), callConnectedAt: z.iso.datetime().nullable(), callEndedAt: z.iso.datetime().nullable(),
@@ -12,6 +14,7 @@ export const summarySourceContextSchema = z.strictObject({
     state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
     date: appointmentDateSchema, startTime: appointmentTimeSchema, timeZone: appointmentTimeZoneSchema }).nullable()
 });
+export const summarySourceContextSchema=z.union([legacySummarySourceContextSchema,legacySummarySourceContextSchema.extend({version:z.literal(2),nativeAppointmentAuthorization:nativeAppointmentAuthorizationSchema.nullable(),nativeAppointmentAction:nativeAppointmentActionSchema.nullable()})]);
 export type SummarySourceContext = z.infer<typeof summarySourceContextSchema>;
 
 /** Provider extraction contains observations and citations, never a trusted calendar verdict. */
@@ -23,7 +26,15 @@ export const appointmentExtractionSchema = z.strictObject({
     supersedes: z.array(z.string().min(1).max(80)).max(10), sourceSegmentIds: ids.min(1)
   })).max(10),
   conditions: z.array(z.strictObject({ checkId: z.string().min(1).max(160),
-    kind: z.enum(["calendar_only", "combined"]), candidateId: z.string().min(1).max(80).nullable() })).max(30)
+    kind: z.enum(["calendar_only", "combined"]), candidateId: z.string().min(1).max(80).nullable() })).max(30),
+  // Present only in native-summary-v1. Older extractions remain readable.
+  nativeOutcome: z.strictObject({
+    operation: z.enum(["book", "confirm_existing", "reschedule", "cancel"]),
+    disposition: z.enum(["confirmed", "unconfirmed", "not_required"]),
+    candidateId: z.string().min(1).max(80).nullable(),
+    previousAppointmentReleased: z.boolean().nullable(),
+    sourceSegmentIds: ids
+  }).optional()
 });
 export type AppointmentExtraction = z.infer<typeof appointmentExtractionSchema>;
 
@@ -40,5 +51,5 @@ export const summaryCalendarSchema = z.strictObject({
 export type SummaryCalendar = z.infer<typeof summaryCalendarSchema>;
 
 export function supportsSummaryAssessment(version: string): boolean {
-  return version.startsWith("summary-v3:") || /^summary-v[45]:grounded-v3:/.test(version);
+  return version.startsWith("summary-v3:") || /^summary-v[45678]:grounded-v3:/.test(version);
 }

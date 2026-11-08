@@ -1,8 +1,10 @@
 "use client";
+import { taskInputMessages } from "@/lib/i18n/task-input-messages";
 
 import {
-  CALL_BRIEF_INPUT_LIMITS,
+  CALL_BRIEF_INPUT_LIMITS, buildNativeOpening, createSpokenIdentities, getAssistantProfile, ASSISTANT_NAME,
   answeringApproval,
+  legacyPreparationIssue,
   callBriefTaskTextLength,
   type CallCompilation,
   type ClarificationAnswer
@@ -17,6 +19,7 @@ import { CallPlanPresentation } from "./call-plan-presentation";
 import { isPlanPreparationFailure } from "@/lib/plan-preparation-failure";
 import { approvalLayoutMessages } from "@/lib/i18n/approval-layout-messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
+import {preparationIssueMessage} from "@/lib/i18n/preparation-issue-messages";
 
 export function CompilationReview({
   busy,
@@ -46,8 +49,14 @@ export function CompilationReview({
   const design = designMessages[locale];
   const copy = messages.review;
   const compiled = compilation.compiledBrief;
+  const nativeOpening = compiled && "contextAppendix" in compiled ? buildNativeOpening({
+    locale: compiled.callLocale, representedPerson: createSpokenIdentities(compiled.callLocale, compilation.rawBrief.recipientName, compilation.rawBrief.representedPerson).representedPerson.spoken,
+    assistantName: ASSISTANT_NAME, voiceGender: getAssistantProfile(compilation.rawBrief.assistantProfileId).voiceGender,
+    addressingStyle: compiled.addressingStyle, assistanceReason: compilation.rawBrief.assistanceReason, purposeExample: compiled.opening.purposeStatement
+  }) : undefined;
   const authorization = compiled && "appointmentAuthorization" in compiled ? compiled.appointmentAuthorization : null;
   const decision = compilation.policyDecision;
+  const issue=("issue" in decision?decision.issue:undefined)??legacyPreparationIssue(decision);
   const blockingIssues = compiled?.blockingIssues ?? [];
   const isReady = decision.status === "ready_for_review";
   const compactReview = isReady && showActions && !!compiled;
@@ -103,19 +112,19 @@ export function CompilationReview({
         {compiled.prohibitedActions.length ? <div className="review-key-limits"><h3>{copy.guardrails}</h3><ul>{compiled.prohibitedActions.map(action => <li key={action}>{action}</li>)}</ul></div> : null}
         {authorization ? <div className="review-key-limits"><h3>{appointmentMessages[locale].title}</h3>
           <p>{authorization.serviceDescription} · {authorization.timeZone}</p>
-          <ul>{authorization.windows.map((window, index) => <li key={index}>{window.date} · {window.startTime}–{window.endTime}</li>)}</ul>
+          {"windows" in authorization ? <ul>{authorization.windows.map((window, index) => <li key={index}>{window.date} · {window.startTime}–{window.endTime}</li>)}</ul> : null}
           <p>{appointmentMessages[locale].financialPolicy}</p>
         </div> : null}
       </section> : null}
 
       <details className="review-full-plan" open={compactReview ? undefined : true} key={`${compilation.snapshotHash}:${compactReview}`}>
       <summary hidden={!compactReview}>{layout.details}</summary>
-      {compiled && !preparationFailed ? <section className="initial-disclosure-preview">
+      {compiled && !preparationFailed && !nativeOpening ? <section className="initial-disclosure-preview">
         <h3>{initialDisclosureMessages[locale].title}</h3>
         {initialDisclosure ? <blockquote lang={initialDisclosure.locale}>{initialDisclosure.text}</blockquote>
           : <p>{initialDisclosureMessages[locale].unavailable}</p>}
       </section> : null}
-      {compiled && !preparationFailed ? <CallPlanPresentation plan={compiled} uiLocale={locale} /> : null}
+      {compiled && !preparationFailed ? <CallPlanPresentation plan={compiled} uiLocale={locale} nativeOpening={nativeOpening} /> : null}
 
       {compiled && isReady && showActions ? <section>
         <h3>{answeringMessages[locale].policy}</h3>
@@ -126,6 +135,18 @@ export function CompilationReview({
         </blockquote> : null}
         <p className="muted-text">{answeringMessages[locale].uncertainty}</p>
       </section> : null}
+      </details>
+
+      <details className="provided-information">
+        <summary>{taskInputMessages[locale].supplied}</summary>
+        <p>{taskInputMessages[locale].information}</p>
+        <dl>{[
+          [messages.form.copy.objective, compilation.rawBrief.objective],
+          [messages.form.copy.additionalContext, compilation.rawBrief.context],
+          [messages.form.copy.shareableInformation, (compilation.rawBrief.allowedFacts ?? []).join("\n")],
+          [copy.addMissingDetail, (compilation.rawBrief.clarificationAnswers ?? []).map(item => item.answer).join("\n")],
+          [messages.form.copy.deliveryInstruction, compilation.rawBrief.deliveryInstruction]
+        ].filter(([,text])=>text).map(([label,text],index)=><div key={index}><dt>{label}</dt><dd style={{whiteSpace:"pre-wrap"}}>{text}</dd></div>)}</dl>
       </details>
 
       {decision.status === "needs_clarification" ? (
@@ -151,14 +172,8 @@ export function CompilationReview({
 
       {decision.status === "blocked" ? (
         <div className="policy-reasons">
-          {preparationFailed ? <p role="alert">{copy.preparationFailedHelp}</p> : <>
-          <strong>{copy.blockedReason}</strong>
-          <ul>
-            {decision.reasonCodes.map((code) => (
-              <li key={code}>{copy.reason[code]}</li>
-            ))}
-          </ul>
-          </>}
+          <strong>{preparationFailed?copy.preparationFailed:copy.blockedReason}</strong>
+          <p role="alert">{issue?preparationIssueMessage(issue,locale):copy.preparationFailedHelp}</p>
         </div>
       ) : null}
 

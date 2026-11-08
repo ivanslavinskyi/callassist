@@ -5,7 +5,7 @@ import type { AppointmentAuthorization, CallLocale, AssistantProfileId, Assistan
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import type { CallRepository } from "../storage/call-repository";
 import { CallService } from "../call-service";
-import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { DeterministicBriefCompiler, evaluateCompiledBrief } from "../brief-compiler/brief-compiler";
 import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 
@@ -50,25 +50,27 @@ export const authorization: AppointmentAuthorization = {
 export const proposal = { operation: "book", date: "2099-09-16", startTime: "15:00", timeZone: "Europe/Zurich",
   serviceMatches: true, recipientMatches: true, requiresPaymentOrNewTerms: false, detailsConfirmed: true };
 
-export async function approvedCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", allowedFacts: string[] = ["Application sent: 12 July"]) {
+export async function approvedCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", allowedFacts: string[] = ["Application sent: 12 July"], objective = "Ask whether the application sent on 12 July was received") {
   const compiler = new DeterministicBriefCompiler();
   if (appointment) {
     const compile = compiler.compile.bind(compiler);
     vi.spyOn(compiler, "compile").mockImplementation(async (input, revision) => {
       const result = await compile(input, revision);
-      if (!result.compiledBrief) throw new Error("Missing fixture plan");
-      result.compiledBrief = { ...result.compiledBrief, schemaVersion: "4", taskType: "appointment_coordination", appointmentAuthorization: appointment };
+      if (!result.compiledBrief || result.compiledBrief.schemaVersion !== "8") throw new Error("Missing current fixture plan");
+      result.compiledBrief = { ...result.compiledBrief, taskType: "appointment_coordination", appointmentAuthorization: appointment,blockingIssues:[] };
+      result.policyDecision=evaluateCompiledBrief(result.rawBrief,result.compiledBrief);
       result.snapshotHash = createCompilationSnapshotHash(result);
       return result;
     });
   }
   const service = new CallService(repository, undefined, undefined, undefined, compiler);
   const brief = await service.create({ recipientName: "Example AG", phoneNumber: "+41710000001",
-    objective: "Ask whether the application sent on 12 July was received", assistantProfileId: profile,
+    objective, assistantProfileId: profile,
     representedPersonFirstName: "Nina", representedPersonLastName: "Keller", assistanceReason,
     locale, audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts });
   await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
   const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
   await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
-  return { service, repository, brief, attempt, snapshot: attempt.executionSnapshot! };
+  if (attempt.executionSnapshot?.version !== 7) throw new Error("Missing native approval fixture");
+  return { service, repository, brief, attempt, snapshot: attempt.executionSnapshot };
 }

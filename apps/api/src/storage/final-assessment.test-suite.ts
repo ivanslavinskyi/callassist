@@ -9,7 +9,7 @@ import { buildSummarySourceContext } from "../text-processing/summary-source";
 import { composeCalendarSummary } from "../text-processing/summary-calendar";
 
 export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository;owner:string;reopen?:()=>Promise<CallRepository>}>) {
-  async function fixture(consent=true) {
+  async function fixture(consent: boolean | "declarative_local"=true) {
     const {repository:r,owner,reopen}=await make();
     await r.grantSignupCredits(owner);
     const input=normalizeCreateCallBriefInput({recipientName:"Office",phoneNumber:"+41523686688",objective:"Ask what they want for dinner",
@@ -19,7 +19,12 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     const {attempt}=await r.startAttempt(brief.id,{userId:owner,provider:"twilio"});
     await r.attachProviderCall(attempt.id,`CA-${attempt.id}`,"in-progress");
     if (!consent) return {r,owner,brief,attempt,c,recording:null,reopen};
-    const {recording}=await r.beginRecording(brief.id);
+    let recording;
+    if (consent === "declarative_local") {
+      await r.nativeLive.reserve(brief.id,attempt.id);
+      await r.nativeLive.bind(attempt.id,`CA-${attempt.id}`);
+      recording=(await r.get(brief.id))!.recording!;
+    } else ({recording}=await r.beginRecording(brief.id));
     await r.attachProviderRecording(recording.id,`RE-${recording.id}`,"in-progress");
     // The provisional ASR misses the task answer. It must not decide billing.
     await r.addTranscript(brief.id,"assistant","What would you like for dinner?","en-GB");
@@ -50,6 +55,15 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     await r.claimTextArtifact(artifact.id,lease);
     return {artifact,revision,decision,payload,lease};
   }
+  it("processes a declared native recording without fabricating an affirmative consent receipt",async()=>{
+    const f=await fixture("declarative_local");
+    expect(f.recording).toMatchObject({consentGrantedAt:null,recordingBasis:"declarative_local"});
+    await f.r.updateStatus(f.brief.id,"completed");
+    expect((await f.r.get(f.brief.id))?.brief.lifecycle?.result).toBe("assessment_pending");
+    const v=await final(f);await f.r.completeTextArtifact(v.artifact.id,v.payload,v.lease);
+    expect((await f.r.get(f.brief.id))?.brief.lifecycle).toMatchObject({result:"conversation_completed",assessment:{status:"ready"}});
+    expect((await f.r.listCallTelemetryEvents(f.brief.id)).some(e=>e.payload.name==="consent.granted")).toBe(false);
+  });
   it.each(["task_answer","cannot_answer","referral"] as const)("settles %s from final evidence exactly once, independently of goal success",async category=>{
     const f=await fixture();
     await f.r.updateStatus(f.brief.id,"completed");
@@ -70,7 +84,7 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     expect(facts.lifecycle?.goals?.[category==="task_answer"?"achieved":"notAchieved"]).toBe(1);
     expect(facts.userGoalFeedback).toEqual({yes:0,partly:0,no:0,notProvided:1});
   });
-  it.each(["summary-v4", "summary-v5"])("freezes a %s context and publishes an immutable assessment revision without rebilling", async version => {
+  it.each(["summary-v4", "summary-v5", "summary-v6", "summary-v7", "summary-v8"])("freezes a %s context and publishes an immutable assessment revision without rebilling", async version => {
     const f = await fixture(); await f.r.updateStatus(f.brief.id,"completed");
     const old = await final(f); await f.r.completeTextArtifact(old.artifact.id,old.payload,old.lease);
     await f.r.completeDurableJob(old.lease.jobId,old.lease.workerId,new Date().toISOString());
@@ -184,6 +198,24 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     expect((await f.r.getCreditUsage(f.owner)).transactions.filter(t=>t.type==="call_charge").map(t=>t.callAttemptId)).toEqual([f.attempt.id]);
     await f.r.applyProviderStatus(`CA-${next.attempt.id}`,"no-answer","failed",f.brief.id);
     expect((await f.r.get(f.brief.id))?.brief.lifecycle).toMatchObject({result:"no_answer",credit:"returned"});
+  });
+
+  it("preserves an earlier attempt's written result when a new native attempt refuses recording",async()=>{
+    const f=await fixture();await f.r.updateStatus(f.brief.id,"completed");const v=await final(f);
+    await f.r.completeTextArtifact(v.artifact.id,v.payload,v.lease);
+    await f.r.completeDurableJob(v.lease.jobId,v.lease.workerId,new Date().toISOString());
+    await f.r.updateStatus(f.brief.id,"ready");
+    const next=await f.r.startAttempt(f.brief.id,{userId:f.owner,provider:"twilio"});
+    await f.r.attachProviderCall(next.attempt.id,`CA-${next.attempt.id}`,"in-progress");
+    await f.r.nativeLive.reserve(f.brief.id,next.attempt.id);
+    // Reserve a later attempt; the application disallows a second recording
+    // on this card. Its cleanup must still preserve older retained artifacts.
+    await f.r.addTranscript(f.brief.id,"recipient","Do not record this attempt.","en-GB");
+    await f.r.nativeLive.discard(next.attempt.id,"recording_refused");
+    expect((await f.r.getTextArtifact(f.brief.id,v.artifact.id))?.payload).toEqual(v.payload);
+    expect((await f.r.getTranscriptRevision(f.brief.id,v.revision.id))?.sourceHash).toBe(v.revision.sourceHash);
+    expect((await f.r.get(f.brief.id))?.transcript.some(s=>s.callAttemptId===next.attempt.id)).toBe(false);
+    await expect(f.r.addTranscript(f.brief.id,"recipient","Late private answer","en-GB")).rejects.toThrow("LIVE_CONVERSATION_DISCARDED");
   });
 
   it("expires reservations even while another durable handler is blocked",async()=>{

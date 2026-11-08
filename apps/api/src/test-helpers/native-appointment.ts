@@ -1,0 +1,7 @@
+import type { NativeAppointmentAuthorization, NativeAppointmentProposal, NativeAppointmentAction } from "@callassist/contracts";
+export const nativeAuthority:NativeAppointmentAuthorization={version:1,operation:"book",serviceDescription:"Routine consultation",providerScope:"called_recipient",timeZone:"Europe/Zurich",existingAppointment:null,
+ alternatives:[{id:"preferred",selection:"first_matching",rules:[{startDate:"2099-09-01",endDate:"2099-09-30",weekdays:[],excludedWeekdays:[],excludedDates:[],startTime:"09:00",endTime:"17:00"}],requirements:[]}],requirements:[],limits:{finishBy:null,maxTotalPrice:null},maxAppointments:1,financialPolicy:"no_unapproved_terms"};
+export const nativeProposal:NativeAppointmentProposal={operation:"book",alternativeId:"preferred",date:"2099-09-16",startTime:"15:00",timeZone:"Europe/Zurich",serviceMatches:true,recipientMatches:true,requiresUnapprovedTerms:false,totalPrice:null,durationMinutes:null,termsQuote:null,requirements:[],unavailableAlternatives:[],selectionEvidence:null};
+export function nativeAction(callBriefId:string,callAttemptId:string,snapshotHash:string):NativeAppointmentAction{
+ const now=new Date().toISOString();return {schemaVersion:1,id:"11111111-1111-4111-8111-111111111111",callBriefId,callAttemptId,snapshotHash,proposalHash:"b".repeat(64),representedPerson:"Nina Keller",proposal:structuredClone(nativeProposal),state:"authorized",intent:"request",episode:1,revision:1,delivery:{status:"not_observed",mark:null,assistantQuote:null,observedAt:null},confirmation:null,authorizedAt:now,updatedAt:now};
+}

@@ -66,12 +66,13 @@ describe("compilation snapshot integrity", () => {
 
   it("hashes authorization changes and does not apply them to legacy approvals", async () => {
     const compilation = await new DeterministicBriefCompiler().compile(input);
-    expect(compilation.compiledBrief!.schemaVersion).toBe("4");
+    expect(compilation.compiledBrief!.schemaVersion).toBe("8");
+    if (compilation.compiledBrief?.schemaVersion !== "8") throw new Error("Expected current compiler fixture");
     expect(compilation.compiledBrief).toHaveProperty("appointmentAuthorization", null);
     const authorization = { operation: "book" as const, serviceDescription: "Permit appointment", providerScope: "called_recipient" as const,
       timeZone: "Europe/Zurich", windows: [{ date: "2026-09-11", startTime: "10:00", endTime: "11:00" }],
       selection: "first_matching" as const, maxAppointments: 1 as const, financialPolicy: "no_new_financial_terms" as const };
-    const changed = { ...compilation, compiledBrief: { ...compilation.compiledBrief!, schemaVersion: "4" as const, appointmentAuthorization: authorization } };
+    const changed = { ...compilation, compiledBrief: { ...compilation.compiledBrief!, schemaVersion: "8" as const, appointmentAuthorization: authorization } };
     expect(hasValidCompilationSnapshotHash(changed)).toBe(false);
     const first = createCompilationSnapshotHash(changed);
     expect(createCompilationSnapshotHash({ ...changed, compiledBrief: { ...changed.compiledBrief,

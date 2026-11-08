@@ -1,4 +1,5 @@
-import type { AppointmentAuthorization, CompiledCallBrief } from "@callassist/contracts";
+import { NativeAppointmentDetails } from "./native-appointment-details";
+import type { CompiledCallBrief, NativeOpening, LiveTaskAppendixSection, NativeAppointmentAuthorization } from "@callassist/contracts";
 import { calendarDateDetails, formatLocale } from "@callassist/contracts";
 import { messages, type UiLocale } from "@/lib/i18n/messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
@@ -10,12 +11,13 @@ export type CallPlanPresentationData = Pick<CompiledCallBrief,
   "resultHandling" | "opening" | "orderedQuestions" | "approvedFacts" |
   "prohibitedActions"
 > & Partial<Pick<CompiledCallBrief, "backgroundSummary" | "conditionalFollowUps" | "unresolvedCriteria" | "stopConditions">>
-  & { appointmentAuthorization?: AppointmentAuthorization | null };
+  & { nativeAppointmentAuthorization?:NativeAppointmentAuthorization|null; appointmentAuthorization?: Exclude<CompiledCallBrief, {schemaVersion: "3"}>["appointmentAuthorization"]; contextAppendix?: LiveTaskAppendixSection[]; taskInstructions?: string };
 
-export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
+export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2, nativeOpening }: {
   plan: CallPlanPresentationData;
   uiLocale: UiLocale;
   headingLevel?: 2 | 4;
+  nativeOpening?: NativeOpening;
 }) {
   const copy = messages[uiLocale].review;
   const appointmentCopy = appointmentMessages[uiLocale];
@@ -24,6 +26,7 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
   const Heading = headingLevel === 4 ? "h4" : "h2";
   return <>
     <p className="call-plan-lead">{plan.localizedObjective}</p>
+    {plan.taskInstructions ? <section className="review-questions"><Heading>{copy.whatWillDo}</Heading><p style={{whiteSpace:"pre-wrap"}}>{plan.taskInstructions}</p></section> : null}
     {plan.backgroundSummary ? <section className="review-questions">
       <Heading>{details.context}</Heading><p>{plan.backgroundSummary}</p>
     </section> : null}
@@ -31,17 +34,18 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
       <Heading>{copy.successMeans}</Heading>
       <ul>{plan.successCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
     </div>
+    {plan.nativeAppointmentAuthorization?<NativeAppointmentDetails authority={plan.nativeAppointmentAuthorization} locale={uiLocale} headingLevel={headingLevel}/>:null}
     {authorization ? <section className="review-questions appointment-authorization" aria-label={appointmentCopy.title}>
       <Heading>{appointmentCopy.title}</Heading>
       <p><strong>{appointmentCopy.operation[authorization.operation]}</strong>: {authorization.serviceDescription}</p>
       <p>{appointmentCopy.scope}</p>
       <dl className="appointment-time-zone"><dt>{appointmentCopy.timeZone}</dt><dd>{authorization.timeZone}</dd></dl>
-      <p className="appointment-window-label">{appointmentCopy.windows}</p>
+      {"windows" in authorization ? <><p className="appointment-window-label">{appointmentCopy.windows}</p>
       <ul className="appointment-windows">{authorization.windows.map((window, index) => <li key={`${window.date}:${window.startTime}:${window.endTime}:${index}`}>
         <time dateTime={window.date}>{calendarDateDetails(window.date, formatLocale(uiLocale), "numeric").dateLabel}</time>
         <span>{window.startTime === window.endTime ? window.startTime : `${window.startTime}–${window.endTime}`}</span>
       </li>)}</ul>
-      {authorization.windows.some((window) => window.startTime !== window.endTime) ? <p className="appointment-window-note">{appointmentCopy.inclusive}</p> : null}
+      {authorization.windows.some((window) => window.startTime !== window.endTime) ? <p className="appointment-window-note">{appointmentCopy.inclusive}</p> : null}</> : null}
       <ul className="appointment-limits"><li>{appointmentCopy.selection[authorization.operation]}</li><li>{appointmentCopy.financialPolicy}</li></ul>
     </section> : null}
     <div className="review-questions"><Heading>{copy.callSettings}</Heading></div>
@@ -51,7 +55,11 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
     </div>
     <div className="review-opening">
       <Heading>{details.openingExample}</Heading>
-      <p>{plan.opening.recipientAddress} {plan.opening.purposeStatement} {plan.opening.readinessQuestion}</p>
+      {nativeOpening ? <>
+        <p>{nativeOpening.introduction} {nativeOpening.recordingNotice} {nativeOpening.readinessQuestion}</p>
+        <p className="muted-text">{details.afterReadiness}</p>
+        <p>{nativeOpening.purposeExample}</p>
+      </> : <p>{plan.opening.recipientAddress} {plan.opening.purposeStatement} {plan.opening.readinessQuestion}</p>}
     </div>
     <div className="review-questions">
       <Heading>{copy.questions}</Heading>
@@ -74,6 +82,13 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2 }: {
     {plan.stopConditions?.length ? <section className="review-questions">
       <Heading>{details.stop}</Heading>
       <ul>{plan.stopConditions.map((condition, index) => <li key={index}>{condition}</li>)}</ul>
+    </section> : null}
+    {plan.contextAppendix?.length ? <section className="review-questions">
+      <Heading>{details.appendix}</Heading>
+      {plan.contextAppendix.map(section => <details key={section.id}>
+        <summary>{section.title}</summary>
+        <p>{section.description}</p><p style={{ whiteSpace: "pre-wrap" }}>{section.content}</p>
+      </details>)}
     </section> : null}
     <div className="compiled-plan-grid">
       <div>

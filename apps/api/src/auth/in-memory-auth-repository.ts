@@ -193,6 +193,7 @@ export class InMemoryAuthRepository implements AuthRepository {
     return structuredClone(user);
   }
 
+  async findUserById(userId: string) { const user=this.#users.get(userId); return user ? structuredClone(user) : null; }
   async findUserByEmail(email: string) {
     const user = [...this.#users.values()].find(
       (candidate) => candidate.email === email.toLowerCase()

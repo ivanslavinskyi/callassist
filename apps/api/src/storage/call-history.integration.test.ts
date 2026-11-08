@@ -64,7 +64,9 @@ it('lists archived calls with newer diagnostic and plan versions without admitti
   const facts = await repository.getAdminOperationsFacts('2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z', brief.id);
   expect(facts.connectedCalls).toBe(0);
   await expect(repository.getCallOutcomeMetrics()).resolves.toBeDefined();
-  await expect(repository.listCallTelemetryEvents(brief.id)).rejects.toThrow();
+  const readableEvents = await repository.listCallTelemetryEvents(brief.id);
+  expect(readableEvents).toHaveLength(inspector.timeline.length);
+  expect(readableEvents.some(event => ['realtime.ready', 'conversation.task'].includes(event.payload.name))).toBe(false);
   expect(await repository.getAdminCallSensitiveContent(brief.id, owner, 'Archive regression inspection'))
     .toMatchObject({ callBriefId:brief.id, objective:input.objective, transcript:[], finalTranscript:null });
   const [access] = await sql`SELECT count(*)::int AS count FROM call_sensitive_access_events WHERE call_brief_id=${brief.id}`;

@@ -4,7 +4,9 @@ import postgres from "postgres";
 import { normalizeCreateCallBriefInput } from "@callassist/contracts";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
-import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { DeterministicBriefCompiler,parseOpenAITextTokenUsage } from "../brief-compiler/brief-compiler";
+import {preparationDiagnosticsFixture} from "../brief-compiler/request-diagnostics.fixture";
+import {liveDurationUsage} from "../voice/live-usage";
 import { buildAdminCostOverview } from "../admin-operations";
 import { unavailableOperationalCostPolicy } from "../config/operational-cost-policy";
 import { readProviderBilling } from "./read-provider-billing";
@@ -26,10 +28,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await repository?.close(); await sql?.end(); await fixture.teardown(); });
 
-async function operation(type: string, startedAt: string, provider = "openai", model = "gpt-5.6") {
+async function operation(type: string, startedAt: string, provider = "openai", model = "gpt-5.6",stage="test") {
   const id = randomUUID();
   await sql`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,started_at)
-    VALUES(${id},${provider},${type},'test',${model},${id},${callId},${startedAt})`;
+    VALUES(${id},${provider},${type},${stage},${model},${id},${callId},${startedAt})`;
   return id;
 }
 async function usage(id: string, input: number | null, output: number | null, billable: number | null = null) {
@@ -80,5 +82,20 @@ describe("expense accounting read model", () => {
     await saveBillingSnapshots(sql, [{ ...snapshot, scopeKey: "ACother", totalMicros: 999 }], "2026-09-03T12:00:00Z");
     const reports = await readProviderBilling(sql, from, "2026-09-03T00:00:00.000Z", { TWILIO_ACCOUNT_SID: "ACtest" });
     expect(reports.find(r => r.provider === "twilio")).toMatchObject({ totalMicros: 20, days: 1, expectedDays: 2, status: "partial" });
+  });
+  it("persists bounded repair diagnostics and exposes Live finality independently of an operation result",async()=>{
+    const summary=await operation("call_summary","2026-09-18T12:00:00Z","openai","gpt-5.6","call_summary.0.grounding_repair");
+    const diagnostics={...preparationDiagnosticsFixture,textValidation:{version:1,kind:"call_summary",nativeFormat:"native-summary-v3",repair:"grounding",repairFieldPath:"findings.1",validationCode:"TEXT_INVALID_GROUNDING",validationFieldPath:"findings.2"}} as const;
+    await repository.completeProviderOperation({operationId:summary,outcome:"invalid_response",providerRequestId:null,providerResponseId:null,providerModel:"gpt-5.6",statusCode:200,errorCode:"TEXT_INVALID_GROUNDING",completedAt:"2026-09-18T12:00:01Z",durationMs:1000,usage:parseOpenAITextTokenUsage({input_tokens:100,output_tokens:50,total_tokens:150}),diagnostics,actualServiceTier:"default"});
+    expect((await sql`SELECT response_metadata FROM provider_operation_results WHERE operation_id=${summary}`)[0]?.response_metadata).toEqual(diagnostics);
+    const ids:string[]=[];
+    for(const final of [false,true]){
+      const id=await operation("realtime_session","2026-09-18T12:00:00Z","openai","gpt-live-1","live_conversation");ids.push(id);
+      await repository.completeProviderOperation({operationId:id,outcome:"succeeded",providerRequestId:null,providerResponseId:null,providerModel:"gpt-live-1",statusCode:200,errorCode:null,completedAt:"2026-09-18T12:01:00Z",durationMs:60000,usage:liveDurationUsage(60,final)});
+    }
+    const cost=buildAdminCostOverview(await repository.getAdminOperationsFacts(from,to,callId),unavailableOperationalCostPolicy);
+    expect(cost.providerUsage.records.find(r=>r.id===ids[0])).toMatchObject({finality:"provisional",missingMetrics:["final_session_usage_missing"]});
+    expect(cost.providerUsage.records.find(r=>r.id===ids[1])).toMatchObject({finality:"final",usageSource:"provider_final",missingMetrics:[]});
+    expect(cost.providerUsage.records.find(r=>r.id===summary)).toMatchObject({stage:"call_summary.0.grounding_repair",actualServiceTier:"default",outcome:"invalid_response"});
   });
 });

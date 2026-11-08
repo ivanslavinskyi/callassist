@@ -1,5 +1,5 @@
 import type WebSocket from "ws";
-import type { ApprovedExecutionSnapshot, CallBrief, CallTelemetryPayload } from "@callassist/contracts";
+import type { ApprovedExecutionSnapshot, CallBrief, CallTelemetryPayload, LiveRuntimeDiagnostic } from "@callassist/contracts";
 import type { EndCallReason } from "../realtime/agent-hangup";
 
 /** The HTTP/Twilio boundary is independent of the conversation protocol. */
@@ -21,6 +21,8 @@ export interface VoiceConversationContext {
   interruptFarewell(): boolean;
   isClosing(): boolean;
   telemetry(key: string, payload: CallTelemetryPayload): void;
+  diagnostic?(diagnostic: LiveRuntimeDiagnostic): void;
+  trace?(direction: "in" | "out" | "host", event: Record<string, unknown>): void;
   fail(): void;
 }
 

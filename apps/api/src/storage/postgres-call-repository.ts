@@ -1,4 +1,7 @@
+import { nativeAppointmentActionSchema } from "@callassist/contracts";
+import { PostgresNativeLiveStore } from "./native-live-store";
 import { maintainPreparationTelemetry, preparationRuntimeStatus } from "./preparation-observability";
+import { assertPinnedLiveRuntime } from "../voice/runtime-descriptor";
 import { resolveUiLocale, type UiLocale } from "@callassist/contracts";
 import { lockPreparationProviderCapacity, insertPreparationProviderPermit } from "./preparation-provider-capacity";
 import { PostgresPreparationPolicyStore, PreparationPolicyError } from "./preparation-policy-store";
@@ -18,6 +21,7 @@ import { transitionAnswering, type AnsweringTransitionInput } from "../telephony
 import { historyObjective } from "./history-objective";
 import { readHistoryCompilation, readHistoryTelemetry } from "./history-read-model";
 import { assertRetryableCall } from "./call-retry";
+import { nativeAutomatedAnswerHandled } from "@callassist/contracts";
 import { appointmentPlanExpired } from "@callassist/contracts";
 import { readProviderBilling } from "../billing/read-provider-billing";
 import { PostgresCallAssessmentStore, type FinalCreditEvidence } from "./postgres-call-assessment-store";
@@ -184,6 +188,7 @@ type CallBriefRow = {
   recipientName: string;
   phoneNumber: string;
   objective: string;
+  objectiveCiphertext: string | null;
   retrySourceCallId: string | null;
   creationUiLocale: UiLocale;
   assistantProfileId: AssistantProfileId | null;
@@ -263,7 +268,8 @@ type CallRecordingRow = {
   id: string;
   status: CallRecording["status"];
   providerRecordingId: string | null;
-  consentGrantedAt: DatabaseDate;
+  consentGrantedAt: DatabaseDate | null;
+  recordingBasis: "affirmative_consent" | "declarative_local";
   startedAt: DatabaseDate | null;
   completedAt: DatabaseDate | null;
   durationSeconds: number | null;
@@ -399,6 +405,7 @@ type AdminProviderOperationCountRow = {
 };
 
 type AdminProviderUsageRow = {
+  testingAttribution?: import("@callassist/contracts").TestingAttribution | null;
   operationId: string; startedAt: Date; outcome: string | null; pricingVersion: string; reportedUsdMicros: number | null;
   provider: string;
   operationType: string;
@@ -576,10 +583,12 @@ function toIso(value: DatabaseDate) {
 }
 
 export class PostgresCallRepository implements CallRepository {
+  readonly nativeLive: PostgresNativeLiveStore;
   readonly recipientOptOut: PostgresRecipientOptOutStore;
   readonly betaControls?: PostgresBetaControls;
   readonly mode = "postgres" as const;
   readonly #sql: postgres.Sql;
+  readonly #traceSql: postgres.Sql;
   readonly #encryptionKey: DataEncryptionMaterial;
   readonly #callText: PostgresCallTextStore;
   readonly #assessments: PostgresCallAssessmentStore;
@@ -592,6 +601,9 @@ export class PostgresCallRepository implements CallRepository {
       connection: { statement_timeout: 10000, idle_in_transaction_session_timeout: 10000 },
       onnotice: () => undefined
     });
+    this.#traceSql = postgres(databaseUrl, { max: 2, connect_timeout: 3,
+      connection: { statement_timeout: 2500, idle_in_transaction_session_timeout: 2500 }, onnotice: () => undefined });
+    this.nativeLive = new PostgresNativeLiveStore(this.#sql, this.#encryptionKey, this.#traceSql);
     this.betaControls = betaControlsEnabled ? new PostgresBetaControls(this.#sql) : undefined;
     this.recipientOptOut = new PostgresRecipientOptOutStore(this.#sql, recipientContactHashKey(encryptionKey));
     this.#assessments = new PostgresCallAssessmentStore(this.#sql,this.#encryptionKey,async (tx,attemptId,type,evidence)=>{
@@ -805,11 +817,20 @@ export class PostgresCallRepository implements CallRepository {
           AND user_id IS NOT DISTINCT FROM ${userId}::uuid AND data_deleted_at IS NULL FOR UPDATE`;
         if (!source) throw new CallRepositoryError("CALL_NOT_FOUND");
         const recordings = await transaction`SELECT id FROM call_recordings WHERE call_brief_id=${retrySource.callId} LIMIT 1`;
-        if (recordings.length) throw new CallRepositoryError("CALL_RETRY_NOT_AVAILABLE");
         const sourceCompilation = this.#mapCurrentCompilation(source);
         const attempt = await this.getLatestAttempt(retrySource.callId);
         const events = await this.#selectTelemetryForCallIds([retrySource.callId], transaction);
-        assertRetryableCall({ brief: { ...this.#mapBrief(source), lifecycle: deriveCallLifecycle(source.status, events) },
+        const lifecycle = deriveCallLifecycle(source.status, events);
+        if (recordings.length && !nativeAutomatedAnswerHandled(lifecycle)) throw new CallRepositoryError("CALL_RETRY_NOT_AVAILABLE");
+        // Recheck effect journals while holding the source lock. A late AMD
+        // result must never turn a delivered/uncertain commitment into a retry.
+        if (attempt) {
+          const [effects] = await transaction`SELECT
+            EXISTS(SELECT 1 FROM call_voice_actions WHERE call_attempt_id=${attempt.id}) OR
+            EXISTS(SELECT 1 FROM live_native_action_revisions WHERE call_attempt_id=${attempt.id}) AS present`;
+          if (effects?.present) throw new CallRepositoryError("CALL_RETRY_NOT_AVAILABLE");
+        }
+        assertRetryableCall({ brief: { ...this.#mapBrief(source), lifecycle },
           compilation: sourceCompilation, executionPlanSource: "immutable", transcript: [], pendingApproval: null, recording: null, finalTranscript: null }, attempt);
         if (attempt?.id !== retrySource.attemptId || sourceCompilation?.snapshotHash !== compilation.snapshotHash)
           throw new CallRepositoryError("CALL_COMPILATION_STALE");
@@ -830,7 +851,7 @@ export class PostgresCallRepository implements CallRepository {
           creation_idempotency_key, retry_source_call_id, retry_source_attempt_id, creation_ui_locale,
           recipient_name,
           phone_number,
-          objective,
+          objective, objective_ciphertext,
           assistant_profile_id,
           agent_name,
           represented_person,
@@ -856,7 +877,7 @@ export class PostgresCallRepository implements CallRepository {
           ${creationIdempotencyKey}, ${retrySource?.callId ?? null}, ${retrySource?.attemptId ?? null}, ${creationUiLocale},
           ${parsed.recipientName},
           ${parsed.phoneNumber},
-          ${runtime.objective},
+          ${'Encrypted task'}, ${encryptJson(runtime.objective, this.#encryptionKey)},
           ${parsed.assistantProfileId},
           ${parsed.agentName},
           ${parsed.representedPerson},
@@ -1368,6 +1389,7 @@ export class PostgresCallRepository implements CallRepository {
       const [attempt] = await tx`SELECT id,runtime_descriptor FROM call_attempts WHERE id=${attemptId}
         AND call_brief_id=${callId} AND status IN ('dialing','in_progress','awaiting_approval') FOR UPDATE`;
       if (!attempt) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+      assertPinnedLiveRuntime(attempt.runtime_descriptor, descriptor);
       if (attempt.runtime_descriptor === null) await tx`UPDATE call_attempts SET runtime_descriptor=${tx.json(descriptor)} WHERE id=${attemptId}`;
     });
   }
@@ -1428,7 +1450,7 @@ export class PostgresCallRepository implements CallRepository {
       user_id AS "userId",sequence,schema_version AS "schemaVersion",event_name AS "eventName",source,stage,severity,metadata,
       occurred_at AS "occurredAt" FROM call_events WHERE call_brief_id=${callId} AND call_attempt_id=${attemptId}
       AND event_name IN ('disclosure.completed','consent.decision') ORDER BY sequence`;
-    return rows.map(mapCallTelemetryEvent);
+    return readHistoryTelemetry(rows.map(callTelemetryValue)).events;
   }
   async recordConsentDisclosure(callId: string, input: ConsentDisclosureInput) {
     const parsed = consentDisclosureInputSchema.parse(input);
@@ -2205,7 +2227,7 @@ export class PostgresCallRepository implements CallRepository {
         SET
           recipient_name = 'Deleted call',
           phone_number = '',
-          objective = 'Deleted by owner',
+          objective = 'Deleted by owner', objective_ciphertext = NULL,
           represented_person = 'Deleted account',
           represented_person_first_name = 'Deleted',
           represented_person_last_name = 'Account',
@@ -2806,7 +2828,7 @@ export class PostgresCallRepository implements CallRepository {
         SET
           recipient_name = ${parsed.recipientName},
           phone_number = ${parsed.phoneNumber},
-          objective = ${runtime.objective},
+          objective = 'Encrypted task', objective_ciphertext = ${encryptJson(runtime.objective, this.#encryptionKey)},
           assistant_profile_id = ${parsed.assistantProfileId},
           agent_name = ${parsed.agentName},
           represented_person = ${parsed.representedPerson},
@@ -2887,9 +2909,10 @@ export class PostgresCallRepository implements CallRepository {
   async getCurrentReviewReceipt(...args: Parameters<CallTextRepository["getCurrentReviewReceipt"]>) { return this.#callText.getCurrentReviewReceipt(...args); }
   async exportCallTextData(...args: Parameters<CallTextRepository["exportCallTextData"]>) {
     const text = await this.#callText.exportCallTextData(...args);
+    const nativeActions=await this.#sql`SELECT payload_ciphertext FROM live_native_action_revisions WHERE call_brief_id=${args[0]} ORDER BY call_attempt_id,revision`;
     const actions = await this.#sql`SELECT * FROM call_voice_actions WHERE call_brief_id=${args[0]} AND payload_ciphertext IS NOT NULL ORDER BY created_at`;
     const terminal = await this.#sql`SELECT payload_ciphertext FROM call_terminal_decisions WHERE call_brief_id=${args[0]} AND payload_ciphertext IS NOT NULL ORDER BY created_at`;
-    return {...text, assessments: await this.#assessments.export(args[0]), assessmentRevisions: await this.#assessments.exportRevisions(args[0]),
+    return {...text, nativeAppointmentActions:nativeActions.map(row=>nativeAppointmentActionSchema.parse(decryptJson(row.payload_ciphertext,this.#encryptionKey))), assessments: await this.#assessments.export(args[0]), assessmentRevisions: await this.#assessments.exportRevisions(args[0]),
       terminalDecisions: terminal.map(row => terminalDecisionSchema.parse(decryptJson(row.payload_ciphertext,this.#encryptionKey))), voiceActions: actions.map(row => ({
       ...decryptJson<VoiceActionInput>(row.payload_ciphertext, this.#encryptionKey), id: row.id, version: row.version, state: row.state
     })) };
@@ -2964,7 +2987,7 @@ export class PostgresCallRepository implements CallRepository {
     `;
     if (!briefRow) return null;
 
-    const [nativeRow] = await this.#sql<{capture: NativeTranscriptCapture|null}[]>`SELECT native_transcript_capture AS capture FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1`;
+    const [nativeRow] = await this.#sql<{id:string;capture: NativeTranscriptCapture|null}[]>`SELECT id,native_transcript_capture AS capture FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1`;
     const [actionRow] = await this.#sql`SELECT state,call_attempt_id,payload_ciphertext FROM call_voice_actions
       WHERE call_attempt_id=(SELECT id FROM call_attempts WHERE call_brief_id=${id} ORDER BY created_at DESC,id DESC LIMIT 1)
       AND payload_ciphertext IS NOT NULL`;
@@ -3033,6 +3056,7 @@ export class PostgresCallRepository implements CallRepository {
     const audioRevision=audioRow?.status==='completed' ? await this.#callText.getRecordingTranscriptRevision(id) : null;
     return {
       nativeTranscriptCapture: nativeRow?.capture ?? null,
+      nativeAppointmentAction:nativeRow?await this.nativeLive.readAction(nativeRow.id):null,
       recordingTranscript: audioRow ? this.#mapFinalTranscript(audioRow) : null,
       recordingTranscriptRevision: audioRevision,
       recordingTranscriptRequest: audioRow?.requestId && audioRow.requestedAt ? { id:audioRow.requestId, requestedAt:toIso(audioRow.requestedAt),
@@ -3128,7 +3152,7 @@ export class PostgresCallRepository implements CallRepository {
       WHERE call_brief_id = ${id}
       ORDER BY sequence ASC
     `;
-    return rows.map(mapCallTelemetryEvent);
+    return readHistoryTelemetry(rows.map(callTelemetryValue)).events;
   }
 
   async listAdminCalls(input: ListAdminCallsInput) {
@@ -3558,8 +3582,17 @@ export class PostgresCallRepository implements CallRepository {
       this.#sql<AdminProviderUsageRow[]>`
         SELECT
           operations.id AS "operationId", operations.started_at AS "startedAt",
+          (SELECT jsonb_build_object('tester',t.tester,'byRole',t.by_role,'objectiveModified',t.objective_modified,
+            'scenario',CASE WHEN t.scenario_id IS NULL THEN NULL ELSE jsonb_build_object('id',t.scenario_id,'revision',t.scenario_revision) END)
+            FROM testing_preparation_attribution t JOIN call_preparation_requests p ON p.id=t.preparation_id
+            WHERE p.id=operations.call_preparation_id OR (operations.call_preparation_id IS NULL AND p.call_brief_id=operations.call_brief_id
+              AND p.created_at<=COALESCE((SELECT started_at FROM call_attempts WHERE id=operations.call_attempt_id),operations.started_at))
+            ORDER BY p.created_at DESC,p.id DESC LIMIT 1) AS "testingAttribution",
           (SELECT sum(c.amount_micros)::double precision FROM provider_cost_records c WHERE c.operation_id=operations.id AND c.currency='USD') AS "reportedUsdMicros",
           results.outcome, usage.pricing_version AS "pricingVersion",
+          operations.requested_service_tier AS "requestedServiceTier", results.actual_service_tier AS "actualServiceTier",
+          bool_or(usage.raw_usage->'finalized'='true'::jsonb) AS "usageFinalized",
+          max(CASE WHEN usage.raw_usage->>'source' IN ('live_session','speech_api') THEN usage.raw_usage->>'source' END) AS "usageSource",
           operations.provider,
           operations.operation_type AS "operationType",
           operations.stage,
@@ -3634,7 +3667,7 @@ export class PostgresCallRepository implements CallRepository {
             )
           )
         GROUP BY
-          operations.id, operations.started_at, results.outcome, usage.pricing_version,
+          operations.id, operations.started_at, results.outcome, results.actual_service_tier, usage.pricing_version,
           operations.provider,
           operations.operation_type,
           operations.stage,
@@ -4402,7 +4435,7 @@ export class PostgresCallRepository implements CallRepository {
         FROM call_compilations c JOIN call_compilation_approvals a ON a.compilation_id=c.id WHERE c.id=${brief.current_compilation_id}`;
       if (!row?.execution_snapshot_ciphertext || !row.compilation_ciphertext) return false;
       const old = approvedExecutionSnapshotSchema.parse(decryptJson(row.execution_snapshot_ciphertext, this.#encryptionKey));
-      if (old.version === 3) return false;
+      if ("answering" in old) return false;
       const compilation = callCompilationSchema.parse(decryptJson(row.compilation_ciphertext, this.#encryptionKey));
       compilation.revision += 1;
       compilation.approvedAt = null;
@@ -5853,6 +5886,7 @@ export class PostgresCallRepository implements CallRepository {
           callId: string;
           callAttemptId: string;
           status: CallRecording["status"];
+          recordingBasis: CallRecording["recordingBasis"];
         }[]
       >`
         UPDATE call_recordings
@@ -5880,7 +5914,7 @@ export class PostgresCallRepository implements CallRepository {
         RETURNING
           call_brief_id AS "callId",
           call_attempt_id AS "callAttemptId",
-          status
+          status, recording_basis AS "recordingBasis"
       `;
       const updated = rows[0];
       if (updated) {
@@ -5897,6 +5931,7 @@ export class PostgresCallRepository implements CallRepository {
             name: "recording.started",
             metadata: {
               recordingId, providerRecordingId,
+              recordingBasis: updated.recordingBasis,
               providerStatus: safeTelemetryCode(
                 providerStatus,
                 "unknown_provider_status"
@@ -5988,6 +6023,8 @@ export class PostgresCallRepository implements CallRepository {
           callAttemptId: string;
           providerRecordingId: string | null;
           recordingStatus: CallRecording["status"];
+          recordingBasis: CallRecording["recordingBasis"];
+          executionSnapshotCiphertext: string | null;
           durationSeconds: number | null;
           channels: number | null;
         }[]
@@ -5997,6 +6034,8 @@ export class PostgresCallRepository implements CallRepository {
           call_recordings.call_attempt_id AS "callAttemptId",
           call_recordings.provider_recording_id AS "providerRecordingId",
           call_recordings.status AS "recordingStatus",
+          call_recordings.recording_basis AS "recordingBasis",
+          call_attempts.execution_snapshot_ciphertext AS "executionSnapshotCiphertext",
           call_recordings.duration_seconds AS "durationSeconds",
           call_recordings.channels
         FROM call_recordings
@@ -6077,6 +6116,7 @@ export class PostgresCallRepository implements CallRepository {
           payload: {
             name: "recording.started",
             metadata: { providerStatus: "in-progress", recordingId: input.recordingId,
+              recordingBasis: row.recordingBasis,
               providerRecordingId: input.providerRecordingId, ...(input.startedAt ? { providerReportedAt: input.startedAt } : {}) }
           }
         });
@@ -6089,11 +6129,14 @@ export class PostgresCallRepository implements CallRepository {
             name: "recording.completed",
             metadata: {
               durationSeconds: input.durationSeconds ?? row.durationSeconds,
+              recordingBasis: row.recordingBasis,
               channels: input.channels ?? row.channels
             }
           }
         });
-        await transaction`UPDATE call_recordings r SET delete_after=COALESCE(r.delete_after,${now}::timestamptz+b.audio_retention_days*interval '1 day')
+        const retainedSnapshot = row.executionSnapshotCiphertext ? decryptJson<ApprovedExecutionSnapshot>(row.executionSnapshotCiphertext, this.#encryptionKey) : null;
+        const retentionDays = retainedSnapshot?.runtime.audioRetentionDays ?? null;
+        await transaction`UPDATE call_recordings r SET delete_after=COALESCE(r.delete_after,${now}::timestamptz+COALESCE(${retentionDays}::integer,b.audio_retention_days)*interval '1 day')
           FROM call_briefs b WHERE b.id=r.call_brief_id AND r.id=${input.recordingId}`;
         await transaction`INSERT INTO durable_jobs(id,job_type,recording_id,status,max_attempts,run_after)
           SELECT ${randomUUID()},'recording_retention',id,'queued',${durableJobMaxAttempts.recording_retention},delete_after
@@ -7322,7 +7365,7 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async close() {
-    await this.#sql.end({ timeout: 5 });
+    await Promise.all([this.#sql.end({ timeout: 5 }), this.#traceSql.end({ timeout: 5 })]);
   }
 
   #briefSelect(
@@ -7364,7 +7407,7 @@ export class PostgresCallRepository implements CallRepository {
         `}
         recipient_name AS "recipientName",
         phone_number AS "phoneNumber",
-        objective,
+        objective, objective_ciphertext AS "objectiveCiphertext",
         retry_source_call_id AS "retrySourceCallId",
         creation_ui_locale AS "creationUiLocale",
         assistant_profile_id AS "assistantProfileId",
@@ -7433,7 +7476,7 @@ export class PostgresCallRepository implements CallRepository {
       id: row.id,
       recipientName: row.recipientName,
       phoneNumber: row.phoneNumber,
-      objective: row.objective,
+      objective: row.objectiveCiphertext ? decryptJson<string>(row.objectiveCiphertext, this.#encryptionKey) : row.objective,
       retrySourceCallId: row.retrySourceCallId ?? null,
       creationUiLocale: row.creationUiLocale,
       assistantProfileId: row.assistantProfileId,
@@ -7514,6 +7557,7 @@ export class PostgresCallRepository implements CallRepository {
         status,
         provider_recording_id AS "providerRecordingId",
         consent_granted_at AS "consentGrantedAt",
+        recording_basis AS "recordingBasis",
         started_at AS "startedAt",
         completed_at AS "completedAt",
         duration_seconds AS "durationSeconds",
@@ -7528,7 +7572,7 @@ export class PostgresCallRepository implements CallRepository {
   #mapRecording(row: CallRecordingRow): CallRecording {
     return {
       ...row,
-      consentGrantedAt: toIso(row.consentGrantedAt),
+      consentGrantedAt: row.consentGrantedAt ? toIso(row.consentGrantedAt) : null,
       startedAt: row.startedAt ? toIso(row.startedAt) : null,
       completedAt: row.completedAt ? toIso(row.completedAt) : null,
       deleteAfter: row.deleteAfter ? toIso(row.deleteAfter) : null,
@@ -7739,8 +7783,8 @@ export class PostgresCallRepository implements CallRepository {
   }
 
   async #lifecycle(id: string, status: CallBrief["status"]) {
-    const events=await this.#selectTelemetryForCallIds([id]);
-    const {settlements,assessments}=await this.#lifecycleFacts([id]);
+    const {events}=await this.#selectHistoryTelemetryForCallIds([id]);
+    const {settlements,assessments}=await this.#lifecycleFacts([id],undefined,true);
     return deriveCallLifecycle(status,events,settlements.get(id),assessments.get(id));
   }
 

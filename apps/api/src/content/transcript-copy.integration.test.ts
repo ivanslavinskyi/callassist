@@ -6,6 +6,7 @@ import { PostgresContentRepository } from "./postgres-content-repository";
 import { seededContentPages, seededEditorialCollections } from "./seed-content";
 import rules from "./transcript-copy-migration.json";
 import optionalRules from "./optional-transcript-copy-migration.json";
+import retentionRules from "./retention-copy-migration.json";
 
 const fixture = isolatedTestDatabase();
 let sql: postgres.Sql;
@@ -16,7 +17,8 @@ beforeAll(async () => {
 afterAll(async () => { await repository?.close(); await sql?.end(); await fixture.teardown(); });
 function oldCopy<T>(value: T): T {
   if (typeof value === "string") {
-    const previous=optionalRules.find(rule=>rule.next===value)?.old[0]??value;
+    const beforeRetention=retentionRules.find(rule=>rule.next===value)?.old[0]??value;
+    const previous=optionalRules.find(rule=>rule.next===beforeRetention)?.old[0]??beforeRetention;
     return (rules.find(rule => rule.next === previous)?.old[0] ?? previous) as T;
   }
   if (Array.isArray(value)) return value.map(oldCopy) as T;

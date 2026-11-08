@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const TELEMETRY_EXPORT_VERSION = 2 as const;
+export const TELEMETRY_EXPORT_VERSION = 3 as const;
 export const telemetryExportPresetSchema = z.enum(["today", "yesterday", "last7", "last30", "previousMonth", "custom"]);
 export const telemetryExportInputSchema = z.strictObject({
   requestId: z.uuid(), preset: telemetryExportPresetSchema,

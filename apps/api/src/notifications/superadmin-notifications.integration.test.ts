@@ -13,6 +13,8 @@ import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { SuperadminNotifications } from "./superadmin-notifications";
 import { decryptJson } from "../security/encryption";
+import { buildSummarySourceContext } from "../text-processing/summary-source";
+import { liveDurationUsage } from "../voice/live-usage";
 
 const db=isolatedTestDatabase(),key=Buffer.alloc(32,22);
 let sql:postgres.Sql,calls:PostgresCallRepository,authRepository:PostgresAuthRepository,operator:string,now:Date,email:MockEmailProvider;
@@ -159,7 +161,7 @@ describe("durable superadmin notifications",()=>{
     now=new Date(now.getTime()+6*60_000);await service.tick();expect(email.adminMessages).toHaveLength(0);
     expect((await rows()).every(r=>r.status==='cancelled' && r.payload_ciphertext===null)).toBe(true);
   });
-  it("uses the canonical ready assessment and preserves original-language summary text",async()=>{
+  it.each([false,true])("uses the selected assessment and original-language summary (display revision: %s)",async(revised)=>{
     const f=await callFixture();
     const {recording}=await calls.beginRecording(f.brief.id);
     await calls.attachProviderRecording(recording.id,`RE-${recording.id}`,"in-progress");
@@ -179,9 +181,21 @@ describe("durable superadmin notifications",()=>{
     const job=(await calls.claimDueDurableJob({types:["text_artifact_generation"],workerId:randomUUID(),now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+60_000).toISOString()}))!;
     const lease={jobId:job.id,workerId:job.leaseOwner!,checkedAt:new Date().toISOString(),generation:job.generation,attemptNumber:job.attemptCount};
     await calls.claimTextArtifact(artifact.id,lease);
-    await calls.completeTextArtifact(artifact.id,{schemaVersion:2,assessment:decision,
+    const payload={schemaVersion:2 as const,assessment:decision,
       overview:[{label:"Итог",text:"Завтра в 10:00.",findingIds:["hours"]}],
-      findings:[{id:"hours",label:"Время",text:"Завтра в 10:00.",certainty:"reported",sourceSegmentIds:[answerId]}],nextSteps:[],unresolved:[]},lease);
+      findings:[{id:"hours",label:"Время",text:"Завтра в 10:00.",certainty:"reported" as const,sourceSegmentIds:[answerId]}],nextSteps:[],unresolved:[]};
+    await calls.completeTextArtifact(artifact.id,{...payload,assessment:{...decision,goal:{...decision.goal,status:revised?"partial":"achieved"}}},lease);
+    if(revised){
+      await calls.completeDurableJob(job.id,job.leaseOwner!,new Date().toISOString());
+      const updated=await calls.enqueueTextArtifact({callId:f.brief.id,kind:"call_summary",compilationId:f.attempt.compilationId!,transcriptRevisionId:revision.id,
+        sourceHash:revision.sourceHash,targetLanguage:f.attempt.contentLanguage??"en",generatorVersion:"summary-v8:grounded-v3:openai:fixture"});
+      const next=(await calls.claimDueDurableJob({types:["text_artifact_generation"],workerId:randomUUID(),now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+60000).toISOString()}))!;
+      const nextLease={jobId:next.id,workerId:next.leaseOwner!,checkedAt:new Date().toISOString(),generation:next.generation,attemptNumber:next.attemptCount};
+      await calls.claimTextArtifact(updated.id,nextLease);
+      await calls.freezeTextArtifactContext(updated.id,await buildSummarySourceContext(calls,updated),nextLease);
+      await calls.completeTextArtifact(updated.id,{...payload,schemaVersion:3,appointmentExtraction:{candidates:[],conditions:[]}},nextLease);
+      expect((await sql`SELECT goal FROM call_assessments WHERE call_attempt_id=${f.attempt.id}`)[0]?.goal).toBe("partial");
+    }
     await calls.updateStatus(f.brief.id,"completed");await service.tick();
     expect(email.adminMessages).toHaveLength(1);
     expect(email.adminMessages[0]!.content.text).toContain("Goal: Achieved");
@@ -202,12 +216,19 @@ describe("durable superadmin notifications",()=>{
     await usage(f.attempt.id,"call_summary",100,10); // 600 micros
     await usage(second.id,"call_summary",200,20); // 1200 micros
     await usage(null,"brief_compilation",300,30); // 1800 shared micros
+    const liveId=randomUUID();
+    await sql`INSERT INTO provider_operations(id,provider,operation_type,stage,requested_model,client_request_id,call_brief_id,call_attempt_id,started_at)
+      VALUES(${liveId},'openai','realtime_session','live_conversation','gpt-live-1',${liveId},${f.brief.id},${second.id},now())`;
+    await calls.completeProviderOperation({operationId:liveId,outcome:"succeeded",providerRequestId:null,providerResponseId:null,providerModel:"gpt-live-1",statusCode:200,errorCode:null,
+      completedAt:new Date().toISOString(),durationMs:60000,usage:liveDurationUsage(60,true)});
     await calls.updateStatus(f.brief.id,"failed");now=new Date(now.getTime()+6*60_000);await service.tick();
     expect(email.adminMessages).toHaveLength(2);
     const first=email.adminMessages.find(m=>m.content.text.includes(`Attempt ID: ${f.attempt.id}`))!.content.text;
     const last=email.adminMessages.find(m=>m.content.text.includes(`Attempt ID: ${second.id}`))!.content.text;
     expect(first).toContain("Attempt — Summary and assessment: US$0.0006");
     expect(first).not.toContain("US$0.0012");
+    expect(first).not.toContain("Live voice");
+    expect(last).toMatch(/Attempt — Live voice: US\$0\.\d+/);
     expect(last).toContain("Attempt — Summary and assessment: US$0.0012");
     expect(last).not.toContain("US$0.0006");
     for(const text of [first,last]) expect(text).toContain("Shared — Plan preparation: US$0.0018");

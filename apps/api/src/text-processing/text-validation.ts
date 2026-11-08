@@ -1,4 +1,5 @@
 import { validateFinalAssessment } from "../credits/final-assessment";
+import { nativeSummaryAuthority,hasNativeSummaryContext } from "./native-summary";
 import {
   callSummaryPayloadSchema,
   planReviewPayloadSchema,
@@ -51,6 +52,8 @@ export function validateTextProcessingInput(input: TextProcessingInput): void {
     characterCount = input.segments.reduce((sum, segment) => sum + segment.id.length + segment.text.length, 0);
     if (input.kind === "call_summary") {
       if (input.sourceContext && !summarySourceContextSchema.safeParse(input.sourceContext).success) throw new TextProcessingError("TEXT_INPUT_INVALID");
+      if (input.nativeFormat !== undefined && !hasNativeSummaryContext(input)) throw new TextProcessingError("TEXT_INPUT_INVALID");
+      if (input.nativeTaskSources && !hasNativeSummaryContext(input)) throw new TextProcessingError("TEXT_INPUT_INVALID");
       if (!Array.isArray(input.checks) || input.checks.length > 30 || !input.checks.length ||
         input.checks.some(check => !nonempty(check.id, 160) || !nonempty(check.text, 12000)) ||
         new Set(input.checks.map(check => check.id)).size !== input.checks.length ||
@@ -60,7 +63,8 @@ export function validateTextProcessingInput(input: TextProcessingInput): void {
       }
       characterCount += input.checks.reduce((sum, check) => sum + check.id.length + check.text.length, 0) +
         JSON.stringify(input.context).length + (input.extraction ? JSON.stringify(input.extraction).length : 0) +
-        (input.sourceContext ? JSON.stringify(input.sourceContext).length : 0);
+        (input.sourceContext ? JSON.stringify(input.sourceContext).length : 0) +
+        (input.nativeTaskSources ? JSON.stringify(input.nativeTaskSources).length : 0);
     }
   } else {
     throw new TextProcessingError("TEXT_INPUT_INVALID");
@@ -114,15 +118,15 @@ export function validateTextProcessingOutput(
     if (finding.id !== input.checks[index]!.id) invalid("TEXT_INVALID_REFERENCES");
     const cited = evidence(finding.sourceSegmentIds);
     const unknownContext = finding.certainty === "unknown" ? input.checks[index]!.text : "";
-    assertGroundedIdentifiers(`${finding.label}\n${finding.text}`, `${cited}\n${unknownContext}`);
+    assertGroundedIdentifiers(`${finding.label}\n${finding.text}`, `${cited}\n${unknownContext}`, `findings.${index}`);
   }
-  for (const item of summary.overview) {
+  for (const [index, item] of summary.overview.entries()) {
     const findings = summary.findings.filter(finding => item.findingIds.includes(finding.id));
     const cited = evidence([...new Set(findings.flatMap(finding => finding.sourceSegmentIds))]);
     // A shortened result must retain the same evidence boundary as its detailed findings.
-    assertGroundedIdentifiers(`${item.label ?? ""}\n${item.text}`, cited);
+    assertGroundedIdentifiers(`${item.label ?? ""}\n${item.text}`, cited, `overview.${index}`);
   }
-  for (const step of summary.nextSteps) assertGroundedIdentifiers(step.text, evidence(step.sourceSegmentIds));
+  for (const [index, step] of summary.nextSteps.entries()) assertGroundedIdentifiers(step.text, evidence(step.sourceSegmentIds), `nextSteps.${index}`);
   const fullSource = [...input.checks.map(check => check.text), ...input.segments.map(segment => segment.text)].join("\n");
   for (const item of summary.unresolved) assertGroundedIdentifiers(item, fullSource);
   for (const item of summary.unresolvedDetails ?? []) assertGroundedIdentifiers(item.text, fullSource);
@@ -130,7 +134,8 @@ export function validateTextProcessingOutput(
 }
 
 function validateAppointmentExtraction(input: Extract<TextProcessingInput, {kind: "call_summary"}>, extraction: AppointmentExtraction) {
-  const authority = input.sourceContext?.appointmentAuthorization;
+  const native = nativeSummaryAuthority(input);
+  const authority = native ?? input.sourceContext?.appointmentAuthorization;
   if (!authority && (extraction.candidates.length || extraction.conditions.length)) invalid("TEXT_INVALID_REFERENCES");
   const candidates = new Map(extraction.candidates.map((c, index) => [c.id, { ...c, index }]));
   if (candidates.size !== extraction.candidates.length) invalid("TEXT_INVALID_REFERENCES");
@@ -145,6 +150,17 @@ function validateAppointmentExtraction(input: Extract<TextProcessingInput, {kind
   if (new Set(extraction.conditions.map(c => c.checkId)).size !== extraction.conditions.length) invalid("TEXT_INVALID_REFERENCES");
   for (const c of extraction.conditions) if (!input.checks.some(check => check.id === c.checkId) ||
     (c.candidateId !== null && !candidates.has(c.candidateId))) invalid("TEXT_INVALID_REFERENCES");
+  const outcome = extraction.nativeOutcome;
+  if (!native) { if (outcome) invalid("TEXT_INVALID_REFERENCES"); return; }
+  if (!outcome || outcome.operation !== native.operation ||
+    new Set(outcome.sourceSegmentIds).size !== outcome.sourceSegmentIds.length || outcome.sourceSegmentIds.some(id => !sources.has(id)) ||
+    (outcome.candidateId !== null && !candidates.has(outcome.candidateId)) ||
+    (outcome.disposition !== "unconfirmed" && !outcome.sourceSegmentIds.some(id => sources.get(id)?.role === "recipient"))) invalid("TEXT_INVALID_REFERENCES");
+  if (outcome.operation !== "reschedule" && outcome.previousAppointmentReleased !== null) invalid("TEXT_INVALID_REFERENCES");
+  if (outcome.disposition === "confirmed" && (outcome.candidateId === null || candidates.get(outcome.candidateId)?.status !== "reported_confirmed")) invalid("TEXT_INVALID_REFERENCES");
+  if (outcome.disposition === "not_required" && (outcome.candidateId !== null || outcome.previousAppointmentReleased !== null ||
+    extraction.conditions.length > 0 || extraction.candidates.some(c => c.status === "reported_confirmed") ||
+    (input.sourceContext?.version === 2 && input.sourceContext.nativeAppointmentAction !== null))) invalid("TEXT_INVALID_REFERENCES");
 }
 
 function orderedTranslations(value: unknown, source: Array<{ id: string; text: string }>) {
@@ -164,11 +180,11 @@ function orderedTranslations(value: unknown, source: Array<{ id: string; text: s
 }
 
 /** A citation is insufficient if the generated amount/date/identifier does not occur in its evidence. */
-function assertGroundedIdentifiers(text: string, evidence: string) {
+function assertGroundedIdentifiers(text: string, evidence: string, fieldPath?: string) {
   const numbers = (value: string) => value.match(/\d+(?:[.,:/-]\d+)*/g) ?? [];
   const sourceNumbers = new Set(numbers(evidence));
   if (numbers(text).some((number) => !sourceNumbers.has(number)) ||
-    protectedIdentifiers(text).some((identifier) => !evidence.includes(identifier))) invalid("TEXT_INVALID_GROUNDING");
+    protectedIdentifiers(text).some((identifier) => !evidence.includes(identifier))) throw new TextValidationError("TEXT_INVALID_GROUNDING", fieldPath);
 }
 
 const text = { type: "string" };
@@ -190,20 +206,28 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
   const citations = { type: "array", items: sourceId, maxItems: input.segments.length ? 30 : 0 };
   const checkId = { ...bounded(160), enum: input.checks.map(c => c.id) };
   const criteriaIds = input.checks.filter(c => c.id.startsWith("criterion.")).map(c => c.id);
+  const native = nativeSummaryAuthority(input);
+  const appointment = native ?? input.sourceContext?.appointmentAuthorization;
   return object({
     schemaVersion: { type: "integer", enum: [input.sourceContext ? 3 : 2] },
     ...(input.sourceContext ? {
       appointmentExtraction: object({
-        candidates: { type: "array", maxItems: input.sourceContext.appointmentAuthorization ? 10 : 0, items: object({
+        candidates: { type: "array", maxItems: appointment ? 10 : 0, items: object({
           id: bounded(80), date: { type: ["string", "null"], pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
           startTime: { type: ["string", "null"], pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" }, timeZone: { type: ["string", "null"], maxLength: 80 },
           zoneSource: { type: "string", enum: ["approved_plan", "conversation", "unknown"] },
           status: { type: "string", enum: ["offered", "reported_confirmed", "conditional", "corrected", "ambiguous"] },
           supersedes: { type: "array", maxItems: 10, items: bounded(80) }, sourceSegmentIds: { ...citations, minItems: 1 }
         }) },
-        conditions: { type: "array", maxItems: input.sourceContext.appointmentAuthorization ? 30 : 0, items: object({
+        conditions: { type: "array", maxItems: appointment ? 30 : 0, items: object({
           checkId, kind: { type: "string", enum: ["calendar_only", "combined"] }, candidateId: { type: ["string", "null"], maxLength: 80 }
-        }) }
+        }) },
+        ...(native ? { nativeOutcome: object({
+          operation: { type: "string", enum: [native.operation] },
+          disposition: { type: "string", enum: ["confirmed", "unconfirmed", "not_required"] },
+          candidateId: { type: ["string", "null"], maxLength: 80 },
+          previousAppointmentReleased: { type: ["boolean", "null"] }, sourceSegmentIds: citations
+        }) } : {})
       }),
       unresolvedDetails: { type: "array", maxItems: 30, items: object({ checkId, reason: { type: "string", enum: ["conversation_evidence"] }, text: bounded(4000) }) }
     } : {}),

@@ -22,6 +22,7 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
   const id = useId();
   const [selected, setSelected] = useState<ExpenseCategory | null>("realtime");
   const [tab, setTab] = useState<Tab>("cost");
+  const [testingCohort,setTestingCohort] = useState("all");
   const heading = useRef<HTMLHeadingElement>(null);
   const money = (amount: number | null, precise = false, currency = "USD") => formatAdminMoney(amount, locale, precise, currency);
   const date = (at: string, time = false) => new Intl.DateTimeFormat(formatLocale(locale), { dateStyle: "medium", ...(time ? { timeStyle: "short" as const } : {}), timeZone: "UTC" }).format(new Date(at));
@@ -34,7 +35,8 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
   const twilioActual = twilioReportedMicros(cost);
   const hasIssues = usage.missingUsageOperations > 0 || usage.incompleteSessions > 0 || usage.unpricedBuckets > 0 || cost.providerReported.pendingOperations > 0;
   const close = () => { const trigger = document.getElementById(`${id}-category-${group?.key}`); setSelected(null); trigger?.focus(); };
-  const records = usage.records.filter(record => expenseCategory(record.operationType) === group?.key);
+  const records = usage.records.filter(record => expenseCategory(record.operationType) === group?.key)
+    .filter(record => testingCohort === "all" || (record.testingAttribution ? record.testingAttribution.tester ? "tester" : "ordinary" : "unclassified") === testingCohort);
   const usageDetails = (component: UsageComponent, key: string) => <dl className="expense-facts" key={key}>
     <Fact label={copy.requests}>{component.requests.toLocaleString(locale)}</Fact>
     {Object.entries(metricSamples).filter(([, sample]) => component[sample] > 0).map(([metric, sample]) => <Fact key={metric} label={copy.metric[metric as keyof typeof metricSamples]}>
@@ -43,6 +45,11 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
     </Fact>)}
   </dl>;
   return <section className="expense-explorer" aria-labelledby={`${id}-title`}>
+    {usage.testingCohorts ? <details><summary>Testing cohorts</summary><p>Classification is saved at preparation. Historical and unattributed requests remain unclassified. Estimates and provider charges are shown separately.</p>
+      <table><thead><tr><th>Cohort</th><th>Basis</th><th>Requests</th><th>USD</th><th>Incomplete</th></tr></thead><tbody>
+        {usage.testingCohorts.filter(c=>c.operations>0).map(c=><tr key={`${c.cohort}:${c.costBasis}`}><td>{c.cohort}</td><td>{c.costBasis}</td><td>{c.operations}</td><td>{money(c.amountMicros,true)}</td><td>{c.incompleteOperations}</td></tr>)}
+      </tbody></table><label>Filter recent requests <select value={testingCohort} onChange={e=>setTestingCohort(e.target.value)}>{["all","tester","ordinary","unclassified"].map(value=><option key={value}>{value}</option>)}</select></label>
+    </details> : null}
     <header className="expense-heading">
       <div><h2 id={`${id}-title`}>{copy.title}</h2><p>{scope === "record" ? copy.lifetime : `${date(usage.from)} – ${date(new Date(Date.parse(usage.to) - 1).toISOString())}`} <span>· {copy.currency}</span></p></div>
       {scope === "period" ? <span className="expense-period-label">{copy.period}</span> : null}
@@ -100,7 +107,10 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
         <div role="tabpanel" id={`${id}-tab-panel`} aria-labelledby={`${id}-${tab}`} tabIndex={0}>
           {tab === "cost" ? <>
             <dl className="expense-facts expense-price-parts">
-              {group.key === "realtime" ? <><Fact label={copy.audio}>{money(usage.components.realtimeAudio.calculatedUsdMicros, true)}</Fact><Fact label={copy.text}>{money(usage.components.realtimeText.calculatedUsdMicros, true)}</Fact></> : null}
+              {usage.breakdown?.filter(part => expenseCategory(part.operationType) === group.key && group.key !== "twilio").map(part => <Fact key={`${part.operationType}:${part.stage}:${part.model}`} label={`${part.operationType === "realtime_session" && part.stage === "live_conversation" ? "GPT-Live" : part.operationType === "realtime_response" ? "Backend" : part.model} · ${part.stage}`}>
+                {money(part.calculatedUsdMicros, true)}{part.incompleteOperations > 0 ? <small>{copy.partial} · {part.incompleteOperations}/{part.operations}</small> : null}
+              </Fact>)}
+              {group.key === "realtime" && !usage.breakdown ? <><Fact label={copy.audio}>{money(usage.components.realtimeAudio.calculatedUsdMicros, true)}</Fact><Fact label={copy.text}>{money(usage.components.realtimeText.calculatedUsdMicros, true)}</Fact></> : null}
               {group.key === "transcription" ? <><Fact label={copy.realtimeTranscription}>{money(usage.components.realtimeTranscription.calculatedUsdMicros, true)}</Fact><Fact label={copy.postCallTranscription}>{money(usage.components.postCallTranscription.calculatedUsdMicros, true)}</Fact></> : null}
               {group.key === "twilio" && billing?.totalMicros != null ? billing.components.filter(part => part.amountMicros !== 0).map(part => <Fact key={part.key} label={copy.components[part.key as keyof typeof copy.components] ?? part.key}>{money(part.amountMicros, true)}</Fact>) : null}
               <Fact label={copy.total}><strong>{money(group.amount, true)}</strong></Fact>
@@ -116,7 +126,7 @@ export function AdminExpenseExplorer({ cost, locale, scope = "record" }: { cost:
             </>}
           </> : null}
           {tab === "usage" ? <>{group.parts.map((part, index) => <div key={index}>{group.key === "transcription" ? <h4>{index === 0 ? copy.realtimeTranscription : copy.postCallTranscription}</h4> : null}{usageDetails(part, String(index))}</div>)}</> : null}
-          {tab === "requests" ? <><p className="expense-detail-note">{copy.latestRequests}</p>{records.length ? <ul className="expense-requests">{records.map(record => <li key={record.id}><div><time dateTime={record.startedAt}>{date(record.startedAt, true)} UTC</time><strong>{money(record.calculatedUsdMicros, true)}</strong></div><span>{record.provider} · {record.model} · {record.stage} · {record.outcome ?? copy.unknown}</span>{record.missingMetrics.length ? <small>{copy.partial}: {record.missingMetrics.join(", ")}</small> : null}<details><summary>ID</summary><code>{record.id}</code></details></li>)}</ul> : <p>{copy.noRequests}</p>}</> : null}
+          {tab === "requests" ? <><p className="expense-detail-note">{copy.latestRequests}</p>{records.length ? <ul className="expense-requests">{records.map(record => <li key={record.id}><div><time dateTime={record.startedAt}>{date(record.startedAt, true)} UTC</time><strong>{money(record.calculatedUsdMicros, true)}</strong></div><span>{record.provider} · {record.model} · {record.stage} · {record.outcome ?? copy.unknown}</span><small>{record.finality === "provisional" ? copy.preliminary : record.finality === "final" ? copy.measured : copy.unknown} · {record.usageSource ?? copy.unknown} · {record.actualServiceTier ?? copy.unknown}</small>{record.missingMetrics.length ? <small>{copy.partial}: {record.missingMetrics.join(", ")}</small> : null}<details><summary>ID</summary><code>{record.id}</code><p>{record.pricingVersion ?? copy.unknown}</p></details></li>)}</ul> : <p>{copy.noRequests}</p>}</> : null}
         </div>
       </aside> : <div id={`${id}-details`} hidden />}
     </div>

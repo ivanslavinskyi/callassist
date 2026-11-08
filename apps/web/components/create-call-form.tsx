@@ -6,6 +6,7 @@ import {
   getAssistantProfile,
   applyCallBriefDefaults,
   CALL_BRIEF_INPUT_LIMITS,
+  DEFAULT_AUDIO_RETENTION_DAYS,
   selectableCallLanguagesForRole,
   isCallLanguageAvailable,
   callBriefTaskTextLength,
@@ -43,6 +44,8 @@ import type { CallDraft } from "@/lib/call-draft-store";
 import { normalizeCallFormLanguages } from "@/lib/call-form-languages";
 import { CallPreparationStatus } from "./call-preparation-status";
 import { clinicPreparationMessages } from "@/lib/i18n/clinic-preparation-messages";
+import { taskInputMessages, scenarioSelectionChanged } from "@/lib/i18n/task-input-messages";
+import { TestScenarioButtons } from "./test-scenario-buttons";
 
 const emptyForm: CreateCallBriefInput = {
   recipientName: "",
@@ -54,7 +57,7 @@ const emptyForm: CreateCallBriefInput = {
   assistanceReason: "none",
   context: "",
   locale: "de-CH",
-  audioRetentionDays: 7,
+  audioRetentionDays: DEFAULT_AUDIO_RETENTION_DAYS,
   allowLanguageSwitch: false,
   allowedFacts: [],
   resultHandling: "capture_in_callassist",
@@ -83,7 +86,8 @@ type CreateCallFormProps = {
     input: CreateCallBriefInput,
     idempotencyKey?: string,
     languagePreferences?: TaskLanguagePreferences,
-    onProgress?: (progress: CallPreparationProgress) => void
+    onProgress?: (progress: CallPreparationProgress) => void,
+    testScenario?: import("@callassist/contracts").TestScenarioSelection
   ) => Promise<CallBrief>;
   heading?: string;
   headingLevel?: 1 | 2;
@@ -251,12 +255,12 @@ export function CreateCallForm({
         brief = await prepareCallBriefCreation({
           input,
           languagePreferences: creationLanguagePreferences,
-          scope: draftId,
+          scope: `${draftId}:${draft.testScenario?.id ?? ""}:${draft.testScenario?.revision ?? ""}`,
           userId,
           current: draftRef.current.preparationAttempt,
           storage,
           save: (value, idempotencyKey) =>
-            saveCallBrief(value, idempotencyKey, creationLanguagePreferences, onProgress),
+            saveCallBrief(value, idempotencyKey, creationLanguagePreferences, onProgress, draft.testScenario),
           load: async (callBriefId) =>
             (await getCallSnapshot(callBriefId)).brief,
           onAttempt: (attempt) => {
@@ -274,6 +278,10 @@ export function CreateCallForm({
       }
     } catch (error) {
       setBudgetNeedsSetup(error instanceof ApiError && error.code === "BETA_BUDGET_UNCONFIGURED");
+      if (error instanceof ApiError && error.code === "SCENARIO_SELECTION_UNAVAILABLE") {
+        updateDraft({testScenario:undefined,preparationAttempt:null});
+        setError(scenarioSelectionChanged[uiLocale]);setSubmitting(false);return;
+      }
       setError(getCallPreparationErrorMessage(error, {
         ...betaMessages[uiLocale],
         generic: messages.form.preparationError,
@@ -285,7 +293,7 @@ export function CreateCallForm({
         notEditable: messages.form.preparationNotEditable,
         swissDestinationRequired: messages.form.phoneInvalid,
         rateLimited: messages.form.rateLimited
-      }));
+      },uiLocale));
       setSubmitting(false);
       return;
     }
@@ -381,6 +389,8 @@ export function CreateCallForm({
         </label>
 
         <div className="form-section-title">{design.task}</div>
+        <TestScenarioButtons userId={userId} objective={form.objective} disabled={submitting} selection={draft.testScenario}
+          onInsert={(objective,testScenario)=>updateDraft({form:{...draftRef.current.form,objective},testScenario,preparationAttempt:null})} />
         <label className="field field-wide objective-field">
           <span>{copy.objective}</span>
           <textarea
@@ -464,7 +474,7 @@ export function CreateCallForm({
           <span>{messages.form.callOptions}</span>
           <span className="details-chevron" aria-hidden="true">⌄</span>
         </summary>
-        <p className="call-options-help">{copy.objectiveHelp}</p>
+        <p className="call-options-help">{taskInputMessages[uiLocale].information}</p>
         <p>{copy.optionsHelp}</p>
 
         <div className="form-grid call-options-grid">
@@ -524,19 +534,7 @@ export function CreateCallForm({
 
 
 
-          <label className="field">
-            <span>{copy.audioRetention}</span>
-            <select
-              value={form.audioRetentionDays ?? 7}
-              onChange={(event) =>
-                update("audioRetentionDays", Number(event.target.value) as 0 | 7 | 30)
-              }
-            >
-              <option value={0}>{copy.deleteAfterTranscript}</option>
-              <option value={7}>{copy.keepSevenDays}</option>
-              <option value={30}>{copy.keepThirtyDays}</option>
-            </select>
-          </label>
+          <p className="field">{taskInputMessages[uiLocale].retention(form.audioRetentionDays ?? DEFAULT_AUDIO_RETENTION_DAYS)}</p>
 
           <div className="field field-wide disclosure-preview">
             {disclosurePreview ? (
@@ -608,7 +606,7 @@ export function CreateCallForm({
         <div className="allowed-facts">
           <div>
             <span className="section-label">{copy.shareableInformation}</span>
-            <p>{copy.shareableInformationHelp}</p>
+            <p>{taskInputMessages[uiLocale].information}</p>
           </div>
           <details>
             <summary>{clinicCopy.title}</summary>

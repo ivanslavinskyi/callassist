@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CallBrief, CallSummaryPayload } from "@callassist/contracts";
+import { summaryCoverageMessages, uiLocales } from "@callassist/contracts";
 import { summaryExportLines, summaryPresentation } from "./summary-presentation";
 import { buildDerivedTranscriptCopyText, buildDerivedTranscriptPdfDefinition, type DerivedTranscriptExport } from "./derived-transcript-export";
 
@@ -12,6 +13,13 @@ const summary: CallSummaryPayload = { schemaVersion:3,appointmentExtraction:{can
     text:"3 октября, 11:00. Дата и время соответствуют утверждённому расписанию.",sourceLabel:"Утверждённое расписание",sourceText:"3 октября, 09:00–18:00",
     actionState:"unconfirmed",actionText:"Подтверждение действия в приложении не завершено."}};
 describe("shared summary projection",()=>{
+  it.each(uiLocales)("retains the partial assessment warning in copy and PDF in %s",uiLocale=>{
+    const input:DerivedTranscriptExport={brief:{recipientName:"Example",locale:"en-GB"} as CallBrief,
+      revision:{revision:1,id:"rev",transcriptId:"t",callAttemptId:"a",sourceHash:"a".repeat(64),createdAt:"2026-11-08T09:00:00Z",text:"",segments:[]},
+      segments:[],text:"",translationLanguage:null,uiLocale,summary:{...summary,evaluationCoverage:{version:1,status:"partial",reason:"input_limit",extractedParts:3,totalParts:3}}};
+    expect(buildDerivedTranscriptCopyText(input)).toContain(summaryCoverageMessages[uiLocale]);
+    expect(JSON.stringify(buildDerivedTranscriptPdfDefinition(input))).toContain(summaryCoverageMessages[uiLocale]);
+  });
   it("keeps computed evidence separate from conversation certainty and shows it once",()=>{
     expect(summaryPresentation(summary).findings.map(f=>f.id)).toEqual(["goal"]);
     const lines=summaryExportLines(summary);

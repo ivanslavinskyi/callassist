@@ -1,4 +1,4 @@
-import { getAppointmentAuthorization, summarySourceContextSchema, type CallTextArtifact, type SummarySourceContext } from "@callassist/contracts";
+import { getAppointmentAuthorization, nativeAuthorityFromLegacy, summarySourceContextSchema, type CallTextArtifact, type SummarySourceContext } from "@callassist/contracts";
 import { CallRepositoryError, type CallRepository } from "../storage/call-repository";
 import { textPayloadHash } from "../storage/call-text-repository";
 
@@ -15,7 +15,11 @@ export async function buildSummarySourceContext(repository: CallRepository, arti
   // A 'completed' callback can establish historical connection, but its timestamp
   // is not the time the recipient answered. Use only observed in-progress evidence.
   const connected = events.find(e => e.callAttemptId === attempt.id && e.payload.name === "connection.confirmed" && e.payload.metadata.providerStatus === "in-progress");
-  return summarySourceContextSchema.parse({ version: 1, callAttemptId: attempt.id, compilationId: artifact.compilationId,
+  const nativeAction=data.nativeAppointmentActions?.filter(a=>a.callAttemptId===attempt.id&&a.snapshotHash===compilation.snapshotHash).at(-1)??null;
+  const native=compilation.compiledBrief.schemaVersion==="9"||nativeAction!==null;
+  const legacyAuthority=getAppointmentAuthorization(compilation.compiledBrief);
+  return summarySourceContextSchema.parse({ version: native?2:1,
+    ...(native?{nativeAppointmentAuthorization:(compilation.compiledBrief.schemaVersion==="9"?compilation.compiledBrief.nativeAppointmentAuthorization:legacyAuthority?nativeAuthorityFromLegacy(legacyAuthority):null),nativeAppointmentAction:nativeAction}:{}), callAttemptId: attempt.id, compilationId: artifact.compilationId,
     compilationSnapshotHash: compilation.snapshotHash, transcriptRevisionId: source.id, transcriptSourceHash: source.sourceHash,
     callCreatedAt: attempt.startedAt, callConnectedAt: connected?.occurredAt ?? null, callEndedAt: attempt.endedAt,
     approvedAt: attempt.executionSnapshot?.approvedAt ?? compilation.approvedAt,

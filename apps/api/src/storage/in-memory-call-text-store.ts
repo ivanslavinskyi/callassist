@@ -232,6 +232,18 @@ export class InMemoryCallTextStore {
       transcriptRevisions:[...this.revisions.values()].filter(r=>r.callId===callId).map(r=>structuredClone(r.revision)),artifacts:this.listTextArtifacts(callId),
       reviewReceipts:[...this.receipts.values()].filter(r=>r.callId===callId).map(r=>structuredClone(r))};
   }
+  redactConversation(callId:string,attemptId:string) {
+    const revisions=new Set([...this.revisions].filter(([,row])=>row.callId===callId && (!row.revision.callAttemptId || row.revision.callAttemptId===attemptId)).map(([id])=>id));
+    const artifacts=new Set<string>();
+    for(const [id,artifact] of this.artifacts) if(artifact.callId===callId && ["call_summary","transcript_translation"].includes(artifact.kind) &&
+      (!artifact.transcriptRevisionId || revisions.has(artifact.transcriptRevisionId))) {
+      artifacts.add(id);artifact.payload=null;artifact.sourceContext=null;artifact.status="cancelled";this.chunks.delete(id);
+    }
+    for(const id of revisions) this.revisions.delete(id);
+    for(const job of this.hooks.jobs()) if(job.textArtifactId && artifacts.has(job.textArtifactId) && ["queued","running"].includes(job.status)) {
+      job.status="cancelled";job.leaseOwner=null;job.leasedAt=null;job.leaseExpiresAt=null;job.completedAt=new Date().toISOString();job.lastErrorCode="conversation_discarded";
+    }
+  }
   redact(callId:string) {
     for(const [id,artifact] of this.artifacts) if(artifact.callId===callId) { artifact.payload=null;artifact.sourceContext=null;artifact.status="cancelled";this.chunks.delete(id); }
     for(const [id,row] of this.revisions) if(row.callId===callId) this.revisions.delete(id);

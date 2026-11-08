@@ -48,6 +48,9 @@ function createProvider(asyncAnswering = false) {
     status: "in-progress"
   });
   const removeRecording = vi.fn().mockResolvedValue(true);
+  const listRecordings = vi.fn().mockResolvedValue([]);
+  const stopRecording = vi.fn().mockResolvedValue({});
+  const callRecordings = Object.assign(vi.fn(() => ({ update: stopRecording })), { create: createRecording, list: listRecordings });
   const fetchRecording = vi.fn().mockResolvedValue({
     sid: "RE123",
     status: "completed",
@@ -59,7 +62,7 @@ function createProvider(asyncAnswering = false) {
     vi.fn(() => ({
       fetch: fetchCall,
       update,
-      recordings: { create: createRecording }
+      recordings: callRecordings
     })),
     {
       create: vi.fn().mockResolvedValue({
@@ -88,9 +91,19 @@ function createProvider(asyncAnswering = false) {
     provider,
     recordings,
     removeRecording,
+    listRecordings,
+    stopRecording,
     update
   };
 }
+
+it("requests declared dual-channel recording on connection only when an explicit native intent is supplied", async () => {
+  const h=createProvider(),options=await approvedOptions();
+  await h.provider.startCall(brief,{...options,nativeRecording:{recordingId:"00000000-0000-4000-8000-000000000123"}});
+  expect(h.calls.create).toHaveBeenCalledWith(expect.objectContaining({record:true,recordingChannels:"dual",recordingTrack:"both",
+    recordingStatusCallback:expect.stringContaining("recordingId=00000000-0000-4000-8000-000000000123"),recordingStatusCallbackEvent:["in-progress","completed","absent"]}));
+  expect(h.createRecording).not.toHaveBeenCalled();
+});
 
 describe("TwilioTelephonyProvider", () => {
   it("uses an attempt-bound async callback only for the new approved policy", async () => {
@@ -99,7 +112,7 @@ describe("TwilioTelephonyProvider", () => {
     await provider.startCall(brief, options);
     expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "true", machineDetection: "Enable",
       asyncAmdStatusCallbackMethod: "POST", asyncAmdStatusCallback: expect.stringContaining(`/webhooks/twilio/amd?callBriefId=${brief.id}&callAttemptId=`) }));
-    if (options.executionSnapshot.version !== 3) throw new Error("Expected current snapshot");
+    if (!("answering" in options.executionSnapshot)) throw new Error("Expected current snapshot");
     options.executionSnapshot.answering.policyVersion = "twilio-async-live-beep-v2";
     await provider.startCall(brief, options);
     expect(calls.create).toHaveBeenLastCalledWith(expect.objectContaining({ asyncAmd: "true" }));
@@ -269,6 +282,18 @@ describe("TwilioTelephonyProvider", () => {
     await provider.deleteRecording("RE123");
     expect(recordings).toHaveBeenCalledWith("RE123");
     expect(removeRecording).toHaveBeenCalledOnce();
+  });
+
+  it("purges every call recording even if stopping a just-completed recording fails", async () => {
+    const h = createProvider();
+    h.listRecordings.mockResolvedValue([{ sid: "RE123", status: "in-progress" }, { sid: "RE456", status: "completed" }]);
+    h.stopRecording.mockRejectedValueOnce(new Error("already stopped"));
+    await h.provider.purgeCallRecordings("CA123");
+    expect(h.stopRecording).toHaveBeenCalledWith({ status: "stopped" });
+    expect(h.recordings).toHaveBeenCalledWith("RE123");
+    expect(h.recordings).toHaveBeenCalledWith("RE456");
+    h.removeRecording.mockRejectedValueOnce(new Error("delete unavailable"));
+    await expect(h.provider.purgeCallRecordings("CA123")).rejects.toThrow("delete unavailable");
   });
 
   it("fetches bounded provider recording state", async () => {

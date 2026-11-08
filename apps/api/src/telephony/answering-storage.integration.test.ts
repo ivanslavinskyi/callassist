@@ -29,7 +29,7 @@ it("persists AMD admission, one-time voicemail, usage and late completion across
     expect(raced.filter(r => r.applied)).toHaveLength(1);
     // The callback can beat the REST create response. Attaching it later must preserve the decision.
     await repository.attachProviderCall(attempt.id, providerCallId, "queued");
-    expect(await second.getLatestAttempt(brief.id)).toMatchObject({ providerCallId, executionSnapshot: { version: 3 } });
+    expect(await second.getLatestAttempt(brief.id)).toMatchObject({ providerCallId, executionSnapshot: { version: 7 } });
     expect((await second.transitionAnswering(brief.id, { ...input, kind: "admit" })).applied).toBe(false);
     const operations = await sql`SELECT o.operation_type, u.request_count FROM provider_operations o
       JOIN provider_usage_records u ON u.operation_id=o.id WHERE o.call_attempt_id=${attempt.id}`;
@@ -53,7 +53,7 @@ it("persists AMD admission, one-time voicemail, usage and late completion across
     const draft = (await repository.get(repeated.id))!;
     const approvedAt = new Date().toISOString();
     const current = createApprovedExecutionSnapshot({ brief: draft.brief, compilation: { ...draft.compilation!, approvedAt } });
-    const { answering: _policy, ...legacy } = current as Extract<typeof current, { version: 3 }>;
+    const { answering: _policy, taskSources: _sources, contextAppendix: _appendix, nativeOpening: _opening, ...legacy } = current as Extract<typeof current, { version: 7 }>;
     const [compilation] = await sql`SELECT current_compilation_id AS id FROM call_briefs WHERE id=${repeated.id}`;
     await sql`INSERT INTO call_compilation_approvals(id,compilation_id,call_brief_id,revision,snapshot_hash,approved_at,execution_snapshot_ciphertext)
       VALUES (${randomUUID()},${compilation.id},${repeated.id},${draft.compilation!.revision},${draft.compilation!.snapshotHash},${approvedAt},${encryptJson({ ...legacy, version: 2 },key)})`;

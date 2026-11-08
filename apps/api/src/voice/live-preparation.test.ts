@@ -4,14 +4,14 @@ import { approvedCall, TestSocket, flush, silence } from "./voice-test-helpers";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const stop of cleanup.splice(0)) await stop(); vi.useRealTimers(); });
-async function fixture() {
+async function fixture(nativeExperiment = false) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   const call = await approvedCall(); const live = new TestSocket(); const twilio = new TestSocket();
   const connect = vi.fn(() => live.ws);
   const complete = vi.spyOn(call.service, "completeProviderOperation");
   const speechFetch = vi.fn<typeof fetch>(async () => new Response(Buffer.alloc(4_800)));
   const runtime = new OpenAILiveBridge({ apiKey: "test", service: call.service, agentHangupEnabled: true,
-    createLiveSocket: connect, speechFetch, validateStreamToken: (_binding, token) => token === "valid" });
+    createLiveSocket: connect, speechFetch, nativeExperiment, validateStreamToken: (_binding, token) => token === "valid" });
   const binding = { callBriefId: call.brief.id, callAttemptId: call.attempt.id,
     compilationSnapshotHash: call.snapshot.compilationSnapshotHash, providerCallId: "CA-LIVE" };
   cleanup.push(async () => { twilio.close(); runtime.close(); live.receive({ type: "session.closed", reason: "close_requested", usage: { seconds: 5 } }); await flush(); await call.service.close(); });
@@ -19,10 +19,79 @@ async function fixture() {
     live.startLive("prepared-session"); await promise; }
   function attach(token = "valid") { runtime.handleTwilioSocket(twilio.ws); twilio.receive({ event: "connected" });
     twilio.receive({ event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ", customParameters: { ...binding, streamToken: token } } }); }
-  return { ...call, live, twilio, connect, complete, runtime, binding, warm, attach };
+  return { ...call, live, twilio, connect, complete, runtime, binding, warm, attach, speechFetch };
 }
 
 describe("attempt-bound Live preparation", () => {
+  it("pins native selection and approved startup context before warmup without admitting output", async () => {
+    const h = await fixture(true);
+    const descriptor = vi.spyOn(h.service, "recordRuntimeDescriptor");
+    await h.warm();
+    expect(descriptor).toHaveBeenCalledWith(h.brief.id, h.attempt.id, expect.objectContaining({ runtime: "live_native_v1",
+      runtimeVersion: "live-native-v1", experiment: expect.objectContaining({ selection: "eligible", briefHash: expect.stringMatching(/^[a-f0-9]{64}$/) }) }));
+    expect(JSON.stringify(h.live.sent.find(e => e.type === "session.start").session.input)).toContain(h.snapshot.plan.localizedObjective);
+    h.live.receive({ type: "session.output_audio.delta", delta: silence });
+    expect(h.twilio.sent).toHaveLength(0);
+    await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE",
+      snapshotHash: h.snapshot.compilationSnapshotHash, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
+    h.attach(); await flush(); await flush();
+    expect(descriptor).toHaveBeenCalledOnce(); expect(h.connect).toHaveBeenCalledOnce();
+    expect(h.twilio.sent.some(e => e.event === "mark")).toBe(true);
+  });
+  it("renders cold disclosure while Live is starting, without releasing it before ready", async () => {
+    const h = await fixture();
+    await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE",
+      snapshotHash: h.snapshot.compilationSnapshotHash, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
+    h.attach(); await flush(); await flush();
+    expect(h.connect).toHaveBeenCalledOnce();
+    expect(h.speechFetch).toHaveBeenCalledOnce();
+    expect(h.twilio.sent.some(e => e.event === "media" || e.event === "mark")).toBe(false);
+    h.live.emit("open"); h.live.startLive("cold-session"); await flush(); await flush();
+    expect(h.speechFetch).toHaveBeenCalledOnce();
+    expect(h.twilio.sent.filter(e => e.event === "mark")).toHaveLength(1);
+    expect(JSON.stringify(h.live.sent)).not.toContain(h.snapshot.plan.localizedObjective);
+  });
+  it("waits for cold rendering after Live is ready and ignores duplicate start frames", async () => {
+    const h = await fixture(); let release!: (response: Response) => void;
+    h.speechFetch.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE",
+      snapshotHash: h.snapshot.compilationSnapshotHash, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
+    h.attach(); await flush(); h.live.emit("open"); h.live.startLive("cold-session"); await flush();
+    h.twilio.receive({ event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ", customParameters: { ...h.binding, streamToken: "valid" } } });
+    await flush();
+    expect(h.twilio.sent.some(e => e.event === "media" || e.event === "mark")).toBe(false);
+    release(new Response(Buffer.alloc(4_800))); await flush(); await flush();
+    expect(h.speechFetch).toHaveBeenCalledOnce(); expect(h.connect).toHaveBeenCalledOnce();
+    expect(h.twilio.sent.filter(e => e.event === "mark")).toHaveLength(1);
+  });
+  it.each(["disconnect", "startup_timeout"])("does not play a late cold render after %s", async failure => {
+    const h = await fixture(); let release!: (response: Response) => void;
+    h.speechFetch.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE",
+      snapshotHash: h.snapshot.compilationSnapshotHash, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
+    h.attach(); await flush(); await flush();
+    if (failure === "disconnect") h.twilio.close();
+    else await vi.advanceTimersByTimeAsync(8_001);
+    release(new Response(Buffer.alloc(4_800))); await flush(); await flush();
+    expect(h.twilio.readyState).toBe(3);
+    expect(h.twilio.sent.some(e => e.event === "media" || e.event === "mark")).toBe(false);
+    expect(h.speechFetch).toHaveBeenCalledOnce();
+  });
+  it.each(["render", "request_journal", "reservation"])("fails closed on cold %s failure", async failure => {
+    const h = await fixture(); const telemetry = vi.spyOn(h.service, "recordTelemetry");
+    if (failure === "render") h.speechFetch.mockRejectedValueOnce(new Error("render unavailable"));
+    if (failure === "request_journal") vi.spyOn(h.service, "recordRealtimeProviderOperation").mockRejectedValueOnce(new Error("journal unavailable"));
+    if (failure === "reservation") vi.spyOn(h.service, "startRealtimeProviderSessions").mockRejectedValueOnce(new Error("reservation unavailable"));
+    await h.repository.transitionAnswering(h.brief.id, { attemptId: h.attempt.id, providerCallId: "CA-LIVE",
+      snapshotHash: h.snapshot.compilationSnapshotHash, kind: "resolve", answeredBy: "human", now: new Date().toISOString() });
+    h.attach(); await flush(); await flush();
+    expect(h.twilio.readyState).toBe(3);
+    expect(h.twilio.sent.some(e => e.event === "media" || e.event === "mark")).toBe(false);
+    expect(h.speechFetch).toHaveBeenCalledTimes(failure === "render" ? 1 : 0);
+    if (failure === "render") expect(telemetry).toHaveBeenCalledWith(h.brief.id, expect.objectContaining({
+      payload: { name: "conversation.ended", metadata: { reason: "openai_error", failureCode: "LIVE_DISCLOSURE_RENDER_FAILED", failurePhase: "disclosure" } }
+    }));
+  });
   it("warms without task, tools or speech; adopts the same session only after human admission", async () => {
     const h = await fixture(); await h.warm(); await vi.advanceTimersByTimeAsync(100);
     expect(h.live.sent.filter(e => e.type === "session.instructions.append")).toHaveLength(0);

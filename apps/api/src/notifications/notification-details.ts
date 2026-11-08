@@ -13,7 +13,8 @@ const values: Record<UiLocale, string[]> = {
 };
 export const notificationDetailMessages = Object.fromEntries(Object.entries(values).map(([locale, texts]) => [locale, Object.fromEntries(en.map((source, index) => [source.toLowerCase(), texts[index]!]))])) as Record<UiLocale, Record<string, string>>;
 export function notificationDetail(value: string, locale: UiLocale): string {
-  const copy = notificationDetailMessages[locale];
+  const liveVoice:Record<UiLocale,string>={en:"Live voice",de:"Live-Sprachmodell",fr:"Voix Live",it:"Voce Live",rm:"Vusch Live",ru:"Голосовая модель Live",uk:"Голосова модель Live"};
+  const copy:Record<string,string> = {...notificationDetailMessages[locale],"live voice":liveVoice[locale]};
   const direct = copy[value.toLowerCase().replaceAll("_", " ").replace("no-answer", "no answer")];
   if (direct) return direct;
   // These delimiters separate display labels from diagnostic codes, not sentence fragments.

@@ -4,6 +4,7 @@ import {
   callBriefTaskTextLength,
   compilationApprovalInputSchema,
   createCallBriefInputSchema,
+  storedCallBriefInputSchema,
   getAssistanceDisclosure,
   normalizeCreateCallBriefInput
 } from "./call-brief";
@@ -33,6 +34,13 @@ const validBrief = {
 };
 
 describe("createCallBriefInputSchema", () => {
+  it("keeps historical defaults and explicit retention policies stable", () => {
+    expect(storedCallBriefInputSchema.parse(validBrief).audioRetentionDays).toBe(7);
+    for (const audioRetentionDays of [0,7,30]) {
+      expect(createCallBriefInputSchema.parse({...validBrief,audioRetentionDays}).audioRetentionDays).toBe(audioRetentionDays);
+      expect(storedCallBriefInputSchema.parse({...validBrief,audioRetentionDays}).audioRetentionDays).toBe(audioRetentionDays);
+    }
+  });
   it.each(ASSISTANT_PROFILES)("normalizes legacy profile $id to the brand without changing its voice", profile => {
     const normalized = normalizeCreateCallBriefInput({ ...validBrief, assistantProfileId: profile.id });
     expect(normalized.agentName).toBe("Shprohli");
@@ -63,7 +71,7 @@ describe("createCallBriefInputSchema", () => {
       expect(normalized.agentName).toBe("Shprohli");
       expect(normalized.voiceGender).toBe("male");
       expect(normalized.representedPerson).toBe("Nina Keller");
-      expect(result.data.audioRetentionDays).toBe(7);
+      expect(result.data.audioRetentionDays).toBe(30);
       expect(result.data.assistanceReason).toBe("speech_impairment");
       expect(result.data).toMatchObject({
         resultHandling: "capture_in_callassist",
@@ -135,13 +143,12 @@ describe("createCallBriefInputSchema", () => {
   it("enforces one normalized aggregate budget across every task text field", () => {
     const atLimit = {
       ...validBrief,
-      objective: "o".repeat(CALL_BRIEF_INPUT_LIMITS.objective),
+      objective: "o".repeat(1000),
       context: "c".repeat(CALL_BRIEF_INPUT_LIMITS.context),
       allowedFacts: [
-        ...Array.from({ length: 13 }, () =>
+        ...Array.from({ length: 10 }, () =>
           "f".repeat(CALL_BRIEF_INPUT_LIMITS.allowedFact)
-        ),
-        "f".repeat(100)
+        )
       ]
     };
     expect(callBriefTaskTextLength(atLimit)).toBe(

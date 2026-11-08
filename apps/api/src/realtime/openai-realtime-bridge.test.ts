@@ -1,3 +1,4 @@
+import { defaultPreparationRuntimePolicy } from "@callassist/contracts";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 import {
   approvedExecutionSnapshotSchema,
@@ -1267,7 +1268,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
   if (appointmentAuthorization) {
     const compile = compiler.compile.bind(compiler);
     vi.spyOn(compiler, "compile").mockImplementation(async (input, revision) => {
-      const compilation = await compile(input, revision);
+      const compilation = await compile(input, revision, {policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-2026-10-05"}});
       if (!compilation.compiledBrief) throw new Error("Expected a ready plan fixture");
       compilation.compiledBrief = { ...compilation.compiledBrief, schemaVersion: "4",
         taskType: "appointment_coordination", appointmentAuthorization };

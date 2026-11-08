@@ -91,7 +91,7 @@ describe("retained audio telemetry archives", () => {
     fetchMedia.mockRejectedValue(new Error("TWILIO_RECORDING_DOWNLOAD_404"));
     const job = await service.create(actor, request()); await service.runOnce();
     const zip = await files(job.id);
-    expect(JSON.parse(strFromU8(zip["manifest.json"]!)).completeness).toBe("partial_audio");
+    expect(JSON.parse(strFromU8(zip["manifest.json"]!)).completeness).toBe("partial");
     expect(JSON.parse(strFromU8(zip["audio-manifest.json"]!)).recordings.every((r: {status:string}) => r.status === "unavailable")).toBe(true);
   });
   it("does not publish a truncated WAV after a mid-body failure", async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {preparationIssueSchema} from "./preparation-issue";
 
 export const callPreparationStatusSchema = z.enum([
   "queued",
@@ -26,6 +27,7 @@ export const callPreparationSchema = z.strictObject({
   status: callPreparationStatusSchema,
   callBriefId: z.uuid().nullable(),
   failureCode: callPreparationFailureCodeSchema.nullable(),
+  issue:preparationIssueSchema.optional(),
   attemptCount: z.number().int().nonnegative(),
   stage: z.enum(["input_moderation", "compilation", "compilation_repair", "language_audit", "output_moderation"]).optional(),
   createdAt: z.iso.datetime(),

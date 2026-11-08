@@ -21,6 +21,7 @@ type TranscriptPdfInput = {
   turns: TranscriptPdfTurn[];
   text: string;
   notes: string[];
+  assessment?: { title: string; status: string; summary?: string; note?: string };
   source?: { title: string; rows: Metadata[] };
 };
 
@@ -46,6 +47,16 @@ export function buildTranscriptPdfLayout(input: TranscriptPdfInput): TDocumentDe
     { text: input.title, bold: true, fontSize: 24, lineHeight: 1.1, margin: [0, 0, 0, 8] },
     { text: input.description, color: muted, fontSize: 10, margin: [0, 0, 0, 20] },
     ...input.metadata.map(metadataRow),
+    ...(input.assessment ? [{
+      id: "shprohli-task-assessment", unbreakable: true,
+      table: { widths: ["*"], body: [[{ stack: [
+        { text: input.assessment.title, bold: true, color: green, fontSize: 10 },
+        { text: input.assessment.status, bold: true, fontSize: 13, margin: [0, 5, 0, 0] },
+        ...(input.assessment.summary ? [{ text: input.assessment.summary, fontSize: 9.5, margin: [0, 5, 0, 0] }] : []),
+        ...(input.assessment.note ? [{ text: input.assessment.note, fontSize: 9, margin: [0, 5, 0, 0] }] : [])
+      ], fillColor: "#F0F6F2", margin: [10, 9, 10, 9] }]] },
+      layout: "noBorders", margin: [0, 10, 0, 0]
+    } as Content] : []),
     divider([0, 13, 0, 20]),
     ...(input.turns.length ? input.turns.map((turn, index) => ({
       // Break before the entire turn if its heading would be separated from its text.

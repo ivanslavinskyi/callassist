@@ -1310,7 +1310,7 @@ Silent control result (never read aloud): ${JSON.stringify(result)}`)
         return;
       }
 
-      if (executionSnapshot.version === 3) {
+      if ("answering" in executionSnapshot) {
         const admitted = message.start?.callSid && await this.#service.transitionAnswering(candidateCallBriefId, {
           attemptId: attempt.id, providerCallId: message.start.callSid,
           snapshotHash: candidateCompilationSnapshotHash, kind: "admit", now: new Date().toISOString()

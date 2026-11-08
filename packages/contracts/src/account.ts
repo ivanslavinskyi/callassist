@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { creditFundingSchema } from "./beta-credits";
+import { testingAccessSchema } from "./testing";
 import { terminalDecisionSchema } from "./terminal-decision";
 import { normalizeAccountPhoneNumber, parseAccountPhoneNumber } from "./phone";
 import { callCompilationSchema, callSnapshotSchema, personNamePartSchema } from "./call-brief";
@@ -397,6 +398,7 @@ export const accountExportReviewReceiptSchema = z.strictObject({
 });
 
 import { callAssessmentRecordSchema } from "./call-assessment";
+import { nativeAppointmentActionSchema } from "./native-appointment";
 export const accountExportVoiceActionSchema = z.strictObject({
   id: z.uuid(), callBriefId: z.uuid(), callAttemptId: z.uuid(), snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
   version: z.number().int().positive(), state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
@@ -416,7 +418,8 @@ export const accountExportCallTextDataSchema = z.strictObject({
   assessments: z.array(callAssessmentRecordSchema).optional(),
   assessmentRevisions: z.array(callAssessmentRecordSchema).optional(),
   terminalDecisions: z.array(terminalDecisionSchema).optional(),
-  voiceActions: z.array(accountExportVoiceActionSchema).optional()
+  voiceActions: z.array(accountExportVoiceActionSchema).optional(),
+  nativeAppointmentActions: z.array(nativeAppointmentActionSchema).optional()
 });
 
 const legacyAccountDataExportCallSchema = z.strictObject({
@@ -431,6 +434,7 @@ export type AccountDataExportCall = z.infer<
 >;
 
 export const accountDataExportSchema = z.strictObject({
+  testingAccess: testingAccessSchema.optional(),
   schemaVersion: z.literal(ACCOUNT_DATA_EXPORT_SCHEMA_VERSION),
   exportId: z.uuid(),
   generatedAt: z.iso.datetime(),

@@ -4,6 +4,7 @@ import type postgres from "postgres";
 import type { RecordingMediaStream } from "../telephony/telephony-provider";
 import type { DataEncryptionMaterial } from "../security/encryption";
 import { exportCoverageQuery, exportSources, mapExportRow, sourceQuery } from "./sources";
+import { ExportCoverage } from "./coverage";
 
 export const exportMaxBytes = 250 * 1024 * 1024;
 export const exportPartBytes = 1024 * 1024;
@@ -14,7 +15,7 @@ export const exportMaxAudioBytes = 250 * 1024 * 1024;
 export const exportMaxRecordingBytes = 64 * 1024 * 1024;
 export type ArchiveContext = { id: string; from: string; to: string; createdAt: string; generation: number; includeAudio?: boolean };
 export type ExportRecording = { id: string; callId: string; attemptId: string; provider: string; providerRecordingId: string | null;
-  status: string; consentAt: string | null; deletedAt: string | null; deleteAfter: string | null; durationSeconds: number | null; channels: number | null };
+  status: string; recordingBasis?: "affirmative_consent" | "declarative_local"; consentAt: string | null; deletedAt: string | null; deleteAfter: string | null; durationSeconds: number | null; channels: number | null };
 export type ArchiveAudioAccess = (recording: ExportRecording) => Promise<RecordingMediaStream | { unavailable: "deleted" | "expired" | "unavailable" | "fetch_failed"; reason: string }>;
 
 // Compatibility helper for direct metadata-only builders/tests.
@@ -88,8 +89,13 @@ export async function captureTelemetryArchive(
     "Consent policies are the values pinned to each attempt. Global consent settings and operator change notes are excluded; missing historical policies remain null.",
     "effective_provider_usage replaces missing measurements; do not add it to the original usage records."
   ];
+  const coverage = new ExportCoverage();
   try {
     for (const s of exportSources) {
+      if (s.optional) {
+        const [present] = await tx`SELECT to_regclass(${s.table}) IS NOT NULL AS present`;
+        if (!present?.present) { warnings.push(`Optional historical source ${s.table} is absent.`); continue; }
+      }
       phase = s.table;
       const path = `data/${s.table}.jsonl`, entry = addFile(path), hash = createHash("sha256");
       let count = 0, size = 0;
@@ -118,10 +124,12 @@ export async function captureTelemetryArchive(
             const d = row.data;
             recordings.push({ id: String(d.id), callId: String(d.call_brief_id), attemptId: String(d.call_attempt_id), provider: String(d.provider),
               providerRecordingId: d.provider_recording_id == null ? null : String(d.provider_recording_id), status: String(d.status),
+              recordingBasis: d.recording_basis === "declarative_local" ? "declarative_local" : "affirmative_consent",
               consentAt: d.consent_granted_at == null ? null : String(d.consent_granted_at), deletedAt: d.deleted_at == null ? null : String(d.deleted_at),
               deleteAfter: d.delete_after == null ? null : String(d.delete_after), durationSeconds: d.duration_seconds == null ? null : Number(d.duration_seconds),
               channels: d.channels == null ? null : Number(d.channels) });
           }
+          coverage.observe(s.table, record.data, "selectedInPeriod" in record && record.selectedInPeriod === true);
           const line = encode(record); records++; count++; size += line.length; hash.update(line);
           if (records > 1_000_000) throw new ExportError("EXPORT_LIMIT_EXCEEDED");
           entry.push(line, false);
@@ -142,13 +150,13 @@ export async function captureTelemetryArchive(
         for (const recording of recordings) {
           const item: Record<string, unknown> = { recordingId: recording.id, callId: recording.callId, attemptId: recording.attemptId,
             provider: recording.provider, channels: recording.channels, durationSeconds: recording.durationSeconds,
-            consentAt: recording.consentAt, deleteAfter: recording.deleteAfter, path: null, bytes: 0, sha256: null, mime: null };
+            consentAt: recording.consentAt, recordingBasis: recording.recordingBasis ?? "affirmative_consent", deleteAfter: recording.deleteAfter, path: null, bytes: 0, sha256: null, mime: null };
           audio.push(item);
           if (!context.includeAudio) { item.status = "not_requested"; continue; }
           await check();
           if (recording.deletedAt || recording.status === "deleted" || recording.status === "deleting") { item.status = "deleted"; continue; }
           if (recording.deleteAfter && Date.parse(recording.deleteAfter) <= Date.now()) { item.status = "expired"; continue; }
-          if (!recording.consentAt || !recording.deleteAfter || recording.status !== "available" || !recording.providerRecordingId || !media) {
+          if ((!recording.consentAt && recording.recordingBasis !== "declarative_local") || !recording.deleteAfter || recording.status !== "available" || !recording.providerRecordingId || !media) {
             item.status = "unavailable"; item.reason = !recording.consentAt ? "consent_unavailable" : "media_unavailable"; continue;
           }
           const stream = await media(recording);
@@ -178,15 +186,18 @@ export async function captureTelemetryArchive(
         for (const state of ["included", "deleted", "expired", "unavailable", "fetch_failed", "not_requested"]) counts[`audio_${state}`] = audio.filter(item => item.status === state).length;
         counts.audio_recordings = audio.length; counts.audio_bytes = audioBytes;
         const completeAudio = !context.includeAudio || !audio.some(item => ["unavailable", "fetch_failed"].includes(String(item.status)));
+        const coverageManifest = coverage.finish(audio);
+        const partial = !completeAudio || coverageManifest.incompleteAttempts > 0 || (counts.missing_paid_usage ?? 0) > 0 || (counts.unpriced_usage_records ?? 0) > 0 || (counts.stale_provider_operations ?? 0) > 0 || (counts.pending_text_artifacts ?? 0) > 0;
     const docs: Record<string, unknown> = {
+      "coverage.json": coverageManifest,
       "audio-manifest.json": { version: 2, requested: context.includeAudio === true, complete: completeAudio, recordings: audio },
       "summary.json": { scope, attemptStatuses: outcomes, pending, reportedCostMicrosByCurrency: Object.fromEntries(Object.entries(costs).map(([k, v]) => [k, v.toString()])), costScope: "All associated operations, including preparation outside the selected period. effective_provider_usage includes versioned calculated_cost per operation; these estimates must not be added to provider-reported actuals.", counts },
-      "schema.json": { formatVersion: 2, encoding: "UTF-8", dataFormat: "JSON Lines", recordEnvelope: { schemaVersion: 2, recordType: "source table", data: "allowlisted source columns; ciphertext suffix removed after decryption" }, sources: Object.fromEntries(exportSources.map(s => [s.table, [...s.fields.map(f => f.replace(/_ciphertext$/, "")), ...(s.table === "effective_provider_usage" ? ["provider", "operation_type", "stage", "model", "calculated_cost"] : [])]])), numericPolicy: "Monetary micros are decimal strings; null is unknown, never zero." },
-      "manifest.json": { schemaVersion: 2, exportId: context.id, generation: context.generation, requestedAt: context.createdAt, snapshotCapturedAt: snapshotAt, generatedAt: new Date().toISOString(), period: { from: context.from, to: context.to, timezone: "Europe/Zurich", bounds: "[from,to)" }, generatorVersion: "telemetry-export-v2", completeness: completeAudio ? "all_available_allowlisted_sources" : "partial_audio", audioRequested: context.includeAudio === true, counts, files, warnings }
+      "schema.json": { formatVersion: 4, encoding: "UTF-8", dataFormat: "JSON Lines", recordEnvelope: { schemaVersion: "2 (historical sources) or 3 (native Live trace)", recordType: "source table", data: "allowlisted source columns; ciphertext suffix removed after decryption" }, sources: Object.fromEntries(exportSources.map(s => [s.table, [...s.fields.map(f => f.replace(/_ciphertext$/, "")), ...(s.table === "effective_provider_usage" ? ["provider", "operation_type", "stage", "model", "calculated_cost"] : [])]])), numericPolicy: "Monetary micros are decimal strings; null is unknown, never zero." },
+      "manifest.json": { schemaVersion: 4, exportId: context.id, generation: context.generation, requestedAt: context.createdAt, snapshotCapturedAt: snapshotAt, generatedAt: new Date().toISOString(), period: { from: context.from, to: context.to, timezone: "Europe/Zurich", bounds: "[from,to)" }, generatorVersion: "telemetry-export-v4", completeness: partial ? "partial" : "all_available_allowlisted_sources", coverage: { path: "coverage.json", incompleteAttempts: coverageManifest.incompleteAttempts, unavailableCalls: scope.unavailable_calls ?? 0 }, audioRequested: context.includeAudio === true, counts, files, warnings }
     };
     for (const [name, data] of Object.entries(docs)) { const entry = addFile(name); entry.push(encode(data), true); await flush(); }
     const readme = addFile("README.txt");
-    readme.push(Buffer.from("SHPROHLI call telemetry v2\nEach data/*.jsonl line is one UTF-8 JSON record. Preserve IDs and source hashes when joining tables. Read manifest.json for scope, completeness and checksums. Transcripts, approved plans and reviews contain personal information. This file is a copy of the data at snapshotCapturedAt; later results require a new export.\n" + warnings.join("\n")), true);
+    readme.push(Buffer.from("SHPROHLI call telemetry v4\nEach data/*.jsonl line is one UTF-8 JSON record. Preserve IDs and source hashes when joining tables. Read manifest.json for scope, completeness and checksums. Transcripts, approved plans and reviews contain personal information. This file is a copy of the data at snapshotCapturedAt; later results require a new export.\n" + warnings.join("\n")), true);
     zip.end(); await flush(true);
     if (!finalized) throw new ExportError("EXPORT_ARCHIVE_INCOMPLETE");
     return { snapshotAt, privacyRevision: snapshot!.revision, records, bytes, counts, sha256: digest.digest("hex") };

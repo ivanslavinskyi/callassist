@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { describeCallTelemetryEvent, durableCallEventSchema, callCompilationSchema, callHistoryItemSchema, callBriefSchema, CALL_BRIEF_INPUT_LIMITS, normalizeCreateCallBriefInput } from '@callassist/contracts';
 import { DeterministicBriefCompiler } from '../brief-compiler/brief-compiler';
-import { readHistoryCompilation, readHistoryTelemetry } from './history-read-model';
+import { readHistoryCompilation, readHistoryTelemetry, readSavedSummaryContext } from './history-read-model';
 
 const callId = randomUUID();
 function event(name: Parameters<typeof describeCallTelemetryEvent>[0], sequence: number, metadata: unknown) {
@@ -11,6 +11,12 @@ function event(name: Parameters<typeof describeCallTelemetryEvent>[0], sequence:
 }
 
 describe('read-only history compatibility', () => {
+  it('keeps completed summaries readable without turning unsupported context into generation input', () => {
+    const archived = { version: 1, taskInstructions: 'Archived mission', unsupportedFutureField: true };
+    expect(readSavedSummaryContext(archived, 'ready')).toBeNull();
+    expect(() => readSavedSummaryContext(archived, 'processing')).toThrow();
+    expect(archived).toHaveProperty('unsupportedFutureField', true);
+  });
   it('reads oversized archive objectives without relaxing new brief validation', async () => {
     const { InMemoryCallRepository } = await import('./in-memory-call-repository');
     const repository = new InMemoryCallRepository();

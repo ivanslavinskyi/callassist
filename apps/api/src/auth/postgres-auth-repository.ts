@@ -209,6 +209,10 @@ export class PostgresAuthRepository implements AuthRepository {
     return row ? this.#mapUser(row) : null;
   }
 
+  async findUserById(userId: string) {
+    const [row] = await this.#sql<UserRow[]>`SELECT ${this.#userColumns()} FROM users WHERE id=${userId}`;
+    return row ? this.#mapUser(row) : null;
+  }
   async findUserByEmail(email: string) {
     const [row] = await this.#sql<UserRow[]>`
       SELECT ${this.#userColumns()}

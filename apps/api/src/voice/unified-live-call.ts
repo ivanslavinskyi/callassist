@@ -21,6 +21,9 @@ import { liveTaskFailureCopy, liveFarewellCopy } from "./live-failure-copy";
 import { renderSpeech, type RenderedSpeech } from "./rendered-speech";
 import { appointmentRequestCopy, appointmentStatusCopy } from "./live-appointment-copy";
 import { resolveInitialDisclosure, calendarDateDetails } from "@callassist/contracts";
+import { LiveTelemetry } from "./live-telemetry";
+import { selectNativeSession, type NativeSession } from "./live-native-prompts";
+import { LiveNativeCall } from "./live-native-call";
 
 type Phase = "starting" | "disclosure" | "consent" | "recording" | "opening" | "conversation" | "closing" | "ending" | "closed";
 type PlaybackMilestones = Omit<ApplicationPlaybackDiagnostic, "outcome" | "reason" | "endedAt">;
@@ -36,6 +39,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #provider = "";
   #context: VoiceConversationContext | null = null;
   #live: OpenAILiveConversation | null = null;
+  #nativeSession: NativeSession | null = null;
+  #nativeTask: LiveNativeCall | null = null;
+  get #runtimeVersion() { return this.#nativeSession ? "live-native-v1" as const : "live-managed-v9" as const; }
   #speechFailure: { code: string; phase: Phase } | null = null;
   #consent = new ConsentFlow();
   #consentPolicy: ConsentRuntimePolicy = defaultVoiceConsentRuntimePolicy;
@@ -105,11 +111,23 @@ export class UnifiedLiveCall implements LiveLifecycle {
   #waitingExpired = false;
   #closingInputPending = false;
   #closingDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  #startupPath: "prepared" | "cold" = "cold";
+  #liveStartAt: number | null = null;
+  #liveReadyMs: number | null = null;
+  #admittedAt: number | null = null;
+  #startupDiagnosticSent = false;
+  #lastConsentBoundaryAt: number | null = null;
+  #acceptedConsentBoundaryAt: number | null = null;
+  #consentDecisionAt: number | null = null;
+  #recordingAdmissionMs = 0;
+  #audioStats = { frames: 0, sentAudioMs: 0, clearCount: 0, maxEstimatedQueueMs: 0,
+    nativeFrames: 0, nativeAudioMs: 0, nativeMaxDeltaMs: 0, renderCacheHits: 0, renderCacheMisses: 0 };
 
   constructor(private readonly options: OpenAILiveBridgeOptions, private twilio?: WebSocket) {}
   get closed() { return this.#isClosed(); }
   dispose() { this.#close("socket_closed"); }
   prepare(binding: { callBriefId: string; callAttemptId: string; providerCallId: string; compilationSnapshotHash: string }) {
+    this.#startupPath = "prepared";
     this.#preparing = (async () => {
       const snapshot = await this.options.service.get(binding.callBriefId);
       const attempt = await this.options.service.getLatestAttempt(binding.callBriefId);
@@ -124,9 +142,11 @@ export class UnifiedLiveCall implements LiveLifecycle {
       await this.#initialize(snapshot, attempt);
       if (this.closed) return;
       const disclosure = resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).text;
+      this.#liveStartAt = Date.now();
       await Promise.all([this.#live!.start(), this.#render(disclosure)]);
       if (this.closed || this.#admitted) return;
-      // No recipient audio or task context is sent while waiting for admission.
+      // No recipient audio is sent while waiting for admission. Native's approved
+      // startup brief is already present; the managed control still loads later.
       this.#warmSilence = setInterval(() => this.#live?.inputAudio(Buffer.alloc(160, 255).toString("base64")), 20);
       this.#warmSilence.unref?.();
     })().catch(() => this.dispose());
@@ -157,7 +177,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     } else if (event.event === "mark") {
       const name = object(event.mark).name;
       if (typeof name === "string") {
-        if (!this.#acknowledgeApplicationPlayback(name)) this.#acknowledgeRendered(name);
+        if (!this.#nativeTask?.closing.acknowledge(name) && !this.#acknowledgeApplicationPlayback(name)) this.#acknowledgeRendered(name);
       }
     } else if (event.event === "dtmf") {
       const digit = object(event.dtmf).digit;
@@ -178,7 +198,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
         if (digit === "1" && this.#consent.stage === "dtmf_fallback")
           await this.#applyConsentDecision("affirmative", "dtmf");
         else if (digit === "2") await this.#applyConsentDecision("negative", "dtmf");
-      } else if (this.#phase === "conversation" && typeof digit === "string") this.#live?.keypad(digit);
+      } else if (this.#phase === "conversation" && typeof digit === "string") {
+        this.#nativeTask?.keypad(digit); this.#live?.keypad(digit);
+      }
     } else if (event.event === "stop") this.#close("stream_stopped");
   }
   async #admit(start: Record<string, unknown>, streamSid: unknown) {
@@ -202,7 +224,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       attempt.compilationSnapshotHash !== binding.compilationSnapshotHash || execution.compilationSnapshotHash !== binding.compilationSnapshotHash) {
       this.#close("socket_closed"); return;
     }
-    if (execution.version === 3) {
+    if ("answering" in execution) {
       const admitted = await this.options.service.transitionAnswering(binding.callBriefId, { attemptId: attempt.id, providerCallId: start.callSid,
         snapshotHash: binding.compilationSnapshotHash, kind: "admit", now: new Date().toISOString() });
       if (this.#isClosed() || !admitted.applied || admitted.decision !== "consent") { this.#close("socket_closed"); return; }
@@ -213,6 +235,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#stream = String(start.streamSid ?? streamSid);
     this.#provider = start.callSid;
     this.#admitted = true;
+    this.#admittedAt = Date.now();
     if (this.#warmSilence) clearInterval(this.#warmSilence);
     this.#warmSilence = null;
     if (!this.#live) await this.#initialize(snapshot, attempt);
@@ -232,7 +255,18 @@ export class UnifiedLiveCall implements LiveLifecycle {
       await this.#checkAnswering();
       if (this.#answeringHandoff || this.closed) return;
     }
-    if (!this.#ready) await this.#live!.start();
+    if (!this.#ready) {
+      // Start establishes the provider reservation synchronously. Rendering can
+      // then overlap the handshake; ready()/disclosure() retain the audio gates
+      // and reuse this exact cached promise, including when ready arrives first.
+      this.#liveStartAt = Date.now();
+      const starting = this.#live!.start();
+      const disclosure = resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).text;
+      await Promise.all([starting, this.#render(disclosure).catch(error => {
+        if (!this.closed) this.#speechFailure = { code: "LIVE_DISCLOSURE_RENDER_FAILED", phase: "disclosure" };
+        throw error;
+      })]);
+    }
     else this.#disclosure();
   }
 
@@ -278,33 +312,64 @@ export class UnifiedLiveCall implements LiveLifecycle {
     const execution = { ...approved, runtime: { ...approved.runtime, spokenIdentities: identities,
       ...(approved.runtime.initialDisclosure ? { initialDisclosure: { ...approved.runtime.initialDisclosure,
         text: projectSpokenIdentityText(approved.runtime.initialDisclosure.text, identities) } } : {}) } };
+    const selection = selectNativeSession(!!this.options.nativeExperiment, execution,
+      { representedPerson: identities.representedPerson.spoken, recipientName: identities.recipient.spoken }, !!this.options.agentHangupEnabled);
+    this.#nativeSession = selection.session;
+    const telemetry = new LiveTelemetry((key, payload) => this.options.service.recordTelemetry(snapshot.brief.id, {
+      callAttemptId: attempt.id, idempotencyKey: key, payload
+    }), details => this.options.logger?.warn({ callAttemptId: attempt.id, ...details }, "Live diagnostic events unavailable"),
+    selection.session ? "live-native-v1" : "live-managed-v9");
     const context: VoiceConversationContext = {
       brief: { ...snapshot.brief, representedPerson: identities.representedPerson.spoken, recipientName: identities.recipient.spoken,
         voiceGender: execution.runtime.voiceGender, locale: execution.plan.callLocale }, snapshot: execution, attemptId: attempt.id,
       sendAudio: payload => this.#sendAudio(payload), clearPlayback: () => this.#clear(),
       requestFarewell: (_id, reason) => this.#requestClosing(reason),
-      interruptFarewell: () => this.#interruptClosing(), isClosing: () => this.#phase === "closing" || this.#phase === "ending",
-      telemetry: (key, payload) => { void this.options.service.recordTelemetry(snapshot.brief.id, {
-        callAttemptId: attempt.id, idempotencyKey: key, payload
-      }).catch(() => this.#close("openai_error")); },
+      interruptFarewell: () => this.#interruptClosing(), isClosing: () => !!this.#nativeTask?.closing.active || this.#phase === "closing" || this.#phase === "ending",
+      telemetry: (key, payload) => {
+        // Lifecycle events also drive stored system outcomes. Keep their existing
+        // write/failure semantics outside the optional bounded diagnostic queue.
+        if (["realtime.ready", "realtime.voice", "realtime.error", "conversation.first_audio",
+          "conversation.task", "conversation.tool_result", "conversation.hangup"].includes(payload.name)) telemetry.record(key, payload);
+        else {
+          void this.options.service.recordTelemetry(snapshot.brief.id, {
+            callAttemptId: attempt.id, idempotencyKey: key, payload
+          }).catch(() => this.#close("openai_error"));
+        }
+      },
+      diagnostic: diagnostic => telemetry.diagnostic(diagnostic),
       fail: () => this.#close("openai_error")
     };
     this.#context = context;
     this.#consentPolicy = await this.options.service.getConsentRuntimePolicy(snapshot.brief.id, attempt.id);
     if (this.closed) return;
-    await this.options.service.recordRuntimeDescriptor(snapshot.brief.id, attempt.id,
-      liveRuntimeDescriptor(context, snapshot.compilation!, buildLiveInstructions(context, false), {
+    const descriptor = liveRuntimeDescriptor(context, snapshot.compilation!, selection.session?.instructions ?? buildLiveInstructions(context, false), {
         live: this.options.liveModel ?? "gpt-live-1", delegation: this.options.delegationModel ?? "gpt-6-luna",
         speech: this.options.speechModel ?? "gpt-4o-mini-tts"
-      }, process.env, this.#consentPolicy));
+      }, process.env, this.#consentPolicy);
+    if (this.options.nativeExperiment) descriptor.experiment = { requested: "native_v1", selection: selection.reason,
+      closing: selection.session ? "native_quiet_tail_v1" : "application_tts", interruption: selection.session ? "native" : "application_clear",
+      ...(selection.session ? { briefHash: selection.session.briefHash, briefUtf8Bytes: selection.session.briefUtf8Bytes } : {}) };
+    if (selection.session) {
+      descriptor.runtime = "live_native_v1"; descriptor.runtimeVersion = "live-native-v1";
+      descriptor.implementationVersion = "live-native-v1-2026-11-05";
+      this.#nativeTask = new LiveNativeCall(context, this.options, {
+        mark: name => this.#send({ event: "mark", streamSid: this.#stream, mark: { name } }),
+        hangup: reason => { this.#closingReason = reason; this.#hangup(); },
+        fail: code => { this.#speechFailure = { code, phase: this.#phase }; this.#noteTranscriptGap("output_boundary"); this.#close("openai_error"); }
+      });
+    }
+    this.options.logger?.info({ callAttemptId: attempt.id, runtime: descriptor.runtime, selection: selection.reason }, "Live runtime selected");
+    await this.options.service.recordRuntimeDescriptor(snapshot.brief.id, attempt.id, descriptor);
     if (this.closed) return;
-    this.#live = new OpenAILiveConversation(this.options, context, this);
+    this.#live = new OpenAILiveConversation(this.options, context, this, selection.session ?? undefined);
   }
   startup() {
+    if (this.#nativeSession) return { instructions: this.#nativeSession.instructions, input: this.#nativeSession.input };
     return { instructions: buildLiveInstructions(this.#context!, false),
       input: [] };
   }
   ready() {
+    if (this.#liveStartAt !== null) this.#liveReadyMs = Math.max(0, Date.now() - this.#liveStartAt);
     this.#ready = true;
     this.#live!.suspendOutput();
     if (this.#admitted && this.#phase === "starting") this.#disclosure();
@@ -312,6 +377,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
   get #locale() { return this.#context!.snapshot.plan.callLocale; }
   get #hybridConsent() { return this.#consentPolicy.mode === "hybrid_deterministic_v1"; }
   #resetConsentAnswer() {
+    this.#lastConsentBoundaryAt = null;
     this.#consentAnswerText = "";
     this.#consentAnswerUnsafe = false;
     this.#hybridSemanticReady = false;
@@ -375,7 +441,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
       this.#live!.configureConsent(rendered.durationMs, !this.#hybridConsent);
       this.#requiredPlaybackEndsAt = Date.now() + rendered.durationMs;
     } else this.#pendingConsentQuestion = null;
-    for (const payload of rendered.frames) this.#sendAudio(payload);
+    for (const payload of rendered.frames) this.#sendAudio(payload, "application");
+    if (segment === "required") this.#recordStartupDiagnostic(true);
     const mark = `rendered-consent-${segment}:${generation}`;
     const timer = setTimeout(() => {
       if (this.#renderedPlayback?.mark !== mark) return;
@@ -419,42 +486,62 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #render(text: string) {
     const existing = this.#renderedSpeech.get(text);
-    if (existing) return existing;
+    if (existing) { this.#audioStats.renderCacheHits++; return existing; }
+    this.#audioStats.renderCacheMisses++;
     const voice = this.#context!.snapshot.runtime.liveVoice ?? LIVE_VOICES[this.#context!.snapshot.runtime.voiceGender];
     const model = this.options.speechModel?.trim() || "gpt-4o-mini-tts";
     const operationId = randomUUID(), started = Date.now();
     const stage = text === resolveInitialDisclosure(this.#context!.snapshot, this.#context!.brief.representedPerson).text
       ? "live_disclosure_synthesis" : "live_application_synthesis";
+    const diagnostic: Extract<import("@callassist/contracts").LiveRuntimeDiagnostic, { kind: "speech_render" }> = {
+      kind: "speech_render", operationId, stage: stage === "live_disclosure_synthesis" ? "disclosure" : "application",
+      outcome: "failed", durationMs: 0, journalBeforeMs: null, renderMs: null, journalAfterMs: null
+    };
     const rendering = (async () => {
-      // Journal the paid request before crossing the provider boundary. A crash
-      // now leaves an explicit unknown operation instead of invisible spending.
-      await this.#recordRenderedSpeech(operationId, model, started, stage, null);
-      let rendered: RenderedSpeech;
       try {
-        if (this.closed) throw new Error("SPEECH_RENDER_CANCELLED");
-        rendered = await renderSpeech({ apiKey: this.options.apiKey, text, locale: this.#locale, voice,
-          model, speechFetch: this.options.speechFetch });
-      } catch (error) {
-        await this.#recordRenderedSpeech(operationId, model, started, stage, {
-          outcome: speechRenderOutcome(error), providerRequestId: null, providerResponseId: null,
-          providerModel: model, statusCode: speechRenderStatus(error), completedAt: new Date().toISOString(),
-          durationMs: Date.now() - started, errorCode: speechRenderCode(error), usage: null
-        });
-        throw error;
-      }
-      await this.#recordRenderedSpeech(operationId, model, started, stage, {
-        outcome: "succeeded", providerRequestId: rendered.providerRequestId,
-        providerResponseId: rendered.providerRequestId, providerModel: rendered.model,
-        statusCode: 200, completedAt: new Date().toISOString(), durationMs: Date.now() - started,
-        errorCode: null, usage: {
-          requestCount: 1, inputTextTokens: null, cachedInputTextTokens: null,
-          cacheWriteInputTextTokens: null, outputTextTokens: null, reasoningOutputTokens: null,
-          inputAudioTokens: null, cachedInputAudioTokens: null, outputAudioTokens: null,
-          totalTokens: null, durationSeconds: rendered.durationMs / 1_000, billableSeconds: null,
-          rawUsage: { source: "speech_api", outputFormat: "pcm", durationEstimatedFromPcm: true }
+        // Journal the paid request before crossing the provider boundary. A crash
+        // now leaves an explicit unknown operation instead of invisible spending.
+        await this.#recordRenderedSpeech(operationId, model, started, stage, null);
+        diagnostic.journalBeforeMs = Math.max(0, Date.now() - started);
+        const renderStarted = Date.now();
+        let rendered: RenderedSpeech;
+        try {
+          if (this.closed) throw new Error("SPEECH_RENDER_CANCELLED");
+          rendered = await renderSpeech({ apiKey: this.options.apiKey, text, locale: this.#locale, voice,
+            model, speechFetch: this.options.speechFetch });
+        } catch (error) {
+          diagnostic.renderMs = Math.max(0, Date.now() - renderStarted);
+          const journalStarted = Date.now();
+          await this.#recordRenderedSpeech(operationId, model, started, stage, {
+            outcome: speechRenderOutcome(error), providerRequestId: null, providerResponseId: null,
+            providerModel: model, statusCode: speechRenderStatus(error), completedAt: new Date().toISOString(),
+            durationMs: Date.now() - started, errorCode: speechRenderCode(error), usage: null
+          });
+          diagnostic.journalAfterMs = Math.max(0, Date.now() - journalStarted);
+          throw error;
         }
-      });
-      return rendered;
+        diagnostic.renderMs = Math.max(0, Date.now() - renderStarted);
+        Object.assign(diagnostic, rendered.timings);
+        const journalStarted = Date.now();
+        await this.#recordRenderedSpeech(operationId, model, started, stage, {
+          outcome: "succeeded", providerRequestId: rendered.providerRequestId,
+          providerResponseId: rendered.providerRequestId, providerModel: rendered.model,
+          statusCode: 200, completedAt: new Date().toISOString(), durationMs: Date.now() - started,
+          errorCode: null, usage: {
+            requestCount: 1, inputTextTokens: null, cachedInputTextTokens: null,
+            cacheWriteInputTextTokens: null, outputTextTokens: null, reasoningOutputTokens: null,
+            inputAudioTokens: null, cachedInputAudioTokens: null, outputAudioTokens: null,
+            totalTokens: null, durationSeconds: rendered.durationMs / 1_000, billableSeconds: null,
+            rawUsage: { source: "speech_api", outputFormat: "pcm", durationEstimatedFromPcm: true }
+          }
+        });
+        diagnostic.journalAfterMs = Math.max(0, Date.now() - journalStarted);
+        diagnostic.outcome = "succeeded";
+        return rendered;
+      } finally {
+        diagnostic.durationMs = Math.max(0, Date.now() - started);
+        this.#context?.diagnostic?.(diagnostic);
+      }
     })();
     this.#renderedSpeech.set(text, rendering);
     void rendering.catch(() => this.#renderedSpeech.delete(text));
@@ -515,7 +602,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     // on diagnostics, and never route a diagnostic write failure to context.fail.
     void Promise.resolve().then(() => this.options.service.recordTelemetry(brief.id, {
       callAttemptId: attemptId, idempotencyKey: `live:playback:${diagnostic.markId}`,
-      payload: { name: "conversation.task", metadata: { runtimeVersion: "live-managed-v9", phase: "speak",
+      payload: { name: "conversation.task", metadata: { runtimeVersion: this.#runtimeVersion, phase: "speak",
         revision: playback.generation, cause: "application_playback", playback: diagnostic } }
     })).catch(() => this.options.logger?.warn({ callAttemptId: attemptId, generation: playback.generation,
       code: "LIVE_PLAYBACK_DIAGNOSTIC_FAILED" }, "Playback diagnostic unavailable"));
@@ -565,7 +652,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
           if (playback.diagnostic) playback.diagnostic.releasedAt = playback.sentAt;
           playback.durationMs = rendered.durationMs;
           if (this.#criticalResolve) this.#criticalReleased = true;
-          for (const payload of rendered.frames) this.#sendAudio(payload);
+          for (const payload of rendered.frames) this.#sendAudio(payload, "application");
           this.#send({ event: 'mark', streamSid: this.#stream, mark: { name: mark } });
         };
         release();
@@ -593,9 +680,12 @@ export class UnifiedLiveCall implements LiveLifecycle {
     playback.resolve(true); return true;
   }
   audio(payload: string) {
-    if (this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null) this.#sendAudio(payload);
+    if (this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null) {
+      this.#sendAudio(payload); this.#nativeTask?.audio(payload);
+    }
   }
   transcript(role: 'recipient' | 'assistant', text: string, _startMs: number, _endMs: number, _persist: () => void) {
+    if (this.#consented && this.#nativeTask) return this.#nativeTask.transcript(role, text, _startMs, _endMs);
     if (role === 'assistant') {
       return this.#phase === 'conversation' && !this.#applicationPlayback && this.#appointmentRejectedTurn === null;
     }
@@ -612,6 +702,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
       else this.#consentAnswerText += text;
     }
     if ((this.#phase === "disclosure" || this.#phase === "consent") && text.trim()) {
+      this.#lastConsentBoundaryAt = Date.now();
       this.#answerObserved = true;
       this.#consentInfrastructureFailures = 0;
       this.#consentAnswerRevision++;
@@ -635,6 +726,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     return this.#consented && this.#phase !== "recording" && this.#phase !== "closed";
   }
   activity(event: "started" | "stopped" | null, voicedMs = 0) {
+    if (this.#consented && this.#nativeTask) { this.#nativeTask.activity(event); return; }
     // The fast gate yields on the first energetic frame, before the shared
     // 100 ms activity detector reports started. Do not alter task/AMD VAD.
     if (this.#hybridConsent && (this.#phase === "disclosure" || this.#phase === "consent")) {
@@ -687,6 +779,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
         }
       }
     } else if (event === "stopped") {
+      if (this.#phase === "consent") this.#lastConsentBoundaryAt = Date.now();
       this.#speaking = false;
       this.#hybridAcousticPending = false;
       if (this.#backendFailurePending) this.#scheduleBackendFailure();
@@ -835,6 +928,8 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   async #grant(evidence: ConsentEvidence) {
     if (this.#phase !== "consent") return;
+    this.#consentDecisionAt = Date.now();
+    this.#acceptedConsentBoundaryAt = evidence.method === "dtmf" ? null : this.#lastConsentBoundaryAt;
     this.#phase = "recording";
     this.#resetConsentAnswer();
     if (this.#consentOverallTimer) clearTimeout(this.#consentOverallTimer);
@@ -848,6 +943,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#wait(15_000, () => this.#close("openai_error"));
     try {
       const recorded = await this.options.service.startRecordingAfterConsent(this.#context!.brief.id, evidence);
+      this.#recordingAdmissionMs = Math.max(0, Date.now() - this.#consentDecisionAt);
       if (this.#isClosed()) return;
       this.#consented = true;
       this.#conversationStartedAt = Date.now();
@@ -855,7 +951,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
       this.#context!.telemetry("live:conversation:started", { name: "conversation.started", metadata: {} });
       const beginTask = () => {
         this.#phase = "conversation";
+        if (this.#nativeTask) this.#nativeTask.start();
         this.#live!.configureBackend(recorded.recording?.startedAt ?? undefined);
+        if (this.#nativeTask) return;
         this.#armTaskWait();
         this.#settleRecipientTurn();
       };
@@ -899,6 +997,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   backendFailed(current: () => boolean = () => true, code = "LIVE_BACKEND_FAILURE") {
     if (!current()) return;
+    if (this.#consented && this.#nativeTask) {
+      this.#speechFailure = { code, phase: this.#phase }; this.#close("openai_error"); return;
+    }
     if (this.#phase === "ending") return;
     if (this.#phase === "closing") { this.#fallbackClosing(); return; }
     if (this.#isClosed() || !this.#consented) { this.#close("openai_error"); return; }
@@ -906,7 +1007,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#backendFailurePending = true;
     this.#backendFailureCurrent = current; this.#backendFailureCode = code;
     this.#context!.telemetry(`live:failure:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v9", phase: "failed", revision: this.#generation, cause: code } });
+      runtimeVersion: this.#runtimeVersion, phase: "failed", revision: this.#generation, cause: code } });
     this.options.logger?.warn({ callAttemptId: this.#context!.attemptId, code }, "Live owned backend failure pending");
     this.#backendFailureDeadlineAt = Date.now() + 8_000;
     this.#scheduleBackendFailure();
@@ -960,7 +1061,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#criticalResolve) return;
     if (this.#criticalReleased) this.#noteTranscriptGap("application_interrupted");
     this.#context!.telemetry(`live:action-interrupted:${randomUUID()}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v9", phase: "stale", revision: this.#generation,
+      runtimeVersion: this.#runtimeVersion, phase: "stale", revision: this.#generation,
       cause, released: this.#criticalReleased } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, cause,
       released: this.#criticalReleased, generation: this.#generation }, "Live appointment playback cancelled");
@@ -994,6 +1095,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     });
   }
   async tool(call: { name: string; arguments: string }, current: () => boolean): Promise<Record<string, unknown>> {
+    if (call.name !== "report_consent" && this.#nativeTask) return this.#nativeTask.tool(call, current);
     const reject = (reason: string) => ({ ok: false, reason });
     if (!current()) return reject("stale_or_unauthorized_request");
     let value: Record<string, unknown>;
@@ -1144,7 +1246,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     if (!this.#action || this.#isClosed()) return;
     this.#live?.appointmentState(this.taskDecisionContext().appointment);
     this.#context!.telemetry(`live:action:${this.#action.id}:${this.#action.version}`, { name: "conversation.task", metadata: {
-      runtimeVersion: "live-managed-v9", phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
+      runtimeVersion: this.#runtimeVersion, phase: this.#action.state === "confirmed" ? "confirm_appointment" : "request_appointment",
       revision: this.#action.version, actionState: this.#action.state,
       ...(this.#action.delivery ? { deliveryKind: this.#action.delivery.kind, deliveryStatus: this.#action.delivery.status } : {}) } });
     this.options.logger?.info({ callAttemptId: this.#context!.attemptId, actionId: this.#action.id,
@@ -1190,7 +1292,9 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#closingAttempts++;
     // One finite audio unit owns the output. A native tail or a backend completion
     // cannot issue its mark; only the final rendered frame does.
-    const text = [decision?.summary, liveFarewellCopy[this.#locale]].filter(Boolean).join(" ");
+    // The no-evidence fallback is already a complete application-owned farewell.
+    const text = decision?.evidence.length === 0 ? decision.summary
+      : [decision?.summary, liveFarewellCopy[this.#locale]].filter(Boolean).join(" ");
     const current = () => this.#phase === "closing" && !this.#closingInputPending && this.#terminalDecision === decision;
     const playback = this.#playApplicationText(text, current, remaining, true);
     const generation = this.#generation;
@@ -1231,18 +1335,33 @@ export class UnifiedLiveCall implements LiveLifecycle {
     this.#live?.resumeOutput("closing_cancelled");
     return true;
   }
-  #sendAudio(payload: string) {
-    if (this.#consented && !this.#firstConversationAudio && pcmuHasSpeech(Buffer.from(payload, "base64"))) {
+  #sendAudio(payload: string, source: "native" | "application" = "native") {
+    const bytes = Buffer.from(payload, "base64");
+    if (this.#consented && !this.#firstConversationAudio && pcmuHasSpeech(bytes)) {
       this.#firstConversationAudio = true;
       this.#context!.telemetry("live:conversation:first-audio", { name: "conversation.first_audio", metadata: { latencyMs: Math.max(0, Date.now() - this.#conversationStartedAt) } });
+      if (this.#consentDecisionAt !== null) this.#context!.diagnostic?.({ kind: "consent_to_audio", source,
+        decisionToSendMs: Math.max(0, Date.now() - this.#consentDecisionAt),
+        lastBoundaryToSendMs: this.#acceptedConsentBoundaryAt === null ? null : Math.max(0, Date.now() - this.#acceptedConsentBoundaryAt),
+        recordingAdmissionMs: this.#recordingAdmissionMs, afterRecordingAdmissionMs: Math.max(0, Date.now() - this.#conversationStartedAt) });
     }
     this.#lastOutputAudioAt = Date.now();
-    this.#playbackUntil = Math.max(Date.now(), this.#playbackUntil) + Buffer.from(payload,"base64").length / 8;
+    this.#playbackUntil = Math.max(Date.now(), this.#playbackUntil) + bytes.length / 8;
+    this.#audioStats.frames++;
+    this.#audioStats.sentAudioMs += bytes.length / 8;
+    if (source === "native") {
+      this.#audioStats.nativeFrames++;
+      this.#audioStats.nativeAudioMs += bytes.length / 8;
+      this.#audioStats.nativeMaxDeltaMs = Math.max(this.#audioStats.nativeMaxDeltaMs, bytes.length / 8);
+    }
+    this.#audioStats.maxEstimatedQueueMs = Math.max(this.#audioStats.maxEstimatedQueueMs, this.#playbackUntil - Date.now());
     this.#send({ event: "media", streamSid: this.#stream, media: { payload } });
     if (this.#backendFailurePending) this.#scheduleBackendFailure();
   }
   #send(event: object) { if (this.twilio?.readyState === WebSocket.OPEN) this.twilio.send(JSON.stringify(event)); }
   #clear() {
+    this.#nativeTask?.cleared();
+    if (this.#stream) this.#audioStats.clearCount++;
     if ((this.#phase === "conversation" || this.#phase === "closing") && this.#playbackUntil > Date.now()+150) this.#noteTranscriptGap("output_cleared");
     this.#playbackUntil = 0;
     if (this.#stream) this.#send({ event: "clear", streamSid: this.#stream });
@@ -1267,6 +1386,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
   }
   #close(reason: "socket_closed" | "stream_stopped" | "openai_error" | "agent_hangup" | "agent_hangup_fallback") {
     if (this.#isClosed()) return;
+    this.#nativeTask?.close();
     this.#phase = "closed";
     this.#stopAnsweringWatch();
     if (this.#appointmentReply) clearTimeout(this.#appointmentReply.timer);
@@ -1293,8 +1413,17 @@ export class UnifiedLiveCall implements LiveLifecycle {
       if (!this.#consented && !this.#consentFailed) this.#context.telemetry("live:consent:ended", { name: "consent.failed", metadata: { reason: "stream_ended_before_consent" } });
       this.#context.telemetry("live:conversation:ended", { name: "conversation.ended", metadata: { reason, ...(this.#speechFailure ? { failureCode: this.#speechFailure.code, failurePhase: this.#speechFailure.phase } : {}) } });
     }
+    this.#recordStartupDiagnostic(false);
+    this.#context?.diagnostic?.({ kind: "audio_output", ...this.#audioStats });
     this.#live?.close();
     if (this.twilio?.readyState === WebSocket.OPEN) this.twilio.close();
+  }
+  #recordStartupDiagnostic(released: boolean) {
+    if (!this.#context || this.#startupDiagnosticSent) return;
+    this.#startupDiagnosticSent = true;
+    this.#context.diagnostic?.({ kind: "startup", path: this.#startupPath,
+      outcome: released ? "released" : "not_released", liveReadyMs: this.#liveReadyMs,
+      admissionToReleaseMs: released && this.#admittedAt !== null ? Math.max(0, Date.now() - this.#admittedAt) : null });
   }
 }
 

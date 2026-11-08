@@ -5,7 +5,7 @@ import type {
 } from "@callassist/contracts";
 import type { DurableJob, DurableJobLease } from "../jobs/durable-job";
 import type { VoiceActionRecord } from "./voice-action";
-import type { TerminalDecision } from "@callassist/contracts";
+import type { TerminalDecision, NativeAppointmentAction } from "@callassist/contracts";
 
 export type EnqueueTextArtifactInput = {
   callId: string; kind: TextArtifactKind; compilationId?: string; transcriptRevisionId?: string;
@@ -50,6 +50,7 @@ export interface CallTextRepository {
     assessmentRevisions?: CallAssessmentRecord[];
     terminalDecisions?: TerminalDecision[];
     voiceActions?: VoiceActionRecord[];
+    nativeAppointmentActions?: NativeAppointmentAction[];
     transcriptRevisions: FinalTranscriptRevision[]; artifacts: CallTextArtifact[]; reviewReceipts: CallPlanReviewReceipt[];
   }>;
 }

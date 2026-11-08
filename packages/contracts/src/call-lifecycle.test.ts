@@ -6,6 +6,42 @@ const started = event(1, { name: "attempt.started", metadata: { provider: "twili
 const connected = event(2, { name: "connection.confirmed", metadata: { providerStatus: "in-progress" } });
 const consent = event(3, { name: "consent.granted", metadata: { method: "voice", decision: "affirmative", locale: "en-GB" } });
 describe("call lifecycle evidence", () => {
+  const nativeMachine = [started, connected,
+    event(3, {name:"recording.started",metadata:{providerStatus:"in-progress",recordingBasis:"declarative_local"}}),
+    event(4, {name:"conversation.started",metadata:{}}),
+    event(5, {name:"answering.updated",metadata:{phase:"resolved",policyVersion:"twilio-async-live-inconclusive-v3",execution:"async",
+      actionDispatched:true,mode:"Enable",answeredBy:"machine_start",decision:"hang_up",streamAdmitted:true,
+      observedAt:"2026-09-15T12:00:05Z",durationMs:2977,message:"not_requested",failure:null}})];
+  it("shows a dispatched native machine answer despite the assistant's early greeting",()=>{
+    expect(deriveCallLifecycle("completed",nativeMachine)).toMatchObject({result:"automated_answer",recordingBasis:"declarative_local",
+      consent:"not_requested",substantiveAnswerConfirmed:false,conversationStartedAt:nativeMachine[3].occurredAt});
+  });
+  it.each(["pending","unavailable"] as const)("does not hide a known machine answer behind a %s transcript assessment",status=>{
+    const assessment={callAttemptId:"attempt-1",compilationId:"fixture",sourceHash:null,decision:null,
+      summary:{status,conversation:null,goal:null,reason:null,updatedAt:"2026-09-15T12:00:10Z",deadlineAt:null,transcriptRevisionId:null,evaluatorVersion:null}};
+    expect(deriveCallLifecycle("completed",nativeMachine,[],[assessment]).result).toBe("automated_answer");
+  });
+  it("preserves human evidence and refusal over a conflicting native machine callback",()=>{
+    expect(deriveCallLifecycle("completed",[...nativeMachine,consent]).result).toBe("no_substantive_answer");
+    expect(deriveCallLifecycle("completed",nativeMachine,[{callAttemptId:"attempt-1",settlement:"charge",qualified:true}]).result).toBe("conversation_completed");
+    expect(deriveCallLifecycle("completed",[...nativeMachine,event(6,{name:"consent.failed",metadata:{reason:"negative"}})]).result).toBe("consent_declined");
+  });
+  it("keeps a declared recording separate from consent, disclosure and task-answer evidence", () => {
+    const recording = event(3, { name: "recording.started", metadata: { providerStatus: "in-progress", recordingBasis: "declarative_local" } });
+    const charge = { callAttemptId: "attempt-1", settlement: "charge", qualified: true } as const;
+    expect(deriveCallLifecycle("completed", [started, connected, recording])).toMatchObject({
+      result: "no_substantive_answer", consent: "not_requested", consentAt: null, disclosureAt: null, substantiveAnswerConfirmed: false
+    });
+    expect(deriveCallLifecycle("completed", [started, connected, recording], [charge])).toMatchObject({
+      result: "conversation_completed", consent: "not_requested", recordingBasis: "declarative_local"
+    });
+    const declined = event(4, { name: "consent.failed", metadata: { reason: "negative" } });
+    expect(deriveCallLifecycle("completed", [started, connected, recording, declined], [charge])).toMatchObject({
+      result: "consent_declined", substantiveAnswerConfirmed: false
+    });
+    expect(deriveCallLifecycle("completed", [started, connected, recording,
+      event(5, { name: "attempt.started", metadata: { provider: "twilio" } }, "attempt-2")], [charge]).recordingBasis).toBeUndefined();
+  });
   it("recovers a settled credit from the atomic ledger when secondary telemetry is missing", () => {
     expect(deriveCallLifecycle("completed", [started, connected, consent], [{ callAttemptId: "attempt-1", settlement: "charge", qualified: true }])).toMatchObject({ result: "conversation_completed", credit: "used", substantiveAnswerConfirmed: true });
     expect(deriveCallLifecycle("completed", [started, connected, consent], [{ callAttemptId: "older-attempt", settlement: "charge", qualified: true }])).toMatchObject({ result: "no_substantive_answer", substantiveAnswerConfirmed: false });

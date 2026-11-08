@@ -6,13 +6,17 @@ receive a saved transcript with optional translation, summary and recording tran
 After a qualifying conversation, the verified owner also receives a branded result
 email with the saved AI assessment, full original transcript and authenticated call link.
 
-The current source uses one native Live voice session (live-managed-v9) with
-application-owned consent, recording, tool authorization and closing playback.
-Consent recognition is configurable in Admin System: semantic mode remains the
-default; the hybrid mode checks short replies locally before semantic fallback.
-Realtime and legacy Live fallback remain explicit compatibility paths. The default
-is Live with fallback disabled. Production deployment is a separate operation;
-repository checks do not establish the currently deployed version.
+The default uses managed GPT-Live (`live-managed-v9`) with application-owned
+consent, recording and closing playback. The opt-in native v2 implementation
+lets Live conduct the opening, conversation and brief closing, with full approved
+task context available at startup. Responses delegation handles reasoning; the
+application validates action authority, evidence, privacy and hangup. Native v2
+supports general tasks and approved booking, confirmation, rescheduling and
+cancellation. Native v2 was accepted as stable after local telephone testing on
+8 November 2026; production activation remains gated until the separate rollout.
+Realtime and legacy hybrid remain
+explicit compatibility paths. Repository checks do not establish the deployed version.
+See the [native runtime specification](docs/native-live-runtime.md).
 
 ## Develop
 
@@ -47,6 +51,13 @@ Do not point tests at a working or production database. Build with corepack pnpm
   retries, shared multiuser admission, role workers and recorded provider usage.
 - Compact approval summary with expandable details, a sticky desktop action panel
   and mobile bottom actions; the existing final confirmation remains required.
+- Native startup preserves relevant information from the objective, context, facts
+  and clarification answers; original sources remain inspectable during review.
+- New calls default to 30-day audio retention with no form selector. Historical
+  retention choices remain valid, and users can delete recordings earlier.
+- Superadmin-managed test scenarios insert editable task text above the objective
+  field. Superadmins have access automatically; eligible accounts can receive an
+  independent tester capability. Standard preparation and approval still apply.
 - Result emails use the UI language captured when the call was created. Saved AI
   prose and original transcript retain their own languages, without extra translation
   or transcript attachments. Delivery uses a separate durable owner outbox.
@@ -54,15 +65,25 @@ Do not point tests at a working or production database. Build with corepack pnpm
   prerequisite; fixed audit/review profiles and policy snapshots for existing jobs.
 - Optional Swiss-only account phones for registration and phone changes, with
   matching forms and copy across all seven interface locales.
-- Post-consent recording, Live transcripts and explicitly requested recording ASR;
-  retention and deletion apply to recordings and derived export archives.
+- Managed recording after affirmative consent; local native v2 recording from
+  connection with a declarative notice and durable deletion on refusal. Live
+  transcripts are primary; recording ASR requires an explicit request.
+- Summary-v8 uses original task context and grounded evidence, with explicit partial
+  coverage. Historical reports and canonical credit evidence remain preserved.
+- Transcript PDFs show a separate first-page AI assessment from saved evidence,
+  including distinct pending/unavailable states and partial-analysis warnings.
 - Transactional credit reserve/charge/refund and versioned beta allowances by
   lifetime, UTC day, week or month without rollover; optional registration seats display.
-- Admin expense/usage explorer, safety review of returned plan revisions, durable
-  localized superadmin alerts, and telemetry exports with retained audio.
+- Typed, localized preparation failures, safety review of returned plan revisions
+  and durable localized notifications.
+- Telemetry export v4 with coverage and timing diagnostics; separate Live-duration,
+  backend-token and preparation/result costs with usage provenance and finality.
+- Immutable preparation attribution separates tester, ordinary and unclassified
+  expenses without changing provider pricing or user credit rules.
 
 [Documentation index](docs/README.md) · [Current engineer guide](docs/engineer-guide.md) ·
-[Preparation runtime](docs/preparation-runtime.md).
+[Preparation runtime](docs/preparation-runtime.md) · [Native validation](docs/native-live-validation.md) ·
+[Task information and testing](docs/task-input-and-testing.md).
 Historical evidence is under docs/archive/. Deployment runbooks and VPS topology
 are local only under the ignored docs/local-operations/ directory.
 

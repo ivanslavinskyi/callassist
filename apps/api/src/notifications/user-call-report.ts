@@ -17,7 +17,7 @@ export class UserCallReportReader {
       consent: boolean; consent_at: Date | null; conversation_started: boolean; content_language: string | null;
     }[]>`SELECT b.creation_ui_locale,a.ended_at,a.compilation_id,c.compilation_ciphertext AS compilation,
       a.content_language,
-      EXISTS(SELECT 1 FROM call_recordings r WHERE r.call_attempt_id=a.id AND r.consent_granted_at IS NOT NULL AND r.started_at IS NOT NULL) AS consent,
+      EXISTS(SELECT 1 FROM call_recordings r WHERE r.call_attempt_id=a.id AND (r.consent_granted_at IS NOT NULL OR r.recording_basis='declarative_local') AND r.started_at IS NOT NULL) AS consent,
       (SELECT min(r.consent_granted_at) FROM call_recordings r WHERE r.call_attempt_id=a.id) AS consent_at,
       EXISTS(SELECT 1 FROM call_events e WHERE e.call_attempt_id=a.id AND e.event_name='conversation.started') AS conversation_started
       FROM call_attempts a JOIN call_briefs b ON b.id=a.call_brief_id JOIN call_compilations c ON c.id=a.compilation_id
@@ -69,7 +69,8 @@ export class UserCallReportReader {
       callLanguage: compilation.compiledBrief.callLocale, assessmentLanguage: summaryRow?.language,
       goal: ready ? assessment.decision!.goal.status : null,
       assessmentParagraphs: prose.map(item => item.label ? `${item.label}: ${item.text}` : item.text),
-      transcript, partial: source.quality?.coverage === "partial" || source.quality?.coverage === "unavailable"
+      transcript, partial: source.quality?.coverage === "partial" || source.quality?.coverage === "unavailable",
+      summaryPartial: summary?.evaluationCoverage?.status === "partial"
     };
   }
 }

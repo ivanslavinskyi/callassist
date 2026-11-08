@@ -3,7 +3,7 @@ import {
   isSupportedBriefCompilerVersion,
   callCompilationSchema,
   compiledCallBriefSchema,
-  createCallBriefInputSchema,
+  storedCallBriefInputSchema,
   policyDecisionSchema,
   type CallCompilation
 } from "@callassist/contracts";
@@ -28,7 +28,7 @@ export function createCompilationSnapshotHash(
   input: CompilationSnapshotHashInput
 ) {
   const hashPayload = JSON.stringify({
-    rawBrief: createCallBriefInputSchema.parse(input.rawBrief),
+    rawBrief: storedCallBriefInputSchema.parse(input.rawBrief),
     compiledBrief: input.compiledBrief
       ? compiledCallBriefSchema.parse(input.compiledBrief)
       : null,

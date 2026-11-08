@@ -1,4 +1,4 @@
-import { getAppointmentAuthorization, type AppointmentAuthorization, type CallCompilation, type CallTextArtifact, type PlanSource } from "@callassist/contracts";
+import { getAppointmentAuthorization, nativeAuthorityFromLegacy, type AppointmentAuthorization, type CallCompilation, type CallTextArtifact, type PlanSource } from "@callassist/contracts";
 import { describe, expect, it } from "vitest";
 import { currentPlanReviewArtifact, projectPlanReview } from "./plan-review-projection";
 
@@ -41,6 +41,36 @@ function appointmentArtifact(): CallTextArtifact {
 }
 
 describe("translated plan projection", () => {
+  it("translates native permission text while preserving operation, dates, limits and source evidence",()=>{
+    const native=nativeAuthorityFromLegacy(appointmentAuthorization);
+    native.requirements=[{id:"doctor",description:"Only Dr Example",sourceText:"Only Dr Example"}];
+    const original:CallCompilation={...structuredClone(compilation),compiledBrief:{...structuredClone(compilation.compiledBrief!),schemaVersion:"9",appointmentAuthorization:null,nativeAppointmentAuthorization:native,contextAppendix:[]}};
+    const ready=artifact(),fields=(ready.payload as {fields:Array<{id:string;text:string}>}).fields;
+    expect(projectPlanReview(original,source,ready)).toBeNull();
+    const projected=projectPlanReview(original,source,{...ready,payload:{fields:[...fields,{id:"nativeAppointmentAuthorization.serviceDescription",text:"Консультация"},{id:"nativeAppointmentAuthorization.requirements.0.description",text:"Только доктор Example"}]}});
+    expect(projected?.compiledBrief).toMatchObject({nativeAppointmentAuthorization:{...native,serviceDescription:"Консультация",requirements:[{...native.requirements[0],description:"Только доктор Example"}]}});
+  });
+
+  it("requires every native appendix text field while preserving its lookup ID and original sources", () => {
+    const original: CallCompilation = { ...structuredClone(compilation), compiledBrief: {
+      ...structuredClone(compilation.compiledBrief!), schemaVersion: "8", appointmentAuthorization: null,
+      contextAppendix: [{ id: "reference", title: "Titel", description: "Beschreibung", content: "Inhalt" }]
+    } };
+    const ready = artifact();
+    const fields = (ready.payload as { fields: Array<{ id: string; text: string }> }).fields;
+    expect(projectPlanReview(original, source, ready)).toBeNull();
+    const translated = { ...ready, payload: { fields: [...fields, ...["title", "description", "content"].map(key => ({
+      id: `contextAppendix.0.${key}`, text: `Перевод ${key}`
+    }))] } };
+    const display = projectPlanReview(original, source, translated);
+    expect(display?.compiledBrief).toHaveProperty("contextAppendix.0", {
+      id: "reference", title: "Перевод title", description: "Перевод description", content: "Перевод content"
+    });
+    expect(display?.rawBrief).toEqual(original.rawBrief);
+    expect(projectPlanReview(original, source, { ...translated, payload: { fields: [
+      ...translated.payload.fields, { id: "contextAppendix.0.id", text: "changed" }
+    ] } })).toBeNull();
+  });
   it("never presents a saved mock as a translated plan or prefers it to real generation in progress", () => {
     const mock = { ...artifact(), generatorVersion: "text-processing-v2:mock", createdAt: "2026-09-15T10:00:00Z" };
     const pending = { ...artifact(), id: "real", generatorVersion: "text-processing-v2:openai:gpt-5.6", status: "processing" as const,

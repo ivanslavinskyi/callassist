@@ -1,4 +1,5 @@
 import { preparationRequestReserve } from "../config/preparation-pricing";
+import { nativeSummaryInstructions } from "./native-summary";
 import { awaitWithAbort } from "../runtime/await-with-abort";
 import { providerBackoffMs } from "../brief-compiler/response-reader";
 import { randomUUID } from "node:crypto";
@@ -70,6 +71,19 @@ export class OpenAITextProcessor implements TextProcessor {
   }
 
   async process(input: TextProcessingInput, options: TextProcessingRunOptions = {}): Promise<TextProcessingPayload> {
+    try { return await this.#processOnce(input, options); }
+    catch (error) {
+      const validation = error instanceof TextProcessingError ? error.cause : null;
+      if (input.kind !== "call_summary" || !["native-summary-v2","native-summary-v3"].includes(input.nativeFormat??"") ||
+          (options.maxProviderRequests ?? 2) < 2 || options.signal?.aborted ||
+          !(validation instanceof TextValidationError) || validation.validationCode !== "TEXT_INVALID_GROUNDING" || !validation.fieldPath) throw error;
+      // One targeted retry, with its own reservation/accounting and the SAME
+      // strict validation. No draft, guessed evidence or expected verdict is supplied.
+      return this.#processOnce(input, {...options,maxProviderRequests:1}, validation.fieldPath);
+    }
+  }
+
+  async #processOnce(input: TextProcessingInput, options: TextProcessingRunOptions, groundingRepairPath?: string): Promise<TextProcessingPayload> {
     validateTextProcessingInput(input);
     if (options.signal?.aborted) throw new TextProcessingError("TEXT_REQUEST_CANCELLED");
     if (options.maxProviderRequests !== undefined &&
@@ -81,17 +95,19 @@ export class OpenAITextProcessor implements TextProcessor {
     const requestBody = JSON.stringify({
       model, service_tier: serviceTier, store: false, max_output_tokens: 16_384,
       reasoning: { effort: "low" },
-      input: [{ role: "system", content: instructions }, { role: "user", content: JSON.stringify(providerTextInput(input)) }],
+      input: [{ role: "system", content: nativeSummaryInstructions(instructions, input) + (groundingRepairPath
+        ? `\nThe previous response failed the numeric/identifier evidence check at ${groundingRepairPath}. Regenerate from the original evidence. Check every narrative field against its own citations. Omit unneeded task thresholds from prose or cite genuine relevant transcript context; never invent evidence, change source wording, erase a criterion or force a verdict to pass validation.` : "") }, { role: "user", content: JSON.stringify(providerTextInput(input)) }],
       text: { verbosity: "low", format: { type: "json_schema", name: `callassist_${input.kind}`, strict: true, schema: textOutputJsonSchema(input) } }
     });
     const timeout = AbortSignal.timeout(input.kind === "call_summary" ? this.#summaryTimeoutMs : this.#timeoutMs);
     const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
     const clientRequestId = randomUUID();
+    const reservationStarted=Date.now();
     try {
     if (options.beforeProviderRequest && !await awaitWithAbort(options.beforeProviderRequest({
       clientRequestId, kind: input.kind,
       operationType: input.kind === "call_summary" ? "call_summary" : "text_translation",
-      provider: "openai", model, requestedServiceTier: serviceTier,
+      provider: "openai", model, requestedServiceTier: serviceTier,...(groundingRepairPath?{repair:"grounding" as const}:{}),
       estimatedTokens: Buffer.byteLength(requestBody) + 4096 + 16384,
       reserveUsdMicros: options.profile ? preparationRequestReserve(options.profile, Buffer.byteLength(requestBody), 16384) : undefined, startedAt: new Date().toISOString()
     }), signal)) throw new TextProcessingError("TEXT_REQUEST_BUDGET_EXHAUSTED");
@@ -104,7 +120,13 @@ export class OpenAITextProcessor implements TextProcessor {
     const result: TextProcessingProviderRequestResult = {
       clientRequestId, kind: input.kind, outcome: "network_error",
       providerRequestId: null, providerResponseId: null, providerModel: null,
-      statusCode: null, completedAt: "", durationMs: 0, usage: null
+      statusCode: null, completedAt: "", durationMs: 0, usage: null,
+      diagnostics:{version:1,dispatchedAt:new Date(startedAt).toISOString(),reservationMs:startedAt-reservationStarted,
+        actualTimeoutMs:input.kind==="call_summary"?this.#summaryTimeoutMs:this.#timeoutMs,requestBytes:Buffer.byteLength(requestBody),
+        requestCreatedMs:null,socketWriteMs:null,requestBodySentMs:null,responseHeadersMs:null,bodyReadMs:null,failurePhase:null,networkErrorCode:null,
+        providerProcessingMs:null,remainingRequests:null,remainingTokens:null,
+        textValidation:{version:1,kind:input.kind,nativeFormat:input.kind==="call_summary"?input.nativeFormat??null:null,
+          repair:groundingRepairPath?"grounding":"none",repairFieldPath:groundingRepairPath??null,validationCode:null,validationFieldPath:null}}
     };
     let failure: TextProcessingError | null = null;
     let output: TextProcessingPayload | null = null;
@@ -122,6 +144,7 @@ export class OpenAITextProcessor implements TextProcessor {
         body: requestBody
       }), signal);
       result.providerRequestId = response.headers.get("x-request-id");
+      result.diagnostics!.responseHeadersMs=Date.now()-startedAt;
       result.statusCode = response.status;
       result.retryAfterMs = providerBackoffMs(response.headers);
       if (!response.ok) {
@@ -132,6 +155,7 @@ export class OpenAITextProcessor implements TextProcessor {
           { retryAfterMs: result.retryAfterMs });
       } else {
         const envelope = await readResponse(response, signal);
+        result.diagnostics!.bodyReadMs=Date.now()-startedAt;
         result.providerResponseId = typeof envelope.id === "string" ? envelope.id : null;
         result.providerModel = typeof envelope.model === "string" ? envelope.model : null;
         result.actualServiceTier = typeof envelope.service_tier === "string" ? envelope.service_tier : null;
@@ -141,7 +165,11 @@ export class OpenAITextProcessor implements TextProcessor {
           result.outcome = "succeeded";
         } catch (cause) {
           result.outcome = "invalid_response";
-          if (cause instanceof TextValidationError) result.validationCode = cause.validationCode;
+          if (cause instanceof TextValidationError) {
+            result.validationCode = cause.validationCode;
+            result.diagnostics!.textValidation!.validationCode=cause.validationCode;
+            result.diagnostics!.textValidation!.validationFieldPath=cause.fieldPath??null;
+          }
           failure = new TextProcessingError("TEXT_RESPONSE_INVALID", { cause });
         }
       }

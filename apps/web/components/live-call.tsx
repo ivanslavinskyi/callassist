@@ -5,6 +5,7 @@ import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
 import { transcriptSourceCopy, transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 
 import { consentTimeline } from "@/lib/i18n/consent-timeline";
+import { nativeLiveStartError } from "@/lib/i18n/native-live-messages";
 import { answeringMessages } from "@/lib/i18n/answering-messages";
 import { buildInitialDisclosure, formatPersonName, answeringApproval, canRepeatUnansweredCall, appointmentPlanExpired, createCallBriefInputSchema, formatLocale } from "@callassist/contracts";
 import { registrationCallMessages } from "@/lib/i18n/registration-call-messages";
@@ -280,7 +281,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         return;
       }
       setActionError(
-        betaErrorMessage(error, uiLocale) ?? (
+        (error instanceof ApiError ? nativeLiveStartError(error.code, uiLocale) : null) ?? betaErrorMessage(error, uiLocale) ?? (
         error instanceof ApiError && error.code === "CALL_LANGUAGE_FORBIDDEN"
           ? languageCopy.callLanguageForbidden
           : error instanceof ApiError && error.code === "EMAIL_VERIFICATION_REQUIRED"
@@ -385,7 +386,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
         notEditable: messages.form.preparationNotEditable,
         swissDestinationRequired: messages.form.phoneInvalid,
         rateLimited: messages.live.rateLimited
-      }));
+      },uiLocale));
     } finally {
       setBusy(false);
       setPreparationProgress(null);
@@ -565,7 +566,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
           </div>
 
           <div className="call-actions">
-          {canRepeatUnansweredCall(brief) ? <button type="button" className="primary-button compact-button" disabled={busy} onClick={async () => {
+          {canRepeatUnansweredCall(brief, snapshot) ? <button type="button" className="primary-button compact-button" disabled={busy} onClick={async () => {
             if (busy) return;
             setBusy(true); setActionError(null);
             try { const repeated = await repeatUnansweredCall(callId, uiLocale); router.push(localizeHref(`/app/calls/${repeated.id}`)); }

@@ -1,5 +1,5 @@
 import { notificationDetail } from "./notification-details";
-import { DEFAULT_UI_LOCALE, formatDateTime, formatNumber, formatLocale, type UiLocale } from "@callassist/contracts";
+import { DEFAULT_UI_LOCALE, formatDateTime, formatNumber, formatLocale, summaryCoverageMessages, type UiLocale } from "@callassist/contracts";
 import { notificationMessages } from "./notification-messages";
 import type { CallAssessmentDecision, CallSummaryPayload } from "@callassist/contracts";
 import type { EmailBranding } from "../auth/email-branding";
@@ -44,6 +44,7 @@ export function callNotificationEmail(report: CallReport, branding: EmailBrandin
     }
   }
   if (report.summary) {
+    if (report.summary.evaluationCoverage?.status === "partial") details.push(summaryCoverageMessages[locale]);
     const summaryItems = report.summary.overview.length ? report.summary.overview : report.summary.findings;
     details.push(c.summary, ...summaryItems.map(item => item.label ? pair(item.label, item.text) : item.text));
     if (report.summary.nextSteps.length) details.push(c.next, ...report.summary.nextSteps.map(item => item.text));

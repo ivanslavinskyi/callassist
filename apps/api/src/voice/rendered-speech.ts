@@ -8,6 +8,7 @@ export type RenderedSpeech = {
   durationMs: number;
   model: string;
   providerRequestId: string | null;
+  timings: { headersMs: number; bodyMs: number; conversionMs: number };
 };
 
 export type RenderSpeechInput = {
@@ -26,6 +27,8 @@ export type RenderSpeechInput = {
  * 8 kHz, so conversion stays local and never passes through Live.
  */
 export async function renderSpeech(input: RenderSpeechInput): Promise<RenderedSpeech> {
+  const started = Date.now();
+  let headersAt = started, bodyAt = started;
   const model = input.model?.trim() || "gpt-4o-mini-tts";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 15_000);
@@ -48,8 +51,10 @@ export async function renderSpeech(input: RenderSpeechInput): Promise<RenderedSp
       }),
       signal: controller.signal
     }), aborted]);
+    headersAt = Date.now();
     if (!response.ok) throw new Error(`SPEECH_RENDER_PROVIDER_ERROR_${response.status}`);
     pcm = Buffer.from(await Promise.race([response.arrayBuffer(), aborted]));
+    bodyAt = Date.now();
   } catch (error) {
     if (controller.signal.aborted) throw new Error("SPEECH_RENDER_TIMEOUT", { cause: error });
     if (error instanceof Error && error.message.startsWith("SPEECH_RENDER_PROVIDER_ERROR_")) throw error;
@@ -64,7 +69,10 @@ export async function renderSpeech(input: RenderSpeechInput): Promise<RenderedSp
   for (let offset = 0; offset < pcmu.length; offset += PCMU_FRAME_BYTES)
     frames.push(pcmu.subarray(offset, offset + PCMU_FRAME_BYTES).toString("base64"));
   return { frames, durationMs: Math.ceil(pcmu.length * 1_000 / PCMU_SAMPLE_RATE), model,
-    providerRequestId: response.headers.get("x-request-id") };
+    providerRequestId: response.headers.get("x-request-id"), timings: {
+      headersMs: Math.max(0, headersAt - started), bodyMs: Math.max(0, bodyAt - headersAt),
+      conversionMs: Math.max(0, Date.now() - bodyAt)
+    } };
 }
 
 export function pcm24kToPcmu8k(pcm: Buffer): Buffer {

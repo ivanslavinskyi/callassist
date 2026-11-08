@@ -29,6 +29,7 @@ describe("durable telemetry export", () => {
     requestedAt: "2026-11-02T08:35:25.830Z", renderedAt: "2026-11-02T08:35:27.824Z",
     releasedAt: "2026-11-02T08:35:27.824Z", endedAt: "2026-11-02T08:35:33.204Z", durationMs: 12350 } as const;
   const request = (): TelemetryExportInput => ({ requestId: randomUUID(), reason: "Integration quality review", timezone: "Europe/Zurich", preset: "last7" });
+  const runtimeDiagnostic = { kind: "task_context", durationMs: 30, firstAckMs: 20, commands: 3, utf8Bytes: 1000 } as const;
   async function archive(id: string) {
     const chunks: Buffer[] = [];
     for await (const buffer of service.download(actor, id, async () => true)) chunks.push(buffer);
@@ -60,6 +61,16 @@ describe("durable telemetry export", () => {
       metadata: { runtimeVersion: "live-managed-v9", phase: "speak", revision: 4, cause: "application_playback", playback } } } as const;
     const first = await repository.appendCallTelemetryEvent(callId, diagnostic);
     expect((await repository.appendCallTelemetryEvent(callId, diagnostic)).id).toBe(first.id);
+    const runtimeEvent = { callAttemptId: attemptId, idempotencyKey: "live:runtime-diagnostic:1", payload: { name: "conversation.task",
+      metadata: { runtimeVersion: "live-managed-v9", phase: "diagnostic", revision: 1, diagnostic: runtimeDiagnostic } } } as const;
+    const runtimeFirst = await repository.appendCallTelemetryEvent(callId, runtimeEvent);
+    expect((await repository.appendCallTelemetryEvent(callId, runtimeEvent)).id).toBe(runtimeFirst.id);
+    await repository.appendCallTelemetryEvent(callId, { callAttemptId: attemptId, idempotencyKey: "native:ready", payload: {
+      name: "realtime.ready", metadata: { model: "gpt-live-1", transcriptionModel: "gpt-live-1", runtimeVersion: "live-native-v1" }
+    } });
+    await repository.appendCallTelemetryEvent(callId, { callAttemptId: attemptId, idempotencyKey: "native:close", payload: {
+      name: "conversation.task", metadata: { runtimeVersion: "live-native-v1", phase: "close", revision: 1, cause: "native_closing_requested" }
+    } });
     const recording = await repository.beginRecording(callId);
     await repository.attachProviderRecording(recording.recording.id, providerRecordingId, "in-progress");
     await repository.applyRecordingStatus({ callBriefId: callId, recordingId: recording.recording.id, providerCallId, providerRecordingId, providerStatus: "completed", durationSeconds: 20, channels: 2 });
@@ -84,6 +95,10 @@ describe("durable telemetry export", () => {
 
   it("uses real migrated columns for every allowlisted source", async () => {
     for (const source of exportSources) {
+      if (source.optional) {
+        const [present] = await sql`SELECT to_regclass(${source.table}) IS NOT NULL AS present`;
+        if (!present?.present) continue;
+      }
       await expect(sql.unsafe(`${sourceQuery(source)} LIMIT 0`, ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]), source.table).resolves.toBeDefined();
     }
   });
@@ -108,11 +123,16 @@ describe("durable telemetry export", () => {
     expect(result.status, JSON.stringify(result)).toBe("ready");
     expect(result.counts.selected_attempts).toBe(1);
     const files = await archive(created.id);
+    expect(lines(files, "call_events").filter(row => (row.data.metadata as any)?.runtimeVersion === "live-native-v1"))
+      .toHaveLength(2);
     expect(lines(files, "call_briefs")[0]!.data.context).toContain("Привет\nsecond line");
     expect(lines(files, "call_attempts")[0]).toMatchObject({ selectedInPeriod: true, data: { id: attemptId, consent_runtime_policy: defaultVoiceConsentRuntimePolicy } });
     expect(files["data/voice_consent_settings.jsonl"]).toBeUndefined();
     expect(files["data/voice_consent_settings_audit.jsonl"]).toBeUndefined();
     expect(lines(files, "final_transcript_revisions")).toHaveLength(2);
+    expect(lines(files, "call_events").filter(row => (row.data.metadata as any)?.diagnostic))
+      .toEqual([expect.objectContaining({ data: expect.objectContaining({ call_attempt_id: attemptId,
+        metadata: expect.objectContaining({ diagnostic: runtimeDiagnostic }) }) })]);
     expect(lines(files, "call_events").filter(row => (row.data.metadata as any)?.playback))
       .toEqual([expect.objectContaining({ data: expect.objectContaining({ call_attempt_id: attemptId,
         metadata: expect.objectContaining({ playback }) }) })]);
@@ -125,6 +145,8 @@ describe("durable telemetry export", () => {
     expect(plain).not.toContain("private-password-hash"); expect(plain).not.toContain("secret-provider-header");
     expect(plain).not.toContain("PRIVATE-GLOBAL-CONSENT-NOTE");
     const manifest = JSON.parse(strFromU8(files["manifest.json"]!));
+    expect(manifest).toMatchObject({schemaVersion:4,generatorVersion:"telemetry-export-v4",coverage:{path:"coverage.json"}});
+    expect(JSON.parse(strFromU8(files["coverage.json"]!))).toMatchObject({version:1,attempts:expect.any(Array)});
     for (const file of manifest.files) expect(createHash("sha256").update(files[file.path]!).digest("hex")).toBe(file.sha256);
     const [part] = await sql`SELECT payload_ciphertext FROM admin_telemetry_export_parts WHERE export_id=${created.id} LIMIT 1`;
     expect(String(part!.payload_ciphertext)).not.toContain("Private");

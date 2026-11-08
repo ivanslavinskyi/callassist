@@ -1,4 +1,4 @@
-import { callCompilationSchema, durableCallEventSchema, type DurableCallEvent, type CallAssessmentRecord } from '@callassist/contracts';
+import { callCompilationSchema, durableCallEventSchema, summarySourceContextSchema, type DurableCallEvent, type CallAssessmentRecord } from '@callassist/contracts';
 
 // These diagnostic events are not inputs to deriveCallLifecycle. A newer writer
 // must not make the owner's entire history unreadable. Preserve its watermark.
@@ -45,6 +45,16 @@ export function readHistoryTelemetry(values: unknown[]) {
 export function readHistoryCompilation(value: unknown) {
   const parsed = callCompilationSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+/** A saved result remains readable when its generator used a later frozen
+ * context. Preserve the encrypted original for exports; never pass a partial
+ * context to a new generation or treat it as current action authority. */
+export function readSavedSummaryContext(value: unknown, status: string) {
+  const parsed = summarySourceContextSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (status === "ready") return null;
+  throw parsed.error;
 }
 
 export function unavailableHistoryAssessment(record: CallAssessmentRecord): CallAssessmentRecord {

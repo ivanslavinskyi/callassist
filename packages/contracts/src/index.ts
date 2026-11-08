@@ -3,6 +3,8 @@
 export * from "./account";
 export * from "./assistant-identity";
 export * from "./appointment";
+export * from "./native-appointment";
+export * from "./preparation-issue";
 export * from "./calendar-date";
 export * from "./admin-users";
 export * from "./admin-calls";
@@ -47,3 +49,6 @@ export * from "./spoken-identities";
 export * from "./plan-review-cases";
 export * from "./voice-consent";
 export * from "./preparation-policy";
+export * from "./live-task";
+export * from "./summary-coverage";
+export * from "./testing";

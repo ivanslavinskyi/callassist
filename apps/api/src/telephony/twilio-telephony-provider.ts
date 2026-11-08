@@ -57,7 +57,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     }
     const binding = options?.binding;
     const snapshot = options?.executionSnapshot;
-    if (!binding || snapshot?.version !== 3 || binding.callBriefId !== brief.id ||
+    if (!binding || (snapshot?.version !== 3 && snapshot?.version !== 7 && snapshot?.version !== 8) || binding.callBriefId !== brief.id ||
         binding.compilationSnapshotHash !== snapshot.compilationSnapshotHash) {
       throw new Error("ANSWERING_APPROVAL_REQUIRED");
     }
@@ -70,7 +70,12 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
       ...(asyncAmd ? { asyncAmdStatusCallback: this.webhookUrl(`/webhooks/twilio/amd?${query}`), asyncAmdStatusCallbackMethod: "POST" } : {}),
       from: this.#fromNumber,
       method: "POST",
-      record: false,
+      record: !!options?.nativeRecording,
+      ...(options?.nativeRecording ? {
+        recordingChannels: "dual", recordingTrack: "both",
+        recordingStatusCallback: this.webhookUrl(`/webhooks/twilio/recording?callBriefId=${encodeURIComponent(brief.id)}&recordingId=${encodeURIComponent(options.nativeRecording.recordingId)}`),
+        recordingStatusCallbackMethod: "POST", recordingStatusCallbackEvent: ["in-progress", "completed", "absent"]
+      } : {}),
       statusCallback: this.webhookUrl(
         `/webhooks/twilio/status?${query}`
       ),
@@ -90,6 +95,17 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     };
   }
 
+  async purgeCallRecordings(providerCallId: string) {
+    const recordings = await this.#client.calls(providerCallId).recordings.list({ limit: 1000 });
+    for (const recording of recordings) {
+      if (recording.status === "in-progress") {
+        // The call may have ended since listing. Still attempt deletion; a
+        // failed delete propagates and keeps durable cleanup pending.
+        await this.#client.calls(providerCallId).recordings(recording.sid).update({ status: "stopped" }).catch(() => {});
+      }
+      await this.deleteRecording(recording.sid);
+    }
+  }
   async stopCall(providerCallId: string) {
     await this.#client.calls(providerCallId).update({ status: "completed" });
   }

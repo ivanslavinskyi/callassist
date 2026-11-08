@@ -478,11 +478,16 @@ export type AdminOperationsAggregateFacts = {
 };
 
 export type AdminProviderUsageBucket = {
+  testingAttribution?: import("@callassist/contracts").TestingAttribution | null;
   billableCharacters?: number | null;
   reportedUsdMicros?: number | null;
   operationId?: string;
   startedAt?: string;
   outcome?: string | null;
+  usageFinalized?: boolean | null;
+  usageSource?: string | null;
+  requestedServiceTier?: string | null;
+  actualServiceTier?: string | null;
   pricingVersion?: string;
   provider: string;
   operationType: string;
@@ -767,6 +772,8 @@ export type FinalTranscriptMutationResult = {
 };
 
 export interface CallRepository extends CallTextRepository {
+  /** Shared ephemeral metadata for the memory adapter; PostgreSQL joins its durable attribution table. */
+  readonly testingPreparationAttribution?: Map<string, import("@callassist/contracts").TestingAttribution>;
   readonly recipientOptOut: RecipientOptOutStore;
   readonly betaControls?: BetaControls;
   getCompilationPreparationPolicy(callId: string, compilationId: string): Promise<import("@callassist/contracts").PreparationRuntimePolicy | null>;
@@ -784,6 +791,7 @@ export interface CallRepository extends CallTextRepository {
   recordConsentDecision(callId: string, input: import("@callassist/contracts").ConsentDecisionInput): Promise<string>;
   getLanguageContext(id: string): Promise<CallLanguageContext | null>;
   updateContentLanguage(id: string, targetLanguage: TextLanguage, expectedSelectionRevision: number): Promise<CallLanguageContext>;
+  readonly nativeLive: import("./native-live-store").NativeLiveStore;
   readonly mode: "memory" | "postgres";
   list(input: ListCallBriefsInput): Promise<ListCallBriefsResult>;
   listRecipientSuggestions(

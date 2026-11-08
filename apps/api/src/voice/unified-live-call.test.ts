@@ -4,10 +4,182 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createVoiceRuntime } from "./create-voice-runtime";
 import { approvedCall, authorization, proposal, TestSocket, flush, silence, speech } from "./voice-test-helpers";
 import backendReplay from './fixtures/appointment-backend-replay-2026-11-02.json';
+import { liveTaskFailureCopy } from './live-failure-copy';
 
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+describe("opt-in native informational conversation", () => {
+  const native = (appointment = false, recordingFailure = false) => harness("human", recordingFailure, appointment,
+    "en-GB", false, "anna", "none", "semantic_native", undefined, true);
+  it("preloads the approved brief while keeping speech, task effects and persistence behind consent", async () => {
+    const h = await native();
+    const start = h.live.sent.find(e => e.type === "session.start").session;
+    expect(JSON.stringify(start.input)).toContain(h.snapshot.plan.localizedObjective);
+    expect(start.delegation.responses.tools).toEqual([]);
+    const media = h.twilio.sent.filter(e => e.event === "media").length;
+    h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    h.transcript("input", "Private before consent");
+    expect(h.twilio.sent.filter(e => e.event === "media")).toHaveLength(media);
+    const id = await h.tool("end_call", { reason: "objective_resolved" });
+    expect(h.result(id).ok).toBe(false); expect(h.recording).not.toHaveBeenCalled();
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toEqual([]);
+    expect((await h.service.get(h.brief.id))!.transcript.some(t => t.role === "recipient")).toBe(false);
+  });
+  it("uses one handoff, end_call only, no task recovery timer and no VAD playback clear", async () => {
+    const h = await native(); await h.accept();
+    expect(h.live.sent.filter(e => e.type === "session.instructions.append" && e.content.startsWith("Task enabled:"))).toHaveLength(1);
+    expect(h.live.sent.filter(e => e.type === "session.thinking.append")).toHaveLength(0);
+    expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: any) => t.name)).toEqual(["end_call"]);
+    const requests = h.live.sent.filter(e => e.type === "response.create").length;
+    const clears = h.twilio.sent.filter(e => e.event === "clear").length;
+    for (let n = 0; n < 5; n++) h.twilio.receive({ event: "media", media: { payload: speech } });
+    h.transcript("input", "It arrived yesterday.");
+    for (let n = 0; n < 30; n++) h.twilio.receive({ event: "media", media: { payload: silence } });
+    h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(12_000); await flush();
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(requests);
+    expect(h.twilio.sent.filter(e => e.event === "clear")).toHaveLength(clears);
+    expect(h.twilio.readyState).toBe(1);
+  });
+  it("finishes with native audio and an acknowledged drain, without an extra TTS request", async () => {
+    const h = await native(); await h.accept(); const renders = h.speechRequests.length;
+    const id = await h.tool("end_call", { reason: "objective_resolved", resultSummary: "The application arrived yesterday." }, "It arrived yesterday.");
+    expect(h.result(id)).toMatchObject({ ok: true, state: "closing_authorized" });
+    expect(h.speechRequests).toHaveLength(renders);
+    h.transcript("output", "Thank you. Goodbye."); h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(1_500); await flush();
+    expect(h.hangup).not.toHaveBeenCalled();
+    const mark = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
+    expect(mark).toMatch(/^live-native-close:/);
+    h.twilio.receive({ event: "mark", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(350); await flush();
+    expect(h.hangup).toHaveBeenCalledOnce(); expect(h.speechRequests).toHaveLength(renders);
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toHaveLength(1);
+  });
+  it("cancels closing for a correction and rejects the old returned mark", async () => {
+    const h = await native(); await h.accept();
+    await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.");
+    h.transcript("output", "Goodbye."); h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(1_500);
+    const old = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
+    h.transcript("input", "Actually it did not arrive.");
+    h.twilio.receive({ event: "mark", mark: { name: old } });
+    await vi.advanceTimersByTimeAsync(1_000); expect(h.hangup).not.toHaveBeenCalled();
+    const corrected = await h.tool("end_call", { reason: "cannot_proceed", resultSummary: "It has not arrived." });
+    expect(h.result(corrected).ok).toBe(true);
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions?.map(d => d.revision)).toEqual([1, 2]);
+  });
+  it("does not require a task-state tool from a reasoning delegation", async () => {
+    const h = await native(); await h.accept();
+    for (let n = 0; n < 3; n++) {
+      h.live.receive({ type: "response.event", delegation_id: `reason-${n}`, event: { type: "response.created", response: { id: `reason-${n}` } } });
+      h.live.receive({ type: "response.event", delegation_id: `reason-${n}`, event: { type: "response.completed", response: { id: `reason-${n}`, status: "completed", output: [] } } });
+    }
+    await flush(); await flush(); await vi.advanceTimersByTimeAsync(12_000);
+    expect(h.twilio.readyState).toBe(1); expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("accepts optional missing delegation scope for usage but cannot execute an unattributed tool", async () => {
+    const h = await native(); await h.accept(); h.transcript("input", "It arrived."); await vi.advanceTimersByTimeAsync(901);
+    h.live.receive({ type: "response.event", event: { type: "response.created", response: { id: "unscoped" } } });
+    h.live.receive({ type: "response.event", event: { type: "response.completed", response: { id: "unscoped", status: "completed", output: [
+      { type: "function_call", call_id: "unscoped-call", name: "end_call", arguments: JSON.stringify({ reason: "objective_resolved", resultSummary: "It arrived." }) }
+    ] } } });
+    await flush(); await flush();
+    expect(h.result("unscoped-call")).toEqual({ ok: false, reason: "unattributed_response" });
+    expect(h.providerOperation).toHaveBeenCalledWith(expect.objectContaining({ stage: "live_delegation" }));
+    expect(h.twilio.readyState).toBe(1); expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("selects managed control for protected appointments before startup", async () => {
+    const h = await native(true);
+    expect(h.live.sent.find(e => e.type === "session.start").session.input).toEqual([]);
+    expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({ runtime: "unified_live", selection: "protected_action" }), "Live runtime selected");
+    await h.accept();
+    expect(h.live.sent.findLast(e => e.type === "session.update").session.delegation.responses.tools.map((t: any) => t.name)).toContain("request_appointment");
+  });
+  it("does not enable the task if recording startup fails", async () => {
+    const h = await native(false, true); await h.accept();
+    expect(h.live.sent.some(e => e.type === "session.instructions.append" && e.content.startsWith("Task enabled:"))).toBe(false);
+  });
+  it("returns tool results immediately despite an unrelated physical response still running", async () => {
+    const h = await native(); await h.accept();
+    h.live.receive({ type: "response.event", delegation_id: "slow", event: { type: "response.created", response: { id: "slow" } } });
+    const before = h.live.sent.filter(e => e.type === "response.create").length;
+    const id = await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
+    expect(h.result(id).ok).toBe(true);
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before + 1);
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("returns every announced call output before one continuation for the completed batch", async () => {
+    const h = await native(); await h.accept(); h.transcript("input", "It arrived."); await vi.advanceTimersByTimeAsync(901);
+    const before = h.live.sent.filter(e => e.type === "response.create").length;
+    const send = (id: string, event: object) => h.live.receive({ type: "response.event", delegation_id: id, event });
+    const item = (id: string) => ({ type: "function_call", call_id: id, name: "end_call", arguments: JSON.stringify({ reason: "objective_resolved", resultSummary: "It arrived." }) });
+    for (const id of ["batch-a", "batch-b"]) {
+      send(id, { type: "response.created", response: { id } });
+      send(id, { type: "response.output_item.added", item: { ...item(id), arguments: "" } });
+    }
+    send("batch-a", { type: "response.output_item.done", item: item("batch-a") });
+    send("batch-a", { type: "response.completed", response: { id: "batch-a", status: "completed", output: [] } });
+    await flush(); await flush();
+    expect(h.result("batch-a").ok).toBe(true);
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before);
+    send("batch-b", { type: "response.output_item.done", item: item("batch-b") });
+    send("batch-b", { type: "response.completed", response: { id: "batch-b", status: "completed", output: [] } });
+    await flush(); await flush();
+    expect(h.result("batch-b").ok).toBe(false);
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(before + 1);
+  });
+  it("uses exact client correlation without optional delegation ID and preserves stale action fencing", async () => {
+    const h = await native(); await h.accept();
+    await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
+    const command = h.live.sent.findLast(e => e.type === "response.create");
+    h.transcript("input", "Correction: it never arrived."); await vi.advanceTimersByTimeAsync(901);
+    h.live.receive({ type: "response.event", client_event_id: command.event_id, event: { type: "response.created", response: { id: "late-continuation" } } });
+    h.live.receive({ type: "response.event", event: { type: "response.completed", response: { id: "late-continuation", status: "completed", output: [
+      { type: "function_call", call_id: "stale-finish", name: "end_call", arguments: JSON.stringify({ reason: "objective_resolved", resultSummary: "It arrived." }) }
+    ] } } });
+    await flush(); await flush();
+    expect(h.result("stale-finish")).toMatchObject({ ok: false, reason: "stale_or_unauthorized_request" });
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toHaveLength(1);
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("deduplicates repeated call IDs and rejects changed arguments without a second decision", async () => {
+    const h = await native(); await h.accept();
+    const id = await h.tool("end_call", { reason: "objective_resolved", resultSummary: "It arrived." }, "It arrived.", false);
+    const send = (responseId: string, summary: string) => {
+      h.live.receive({ type: "response.event", delegation_id: responseId, event: { type: "response.created", response: { id: responseId } } });
+      h.live.receive({ type: "response.event", delegation_id: responseId, event: { type: "response.completed", response: { id: responseId, status: "completed", output: [
+        { type: "function_call", call_id: id, name: "end_call", arguments: JSON.stringify({ reason: "objective_resolved", resultSummary: summary }) }
+      ] } } });
+    };
+    send("replay", "It arrived."); await flush(); await flush();
+    send("collision", "Different result."); await flush(); await flush();
+    const results = h.live.sent.filter(e => e.type === "response.item.create" && e.item.call_id === id).map(e => JSON.parse(e.item.output));
+    expect(results.map(r => r.ok)).toEqual([true, true, false]);
+    expect(results.at(-1).reason).toBe("tool_call_id_collision");
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toHaveLength(1);
+  });
+  it("never retries a continuation whose acceptance is ambiguous", async () => {
+    const h = await native(); await h.accept();
+    await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.", false);
+    const count = h.live.sent.filter(e => e.type === "response.create").length;
+    await vi.advanceTimersByTimeAsync(15_001); await flush();
+    expect(h.live.sent.filter(e => e.type === "response.create")).toHaveLength(count);
+    expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("revokes pending closing for a keypad answer too", async () => {
+    const h = await native(); await h.accept();
+    await h.tool("end_call", { reason: "objective_resolved" }, "It arrived.");
+    h.transcript("output", "Goodbye."); h.live.receive({ type: "session.output_audio.delta", delta: speech });
+    await vi.advanceTimersByTimeAsync(1_500);
+    const mark = h.twilio.sent.findLast(e => e.event === "mark").mark.name;
+    h.twilio.receive({ event: "dtmf", dtmf: { digit: "2" } });
+    h.twilio.receive({ event: "mark", mark: { name: mark } });
+    await vi.advanceTimersByTimeAsync(1_000); expect(h.hangup).not.toHaveBeenCalled();
+  });
+});
 
 describe("opt-in hybrid consent", () => {
   const hybrid = (locale: CallLocale = "en-GB", reason: AssistanceReason = "none") =>
@@ -239,7 +411,7 @@ describe("opt-in hybrid consent", () => {
   });
 });
 
-async function harness(answer: string | null = "human", recordingFailure = false, appointment: boolean | AppointmentAuthorization = false, locale: CallLocale = "en-GB", asyncAnswering = false, profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", consentMode: "semantic_native" | "hybrid_deterministic_v1" = "semantic_native", allowedFacts?: string[]) {
+async function harness(answer: string | null = "human", recordingFailure = false, appointment: boolean | AppointmentAuthorization = false, locale: CallLocale = "en-GB", asyncAnswering = false, profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", consentMode: "semantic_native" | "hybrid_deterministic_v1" = "semantic_native", allowedFacts?: string[], nativeExperiment = false) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   const call = await approvedCall(typeof appointment === 'object' ? appointment : appointment ? authorization : undefined, undefined, locale, "CA-LIVE", profile, assistanceReason, allowedFacts);
   if (consentMode === "hybrid_deterministic_v1") vi.spyOn(call.service, "getConsentRuntimePolicy").mockResolvedValue({
@@ -275,7 +447,8 @@ async function harness(answer: string | null = "human", recordingFailure = false
   vi.stubGlobal("fetch", unexpectedFetch);
   const bridge = createVoiceRuntime({ apiKey: "test", service: call.service, agentHangupEnabled: true,
     validateStreamToken: (_binding, token) => token === "valid", createLiveSocket: connect,
-    createOpenAISocket: legacy, createConsentSocket: legacy, speechFetch, logger }, { VOICE_RUNTIME_DRIVER: "live" });
+    createOpenAISocket: legacy, createConsentSocket: legacy, speechFetch, logger }, { VOICE_RUNTIME_DRIVER: "live",
+      ...(nativeExperiment ? { VOICE_RUNTIME_LIVE_EXPERIMENT: "native_v1" } : {}) });
   bridge.handleTwilioSocket(twilio.ws);
   const start = { event: "start", start: { callSid: "CA-LIVE", streamSid: "MZ", customParameters: { callBriefId: call.brief.id,
     callAttemptId: call.attempt.id, compilationSnapshotHash: call.snapshot.compilationSnapshotHash, streamToken: "valid" } } };
@@ -534,6 +707,66 @@ async function playbackDiagnostics(h: Awaited<ReturnType<typeof harness>>) {
 }
 
 describe('application playback diagnostics', () => {
+  it('separates recording admission from first audio and stores only technical startup/render/output measurements', async () => {
+    const h = await harness('human', false, false, 'en-GB', false, 'anna', 'none', 'hybrid_deterministic_v1'); await h.play();
+    h.recording.mockImplementationOnce(async () => {
+      await new Promise(resolve => setTimeout(resolve, 120));
+      const snapshot = (await h.service.get(h.brief.id))!;
+      return { ...snapshot, recording: { ...snapshot.recording, startedAt: new Date().toISOString() } } as typeof snapshot;
+    });
+    h.transcript('input', 'Yes'); await vi.advanceTimersByTimeAsync(401); await flush();
+    h.live.receive({ type: 'session.output_audio.delta', delta: speech }); await flush();
+    h.twilio.close(); await flush(); await flush();
+    const diagnostics = (await h.repository.listCallTelemetryEvents(h.brief.id)).flatMap(event =>
+      event.payload.name === 'conversation.task' && event.payload.metadata.diagnostic ? [event.payload.metadata.diagnostic] : []);
+    const first = diagnostics.find(d => d.kind === 'consent_to_audio')!;
+    expect(first).toMatchObject({ kind: 'consent_to_audio', source: 'native', recordingAdmissionMs: 120 });
+    if (first.kind !== 'consent_to_audio') throw new Error('missing consent latency');
+    expect(first.decisionToSendMs).toBe(first.recordingAdmissionMs + first.afterRecordingAdmissionMs);
+    expect(first.lastBoundaryToSendMs).toBeGreaterThanOrEqual(first.decisionToSendMs);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ kind: 'startup', path: 'cold', outcome: 'released' }));
+    expect(diagnostics).toContainEqual(expect.objectContaining({ kind: 'speech_render', stage: 'disclosure', outcome: 'succeeded',
+      journalBeforeMs: expect.any(Number), journalAfterMs: expect.any(Number), headersMs: expect.any(Number), bodyMs: expect.any(Number) }));
+    expect(diagnostics).toContainEqual(expect.objectContaining({ kind: 'audio_output', nativeFrames: 1, nativeAudioMs: 100, renderCacheMisses: 1 }));
+    expect(JSON.stringify(diagnostics)).not.toContain(h.snapshot.plan.localizedObjective);
+    expect(JSON.stringify(diagnostics)).not.toContain(h.brief.representedPerson);
+  });
+  it('writes terminal lifecycle outcomes even while optional diagnostics are hung', async () => {
+    const h = await harness(); await h.accept(); let release!: () => void;
+    const original = h.service.recordTelemetry.bind(h.service);
+    const write = vi.spyOn(h.service, 'recordTelemetry').mockImplementation(original);
+    // Only the next write hangs; terminal outcomes must not sit behind it.
+    write.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(undefined as never); }));
+    h.live.receive({ type: 'session.output_audio.delta', delta: speech }); await flush();
+    h.twilio.close(); await flush();
+    expect(write).toHaveBeenCalledWith(h.brief.id, expect.objectContaining({
+      payload: expect.objectContaining({ name: 'conversation.ended' })
+    }));
+    release(); await flush();
+  });
+  it('continues voice when general telemetry fails without exposing its error', async () => {
+    const h = await harness(); await h.accept();
+    vi.spyOn(h.service, 'recordTelemetry').mockRejectedValue(new Error('PRIVATE_TELEMETRY_ERROR'));
+    h.transcript('output', 'The first task response.');
+    h.live.receive({ type: 'session.output_audio.delta', delta: speech });
+    await flush(); await flush();
+    expect(h.twilio.readyState).toBe(1);
+    expect(h.twilio.sent.findLast(e => e.event === 'media').media.payload).toBe(speech);
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ code: 'LIVE_TELEMETRY_UNAVAILABLE' }), expect.any(String));
+    expect(JSON.stringify(h.logger.warn.mock.calls)).not.toContain('PRIVATE_TELEMETRY_ERROR');
+    const id = await h.tool('end_call', { reason: 'recipient_requested_end' }, 'Goodbye.');
+    expect(h.result(id).ok).toBe(true);
+    await h.play(); expect(h.hangup).toHaveBeenCalledOnce();
+  });
+  it.each(SUPPORTED_CALL_LOCALES)('uses one complete failure farewell after no answer in %s', async locale => {
+    const h = await harness('human', false, false, locale); await h.accept();
+    await vi.advanceTimersByTimeAsync(45_001);
+    const id = await h.tool('end_call', { reason: 'cannot_proceed' });
+    expect(h.result(id).ok).toBe(true);
+    expect(h.speechRequests.at(-1)?.input).toBe(liveTaskFailureCopy[locale]);
+    expect(h.hangup).not.toHaveBeenCalled();
+    await h.play(); expect(h.hangup).toHaveBeenCalledOnce();
+  });
   it('records interrupted and acknowledged generations without treating sent text as heard', async () => {
     const h = await harness(); await h.accept();
     expect(await playbackDiagnostics(h)).toEqual([]);
@@ -2035,6 +2268,7 @@ describe("stable Live transitions", () => {
     const acknowledge = (event: any) => h.live.receive(event.type === "session.update"
       ? { type: "session.updated", client_event_id: event.event_id, session: h.live.liveSession }
       : { type: `${event.type}ed`, client_event_id: event.event_id, start_ms: 900, end_ms: 1000 });
+    await vi.advanceTimersByTimeAsync(100);
     for (const command of commands.slice(1).reverse()) acknowledge(command);
     h.live.receive({ type: "session.output_transcript.delta", delta: "MUTED DISCLOSURE", start_ms: 0, end_ms: 100 });
     const firstFrame = Buffer.alloc(800, 129).toString("base64");
@@ -2046,6 +2280,7 @@ describe("stable Live transitions", () => {
     expect(starts()).toHaveLength(0);
     h.twilio.receive({ event: "media", media: { payload: silence } });
     h.live.receive({ type: "session.input_transcript.delta", delta: "Go ahead with the task.", start_ms: 1100, end_ms: 1200 });
+    await vi.advanceTimersByTimeAsync(200);
     acknowledge(commands[0]); acknowledge(commands[0]);
     expect(starts()).toHaveLength(1);
     h.live.receive({ type: "session.output_transcript.delta", delta: "OLD TAIL", start_ms: 100, end_ms: 150 });
@@ -2057,6 +2292,13 @@ describe("stable Live transitions", () => {
     expect(h.twilio.sent.filter(e => e.event === "media").slice(mediaBefore).map(e => e.media.payload)).toEqual([firstFrame, speech]);
     expect(h.logger.info).toHaveBeenCalledWith(expect.objectContaining({ suppressedPreparationAudioMs: 0 }), "Live task opening requested");
     await flush(); await flush();
+    const contextDiagnostics = (await h.repository.listCallTelemetryEvents(h.brief.id)).flatMap(event =>
+      event.payload.name === 'conversation.task' && event.payload.metadata.diagnostic?.kind === 'task_context'
+        ? [event.payload.metadata.diagnostic] : []);
+    expect(contextDiagnostics).toHaveLength(1);
+    expect(contextDiagnostics[0]).toMatchObject({ commands: commands.length });
+    expect(contextDiagnostics[0]!.durationMs - contextDiagnostics[0]!.firstAckMs).toBe(200);
+    expect(contextDiagnostics[0]!.utf8Bytes).toBeGreaterThan(0);
     const transcript = (await h.repository.get(h.brief.id))!.transcript;
     expect(transcript.some(t => t.text === "Go ahead with the task.")).toBe(true);
     expect(transcript.filter(t => t.role === "assistant").map(t => t.text).join("")).toContain("What would you like?");

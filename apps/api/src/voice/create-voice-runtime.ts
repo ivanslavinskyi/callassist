@@ -15,6 +15,8 @@ export function createVoiceRuntime(options: OpenAILiveBridgeOptions, environment
     }
   }
   return new OpenAILiveBridge({ ...options,
+    nativeExperiment: mode === "live_native_v1",
+    nativeV2: mode === "live_native_v2",
     liveModel: environment.OPENAI_LIVE_MODEL?.trim() || "gpt-live-1",
     delegationModel: environment.OPENAI_LIVE_DELEGATION_MODEL?.trim() || "gpt-6-luna",
     speechModel: environment.OPENAI_SPEECH_MODEL?.trim() || "gpt-4o-mini-tts",

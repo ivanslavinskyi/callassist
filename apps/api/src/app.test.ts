@@ -417,7 +417,7 @@ describe("call API", () => {
       error: "INVALID_CALL_BRIEF",
       issues: {
         fieldErrors: {
-          objective: [expect.stringContaining("20000")]
+          objective: [expect.stringContaining("8000")]
         }
       }
     });

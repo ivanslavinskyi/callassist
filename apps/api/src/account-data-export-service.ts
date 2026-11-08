@@ -17,17 +17,20 @@ export class AccountDataExportService {
   readonly #callRepository: CallRepository;
   readonly #contentRepository: ContentRepository;
   readonly #now: () => Date;
+  readonly #testingStore?: import("./testing/store").TestingStore;
 
   constructor(options: {
     authService: AuthService;
     callRepository: CallRepository;
     contentRepository: ContentRepository;
     now?: () => Date;
+    testingStore?: import("./testing/store").TestingStore;
   }) {
     this.#authService = options.authService;
     this.#callRepository = options.callRepository;
     this.#contentRepository = options.contentRepository;
     this.#now = options.now ?? (() => new Date());
+    this.#testingStore = options.testingStore;
   }
 
   async generate(user: User, currentSessionId: string): Promise<AccountDataExport> {
@@ -43,6 +46,7 @@ export class AccountDataExportService {
       schemaVersion: ACCOUNT_DATA_EXPORT_SCHEMA_VERSION,
       exportId,
       generatedAt,
+      testingAccess: await this.#testingStore?.access(user.id),
       account: user,
       activeSessions,
       credits: sanitizeCredits(credits),

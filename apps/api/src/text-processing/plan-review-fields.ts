@@ -20,6 +20,15 @@ export function planReviewFields(compilation: CallCompilation) {
     }
     compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText));
     compiled.blockingIssues.forEach((issue, index) => add(`blockingIssues.${index}.question`, issue.question));
+    if ("contextAppendix" in compiled) compiled.contextAppendix.forEach((section,index) => {
+      for (const key of ["title","description","content"] as const) add(`contextAppendix.${index}.${key}`,section[key]);
+    });
+    if (compiled.schemaVersion === "9" && compiled.nativeAppointmentAuthorization) {
+      const native = compiled.nativeAppointmentAuthorization;
+      add("nativeAppointmentAuthorization.serviceDescription",native.serviceDescription);
+      native.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.requirements.${index}.description`,item.description); });
+      native.alternatives.forEach((alternative,a)=>alternative.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.alternatives.${a}.requirements.${index}.description`,item.description); }));
+    }
     const authorization = getAppointmentAuthorization(compiled);
     if (authorization) add("appointmentAuthorization.serviceDescription", authorization.serviceDescription);
   }

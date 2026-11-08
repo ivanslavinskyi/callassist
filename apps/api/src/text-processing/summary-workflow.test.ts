@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { normalizeCreateCallBriefInput, callSummaryPayloadSchema, type SourceSegment } from "@callassist/contracts";
+import { normalizeCreateCallBriefInput, callSummaryPayloadSchema, defaultPreparationRuntimePolicy, type SourceSegment } from "@callassist/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
@@ -9,16 +9,27 @@ import { summaryInput } from "./summary-input";
 import { buildSummarySourceContext } from "./summary-source";
 import { textGeneratorVersion, compatibleTextGeneratorVersion, TextProcessingError, type TextProcessingInput, type TextProcessor } from "./text-processor";
 import { allTextDirections } from "./text-capabilities";
+import { nativeAuthority } from "../test-helpers/native-appointment";
+import { createCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
 const raw = normalizeCreateCallBriefInput({ recipientName: "Office", phoneNumber: "+41710000001", objective: "Ask about office hours",
   assistantProfileId: "sebastian", representedPersonFirstName: "Anna", representedPersonLastName: "Example", locale: "en-GB",
   audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: [] });
 
-async function setup(long = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy = false) {
+async function setup(long: boolean|"over_limit" = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy: boolean | "v5" | "v6" = false, native: boolean|"general" = false) {
   const repository = new InMemoryCallRepository();
-  const compilation = await new DeterministicBriefCompiler().compile(raw);
-  const brief = await repository.create(raw, compilation);
+  const taskRaw=native===true?{...raw,objective:"Ask the price; book only if it costs at most CHF 100."}:raw;
+  const compilation = await new DeterministicBriefCompiler().compile(taskRaw,1,native==="general"?{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-native-integrity-2026-11-08"}}:{});
+  if (native===true) {
+    compilation.compilerVersion = "brief-compiler-12";
+    compilation.compiledBrief = { ...compilation.compiledBrief!, schemaVersion: "9", contextAppendix: [], appointmentAuthorization: null,
+      nativeAppointmentAuthorization: {...nativeAuthority,limits:{finishBy:null,maxTotalPrice:{amount:100,currency:"CHF"}}}, localizedObjective: taskRaw.objective,
+      successCriteria: ["Learn the price; book only if it costs at most CHF 100."],
+      orderedQuestions: [{...compilation.compiledBrief!.orderedQuestions[0]!,text:"What is the total price?"}] };
+    compilation.snapshotHash = createCompilationSnapshotHash(compilation);
+  }
+  const brief = await repository.create(taskRaw, compilation);
   await repository.approveCompilation(brief.id, { revision: compilation.revision, snapshotHash: compilation.snapshotHash,
     review: { mode: "original", language: "en-GB", selectionRevision: 1 } });
   const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
@@ -27,7 +38,9 @@ async function setup(long = false, failCompaction = false, override?: TextProces
   await repository.attachProviderRecording(recording.id, "RE-test", "in-progress");
   await repository.applyRecordingStatus({ callBriefId: brief.id, recordingId: recording.id, providerCallId: "CA-test", providerRecordingId: "RE-test", providerStatus: "completed", durationSeconds: 60, channels: 2 });
   await repository.claimFinalTranscript(recording.id, "test-model");
-  const segments = (long ? [0, 1, 2] : [0]).map(index => ({ role: "recipient" as const, text: long ? "Open on weekdays. ".repeat(900) : "Open on weekdays.", startSeconds: index * 10, endSeconds: index * 10 + 9 }));
+  const segments = native===true ? [{role:"assistant" as const,text:"What is the total price?",startSeconds:0,endSeconds:1},
+    {role:"recipient" as const,text:"It costs CHF 150.",startSeconds:2,endSeconds:3}] :
+    (long==="over_limit"?[0,1,2,3]:long ? [0, 1, 2] : [0]).map(index => ({ role: "recipient" as const, text: long ? "Open on weekdays. ".repeat(900) : "Open on weekdays.", startSeconds: index * 10, endSeconds: index * 10 + 9 }));
   const mock = new MockTextProcessor();
   const process = vi.fn(async (input: TextProcessingInput) => {
     if (failCompaction && input.kind === "call_summary" && input.extraction) throw new TextProcessingError("TEXT_REQUEST_FAILED");
@@ -35,7 +48,7 @@ async function setup(long = false, failCompaction = false, override?: TextProces
   });
   const processor: TextProcessor = override ?? { ...mock, driver: "mock", model: mock.model, generatorVersion: mock.generatorVersion, process };
   await repository.completeFinalTranscript(recording.id, segments.map(s => s.text).join("\n"), segments, undefined,
-    automatic ? { summaryGeneratorVersion: textGeneratorVersion(processor, "call_summary").replace(/^summary-v5:/, legacy ? "summary-v4:" : "summary-v5:") } : undefined);
+    automatic ? { summaryGeneratorVersion: legacy ? textGeneratorVersion(processor, "call_summary").replace(/^summary-v\d+:/, legacy === "v6" ? "summary-v6:" : legacy === "v5" ? "summary-v5:" : "summary-v4:") : textGeneratorVersion(processor, "call_summary") } : undefined);
   const service = new TextArtifactService(repository, processor, { enabled: true, directions: allTextDirections() });
   const revision = (await repository.getCurrentTranscriptRevision(brief.id))!;
   const artifact = automatic ? (await repository.listTextArtifacts(brief.id)).find(a => a.kind === "call_summary")!
@@ -46,6 +59,60 @@ async function setup(long = false, failCompaction = false, override?: TextProces
 }
 
 describe("summary execution", () => {
+  it("pins original task sources for the general profile as well as appointments",async()=>{
+    const h=await setup(false,false,undefined,false,false,"general");await h.service.process(h.job,h.lease);
+    expect(h.process.mock.calls[0]![0]).toMatchObject({nativeFormat:"native-summary-v3",nativeTaskSources:{objective:raw.objective,context:raw.context,allowedFacts:raw.allowedFacts}});
+  });
+  it("pins queued v6 native instructions and reuses its successful report",async()=>{
+    const h=await setup(false,false,undefined,true,"v6",true);
+    expect((await h.service.requestTranscriptArtifact(h.artifact.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:"en"})).id).toBe(h.artifact.id);
+    await h.service.process(h.job,h.lease);
+    expect(h.process.mock.calls[0]![0]).toMatchObject({nativeFormat:"native-summary-v1"});
+    expect((await h.service.requestTranscriptArtifact(h.artifact.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:"en"})).id).toBe(h.artifact.id);
+  });
+  it("retries a failed native v6 report as a new v8 artifact without rewriting the failed evidence",async()=>{
+    const h=await setup(false,false,new MockTextProcessor({fixture:()=>({})}),true,"v6",true);
+    await expect(h.service.process(h.job,h.lease)).rejects.toMatchObject({code:"TEXT_RESPONSE_INVALID"});
+    await h.repository.failDurableJob(h.job.id,h.lease.workerId,"TEXT_RESPONSE_INVALID",new Date().toISOString(),new Date().toISOString(),false);
+    const old=await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id);
+    expect(old).toMatchObject({status:"failed",sourceContext:{version:2}});
+    const next=await h.service.retry(h.artifact.callId,h.artifact.id);
+    expect(next).toMatchObject({status:"queued",generatorVersion:expect.stringMatching(/^summary-v8:/)});
+    expect(next.id).not.toBe(h.artifact.id);
+    expect(await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id)).toEqual(old);
+    expect(await h.service.retry(h.artifact.callId,h.artifact.id)).toEqual({...next,updatedAt:expect.any(String)});
+  });
+  it("creates a separate native v8 report, reevaluates an old partial and reuses the new immutable result", async () => {
+    const seen: TextProcessingInput[] = [];
+    const processor = new OpenAITextProcessor({apiKey:"fixture",fetchImplementation:async (_url, init) => {
+      const input=JSON.parse(JSON.parse(String(init!.body)).input[1].content);seen.push(input);
+      return Response.json({output_text:JSON.stringify({schemaVersion:3,overview:[],nextSteps:[],unresolved:[],unresolvedDetails:[],
+        findings:input.checks.map((check:{id:string})=>({id:check.id,label:"Price",text:"CHF 150, above the approved limit.",certainty:"reported",sourceSegmentIds:[input.segments[1].id]})),
+        appointmentExtraction:{candidates:[],conditions:[],...(input.nativeFormat?{nativeOutcome:{operation:"book",disposition:"not_required",candidateId:null,previousAppointmentReleased:null,sourceSegmentIds:[input.segments[0].id,input.segments[1].id]}}:{})},
+        assessment:{conversation:{status:"confirmed",category:"task_answer",questionSegmentId:input.segments[0].id,answerSegmentId:input.segments[1].id,answerQuote:input.segments[1].text},goal:{status:"achieved",sourceSegmentIds:[input.segments[1].id]},
+          criteria:input.checks.filter((c:{id:string})=>c.id.startsWith("criterion.")).map((c:{id:string})=>({id:c.id,status:"achieved",sourceSegmentIds:[input.segments[1].id]}))}})});
+    }});
+    const h=await setup(false,false,processor,true,"v5",true);
+    await h.service.process(h.job,h.lease);
+    const old=(await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id))!;
+    expect(callSummaryPayloadSchema.parse(old.payload).assessment?.goal.status).toBe("partial");
+    const before=await h.repository.exportCallTextData(old.callId);
+    await h.repository.completeDurableJob(h.job.id,h.lease.workerId,new Date().toISOString());
+    const fresh=await h.service.requestTranscriptArtifact(old.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:old.targetLanguage});
+    expect(fresh.id).not.toBe(old.id);expect(fresh.generatorVersion).toMatch(/^summary-v8:/);
+    const job=(await h.repository.claimDueDurableJob({types:["text_artifact_generation"],workerId:randomUUID(),now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+60000).toISOString()}))!;
+    await h.service.process(job,{jobId:job.id,workerId:job.leaseOwner!,generation:job.generation,attemptNumber:job.attemptCount,checkedAt:new Date().toISOString()});
+    const saved=(await h.repository.getTextArtifact(old.callId,fresh.id))!;
+    expect(saved.status).toBe("ready");expect(callSummaryPayloadSchema.parse(saved.payload).assessment?.goal.status).toBe("achieved");
+    expect(seen.map(i=>i.kind==="call_summary"?[i.nativeFormat,i.assessmentMode]:null)).toEqual([[undefined,"evaluate"],["native-summary-v3","evaluate"]]);
+    expect(seen[0]).not.toHaveProperty("nativeTaskSources");
+    expect(seen[1]).toMatchObject({nativeTaskSources:{objective:h.compilation.rawBrief.objective,context:raw.context,allowedFacts:raw.allowedFacts,clarificationAnswers:raw.clarificationAnswers}});
+    expect((await h.repository.get(old.callId))!.brief.lifecycle?.assessment?.goal).toBe("achieved");
+    expect(await h.repository.getTextArtifact(old.callId,old.id)).toEqual(old);
+    expect((await h.repository.exportCallTextData(old.callId)).assessments).toEqual(before.assessments);
+    expect(await h.service.requestTranscriptArtifact(old.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:old.targetLanguage})).toEqual(saved);
+    expect(seen).toHaveLength(2);
+  });
   it("finishes a queued v4 job with the original version and reuses its ready result", async () => {
     const h = await setup(false, false, undefined, true, true);
     expect(h.artifact.generatorVersion).toContain("summary-v4:");
@@ -155,7 +222,7 @@ describe("summary execution", () => {
     const processor = new MockTextProcessor();
     expect(textGeneratorVersion(processor, "plan_review")).toBe(processor.generatorVersion);
     expect(textGeneratorVersion(processor, "transcript_translation")).toBe(processor.generatorVersion);
-    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v5:grounded-v3:${processor.generatorVersion}`);
+    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v8:grounded-v3:${processor.generatorVersion}`);
   });
 
   it("uses one request for an ordinary transcript, persists new format and never regenerates a ready result", async () => {
@@ -177,7 +244,15 @@ describe("summary execution", () => {
     expect(lastInput.kind === "call_summary" && lastInput.extraction?.schemaVersion).toBe(3);
     const saved = (await h.repository.getTextArtifact(h.artifact.callId, h.artifact.id))!;
     expect(saved.status).toBe("ready");
+    if(fail)expect(callSummaryPayloadSchema.parse(saved.payload).evaluationCoverage).toMatchObject({status:"partial",reason:"assessment_unavailable",totalParts:3});
     expect(callSummaryPayloadSchema.parse(saved.payload).overview).toEqual([]);
     expect((await h.repository.getTextArtifactChunks(h.artifact.id, h.lease)).map(chunk => chunk.index)).toEqual([0, 1, 2, 3]);
+  });
+  it("does not pay for an oversized final assessment or hide the incomplete coverage",async()=>{
+    const mock=new MockTextProcessor(),process=vi.fn(mock.process.bind(mock));
+    const h=await setup("over_limit",false,{driver:"openai",model:mock.model,generatorVersion:mock.generatorVersion,process},false,false,"general");await h.service.process(h.job,h.lease);
+    expect(process).toHaveBeenCalledTimes(4);
+    const saved=(await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id))!;
+    expect(callSummaryPayloadSchema.parse(saved.payload)).toMatchObject({evaluationCoverage:{status:"partial",reason:"input_limit",extractedParts:4,totalParts:4},assessment:{goal:{status:"uncertain"}}});
   });
 });

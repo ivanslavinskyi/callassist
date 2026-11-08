@@ -1,4 +1,5 @@
 import { lockPreparationProviderCapacity, insertPreparationProviderPermit } from "./preparation-provider-capacity";
+import { readSavedSummaryContext } from "./history-read-model";
 import { randomUUID } from "node:crypto";
 import { assertSummaryArtifactOutput } from "../text-processing/summary-calendar";
 import type { VoiceActionInput } from "./voice-action";
@@ -372,7 +373,7 @@ async function readArtifactJob(sql:Sql,id:string) {
 function mapArtifact(row:ArtifactRow,key:DataEncryptionMaterial) {
   return callTextArtifactSchema.parse({id:row.id,callId:row.call_brief_id,kind:row.kind,compilationId:row.compilation_id,
     transcriptRevisionId:row.transcript_revision_id,sourceHash:row.source_hash,targetLanguage:row.target_language,generatorVersion:row.generator_version,
-    contextHash:row.context_hash ?? null,sourceContext:row.context_ciphertext?summarySourceContextSchema.parse(decryptJson(row.context_ciphertext,key)):null,
+    contextHash:row.context_hash ?? null,sourceContext:row.context_ciphertext?readSavedSummaryContext(decryptJson(row.context_ciphertext,key),row.status):null,
     status:row.status,payload:row.payload_ciphertext?decryptJson(row.payload_ciphertext,key):null,payloadHash:row.payload_hash,
     failureCode:row.failure_code,retryable:false,createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString()});
 }

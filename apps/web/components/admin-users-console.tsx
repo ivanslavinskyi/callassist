@@ -1,4 +1,5 @@
 "use client";
+import { AdminTestingAccess } from "./admin-testing-access";
 import { formatLocale } from "@callassist/contracts";
 import { CreditFundingDetails, CreditSourceDetails } from "./credit-funding-details";
 
@@ -271,6 +272,7 @@ function Ledger({
       <span className="eyebrow">{copy.ledger}</span>
       <h2>{ledger.user.firstName} {ledger.user.lastName}</h2>
       <p className="admin-ledger-email">{ledger.user.email}</p>
+      <AdminTestingAccess key={ledger.user.id} userId={ledger.user.id} />
       <a href={`/admin/safety?userId=${ledger.user.id}`}>Returned call plans</a>
       <dl className="admin-ledger-summary">
         <div><dt>{copy.balance}</dt><dd>{ledger.usage.balance}</dd></div>

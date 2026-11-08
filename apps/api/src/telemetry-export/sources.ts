@@ -1,12 +1,13 @@
-import { preparationCheckpointSchema, preparationRuntimePolicySchema, applicationPlaybackDiagnosticSchema } from "@callassist/contracts";
+import { preparationCheckpointSchema, preparationRuntimePolicySchema, applicationPlaybackDiagnosticSchema, liveRuntimeDiagnosticSchema } from "@callassist/contracts";
 import { decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
 import { voiceConsentRuntimePolicySchema, preparationTransportDiagnosticsSchema } from "@callassist/contracts";
+import { storedPreparationRuntimePolicySchema } from "@callassist/contracts";
 
 // Only these columns cross the export boundary. Names are source-database names;
 // decrypted *_ciphertext fields lose the suffix. Never export a database row wholesale.
-export type ExportSource = { table: string; fields: string[]; where: string; order: string };
+export type ExportSource = { table: string; fields: string[]; where: string; order: string; optional?: boolean };
 const source = (table: string, fields: string, where: string, order = "t.id"): ExportSource => ({ table, fields: fields.split(" "), where, order });
 const calls = "t.call_brief_id IN (SELECT id FROM export_calls WHERE available)";
 const preparations = "t.id IN (SELECT id FROM export_preparations WHERE available)";
@@ -15,7 +16,14 @@ const artifacts = "t.artifact_id IN (SELECT id FROM call_text_artifacts WHERE ca
 const operations = "t.operation_id IN (SELECT id FROM export_operations)";
 const jobs = "t.job_id IN (SELECT id FROM export_jobs)";
 export const exportSources: ExportSource[] = [
-  source("call_briefs", "id user_id recipient_name phone_number objective locale creation_ui_locale allow_language_switch fallback_locale allowed_facts_ciphertext status created_at updated_at context_ciphertext represented_person represented_person_first_name represented_person_last_name agent_name assistant_profile_id assistance_reason_ciphertext assistance_disclosure_ciphertext voice_gender audio_retention_days current_compilation_id data_deleted_at retry_source_call_id retry_source_attempt_id", "t.id IN (SELECT id FROM export_calls)"),
+  { ...source("call_runtime_captures", "id call_brief_id call_attempt_id schema_version policy_version status started_at completed_at expires_at record_count payload_bytes dropped_records issue_codes", calls), optional: true },
+  { ...source("call_runtime_diagnostics", "id capture_id call_brief_id call_attempt_id sequence schema_version kind observed_at session_offset_ms metadata payload_ciphertext payload_bytes record_bytes idempotency_key",
+    `${calls} AND EXISTS (SELECT 1 FROM call_runtime_captures c WHERE c.id=t.capture_id AND c.status IN ('collecting','complete','partial') AND c.expires_at>now())`, "t.call_attempt_id,t.sequence"), optional: true },
+  source("live_attempt_privacy", "call_attempt_id call_brief_id recording_id provider_call_id state reason generation next_retry_at cleanup_attempts last_error_code requested_at created_at updated_at", calls, "t.call_attempt_id"),
+  source("live_native_action_revisions", "id call_brief_id call_attempt_id revision action_id state payload_ciphertext created_at", calls, "t.call_attempt_id,t.revision"),
+  source("live_trace_events", "call_attempt_id call_brief_id trace_id sequence direction event_type observed_at elapsed_ms byte_length schema_version", calls, "t.call_attempt_id,t.trace_id,t.sequence"),
+  source("live_trace_payloads", "id call_attempt_id trace_id sequence payload_ciphertext", "t.call_attempt_id IN (SELECT id FROM call_attempts WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))", "t.call_attempt_id,t.trace_id,t.sequence"),
+  source("call_briefs", "id user_id recipient_name phone_number objective objective_ciphertext locale creation_ui_locale allow_language_switch fallback_locale allowed_facts_ciphertext status created_at updated_at context_ciphertext represented_person represented_person_first_name represented_person_last_name agent_name assistant_profile_id assistance_reason_ciphertext assistance_disclosure_ciphertext voice_gender audio_retention_days current_compilation_id data_deleted_at retry_source_call_id retry_source_attempt_id", "t.id IN (SELECT id FROM export_calls)"),
   source("call_attempts", "id call_brief_id user_id provider provider_call_id provider_status status started_at ended_at failure_reason compilation_id compilation_revision compilation_snapshot_hash execution_snapshot_ciphertext review_receipt_id content_language max_duration_seconds native_transcript_capture runtime_descriptor consent_runtime_policy created_at", calls),
   source("call_voice_actions", "id call_brief_id call_attempt_id snapshot_hash version state payload_ciphertext created_at updated_at", calls),
   source("call_events", "id call_brief_id call_attempt_id user_id sequence schema_version event_name source stage severity metadata occurred_at created_at", "t.call_brief_id IN (SELECT id FROM export_calls)", "t.call_brief_id,t.sequence"),
@@ -25,7 +33,7 @@ export const exportSources: ExportSource[] = [
   source("call_plan_review_receipts", "id call_brief_id compilation_id revision snapshot_hash mode language selection_revision artifact_id artifact_hash payload_ciphertext created_at", calls),
   source("call_language_contexts", "call_brief_id context", calls, "t.call_brief_id"),
   source("transcript_segments", "id call_brief_id call_attempt_id attempt_attribution role text locale final native_timing application_playback ingestion_sequence received_at created_at", calls, "t.call_brief_id,t.ingestion_sequence"),
-  source("call_recordings", "id call_brief_id call_attempt_id provider provider_call_id provider_recording_id status consent_granted_at started_at completed_at duration_seconds channels delete_after deleted_at failure_reason created_at updated_at", calls),
+  source("call_recordings", "id call_brief_id call_attempt_id provider provider_call_id provider_recording_id status consent_granted_at recording_basis started_at completed_at duration_seconds channels delete_after deleted_at failure_reason created_at updated_at", calls),
   source("final_transcripts", "id call_recording_id call_attempt_id artifact_kind status source quality model text_ciphertext segments_ciphertext failure_reason current_revision_id request_id requested_by requested_at created_at updated_at completed_at", "t.call_attempt_id IN (SELECT id FROM call_attempts WHERE call_brief_id IN (SELECT id FROM export_calls WHERE available))"),
   source("final_transcript_revisions", "id call_brief_id transcript_id call_attempt_id revision source_hash payload_ciphertext created_at", calls),
   source("post_call_transcription_chunks", "id recording_id durable_job_generation stage chunk_key input_fingerprint requested_model provider_operation_id text_ciphertext created_at", recordings),
@@ -40,6 +48,7 @@ export const exportSources: ExportSource[] = [
   source("call_feedback_revisions", "id call_brief_id user_id revision schema_version goal_result transcript_quality comment_ciphertext created_at", calls),
   source("call_preparation_requests", "id user_id status call_brief_id target_call_brief_id operation_kind failure_code created_at updated_at completed_at input_ciphertext expected_compilation_id target_revision provider_request_count runtime_policy runtime_policy_source deadline_at", preparations),
   source("call_preparation_language_contexts", "preparation_id preferences account_preference request_version", "t.preparation_id IN (SELECT id FROM export_preparations WHERE available)", "t.preparation_id"),
+  source("testing_preparation_attribution", "preparation_id tester by_role scenario_id scenario_revision objective_modified created_at", "t.preparation_id IN (SELECT id FROM export_preparations WHERE available)", "t.preparation_id"),
   source("provider_operations", "id provider operation_type stage requested_model client_request_id call_preparation_id call_brief_id call_attempt_id recording_id recording_transcript_request_id durable_job_id durable_job_generation text_artifact_id parent_operation_id request_metadata started_at requested_service_tier pricing_version", "t.id IN (SELECT id FROM export_operations)"),
   source("provider_operation_results", "operation_id outcome provider_request_id provider_response_id provider_model http_status error_code completed_at duration_ms response_metadata actual_service_tier", operations, "t.operation_id"),
   source("preparation_request_checkpoints", "operation_id kind metadata created_at", operations, "t.operation_id,t.kind"),
@@ -119,6 +128,9 @@ const safeMetadataKeys = new Set(["status", "decision", "provider", "providerSta
 // Export only the policy actually pinned to the attempt. Global settings, actor
 // identities and operator change reasons are outside this call-content cohort.
 const exportedConsentPolicySchema = voiceConsentRuntimePolicySchema.strip();
+// An export is a read of pinned historical configuration, never permission to
+// execute an unknown preparation prompt in the current compiler.
+const exportedPreparationPolicySchema = storedPreparationRuntimePolicySchema;
 function metadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).filter(([k, v]) => safeMetadataKeys.has(k) &&
@@ -140,17 +152,26 @@ export function mapExportRow(s: ExportSource, data: Record<string, unknown>, key
     else if (s.table === "call_attempts" && field === "consent_runtime_policy") mapped[field] = value === null ? null : exportedConsentPolicySchema.parse(value);
     else if (s.table === "provider_operation_results" && field === "response_metadata") mapped[field] = value === null ? null : preparationTransportDiagnosticsSchema.strip().parse(value);
     else if (s.table === "preparation_request_checkpoints" && field === "metadata") mapped[field] = preparationCheckpointSchema.strip().parse(value);
-    else if (s.table === "call_preparation_requests" && field === "runtime_policy") mapped[field] = preparationRuntimePolicySchema.parse(value);
+    else if (s.table === "call_preparation_requests" && field === "runtime_policy") mapped[field] = exportedPreparationPolicySchema.parse(value);
     else if (s.table === "audit_events" && field === "metadata") mapped[field] = metadata(value);
     else if (s.table === "call_events" && data.event_name === "conversation.task" && field === "metadata" &&
-      value && typeof value === "object" && "playback" in value) {
-      mapped[field] = { ...value, playback: applicationPlaybackDiagnosticSchema.strip().parse(value.playback) };
+      value && typeof value === "object" && ("playback" in value || "diagnostic" in value)) {
+      const result = { ...value };
+      if ("playback" in result) result.playback = applicationPlaybackDiagnosticSchema.strip().parse(result.playback);
+      if ("diagnostic" in result) {
+        const diagnostic = result.diagnostic as Record<string, unknown> | null;
+        const schema = liveRuntimeDiagnosticSchema.options.find(option => option.shape.kind.value === diagnostic?.kind);
+        if (!schema) throw new Error("LIVE_RUNTIME_DIAGNOSTIC_INVALID");
+        result.diagnostic = schema.strip().parse(diagnostic);
+      }
+      mapped[field] = result;
     }
     else if (field === "raw_usage" || field === "raw_cost") mapped[field] = usage(value);
     else mapped[field] = value;
   }
+  if (s.table === "call_briefs") mapped.objective = data.objective_ciphertext == null ? data.objective : decryptJson(String(data.objective_ciphertext), key);
   if (s.table === "effective_provider_usage") mapped.calculated_cost = calculatedCost(data);
-  return { schemaVersion: 2, recordType: s.table, ...(s.table === "transcript_segments" ? { attribution: data.call_attempt_id == null ? "unknown" : data.attempt_attribution ?? "legacy_inferred", attemptId: data.call_attempt_id ?? null } : {}), data: mapped };
+  return { schemaVersion: s.table.startsWith("live_") ? 3 : 2, recordType: s.table, ...(s.table === "transcript_segments" ? { attribution: data.call_attempt_id == null ? "unknown" : data.attempt_attribution ?? "legacy_inferred", attemptId: data.call_attempt_id ?? null } : {}), data: mapped };
 }
 
 function calculatedCost(data: Record<string, unknown>) {
@@ -166,7 +187,9 @@ function calculatedCost(data: Record<string, unknown>) {
   const cost = calculateProviderUsageCost({ ...metrics, provider: String(data.provider), model: String(data.model), operationType: String(data.operation_type),
     billableCharacters: typeof (data.raw_usage as Record<string, unknown> | null)?.characters === "number" ? (data.raw_usage as Record<string, number>).characters : null,
     stage: String(data.stage), pricingVersion: String(data.pricing_version), usageRecords: 1, requestCount: Number(data.request_count ?? 0) } as AdminProviderUsageBucket);
+  const provisional=data.operation_type==="realtime_session"&&data.stage==="live_conversation"&&(data.raw_usage as Record<string,unknown>|null)?.finalized!==true;
   return { basis: "versioned_public_rates", currency: "USD", pricingVersion: cost.pricingVersion,
-    amountMicros: cost.calculatedUsdMicros === null ? null : String(cost.calculatedUsdMicros), unpricedMetrics: cost.unpricedMetrics,
-    matched: cost.matched, complete: cost.calculatedUsdMicros !== null && cost.unpricedMetrics.length === 0 };
+    finality:provisional?"provisional":"final",
+    amountMicros: cost.calculatedUsdMicros === null ? null : String(cost.calculatedUsdMicros), unpricedMetrics: [...cost.unpricedMetrics,...(provisional?["final_session_usage_missing"]:[])],
+    matched: cost.matched, complete: !provisional && cost.calculatedUsdMicros !== null && cost.unpricedMetrics.length === 0 };
 }

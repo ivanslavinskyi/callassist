@@ -517,6 +517,7 @@ describe("auth API", () => {
       /^attachment; filename="shprohli-data-\d{4}-\d{2}-\d{2}\.json"$/
     );
     const exported = accountDataExportSchema.parse(response.json());
+    expect(exported.calls[0]?.textData.nativeAppointmentActions).toEqual([]);
     expect(exported).toMatchObject({
       schemaVersion: "2",
       account: {

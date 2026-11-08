@@ -3,6 +3,8 @@ import { OpenAIRealtimeBridge, type OpenAIRealtimeBridgeOptions } from "../realt
 import type { VoiceRuntime } from "./voice-runtime";
 import { object } from "./live-usage";
 import { UnifiedLiveCall } from "./unified-live-call";
+import { NativeLiveV2Call } from "./native-live-v2-call";
+type LiveHost = UnifiedLiveCall | NativeLiveV2Call;
 
 import { OpenAILiveConversation } from "./live-conversation";
 export { OpenAILiveConversation, buildLiveInstructions } from "./live-conversation";
@@ -15,6 +17,7 @@ export interface LiveLifecycle {
   startup(): { instructions: string; input: unknown[] };
   backendFailed?(current?: () => boolean, code?: string): void;
   backendProgress?(): void;
+  backendIdle?(): void;
   consentDecisionUnavailable?(reason?: "provider_failure" | "contract_violation"): void;
   consentFragmentDiscarded?(): void;
   consentSemanticReady?(): boolean;
@@ -29,6 +32,8 @@ export interface LiveLifecycle {
 }
 
 export type OpenAILiveBridgeOptions = OpenAIRealtimeBridgeOptions & {
+  nativeExperiment?: boolean;
+  nativeV2?: boolean;
   liveModel?: string;
   delegationModel?: string;
   speechModel?: string;
@@ -40,11 +45,11 @@ export type OpenAILiveBridgeOptions = OpenAIRealtimeBridgeOptions & {
 /** Native Live lifecycle by default; explicit legacy fallback retains the hybrid pilot. */
 export class OpenAILiveBridge implements VoiceRuntime {
   readonly #gate: OpenAIRealtimeBridge | null;
-  readonly #attached = new Map<string, UnifiedLiveCall>();
-  readonly #prepared = new Map<string, { call: UnifiedLiveCall; timer: ReturnType<typeof setTimeout> }>();
+  readonly #attached = new Map<string, LiveHost>();
+  readonly #prepared = new Map<string, { call: LiveHost; timer: ReturnType<typeof setTimeout> }>();
   prepareCall: NonNullable<VoiceRuntime["prepareCall"]> = async binding => {
     if (this.#gate || this.#attached.has(binding.callAttemptId) || this.#prepared.has(binding.callAttemptId) || this.#prepared.size >= 64) return;
-    const call = new UnifiedLiveCall(this.options);
+    const call = this.options.nativeV2 ? new NativeLiveV2Call(this.options) : new UnifiedLiveCall(this.options);
     const timer = setTimeout(() => this.releasePrepared(binding.callAttemptId), 45_000);
     timer.unref?.();
     this.#prepared.set(binding.callAttemptId, { call, timer });
@@ -61,6 +66,13 @@ export class OpenAILiveBridge implements VoiceRuntime {
     this.#attached.clear();
   }
   constructor(private readonly options: OpenAILiveBridgeOptions) {
+    if(options.nativeV2) options.service.setNativePreflight(async (callId,attemptId)=>{
+      if(this.#prepared.size>=64)throw new Error("LIVE_PREFLIGHT_CAPACITY");
+      const call=new NativeLiveV2Call(options);
+      const timer=setTimeout(()=>this.releasePrepared(attemptId),60_000);timer.unref?.();
+      this.#prepared.set(attemptId,{call,timer});
+      try{await call.preflight(callId,attemptId);}catch(error){this.releasePrepared(attemptId);throw error;}
+    });
     // Explicit legacy opt-in only. Production live/fallback=false uses one Live session.
     this.#gate = options.conversationFallback ? new OpenAIRealtimeBridge({ ...options,
       createConversation: context => new OpenAILiveConversation(options, context) }) : null;
@@ -86,7 +98,7 @@ export class OpenAILiveBridge implements VoiceRuntime {
         if (this.#attached.has(p.callAttemptId)) { socket.close(); return; }
         const entry = this.#prepared.get(p.callAttemptId);
         if (entry) { this.#prepared.delete(p.callAttemptId); clearTimeout(entry.timer); }
-        const call = entry?.call ?? new UnifiedLiveCall(this.options);
+        const call = entry?.call ?? (this.options.nativeV2 ? new NativeLiveV2Call(this.options) : new UnifiedLiveCall(this.options));
         const attemptId = p.callAttemptId;
         this.#attached.set(attemptId, call);
         socket.once("close", () => { if (this.#attached.get(attemptId) === call) this.#attached.delete(attemptId); });

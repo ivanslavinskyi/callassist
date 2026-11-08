@@ -31,6 +31,13 @@ export const preparationTransportDiagnosticsSchema = z.strictObject({
     outputBytes: z.number().int().nonnegative().max(8_000_000),
     firstOutputMs: milliseconds.nullable(),
     lastOutputMs: milliseconds.nullable()
+  }).optional(),
+  textValidation:z.strictObject({version:z.literal(1),kind:z.enum(["call_summary","transcript_translation","plan_review","clarification_review"]),
+    nativeFormat:z.enum(["native-summary-v1","native-summary-v2","native-summary-v3"]).nullable(),
+    repair:z.enum(["none","grounding"]),
+    repairFieldPath:z.string().regex(/^[a-zA-Z][a-zA-Z0-9_.\[\]-]{0,159}$/).nullable(),
+    validationCode:z.enum(["TEXT_INVALID_SCHEMA","TEXT_INVALID_ASSESSMENT","TEXT_INVALID_FIXED_ASSESSMENT","TEXT_INVALID_REFERENCES","TEXT_INVALID_GROUNDING"]).nullable(),
+    validationFieldPath:z.string().regex(/^[a-zA-Z][a-zA-Z0-9_.\[\]-]{0,159}$/).nullable()
   }).optional()
 });
 export type PreparationTransportDiagnostics = z.infer<typeof preparationTransportDiagnosticsSchema>;

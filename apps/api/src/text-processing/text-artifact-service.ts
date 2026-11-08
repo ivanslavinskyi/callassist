@@ -77,6 +77,12 @@ export class TextArtifactService {
     const artifact = await this.repository.getTextArtifact(callId, artifactId);
     if (!artifact) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");
     if (artifact.status === "ready") return artifact;
+    // The new native narrative policy fixes a known v6 generation failure.
+    // Create a new artifact; keep failed evidence and queued v6 work immutable.
+    if (artifact.kind === "call_summary" && artifact.status === "failed" && /^summary-v[67]:/.test(artifact.generatorVersion) &&
+        artifact.sourceContext?.version === 2 &&
+        textGeneratorVersion(this.processor, "call_summary").startsWith("summary-v8:") && artifact.transcriptRevisionId)
+      return this.requestTranscriptArtifact(callId, "call_summary", {sourceRevisionId:artifact.transcriptRevisionId,targetLanguage:artifact.targetLanguage});
     const snapshot = await this.repository.get(callId);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
@@ -107,6 +113,8 @@ export class TextArtifactService {
         assertSummaryContext(artifact);
       }
       const inputs = await this.#inputs(artifact);
+      // Fail local admission before paying for any part of an invalid assembled task.
+      for (const input of inputs) validateTextProcessingInput(input);
       const completed = new Map((await this.repository.getTextArtifactChunks(artifact.id, lease())).map((chunk) => [chunk.index, chunk.payload]));
       const outputs: TextProcessingPayload[] = [];
       const needsCompaction = artifact.kind === "call_summary" && inputs.length > 1;
@@ -119,16 +127,18 @@ export class TextArtifactService {
         }
         this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
         const output = await this.processor.process(input, {
-          maxProviderRequests: 1, signal: baseLease.signal, profile: policy?.review,
+          maxProviderRequests: input.kind === "call_summary" && ["native-summary-v2","native-summary-v3"].includes(input.nativeFormat??"") ? 2 : 1,
+          signal: baseLease.signal, profile: policy?.review,
           beforeProviderRequest: (request) => {
             this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
             return this.repository.reserveTextArtifactProviderRequest({
             id: request.clientRequestId, artifactId: artifact.id, provider: request.provider, operationType: request.operationType,
-            stage: `${artifact.kind}.${index}`, requestedModel: request.model, requestedServiceTier: request.requestedServiceTier, pricingVersion: policy?.pricingVersion, reserveUsdMicros: request.reserveUsdMicros, estimatedTokens: request.estimatedTokens, clientRequestId: request.clientRequestId,
+            stage: `${artifact.kind}.${index}${request.repair?".grounding_repair":""}`, requestedModel: request.model, requestedServiceTier: request.requestedServiceTier, pricingVersion: policy?.pricingVersion, reserveUsdMicros: request.reserveUsdMicros, estimatedTokens: request.estimatedTokens, clientRequestId: request.clientRequestId,
             startedAt: request.startedAt, maxRequests: maximumRequests, durableJobGeneration: job.generation
             }, lease());
           },
           afterProviderRequest: (result) => this.repository.completeProviderOperation({
+            diagnostics:result.diagnostics,
             actualServiceTier: result.actualServiceTier, retryAfterMs: result.retryAfterMs,
             operationId: result.clientRequestId, outcome: result.outcome, providerRequestId: result.providerRequestId,
             providerResponseId: result.providerResponseId, providerModel: result.providerModel, statusCode: result.statusCode,
@@ -155,7 +165,10 @@ export class TextArtifactService {
           if (!(error instanceof TextProcessingError)) throw error;
           const assessment = compactInput.assessmentMode === "preserve" ? compactInput.fixedAssessment : compactInput.assessmentMode === "evaluate"
             ? {...uncertainAssessment(),criteria:compactInput.checks.filter(c=>c.id.startsWith("criterion.")).map(c=>({id:c.id,status:"uncertain" as const,sourceSegmentIds:[]}))} : undefined;
-          payload = {...extraction,...(assessment ? {assessment} : {})};
+          payload = {...extraction,...(assessment ? {assessment} : {}), evaluationCoverage: {
+            version:1,status:"partial",reason:error.code==="TEXT_INPUT_TOO_LARGE"?"input_limit":"assessment_unavailable",
+            extractedParts:outputs.length,totalParts:inputs.length
+          }};
           await this.repository.saveTextArtifactChunk(artifact.id, inputs.length, payload, lease());
         }
       }
@@ -193,6 +206,12 @@ export class TextArtifactService {
     // taken from the brief, recipient speech or a model/tool authorization.
     const inputs = chunkBySize(source.segments).map(segments => ({ ...summaryInput(compilation, segments, artifact.targetLanguage),
       ...(artifact.sourceContext ? { sourceContext: assertSummaryContext(artifact) } : {}),
+      ...(/^summary-v[678]:/.test(artifact.generatorVersion) && artifact.sourceContext?.version === 2 && (artifact.generatorVersion.startsWith("summary-v8:")||artifact.sourceContext.nativeAppointmentAuthorization)
+        ? { nativeFormat: artifact.generatorVersion.startsWith("summary-v8:")?"native-summary-v3" as const:artifact.generatorVersion.startsWith("summary-v7:") ? "native-summary-v2" as const : "native-summary-v1" as const, nativeTaskSources: {
+          objective: compilation.rawBrief.objective, context: compilation.rawBrief.context,
+          allowedFacts: compilation.rawBrief.allowedFacts, clarificationAnswers: compilation.rawBrief.clarificationAnswers,
+          ...(artifact.generatorVersion.startsWith("summary-v8:")?{deliveryInstruction:compilation.rawBrief.deliveryInstruction}:{})
+        } } : {}),
       applicationFacts: { transcriptPersisted: true as const, resultHandling: compilation.compiledBrief!.resultHandling } }));
     return inputs.length === 1 ? [await this.#assessmentInput(artifact, inputs[0]!)] : inputs;
   }
@@ -225,9 +244,13 @@ export class TextArtifactService {
   async #find(callId: string, kind: TextArtifactKind, compilationId: string | null, transcriptRevisionId: string | null, sourceHash: string, targetLanguage: TextLanguage, generatorVersion=textGeneratorVersion(this.processor,kind)) {
     const matching = (await this.repository.listTextArtifacts(callId)).filter(item => item.kind === kind && item.compilationId === compilationId &&
       item.transcriptRevisionId === transcriptRevisionId && item.sourceHash === sourceHash && item.targetLanguage === targetLanguage && !["stale", "cancelled"].includes(item.status));
-    // A projection upgrade must not regenerate an existing result or duplicate a queued job.
+    // Successful historical reports and queued jobs remain pinned. Failed native
+    // jobs may obtain a new-format artifact without overwriting the original.
     return matching.find(item => item.generatorVersion === generatorVersion) ??
-      matching.find(item => compatibleTextGeneratorVersion(item.generatorVersion, generatorVersion, kind));
+      matching.find(item => compatibleTextGeneratorVersion(item.generatorVersion, generatorVersion, kind) &&
+        !(item.sourceContext?.version === 2 && (
+          (item.sourceContext.nativeAppointmentAuthorization&&/^summary-v[678]:/.test(generatorVersion) && /^summary-v[45]:/.test(item.generatorVersion)) ||
+          (generatorVersion.startsWith("summary-v8:") && /^summary-v[67]:/.test(item.generatorVersion) && item.status === "failed"))));
   }
   #assertDirection(kind: TextArtifactKind, sourceLanguage: string, targetLanguage: TextLanguage) {
     if (!this.capabilities.enabled) throw new TextArtifactServiceError("TEXT_GENERATION_DISABLED");
@@ -295,8 +318,11 @@ export function combinePayloads(kind: TextArtifactKind, outputs: TextProcessingP
   }
   // Keep cited steps where the chunk answers agree; conflicting evidence stays explicitly unresolved.
   const modern = summaries.every(summary => summary.schemaVersion === 3);
+  const native = summaries.find(s => s.appointmentExtraction?.nativeOutcome)?.appointmentExtraction?.nativeOutcome;
   return { schemaVersion: modern ? 3 : 2, overview: [], findings, nextSteps: unresolvedAnswers ? [] : [...mergedSteps.values()].slice(0, 30),
-    ...(modern ? { appointmentExtraction: { candidates: [], conditions: [] }, unresolvedDetails: [
+    ...(modern ? { appointmentExtraction: { candidates: [], conditions: [], ...(native ? { nativeOutcome: {
+      operation: native.operation, disposition: "unconfirmed" as const, candidateId: null, previousAppointmentReleased: null, sourceSegmentIds: []
+    } } : {}) }, unresolvedDetails: [
       ...summaries.flatMap(s => s.unresolvedDetails ?? []),
       ...(unresolvedAnswers ? [{ checkId: findings[0]!.id, reason: "conversation_evidence" as const, text: uncertaintyText(language, "…") }] : [])
     ].slice(0, 30) } : {}),

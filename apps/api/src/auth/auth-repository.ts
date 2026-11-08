@@ -152,6 +152,7 @@ export interface AuthRepository {
   createUser(input: CreateAuthUserInput, accept?: RegistrationAcceptanceWriter): Promise<AuthUserRecord>;
   deferEmailVerification(userId: string, expectedEmail: string, now: string): Promise<AuthUserRecord | null>;
   findUserByEmail(email: string): Promise<AuthUserRecord | null>;
+  findUserById(userId: string): Promise<AuthUserRecord | null>;
   updateOwnName(input: {
     userId: string;
     firstName: string;

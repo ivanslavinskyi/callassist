@@ -1,3 +1,4 @@
+import { nativeAuthority,nativeAction } from "../test-helpers/native-appointment";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { CallSummaryPayload, CallTextArtifact, SummarySourceContext } from "@callassist/contracts";
@@ -170,4 +171,23 @@ describe("server calendar composition", () => {
     const i = input(); i.sourceContext = { ...calendarContext, appointmentAuthorization: null };
     expect(() => validateTextProcessingOutput(i, summary())).toThrow();
   });
+});
+
+describe("native result summary",()=>{
+ const fixture=()=>{const context={...calendarContext,version:2 as const,appointmentAuthorization:null,nativeAppointmentAuthorization:structuredClone(nativeAuthority),nativeAppointmentAction:nativeAction(randomUUID(),calendarContext.callAttemptId,calendarContext.compilationSnapshotHash)};
+  const action=context.nativeAppointmentAction;action.state="confirmed";action.delivery={status:"played",mark:"test",assistantQuote:"Test readback",observedAt:new Date().toISOString()};action.confirmation={source:"recipient_statement",independentlyVerified:false,recipientQuote:"Confirmed",observedAt:new Date().toISOString()};
+  const value=summary();Object.assign(value.appointmentExtraction!.candidates[0]!,{date:action.proposal.date,startTime:action.proposal.startTime});return {context,value};};
+ it("binds the summary to the exact native action and preserves the context hash",()=>{
+  const {context,value}=fixture(),result=composeCalendarSummary(value,context,"ru");
+  expect(result).toMatchObject({assessment:{goal:{status:"achieved"}},calendar:{contextHash:textPayloadHash(context),actionState:"confirmed"}});
+  expect(composeCalendarSummary(result,context,"ru")).toEqual(result);
+  context.nativeAppointmentAction.state="uncertain";expect(composeCalendarSummary(value,context,"ru").assessment?.goal.status).toBe("partial");
+ });
+ it("does not turn a cancellation into a new appointment",()=>{
+  const {context,value}=fixture();context.nativeAppointmentAuthorization.operation="cancel";context.nativeAppointmentAuthorization.alternatives=[];
+  context.nativeAppointmentAuthorization.existingAppointment={date:context.nativeAppointmentAction.proposal.date,startTime:context.nativeAppointmentAction.proposal.startTime,reference:null};
+  context.nativeAppointmentAction.proposal.operation="cancel";context.nativeAppointmentAction.proposal.alternativeId=null;
+  const result=composeCalendarSummary(value,context,"en");expect(result.calendar).toBeUndefined();expect(result.assessment?.goal.status).toBe("achieved");
+  context.nativeAppointmentAction.state="uncertain";expect(composeCalendarSummary(value,context,"en").assessment?.goal.status).toBe("partial");
+ });
 });

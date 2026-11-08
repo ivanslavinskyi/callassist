@@ -2,6 +2,7 @@ import type { CallSummaryPayload } from "@callassist/contracts";
 import type { UiLocale } from "@/lib/i18n/messages";
 import { textArtifactMessages } from "@/lib/i18n/text-artifact-messages";
 import { summaryPresentation } from "@/lib/summary-presentation";
+import { summaryCoverageMessages } from "@/lib/i18n/summary-coverage";
 
 /** Task-language facts; interface-language controls. Sources point to the original revision. */
 export function CallSummaryPresentation({ summary: rawSummary, uiLocale, sourceHref, onSource, headingLevel = 3 }: {
@@ -26,6 +27,7 @@ export function CallSummaryPresentation({ summary: rawSummary, uiLocale, sourceH
   const cautions = summary.findings.filter(item => item.certainty !== "reported")
     .filter((item, index, items) => items.findIndex(other => other.text === item.text && other.certainty === item.certainty) === index);
   return <div className="call-summary-presentation">
+    {rawSummary.evaluationCoverage?.status === "partial" ? <p role="status" className="transcript-warning">{summaryCoverageMessages[uiLocale]}</p> : null}
     {summary.findings.some(item => item.certainty === "reported") ? <small>{copy.reported}</small> : null}
     {summary.overview.length ? <>
       <dl className="summary-overview">{summary.overview.map((item, index) => {

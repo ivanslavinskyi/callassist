@@ -9,6 +9,7 @@ import type {
 } from "@callassist/contracts";
 import type { TDocumentDefinitions } from "pdfmake/interfaces";
 import { buildTranscriptPdfLayout } from "./transcript-pdf-layout";
+import { transcriptAssessment } from "./transcript-assessment";
 import { uiLocaleRegistry, type UiLocale } from "./i18n/registry";
 
 type ExportInput = {
@@ -87,6 +88,7 @@ export function buildFinalTranscriptPdfDefinition(
     variant: copy.title,
     recipient: brief.recipientName,
     language: brief.locale,
+    assessment: transcriptAssessment({ locale: uiLocale }),
     metadata: [
       { label: copy.recipient, value: brief.recipientName },
       { label: copy.assistant, value: ASSISTANT_DISPLAY_NAME },

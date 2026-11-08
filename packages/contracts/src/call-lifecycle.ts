@@ -24,6 +24,7 @@ export const callLifecycleSchema = z.strictObject({
   consent: z.enum(["not_recorded", "granted", "declined", "not_received", "not_requested"]),
   consentAt: z.iso.datetime().nullable(),
   consentMethod: z.enum(["voice", "dtmf"]).optional(),
+  recordingBasis: z.enum(["affirmative_consent", "declarative_local"]).optional(),
   conversationStartedAt: z.iso.datetime().nullable(),
   substantiveAnswerConfirmed: z.boolean(),
   endedAt: z.iso.datetime().nullable(),
@@ -32,6 +33,18 @@ export const callLifecycleSchema = z.strictObject({
   credit: z.enum(["not_recorded", "reserved", "used", "returned"])
 });
 export type CallLifecycle = z.infer<typeof callLifecycleSchema>;
+
+/** Native speech starts before async AMD resolves. An emitted greeting alone
+ * is not evidence of a human conversation. Require a concrete machine/fax
+ * result and the application's dispatched answering action. */
+export function nativeAutomatedAnswerHandled(lifecycle: CallLifecycle) {
+  const state = lifecycle.answering;
+  return lifecycle.recordingBasis === "declarative_local" &&
+    lifecycle.consent !== "granted" && lifecycle.consent !== "declined" && !lifecycle.substantiveAnswerConfirmed &&
+    state?.execution === "async" && state.phase === "resolved" && state.actionDispatched === true &&
+    (state.decision === "hang_up" || state.decision === "message") &&
+    ["machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other", "fax"].includes(state.answeredBy ?? "");
+}
 type LifecycleEvent = Pick<DurableCallEvent, "callAttemptId" | "sequence" | "occurredAt" | "payload">;
 export type CallSettlementFact = { callAttemptId: string; settlement: "charge" | "refund"; qualified: boolean };
 
@@ -83,6 +96,10 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
         if (payload.metadata.providerStatus === "in-progress") value.connectedAt ??= occurredAt;
         break;
       case "disclosure.started": value.disclosureAt ??= occurredAt; break;
+      case "recording.started":
+      case "recording.completed":
+        value.recordingBasis = payload.metadata.recordingBasis ?? value.recordingBasis;
+        break;
       case "consent.granted": value.connected = true; value.consent = "granted"; value.consentAt = occurredAt; value.consentMethod = payload.metadata.method === "dtmf_1" ? "dtmf" : payload.metadata.method; break;
       case "consent.failed":
         if (["recording_start_failed", "recognition_failed"].includes(payload.metadata.reason)) technicalFailure = true;
@@ -119,7 +136,11 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
   }
   const assessment = assessments.find(a=>a.callAttemptId === current.find(e=>e.payload.name === "attempt.started")?.callAttemptId)?.summary;
   if (assessment) value.assessment = assessment;
-  value.substantiveAnswerConfirmed = value.consent === "granted" && (assessment?.status === "ready" ? assessment.conversation === "confirmed" : qualifiedCharge);
+  // A local declared recording is not evidence of affirmative consent or an audible disclosure.
+  const recordingAuthorized = value.consent === "granted" ||
+    (value.recordingBasis === "declarative_local" && value.consent !== "declined");
+  if (value.recordingBasis === "declarative_local" && value.consent === "not_recorded") value.consent = "not_requested";
+  value.substantiveAnswerConfirmed = recordingAuthorized && (assessment?.status === "ready" ? assessment.conversation === "confirmed" : qualifiedCharge);
   if (value.answering && !value.disclosureAt && value.consent === "not_recorded") value.consent = "not_requested";
   if (!terminal) return value;
   if (value.answering?.message === "issued") value.answering = { ...value.answering,
@@ -129,15 +150,16 @@ export function deriveCallLifecycle(status: CallBriefStatus, events: readonly Li
   else if (providerResult === "busy" && !value.connected) value.result = "busy";
   else if (providerResult === "canceled" && !value.connected) value.result = "canceled";
   else if (value.substantiveAnswerConfirmed) value.result = "conversation_completed";
-  else if (value.consent === "granted" && assessment?.status === "pending") value.result = "assessment_pending";
-  else if (value.consent === "granted" && (assessment?.status === "unavailable" || assessment?.conversation === "uncertain")) value.result = "assessment_unavailable";
+  else if (nativeAutomatedAnswerHandled(value) && status !== "stopped" && value.endedBy !== "user" && value.endedBy !== "system") value.result = answeringResult(value.answering!);
+  else if (recordingAuthorized && assessment?.status === "pending") value.result = "assessment_pending";
+  else if (recordingAuthorized && (assessment?.status === "unavailable" || assessment?.conversation === "uncertain")) value.result = "assessment_unavailable";
   else if (status === "stopped" || value.endedBy === "user" || value.endedBy === "system") value.result = "stopped";
   else if (value.consent === "declined") value.result = "consent_declined";
   else if (technicalFailure || providerResult === "failed") value.result = "technical_failure";
   else if (value.answering?.phase === "pending" && value.connected && value.consent !== "granted" && !value.conversationStartedAt) value.result = "answer_detection_failed";
   else if (value.answering && answeringResult(value.answering) && !value.conversationStartedAt && value.consent !== "granted") value.result = answeringResult(value.answering);
   else if (technicalFailure || providerResult === "failed" || status === "failed") value.result = "technical_failure";
-  else if (value.consent === "granted") value.result = "no_substantive_answer";
+  else if (recordingAuthorized) value.result = "no_substantive_answer";
   else if (value.connected) value.result = "consent_not_received";
   else value.result = "ended";
   return value;

@@ -1,4 +1,4 @@
-import { formatDateTime, type FinalTranscriptRevision, type GoalAssessmentStatus, type UiLocale } from "@callassist/contracts";
+import { formatDateTime, summaryCoverageMessages, type FinalTranscriptRevision, type GoalAssessmentStatus, type UiLocale } from "@callassist/contracts";
 import { renderEmail, type EmailBlock } from "../auth/email-templates";
 import type { EmailBranding } from "../auth/email-branding";
 
@@ -18,7 +18,7 @@ export const userCallEmailMessages: Record<UiLocale, Copy> = {
 export type UserCallReport = {
   callId: string; attemptId: string; locale: UiLocale; recipient: string; endedAt: string;
   callLanguage: string; assessmentLanguage?: string; goal: GoalAssessmentStatus | null;
-  assessmentParagraphs: string[]; transcript: FinalTranscriptRevision; partial: boolean;
+  assessmentParagraphs: string[]; transcript: FinalTranscriptRevision; partial: boolean; summaryPartial?: boolean;
 };
 
 export function userCallEmail(report: UserCallReport, branding: EmailBranding) {
@@ -32,11 +32,13 @@ export function userCallEmail(report: UserCallReport, branding: EmailBranding) {
     const offset = seconds === null ? "" : ` [${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}]`;
     return `${speaker}${offset}\n${segment.text}`;
   }) : [report.transcript.text];
-  const paragraphs = [...metadata, `${c.assessment}: ${goal}`, ...report.assessmentParagraphs, `${c.open}: ${url}`,
+  const summaryWarning = report.summaryPartial ? [summaryCoverageMessages[report.locale]] : [];
+  const paragraphs = [...metadata, `${c.assessment}: ${goal}`, ...summaryWarning, ...report.assessmentParagraphs, `${c.open}: ${url}`,
     c.transcript, ...(report.partial ? [c.partial] : []), ...transcript];
   const blocks: EmailBlock[] = [
     ...metadata.map(text => ({ kind: "paragraph" as const, text })),
     { kind: "assessment", title: c.assessment, status: goal, paragraphs: report.assessmentParagraphs, lang: report.assessmentLanguage },
+    ...summaryWarning.map(text => ({kind:"paragraph" as const,text})),
     { kind: "button", label: c.open, url }, { kind: "heading", text: c.transcript },
     ...(report.partial ? [{ kind: "paragraph" as const, text: c.partial }] : []),
     ...transcript.map(text => ({ kind: "paragraph" as const, text, lang: report.callLanguage }))

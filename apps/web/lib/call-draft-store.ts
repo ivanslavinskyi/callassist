@@ -2,6 +2,7 @@ import type { CreateCallBriefInput, TaskLanguagePreferences } from "@callassist/
 import type { CallPreparationAttempt } from "./call-preparation-attempt";
 
 export type CallDraft = {
+  testScenario?: import("@callassist/contracts").TestScenarioSelection;
   form: CreateCallBriefInput;
   factsText: string;
   languagePreferences: TaskLanguagePreferences;

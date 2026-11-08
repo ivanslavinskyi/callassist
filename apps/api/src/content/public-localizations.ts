@@ -4,12 +4,17 @@ import it from "./locales/it.json";
 import rm from "./locales/rm.json";
 import ru from "./locales/ru.json";
 import uk from "./locales/uk.json";
+import retentionRules from "./retention-copy-migration.json";
 
 export const publicLocaleResources: Partial<Record<UiLocale, Record<string, string>>> = { fr, it, rm, ru, uk };
 /** Seed content must be complete. Missing copy fails validation instead of mixing languages. */
 export function publicText(source: string, locale: UiLocale): string {
   if (locale === DEFAULT_UI_LOCALE || source.includes("@shprohli.ch") && !source.includes(" ")) return source;
-  const translated = publicLocaleResources[locale]?.[source];
+  // Locale completion also reads publications already upgraded by migration 0115.
+  const retentionSource = retentionRules.find(rule => rule.locale === "en" && rule.next === source);
+  const translated = publicLocaleResources[locale]?.[source] ?? (retentionSource
+    ? retentionRules.find(rule => rule.locale === locale && rule.group === retentionSource.group && rule.semantic === retentionSource.semantic)?.next
+    : undefined);
   if (!translated) throw new Error(`PUBLIC_TRANSLATION_MISSING: ${locale}: ${source}`);
   return translated;
 }

@@ -86,6 +86,10 @@ type Fixture = {
   verifyTurnDestinations?: boolean;
 };
 const fixtures: Fixture[] = [
+  { file: "00-assessment-ru.pdf", definition: buildDerivedTranscriptPdfDefinition({ brief, revision,
+    segments: translatedSegments, text: russian.join("\n"), translationLanguage:"ru",uiLocale:"ru",
+    assessment:{status:"ready",goal:"achieved",conversation:"confirmed",reason:null,updatedAt:createdAt,deadlineAt:null,transcriptRevisionId:revision.id,evaluatorVersion:"synthetic"}
+  },logoSvg), expectedText:["Оценка выполнения задания ИИ","Выполнено", "Документ ещё не получен."] },
   {
     file: "01-legacy-en.pdf",
     definition: buildFinalTranscriptPdfDefinition({ brief: { ...brief, locale: "en-GB" }, finalTranscript: legacy, languageLabel: "English", uiLocale: "en" }, logoSvg),

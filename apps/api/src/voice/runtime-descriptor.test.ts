@@ -16,10 +16,15 @@ describe("immutable runtime descriptor boundary", () => {
         models, { SHPROHLI_RELEASE_SHA: "not-a-release-secret" });
       expect(descriptor.releaseSha).toBeNull();
       expect(descriptor.runtimeVersion).toBe("live-managed-v9");
+      expect(descriptor.implementationVersion).toBe("live-audit-a-2026-11-05");
       expect(descriptor.promptHash).toMatch(/^[a-f0-9]{64}$/);
       expect(JSON.stringify(descriptor)).not.toMatch(/Nina|Keller|private runtime|not-a-release-secret|41710000001/);
       expect(liveRuntimeDescriptor(context, snapshot.compilation!, "private runtime instructions Nina Keller", models,
         { SHPROHLI_RELEASE_SHA: "A".repeat(40) }).releaseSha).toBe("a".repeat(40));
+      expect(liveRuntimeDescriptor(context, snapshot.compilation!, "prompt", models,
+        { SHPROHLI_RUNTIME_SOURCE_DIGEST: "A".repeat(64) }).sourceDigest).toBe("a".repeat(64));
+      expect(liveRuntimeDescriptor(context, snapshot.compilation!, "prompt", models,
+        { SHPROHLI_RUNTIME_SOURCE_DIGEST: "private-not-a-digest" }).sourceDigest).toBeUndefined();
       const policy = voiceConsentRuntimePolicy("hybrid_deterministic_v1", 3);
       expect(liveRuntimeDescriptor(context, snapshot.compilation!, "instructions", models, {}, policy).consentPolicy)
         .toEqual(policy);

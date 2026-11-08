@@ -59,10 +59,12 @@ describe("database recovery drill", () => {
       "user_call_notifications",
       "audit_events",
       "call_briefs",
+      "testing_access", "test_scenarios", "test_scenario_revisions", "testing_audit", "testing_preparation_attribution",
       "call_voice_actions",
       "call_assessments",
       "call_assessment_revisions",
       "call_terminal_decisions",
+      "live_attempt_privacy", "live_trace_events", "live_trace_payloads", "live_native_action_revisions",
       "call_compilations",
       "call_compilation_approvals",
       "call_compilation_review_policies",
@@ -83,7 +85,7 @@ describe("database recovery drill", () => {
       "sessions",
       "users"
     ];
-    expect(tables).toHaveLength(39);
+    expect(tables).toHaveLength(48);
     expect(() => validateCriticalTables(tables)).not.toThrow();
     for (const table of tables) {
       expect(() => validateCriticalTables(tables.filter((name) => name !== table)))

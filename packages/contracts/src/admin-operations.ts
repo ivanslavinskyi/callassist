@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { testingAttributionSchema } from "./testing";
 import { callLifecycleCountsSchema } from "./call-lifecycle";
 
 export const adminOperationsWindowSchema = z.enum(["24h", "7d", "30d", "month", "previous_month"]);
@@ -145,12 +146,21 @@ export const adminOperationsOverviewSchema = z.strictObject({
       incompleteSessions: countSchema.default(0),
       firstRecordedAt: z.iso.datetime().nullable().default(null),
       pricingVersions: z.array(z.string()).default([]),
+      testingCohorts: z.array(z.strictObject({ cohort: z.enum(["tester","ordinary","unclassified"]),
+        costBasis: z.enum(["usage_estimate","provider_reported"]), operations: countSchema,
+        amountMicros: countSchema.nullable(), incompleteOperations: countSchema })).optional(),
       records: z.array(z.strictObject({
+        testingAttribution: testingAttributionSchema.nullable().optional(),
         id: z.uuid(), startedAt: z.iso.datetime(), operationType: z.string(), stage: z.string(), model: z.string(), provider: z.string().default("openai"),
         costBasis: z.enum(["usage_estimate", "provider_reported"]),
         outcome: z.string().nullable(), calculatedUsdMicros: countSchema.nullable(),
         missingMetrics: z.array(z.string())
+        ,finality: z.enum(["final", "provisional", "unknown"]).optional(),
+        usageSource: z.enum(["provider_final", "provider_observed", "provider_reported", "unknown"]).optional(),
+        pricingVersion: z.string().nullable().optional(), requestedServiceTier: z.string().nullable().optional(), actualServiceTier: z.string().nullable().optional()
       })).max(1000).default([]),
+      breakdown: z.array(z.strictObject({ operationType: z.string(), stage: z.string(), model: z.string(),
+        operations: countSchema, incompleteOperations: countSchema, calculatedUsdMicros: countSchema.nullable() })).optional(),
       calculatedUsdMicros: countSchema.nullable(),
       components: z.strictObject({
         briefCompilation: providerUsageCostComponentSchema,

@@ -21,10 +21,11 @@ import { needsTranscriptTranslation } from "@/lib/text-capabilities";
 import type { CallSnapshot } from "@callassist/contracts";
 import { appointmentResultMessages } from "@/lib/i18n/appointment-result-messages";
 
-export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction, showSummary=true, allowSummaryGeneration=true }: {
+export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction, assessment, showSummary=true, allowSummaryGeneration=true }: {
   brief: CallBrief; userId: string; revision: FinalTranscriptRevision; taskLanguage: TextLanguage;
   promptLanguage: string | null; initialArtifacts?: CallTextArtifact[];
   appointmentAction?: CallSnapshot["appointmentAction"];
+  assessment?: import("@callassist/contracts").CallAssessmentSummary | null;
   showSummary?: boolean; allowSummaryGeneration?: boolean;
 }) {
   const { locale, messages } = useUiLocale();
@@ -81,7 +82,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     });
   }
   function exportInput(): DerivedTranscriptExport {
-    return { brief, revision, appointmentAction, summary, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
+    return { brief, revision, appointmentAction, summary, assessment, assessmentPending: waitingSummary, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
   }
   async function copyText() {
     const input = exportInput();

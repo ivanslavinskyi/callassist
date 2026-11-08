@@ -1,18 +1,51 @@
 # Call-plan preparation runtime
 
-Source specification checked against `879dec5`, 2026-10-07. This describes
-code, not the state or measured capacity of any deployed server. The original
-[plan](preparation-performance-and-scaling-plan-2026-10-05.md) remains the design record;
-[implementation evidence](preparation-performance-implementation-2026-10-05.md)
-records verification. Host configuration and rollout procedures live only in the
-ignored `docs/local-operations/` directory.
+**Source reviewed:** 2026-11-08, current working tree. This describes code, not the
+state or measured capacity of a deployed server. See the [native runtime](native-live-runtime.md)
+for startup context, conversation and action boundaries. Dated preparation plans
+and measurements are [historical evidence](archive/README.md). Host configuration
+and rollout procedures live only in the ignored `docs/local-operations/` directory.
 
 ## Immutable policy and operator controls
 
-`GET/PUT /api/admin/system/preparation` reads or changes the policy. Only a current,
-active superadmin can mutate it; origin/session checks, database authorization,
-expected revision and an audit record apply; the comment is optional. A conflict returns 409. Reads are
-private/no-store. A lost response requires refresh before another save.
+Local native checkpoint, 8 November 2026: policy
+`preparation-live-native-integrity-2026-11-08` selects `brief-compiler-13`, plan schema 9
+and approval 8. The previous progressive instruction remains: resolve prerequisites
+before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
+Full original task sources and facts remain available at Live startup. The default
+policy remains `preparation-live-native-v2-2026-11-06`; historical jobs retain their
+pinned policy. The verified local setup selected the integrity policy separately,
+with a new revision and audit record. The public settings API does not expose a
+`promptVersion` setter. See [dated evidence](reports/native-live-integrity-2026-11-08.md).
+
+| Prompt policy suffix | Compiler | Plan schema | Native approval |
+| --- | --- | --- | --- |
+| `live-native-v2-2026-11-06` (code default) | `brief-compiler-10` | 8 | 7 |
+| `live-native-actions-2026-11-06` | `brief-compiler-11` | 9 | 8 |
+| `live-native-progressive-2026-11-07` | `brief-compiler-12` | 9 | 8 |
+| `live-native-integrity-2026-11-08` | `brief-compiler-13` | 9 | 8 |
+
+All policy IDs in the table start with `preparation-`. The earlier
+`preparation-2026-10-05` policy uses compiler 6 / schema 4. Historical readers
+support earlier schemas through explicit compatibility contracts; reading an old
+plan does not silently upgrade its authority or make it eligible for native v2.
+Sources: [policy contract](../packages/contracts/src/preparation-policy.ts) and
+[compiler selection](../apps/api/src/brief-compiler/brief-compiler.ts).
+
+Preparation failures now expose an optional typed `issue`: reason kind/code, known
+source/category, affected fields, retryability and next action. All seven UI locales
+explain policy restrictions, unsupported actions, missing input and technical failures.
+Unknown model refusals do not invent a safety category; output moderation is a generated
+plan failure, not an accusation about the user's request. Legacy records without a
+specific cause retain a general explanation. The optional field has no default and
+does not change historical compilation hashes.
+
+`GET /api/admin/system/preparation` reads settings; `PUT` changes generation profile
+and capacity using the existing policy. It cannot change the prompt policy version.
+Only a current, active superadmin can mutate it; origin/session checks, database
+authorization, expected revision and an audit record apply; the comment is optional.
+A conflict returns 409. Reads are private/no-store. A lost response requires refresh
+before another save.
 
 The admin System panel selects `gpt-5.6`, `gpt-5.6-terra` or `gpt-6-luna` and
 Standard/Fast for **generation**. Audit and review stay on `gpt-5.6:default`.
@@ -33,11 +66,60 @@ attested in the user's source. It does not guess translations, abbreviations or
 approximate spellings. Postal addresses and protected identifiers retain their
 strict checks. Unknown transformations still require repair/review.
 
-Known limitation in this source checkpoint: protected-reference extraction remains
-heuristic. Local replay reproduced a false `fact_integrity_failure` for generated
-`finish-by-16:30` versus source `finish by 16:30`; this wording can be mistaken for
-an invented identifier and cause unnecessary repair. The padding fix does not
-correct this validator. Model selection is not a guarantee against such failures.
+Protected-reference extraction is heuristic. The October implementation evidence
+records a `finish-by-16:30` false-positive case; that dated observation is not a
+fresh reproduction against the integrity compiler. Model selection alone does not
+guarantee absence of validation repairs.
+
+## Native task compilation and user-facing errors
+
+The integrity compiler preserves original objective, context, facts, clarification
+answers and delivery instruction. It derives general or appointment capability
+from approved authority. Appointment profiles are `book`, `confirm_existing`,
+`reschedule` and `cancel`; conditional alternatives remain ordered and permission
+must not be inferred from untrusted recipient text. The conversation resolves an
+unknown prerequisite before pursuing a dependent action, discloses constraints when
+relevant and reuses known answers. Full primary context is supplied to Live at
+startup; optional appendix sections are indexed for retrieval. Preparation produces
+authority and context, not a script that Live must recite.
+
+Relevant facts may be supplied in any primary field. Context provides background,
+conditions and factual values; appointment action authority must be grounded in the
+objective or clarification answers. Explicit withholding and conditional disclosure
+remain binding. The review page exposes the original sources, and `approvedFacts`
+is not the complete disclosure boundary. Required destination and identity inputs
+remain separate. See [task information](task-input-and-testing.md#task-information).
+
+The optional v2 request-envelope field `testScenario: { id, revision }` records
+scenario origin outside the brief and approval hashes. Scenario text goes through
+the same validation, moderation, compilation, review and approval as manual input.
+Effective tester access is captured even when no scenario is selected. The catalog
+adds no compilation stage and no ordinary-turn model lookup. The native disclosure
+instruction identity changed to `live-native-context-2026-11-08`; compiler policy,
+schema and approval versions in the table above remain unchanged.
+
+New objective and context fields each allow 4,000 JavaScript string units after
+trimming. The shared aggregate counts normalized Unicode code points: warning at
+6,000 and rejection above 8,000 across objective, context, facts, clarification
+answers and delivery instruction. Field maxima are not additive allowances. Old
+stored context can still be read up to 12,000 characters. See the
+[complete limits table](native-live-runtime.md#input-and-allocation-limits).
+
+The optional typed preparation `issue` preserves a machine-readable reason and
+localized presentation without changing historical hashes when absent. Distinguish
+policy rejection, unsupported actions, missing information and technical failure.
+Only a known source/category may be shown as such; an unspecified provider refusal
+must not be assigned an invented safety reason. A generated-plan moderation failure
+does not imply that the user's original request violated policy. `retryable` and
+`nextAction` drive recovery; `affectedFields` can be empty when no field is known.
+All seven UI locales provide explanatory copy. Old errors without detailed provenance
+retain a generic explanation. Input and output moderation, local validation and
+user review remain separate boundaries.
+
+Sources: [compiler instructions](../apps/api/src/brief-compiler/compiler-instructions.ts),
+[native authority compilation](../apps/api/src/brief-compiler/native-appointment-compilation.ts),
+[issue contract](../packages/contracts/src/preparation-issue.ts),
+[localized messages](../apps/web/lib/i18n/preparation-issue-messages.ts).
 
 ## Account phone policy
 
@@ -86,6 +168,8 @@ process, 1 otherwise; `REVIEW_WORKER_SLOTS` defaults to 1. Both are bounded.
 process. Prep creates no auth/export/notification/billing dependencies. Background
 also budgets auth 5, notifications 3, export 3+1 and billing 1; listeners and other
 configured clients must be counted separately. API defaults to a call pool of 6.
+Its testing store has a separate PostgreSQL pool capped at 3; role workers do not
+instantiate that store. Catalog access occurs outside the voice conversation path.
 
 The immutable job `work_class` routes review separately from background text.
 New role processes never run global call recovery on startup. Operations seed

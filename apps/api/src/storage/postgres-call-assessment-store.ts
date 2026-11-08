@@ -70,7 +70,7 @@ export class PostgresCallAssessmentStore {
   async deferRefund(tx: postgres.TransactionSql, attemptId: string) {
     const [attempt] = await tx<{call_brief_id:string;compilation_id:string|null}[]>`SELECT a.call_brief_id,a.compilation_id FROM call_attempts a
       JOIN call_recordings r ON r.call_attempt_id=a.id JOIN call_briefs b ON b.id=a.call_brief_id
-      WHERE a.id=${attemptId} AND r.consent_granted_at IS NOT NULL AND r.started_at IS NOT NULL
+      WHERE a.id=${attemptId} AND (r.consent_granted_at IS NOT NULL OR r.recording_basis='declarative_local') AND r.started_at IS NOT NULL
         AND b.data_deleted_at IS NULL AND a.compilation_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM credit_transactions WHERE call_attempt_id=a.id AND type IN ('call_charge','call_refund'))`;
     if (!attempt?.compilation_id) return false;
@@ -89,7 +89,7 @@ export class PostgresCallAssessmentStore {
       !supportsSummaryAssessment(artifact.generatorVersion) || !artifact.generatorVersion.includes(":openai:")) return;
     const [source] = await tx<{payload_ciphertext:string;compilation_ciphertext:string;content_language:string|null;context:{taskContentLanguage:string}|null;ended_at:Date|null;consent:boolean}[]>`
       SELECT r.payload_ciphertext,c.compilation_ciphertext,a.content_language,l.context,a.ended_at,
-        EXISTS(SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND cr.consent_granted_at IS NOT NULL AND cr.started_at IS NOT NULL) AS consent
+        EXISTS(SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND (cr.consent_granted_at IS NOT NULL OR cr.recording_basis='declarative_local') AND cr.started_at IS NOT NULL) AS consent
       FROM final_transcript_revisions r JOIN call_attempts a ON a.id=r.call_attempt_id
       JOIN call_compilations c ON c.id=a.compilation_id LEFT JOIN call_language_contexts l ON l.call_brief_id=a.call_brief_id
       WHERE r.id=${artifact.transcriptRevisionId} AND r.call_brief_id=${artifact.callId} AND c.id=${artifact.compilationId} AND r.source_hash=${artifact.sourceHash}`;
@@ -136,7 +136,7 @@ export class PostgresCallAssessmentStore {
       LEFT JOIN call_language_contexts l ON l.call_brief_id=a.call_brief_id
       WHERE r.id=${artifact.transcriptRevisionId} AND r.source_hash=${artifact.sourceHash}
         AND a.call_brief_id=${artifact.callId} AND a.compilation_id=${artifact.compilationId}
-        AND EXISTS (SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND cr.consent_granted_at IS NOT NULL AND cr.started_at IS NOT NULL)
+        AND EXISTS (SELECT 1 FROM call_recordings cr WHERE cr.call_attempt_id=a.id AND (cr.consent_granted_at IS NOT NULL OR cr.recording_basis='declarative_local') AND cr.started_at IS NOT NULL)
         AND COALESCE(a.content_language,l.context->>'taskContentLanguage')=${artifact.targetLanguage}`;
     if (!attempt) return;
     await tx`INSERT INTO call_assessments(call_attempt_id,call_brief_id,compilation_id,status)

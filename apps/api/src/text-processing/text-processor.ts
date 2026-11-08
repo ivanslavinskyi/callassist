@@ -1,5 +1,6 @@
 import type {
   CallSummaryPayload,
+  CallCompilation,
   CallAssessmentDecision,
   PlanReviewPayload,
   SourceSegment,
@@ -13,7 +14,7 @@ import { MockTextProcessor } from "./mock-text-processor";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
 export const TEXT_PROCESSOR_VERSION = "text-processing-v2";
-export const SUMMARY_PROCESSOR_VERSION = "summary-v5";
+export const SUMMARY_PROCESSOR_VERSION = "summary-v8";
 export const MAX_TEXT_PROCESSING_SOURCE_CHARACTERS = 60_000;
 
 export type TextProcessingInput = (
@@ -23,6 +24,8 @@ export type TextProcessingInput = (
   | { kind: "call_summary"; segments: SourceSegment[]; checks: Array<{ id: string; text: string }>;
       context: { objective: string; taskType: string; recipient: string; representedPerson: string };
       sourceContext?: SummarySourceContext;
+      nativeFormat?: "native-summary-v1" | "native-summary-v2" | "native-summary-v3";
+      nativeTaskSources?: Pick<CallCompilation["rawBrief"], "objective" | "context" | "allowedFacts" | "clarificationAnswers"> & {deliveryInstruction?:string};
       extraction?: CallSummaryPayload;
       applicationFacts?: { transcriptPersisted: true; resultHandling: "capture_in_callassist" | "request_external_delivery" | "message_only" };
       assessmentMode?: "evaluate" | "preserve"; fixedAssessment?: CallAssessmentDecision }
@@ -39,6 +42,7 @@ export type TextProcessingProviderRequest = {
   provider: "openai";
   model: string;
   startedAt: string;
+  repair?:"grounding";
 };
 export type TextProcessingProviderRequestResult = {
   actualServiceTier?: string | null;
@@ -55,6 +59,7 @@ export type TextProcessingProviderRequestResult = {
   usage: OpenAITextTokenUsage | null;
   errorCode?: TextProcessingError["code"] | null;
   validationCode?: string;
+  diagnostics?:import("@callassist/contracts").PreparationTransportDiagnostics;
 };
 export type TextProcessingRunOptions = {
   profile?: import("@callassist/contracts").PreparationProfile;
@@ -76,10 +81,12 @@ export function textGeneratorVersion(processor: Pick<TextProcessor, "generatorVe
   return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:grounded-v3:${processor.generatorVersion}` : processor.generatorVersion;
 }
 
-/** v4 uses the same extraction contract; its calendar projection stays pinned. */
+/** Older jobs retain their pinned input instructions and calendar projection. */
 export function compatibleTextGeneratorVersion(actual: string, expected: string, kind: TextArtifactKind): boolean {
-  return actual === expected || (kind === "call_summary" && actual.startsWith("summary-v4:grounded-v3:") &&
-    actual.replace(/^summary-v4:/, "summary-v5:") === expected);
+  if (actual === expected) return true;
+  const previous = /^summary-v([4567]):(grounded-v3:.+)$/.exec(actual);
+  const current = /^summary-v([5678]):(grounded-v3:.+)$/.exec(expected);
+  return kind === "call_summary" && !!previous && !!current && Number(previous[1]) < Number(current[1]) && previous[2] === current[2];
 }
 
 export class TextProcessingError extends Error {
@@ -108,7 +115,7 @@ export class TextProcessingError extends Error {
 }
 
 export class TextValidationError extends TextProcessingError {
-  constructor(readonly validationCode: "TEXT_INVALID_SCHEMA" | "TEXT_INVALID_ASSESSMENT" | "TEXT_INVALID_FIXED_ASSESSMENT" | "TEXT_INVALID_REFERENCES" | "TEXT_INVALID_GROUNDING") {
+  constructor(readonly validationCode: "TEXT_INVALID_SCHEMA" | "TEXT_INVALID_ASSESSMENT" | "TEXT_INVALID_FIXED_ASSESSMENT" | "TEXT_INVALID_REFERENCES" | "TEXT_INVALID_GROUNDING", readonly fieldPath?: string) {
     super("TEXT_RESPONSE_INVALID");
   }
 }

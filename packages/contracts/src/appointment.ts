@@ -32,7 +32,7 @@ export type AppointmentAuthorization = z.infer<typeof appointmentAuthorizationSc
 
 /** Historical plans have no booking authority. Never infer it from taskType or prose. */
 export function getAppointmentAuthorization(plan: object): AppointmentAuthorization | null {
-  if ("schemaVersion" in plan && plan.schemaVersion !== "4") return null;
+  if ("schemaVersion" in plan && plan.schemaVersion !== "4" && plan.schemaVersion !== "8") return null;
   if (!("appointmentAuthorization" in plan)) return null;
   const parsed = appointmentAuthorizationSchema.safeParse(plan.appointmentAuthorization);
   return parsed.success ? parsed.data : null;

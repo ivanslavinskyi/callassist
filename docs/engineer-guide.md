@@ -1,7 +1,7 @@
 # SHPROHLI engineer guide
 
-Source checkpoint: 2026-10-07, including call review and owner result emails,
-schema catalog `0001`–`0109`. This describes the
+Source reviewed: 2026-11-08, including native GPT-Live, task information and testing changes,
+schema catalog `0001`–`0115`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
 The dated implementation records in the [documentation index](README.md) retain
@@ -21,6 +21,7 @@ their original verification scope; they are not current deployment status.
 | `apps/api/src/storage` | Durable calls/attempts, immutable revisions, usage/credit writes and admin projections |
 | `apps/api/src/credits`, `beta` | Period allowances, credit funding and service admission/spending controls |
 | `apps/api/src/safety` | Recipient suppression and returned-plan case review |
+| `apps/api/src/testing` | Tester capability, scenario catalog, revision checks, audit and preparation attribution |
 | `apps/api/src/telemetry-export` | Snapshot selection, ZIP generation, retained audio, expiry/revocation |
 | `apps/api/src/notifications` | Separate superadmin and owner delivery outboxes, reports and localized emails |
 | `apps/api/src/content` | CMS seeds, editorial collections and exact public-copy upgrades |
@@ -71,6 +72,13 @@ Email verification is required by default; explicit deferral is available only w
 enabled. Deferral does not mark an address verified. Current policy gates new calls.
 Roles and sensitive reads are checked server-side, not only by hiding controls.
 
+Tester is an independent capability, not a role enum value. Active superadmins
+receive it automatically; they can grant it to eligible accounts in Admin Users.
+The Admin Test scenarios page manages versioned templates. Authorized users see
+active scenario buttons above the objective; insertion changes only that text and
+requires confirmation before replacing an occupied field. It does not prepare or
+start a call. See [access and catalog contracts](task-input-and-testing.md#tester-capability-and-catalog).
+
 Admin registration policy can restrict account phones to Switzerland. It applies
 to registration, unverified-phone correction, verification/resend and phone changes,
 including pending confirmations. The server rechecks policy before provider IO
@@ -85,6 +93,13 @@ versions and snapshot hash. Edits create another revision. Approval binds a prec
 revision/hash and original or translated review receipt. A stale approval cannot
 authorize a changed plan. A recompile that fails before publication preserves the
 previous revision; a published returned plan still needs correction and fresh approval.
+
+Relevant facts may appear in the objective, context, facts list or clarification
+answers. Native startup preserves all of them, with explicit disclosure restrictions
+and exact identifiers. Original sources are inspectable during review; the compiled
+`approvedFacts` list is not the complete disclosure boundary. Appointment authority
+must still come from the objective or clarification answers. Task text never replaces
+the destination phone or required identity fields automatically.
 
 The approval page starts with a compact objective, recipient and important conditions;
 the full plan is collapsed in expandable details. Approval/edit actions stay in a
@@ -110,6 +125,25 @@ can count as substantive. Assessment uncertainty has a bounded settlement path.
 
 ## Current voice runtime
 
+### Local native v2
+
+The local `native_v2` experiment uses `NativeLiveV2Call`, version
+`live-native-context-2026-11-08`. Live receives complete task sources and facts at
+startup, owns the declarative opening, ordinary replies and short closing, and uses
+backend tools at action/refusal/termination boundaries. Optional indexed references
+are fetched only when needed. General/book/confirm_existing/reschedule/cancel profiles
+follow approved authority; numeric terms are checked against recipient quotes.
+Recording starts at connection; refusal triggers durable deletion. This mode requires
+explicit local flags and rejects production. It does not change default deployment
+configuration. See the maintained [native runtime specification](native-live-runtime.md)
+and [validation guide](native-live-validation.md). Runtime flags and preparation
+policy selection are independent; a model change in Admin System does not select
+the integrity compiler.
+
+### Managed default and compatibility paths
+
+The following paragraphs describe the retained managed/default path:
+
 Default `VOICE_RUNTIME_DRIVER=live`, `VOICE_RUNTIME_LIVE_FALLBACK=false`. One
 `UnifiedLiveCall` manages the native session from admission/disclosure through
 conversation and closing. Realtime and legacy hybrid fallback remain deliberate
@@ -124,7 +158,7 @@ ordinary-reply semantic classifier. Calendar/appointment authorization remains
 within the approved time windows and no-new-financial-terms policy. No external
 calendar integration is implied.
 
-For native Live, AMD runs alongside disclosure. Explicit machine/fax outcomes have
+For managed Live, AMD runs alongside disclosure. Explicit machine/fax outcomes have
 their own policy; `unknown` is inconclusive. A later AMD callback cannot reverse
 accepted consent. Consent tools are restricted to the consent stage. Recording
 and task access wait for the required consent/disclosure/recording conditions.
@@ -143,9 +177,10 @@ The audit binds disclosure playback to the consent decision and its method
 recording ID. After recording admission, v9 opens audio forwarding before sending
 task context, so early native speech is preserved. Context acknowledgements gate
 the separate task-start instruction, without moving the audio or transcript
-boundary. That instruction does not establish when speech will arrive. Background
-speech is a leading hypothesis for one delayed production opening; a quiet-room
-comparison is pending. See the [dated call analysis](live-runtime-stability-plan-2026-10-04.md).
+boundary. That instruction does not establish when speech will arrive. Earlier
+audio-gap investigations and their hypotheses remain in the
+[dated call analysis](archive/2026-10/live-runtime-stability-plan-2026-10-04.md); they do not describe
+fresh acceptance of the native-v2 path.
 
 Application-owned speech and terminal playback are journaled; hangup waits for the
 correct uncleared playback mark. Recipient corrections and interrupted playback
@@ -155,7 +190,9 @@ settled-answer grace (5 seconds) and last native voiced-packet quiet window
 (2 seconds), with readiness and backend-occupancy checks; these are not an
 opening-speech delay timer.
 
-Each new native attempt records a runtime descriptor before OpenAI Live/TTS startup:
+### Runtime provenance
+
+Each new Live attempt records a runtime descriptor before OpenAI Live/TTS startup:
 runtime version, optional validated release SHA, compiler/policy versions,
 hashes of instructions and compilation, models, voice, locale and disclosure
 version and pinned consent policy. The optional release value comes from a valid
@@ -163,6 +200,28 @@ version and pinned consent policy. The optional release value comes from a valid
 It contains hashes, not raw prompts, and is cleared by call/account deletion.
 Historical missing descriptors stay null. A code/config change does not
 retroactively identify an old call's runtime.
+
+## Native results and compatibility
+
+Summary-v8 uses an immutable executed source context and original transcript
+evidence. Context v2 includes full original task sources for schema-9 general and
+appointment profiles, or when a native action is present. Native-summary-v3 handles
+conditional task applicability separately from appointment disposition. A correct
+permitted decision not to act can achieve the task; an unknown prerequisite cannot.
+
+Eligible native inputs permit one targeted grounding repair under the shared request
+budget. Long conversations can retain cited extraction with explicit partial coverage
+when full consolidation is unavailable. The card, copy, PDF and emails show that
+limitation. Old ready artifacts remain unchanged; failed native v6/v7 can create a
+new v8 revision. Display revisions do not rewrite canonical credit evidence or charge
+a second user credit. See [results and history](native-live-runtime.md#results-history-and-notifications).
+
+PDFs reserve a first-page AI assessment block before transcript turns. A validated
+summary assessment takes precedence over a saved lifecycle assessment matching the
+exported revision. Pending and unavailable evidence have separate labels; partial
+analysis remains visible. Export uses saved evidence and makes no model request.
+See [PDF assessment](task-input-and-testing.md#transcript-pdf-assessment) for exact
+selection and historical-export behavior.
 
 ## Preparation latency and diagnostics
 
@@ -206,7 +265,7 @@ response headers, body read/parse and numeric provider processing/rate-limit
 metadata. The inspector and export preserve missing historical evidence as
 unknown. Overlapping offsets must not be summed; waiting for headers does not
 prove provider processing time. No raw prompts, headers or audio are added.
-See [transport diagnostics and measurements](preparation-latency-diagnostics-2026-10-04.md).
+See [transport diagnostics and measurements](archive/2026-10/preparation-latency-diagnostics-2026-10-04.md).
 
 The audit found a small local sample's long tail dominated by provider/network
 failures and retries; short initial queue times do not prove zero congestion under
@@ -280,15 +339,34 @@ estimate for the same service. Do not sum different currencies or present a part
 estimate as a complete invoice. Provider billing snapshots may cover a broader
 account or timezone than the selected application's operations.
 
+Live voice uses active session duration; Responses backend reasoning uses separate
+token usage. Cumulative Live updates replace prior observations, and operation
+success alone does not prove final usage. Reasoning tokens are an output-token
+subset, not an additional amount to charge twice. The expense explorer calculates
+stage/model breakdowns across the full selected cohort before limiting recent request
+rows. Requests expose pricing version, requested/actual tier, usage provenance and
+final/provisional/unknown status. Paid diagnostic probes use a separate project and
+ledger; unexplained billing differences remain unattributed.
+
 The expense explorer separates Cost / Usage / Requests and displays incomplete
 coverage. Pricing definitions are in `config/provider-pricing-policy.ts`, request
 journaling in repositories, and admin display helpers in `apps/web/lib/admin-costs.ts`.
 Tariff changes require a new version rather than rewriting historical estimates.
 
+Preparation-time attribution adds tester, ordinary and unclassified cohorts. It
+captures effective access and optional scenario origin independently of approval
+hashes; later grant or catalog edits do not reclassify existing records. Cohort
+subtotals separate usage estimates from reported amounts and are computed before
+recent-row truncation. The UI cohort filter applies to that bounded request list,
+not the provider invoice or all explorer totals. Pricing and credits are unchanged.
+See [attribution and expenses](task-input-and-testing.md#attribution-and-expenses).
+
 ## Telemetry, transcripts and audio export
 
-Structured telemetry excludes raw provider error messages and sensitive prompt
-content. Operational logs use PII-safe error reporting. Native transcript capture,
+Operational telemetry excludes raw provider error messages and sensitive prompt
+content. The separate native protocol trace can retain conversational/context
+payloads encrypted at rest and follows refusal deletion and sensitive export access.
+Operational logs use PII-safe error reporting. Native transcript capture,
 application playback, terminal decision, assessment and credit evidence are
 separate persisted sources. "First audio sent by application" measures application
 egress, not what the recipient heard; playback acknowledgement is stronger evidence.
@@ -299,6 +377,12 @@ revisions are immutable; summaries and translations reference their source/hash.
 Incomplete native captures retain quality flags. Recording retention does not
 imply deleting the retained textual source unless the wider deletion policy applies.
 
+New forms and omitted creation-API settings default audio retention to 30 days;
+the form displays the period without a selector. Explicit 0/7/30 values, historical
+drafts and attempts remain compatible. Recording completion uses the frozen attempt
+policy and preserves the first deadline on repeated callbacks. A text-processing
+retry does not renew audio retention. See [audio retention](task-input-and-testing.md#audio-retention).
+
 In the live browser view, persisted fragments are sorted by arrival order and
 pending SSE fragments follow the saved prefix. Session/event identity deduplicates
 snapshot/SSE overlap; grouping uses that combined order rather than comparing
@@ -306,19 +390,26 @@ speech timestamps with database receipt times. Native partials display their spe
 timestamp instead of the generic live label. These UI changes do not rewrite
 stored transcript boundaries or certify that a fragment was audibly played.
 
-Admin telemetry export v2 includes native captures, immutable contexts/revisions,
+Admin telemetry export v4 includes native captures, immutable contexts/revisions,
 terminal/action evidence, preparation diagnostics, runtime descriptors, budget and
 beta credit provenance, and scoped plan-review evidence. Explicit source inventory
 tests guard new persisted tables and columns. Direct transcript attribution,
 legacy inference and unknown provenance are distinct; export does not invent old
 runtime metadata. Preview shows record coverage and approximate WAV size.
+The root manifest and `coverage.json` identify incomplete attempts, missing trace
+manifests, sequence gaps, payload loss, incomplete final Live usage, deletion and
+audio availability. Existing JSONL versions 2/3 are preserved. Derived timing separates
+audio forwarding, backend/tool processing and acknowledged closing playback; it
+does not certify when a person heard a word. Expense rows expose finality, source,
+pricing version and service tier; stage/model subtotals use the entire selected cohort.
 
 The period selects attempt start times and preparation creation times. Export
 includes associated retained history and recordings for those calls, including
 attempts outside the selected period. New exports default to include audio;
 metadata-only remains an explicit option. Eligible recordings
-must be available, consented, not deletion-pending and within a known retention
-deadline. The database snapshot completes before provider network streaming.
+must be available, have an eligible recording basis (affirmative consent or
+`declarative_local`), not be deletion-pending and be within a known retention deadline.
+The database snapshot completes before provider network streaming.
 Audio is fetched one recording at a time, with the stored channel count. No ASR is
 triggered by export. The manifest records status/reason, byte length, checksum,
 channels and linkage for each recording, including unavailable/missing sources.
@@ -365,11 +456,21 @@ workers; memory development does not run a durable owner queue.
 
 The report binds the exact attempt, executed compilation, transcript revision and
 saved assessment. Confirmed substantive conversations qualify regardless of goal
-success. No-answer, busy, voicemail-only and refused-consent attempts do not. If the
-assessment is unavailable after five minutes, fallback requires recorded consent,
-task-conversation admission and original post-consent turns from both parties;
-application playback/consent text cannot supply that evidence. Missing evidence is
-rechecked for at most 24 hours. A partial transcript is explicitly marked.
+success. No-answer, busy, voicemail-only and refusal/discard attempts do not.
+Recording eligibility accepts affirmative consent or `declarative_local`. The saved
+display assessment and its exact artifact/transcript revision drive the normal path;
+legacy assessments without artifact IDs retain a bounded compatibility selection.
+
+If no ready assessment confirms conversation after five minutes, fallback requires
+task-conversation admission and original turns from both parties. For a native
+transcript, the current filter requires turn timestamps after affirmative consent;
+recording ASR has a separate source rule. A declarative-only native capture has no
+affirmative-consent timestamp, so fallback without a ready assessment can remain
+pending and ultimately produce no email. This is an implemented limitation, not a
+claim that all native email fallback scenarios are complete. Application playback
+and consent text cannot supply conversation evidence. Missing evidence is rechecked
+for at most 24 hours. Partial transcript and partial summary coverage are marked.
+Source: [user-call-report.ts](../apps/api/src/notifications/user-call-report.ts).
 
 HTML and plain-text email reuse the existing logo, typography and footer. They
 contain a compact saved assessment, complete original transcript and an authenticated
@@ -432,6 +533,9 @@ contains the broader route/configuration inventory. Core families:
 | `/api/auth/*` | Registration options, session/login/recovery, verification and legal agreement |
 | `/api/account/*` | Authenticated account, preferences, sessions, export/deletion |
 | `/api/call-preparations*` | Idempotent asynchronous plan preparation and status |
+| `/api/testing/*` | Effective tester capability and active scenario catalog for eligible accounts |
+| `/api/admin/testing/scenarios*` | Superadmin catalog management with immutable revisions |
+| `/api/admin/users/:id/testing-access` | Superadmin capability reads and revision-checked grants |
 | `/api/call-briefs/*` | Owner plans, review/approval/start, attempts, SSE, text/audio and deletion |
 | `/api/call-briefs/:id/recording-transcript` | Owner explicit ASR request, bounded admission |
 | Twilio callback/media routes | Signature/token validation and call/attempt binding |
@@ -466,8 +570,20 @@ and provider admission, observability/retention, deletion guards and policy
 provenance; `0108` adds the Swiss-only account-phone policy with a compatible false
 default. `0109` adds immutable creation UI language and the encrypted owner-email
 outbox with enqueue/redaction triggers; its payload is in the encryption rotation
-inventory. It does not enqueue historical calls. Backfills and existing-account
-policy transitions remain explicit, reviewed actions.
+inventory. It does not enqueue historical calls. `0110` adds native-v2 privacy and
+encrypted trace storage; `0111` scopes native state to attempts; `0112` adds encrypted
+native appointment action revisions. `0113` adds encrypted objective projections
+and the fresh-call 30-day default; `0114` adds testing grants, scenario heads and
+encrypted revisions, audit and preparation attribution; `0115` upgrades known public
+retention copy while preserving historical publications and acceptances.
+These are additive contracts, not permission
+to activate native v2 in production. Backfills and existing-account policy transitions
+remain explicit, reviewed actions.
+
+Legacy plaintext objective projections remain readable until explicitly backfilled
+using the existing keyring. The backfill defaults to a count-only dry run, encrypts
+and verifies batches under `--execute`, and does not rewrite approval hashes.
+See [the command and compatibility rules](task-input-and-testing.md#objective-storage-and-backfill).
 
 Deletion spans call inputs, transcripts, recordings, derived artifacts, safety
 notes and generated archives. Do not extend source retention merely to complete an
@@ -505,6 +621,11 @@ Run web/contracts tests through their package scripts. CI checks the migration
 catalog, fresh schema, privacy/re-encryption/recovery, dependency audit, copy,
 license, lint, types, tests and build. CI result and real-provider acceptance are
 separate evidence.
+
+The [native validation guide](native-live-validation.md) includes task-source,
+retention, tester access, attribution and PDF checks. The
+[feature implementation record](reports/task-input-testing-implementation-2026-11-08.md)
+lists dated results; commands in this guide are procedures, not a fresh test receipt.
 
 For public SEO changes, run `node scripts/check-public-seo.mjs https://shprohli.ch`
 against the deployed site, or pass a local server origin followed by its configured

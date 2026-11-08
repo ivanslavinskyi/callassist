@@ -23,7 +23,8 @@ export const adminNavigation: readonly AdminNavigationGroup[] = [
       { href: "/admin/users", label: "Users", roles: operationalRoles },
       { href: "/admin/credits", label: "Credits", roles: operationalRoles },
       { href: "/admin/safety", label: "Safety", roles: operationalRoles },
-      { href: "/admin/system", label: "System", roles: operationalRoles }
+      { href: "/admin/system", label: "System", roles: operationalRoles },
+      { href: "/admin/testing", label: "Test scenarios", roles: ["superadmin"] }
     ]
   },
   {

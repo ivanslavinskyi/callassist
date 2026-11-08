@@ -1,60 +1,69 @@
 # Documentation
 
-Current source reference, updated 2026-10-07 for call review and owner result emails
-(schema 0001–0109; implementation verification is recorded below):
+**Source reviewed:** 2026-11-08, current working tree; schema catalog `0001`–`0115`.
 
-- [Engineer guide](engineer-guide.md): architecture, domain rules, runtime, API map,
-  languages, storage, costs, telemetry, permissions and development workflow.
-- [Architecture entry point](architecture.md) and [API/configuration reference](runtime-reference.md).
-- [Preparation runtime](preparation-runtime.md): current model selection, role workers,
-  shared admission, deadlines, streaming protection and verification tools.
+The maintained documents describe implemented behavior. Native GPT-Live v2 was
+accepted as the stable implementation on 2026-11-08 after local telephone testing.
+Its current configuration still requires explicit local activation and blocks
+production activation until the separate rollout. Managed Live remains the
+configuration default and rollback path. Source availability and local verification
+do not establish what is deployed. See the [release decision](reports/native-v2-stable-acceptance-2026-11-08.md).
 
-Dated design and verification records (their tests and observations retain their original dates):
+## Maintained references
 
-- [Universal user-information disclosure plan, 4 November](user-information-disclosure-plan-2026-11-04.md):
-  minimal shared compiler/Live/backend instruction, existing translated snapshots,
-  482 regression checks and manual conversation acceptance pending.
-- [No-phone model probe results, 2 November](voice-no-call-results-2026-11-02.md):
-  authorized $5 smoke, 16 backend requests and 6 synthetic Live sessions; findings,
-  budget accounting and harness limits. Release held; no telephone calls.
-- [Controlled voice acceptance, 2 November](voice-acceptance-protocol-2026-11-02.md):
-  synthetic actor scripts, baseline/candidate matrix, offline worksheet generator,
-  evidence and stop criteria. No external calls or release approval.
-- [Real-call hardening plan, 2 November](real-call-hardening-plan-2026-11-02.md):
-  evidence from a successful appointment call, independent fixes, runtime invariants,
-  regression checks and rollback criteria.
-- [Real-call implementation and verification, 2 November](real-call-hardening-implementation-2026-11-02.md):
-  stages A–H: baseline, summary selection, spoken timezone copy, service speech,
-  continuation recovery, closing investigation, playback diagnostics and optional
-  clinic preparation; 4 November precommit fixes cover archive-compatible admin
-  reads, baseline loading and the test runner, with regression results and rollout
-  constraints. Local verification; no production rollout or new telephone call.
+| Document | Purpose |
+| --- | --- |
+| [Architecture](architecture.md) | Components, ownership and evidence boundaries |
+| [Engineer guide](engineer-guide.md) | Repository map, shared domain rules, development and operations interfaces |
+| [Preparation runtime](preparation-runtime.md) | Policy/compiler versions, input limits, user-facing failures, admission and diagnostics |
+| [Native GPT-Live runtime](native-live-runtime.md) | Startup context, prompts, action profiles, recording, closing, assessment, telemetry and costs |
+| [Runtime and API reference](runtime-reference.md) | Environment settings, API inventory and managed/legacy compatibility behavior |
+| [Native validation](native-live-validation.md) | Reproducible checks, paid-probe boundaries, telephone scenarios and troubleshooting |
+| [Task information and testing](task-input-and-testing.md) | Information sources, 30-day audio default, tester grants, scenario catalog, expense attribution and PDF assessment |
 
-- [Call review and user result email implementation](call-review-and-user-email-plan-2026-10-07.md):
-  approved behavior, completed implementation and local verification of demo contrast,
-  responsive approval, creation-language snapshots and durable owner emails.
+## Verification records
 
-- [Hybrid consent implementation](hybrid-consent-implementation-2026-10-04.md):
-  pinned admin policy, deterministic recognition and consent/recording audit.
-- [Live v9 stability and call evidence](live-runtime-stability-plan-2026-10-04.md):
-  historical opening/closing investigation. The engineer guide describes the later
-  opening-audio and browser transcript fixes included in `879dec5`.
-- [Preparation latency diagnostics](preparation-latency-diagnostics-2026-10-04.md):
-  provider/transport measurements, interpretation and verification.
-- [Preparation implementation re-audit](preparation-implementation-audit-2026-10-05.md):
-  reproduced HTTP/retry/deadline defects, incident evidence and a smaller first change.
-- [Preparation performance and scaling plan](preparation-performance-and-scaling-plan-2026-10-05.md):
-  proposed streaming telemetry, admin model and Fast mode policy, worker roles,
-  multiuser concurrency and capacity validation. Not an implementation record.
-- [Preparation implementation evidence](preparation-performance-implementation-2026-10-05.md).
-- [Approved audit and implementation plan](pre-production-audit-and-implementation-plan-2026-10-01.md).
-- [Implementation and verification record](pre-production-implementation-2026-10-01.md).
+[Task information, testing and PDF assessment, 8 November 2026](reports/task-input-testing-implementation-2026-11-08.md)
+records the subsequent feature implementation, migration/backfill, automated checks
+and local restart.
 
-The [archive](archive/README.md) preserves dated investigations, intermediate
-designs and previous acceptance evidence. It is not a current specification.
-Historical files may describe removed components or old limits.
+[Native integrity implementation, 8 November 2026](reports/native-live-integrity-2026-11-08.md)
+records the earlier native integrity checkpoint, dated test evidence, local activation
+and outstanding acceptance. It does not claim fresh telephone validation.
 
-Deployment procedures, backup/recovery runbooks and VPS topology are kept only
-in the ignored local docs/local-operations/ directory. Obtain those operational
-materials directly from the maintainer; they are intentionally absent from a clone.
-No tracked document is evidence of the current production configuration.
+## Implementation plans
+
+[Task input, audio retention and test scenarios](plans/task-input-retention-and-test-scenarios-2026-11-08.md)
+records the approved design and implementation decisions for facts in any task field,
+context semantics, a 30-day audio default, scenario buttons and first-page PDF
+assessment. The [implementation record](reports/task-input-testing-implementation-2026-11-08.md)
+separates completed checks from remaining telephone acceptance.
+The plan remains active as a delivery and acceptance record; its original investigation
+describes the pre-change baseline. Maintained references describe current behavior.
+
+## Historical material
+
+The [archive index](archive/README.md) explains which audits, plans and intermediate
+implementation records were retired from the active documentation and why. Original
+dates, language and test evidence are preserved. An archived proposal is not an
+unimplemented requirement merely because its original checklist remains open.
+
+The reusable [voice acceptance scenario fixture](voice-acceptance-scenarios-2026-11-02.json)
+remains here because executable validation scripts reference it. Its historical
+origin does not make it a substitute for current native acceptance.
+Host topology and deployment runbooks remain local under ignored `local-operations/`.
+
+## Maintenance conventions
+
+- Write maintained documentation in English; retain historical originals as evidence.
+- State scope, status and source-review date. Separate defaults, local selections,
+  supported compatibility behavior and future work.
+- Link to implementation or contracts for normative behavior. Use relative repository
+  links; avoid fragile source line numbers in maintained references.
+- Keep one detailed specification per topic and cross-link it. Update affected
+  references when changing contracts, settings, privacy or externally visible behavior.
+- Record verification with its date and limits. Distinguish offline tests, paid model
+  probes, telephone acceptance and deployment evidence.
+- Archive superseded records with an English notice and update inbound links.
+  Do not archive a still-used fixture or a unique current requirement without moving
+  that requirement into a maintained reference.

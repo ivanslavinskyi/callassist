@@ -1,7 +1,8 @@
 import "../config/load-env";
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeCreateCallBriefInput, type CallCompilation } from "@callassist/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultPreparationRuntimePolicy, normalizeCreateCallBriefInput, type CallCompilation } from "@callassist/contracts";
+import { nativeAction } from "../test-helpers/native-appointment";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresAuthRepository } from "../auth/postgres-auth-repository";
 import { InMemoryCallRepository } from "./in-memory-call-repository";
@@ -13,10 +14,11 @@ import { createCompilationSnapshotHash } from "../brief-compiler/compilation-int
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 
 const closers: Array<() => Promise<unknown>> = [];
+let preparedDatabase: ReturnType<typeof isolatedTestDatabase> | null = null;
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); vi.restoreAllMocks(); });
-async function fixture(driver: "memory" | "postgres", status = "no-answer", legacy = false) {
-  const db = driver === "postgres" ? isolatedTestDatabase() : null;
-  if (db) { closers.push(() => db.teardown()); await db.setup(); }
+async function fixture(driver: "memory" | "postgres", status = "no-answer", legacy = false, native = false) {
+  const db = driver === "postgres" ? preparedDatabase : null;
+  if (driver === "postgres" && !db) throw Error("POSTGRES_FIXTURE_NOT_READY");
   const repository: CallRepository = db ? new PostgresCallRepository(db.url, Buffer.alloc(32, 15)) : new InMemoryCallRepository();
   let owner: string = randomUUID();
   if (db) {
@@ -25,7 +27,12 @@ async function fixture(driver: "memory" | "postgres", status = "no-answer", lega
     await auth.markPhoneVerified(owner, new Date().toISOString(), "+41790000001");
   }
   const compiler = new DeterministicBriefCompiler();
+  const originalCompile = compiler.compile.bind(compiler);
   const compile = vi.spyOn(compiler, "compile");
+  // Pin both generations explicitly; legacy retry tests must not silently
+  // inherit the current native compiler's default schema.
+  compile.mockImplementation((input,revision,options)=>originalCompile(input,revision,{...options,
+    policy:{...defaultPreparationRuntimePolicy,promptVersion:native?"preparation-live-native-actions-2026-11-06":"preparation-2026-10-05"}}));
   const service = new CallService(repository, undefined, undefined, undefined, compiler, undefined, undefined, { durableWorkerEnabled: false });
   closers.push(() => service.close());
   await repository.grantSignupCredits(owner);
@@ -42,6 +49,51 @@ async function fixture(driver: "memory" | "postgres", status = "no-answer", lega
 }
 
 describe.each(["memory", "postgres"] as const)("repeat unanswered calls on %s", driver => {
+  // Database creation/migrations use the hook budget, not the runtime assertion timeout.
+  beforeEach(async()=>{
+    preparedDatabase=null;
+    if(driver==="postgres") { const db=isolatedTestDatabase();preparedDatabase=db;closers.push(()=>db.teardown());await db.setup(); }
+  });
+  async function nativeMachine() {
+    const f=await fixture(driver,"in-progress",false,true),now=new Date().toISOString();
+    await f.repository.nativeLive.reserve(f.source.id,f.started.attempt.id);
+    await f.repository.nativeLive.bind(f.started.attempt.id,f.providerId);
+    const binding={attemptId:f.started.attempt.id,providerCallId:f.providerId,snapshotHash:f.started.attempt.compilationSnapshotHash!,now};
+    await f.service.recordTelemetry(f.source.id,{callAttemptId:f.started.attempt.id,idempotencyKey:"native-amd-pending",
+      payload:{name:"answering.updated",metadata:{phase:"pending",policyVersion:"twilio-async-live-inconclusive-v3",execution:"async",
+        mode:"Enable",answeredBy:null,decision:null,streamAdmitted:false,observedAt:now,durationMs:null,message:"not_requested",failure:null}}});
+    expect((await f.repository.transitionAnswering(f.source.id,{...binding,kind:"admit"})).applied).toBe(true);
+    await f.service.recordTelemetry(f.source.id,{callAttemptId:f.started.attempt.id,idempotencyKey:"native-recording",
+      payload:{name:"recording.started",metadata:{providerStatus:"in-progress",recordingBasis:"declarative_local"}}});
+    await f.service.recordTelemetry(f.source.id,{callAttemptId:f.started.attempt.id,idempotencyKey:"native-greeting",payload:{name:"conversation.started",metadata:{}}});
+    expect((await f.repository.transitionAnswering(f.source.id,{...binding,kind:"resolve",answeredBy:"machine_start",durationMs:2977})).applied).toBe(true);
+    expect((await f.repository.transitionAnswering(f.source.id,{...binding,kind:"dispatch"})).applied).toBe(true);
+    await f.repository.applyProviderStatus(f.providerId,"completed","completed",f.source.id);
+    return f;
+  }
+  it("retries a recorded native machine leg as one fresh review, keeping the source recording",async()=>{
+    const f=await nativeMachine(),before=(await f.repository.get(f.source.id))!;
+    expect(before.brief.lifecycle).toMatchObject({result:"automated_answer",credit:"returned",consent:"not_requested"});
+    expect(before.recording).toMatchObject({recordingBasis:"declarative_local"});
+    expect(before.compilation?.compiledBrief?.schemaVersion).toBe("9");
+    const count=f.compile.mock.calls.length;
+    const [first,second]=await Promise.all([f.service.repeatUnansweredCall(f.source.id,f.owner),f.service.repeatUnansweredCall(f.source.id,f.owner)]);
+    expect(first.id).toBe(second.id);expect(first.status).toBe("review_required");expect(f.compile).toHaveBeenCalledTimes(count);
+    const copy=(await f.repository.get(first.id))!;
+    expect(copy.compilation?.snapshotHash).toBe(before.compilation?.snapshotHash);expect(copy.compilation?.approvedAt).toBeNull();
+    expect(copy.recording).toBeNull();expect(copy.transcript).toEqual([]);expect(copy.nativeAppointmentAction).toBeNull();
+    expect(await f.repository.getLatestAttempt(first.id)).toBeNull();expect(await f.repository.getCurrentReviewReceipt(first.id)).toBeNull();
+    expect((await f.repository.get(f.source.id))?.recording?.id).toBe(before.recording?.id);
+    await expect(f.repository.startAttempt(first.id,{provider:"twilio",userId:f.owner})).rejects.toMatchObject({code:"CALL_NOT_READY"});
+  });
+  it("rejects a native machine retry when an action exists, including at the repository boundary",async()=>{
+    const f=await nativeMachine();
+    await f.repository.nativeLive.saveAction(nativeAction(f.source.id,f.started.attempt.id,f.started.attempt.compilationSnapshotHash!));
+    await expect(f.service.repeatUnansweredCall(f.source.id,f.owner)).rejects.toMatchObject({code:"CALL_RETRY_NOT_AVAILABLE"});
+    const snapshot=(await f.repository.get(f.source.id))!,compilation={...structuredClone(snapshot.compilation!),approvedAt:null,compilerResponseId:null};
+    await expect(f.repository.create(compilation.rawBrief,compilation,f.owner,f.started.attempt.id,undefined,
+      {callId:f.source.id,attemptId:f.started.attempt.id})).rejects.toMatchObject({code:"CALL_RETRY_NOT_AVAILABLE"});
+  });
   it("prepares a normalized legacy copy while preserving its source approval and delivery intent", async () => {
     const f = await fixture(driver, "no-answer", true);
     const source = await f.repository.get(f.source.id);
@@ -137,9 +189,9 @@ describe.each(["memory", "postgres"] as const)("repeat unanswered calls on %s", 
     const source = await f.repository.getPlanSource(f.source.id);
     const artifact = await f.repository.enqueueTextArtifact({ callId: f.source.id, kind: "plan_review", compilationId: source.compilationId,
       sourceHash: source.snapshotHash, targetLanguage: "en", generatorVersion: "test-v1" });
-    const job = (await f.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: randomUUID(),
+    const job = (await f.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: randomUUID(), useDatabaseTime:true,
       now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }))!;
-    const lease = { jobId: job.id, workerId: job.leaseOwner!, checkedAt: new Date().toISOString(), generation: job.generation, attemptNumber: job.attemptCount };
+    const lease = { jobId: job.id, workerId: job.leaseOwner!, checkedAt: job.leasedAt!, generation: job.generation, attemptNumber: job.attemptCount };
     await f.repository.claimTextArtifact(artifact.id, lease);
     const ready = await f.repository.completeTextArtifact(artifact.id, { fields: [{ id: "localizedObjective", text: "Ask office opening hours" }] }, lease);
     await f.repository.completeDurableJob(job.id, job.leaseOwner!, new Date().toISOString());

@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import { pcm24kToPcmu8k, renderSpeech } from "./rendered-speech";
 
 describe("application-owned rendered speech", () => {
+  it("separates response headers from the buffered body without releasing partial audio", async () => {
+    vi.useFakeTimers();
+    try {
+      const body = new ReadableStream<Uint8Array>({ start(controller) {
+        setTimeout(() => { controller.enqueue(Buffer.alloc(4_800)); controller.close(); }, 100);
+      } });
+      const speechFetch = vi.fn<typeof fetch>(() => new Promise(resolve => setTimeout(() => resolve(new Response(body)), 30)));
+      const rendering = renderSpeech({ apiKey: "test", text: "Exact disclosure", locale: "en-GB", voice: "cedar", speechFetch });
+      let resolved = false; void rendering.then(() => { resolved = true; });
+      await vi.advanceTimersByTimeAsync(31); expect(resolved).toBe(false);
+      await vi.advanceTimersByTimeAsync(69);
+      expect((await rendering).timings).toEqual({ headersMs: 30, bodyMs: 70, conversionMs: 0 });
+    } finally { vi.useRealTimers(); }
+  });
   it("requests exact text with the approved voice and emits 20 ms PCMU frames", async () => {
     const pcm = Buffer.alloc(24_000 * 2); // one second of mono PCM16 silence
     const speechFetch = vi.fn<typeof fetch>(async (_url, init) => {

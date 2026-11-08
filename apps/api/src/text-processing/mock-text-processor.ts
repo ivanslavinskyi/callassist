@@ -6,6 +6,7 @@ import {
   type TextProcessor
 } from "./text-processor";
 import { validateTextProcessingInput, validateTextProcessingOutput } from "./text-validation";
+import { nativeSummaryAuthority } from "./native-summary";
 
 export class MockTextProcessor implements TextProcessor {
   readonly driver = "mock" as const;
@@ -21,13 +22,16 @@ export class MockTextProcessor implements TextProcessor {
     validateTextProcessingInput(input);
     if (options.signal?.aborted) throw new TextProcessingError("TEXT_REQUEST_FAILED");
     const prefix = `[MOCK ${input.targetLanguage}: untranslated source] `;
+    const native = nativeSummaryAuthority(input);
     const output = this.#fixture ? this.#fixture(structuredClone(input)) :
       input.kind === "plan_review" || input.kind === "clarification_review"
         ? { fields: input.fields.map((field) => ({ id: field.id, text: prefix + field.text })) }
         : input.kind === "transcript_translation"
           ? { segments: input.segments.map((segment) => ({ id: segment.id, text: prefix + segment.text })) }
           : input.extraction ? { ...input.extraction, overview: [] }
-          : { schemaVersion: input.sourceContext ? 3 : 2, ...(input.sourceContext ? { appointmentExtraction: { candidates: [], conditions: [] }, unresolvedDetails: [] } : {}), overview: [], findings: input.checks.map(check => ({
+          : { schemaVersion: input.sourceContext ? 3 : 2, ...(input.sourceContext ? { appointmentExtraction: { candidates: [], conditions: [], ...(native ? { nativeOutcome: {
+            operation: native.operation, disposition: "unconfirmed", candidateId: null, previousAppointmentReleased: null, sourceSegmentIds: []
+          } } : {}) }, unresolvedDetails: [] } : {}), overview: [], findings: input.checks.map(check => ({
             id: check.id, label: prefix + "Result",
             text: "[MOCK: no factual summary has been generated]", certainty: "unknown", sourceSegmentIds: []
           })), nextSteps: [], unresolved: input.sourceContext ? [] : ["[MOCK: no factual summary has been generated]"] };

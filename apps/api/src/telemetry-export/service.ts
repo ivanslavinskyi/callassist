@@ -79,7 +79,7 @@ export class TelemetryExportService {
       SELECT count(*)::int AS recordings, COALESCE(sum(r.duration_seconds*16000::bigint*r.channels),0)::double precision AS "estimatedBytes",
       count(*) FILTER(WHERE r.duration_seconds IS NULL OR r.channels IS NULL)::int AS "unknownSizes", min(r.delete_after) AS "earliestDeadline"
       FROM call_recordings r WHERE r.call_brief_id IN (SELECT id FROM export_calls WHERE available) AND r.status='available'
-        AND r.deleted_at IS NULL AND r.consent_granted_at IS NOT NULL AND r.delete_after>now()`, [period.from, period.to]);
+        AND r.deleted_at IS NULL AND (r.consent_granted_at IS NOT NULL OR r.recording_basis='declarative_local') AND r.delete_after>now() AND NOT EXISTS(SELECT 1 FROM live_attempt_privacy p WHERE p.call_attempt_id=r.call_attempt_id AND p.state<>'active')`, [period.from, period.to]);
     const [coverage] = await this.sql.unsafe<Record<string, number>[]>(exportCoverageQuery, [period.from, period.to]);
     return { ...row!, earliestDeadline: row?.earliestDeadline?.toISOString() ?? null, coverage: coverage ?? {} };
   }
@@ -220,7 +220,7 @@ export class TelemetryExportService {
       if (job.include_audio) await this.sql.begin(async tx => {
         await fence(tx);
         for (const recording of captured!.recordings) {
-          if (recording.status !== "available" || !recording.consentAt || recording.deletedAt || !recording.deleteAfter || Date.parse(recording.deleteAfter) <= Date.now()) continue;
+          if (recording.status !== "available" || (!recording.consentAt && recording.recordingBasis !== "declarative_local") || recording.deletedAt || !recording.deleteAfter || Date.parse(recording.deleteAfter) <= Date.now()) continue;
           await tx`INSERT INTO admin_telemetry_export_recordings(export_id,generation,recording_id,delete_after)
             VALUES(${job.id},${job.generation},${recording.id},${recording.deleteAfter}) ON CONFLICT DO NOTHING`;
         }
@@ -256,13 +256,13 @@ export class TelemetryExportService {
   }
   private async fetchAudio(recording: ExportRecording, signal: AbortSignal, check: () => Promise<void>): ReturnType<ArchiveAudioAccess> {
     await check();
-    const [current] = await this.sql`SELECT r.status,r.deleted_at,r.delete_after,r.consent_granted_at
+    const [current] = await this.sql`SELECT r.status,r.deleted_at,r.delete_after,r.consent_granted_at,r.recording_basis
       FROM call_recordings r JOIN call_briefs b ON b.id=r.call_brief_id JOIN users u ON u.id=b.user_id
-      WHERE r.id=${recording.id} AND b.data_deleted_at IS NULL AND u.status<>'deleted'
+      WHERE r.id=${recording.id} AND NOT EXISTS(SELECT 1 FROM live_attempt_privacy p WHERE p.call_attempt_id=r.call_attempt_id AND p.state<>'active') AND b.data_deleted_at IS NULL AND u.status<>'deleted'
         AND NOT EXISTS(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.id AND d.status<>'completed')`;
     if (!current || current.deleted_at || current.status === "deleted" || current.status === "deleting") return { unavailable: "deleted", reason: "source_deleted" };
     if (current.delete_after && new Date(current.delete_after).getTime() <= Date.now()) return { unavailable: "expired", reason: "retention_expired" };
-    if (current.status !== "available" || !current.consent_granted_at || !current.delete_after || !this.mediaProvider?.streamRecordingMedia ||
+    if (current.status !== "available" || (!current.consent_granted_at && current.recording_basis !== 'declarative_local') || !current.delete_after || !this.mediaProvider?.streamRecordingMedia ||
       !recording.providerRecordingId || recording.provider !== "twilio" || ![1,2].includes(recording.channels ?? 0)) return { unavailable: "unavailable", reason: "media_unavailable" };
     for (let attempt=0; attempt<3; attempt++) {
       await check();

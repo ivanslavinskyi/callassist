@@ -44,6 +44,15 @@ export function projectPlanReview(compilation: CallCompilation, source: PlanSour
     }
     compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText, (text) => { fact.callLanguageText = text; }));
     compiled.blockingIssues.forEach((issue, index) => add(`blockingIssues.${index}.question`, issue.question, (text) => { issue.question = text; }));
+    if ("contextAppendix" in compiled) compiled.contextAppendix.forEach((section,index) => {
+      for (const key of ["title","description","content"] as const) add(`contextAppendix.${index}.${key}`,section[key],text => {section[key]=text;});
+    });
+    if (compiled.schemaVersion === "9" && compiled.nativeAppointmentAuthorization) {
+      const native = compiled.nativeAppointmentAuthorization;
+      add("nativeAppointmentAuthorization.serviceDescription",native.serviceDescription,text=>{native.serviceDescription=text;});
+      native.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.requirements.${index}.description`,item.description,text=>{item.description=text;}); });
+      native.alternatives.forEach((alternative,a)=>alternative.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.alternatives.${a}.requirements.${index}.description`,item.description,text=>{item.description=text;}); }));
+    }
     const authorization = "appointmentAuthorization" in compiled ? compiled.appointmentAuthorization : null;
     if (authorization) add("appointmentAuthorization.serviceDescription", authorization.serviceDescription, (text) => {
       authorization.serviceDescription = text;

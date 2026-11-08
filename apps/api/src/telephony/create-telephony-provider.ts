@@ -19,7 +19,7 @@ export function createTelephonyProviderFromEnv(): TelephonyProvider {
       authToken,
       fromNumber,
       publicBaseUrl,
-      asyncAnswering: asyncAmd === "true" && voiceRuntimeMode(process.env) === "unified_live"
+      asyncAnswering: asyncAmd === "true" && ["unified_live", "live_native_v1", "live_native_v2"].includes(voiceRuntimeMode(process.env))
     });
   }
 

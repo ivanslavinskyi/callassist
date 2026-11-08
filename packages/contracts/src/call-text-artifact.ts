@@ -3,6 +3,7 @@ import { z } from "zod";
 import { languageTagSchema, textLanguageSchema } from "./languages";
 import { callAssessmentDecisionSchema } from "./call-assessment";
 import { appointmentExtractionSchema, summaryCalendarSchema, summarySourceContextSchema } from "./summary-source";
+import { archivedSummaryAssessmentSchema, archivedSummaryExtractionSchema, archivedSummaryCalendarSchema } from "./archived-summary";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const textArtifactKindSchema = z.enum(["plan_review", "clarification_review", "transcript_translation", "call_summary"]);
@@ -28,12 +29,14 @@ export const summaryItemSchema = z.strictObject({
   sourceSegmentIds: z.array(z.string().min(1)).max(30)
 });
 export const callSummaryPayloadSchema = z.strictObject({
-  schemaVersion: z.union([z.literal(2), z.literal(3)]),
-  appointmentExtraction: appointmentExtractionSchema.optional(),
+  evaluationCoverage: z.strictObject({ version: z.literal(1), status: z.literal("partial"),
+    reason: z.enum(["input_limit", "assessment_unavailable"]), extractedParts: z.number().int().positive(), totalParts: z.number().int().positive() }).optional(),
+  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  appointmentExtraction: z.union([archivedSummaryExtractionSchema, appointmentExtractionSchema]).optional(),
   unresolvedDetails: z.array(z.strictObject({ checkId: z.string().min(1).max(160),
     reason: z.literal("conversation_evidence"), text: z.string().min(1).max(4000) })).max(30).optional(),
-  calendar: summaryCalendarSchema.optional(),
-  assessment: callAssessmentDecisionSchema.optional(),
+  calendar: z.union([archivedSummaryCalendarSchema, summaryCalendarSchema]).optional(),
+  assessment: z.union([archivedSummaryAssessmentSchema, callAssessmentDecisionSchema]).optional(),
   overview: z.array(z.strictObject({
     label: z.string().trim().min(1).max(160).nullable(), text: z.string().trim().min(1).max(1200),
     findingIds: z.array(z.string().min(1)).min(1).max(30)
@@ -44,7 +47,7 @@ export const callSummaryPayloadSchema = z.strictObject({
 }).superRefine((value, context) => {
   if (value.schemaVersion === 2 && (value.calendar || value.appointmentExtraction))
     context.addIssue({ code: "custom", message: "Calendar evidence requires schema 3" });
-  if (value.schemaVersion === 3 && !value.appointmentExtraction)
+  if (value.schemaVersion >= 3 && !value.appointmentExtraction)
     context.addIssue({ code: "custom", message: "Schema 3 requires appointment extraction" });
   const ids = new Set(value.findings.map(item => item.id));
   if (ids.size !== value.findings.length) context.addIssue({ code: "custom", message: "Duplicate finding id", path: ["findings"] });

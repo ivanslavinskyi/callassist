@@ -62,6 +62,15 @@ const facts: AdminOperationsFacts = {
 };
 
 describe("admin operations overview", () => {
+  it("aggregates every operation before limiting recent rows and labels provisional Live duration",()=>{
+    const buckets=Array.from({length:105},(_,i)=>providerBucket({operationId:`00000000-0000-4000-8000-${String(i).padStart(12,"0")}`,startedAt:"2026-08-21T12:00:00.000Z",operationType:"realtime_session",stage:"live_conversation",model:"gpt-live-1",outcome:"succeeded",usageFinalized:i!==0,durationSeconds:60,durationSamples:1,billableSeconds:60,billableSamples:1}));
+    const overview=buildAdminOperationsOverview({facts:{...facts,providerUsage:{...facts.providerUsage,buckets}},kind:"24h",from:"2026-08-21T12:00:00.000Z",to:"2026-08-22T12:00:00.000Z",costPolicy:unavailableOperationalCostPolicy});
+    const usage=overview.cost.providerUsage;
+    expect(usage.status).toBe("partial");expect(usage.records).toHaveLength(100);
+    expect(usage.records[0]).toMatchObject({finality:"provisional",missingMetrics:["final_session_usage_missing"]});
+    expect(usage.breakdown).toMatchObject([{operations:105,incompleteOperations:1,calculatedUsdMicros:usage.components.realtime.calculatedUsdMicros}]);
+    expect(usage.calculatedUsdMicros).toBe(usage.components.realtime.calculatedUsdMicros);
+  });
   it("uses explicit denominators and leaves unavailable cost empty", () => {
     const overview = buildAdminOperationsOverview({
       facts,

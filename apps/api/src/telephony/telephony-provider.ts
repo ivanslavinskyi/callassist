@@ -59,6 +59,7 @@ export type MediaStreamBinding = {
 
 export type StartTelephonyCallOptions = {
   maxDurationSeconds: number;
+  nativeRecording?: { recordingId: string };
   binding?: MediaStreamBinding;
   executionSnapshot?: ApprovedExecutionSnapshot;
 };
@@ -119,6 +120,7 @@ export interface TelephonyProvider {
   getRecordingMedia(providerRecordingId: string): Promise<RecordingMedia>;
   streamRecordingMedia?(providerRecordingId: string, channels: 1 | 2, signal: AbortSignal): Promise<RecordingMediaStream>;
   deleteRecording(providerRecordingId: string): Promise<void>;
+  purgeCallRecordings?(providerCallId: string): Promise<void>;
   getCallStatus?(providerCallId: string): Promise<ProviderCallStatus>;
   getRecordingStatus?(
     providerRecordingId: string

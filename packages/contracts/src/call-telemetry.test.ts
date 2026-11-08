@@ -6,6 +6,26 @@ import {
 } from "./call-telemetry";
 
 describe("durable call telemetry contracts", () => {
+  it.each([
+    { kind: "startup", path: "cold", outcome: "released", liveReadyMs: 120, admissionToReleaseMs: 300 },
+    { kind: "startup", path: "prepared", outcome: "not_released", liveReadyMs: null, admissionToReleaseMs: null },
+    { kind: "consent_to_audio", source: "native", decisionToSendMs: 120, lastBoundaryToSendMs: null, recordingAdmissionMs: 100, afterRecordingAdmissionMs: 20 },
+    { kind: "task_context", durationMs: 30, firstAckMs: 20, commands: 3, utf8Bytes: 1000 },
+    { kind: "speech_render", operationId: "11111111-1111-4111-8111-111111111111", stage: "disclosure", outcome: "failed",
+      durationMs: 20, journalBeforeMs: 10, renderMs: 10, journalAfterMs: null },
+    { kind: "audio_output", frames: 5, sentAudioMs: 100, clearCount: 1, maxEstimatedQueueMs: 100,
+      nativeFrames: 1, nativeAudioMs: 20, nativeMaxDeltaMs: 20, renderCacheHits: 2, renderCacheMisses: 1 }
+  ])("accepts technical $kind diagnostics and rejects content or invalid durations", diagnostic => {
+    const input = (value: object) => ({ idempotencyKey: "diagnostic:1", payload: { name: "conversation.task", metadata: {
+      runtimeVersion: "live-managed-v9", phase: "diagnostic", revision: 1, diagnostic: value
+    } } });
+    expect(callTelemetryEventInputSchema.safeParse(input(diagnostic)).success).toBe(true);
+    for (const extra of [{ text: "private speech" }, { audio: "bytes" }, { plan: "private plan" }, { kind: "private" }])
+      expect(callTelemetryEventInputSchema.safeParse(input({ ...diagnostic, ...extra })).success).toBe(false);
+    const field = Object.keys(diagnostic).find(key => key.endsWith("Ms"))!;
+    for (const invalid of [-1, Infinity, NaN])
+      expect(callTelemetryEventInputSchema.safeParse(input({ ...diagnostic, [field]: invalid })).success).toBe(false);
+  });
   it("accepts bounded playback milestones while rejecting content and invalid values", () => {
     const playback = { markId: "live-application-4-test", owner: "closing", outcome: "interrupted", reason: "acoustic_activity",
       requestedAt: "2026-11-02T08:35:25.830Z", renderedAt: "2026-11-02T08:35:27.824Z",
@@ -20,7 +40,7 @@ describe("durable call telemetry contracts", () => {
     }
   });
   it("retains historical task events and records recovery without recipient content", () => {
-    for (const runtimeVersion of ["live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9"]) {
+    for (const runtimeVersion of ["live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9", "live-native-v1"]) {
       const payload = { name: "conversation.task", metadata: { runtimeVersion, phase: "stale", revision: 3,
         cause: "obsolete_backend_timeout", responseId: "old-response", released: false } };
       expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: "recovery:1", payload }).success).toBe(true);
@@ -30,7 +50,7 @@ describe("durable call telemetry contracts", () => {
     }
   });
   it("accepts the stabilization runtime and typed task decisions without storing a spoken summary", () => {
-    for (const runtimeVersion of ["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9"]) {
+    for (const runtimeVersion of ["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v7", "live-managed-v8", "live-managed-v9", "live-native-v1"]) {
       expect(callTelemetryEventInputSchema.safeParse({ idempotencyKey: `live:${runtimeVersion}`, payload: {
         name: "realtime.ready", metadata: { model: "gpt-live-1", transcriptionModel: "gpt-live-1", runtimeVersion }
       } }).success).toBe(true);

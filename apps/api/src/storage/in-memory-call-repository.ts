@@ -1,4 +1,6 @@
+import { MemoryNativeLiveStore } from "./native-live-store";
 import { initialPreparationSettings, PreparationPolicyError } from "./preparation-policy-store";
+import { assertPinnedLiveRuntime } from "../voice/runtime-descriptor";
 import { resolveUiLocale } from "@callassist/contracts";
 import { preparationSettingsUpdateSchema, preparationProfileAdmissionSchema, preparationProfileKey, preparationCheckpointSchema, type PreparationCheckpoint } from "@callassist/contracts";
 import { supportsSummaryAssessment, preparationTransportDiagnosticsSchema, consentDisclosureInputSchema, consentDecisionInputSchema, consentEvidenceSchema,
@@ -232,6 +234,34 @@ function callPreparationFailureCode(
 }
 
 export class InMemoryCallRepository implements CallRepository {
+  readonly testingPreparationAttribution = new Map<string, import("@callassist/contracts").TestingAttribution>();
+  readonly nativeLive = new MemoryNativeLiveStore(state => {
+    const snapshot = this.#calls.get(state.callId);
+    if (!snapshot) return;
+    snapshot.transcript = snapshot.transcript.filter(s => s.callAttemptId !== state.attemptId);
+    if(snapshot.recording && this.#recordingAttempts.get(snapshot.recording.id)===state.attemptId) {
+      snapshot.finalTranscript = null; snapshot.recordingTranscript = null;
+    }
+    this.#nativeCaptures.delete(state.attemptId);
+    this.#callText.redactConversation(state.callId,state.attemptId);
+    for (const [id, decision] of this.#terminalDecisions) if (decision.callAttemptId === state.attemptId) this.#terminalDecisions.delete(id);
+    for (const [id, action] of this.#voiceActions) if (action.callAttemptId === state.attemptId) this.#voiceActions.delete(id);
+    this.#assessments.delete(state.attemptId);
+    this.#authorizedRecordingAttempts.delete(state.attemptId);
+    for(const job of this.#durableJobs.values()) if((job.callAttemptId===state.attemptId || job.recordingId===state.recordingId) &&
+      ["live_transcript_finalization","final_transcription","recording_retention"].includes(job.type) && ["queued","running"].includes(job.status)) {
+      job.status="cancelled";job.leaseOwner=null;job.leasedAt=null;job.leaseExpiresAt=null;job.completedAt=new Date().toISOString();job.lastErrorCode="conversation_discarded";
+    }
+    for (const [id, row] of this.#assessmentRevisions) if (row.callAttemptId === state.attemptId) this.#assessmentRevisions.delete(id);
+    for (const [id, row] of this.#postCallTranscriptionChunks) if (row.recordingId === state.recordingId) this.#postCallTranscriptionChunks.delete(id);
+  }, state => {
+    const snapshot=this.#calls.get(state.callId);
+    if(snapshot && (!snapshot.recording || this.#recordingAttempts.get(snapshot.recording.id)!==state.attemptId)) {
+      snapshot.recording={id:state.recordingId,status:"starting",providerRecordingId:null,consentGrantedAt:null,recordingBasis:"declarative_local",
+        startedAt:null,completedAt:null,durationSeconds:null,channels:null,deleteAfter:null,deletedAt:null,failureReason:null};
+      this.#recordingAttempts.set(state.recordingId,state.attemptId);
+    }
+  });
   #preparationSettings = initialPreparationSettings();
   readonly #preparationCheckpoints = new Map<string, PreparationCheckpoint[]>();
   readonly #diagnosticRevokedUsers = new Set<string>();
@@ -372,6 +402,7 @@ export class InMemoryCallRepository implements CallRepository {
     const parsed = terminalDecisionSchema.parse(input);
     const attempt = this.#attempts.get(parsed.callBriefId)?.find(a => a.id === parsed.callAttemptId);
     if (!attempt || attempt.compilationSnapshotHash !== parsed.snapshotHash || attempt.endedAt) throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
+    if(this.nativeLive.states.get(parsed.callAttemptId)?.state && this.nativeLive.states.get(parsed.callAttemptId)!.state!=="active") throw new Error("LIVE_CONVERSATION_DISCARDED");
     const key = `${parsed.callAttemptId}:${parsed.revision}`;
     const prior = this.#terminalDecisions.get(key);
     if (prior && JSON.stringify(prior) !== JSON.stringify(parsed)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
@@ -447,7 +478,7 @@ export class InMemoryCallRepository implements CallRepository {
   readonly #callPreparationRequests = new Map<string, string>();
   readonly #attempts = new Map<string, CallAttemptRecord[]>();
   readonly #recordingAttempts = new Map<string,string>();
-  readonly #consentedRecordingAttempts = new Set<string>();
+  readonly #authorizedRecordingAttempts = new Set<string>();
   readonly #compilations = new Map<
     string,
     Array<{
@@ -897,6 +928,7 @@ export class InMemoryCallRepository implements CallRepository {
   async recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor) {
     if (this.#callDataDeletions.has(callId) || !this.#calls.has(callId)) throw new CallRepositoryError("CALL_NOT_FOUND");
     if (!(this.#attempts.get(callId) ?? []).some(attempt => attempt.id === attemptId && ["dialing", "in_progress", "awaiting_approval"].includes(attempt.status))) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    assertPinnedLiveRuntime(this.#runtimeDescriptors.get(attemptId), descriptor);
     if (!this.#runtimeDescriptors.has(attemptId)) this.#runtimeDescriptors.set(attemptId, copy(descriptor));
   }
 
@@ -1443,6 +1475,7 @@ export class InMemoryCallRepository implements CallRepository {
       allowedFacts: [],
       updatedAt: input.deletedAt
     };
+    for(const state of this.nativeLive.states.values()) if(state.callId===input.callId) await this.nativeLive.discard(state.attemptId,"owner_deleted");
     this.#callText.redact(input.callId);
     for (const operation of this.#providerOperations.values()) {
       const preparation = "callPreparationId" in operation ? this.#callPreparations.get(operation.callPreparationId) : undefined;
@@ -1902,7 +1935,7 @@ export class InMemoryCallRepository implements CallRepository {
     }
     const action = [...this.#voiceActions.values()].find(a => a.callAttemptId === this.#attempts.get(id)?.at(-1)?.id);
     if(!snapshot.languageContext&&snapshot.compilation) snapshot.languageContext=resolveTaskLanguage({detectedLanguage:snapshot.compilation.compiledBrief?.sourceLanguage,compilationRevision:snapshot.compilation.revision});
-    return {...copy(snapshot),initialDisclosure: initialDisclosureProjection(this.#attempts.get(id)?.at(-1) ?? null),appointmentAction: action ? { callAttemptId: action.callAttemptId, state: action.state, delivery: copy(action.delivery ?? null) } : null,
+    return {...copy(snapshot),nativeAppointmentAction:await this.nativeLive.readAction(this.#attempts.get(id)?.at(-1)?.id??""),initialDisclosure: initialDisclosureProjection(this.#attempts.get(id)?.at(-1) ?? null),appointmentAction: action ? { callAttemptId: action.callAttemptId, state: action.state, delivery: copy(action.delivery ?? null) } : null,
       brief:{...copy(snapshot.brief),lifecycle:this.#lifecycle(snapshot.brief)},planSource:snapshot.compilation?this.#callText.getPlanSource(id):null,
       nativeTranscriptCapture: copy(this.#nativeCaptures.get(this.#attempts.get(id)?.at(-1)?.id??'')??null),
       recordingTranscriptRevision:await this.#callText.getRecordingTranscriptRevision(id),
@@ -1939,6 +1972,7 @@ export class InMemoryCallRepository implements CallRepository {
     return {...text, assessments: copy([...this.#assessments.values()].filter(a=>attempts.has(a.callAttemptId))),
       assessmentRevisions: copy([...this.#assessmentRevisions.values()].filter(a=>attempts.has(a.callAttemptId))),
       terminalDecisions: copy([...this.#terminalDecisions.values()].filter(d=>d.callBriefId===args[0])),
+      nativeAppointmentActions: copy([...this.nativeLive.actions.values()].flat().filter(a=>a.callBriefId===args[0])),
       voiceActions: copy([...this.#voiceActions.values()].filter(a => a.callBriefId === args[0])) };
   }
 
@@ -2215,6 +2249,13 @@ export class InMemoryCallRepository implements CallRepository {
         if (!facts.providerUsage.firstRecordedAt || at < facts.providerUsage.firstRecordedAt) facts.providerUsage.firstRecordedAt = at;
       }
       if (operation.startedAt < from || operation.startedAt >= to) continue;
+      const linkedCallId = "callBriefId" in operation ? operation.callBriefId : null;
+      const attemptId = "callAttemptId" in operation ? operation.callAttemptId : null;
+      const at = (linkedCallId ? this.#attempts.get(linkedCallId)?.find(a=>a.id===attemptId)?.startedAt : null) ?? operation.startedAt;
+      const sourcePreparationId = "callPreparationId" in operation ? operation.callPreparationId :
+        [...this.#callPreparations.values()].filter(p=>p.preparation.callBriefId===linkedCallId && p.preparation.createdAt<=at)
+          .sort((a,b)=>b.preparation.createdAt.localeCompare(a.preparation.createdAt)||b.preparation.id.localeCompare(a.preparation.id))[0]?.preparation.id;
+      const testingAttribution = sourcePreparationId ? this.testingPreparationAttribution.get(sourcePreparationId) ?? null : null;
       facts.providerUsage.operationCount += 1;
       if (operation.operationType === "realtime_session" && operation.result?.outcome !== "succeeded") {
         facts.providerUsage.incompleteSessions = (facts.providerUsage.incompleteSessions ?? 0) + 1;
@@ -2230,7 +2271,7 @@ export class InMemoryCallRepository implements CallRepository {
         }
         const bucket = emptyAdminProviderUsageBucket({ provider: operation.provider, operationType: operation.operationType,
           stage: operation.stage, model: result?.providerModel ?? operation.requestedModel });
-        Object.assign(bucket, { operationId: operation.id, startedAt: operation.startedAt, outcome: result?.outcome ?? null });
+        Object.assign(bucket, { operationId: operation.id, startedAt: operation.startedAt, outcome: result?.outcome ?? null, testingAttribution });
         providerBuckets.set(operation.id, bucket);
         continue;
       }
@@ -2252,8 +2293,12 @@ export class InMemoryCallRepository implements CallRepository {
       const reported = [...this.#providerCosts.values()].filter(c => c.operationId === operation.id && c.currency === "USD");
       bucket.reportedUsdMicros = reported.length ? reported.reduce((sum, c) => sum + c.amountMicros, 0) : null;
       bucket.operationId = operation.id;
+      bucket.testingAttribution = testingAttribution;
       bucket.startedAt = operation.startedAt;
       bucket.outcome = result.outcome;
+      bucket.usageFinalized = typeof result.usage.rawUsage.finalized === "boolean" ? result.usage.rawUsage.finalized : null;
+      bucket.requestedServiceTier = "requestedServiceTier" in operation ? operation.requestedServiceTier ?? null : null;
+      bucket.actualServiceTier = result.actualServiceTier ?? null;
       bucket.pricingVersion = result.usage.pricingVersion;
       bucket.billableCharacters = typeof result.usage.rawUsage.characters === "number" ? result.usage.rawUsage.characters : null;
       bucket.usageRecords += 1;
@@ -2782,7 +2827,7 @@ export class InMemoryCallRepository implements CallRepository {
   async refreshAnsweringApproval(id: string) {
     const snapshot = this.#require(id);
     if (snapshot.brief.status !== "ready" || !snapshot.compilation || (this.#attempts.get(id)?.length ?? 0) > 0) return false;
-    if (this.#currentCompilation(id).executionSnapshot?.version === 3) return false;
+    if ([3, 4, 5, 6, 7, 8].includes(this.#currentCompilation(id).executionSnapshot?.version ?? 0)) return false;
     const compilation = { ...copy(snapshot.compilation), revision: snapshot.compilation.revision + 1,
       approvedAt: null, compiledAt: new Date().toISOString() };
     compilation.snapshotHash = createCompilationSnapshotHash(compilation);
@@ -3162,6 +3207,8 @@ export class InMemoryCallRepository implements CallRepository {
     applicationPlayback?: TranscriptSegment["applicationPlayback"]
   ) {
     const snapshot = this.#require(id);
+    const privacy = this.nativeLive.states.get(this.#attempts.get(id)?.at(-1)?.id ?? "");
+    if (privacy && privacy.state !== "active") throw new Error("LIVE_CONVERSATION_DISCARDED");
     const existing=snapshot.transcript.find(s=>(nativeTiming && s.nativeTiming?.sessionId===nativeTiming.sessionId && s.nativeTiming.eventId===nativeTiming.eventId) ||
       (applicationPlayback && s.applicationPlayback?.sessionId===applicationPlayback.sessionId && s.applicationPlayback.markId===applicationPlayback.markId));
     if(existing) return {segment:copy(existing),snapshot:copy(snapshot)};
@@ -3190,7 +3237,7 @@ export class InMemoryCallRepository implements CallRepository {
     if (!attempt || attempt.endedAt || !recording?.startedAt || !recording.providerRecordingId ||
         this.#recordingAttempts.get(recording.id) !== attemptId ||
         question?.role !== "assistant" || answer?.role !== "recipient" || !question.final || !answer.final ||
-        !question.text.trim() || !answer.text.trim() || question.createdAt < recording.consentGrantedAt ||
+        !question.text.trim() || !answer.text.trim() || (!recording.consentGrantedAt || question.createdAt < recording.consentGrantedAt) ||
         question.createdAt < attempt.startedAt || answer.createdAt < question.createdAt) return false;
     return this.#settleAttempt(id, attempt, "call_charge", evidence) === "call_charge";
   }
@@ -3351,7 +3398,7 @@ export class InMemoryCallRepository implements CallRepository {
     recording.startedAt ??= new Date().toISOString();
     if (recording.status !== "failed") recording.failureReason = null;
     const attempt = (this.#attempts.get(callId) ?? []).find(a=>a.id===this.#recordingAttempts.get(recordingId));
-    if(attempt && recording.consentGrantedAt && recording.startedAt) this.#consentedRecordingAttempts.add(attempt.id);
+    if(attempt && (recording.consentGrantedAt || recording.recordingBasis === "declarative_local") && recording.startedAt) this.#authorizedRecordingAttempts.add(attempt.id);
     const providerStatus = safeTelemetryCode(
       _providerStatus,
       "unknown_provider_status"
@@ -3362,7 +3409,7 @@ export class InMemoryCallRepository implements CallRepository {
       occurredAt: recording.startedAt,
       payload: {
         name: "recording.started",
-        metadata: { providerStatus, recordingId, providerRecordingId }
+        metadata: { providerStatus, recordingId, providerRecordingId, recordingBasis: recording.recordingBasis }
       }
     });
     if (
@@ -3454,7 +3501,7 @@ export class InMemoryCallRepository implements CallRepository {
       recording.status = "failed";
       recording.failureReason = input.failureReason ?? "recording_absent";
     }
-    if(recording.consentGrantedAt && recording.startedAt) this.#consentedRecordingAttempts.add(attempt.id);
+    if((recording.consentGrantedAt || recording.recordingBasis === "declarative_local") && recording.startedAt) this.#authorizedRecordingAttempts.add(attempt.id);
     if (recording.status !== "deleted" && input.providerStatus === "in-progress") {
       this.#appendTelemetry(input.callBriefId, {
         callAttemptId: attempt.id,
@@ -3463,6 +3510,7 @@ export class InMemoryCallRepository implements CallRepository {
         payload: {
           name: "recording.started",
           metadata: { providerStatus: "in-progress", recordingId: input.recordingId, providerRecordingId: input.providerRecordingId,
+            recordingBasis: recording.recordingBasis,
             ...(input.startedAt ? { providerReportedAt: input.startedAt } : {}) }
         }
       });
@@ -3475,11 +3523,12 @@ export class InMemoryCallRepository implements CallRepository {
           name: "recording.completed",
           metadata: {
             durationSeconds: recording.durationSeconds,
+            recordingBasis: recording.recordingBasis,
             channels: recording.channels
           }
         }
       });
-      recording.deleteAfter ??= new Date(Date.parse(recording.completedAt??new Date().toISOString())+snapshot.brief.audioRetentionDays*86_400_000).toISOString();
+      recording.deleteAfter ??= new Date(Date.parse(recording.completedAt??new Date().toISOString())+(attempt.executionSnapshot?.runtime.audioRetentionDays ?? snapshot.brief.audioRetentionDays)*86_400_000).toISOString();
       await this.enqueueDurableJob({type:'recording_retention',recordingId:input.recordingId,runAfter:recording.deleteAfter,maxAttempts:durableJobMaxAttempts.recording_retention});
     } else if (input.providerStatus === "absent") {
       const failureCode = safeTelemetryCode(
@@ -3513,6 +3562,7 @@ export class InMemoryCallRepository implements CallRepository {
   async setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture) {
     const snapshot = this.#require(callId);
     if (!snapshot || !(this.#attempts.get(callId) ?? []).some(a => a.id === attemptId)) return;
+    if (this.nativeLive.states.get(attemptId)?.state && this.nativeLive.states.get(attemptId)!.state !== "active") return;
     const previous=this.#nativeCaptures.get(attemptId);
     if(!previous || (previous.sessionId===capture.sessionId && previous.status==="collecting")) this.#nativeCaptures.set(attemptId,copy(capture));
   }
@@ -3531,6 +3581,7 @@ export class InMemoryCallRepository implements CallRepository {
     this.#assertDurableJobLease(lease);
     const snapshot=this.#require(callId);
     if(this.#attempts.get(callId)?.at(-1)?.id!==attemptId) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
+    if (this.nativeLive.states.get(attemptId)?.state && this.nativeLive.states.get(attemptId)!.state !== "active") throw new Error("LIVE_CONVERSATION_DISCARDED");
     const previous=snapshot.finalTranscript?.source?.startsWith("live_") ? snapshot.finalTranscript : null;
     if(previous?.status==='completed' && !previous.quality) {
       previous.quality=copy(result.quality);
@@ -4357,7 +4408,7 @@ export class InMemoryCallRepository implements CallRepository {
     const attempt=this.#attempts.get(artifact.callId)?.find(a=>a.id===revision?.callAttemptId);
     if (!attempt || attempt.compilationId !== artifact.compilationId || revision?.sourceHash !== artifact.sourceHash ||
       artifact.targetLanguage !== (attempt.contentLanguage ?? this.#require(artifact.callId).languageContext?.taskContentLanguage)) return;
-    if (!this.#consentedRecordingAttempts.has(attempt.id)) return;
+    if (!this.#authorizedRecordingAttempts.has(attempt.id)) return;
     const prior=this.#assessments.get(attempt.id) ?? {callAttemptId:attempt.id,compilationId:attempt.compilationId!,sourceHash:null,decision:null,
       summary:{status:"pending" as const,conversation:null,goal:null,reason:null,updatedAt:new Date().toISOString(),deadlineAt:null,transcriptRevisionId:null,evaluatorVersion:null}};
     if (prior?.summary.status !== "pending") return;
@@ -4378,7 +4429,7 @@ export class InMemoryCallRepository implements CallRepository {
     const snapshot=this.#require(artifact.callId);
     if (artifact.targetLanguage !== (attempt?.contentLanguage ?? snapshot.languageContext?.taskContentLanguage)) return;
     if (!revision || !attempt || attempt.compilationId !== artifact.compilationId || !compilation?.compiledBrief ||
-      revision.sourceHash !== artifact.sourceHash || !this.#consentedRecordingAttempts.has(attempt.id)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
+      revision.sourceHash !== artifact.sourceHash || !this.#authorizedRecordingAttempts.has(attempt.id)) throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");
     let decision;
     try { decision=validateFinalAssessment(artifact.payload.assessment,revision.segments,compilation.compiledBrief.successCriteria.map((_,i)=>`criterion.${i}`)); }
     catch {throw new CallRepositoryError("TEXT_ARTIFACT_INVALID");}
@@ -4427,7 +4478,7 @@ export class InMemoryCallRepository implements CallRepository {
         (entry.type === "call_charge" || entry.type === "call_refund")
     );
     if (alreadySettled) return null;
-    if (type === "call_refund" && !finalSettlement && this.#consentedRecordingAttempts.has(attempt.id) && attempt.compilationId && !this.#callDataDeletions.has(callBriefId)) {
+    if (type === "call_refund" && !finalSettlement && this.#authorizedRecordingAttempts.has(attempt.id) && attempt.compilationId && !this.#callDataDeletions.has(callBriefId)) {
       let assessment=this.#assessments.get(attempt.id);
       if (!assessment) {
         assessment={callAttemptId:attempt.id,compilationId:attempt.compilationId,sourceHash:null,decision:null,

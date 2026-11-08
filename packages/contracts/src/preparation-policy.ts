@@ -21,7 +21,7 @@ export const preparationRuntimePolicySchema = z.strictObject({
   generation: preparationProfileSchema,
   audit: preparationProfileSchema,
   review: preparationProfileSchema,
-  promptVersion: z.literal("preparation-2026-10-05"),
+  promptVersion: z.enum(["preparation-2026-10-05", "preparation-live-native-v2-2026-11-06", "preparation-live-native-actions-2026-11-06", "preparation-live-native-progressive-2026-11-07", "preparation-live-native-integrity-2026-11-08"]),
   pricingVersion: z.literal("openai-preparation-2026-10-05"),
   timeoutMs: z.number().int().min(1000).max(300_000),
   requestTimeoutMs: z.number().int().min(1000).max(120_000),
@@ -29,12 +29,16 @@ export const preparationRuntimePolicySchema = z.strictObject({
   maxOutputTokens: z.number().int().min(2048).max(20_000)
 });
 export type PreparationRuntimePolicy = z.infer<typeof preparationRuntimePolicySchema>;
+/** Read/export only; never use to select a compiler for new work. */
+export const storedPreparationRuntimePolicySchema = preparationRuntimePolicySchema.extend({
+  promptVersion: z.string().regex(/^preparation-[a-z0-9-]{1,80}$/)
+}).strip();
 export const defaultPreparationRuntimePolicy: PreparationRuntimePolicy = {
   version: 1, revision: 1,
   generation: { model: "gpt-5.6", serviceTier: "default" },
   audit: { model: "gpt-5.6", serviceTier: "default" },
   review: { model: "gpt-5.6", serviceTier: "default" },
-  promptVersion: "preparation-2026-10-05", pricingVersion: "openai-preparation-2026-10-05",
+  promptVersion: "preparation-live-native-v2-2026-11-06", pricingVersion: "openai-preparation-2026-10-05",
   timeoutMs: 120_000, requestTimeoutMs: 35_000, maxProviderRequests: 12, maxOutputTokens: 20_000
 };
 export const defaultPreparationCapacity = {

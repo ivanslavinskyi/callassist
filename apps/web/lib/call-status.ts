@@ -4,6 +4,7 @@ import type { UiLocale as ProductUiLocale } from "@callassist/contracts";
 import { extendMessages } from "./i18n/extend-messages";
 import { callPresentation, callStage, type CallBrief, type CallResult } from "@callassist/contracts";
 import { callPresentationCopy } from "./i18n/call-presentation";
+import { nativeRecordingCopy } from "./i18n/native-live-messages";
 export const terminalCallStatuses = new Set<CallBrief["status"]>(["completed", "stopped", "failed"]);
 export function isTerminalCallStatus(status: CallBrief["status"]) { return terminalCallStatuses.has(status); }
 
@@ -54,6 +55,15 @@ export function callResultLabel(brief: StatusBrief, locale: ProductUiLocale) {
 }
 export function callConsentLabel(lifecycle: CallBrief["lifecycle"], locale: ProductUiLocale, fallback: string) {
   if (!lifecycle) return fallback;
+  if (lifecycle.recordingBasis === "declarative_local" && lifecycle.consent === "not_requested") return nativeRecordingCopy[locale].basis;
   const labels = lifecycleMessages[locale].consent;
   return lifecycle.consent === "not_requested" ? answeringMessages[locale].notRequested : labels[lifecycle.consent];
+}
+
+export function callResultHelp(lifecycle: NonNullable<CallBrief["lifecycle"]>, locale: ProductUiLocale) {
+  if (lifecycle.recordingBasis === "declarative_local") {
+    if (lifecycle.result === "conversation_completed") return nativeRecordingCopy[locale].completed;
+    if (lifecycle.result === "no_substantive_answer") return nativeRecordingCopy[locale].unanswered;
+  }
+  return lifecycle.result ? callResultCopy[locale][lifecycle.result][1] : "";
 }

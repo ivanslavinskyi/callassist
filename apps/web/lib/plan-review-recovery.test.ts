@@ -24,7 +24,7 @@ it("shows preparation retry immediately without asking the user to fix the input
       detectedInputLanguage: "ru", detectionStatus: "detected", compilationRevision: 1 },
     onAnswerClarifications: async () => undefined, onApproveAndCall: vi.fn(), onEdit: vi.fn(), onRetryPreparation: vi.fn()
   }));
-  expect(html).toContain("SHPROHLI could not prepare a reliable plan. Your request is saved.");
+  expect(html).toContain("A reliable plan could not be prepared. Your entries are preserved.");
   expect(html).toContain("Retry preparation");
   expect(html).not.toContain("Approve &amp; call");
   expect(html).not.toContain("translation");

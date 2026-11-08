@@ -1,4 +1,5 @@
 import type { CallBriefStatus, CallLifecycle } from "@callassist/contracts";
+import { nativeAutomatedAnswerHandled } from "@callassist/contracts";
 
 export type CallConnectionStatus = "connecting" | "connected" | "reconnecting";
 export type CallActivityPhase = "checking" | "consent" | "machine" | "starting" | "dialing" | "connected" | "approval" | "reconnecting";
@@ -9,7 +10,8 @@ export function callActivityPhase(status: CallBriefStatus, starting: boolean, co
   const active = ["dialing", "in_progress", "awaiting_approval"].includes(status);
   if (!active) return starting ? "starting" : null;
   if (connection !== "connected") return "reconnecting";
-  if (lifecycle?.consent === "granted") return status === "awaiting_approval" ? "approval" : "connected";
+  if (lifecycle && nativeAutomatedAnswerHandled(lifecycle)) return "machine";
+  if (lifecycle?.consent === "granted" || lifecycle?.conversationStartedAt) return status === "awaiting_approval" ? "approval" : "connected";
   if (status === "in_progress" && lifecycle?.answering?.phase === "pending") return lifecycle.disclosureAt ? "consent" : "checking";
   if (status === "in_progress" && lifecycle?.answering?.decision && lifecycle.answering.decision !== "consent") return "machine";
   if (status === "in_progress" && lifecycle?.answering?.decision === "consent") return "consent";

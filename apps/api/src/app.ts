@@ -145,6 +145,8 @@ import type { TwilioTelephonyProvider } from "./telephony/twilio-telephony-provi
 
 import { notificationSettingsUpdateSchema } from "@callassist/contracts";
 import { registerOgRoutes } from "./og/og-routes";
+import { registerTestingRoutes } from "./testing/routes";
+import { MemoryTestingStore, TestingError, type TestingStore } from "./testing/store";
 import { registerTelemetryExportRoutes } from "./telemetry-export/routes";
 import { registerPlanReviewRoutes } from "./safety/plan-review-routes";
 import type { PlanReviewAdmin } from "./safety/plan-review-service";
@@ -153,6 +155,7 @@ import type { OgService } from "./og/og-service";
 import { NotificationSettingsError, type NotificationAdmin } from "./notifications/superadmin-notifications";
 
 type BuildAppOptions = {
+  testingStore?: TestingStore;
   planReviews?: PlanReviewAdmin;
   telemetryExports?: TelemetryExportService;
   ogService?: OgService;
@@ -190,6 +193,7 @@ export function buildApp({
   telemetryExports,
   service,
   authService,
+  testingStore = authService ? new MemoryTestingStore(authService.repository, service.repository.testingPreparationAttribution) : undefined,
   creditService,
   contentService,
   allowAnonymousCallsForTesting = false,
@@ -204,6 +208,7 @@ export function buildApp({
   accountDataExportService = authService && contentService
     ? new AccountDataExportService({
         authService,
+        testingStore,
         callRepository: service.repository,
         contentRepository: contentService.repository
       })
@@ -236,6 +241,14 @@ export function buildApp({
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
   });
 
+  registerTestingRoutes(app, testingStore, async (request, reply, mutation, admin) => {
+    if (admin) {
+      const actor = mutation ? await authorizeSensitiveCallMutation(request,reply) : await authorizeAdminRead(request,reply);
+      if (actor && actor.role !== "superadmin") { await reply.status(403).send({error:"TESTING_FORBIDDEN"}); return null; }
+      return actor;
+    }
+    return (await authorizeCallAccess(request,reply,{mutation}))?.user ?? null;
+  });
   registerTelemetryExportRoutes(app, telemetryExports, async (request, reply, mutation) => {
     const actor = mutation ? await authorizeSensitiveCallMutation(request, reply) : await authorizeAdminRead(request, reply);
     if (!actor) return null;
@@ -2471,18 +2484,23 @@ export function buildApp({
       endpointRateLimitPolicy.briefPreparation
     ))) return;
     try {
+      const selection = "requestVersion" in parsed.data ? parsed.data.testScenario : undefined;
+      if (selection && !testingStore) return reply.status(503).send({error:"TESTING_UNAVAILABLE"});
+      const attribution = await testingStore?.attribution(access.userId, briefInput.objective, selection);
       const preparation = await service.prepare(
         briefInput,
         access.userId,
         idempotencyHeader,
         language
       );
+      if (attribution) await testingStore!.recordPreparation(preparation.id, attribution);
       return reply
         .header("Location", `/api/call-preparations/${preparation.id}`)
         .header("Cache-Control", "private, no-store")
         .status(202)
         .send(preparation);
     } catch (error) {
+      if (error instanceof TestingError) return reply.status(error.status).send({error:error.code});
       return sendRepositoryError(reply, error);
     }
   });
@@ -3231,7 +3249,7 @@ export function buildWebhookApp({
           }
           const binding = { callBriefId, callAttemptId: attempt.id, compilationSnapshotHash: attempt.compilationSnapshotHash };
           let twiml = twilioProvider.createHangupTwiml();
-          if (attempt.executionSnapshot.version === 3) {
+          if ("answering" in attempt.executionSnapshot) {
             if (request.query.callAttemptId === attempt.id &&
                 request.query.compilationSnapshotHash === attempt.compilationSnapshotHash &&
                 parameters.CallSid && /^CA[0-9a-f]{32}$/i.test(parameters.CallSid)) {
@@ -3610,7 +3628,7 @@ function sendRepositoryError(
   }
   if (error instanceof CallServiceError) {
     const status =
-      error.code === "SWISS_DESTINATION_REQUIRED"
+      ["SWISS_DESTINATION_REQUIRED", "LIVE_CONTEXT_TOO_LARGE", "LIVE_TASK_NOT_SUPPORTED", "LIVE_REAPPROVAL_REQUIRED", "LIVE_NEW_CALL_REQUIRED"].includes(error.code)
         ? 422
         : error.code === "RECORDING_NOT_AVAILABLE"
         ? 409

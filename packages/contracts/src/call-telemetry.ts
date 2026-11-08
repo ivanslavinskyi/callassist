@@ -27,6 +27,28 @@ export const applicationPlaybackDiagnosticSchema = z.strictObject({
   durationMs: z.number().finite().nonnegative().nullable()
 });
 export type ApplicationPlaybackDiagnostic = z.infer<typeof applicationPlaybackDiagnosticSchema>;
+const durationSchema = z.number().finite().nonnegative();
+// Fixed technical fields only: no transcript, plan, audio or provider error text.
+export const liveRuntimeDiagnosticSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("startup"), path: z.enum(["prepared", "cold"]),
+    outcome: z.enum(["released", "not_released"]), liveReadyMs: durationSchema.nullable(),
+    admissionToReleaseMs: durationSchema.nullable() }),
+  z.strictObject({ kind: z.literal("consent_to_audio"), source: z.enum(["native", "application"]), decisionToSendMs: durationSchema,
+    lastBoundaryToSendMs: durationSchema.nullable(), recordingAdmissionMs: durationSchema,
+    afterRecordingAdmissionMs: durationSchema }),
+  z.strictObject({ kind: z.literal("task_context"), durationMs: durationSchema,
+    firstAckMs: durationSchema, commands: z.number().int().positive(), utf8Bytes: z.number().int().nonnegative() }),
+  z.strictObject({ kind: z.literal("speech_render"), operationId: z.uuid(),
+    stage: z.enum(["disclosure", "application"]), outcome: z.enum(["succeeded", "failed"]),
+    durationMs: durationSchema, journalBeforeMs: durationSchema.nullable(), renderMs: durationSchema.nullable(),
+    journalAfterMs: durationSchema.nullable(), headersMs: durationSchema.optional(),
+    bodyMs: durationSchema.optional(), conversionMs: durationSchema.optional() }),
+  z.strictObject({ kind: z.literal("audio_output"), frames: z.number().int().nonnegative(),
+    sentAudioMs: durationSchema, clearCount: z.number().int().nonnegative(), maxEstimatedQueueMs: durationSchema,
+    nativeFrames: z.number().int().nonnegative(), nativeAudioMs: durationSchema, nativeMaxDeltaMs: durationSchema,
+    renderCacheHits: z.number().int().nonnegative(), renderCacheMisses: z.number().int().nonnegative() })
+]);
+export type LiveRuntimeDiagnostic = z.infer<typeof liveRuntimeDiagnosticSchema>;
 const providerSchema = z.enum(["mock", "twilio"]);
 
 export const consentDecisionMethodSchema = z.enum(["deterministic_voice", "semantic_voice", "dtmf"]);
@@ -90,13 +112,14 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     attempt: z.number().int().min(0).max(2)
   }) }),
   z.strictObject({ name: z.literal("conversation.task"), metadata: z.strictObject({
-    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7", "live-managed-v8", "live-managed-v9"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed"]),
+    runtimeVersion: z.enum(["live-client-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7", "live-managed-v8", "live-managed-v9", "live-native-v1", "live-native-v2"]), phase: z.enum(["running", "stale", "speak", "wait", "ignore", "close", "resume_closing", "request_appointment", "confirm_appointment", "failed", "diagnostic"]),
     revision: z.number().int().nonnegative(), requestId: z.uuid().optional(),
     cause: safeTokenSchema.optional(), responseId: safeTokenSchema.optional(), released: z.boolean().optional(),
     actionState: z.enum(["sending", "delivered", "uncertain", "confirmed"]).optional(),
     deliveryKind: z.enum(["request", "status_check"]).optional(),
     deliveryStatus: z.enum(["not_sent", "unacknowledged", "played"]).optional(),
-    playback: applicationPlaybackDiagnosticSchema.optional()
+    playback: applicationPlaybackDiagnosticSchema.optional(),
+    diagnostic: liveRuntimeDiagnosticSchema.optional()
   }) }),
   z.strictObject({ name: z.literal("answering.updated"), metadata: answeringStateSchema }),
   z.strictObject({ name: z.literal("provider.sip_response"), metadata: z.strictObject({ code: z.number().int().min(100).max(699) }) }),
@@ -207,11 +230,13 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("recording.started"),
     metadata: z.strictObject({ providerStatus: safeTokenSchema, recordingId: z.uuid().optional(),
+      recordingBasis: z.enum(["affirmative_consent", "declarative_local"]).optional(),
       providerRecordingId: safeTokenSchema.optional(), providerReportedAt: z.string().datetime().optional() })
   }),
   z.strictObject({
     name: z.literal("recording.completed"),
     metadata: z.strictObject({
+      recordingBasis: z.enum(["affirmative_consent", "declarative_local"]).optional(),
       durationSeconds: z.number().int().nonnegative().nullable(),
       channels: z.number().int().positive().nullable()
     })
@@ -225,7 +250,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
     metadata: z.strictObject({
       model: safeTokenSchema,
       transcriptionModel: safeTokenSchema,
-      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7", "live-managed-v8", "live-managed-v9"]).optional()
+      runtimeVersion: z.enum(["live-managed-v1", "live-managed-v2", "live-managed-v3", "live-managed-v4", "live-managed-v5", "live-managed-v6", "live-managed-v7", "live-managed-v8", "live-managed-v9", "live-native-v1", "live-native-v2"]).optional()
     })
   }),
   z.strictObject({
@@ -267,7 +292,7 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("conversation.tool_result"),
     metadata: z.strictObject({
-      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing", "request_appointment", "confirm_appointment", "report_task_state"]),
+      tool: z.enum(["end_call", "check_appointment", "route_interrupted_closing", "request_appointment", "confirm_appointment", "report_task_state", "prepare_appointment", "record_appointment_result"]),
       outcome: z.enum(["accepted", "rejected"]),
       reason: safeTokenSchema,
       requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),

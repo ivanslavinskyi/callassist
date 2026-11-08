@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { createCallBriefInputSchema } from "./call-brief";
 import { taskLanguagePreferencesSchema } from "./languages";
+import { testScenarioSelectionSchema } from "./testing";
 
 export const callPreparationRequestV2Schema = z.strictObject({
   requestVersion: z.literal(2),
   brief: createCallBriefInputSchema,
-  languagePreferences: taskLanguagePreferencesSchema
+  languagePreferences: taskLanguagePreferencesSchema,
+  testScenario: testScenarioSelectionSchema.optional()
 });
 export const callPreparationRequestSchema = z.union([
   callPreparationRequestV2Schema, createCallBriefInputSchema

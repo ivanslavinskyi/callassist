@@ -1,7 +1,7 @@
 import { PreparationPolicyError } from "./storage/preparation-policy-store";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
-import { isLiveTranscript } from "@callassist/contracts";
+import { isLiveTranscript,preparationIssue } from "@callassist/contracts";
 import { assembleNativeTranscript, type NativeTranscriptCapture } from "./storage/native-transcript";
 import type { AnsweringTransitionInput } from "./telephony/answering-policy";
 import { assertRetryableCall } from "./storage/call-retry";
@@ -114,6 +114,10 @@ export class CallServiceError extends Error {
   constructor(
     readonly code:
       | "TELEPHONY_START_FAILED"
+      | "LIVE_CONTEXT_TOO_LARGE"
+      | "LIVE_TASK_NOT_SUPPORTED"
+      | "LIVE_REAPPROVAL_REQUIRED"
+      | "LIVE_NEW_CALL_REQUIRED"
       | "TELEPHONY_STOP_FAILED"
       | "RECORDING_START_FAILED"
       | "RECORDING_NOT_AVAILABLE"
@@ -133,6 +137,53 @@ export class CallServiceError extends Error {
 }
 
 export class CallService {
+  #nativePreflight: ((callId:string,attemptId:string)=>Promise<void>) | null=null;
+  #discardSweep: ReturnType<typeof setInterval> | null=null;
+  #discardWork: Promise<void> | null=null;
+  readonly #locallyDiscarded = new Set<string>();
+  setNativePreflight(callback:(callId:string,attemptId:string)=>Promise<void>) { this.#nativePreflight=callback; }
+  async discardNativeConversation(callId:string,attemptId:string,reason:string) {
+    const attempt=await this.repository.getLatestAttempt(callId);
+    if(attempt?.id!==attemptId)throw new Error("LIVE_ATTEMPT_UNAVAILABLE");
+    this.#locallyDiscarded.add(callId);
+    // Persist the tombstone and erase content before any network cleanup.
+    try { await this.repository.nativeLive.discard(attemptId,reason); }
+    finally {
+      this.#ensureDiscardSweep();
+      // Stop even if persistence fails. Cleanup of other attempts never delays this line.
+      try { if(attempt.providerCallId)await this.telephonyProvider.stopCall(attempt.providerCallId); }
+      finally { void this.#sweepDiscards().catch(this.#onBackgroundError); }
+    }
+  }
+  #ensureDiscardSweep() {
+    if(this.#discardSweep)return;
+    this.#discardSweep=setInterval(()=>{void this.#sweepDiscards().catch(this.#onBackgroundError);},5000);
+    this.#discardSweep.unref?.();
+  }
+  #sweepDiscards() {
+    this.#discardWork??=(async()=>{
+      for(const state of await this.repository.nativeLive.pending()) {
+        if(!state.providerCallId)continue;
+        try {
+          let stopError: unknown;
+          try { await this.telephonyProvider.stopCall(state.providerCallId); }
+          catch (error) {
+            const current = await this.telephonyProvider.getCallStatus?.(state.providerCallId).catch(() => null);
+            if (!current || !["canceled","completed","failed","busy","no-answer"].includes(current.status)) stopError = error;
+          }
+          if(!this.telephonyProvider.purgeCallRecordings)throw new Error("LIVE_RECORDING_PURGE_UNAVAILABLE");
+          // Provider hangup failure must never prevent an attempt to erase audio.
+          await this.telephonyProvider.purgeCallRecordings(state.providerCallId);
+          if (stopError) throw stopError;
+          if(state.reason!=="owner_deleted")await this.repository.markRecordingDeleted(state.callId);
+          await this.repository.nativeLive.finishDiscard(state.attemptId,state.generation);
+          const snapshot=await this.repository.get(state.callId);
+          if(snapshot && !terminalStatuses.has(snapshot.brief.status)) await this.repository.stop(state.callId);
+        } catch(error){this.#onBackgroundError(error);await this.repository.nativeLive.retryDiscard(state.attemptId,state.generation).catch(this.#onBackgroundError);}
+      }
+    })().finally(()=>{this.#discardWork=null;});
+    return this.#discardWork;
+  }
   readonly #subscribers = new Map<string, Set<Subscriber>>();
   readonly #timers = new Map<string, Set<NodeJS.Timeout>>();
   readonly #processingRecordings = new Set<string>();
@@ -278,6 +329,9 @@ export class CallService {
           );
         }
       );
+    }
+    if (["all","operations"].includes(this.#workerRole)) {
+      this.#ensureDiscardSweep(); void this.#sweepDiscards().catch(this.#onBackgroundError);
     }
     if (!this.#durableWorkerConfigured) return 0;
     // Legacy embedded startup keeps its recovery contract. Role workers only seed
@@ -582,35 +636,35 @@ export class CallService {
       now: new Date().toISOString()
     });
     this.#durableJobWorker.wake();
-    return preparation;
+    return withPreparationIssue(preparation);
   }
 
-  findPreparationByRequest(
+  async findPreparationByRequest(
     input: CreateCallBriefInput,
     userId: string,
     idempotencyKey: string,
     language?: PreparationLanguageOptions
   ) {
-    return this.repository.findCallPreparationByRequest(
+    return withPreparationIssue(await this.repository.findCallPreparationByRequest(
       userId,
       idempotencyKey,
       callPreparationFingerprint(normalizeCreateCallBriefInput(input), language)
-    );
+    ));
   }
 
-  findRecompilationByRequest(
+  async findRecompilationByRequest(
     id: string,
     input: CreateCallBriefInput,
     userId: string | null,
     idempotencyKey: string,
     language?: PreparationLanguageOptions
   ) {
-    return this.repository.findCallPreparationByRequest(
+    return withPreparationIssue(await this.repository.findCallPreparationByRequest(
       userId,
       idempotencyKey,
       callPreparationFingerprint(normalizeCreateCallBriefInput(input), language),
       id
-    );
+    ));
   }
 
   async getPreparation(id: string, userId: string) {
@@ -619,7 +673,7 @@ export class CallService {
     if (!preparation) {
       throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
     }
-    return preparation;
+    return withPreparationIssue(preparation);
   }
 
   async assertOwned(id: string, userId: string | null) {
@@ -657,7 +711,7 @@ export class CallService {
       now: new Date().toISOString()
     });
     this.#durableJobWorker.wake();
-    return preparation;
+    return withPreparationIssue(preparation);
   }
 
   get(id: string) {
@@ -777,6 +831,13 @@ export class CallService {
       throw new CallRepositoryError("CALL_NOT_READY");
     }
     if (current.brief.status !== "ready") return current;
+    // This schema retains one recording per brief. Reuse must not overwrite
+    // earlier audio or fail only after the new provider call is placed.
+    if (!this.#nativePreflight && current.compilation?.compiledBrief?.schemaVersion === "9") throw new CallServiceError("LIVE_TASK_NOT_SUPPORTED");
+    if (this.#nativePreflight && current.recording) throw new CallServiceError("LIVE_NEW_CALL_REQUIRED");
+    if (current.compilation?.compiledBrief && ["5","6","7"].includes(current.compilation.compiledBrief.schemaVersion)) {
+      throw new CallServiceError("LIVE_REAPPROVAL_REQUIRED");
+    }
 
     const reserved = await this.repository.startAttempt(id, {
       provider: this.telephonyProvider.mode,
@@ -790,7 +851,14 @@ export class CallService {
     });
 
     let started;
+    let nativeRecording: {recordingId:string} | undefined;
     try {
+      if(this.#nativePreflight && this.telephonyProvider.mode==="twilio") {
+        if(!this.telephonyProvider.purgeCallRecordings)throw new Error("LIVE_RECORDING_PURGE_UNAVAILABLE");
+        const privacy=await this.repository.nativeLive.reserve(id,reserved.attempt.id);
+        await this.#nativePreflight(id,reserved.attempt.id);
+        nativeRecording={recordingId:privacy.recordingId};
+      }
       if (this.telephonyProvider.mode === "twilio") {
         const operationId = randomUUID();
         await this.repository.startTelephonyProviderOperation({
@@ -806,7 +874,7 @@ export class CallService {
         });
       }
       const execution = reserved.attempt.executionSnapshot;
-      if (this.telephonyProvider.mode === "twilio" && execution?.version === 3) {
+      if (this.telephonyProvider.mode === "twilio" && (execution?.version === 3 || execution?.version === 7 || execution?.version === 8)) {
         await this.recordTelemetry(id, {
           callAttemptId: reserved.attempt.id, idempotencyKey: `answering:${reserved.attempt.id}:pending`,
           payload: { name: "answering.updated", metadata: {
@@ -823,7 +891,7 @@ export class CallService {
         this.#durableJobWorker.wake();
       }
       started = await this.telephonyProvider.startCall(current.brief, {
-        maxDurationSeconds, executionSnapshot: execution ?? undefined,
+        maxDurationSeconds, nativeRecording, executionSnapshot: execution ?? undefined,
         binding: reserved.attempt.compilationSnapshotHash ? {
           callBriefId: id, callAttemptId: reserved.attempt.id,
           compilationSnapshotHash: reserved.attempt.compilationSnapshotHash
@@ -832,7 +900,10 @@ export class CallService {
     } catch (error) {
       await this.#markFailedIfActive(id).catch(this.#onBackgroundError);
       this.#onBackgroundError(error);
-      throw new CallServiceError("TELEPHONY_START_FAILED", { cause: error });
+      const code = error instanceof Error ? error.message : "";
+      throw new CallServiceError(["LIVE_CONTEXT_REJECTED","LIVE_V2_CONTEXT_TOO_LARGE","LIVE_V2_INSTRUCTIONS_TOO_LARGE"].includes(code) ? "LIVE_CONTEXT_TOO_LARGE"
+        : code === "LIVE_V2_ACTION_ACCEPTANCE_REQUIRED" ? "LIVE_TASK_NOT_SUPPORTED"
+        : code === "LIVE_V2_REAPPROVAL_REQUIRED" ? "LIVE_REAPPROVAL_REQUIRED" : "TELEPHONY_START_FAILED", { cause: error });
     }
 
     let snapshot: CallSnapshot;
@@ -840,6 +911,7 @@ export class CallService {
       if (!started.providerCallId) {
         throw new CallServiceError("TELEPHONY_START_FAILED");
       }
+      if(nativeRecording) await this.repository.nativeLive.bind(reserved.attempt.id,started.providerCallId);
       snapshot = await this.repository.attachProviderCall(
         reserved.attempt.id,
         started.providerCallId,
@@ -960,7 +1032,7 @@ export class CallService {
     const attempt = await this.repository.getLatestAttempt(id);
     const current = await this.#require(id);
     if (!attempt || attempt.id !== input.attemptId || terminalStatuses.has(attempt.status) ||
-        current.brief.lifecycle?.stopRequestedBy || attempt.executionSnapshot?.version !== 3) return false;
+        current.brief.lifecycle?.stopRequestedBy || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8)) return false;
     try {
       if (result.decision === "message") {
         if (!this.telephonyProvider.playVoicemail || !attempt.executionSnapshot.answering.message) throw new Error("VOICEMAIL_UNAVAILABLE");
@@ -981,7 +1053,7 @@ export class CallService {
     if (!job.callId || !job.callAttemptId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     const attempt = await this.repository.getAttempt(job.callId, job.callAttemptId);
     const snapshot = await this.#require(job.callId);
-    if (!attempt || attempt.executionSnapshot?.version !== 3 || terminalStatuses.has(attempt.status)) return;
+    if (!attempt || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8) || terminalStatuses.has(attempt.status)) return;
     const state = snapshot.brief.lifecycle?.answering;
     // A human conversation has its own consent and maximum duration deadlines.
     if (state?.streamAdmitted && (state.decision === "consent" || snapshot.brief.lifecycle?.consent === "granted")) return;
@@ -1098,6 +1170,8 @@ export class CallService {
   }
 
   async setNativeTranscriptCapture(callId: string, attemptId: string, capture: NativeTranscriptCapture) {
+    const privacy=await this.repository.nativeLive.get(attemptId);
+    if(privacy && privacy.state!=="active")return;
     await this.repository.setNativeTranscriptCapture(callId,attemptId,capture);
     if(capture.status === "collecting") return;
     await this.repository.enqueueDurableJob({ type:"live_transcript_finalization",callAttemptId:attemptId,
@@ -1166,6 +1240,19 @@ export class CallService {
     input: Parameters<CallRepository["applyRecordingStatus"]>[0],
     lease?: DurableJobLease
   ) {
+    const privacy=await this.repository.nativeLive.forRecording(input.recordingId);
+    if(privacy) {
+      if(privacy.callId!==input.callBriefId || (privacy.providerCallId && privacy.providerCallId!==input.providerCallId))return null;
+      await this.repository.nativeLive.bind(privacy.attemptId,input.providerCallId);
+      const attempt=await this.repository.getLatestAttempt(input.callBriefId);
+      if(attempt?.id===privacy.attemptId && !attempt.providerCallId)
+        await this.repository.attachProviderCall(attempt.id,input.providerCallId,"in-progress");
+      if(privacy.state!=="active") {
+        await this.repository.nativeLive.discard(privacy.attemptId,privacy.reason??"conversation_refused");
+        this.#ensureDiscardSweep(); void this.#sweepDiscards().catch(this.#onBackgroundError);
+        return null;
+      }
+    }
     const result = await this.repository.applyRecordingStatus(input, lease);
     if (!result) return null;
     this.#publish(result.callId, {
@@ -1191,6 +1278,10 @@ export class CallService {
 
   async getRecordingMedia(id: string): Promise<RecordingMedia> {
     const snapshot = await this.#require(id);
+    if(snapshot.recording) {
+      const privacy=await this.repository.nativeLive.forRecording(snapshot.recording.id);
+      if(privacy && privacy.state!=="active")throw new CallServiceError("RECORDING_NOT_AVAILABLE");
+    }
     const recording = snapshot.recording;
     if (
       recording?.status !== "available" ||
@@ -1247,7 +1338,7 @@ export class CallService {
     locale: CallBrief["locale"],
     nativeTiming?: TranscriptSegment["nativeTiming"]
   ) {
-    if (!delta) return;
+    if (!delta || this.#locallyDiscarded.has(id)) return;
     this.#publish(id, { type: "transcript.delta", key, role, delta, locale, ...(nativeTiming ? { nativeTiming } : {}) });
   }
 
@@ -1351,6 +1442,8 @@ export class CallService {
   }
 
   async #close() {
+    if(this.#discardSweep)clearInterval(this.#discardSweep);
+    await this.#discardWork;
     for (const id of this.#timers.keys()) this.#clearTimers(id);
     await Promise.all([this.#durableJobWorker.close(), this.#textJobWorker.close()]);
     await Promise.allSettled([...this.#pendingCallChangePublications]);
@@ -2129,4 +2222,10 @@ function workerRoleHandlers(handlers: ConstructorParameters<typeof DurableJobWor
   return Object.fromEntries(Object.entries(handlers).filter(([type]) => role === "preparation" ? type === "brief_compilation" :
     role === "operations" ? ["answer_detection_timeout","provider_call_reconciliation","live_transcript_finalization"].includes(type) :
       !["brief_compilation","answer_detection_timeout","provider_call_reconciliation","live_transcript_finalization"].includes(type))) as typeof handlers;
+}
+
+function withPreparationIssue<T extends {failureCode?:string|null;status:string}|null>(preparation:T):T {
+ if(!preparation)return preparation;
+ const code=preparation.failureCode??(preparation.status==="cancelled"?"CALL_PREPARATION_CANCELLED":null);
+ return code?{...preparation,issue:preparationIssue(code,"transport")}:preparation;
 }

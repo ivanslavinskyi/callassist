@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { uiLocales, uiLocaleRegistry } from "@callassist/contracts";
+import { uiLocales, uiLocaleRegistry, summaryCoverageMessages } from "@callassist/contracts";
 import { userCallEmail, userCallEmailMessages, type UserCallReport } from "./user-call-email";
 
 const report: UserCallReport = {
@@ -11,6 +11,12 @@ const report: UserCallReport = {
     segments: [{ id: "a", role: "assistant", text: "Ist der Antrag da?", startSeconds: 1, endSeconds: 2 }, { id: "b", role: "recipient", text: "Ja, er ist angekommen.", startSeconds: 3, endSeconds: 4 }] }
 };
 describe("owner result email", () => {
+  it.each(uiLocales)("preserves partial-assessment warnings in both email bodies in %s",locale=>{
+    const mail=userCallEmail({...report,locale,summaryPartial:true,goal:"uncertain"},{siteUrl:"https://example.test"});
+    expect(mail.text).toContain(summaryCoverageMessages[locale]);
+    expect(mail.html).toContain(summaryCoverageMessages[locale]);
+    expect(mail.text).not.toContain(userCallEmailMessages[locale].partial);
+  });
   it.each(uiLocales)("localizes only the shell and constants in %s", locale => {
     const mail = userCallEmail({ ...report, locale }, { siteUrl: "https://example.test" });
     expect(mail.subject).toBe(userCallEmailMessages[locale].subject);

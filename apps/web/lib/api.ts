@@ -1,4 +1,6 @@
 import { preparationSettingsViewSchema, type PreparationSettingsUpdate, type PreparationProfileAdmission } from "@callassist/contracts";
+import {preparationIssue,type PreparationIssue,type UiLocale} from "@callassist/contracts";
+import {preparationIssueMessage} from "./i18n/preparation-issue-messages";
 export async function getPreparationSettings() {
   return preparationSettingsViewSchema.parse(await apiRequest("/api/admin/system/preparation", { cache: "no-store" }));
 }
@@ -150,7 +152,7 @@ export class ApiError extends Error {
   }
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -277,7 +279,7 @@ export async function getCurrentUser() {
 
 /** A server-confirmed terminal preparation failure may be retried with a new operation key. */
 export class CallPreparationFailedError extends ApiError {
-  constructor(code: string) {
+  constructor(code: string,readonly issue?:PreparationIssue) {
     super(code, 502);
     this.name = "CallPreparationFailedError";
   }
@@ -764,7 +766,8 @@ export function getCallPreparationErrorMessage(
     swissDestinationRequired: string;
     callLanguageForbidden: string;
     rateLimited: string;
-  }> = {}
+  }> = {},
+  locale?:UiLocale
 ) {
   const copy = {
     generic: "The call plan could not be prepared. Your entries are preserved. Try again.",
@@ -784,6 +787,9 @@ export function getCallPreparationErrorMessage(
   if (!(error instanceof ApiError)) {
     return copy.generic;
   }
+
+  if(locale&&error instanceof CallPreparationFailedError&&error.issue)return preparationIssueMessage(error.issue,locale);
+  if(locale&&["CALL_PREPARATION_CANCELLED","BRIEF_COMPILATION_FAILED","BRIEF_COMPILER_RESPONSE_INVALID","LIVE_V2_CONTEXT_TOO_LARGE","LIVE_CONTEXT_LIMIT_EXCEEDED"].includes(error.code))return preparationIssueMessage(preparationIssue(error.code,"transport"),locale);
 
   if (error.code === "BETA_BUDGET_UNCONFIGURED") return copy.budgetUnconfigured;
   if (error.code === "BETA_BUDGET_EXHAUSTED") return copy.budgetExhausted;
@@ -866,13 +872,14 @@ export async function createCallBrief(
   input: CreateCallBriefInput,
   idempotencyKey = crypto.randomUUID(),
   languagePreferences?: TaskLanguagePreferences,
-  onProgress?: (progress: CallPreparationProgress) => void
+  onProgress?: (progress: CallPreparationProgress) => void,
+  testScenario?: import("@callassist/contracts").TestScenarioSelection
 ) {
   const request = () => apiRequest<CallPreparation>("/api/call-preparations", {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(languagePreferences
-      ? { requestVersion: 2, brief: input, languagePreferences }
+      ? { requestVersion: 2, brief: input, languagePreferences, testScenario }
       : input)
   });
 
@@ -906,7 +913,7 @@ async function waitForCallPreparation(
   let lastProgress: CallPreparationProgress | undefined;
   while (preparation.status !== "succeeded") {
     if (preparation.status === "failed") {
-      throw new CallPreparationFailedError(preparation.failureCode ?? "BRIEF_COMPILATION_FAILED");
+      throw new CallPreparationFailedError(preparation.failureCode ?? "BRIEF_COMPILATION_FAILED",preparation.issue);
     }
     if (preparation.status === "cancelled") {
       throw new ApiError("CALL_PREPARATION_CANCELLED", 409);
