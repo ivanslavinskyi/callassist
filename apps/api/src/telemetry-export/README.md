@@ -1,4 +1,26 @@
-# Consent policy export scope
+# Telemetry export boundaries
+
+## Compilation and execution evidence
+
+The archive retains the original versioned compilation from
+`call_compilations.compilation_ciphertext`, including schema-10 `taskEvidence`.
+This is source provenance for criteria and restrictions, not spoken content.
+Approval records and attempts separately export execution snapshots, including
+version 9; their plans omit `taskEvidence`. The immutable compilation can have
+`approvedAt=null` while a separate approval receipt records the actual approval.
+The archive must not substitute the current compiled plan or synthesize approval
+metadata from the repository's hydrated view.
+
+The existing archive format remains v4 with JSONL versions 2/3; no new source table
+is introduced. Preparation policy snapshots, provider operations/results/usage,
+cost records and encrypted native trace sources retain their established mapping.
+The combined semantic/language audit is still accounted under `language_audit`;
+repairs retain their request identity and diagnostics. Authorized export decrypts
+retained content under its existing privacy and retention rules, while ordinary
+admin timelines remain content-minimized. The integration suite covers schema10
+compilation, approval9, accounting records, admin visibility and ZIP checksums.
+
+## Consent policy export scope
 
 `call_attempts.consent_runtime_policy` is included for retained calls in the export
 cohort. It records the mode, settings revision, classifier version and settlement
@@ -15,7 +37,9 @@ The existing `call_events` source carries the consent audit chain: disclosure
 receipt, decision and method, recording request, and provider recording start.
 These records contain application metadata, not pre-consent recipient text or
 audio. Join receipt, decision and recording IDs to follow the chain. Optional
-retained audio exports continue to use the existing post-consent recording boundary.
+retained audio exports use the attempt's recording policy: managed calls require
+affirmative consent; native v2 records from connection with a declarative notice
+and durable discard on refusal. Export must not invent consent for native attempts.
 
 Deleted or deletion-pending calls do not contribute attempt rows or pinned
 policies. Existing export authorization, snapshot isolation, encrypted storage,

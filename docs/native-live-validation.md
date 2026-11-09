@@ -65,9 +65,10 @@ exercise new preparation instructions.
 Provider session admission precedes dialing and can accrue usage before a human
 answers. Health checks do not start calls. Restart processes only after confirming
 that no active call or relevant job would be interrupted; configuration is read at
-startup. Public-beta deployment remains separate work. The code supports explicit
-production selection; use the [release preparation record](reports/native-v2-production-readiness-2026-11-08.md)
-for the migration rehearsal and deployment sequence.
+startup. The [9 November release record](reports/native-task-boundary-2026-11-09.md)
+records the completed owner-reported production rollout; a new controlled production
+call remains a separate acceptance step. Use the current local runbook for host
+operations. The 8 November preparation record describes the earlier schema transition.
 
 For the new feature checks, verify objective encryption/backfill separately from
 migration application. The [backfill command](task-input-and-testing.md#objective-storage-and-backfill)
@@ -81,6 +82,9 @@ insertion do not call a provider or start preparation automatically.
 | --- | --- |
 | Preparation, conditional order, typed failures | `brief-compiler/native-preparation.test.ts`, `compiler-instructions.test.ts`, `preparation-issues.test.ts` |
 | Roles, source fidelity, bounded audit repair | `brief-compiler/execution-fidelity.test.ts`, `preparation-role-evaluation.test.ts`, `voice/live-native-profiles.test.ts` |
+| Task-only constraints, source coverage, conditional criteria and request accounting | `brief-compiler/task-only-preparation.test.ts` |
+| Current format persistence, admin timeline and exported evidence | `db/configure-runtime-profile.integration.test.ts`, `telemetry-export/telemetry-export.integration.test.ts` |
+| Empty sections and explicit restrictions in seven UI locales | Web `lib/task-only-plan.test.tsx` |
 | Historical contracts and approvals | `brief-compiler/archived-native-compatibility.test.ts`, contract `live-task.test.ts` |
 | Startup and conversational profiles | `voice/native-live-admission.test.ts`, `live-native-prompts.test.ts`, `live-native-profiles.test.ts` |
 | Numeric evidence and action lifecycle | `appointments/native-terms-evidence.test.ts`, `native-appointment-authorization.test.ts`, `voice/native-appointment-call.test.ts` |
@@ -109,6 +113,16 @@ fixtures verify audit handling and request bounds, not the accuracy of the remot
 auditor. Compare repeated live runs with only the plan fixed, only the closing prompt
 fixed and both fixed. Do not infer speech accuracy from passing mock tests or a
 post-call `goal=achieved` alone.
+
+For compiler 15, include a simple task with no restrictions, an explicit restriction
+that resembles an internal rule, an omitted restriction and a conditional branch
+that does not apply. Verify that only user task content appears in the reviewed
+plan. On a real call, check that one natural farewell is followed by silence and
+disconnection, while a substantive correction still receives an answer. The offline
+probe acceptance helper `apps/api/scripts/native-closing-evidence.ts` rejects the
+captured duplicate-farewell/tool-narration pattern; its unit test does not generate
+speech. The existing paid probe requires its diagnostic credentials and budget;
+the helper is not a production speech filter or a universal semantic detector.
 
 Generate the eight synthetic PDF fixtures from `apps/api`:
 

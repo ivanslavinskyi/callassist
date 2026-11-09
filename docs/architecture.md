@@ -1,6 +1,6 @@
 # Architecture
 
-**Source reviewed:** 2026-11-08, current working tree; migration catalog `0001`–`0115`.
+**Source reviewed:** 2026-11-09, application commit `2342741`; migration catalog `0001`–`0115`.
 
 SHPROHLI has a Next.js web application, a Fastify API, PostgreSQL-backed durable
 workers and shared TypeScript contracts. The API owns authorization and immutable
@@ -38,8 +38,8 @@ integration keeps runtime selection explicit; see the
 [acceptance decision](reports/native-v2-stable-acceptance-2026-11-08.md) and subsequent
 [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
-The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the integrity
-preparation policy: compiler 13, plan schema 9 and approval 8. The audited configuration
+The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the task-boundary
+preparation policy: compiler 15, plan schema 10 and approval 9. The audited configuration
 command applies the policy; API and worker startup require a matching saved value.
 The [profile contract](runtime-profiles.md) defines activation and rollback. Low-level
 compatibility flags and model choices alone do not switch the preparation policy.
@@ -49,6 +49,10 @@ See the [native runtime specification](native-live-runtime.md) for the version m
 
 - Preparation preserves the complete original task and facts alongside a reviewable
   plan. Approval freezes authority, language, identity and runtime settings.
+- Audit-only `taskEvidence` grounds criteria and restrictions in original sources.
+  It is hashed and stored with the compilation, but omitted from the approved
+  execution plan and Live input. The existing combined audit checks semantic
+  support; a matching source substring alone is insufficient.
 - Live receives primary task context at startup. Optional indexed appendix content
   is retrieved only when needed. Tools cannot expand approved permissions.
 - Appointment journals distinguish authorization, delivery, uncertainty and confirmed
@@ -58,6 +62,10 @@ See the [native runtime specification](native-live-runtime.md) for the version m
 - Privacy deletion fences late writes. Encrypted trace content is separate from
   operational diagnostics and accounting; missing evidence is never reconstructed.
 - Provider expenses, account billing and user credits are separate quantities.
+
+Live chooses ordinary speech and follow-ups. After one natural closing it delegates
+silently; the backend extracts transcript quotes for `end_call`. This changes prompt
+responsibilities without adding an ordinary-turn gate, model stage or speech filter.
 
 ## Task input, testing and presentation
 

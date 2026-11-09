@@ -8,12 +8,12 @@ and rollout procedures live only in the ignored `docs/local-operations/` directo
 
 ## Immutable policy and operator controls
 
-Native role-fidelity revision, 9 November 2026: policy
-`preparation-live-native-roles-2026-11-09` selects `brief-compiler-14`, plan schema 9
-and approval 8. The previous progressive instruction remains: resolve prerequisites
+Native task-boundary revision, 9 November 2026: policy
+`preparation-live-native-task-2026-11-09` selects `brief-compiler-15`, plan schema 10
+and approval 9. The previous progressive instruction remains: resolve prerequisites
 before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
 Full original task sources and facts remain available at Live startup.
-`CALL_RUNTIME_PROFILE=native_v2` selects this role-fidelity policy through the audited
+`CALL_RUNTIME_PROFILE=native_v2` selects this task-boundary policy through the audited
 `runtime:configure --apply` command. Startup checks that the saved policy matches.
 Historical jobs retain their pinned policy. The unprofiled in-memory default remains
 `preparation-live-native-v2-2026-11-06`; the historical SQL seed uses the managed policy.
@@ -27,7 +27,8 @@ API has no `promptVersion` setter. See [runtime profiles](runtime-profiles.md) a
 | `live-native-actions-2026-11-06` | `brief-compiler-11` | 9 | 8 |
 | `live-native-progressive-2026-11-07` | `brief-compiler-12` | 9 | 8 |
 | `live-native-integrity-2026-11-08` | `brief-compiler-13` | 9 | 8 |
-| `live-native-roles-2026-11-09` (named native profile) | `brief-compiler-14` | 9 | 8 |
+| `live-native-roles-2026-11-09` | `brief-compiler-14` | 9 | 8 |
+| `live-native-task-2026-11-09` (named native profile) | `brief-compiler-15` | 10 | 9 |
 
 All policy IDs in the table start with `preparation-`. The earlier
 `preparation-2026-10-05` policy uses compiler 6 / schema 4. Historical readers
@@ -70,7 +71,7 @@ attested in the user's source. It does not guess translations, abbreviations or
 approximate spellings. Postal addresses and protected identifiers retain their
 strict checks. Unknown transformations still require repair/review.
 
-For native schema 9, a primary identity may be preserved in a source-verified
+For native schemas 9 and 10, a primary identity may be preserved in a source-verified
 `person`, `organisation` or `location` entry in `namedEntities` instead of being
 repeated in the task prose. Both recipient and represented-person labels must
 still be preserved in full, using the comparison rules above. Every declared
@@ -84,7 +85,7 @@ validation, including its intermediate schema 8, is unchanged. See the
 Existing rejected revisions remain immutable; retry preparation after deploying
 the fix to produce a new revision under the corrected validation.
 
-Compiler 14 distinguishes the principal who commissioned the call, the recipient
+Compilers 14 and 15 distinguish the principal who commissioned the call, the recipient
 heard on incoming audio, and the subject of each fact. Matching names do not merge
 these roles. A preference or result can concern the recipient, principal or a third
 party; preserving the spelling of both names does not establish correct attribution.
@@ -150,6 +151,25 @@ the existing moderation requests; repair limits, deadlines and Live autonomy are
 unchanged. Historical policy prompts, approvals and their schemas remain supported.
 Activate the saved policy with `runtime:configure --apply` while API/workers are
 stopped and work is drained; prepare a fresh plan to exercise the new format.
+
+`taskEvidence` covers every success/unresolved criterion, task restriction,
+stopping condition and conditional-follow-up condition. Each entry names its
+target field and quotes the relevant objective, context, delivery instruction,
+allowed fact or clarification answer. The local check verifies source paths,
+exact substrings and complete/unique target coverage. The combined model audit
+checks whether that evidence supports the meaning after corrections; it also
+checks that genuine user restrictions have not disappeared. Role or quote-handling
+instructions invented by the compiler are repaired in the task content, not added
+as a new prohibition. An inapplicable conditional branch is not a missing answer.
+
+Generation, audit and repair still use the existing provider-operation reservation,
+completion and usage hooks. The combined audit retains stage `language_audit` for
+accounting/diagnostic compatibility; semantic repair records `repairKind=integrity`.
+Source evidence adds request/output tokens, not another model stage. Actual usage,
+missing-usage handling, pricing and user-credit rules are unchanged. Full compilation
+evidence is available in authorized diagnostics and telemetry exports, while the
+ordinary admin timeline remains minimized. See the
+[release record](reports/native-task-boundary-2026-11-09.md) for the regressions.
 
 New objective and context fields each allow 4,000 JavaScript string units after
 trimming. The shared aggregate counts normalized Unicode code points: warning at

@@ -15,8 +15,10 @@ installations without this variable retain their previous low-level behavior.
 Both profiles select the Live driver, disable automatic Realtime fallback and enable
 agent hangup. Models, service tiers, provider budgets, capacity limits, pricing and
 approved model profiles retain their existing settings. The 9 November native
-release adds role-preserving prompts, a combined preparation audit and a general
-closing tool contract without appointment-only evidence.
+release preserves roles, keeps user constraints separate from internal rules,
+and checks source evidence in the existing combined audit. Optional restrictions
+can be empty. Live delegates silently after its farewell; only the backend supplies
+closing quotes. General calls require `end_call.noActionRequired=null`.
 
 ## Configuration
 
@@ -98,11 +100,27 @@ with all instances stopped, not a hot switch in the admin UI.
 
 ## Rollback
 
+SQL catalog equality is not sufficient for binary rollback. The task-boundary
+release adds compiled schema 10 / approval 9 without a SQL migration; older binaries
+may reject those artifacts or the newly saved policy. Do not automatically restart
+them after new preparations have been accepted. Prefer a compatible forward fix or
+the managed profile on the upgraded build.
+
 Drain work and stop API/workers. Set `CALL_RUNTIME_PROFILE=managed`, remove conflicting
 legacy overrides, run the same configuration/check commands and restart the matching
 builds. Prepare and approve new plans for managed calls. Keep the upgraded database
 and history readers: changing a runtime profile does not downgrade the schema or
 make an old binary compatible with newly stored data.
+
+Deployment helpers must explicitly support policy activation between stopping the
+old processes and starting the new ones. The repository's current
+`scripts/shprohli-vps-release.sh` does not invoke the profile configurator, and its
+ordinary failure recovery can restart old binaries. For a policy/format transition,
+use the supervised local runbook: build and preview first; pause admission and API
+writes; drain calls, preparations, due jobs and exports; stop matching services;
+verify a fresh backup; apply/check the candidate profile; switch and verify all
+processes; restore admission only after readiness and data-preservation checks.
+Do not use the helper's automatic deploy or rollback blindly for this transition.
 
 Leaving `CALL_RUNTIME_PROFILE` unset keeps legacy mode selection available, including
 native v1 and Realtime. That compatibility path does not enforce a runtime/preparation

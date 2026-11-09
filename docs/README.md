@@ -1,14 +1,16 @@
 # Documentation
 
-**Source reviewed:** 2026-11-08, current working tree; schema catalog `0001`–`0115`.
+**Source reviewed:** 2026-11-09, application commit `2342741`; schema catalog `0001`–`0115`.
 
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
 Its current configuration supports explicit activation in development and production.
 The environment example selects the stable native profile; managed Live remains the
-default without a profile and the named rollback option. Deployment remains separate. Source availability and local verification
-do not establish what is deployed. See the [release decision](reports/native-v2-stable-acceptance-2026-11-08.md)
-and [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
+default without a profile and a recovery option on a compatible build. The current
+native profile uses compiler 15 / plan schema 10 / approval 9. Source availability
+alone does not establish deployment. The [9 November release record](reports/native-task-boundary-2026-11-09.md)
+distinguishes automated checks, local telephone feedback and the completed
+owner-reported rollout. Host-specific evidence remains in local operational records.
 
 ## Maintained references
 
@@ -24,6 +26,10 @@ and [production preparation](reports/native-v2-production-readiness-2026-11-08.m
 | [Task information and testing](task-input-and-testing.md) | Information sources, 30-day audio default, tester grants, scenario catalog, expense attribution and PDF assessment |
 
 ## Verification records
+
+[Task boundaries, participant roles and silent closing, 9 November 2026](reports/native-task-boundary-2026-11-09.md)
+records the current release, unchanged SQL catalog, regression coverage, CI and
+deployment evidence, with production telephone acceptance still pending.
 
 [Task information, testing and PDF assessment, 8 November 2026](reports/task-input-testing-implementation-2026-11-08.md)
 records the subsequent feature implementation, migration/backfill, automated checks

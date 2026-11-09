@@ -1,6 +1,6 @@
 # SHPROHLI engineer guide
 
-Source reviewed: 2026-11-08, including native GPT-Live, task information and testing changes,
+Source reviewed: 2026-11-09, application commit `2342741`, including task boundaries and silent closing,
 schema catalog `0001`–`0115`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
@@ -206,7 +206,7 @@ retroactively identify an old call's runtime.
 ## Native results and compatibility
 
 Summary-v8 uses an immutable executed source context and original transcript
-evidence. Context v2 includes full original task sources for schema-9 general and
+evidence. Context v2 includes full original task sources for schema-9 and schema-10 general and
 appointment profiles, or when a native action is present. Native-summary-v3 handles
 conditional task applicability separately from appointment disposition. A correct
 permitted decision not to act can achieve the task; an unknown prerequisite cannot.
@@ -613,7 +613,7 @@ corepack pnpm build
 For API tests use the disposable database wrapper from `apps/api`:
 
 ```sh
-node --import tsx scripts/test-isolated-db.mjs --reporter=dot
+node --import tsx scripts/test-isolated.ts --reporter=dot
 ```
 
 It creates a uniquely named test database, migrates it, sets the test connection

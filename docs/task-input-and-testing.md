@@ -1,6 +1,6 @@
 # Task information, recordings and testing scenarios
 
-**Implemented:** 2026-11-08, integrated into `main`. This document describes
+**Implemented:** 2026-11-08; source reviewed 2026-11-09 at `2342741`. This document describes
 code behavior, not a production deployment. Native v2 supports explicit selection
 in development and production.
 

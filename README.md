@@ -14,7 +14,10 @@ task context available at startup. Responses delegation handles reasoning; the
 application validates action authority, evidence, privacy and hangup. Native v2
 supports general tasks and approved booking, confirmation, rescheduling and
 cancellation. Native v2 was accepted as stable after local telephone testing on
-8 November 2026. Explicit production selection is supported; deployment is a separate step.
+8 November 2026. The 9 November task-boundary release adds source-grounded plan
+constraints and silent closing delegation without extra Live orchestration. See
+the [release record](docs/reports/native-task-boundary-2026-11-09.md) for verification
+and the owner-reported production rollout; future deployments remain explicit operations.
 Realtime and legacy hybrid remain
 explicit compatibility paths. Repository checks do not establish the deployed version.
 See the [native runtime specification](docs/native-live-runtime.md).
@@ -44,7 +47,7 @@ provider requests. Configuration defaults and required secrets are documented in
     corepack pnpm typecheck
 
 Database tests require a dedicated test database. For a disposable full API run,
-from apps/api use: node --import tsx scripts/test-isolated-db.mjs --reporter=dot.
+from apps/api use: node --import tsx scripts/test-isolated.ts --reporter=dot.
 Do not point tests at a working or production database. Build with corepack pnpm build.
 
 ## Current capabilities
@@ -57,6 +60,9 @@ Do not point tests at a working or production database. Build with corepack pnpm
   and mobile bottom actions; the existing final confirmation remains required.
 - Native startup preserves relevant information from the objective, context, facts
   and clarification answers; original sources remain inspectable during review.
+- Task restrictions are grounded in user sources. Optional sections can be empty;
+  internal model rules stay outside the plan. The existing combined audit checks
+  roles, meaning, omitted restrictions and conditional branches.
 - New calls default to 30-day audio retention with no form selector. Historical
   retention choices remain valid, and users can delete recordings earlier.
 - Superadmin-managed test scenarios insert editable task text above the objective

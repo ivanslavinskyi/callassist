@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated 2026-11-08 for native task context, testing and PDF assessment, schema `0001`–`0115`.
+Updated 2026-11-09 for the task-boundary release (`2342741`), schema `0001`–`0115`.
 Current domain behavior is documented in [the engineer guide](engineer-guide.md).
 The route inventory below links to source registration modules. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
@@ -22,7 +22,7 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 ## Voice runtime selection
 
 The recommended profile is `CALL_RUNTIME_PROFILE=native_v2`, as selected by
-`.env.example`. It binds the Native v2 voice mode, compiler 13 policy and enabled
+`.env.example`. It binds the Native v2 voice mode, compiler 15 policy and enabled
 hangup. Use [runtime profiles](runtime-profiles.md) for the audited application command,
 read-only check and startup diagnostics. Without a profile, the default is managed
 `unified_live` with experiment `off`; low-level Native v2 requires
@@ -33,7 +33,7 @@ See the maintained [native specification](native-live-runtime.md) for complete
 startup context, prompt responsibilities, action profiles, declared recording,
 privacy, closing and summary-v8 behavior.
 
-The integrity preparation path uses compiler 13 / schema 9 / approval 8. A named
+The task-boundary preparation path uses compiler 15 / schema 10 / approval 9. A named
 profile declares the policy; its configuration command saves it and startup validates
 it. Low-level voice flags and model changes alone do not update the policy.
 The settings API has no `promptVersion` setter; its read-only `runtimeProfile` field
@@ -155,7 +155,7 @@ Migrations 0073/0074 add stop events and final assessments. List/snapshot/Inspec
 
 `summary-v8` creates grounded summary/findings and assessment from the executed
 source context and original transcript. Context v2 uses `native-summary-v3` for
-schema-9 general and appointment profiles, or a native action. Older contexts keep
+schema-9 and schema-10 general and appointment profiles, or a native action. Older contexts keep
 their compatible format; legacy reports remain readable. Normal short successful
 inputs need one request; eligible native inputs allow one targeted grounding repair,
 separately accounted under the shared request budget. Long-call consolidation can

@@ -1,7 +1,7 @@
 # Native GPT-Live runtime
 
-**Status:** Native v2 baseline accepted on 2026-11-08; role-fidelity revision implemented on 2026-11-09. Production activation and real-model validation remain separate steps.\
-**Source reviewed:** 2026-11-09, current working tree.\
+**Status:** Native v2 baseline accepted on 2026-11-08; task-boundary and silent-closing release implemented on 2026-11-09. Deployment and telephone evidence are recorded separately below.\
+**Source reviewed:** 2026-11-09, application commit `2342741`.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
 This is the maintained specification for `live_native_v2`. It describes application
@@ -9,7 +9,10 @@ behavior, including its limits. It does not certify model accuracy, acoustic lat
 or the deployed environment. Use the [validation guide](native-live-validation.md)
 for checks. The [native integrity record](reports/native-live-integrity-2026-11-08.md)
 and [task information and testing record](reports/task-input-testing-implementation-2026-11-08.md)
-provide dated evidence for their respective changes.
+provide dated evidence for their respective changes. The
+[9 November release record](reports/native-task-boundary-2026-11-09.md) covers the
+current contracts and completed owner-reported rollout; production voice acceptance
+of that release remains pending.
 
 ## Architecture and ownership
 
@@ -81,12 +84,12 @@ Automatic fallback and the Realtime driver remain incompatible with native v2.
 [voice-runtime.ts](../apps/api/src/config/voice-runtime.ts); startup requirements are
 checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.ts).
 
-| Contract | Current native role-fidelity path | Compatibility |
+| Contract | Current native task-boundary path | Compatibility |
 | --- | --- | --- |
-| Preparation prompt policy | `preparation-live-native-roles-2026-11-09` | Previously pinned policies retain their compiler behavior |
-| Compiler | `brief-compiler-14` | Earlier compilers remain readable; not all are executable for new work |
-| Compiled plan | Schema `9` | Archived schemas are read through explicit readers |
-| Approved snapshot | Version `8` | Native v2 also accepts version `7` through its legacy authority adapter |
+| Preparation prompt policy | `preparation-live-native-task-2026-11-09` | Previously pinned policies retain their compiler behavior |
+| Compiler | `brief-compiler-15` | Earlier compilers remain readable; not all are executable for new work |
+| Compiled plan | Schema `10` | Archived schemas are read through explicit readers |
+| Approved snapshot | Version `9` | Version `8` also accepted; version `7` uses the legacy authority adapter |
 | Runtime and prompt identity | `live-native-task-2026-11-09` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
 | Summary generator | `summary-v8` | Earlier artifacts are preserved |
@@ -95,8 +98,8 @@ checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.t
 
 Voice selection and preparation policy are independent. The code's preparation
 default is `preparation-live-native-v2-2026-11-06` with `gpt-5.6:default`, not the
-integrity policy. Existing database settings can differ. The verified local setup
-selected the integrity policy and `gpt-6-luna:default` for generation. The admin
+task-boundary policy. Existing database settings can differ; profile activation
+preserves saved model choices. The admin
 settings API edits generation profile and capacity; it does **not** expose a
 `promptVersion` setter. See [preparation runtime](preparation-runtime.md).
 
@@ -144,9 +147,11 @@ The shared role contract distinguishes the principal, the recipient heard on inc
 audio, and the subject of each fact. Overlapping names do not merge those roles.
 Original task text defines semantic relationships; derived questions or criteria
 cannot transfer a recipient's preference to the principal. This does not expand
-the approved snapshot's action authority. Compiler 14 checks source fidelity and
-language in the existing preparation audit request; prior pinned compiler policies
-keep their original audit. See [preparation runtime](preparation-runtime.md).
+the approved snapshot's action authority. Compiler 15 retains compiler 14's combined
+source-fidelity/language audit and also checks task boundaries and conditional criteria.
+Source evidence is compilation metadata, not Live input. Optional task restrictions
+may be empty; product controls remain independent. Prior pinned policies keep their
+original behavior. See [preparation runtime](preparation-runtime.md).
 
 Live closes with the actual outcome and preserves its subject. A recipient's own
 preference is addressed directly; the principal is named when the result concerns
@@ -293,10 +298,19 @@ criterion or internal check. The tool requires observed closing speech and the
 latest recipient quote. A substantive correction must be handled; a reciprocal
 goodbye can reuse the existing closing without repeating it.
 
+Live generates `<|SpawnThinking|>` silently after its farewell and listens. The
+backend alone extracts `closingQuote` and `recipientQuote` from the observed
+transcript and puts them in tool arguments. It never asks Live to dictate those
+quotes, and an accepted `end_call` produces no spoken tool acknowledgment. A new
+substantive question or correction still receives a natural answer before closing
+again. These are prompt responsibilities, not a runtime audio-muting rule or a new
+orchestration stage.
+
 | Situation | Completion rule |
 | --- | --- |
 | Appointment action completed | `objective_resolved` requires confirmed journal state |
-| Explicit condition means no action is required | `noActionRequired` carries a literal approved condition and observed recipient answer; no attempted action may exist |
+| Approved appointment condition means no action is required | `noActionRequired` carries a literal approved condition and observed recipient answer; no attempted action may exist |
+| General task completed | `noActionRequired=null`; observed closing evidence is still required |
 | Unknown condition, failed required action, uncertain commitment | Not a successful no-action branch; preserve uncertainty or inability |
 | Recipient ends the conversation | Respect the request; termination does not prove task success |
 
@@ -324,7 +338,7 @@ Sources: [completion recovery](../apps/api/src/voice/live-native-completion.ts),
 
 Summary-v8 resolves the executed compilation and transcript revision, freezes the
 source context and uses original transcript evidence. Context v2 is selected for
-schema-9 plans or an existing native appointment action. All new schema-9 profiles,
+schema-9/schema-10 plans or an existing native appointment action. Both native plan formats,
 including general, receive the original objective, context, facts, clarifications
 and delivery instruction. Older general plans do not automatically become context v2.
 
@@ -441,8 +455,10 @@ Sources: [trace writer](../apps/api/src/voice/live-protocol-trace.ts),
   not inferred from shorter timers or caption timestamps.
 
 The [validation guide](native-live-validation.md) defines the software checks and
-remaining acoustic acceptance. See [production preparation](reports/native-v2-production-readiness-2026-11-08.md)
-for configuration, migration evidence and the remaining deployment steps.
+remaining acoustic acceptance. See the [current release record](reports/native-task-boundary-2026-11-09.md)
+for completed checks and the owner-reported rollout. Host-specific procedures and
+recovery evidence remain in the local runbook; the 8 November production preparation
+record is historical.
 
 ## Related feature contracts
 
