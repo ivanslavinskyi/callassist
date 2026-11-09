@@ -701,8 +701,14 @@ export function evaluateCompiledBrief(
   if (context?.authorizationMismatch || (appointment && (compiledBrief.schemaVersion === "3" || compiledBrief.taskType !== "appointment_coordination" || appointment.operation !== requestedOperation))) {
     return blockedDecision("plan_constraint_failure");
   }
+  // Native action snapshots supply the original identities separately to Live.
+  // An equivalent declared identity need not also occur in the spoken task prose;
+  // the entity-source check below still rejects invented or altered declarations.
   if (![rawBrief.recipientName, rawBrief.representedPerson].every(value =>
-    preservesIdentityLabel(value, executionText, sourceText)) ||
+    preservesIdentityLabel(value, executionText, sourceText) ||
+    (compiledBrief.schemaVersion === "9" && compiledBrief.namedEntities.some(entity =>
+      ["person", "organisation", "location"].includes(entity.type) &&
+      equivalentIdentityLabel(value, entity.value, sourceText)))) ||
     !protectedPostalAddresses(sourceText).every(value => executionText.includes(value))) {
     return blockedDecision("fact_integrity_failure");
   }

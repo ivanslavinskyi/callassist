@@ -1274,8 +1274,8 @@ button:disabled { cursor: wait; opacity: .55; }
   white-space: nowrap;
 }
 .transcript-export-button:hover:not(:disabled) {
-  background: #eaf2ee;
-  border-color: #c7d9d1;
+  background: var(--surface);
+  border-color: var(--control);
   cursor: pointer;
   transform: translateY(-1px);
 }

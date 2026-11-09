@@ -1,6 +1,6 @@
 # Call-plan preparation runtime
 
-**Source reviewed:** 2026-11-08, current working tree. This describes code, not the
+**Source reviewed:** 2026-11-09, current working tree. This describes code, not the
 state or measured capacity of a deployed server. See the [native runtime](native-live-runtime.md)
 for startup context, conversation and action boundaries. Dated preparation plans
 and measurements are [historical evidence](archive/README.md). Host configuration
@@ -68,6 +68,20 @@ existing deterministic Cyrillic transliteration. Inflected Cyrillic forms must b
 attested in the user's source. It does not guess translations, abbreviations or
 approximate spellings. Postal addresses and protected identifiers retain their
 strict checks. Unknown transformations still require repair/review.
+
+For native schema 9, a primary identity may be preserved in a source-verified
+`person`, `organisation` or `location` entry in `namedEntities` instead of being
+repeated in the task prose. Both recipient and represented-person labels must
+still be preserved in full, using the comparison rules above. Every declared
+identity remains subject to source validation; this exception does not satisfy
+address or protected-reference checks. Approval snapshots build the canonical
+parties from the original form fields, and Live receives those parties and the
+represented person's opening identity separately from the task. This applies to
+the general profile and every native appointment operation. Historical managed
+validation, including its intermediate schema 8, is unchanged. See the
+[identity regression tests](../apps/api/src/brief-compiler/native-identity-integrity.test.ts).
+Existing rejected revisions remain immutable; retry preparation after deploying
+the fix to produce a new revision under the corrected validation.
 
 Protected-reference extraction is heuristic. The October implementation evidence
 records a `finish-by-16:30` false-positive case; that dated observation is not a
