@@ -1,7 +1,7 @@
 # Native GPT-Live runtime
 
-**Status:** stable Native v2 implementation accepted on 2026-11-08; explicit production selection supported. Deployment remains a separate step.\
-**Source reviewed:** 2026-11-08, current working tree.\
+**Status:** Native v2 baseline accepted on 2026-11-08; role-fidelity revision implemented on 2026-11-09. Production activation and real-model validation remain separate steps.\
+**Source reviewed:** 2026-11-09, current working tree.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
 This is the maintained specification for `live_native_v2`. It describes application
@@ -63,7 +63,7 @@ Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 
 | Selection | Result |
 | --- | --- |
-| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 13 policy required, hangup enabled; recommended |
+| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 14 policy required, hangup enabled; recommended |
 | `CALL_RUNTIME_PROFILE=managed` | Managed Live, compiler 6 policy required, hangup enabled; rollback |
 | `VOICE_RUNTIME_DRIVER=live`, fallback `false`, experiment `off` | Managed `unified_live`; default selection |
 | Same settings, experiment `native_v1` | Earlier informational experiment; eligibility may select managed control |
@@ -81,13 +81,13 @@ Automatic fallback and the Realtime driver remain incompatible with native v2.
 [voice-runtime.ts](../apps/api/src/config/voice-runtime.ts); startup requirements are
 checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.ts).
 
-| Contract | Current native integrity path | Compatibility |
+| Contract | Current native role-fidelity path | Compatibility |
 | --- | --- | --- |
-| Preparation prompt policy | `preparation-live-native-integrity-2026-11-08` | Previously pinned policies retain their compiler behavior |
-| Compiler | `brief-compiler-13` | Earlier compilers remain readable; not all are executable for new work |
+| Preparation prompt policy | `preparation-live-native-roles-2026-11-09` | Previously pinned policies retain their compiler behavior |
+| Compiler | `brief-compiler-14` | Earlier compilers remain readable; not all are executable for new work |
 | Compiled plan | Schema `9` | Archived schemas are read through explicit readers |
 | Approved snapshot | Version `8` | Native v2 also accepts version `7` through its legacy authority adapter |
-| Runtime and prompt identity | `live-native-context-2026-11-08` | Frozen per-attempt descriptor and configuration hashes |
+| Runtime and prompt identity | `live-native-context-2026-11-09` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
 | Summary generator | `summary-v8` | Earlier artifacts are preserved |
 | Native evaluator format | `native-summary-v3` | Selected for context v2; v6/v7 retain their formats when replayed |
@@ -139,6 +139,19 @@ stored separately: only ID/title/description are sent initially, and
 `get_task_context(sectionId)` retrieves one approved section. This is not a search
 service or permission to add facts or authority. An appendix cannot replace a
 missing critical condition in the approved task.
+
+The shared role contract distinguishes the principal, the recipient heard on incoming
+audio, and the subject of each fact. Overlapping names do not merge those roles.
+Original task text defines semantic relationships; derived questions or criteria
+cannot transfer a recipient's preference to the principal. This does not expand
+the approved snapshot's action authority. Compiler 14 checks source fidelity and
+language in the existing preparation audit request; prior pinned compiler policies
+keep their original audit. See [preparation runtime](preparation-runtime.md).
+
+Live closes with the actual outcome and preserves its subject. A recipient's own
+preference is addressed directly; the principal is named when the result concerns
+them. Appointment-specific readback remains tied to the authorised represented
+person. This adds no ordinary-turn gate, request or script.
 
 ### Prompt responsibilities
 
@@ -231,6 +244,12 @@ Common tools are `end_call` and `stop_and_discard`. `get_task_context` is added 
 when the snapshot contains an appendix. The strict tool schemas and handlers are
 the executable contract; the capability description in a prompt is insufficient.
 
+For `general`, `end_call.noActionRequired` is required to be `null`; its schema
+cannot accept appointment-only conditional evidence. A non-null value reaching the
+handler is rejected with a focused instruction to use null and keep the observed
+closing, without another farewell. Appointment profiles retain the conditional
+evidence object and its existing authorisation/observation checks.
+
 ### Action lifecycle
 
 1. Backend calls `prepare_appointment` before a binding spoken request or acceptance.
@@ -268,7 +287,7 @@ Sources: [authority validation](../apps/api/src/appointments/native-appointment-
 
 ## Closing and conditional completion
 
-Live states the main outcome for the represented person, thanks the recipient and
+Live states the main outcome with its actual subject, thanks the recipient and
 says goodbye **before** delegating `end_call`. It should not enumerate every fact,
 criterion or internal check. The tool requires observed closing speech and the
 latest recipient quote. A substantive correction must be handled; a reciprocal

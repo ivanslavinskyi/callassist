@@ -26,7 +26,7 @@ describe("deployment preflight", () => {
   it("accepts a single named profile and reports the pinned release without requiring low-level flags", () => {
     expect(checkDeployment({ ...config(), REALTIME_AGENT_HANGUP_ENABLED: undefined, CALL_RUNTIME_PROFILE: "native_v2" }))
       .toMatchObject({ configurationValid: true, databaseChecked: false, runtimeProfile: {
-        name: "native_v2", compilerVersion: "brief-compiler-13", promptVersion: "preparation-live-native-integrity-2026-11-08"
+        name: "native_v2", compilerVersion: "brief-compiler-14", promptVersion: "preparation-live-native-roles-2026-11-09"
       } });
   });
   it.each([undefined, "false"])("rejects Native v2 before dialing when hangup is %s", flag => {

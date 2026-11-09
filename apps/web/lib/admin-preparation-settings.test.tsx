@@ -7,9 +7,9 @@ import { preparationSettingsMessages } from "./i18n/preparation-settings-message
 
 const view:PreparationSettingsView={policy:defaultPreparationRuntimePolicy,capacity:defaultPreparationCapacity,approvedProfiles:["gpt-5.6:default"],updatedAt:null,updatedByUserId:null,reason:null,history:[]};
 it.each(["en","de","ru","uk","fr","it","rm"] as const)("shows saved and required runtime policy without editable controls in %s", locale => {
-  const profile: NonNullable<PreparationSettingsView["runtimeProfile"]> = { name: "native_v2", release: "native-v2-2026-11-08",
-    mode: "live_native_v2", runtimeVersion: "live-native-context-2026-11-08", compilerVersion: "brief-compiler-13", planSchemaVersion: "9",
-    expectedPromptVersion: "preparation-live-native-integrity-2026-11-08", actualPromptVersion: "preparation-2026-10-05", ready: false };
+  const profile: NonNullable<PreparationSettingsView["runtimeProfile"]> = { name: "native_v2", release: "native-v2-2026-11-09",
+    mode: "live_native_v2", runtimeVersion: "live-native-context-2026-11-09", compilerVersion: "brief-compiler-14", planSchemaVersion: "9",
+    expectedPromptVersion: "preparation-live-native-roles-2026-11-09", actualPromptVersion: "preparation-2026-10-05", ready: false };
   const html = renderToStaticMarkup(<RuntimeProfileStatus profile={profile} locale={locale} />);
   expect(html).toContain(runtimeProfileMessages[locale].mismatch);
   expect(html).toContain(profile.expectedPromptVersion); expect(html).toContain(profile.actualPromptVersion);

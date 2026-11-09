@@ -8,12 +8,12 @@ and rollout procedures live only in the ignored `docs/local-operations/` directo
 
 ## Immutable policy and operator controls
 
-Local native checkpoint, 8 November 2026: policy
-`preparation-live-native-integrity-2026-11-08` selects `brief-compiler-13`, plan schema 9
+Native role-fidelity revision, 9 November 2026: policy
+`preparation-live-native-roles-2026-11-09` selects `brief-compiler-14`, plan schema 9
 and approval 8. The previous progressive instruction remains: resolve prerequisites
 before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
 Full original task sources and facts remain available at Live startup.
-`CALL_RUNTIME_PROFILE=native_v2` selects this integrity policy through the audited
+`CALL_RUNTIME_PROFILE=native_v2` selects this role-fidelity policy through the audited
 `runtime:configure --apply` command. Startup checks that the saved policy matches.
 Historical jobs retain their pinned policy. The unprofiled in-memory default remains
 `preparation-live-native-v2-2026-11-06`; the historical SQL seed uses the managed policy.
@@ -27,6 +27,7 @@ API has no `promptVersion` setter. See [runtime profiles](runtime-profiles.md) a
 | `live-native-actions-2026-11-06` | `brief-compiler-11` | 9 | 8 |
 | `live-native-progressive-2026-11-07` | `brief-compiler-12` | 9 | 8 |
 | `live-native-integrity-2026-11-08` | `brief-compiler-13` | 9 | 8 |
+| `live-native-roles-2026-11-09` (named native profile) | `brief-compiler-14` | 9 | 8 |
 
 All policy IDs in the table start with `preparation-`. The earlier
 `preparation-2026-10-05` policy uses compiler 6 / schema 4. Historical readers
@@ -83,6 +84,23 @@ validation, including its intermediate schema 8, is unchanged. See the
 Existing rejected revisions remain immutable; retry preparation after deploying
 the fix to produce a new revision under the corrected validation.
 
+Compiler 14 distinguishes the principal who commissioned the call, the recipient
+heard on incoming audio, and the subject of each fact. Matching names do not merge
+these roles. A preference or result can concern the recipient, principal or a third
+party; preserving the spelling of both names does not establish correct attribution.
+The compiler preserves that relation across the objective, questions and criteria.
+
+The existing audit request now checks language and fidelity to the original task
+for the role-fidelity policy. It receives labelled parties, original task sources and
+the execution plan. Language checks apply to execution fields, not source-language
+input. Semantic findings identify actual plan paths and bounded reason codes;
+malformed or incomplete audit responses fail closed. Repairs share the existing
+request budget, deadline and bounded audit-repair allowance. The historical telemetry
+stage remains `language_audit`; the new response format is `execution_fidelity_audit`.
+Earlier pinned policies retain their language-only audit. Successful new preparation
+still uses one generation and one audit, in addition to input/output moderation.
+No per-turn model request, transcript guard or speech gate is added to Live.
+
 Protected-reference extraction is heuristic. The October implementation evidence
 records a `finish-by-16:30` false-positive case; that dated observation is not a
 fresh reproduction against the integrity compiler. Model selection alone does not
@@ -111,9 +129,10 @@ The optional v2 request-envelope field `testScenario: { id, revision }` records
 scenario origin outside the brief and approval hashes. Scenario text goes through
 the same validation, moderation, compilation, review and approval as manual input.
 Effective tester access is captured even when no scenario is selected. The catalog
-adds no compilation stage and no ordinary-turn model lookup. The native disclosure
-instruction identity changed to `live-native-context-2026-11-08`; compiler policy,
-schema and approval versions in the table above remain unchanged.
+adds no compilation stage and no ordinary-turn model lookup. The 8 November catalog
+change used `live-native-context-2026-11-08` without changing its compiler policy,
+schema or approval format. The current role-fidelity release uses
+`live-native-context-2026-11-09` and compiler 14; its formats remain schema 9 / approval 8.
 
 New objective and context fields each allow 4,000 JavaScript string units after
 trimming. The shared aggregate counts normalized Unicode code points: warning at
@@ -292,6 +311,7 @@ From `apps/api`:
 node --import tsx scripts/test-isolated.ts
 node --import tsx scripts/load-preparation.ts --processes=2 --slots=4 --users=10 --duration-seconds=60
 node --import tsx scripts/evaluate-preparation.ts --full --repetitions=2
+node --import tsx scripts/evaluate-preparation.ts --suite=roles --full --profiles=gpt-5.6:default --repetitions=2
 ```
 
 The first two create and drop only their own randomly named test database using
@@ -309,6 +329,19 @@ profile list. Conservative preflight reservation stops the run before its bound;
 failed/unknown requests are not refunded. Reports record corpus/prompt/pricing/code
 versions, working-tree state, requests and unknown usage. Human checks cover facts,
 constraints, authorization, language, clarification, refusals and injection.
+
+The `roles` suite contains six synthetic scenarios across five locales with
+`--full`: matching first names, different names, a third-party subject, a true
+principal subject, two facts with different subjects, and an explicit correction.
+It defaults to compiler 14's policy. Use
+`--prompt-version=preparation-live-native-integrity-2026-11-08` for a baseline on
+the same corpus. Reports carry source-grounded subject expectations and fields to
+review. `statusMismatches` is an automatic status screen; `criticalFailures: null`
+and `semanticReview: required` deliberately leave semantic correctness unmeasured
+until human review. Offline execution makes no provider request and cannot test
+whether a model will actually detect the role error. These cases evaluate preparation,
+not spoken Live behavior; representative live conversations must also check the
+final spoken attribution, corrections and appointment readbacks.
 
 `node scripts/preparation-capacity.mjs <measured-profile.json>` calculates the
 tightest memory/CPU/connection envelope with at least 20% memory headroom. It does

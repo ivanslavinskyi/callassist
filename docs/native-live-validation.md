@@ -1,7 +1,7 @@
 # Native GPT-Live validation
 
 **Status:** maintained engineering procedure.\
-**Source reviewed:** 2026-11-08.\
+**Source reviewed:** 2026-11-09.\
 **Scope:** `live_native_v2` verification; commands do not imply a production deployment.
 
 Use the [runtime specification](native-live-runtime.md) for behavior and the
@@ -51,14 +51,14 @@ Use the normal local setup in the [README](../README.md) and
 | Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
 | Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
-| Latest integrity plan | Policy `preparation-live-native-integrity-2026-11-08`, compiler 13, schema 9, approval 8 |
-| Native instructions | Newly described attempts use `live-native-context-2026-11-08` |
+| Latest integrity plan | Policy `preparation-live-native-roles-2026-11-09`, compiler 14, schema 9, approval 8 |
+| Native instructions | Newly described attempts use `live-native-context-2026-11-09` |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
 
 The public admin preparation API cannot set `promptVersion`. The
 [runtime profile command](runtime-profiles.md) applies the policy with revision/audit
-provenance. Selecting a generation model alone does not activate compiler 13.
+provenance. Selecting a generation model alone does not activate compiler 14.
 An existing approved plan retains its version. Create and approve a new plan to
 exercise new preparation instructions.
 
@@ -80,6 +80,7 @@ insertion do not call a provider or start preparation automatically.
 | Boundary | Representative source tests |
 | --- | --- |
 | Preparation, conditional order, typed failures | `brief-compiler/native-preparation.test.ts`, `compiler-instructions.test.ts`, `preparation-issues.test.ts` |
+| Roles, source fidelity, bounded audit repair | `brief-compiler/execution-fidelity.test.ts`, `preparation-role-evaluation.test.ts`, `voice/live-native-profiles.test.ts` |
 | Historical contracts and approvals | `brief-compiler/archived-native-compatibility.test.ts`, contract `live-task.test.ts` |
 | Startup and conversational profiles | `voice/native-live-admission.test.ts`, `live-native-prompts.test.ts`, `live-native-profiles.test.ts` |
 | Numeric evidence and action lifecycle | `appointments/native-terms-evidence.test.ts`, `native-appointment-authorization.test.ts`, `voice/native-appointment-call.test.ts` |
@@ -98,6 +99,16 @@ API paths in the table are relative to `apps/api/src`; web paths to `apps/web` a
 contract paths to `packages/contracts/src`. Short filenames in a row share its
 preceding directory. Use focused suites during development, then the
 appropriate full suites after changes cross preparation, runtime and result boundaries.
+
+For the role-fidelity revision, test that the correct subject survives preparation,
+question purposes, criteria and the final spoken recap. Include identical first
+names, distinct names, third parties, a result genuinely about the principal and a
+later correction. The optional preparation `--suite=roles` corpus is documented in
+[preparation runtime](preparation-runtime.md#reproducible-verification-tools). Model-output
+fixtures verify audit handling and request bounds, not the accuracy of the remote
+auditor. Compare repeated live runs with only the plan fixed, only the closing prompt
+fixed and both fixed. Do not infer speech accuracy from passing mock tests or a
+post-call `goal=achieved` alone.
 
 Generate the eight synthetic PDF fixtures from `apps/api`:
 

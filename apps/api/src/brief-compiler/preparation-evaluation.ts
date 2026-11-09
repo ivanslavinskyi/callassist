@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
-import { defaultPreparationRuntimePolicy, normalizeCreateCallBriefInput, type CreateCallBriefInput, type PreparationProfile } from "@callassist/contracts";
+import { defaultPreparationRuntimePolicy, normalizeCreateCallBriefInput, type CreateCallBriefInput, type PreparationProfile, type PreparationRuntimePolicy } from "@callassist/contracts";
 import { DeterministicBriefCompiler, OpenAIBriefCompiler, type BriefCompilerProviderRequestResult } from "./brief-compiler";
+import { preparationRoleCorpusVersion, preparationRoleEvaluationCorpus, type PreparationEvaluationFixture, type PreparationRoleReview } from "./preparation-role-evaluation";
+import { NATIVE_ROLES_POLICY } from "./native-appointment-compilation";
 
 export const preparationCorpusVersion = "preparation-eval-v1";
 // Synthetic, manually described scenarios; no exported customer requests.
@@ -27,7 +29,7 @@ const scenarios = [
   ["long-context", "Ask whether the workshop can inspect my bicycle and which documents to bring.", "The bicycle is a city bike. No payment or order is authorized. ".repeat(50), "ready"]
 ] as const;
 const variants = ["de-CH","en-GB","fr-CH","it-CH","de-DE","en-US","ru-RU","it-CH","de-CH","en-GB"] as const;
-export function preparationEvaluationCorpus(full = false) {
+export function preparationEvaluationCorpus(full = false): PreparationEvaluationFixture[] {
   return (full ? variants : variants.slice(0,1)).flatMap((locale,variant) => scenarios.map(([name,objective,context,expected]) => ({
     id: `${name}-${variant}`, split: variant>=8 ? "holdout" : "development", expected, input: {
       recipientName: `Synthetic office ${variant+1}`, phoneNumber: "+41710000064", objective, context,
@@ -37,17 +39,21 @@ export function preparationEvaluationCorpus(full = false) {
   })));
 }
 export async function evaluatePreparation(options: { profiles: PreparationProfile[]; full: boolean; repetitions: number;
-  live: boolean; budgetUsdMicros: number; apiKey?: string; onResult?: (result: unknown) => Promise<void> }) {
+  live: boolean; budgetUsdMicros: number; apiKey?: string; suite?: "general" | "roles";
+  promptVersion?: PreparationRuntimePolicy["promptVersion"]; onResult?: (result: unknown) => Promise<void> }) {
   if (options.live && (!options.apiKey || !Number.isSafeInteger(options.budgetUsdMicros) || options.budgetUsdMicros <= 0)) throw new Error("A key and explicit positive evaluation budget are required");
   if (!Number.isInteger(options.repetitions) || options.repetitions<1 || options.repetitions>10) throw new Error("Invalid repetitions");
-  const cases = preparationEvaluationCorpus(options.full);
+  const roleSuite = options.suite === "roles";
+  const cases = roleSuite ? preparationRoleEvaluationCorpus(options.full) : preparationEvaluationCorpus(options.full);
+  const promptVersion = options.promptVersion ?? (roleSuite ? NATIVE_ROLES_POLICY : defaultPreparationRuntimePolicy.promptVersion);
   let committedMicros=0, stoppedForBudget=false;
-  const results: Array<{ caseId:string; profile:PreparationProfile; repetition:number; durationMs:number; status:string; criticalFailure:boolean;
+  const results: Array<{ caseId:string; profile:PreparationProfile; repetition:number; durationMs:number; status:string;
+    statusMismatch:boolean; criticalFailure:boolean | null; roleReview?:PreparationRoleReview;
     operations: BriefCompilerProviderRequestResult[]; compilation?: unknown }> = [];
   const startedAt = new Date().toISOString();
   outer: for (const fixture of cases) for (let repetition=0;repetition<options.repetitions;repetition++) for (const profile of options.profiles) {
     if (stoppedForBudget) break outer;
-    const policy=structuredClone(defaultPreparationRuntimePolicy); policy.generation=profile;
+    const policy=structuredClone(defaultPreparationRuntimePolicy); policy.generation=profile; policy.promptVersion=promptVersion;
     const compiler=options.live ? new OpenAIBriefCompiler({apiKey:options.apiKey!}) : new DeterministicBriefCompiler();
     const started=performance.now(), operations: BriefCompilerProviderRequestResult[]=[];
     let compilation: Awaited<ReturnType<typeof compiler.compile>> | undefined, status="error";
@@ -62,21 +68,26 @@ export async function evaluatePreparation(options: { profiles: PreparationProfil
       status=compilation.policyDecision.status;
     } catch { /* report only bounded codes/status; never credentials or provider errors */ }
     const expected=fixture.expected === "ready" ? ["ready_for_review"] : fixture.expected === "blocked" ? ["blocked"] : ["needs_clarification", "blocked"];
-    const result={caseId:fixture.id,profile,repetition,durationMs:Math.round(performance.now()-started),status,
-      criticalFailure:!expected.includes(status),operations,...(compilation ? {compilation} : {})};
+    const statusMismatch=!expected.includes(status);
+    const result={caseId:fixture.id,profile,repetition,durationMs:Math.round(performance.now()-started),status,statusMismatch,
+      criticalFailure:roleSuite ? (statusMismatch ? true : null) : statusMismatch,
+      ...(fixture.roleReview ? {roleReview:fixture.roleReview} : {}),operations,...(compilation ? {compilation} : {})};
     results.push(result); await options.onResult?.(result);
   }
   const corpusSha256=createHash("sha256").update(JSON.stringify(cases)).digest("hex");
-  return { version:1,corpusVersion:preparationCorpusVersion,corpusSha256,startedAt,completedAt:new Date().toISOString(),
+  const statusMismatches=results.filter(r=>r.statusMismatch).length;
+  return { version:2,suite:roleSuite?"roles":"general",corpusVersion:roleSuite?preparationRoleCorpusVersion:preparationCorpusVersion,corpusSha256,startedAt,completedAt:new Date().toISOString(),
     live:options.live,profileCount:options.profiles.length,cases:cases.length,repetitions:options.repetitions,
-    promptVersion:defaultPreparationRuntimePolicy.promptVersion,pricingVersion:defaultPreparationRuntimePolicy.pricingVersion,
+    promptVersion,pricingVersion:defaultPreparationRuntimePolicy.pricingVersion,
     budgetUsdMicros:options.budgetUsdMicros,committedMicros,stoppedForBudget,humanReviewed:false,
-    criticalFailures:results.filter(r=>r.criticalFailure).length,
+    statusMismatches,semanticReview:roleSuite?"required":"not_performed",
+    criticalFailures:roleSuite ? null : results.filter(r=>r.criticalFailure).length,
     summary: options.profiles.map(profile=>{
       const runs=results.filter(result=>result.profile.model===profile.model && result.profile.serviceTier===profile.serviceTier);
       const durations=runs.map(result=>result.durationMs).sort((a,b)=>a-b);
       return {profile,runs:runs.length,failures:runs.filter(result=>result.status==="error").length,
-        criticalFailures:runs.filter(result=>result.criticalFailure).length,
+        statusMismatches:runs.filter(result=>result.statusMismatch).length,
+        criticalFailures:roleSuite ? null : runs.filter(result=>result.criticalFailure).length,
         p50Ms:durations[Math.max(0,Math.ceil(durations.length*.5)-1)] ?? null,
         p95Ms:durations[Math.max(0,Math.ceil(durations.length*.95)-1)] ?? null,
         requests:runs.reduce((sum,result)=>sum+result.operations.length,0),

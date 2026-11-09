@@ -1,5 +1,5 @@
 import { preparationRequestReserve } from "../config/preparation-pricing";
-import { isNativeActionsPolicy, isProgressivePolicy, NATIVE_INTEGRITY_POLICY, nativeAppointmentInterpretationJsonSchema, prepareNativeAppointmentOutput } from "./native-appointment-compilation";
+import { isNativeActionsPolicy, isProgressivePolicy, isIntegrityPolicy, NATIVE_ROLES_POLICY, nativeAppointmentInterpretationJsonSchema, prepareNativeAppointmentOutput } from "./native-appointment-compilation";
 import {preparationIssue,moderationIssueCategories,type PreparationIssue} from "@callassist/contracts";
 import { buildCompilerInstructions } from "./compiler-instructions";
 import { equivalentIdentityLabel, preservesIdentityLabel } from "./identity-label";
@@ -32,6 +32,7 @@ import { deterministicMockAppointmentIntent, appointmentClarification, canonical
 import { createCompilationSnapshotHash } from "./compilation-integrity";
 import { storedCallBriefInputSchema, previousCompiledCallBriefSchema } from "@callassist/contracts";
 import { verifyExecutionLanguage } from "./execution-language";
+import { verifyExecutionFidelity, type ExecutionFidelityVerdict } from "./execution-fidelity";
 import { PreparationRequestDiagnostics } from "./request-diagnostics";
 
 const defaultCompilerModel = "gpt-5.6";
@@ -222,13 +223,14 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     const requestBudget = createRequestBudget({ ...options, deadlineAtMs: deadline });
     const native = options.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions = isNativeActionsPolicy(options.policy?.promptVersion);
-    const progressive = isProgressivePolicy(options.policy?.promptVersion),integrity=options.policy?.promptVersion===NATIVE_INTEGRITY_POLICY;
+    const progressive = isProgressivePolicy(options.policy?.promptVersion), integrity = isIntegrityPolicy(options.policy?.promptVersion);
+    const roles = options.policy?.promptVersion === NATIVE_ROLES_POLICY;
     const rawBrief = (native ? createCallBriefInputSchema : storedCallBriefInputSchema).parse(input);
     const currentDateTime = this.#now().toISOString();
     const moderation=await this.#isFlaggedByModeration(rawBrief,deadline,requestBudget);
     if (moderation.flagged) {
       return createCompilation({
-        native, nativeActions, progressive, integrity,
+        native, nativeActions, progressive, integrity, roles,
         rawBrief,
         compiledBrief: null,
         policyDecision: {...blockedDecision("input_moderation_flagged"),...(integrity?{issue:preparationIssue("input_moderation_flagged","input_moderation",moderation.categories)}:{})},
@@ -270,7 +272,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       const refusal = extractRefusal(response);
       if (refusal) {
         return createCompilation({
-          native, nativeActions, progressive, integrity,
+          native, nativeActions, progressive, integrity, roles,
           rawBrief,
           compiledBrief: null,
           policyDecision: {...blockedDecision("model_refusal"),...(integrity?{issue:preparationIssue("model_refusal","model_refusal")}:{})},
@@ -294,21 +296,32 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         localPolicy = evaluateCompiledBrief(rawBrief, compiledBrief, parsed.context);
         if (localPolicy.status === "ready_for_review") {
           let languageIssues: string[];
+          let semanticIssues: ExecutionFidelityVerdict["semanticViolations"] = [];
           try {
-            languageIssues = await verifyExecutionLanguage(compiledBrief, rawBrief, body => this.#request(
-              this.#responsesEndpoint, body, compilationDeadline, "language_audit", options.policy?.audit.model ?? model, requestBudget), options.policy?.audit.model ?? model);
+            const auditRequest = (body: object) => this.#request(this.#responsesEndpoint, body, compilationDeadline,
+              "language_audit", options.policy?.audit.model ?? model, requestBudget);
+            if (roles) {
+              const verdict = await verifyExecutionFidelity(compiledBrief, rawBrief, auditRequest, options.policy?.audit.model ?? model);
+              languageIssues = verdict.languageViolations;
+              semanticIssues = verdict.semanticViolations;
+            } else {
+              languageIssues = await verifyExecutionLanguage(compiledBrief, rawBrief, auditRequest, options.policy?.audit.model ?? model);
+            }
           } catch (cause) {
             if (cause instanceof BriefCompilerError) throw cause;
-            throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "language_audit", validationPaths: ["execution_language_audit"] });
+            throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "language_audit", validationPaths: [roles ? "execution_fidelity_audit" : "execution_language_audit"] });
           }
-          if (languageIssues.length) {
+          if (languageIssues.length || semanticIssues.length) {
             if (languageRepairs < executionLanguageRepairLimit) {
               languageRepairs += 1;
-              repairKind = "language";
-              validationFeedback = languageIssues.map(path => `Language mismatch at ${path}: regenerate all runtime text in ${rawBrief.locale}, including dates, conditions and approved facts. Preserve identity names, addresses and reference IDs. Do not copy source-language prose into runtime fields.`);
+              repairKind = semanticIssues.length ? "integrity" : "language";
+              validationFeedback = [
+                ...languageIssues.map(path => `Language mismatch at ${path}: regenerate all runtime text in ${rawBrief.locale}, including dates, conditions and approved facts. Preserve identity names, addresses and reference IDs. Do not copy source-language prose into runtime fields.`),
+                ...semanticIssues.map(({ path, reason }) => `Semantic fidelity failure at ${path} (${reason}): regenerate from the original labelled parties and full task sources. Preserve who each preference, fact, request and condition concerns, including recipient and third-party subjects; do not merge people by name similarity. Restore omitted facts and restrictions without inventing facts or broadening action authority. Make all plan fields mutually consistent.`)
+              ];
               continue;
             }
-            localPolicy = blockedDecision("plan_constraint_failure");
+            localPolicy = blockedDecision(semanticIssues.length ? "fact_integrity_failure" : "plan_constraint_failure");
           }
         }
         const recoverable = compiledBrief.taskType !== "unsupported" && compiledBrief.riskCategories.length === 0 &&
@@ -348,7 +361,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 
     if (Date.now() >= deadline || options.signal?.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { cause: new Error("PREPARATION_DEADLINE_EXCEEDED") });
     return createCompilation({
-      native, nativeActions, progressive, integrity,
+      native, nativeActions, progressive, integrity, roles,
       rawBrief,
       compiledBrief,
       policyDecision,
@@ -416,7 +429,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
   ) {
     const native = requestBudget.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions = isNativeActionsPolicy(requestBudget.policy?.promptVersion);
-    const instructions = isProgressivePolicy(requestBudget.policy?.promptVersion) ? progressiveCompilerInstructions
+    const instructions = requestBudget.policy?.promptVersion === NATIVE_ROLES_POLICY ? rolesCompilerInstructions
+      : isProgressivePolicy(requestBudget.policy?.promptVersion) ? progressiveCompilerInstructions
       : nativeActions ? nativeActionsCompilerInstructions : native ? nativeCompilerInstructions : compilerInstructions;
     return (await this.#request(
       this.#responsesEndpoint,
@@ -598,7 +612,8 @@ export class DeterministicBriefCompiler implements BriefCompiler {
   async compile(input: NormalizedCallBriefInput, revision = 1, options: BriefCompilerRunOptions = {}) {
     const native = options.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions=isNativeActionsPolicy(options.policy?.promptVersion);
-    const progressive=isProgressivePolicy(options.policy?.promptVersion),integrity=options.policy?.promptVersion===NATIVE_INTEGRITY_POLICY;
+    const progressive = isProgressivePolicy(options.policy?.promptVersion), integrity = isIntegrityPolicy(options.policy?.promptVersion);
+    const roles = options.policy?.promptVersion === NATIVE_ROLES_POLICY;
     const rawBrief = (native ? createCallBriefInputSchema : storedCallBriefInputSchema).parse(input);
     const compiledBrief = compiledCallBriefSchema.parse({
       schemaVersion: nativeActions?"9":CALL_BRIEF_SCHEMA_VERSION,
@@ -646,7 +661,7 @@ export class DeterministicBriefCompiler implements BriefCompiler {
       blockingIssues: deterministicMockAppointmentIntent(rawBrief) ? [{ code: "missing_scheduling_constraints", question: appointmentClarification(rawBrief) }] : []
     });
     return createCompilation({
-      native, nativeActions, progressive, integrity,
+      native, nativeActions, progressive, integrity, roles,
       rawBrief,
       compiledBrief,
       policyDecision: evaluateCompiledBrief(rawBrief, compiledBrief, {
@@ -797,6 +812,7 @@ function createCompilation(input: {
   nativeActions?: boolean;
   progressive?: boolean;
   integrity?:boolean;
+  roles?: boolean;
   rawBrief: RawCallBrief;
   compiledBrief: CompiledCallBrief | null;
   policyDecision: PolicyDecision;
@@ -805,8 +821,8 @@ function createCompilation(input: {
   displayObjective?: CallCompilation["displayObjective"];
   revision: number;
 }): CallCompilation {
-  const { native = true, nativeActions = false, progressive = false, integrity=false, ...original } = input;
-  const compilerVersion = integrity?"brief-compiler-13":progressive ? "brief-compiler-12" : nativeActions ? "brief-compiler-11" : native ? BRIEF_COMPILER_VERSION : "brief-compiler-6";
+  const { native = true, nativeActions = false, progressive = false, integrity=false, roles = false, ...original } = input;
+  const compilerVersion = roles ? "brief-compiler-14" : integrity?"brief-compiler-13":progressive ? "brief-compiler-12" : nativeActions ? "brief-compiler-11" : native ? BRIEF_COMPILER_VERSION : "brief-compiler-6";
   if(integrity&&original.policyDecision.status!=="ready_for_review"){
     const decision=original.policyDecision,code=decision.reasonCodes[0]??"model_refusal";
     const categories=original.compiledBrief?.riskCategories??[];
@@ -1448,6 +1464,7 @@ const nativeModelCompiledBriefJsonSchema = {
 
 const nativeActionsCompilerInstructions = buildCompilerInstructions("native_actions");
 const progressiveCompilerInstructions = buildCompilerInstructions("native_progressive");
+const rolesCompilerInstructions = buildCompilerInstructions("native_roles");
 const { schedulingInterpretation: _legacySchedulingSchema, ...nativeActionProperties } = nativeModelCompiledBriefJsonSchema.properties;
 const nativeActionsModelSchema = {
   ...nativeModelCompiledBriefJsonSchema,

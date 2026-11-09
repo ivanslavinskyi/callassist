@@ -1,7 +1,7 @@
 # Runtime profiles
 
 **Status:** implemented; production deployment is a separate operation.\
-**Source reviewed:** 2026-11-08.
+**Source reviewed:** 2026-11-09.
 
 `CALL_RUNTIME_PROFILE` selects a reviewed pair of voice runtime and preparation
 instructions. The checked-in environment example selects `native_v2`. Existing
@@ -9,13 +9,14 @@ installations without this variable retain their previous low-level behavior.
 
 | Profile | Voice | Preparation policy | Compiler / plan schema |
 | --- | --- | --- | --- |
-| `native_v2` | Native v2, `live-native-context-2026-11-08` | `preparation-live-native-integrity-2026-11-08` | 13 / 9 |
+| `native_v2` | Native v2, `live-native-context-2026-11-09` | `preparation-live-native-roles-2026-11-09` | 14 / 9 |
 | `managed` | Managed Live, `live-managed-v9` | `preparation-2026-10-05` | 6 / 4 |
 
 Both profiles select the Live driver, disable automatic Realtime fallback and enable
 agent hangup. Models, service tiers, provider budgets, capacity limits, pricing and
-approved model profiles retain their existing settings. Conversation prompts are
-unchanged by this configuration feature.
+approved model profiles retain their existing settings. The 9 November native
+release adds role-preserving prompts, a combined preparation audit and a general
+closing tool contract without appointment-only evidence.
 
 ## Configuration
 
@@ -36,6 +37,13 @@ with the variable name and required value; they are never silently ignored.
 The profile defines the desired configuration. PostgreSQL retains the audited
 preparation policy used to pin new requests. Startup checks alignment without
 silently changing that policy.
+
+The role-fidelity release requires an explicit transition from the 8 November
+integrity policy using the existing command below. It needs no new database
+migration. Previously approved plans, completed artifacts and pinned preparation
+jobs are not rewritten; prepare and approve a new revision to receive compiler 14
+semantic validation. Startup rejects a saved policy that does not match the selected
+release rather than silently running new calls with the previous preparation policy.
 
 After normal schema migrations, with calls/preparations drained and API/workers
 stopped, use the same deployment environment for these commands:

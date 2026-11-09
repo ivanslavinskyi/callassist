@@ -273,6 +273,8 @@ export class NativeLiveV2Call implements LiveLifecycle {
     if(call.name==="prepare_appointment"||call.name==="record_appointment_result")
       return this.#appointment?this.#appointment.tool(call.name,args,current):{ok:false,reason:"appointment_not_authorized"};
     if(call.name!=="end_call"||Object.keys(args).some(k=>!["reason","closingQuote","recipientQuote","noActionRequired"].includes(k))||!["objective_resolved","cannot_proceed","recipient_requested_end"].includes(String(args.reason)))return{ok:false,reason:"invalid_arguments"};
+    if(!this.#appointment&&args.noActionRequired!=null)
+      return{ok:false,reason:"no_action_required_not_applicable",instruction:"For this general task, retry end_call with noActionRequired: null, preserving the actual closingQuote and latest recipientQuote. This field is only for conditional appointment authority; do not repeat an already spoken closing."};
     const action=await this.#appointment?.settled(true);
     let noActionRequired:{conditionSourceQuote:string;recipientQuote:string}|undefined;
     if(args.noActionRequired!=null){

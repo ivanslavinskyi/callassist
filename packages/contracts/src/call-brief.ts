@@ -427,7 +427,7 @@ export const PREVIOUS_BRIEF_COMPILER_VERSION = "brief-compiler-5" as const;
 export const CALL_POLICY_VERSION = "callassist-policy-3" as const;
 export const LEGACY_BRIEF_COMPILER_VERSION = "brief-compiler-3" as const;
 export function isSupportedBriefCompilerVersion(value: unknown) {
-  return value === BRIEF_COMPILER_VERSION || ["brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", "brief-compiler-11", "brief-compiler-12", "brief-compiler-13"].includes(String(value)) || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === "brief-compiler-4" || value === LEGACY_BRIEF_COMPILER_VERSION;
+  return value === BRIEF_COMPILER_VERSION || ["brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", "brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14"].includes(String(value)) || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === "brief-compiler-4" || value === LEGACY_BRIEF_COMPILER_VERSION;
 }
 
 export const callTaskTypeSchema = z.enum([
@@ -758,7 +758,7 @@ export const callCompilationSchema = z.object({
   compiledBrief: compiledCallBriefSchema.nullable(),
   policyDecision: policyDecisionSchema,
   compilerModel: z.string().trim().min(1).max(120),
-  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, "brief-compiler-4", PREVIOUS_BRIEF_COMPILER_VERSION, "brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", BRIEF_COMPILER_VERSION, "brief-compiler-11", "brief-compiler-12", "brief-compiler-13"]),
+  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, "brief-compiler-4", PREVIOUS_BRIEF_COMPILER_VERSION, "brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", BRIEF_COMPILER_VERSION, "brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14"]),
   compilerResponseId: z.string().trim().min(1).max(160).nullable(),
   revision: z.number().int().positive(),
   compiledAt: z.string().datetime(),
@@ -766,7 +766,7 @@ export const callCompilationSchema = z.object({
   snapshotHash: z.string().regex(/^[a-f0-9]{64}$/)
 }).superRefine((compilation, context) => {
   const legacy = compilation.compilerVersion === LEGACY_BRIEF_COMPILER_VERSION;
-  const expectedSchema = legacy ? "3" : ["brief-compiler-11", "brief-compiler-12", "brief-compiler-13"].includes(compilation.compilerVersion) ? "9" : compilation.compilerVersion === BRIEF_COMPILER_VERSION ? "8"
+  const expectedSchema = legacy ? "3" : ["brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14"].includes(compilation.compilerVersion) ? "9" : compilation.compilerVersion === BRIEF_COMPILER_VERSION ? "8"
     : compilation.compilerVersion === "brief-compiler-9" ? "7" : compilation.compilerVersion === "brief-compiler-8" ? "6"
     : compilation.compilerVersion === "brief-compiler-7" ? "5" : "4";
   if ((compilation.compiledBrief && compilation.compiledBrief.schemaVersion !== expectedSchema) ||

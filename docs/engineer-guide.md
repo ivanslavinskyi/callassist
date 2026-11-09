@@ -128,7 +128,7 @@ can count as substantive. Assessment uncertainty has a bounded settlement path.
 ### Native v2
 
 The explicit `native_v2` mode uses `NativeLiveV2Call`, version
-`live-native-context-2026-11-08`. Live receives complete task sources and facts at
+`live-native-context-2026-11-09`. Live receives complete task sources and facts at
 startup, owns the declarative opening, ordinary replies and short closing, and uses
 backend tools at action/refusal/termination boundaries. Optional indexed references
 are fetched only when needed. General/book/confirm_existing/reschedule/cancel profiles

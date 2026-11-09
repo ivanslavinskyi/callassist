@@ -27,7 +27,7 @@ describe("native action preparation",()=>{
   const repo=new InMemoryCallRepository(),brief=await repo.create(raw,compilation);const approved=await repo.approveCompilation(brief.id,await originalPlanReview(repo,brief.id));
   const snapshot=createApprovedExecutionSnapshot(approved);expect(snapshot.version).toBe(8);
   const session=nativeV2Session(snapshot);expect(session.tools!.map((t:any)=>t.name)).toContain("prepare_appointment");
-  expect(JSON.stringify(session.input)).toContain(raw.context);expect(session.instructions).toContain("represented person by name");
+  expect(JSON.stringify(session.input)).toContain(raw.context);expect(session.instructions).toContain("name the represented person bound to the approved appointment action");
   const request=fetchImplementation.mock.calls.map(c=>JSON.parse(String(c[1]?.body))).find(b=>b.text?.format?.name==="callassist_compiled_brief");
   expect(request.input[0].content).toContain("nativeAppointmentInterpretation");expect(request.input[0].content).not.toContain("Always return the compiler-only schedulingInterpretation");
   expect(request.input[0].content.includes("Resolve prerequisites before dependent actions")).toBe(promptVersion===NATIVE_PROGRESSIVE_POLICY);

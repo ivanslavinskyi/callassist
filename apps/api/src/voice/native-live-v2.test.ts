@@ -30,6 +30,24 @@ async function fixture(withAppointment=false,objective?:string){
   return{...h,live,twilio,call,tts,hangup,attach};
 }
 describe("native Live v2",()=>{
+  it("repairs appointment-only closing evidence to null for a general task without repeating speech",async()=>{
+    const h=await fixture();await h.attach();
+    const answer="Margherita.",closing="Sie möchten Pizza Margherita. Vielen Dank und auf Wiederhören.";
+    h.call.transcript("recipient",answer,0,1000,()=>{});h.call.transcript("assistant",closing,1000,3000,()=>{});h.call.audio(speech);
+    const args={reason:"objective_resolved",closingQuote:closing,recipientQuote:answer};
+    const end=(noActionRequired:unknown)=>h.call.tool({name:"end_call",arguments:JSON.stringify({...args,noActionRequired})},()=>true);
+    const rejected=await end({conditionSourceQuote:"If pizza, ask which kind.",recipientQuote:answer});
+    expect(rejected).toMatchObject({ok:false,reason:"no_action_required_not_applicable",instruction:expect.stringContaining("noActionRequired: null")});
+    expect(h.hangup).not.toHaveBeenCalled();expect(h.call.closed).toBe(false);
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toHaveLength(0);
+    expect(await end(null)).toMatchObject({ok:true,state:"closing_requested"});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.find(e=>e.event==="mark"));await vi.advanceTimersByTimeAsync(351);await flush();
+    expect(h.hangup).toHaveBeenCalledTimes(1);
+    expect(h.live.sent.filter(e=>e.type==="session.commentary.append")).toHaveLength(1);
+    expect(h.tts).not.toHaveBeenCalled();
+    const decisions=(await h.repository.exportCallTextData(h.brief.id)).terminalDecisions!;
+    expect(decisions).toHaveLength(1);expect(decisions[0]).not.toHaveProperty("noActionRequired");
+  });
   it("resolves a conditional task without booking only with approved and observed evidence",async()=>{
     const condition="Book only if the total price is at most CHF 100.";
     const h=await fixture(true,`Ask the total price. ${condition}`);await h.attach();
