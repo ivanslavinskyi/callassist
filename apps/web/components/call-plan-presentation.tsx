@@ -97,10 +97,10 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2, nativeO
           <li key={index}>{fact.callLanguageText}</li>
         )}</ul> : <p>{copy.none}</p>}
       </div>
-      <div>
-        <Heading>{copy.guardrails}</Heading>
+      {plan.prohibitedActions.length ? <div>
+        <Heading>{details.taskRestrictions}</Heading>
         <ul>{plan.prohibitedActions.map((action) => <li key={action}>{action}</li>)}</ul>
-      </div>
+      </div> : null}
     </div>
   </>;
 }

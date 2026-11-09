@@ -14,7 +14,7 @@ export function transitionAnswering(attempt: CallAttemptRecord, current: Answeri
   const snapshot = attempt.executionSnapshot;
   if (attempt.id !== input.attemptId || attempt.compilationSnapshotHash !== input.snapshotHash ||
       (attempt.providerCallId && attempt.providerCallId !== input.providerCallId) ||
-      attempt.provider !== "twilio" || (snapshot?.version !== 3 && snapshot?.version !== 7 && snapshot?.version !== 8)) return deny;
+      attempt.provider !== "twilio" || (snapshot?.version !== 3 && snapshot?.version !== 7 && snapshot?.version !== 8 && snapshot?.version !== 9)) return deny;
   if (input.kind === "bind") {
     if (!active && attempt.providerCallId !== input.providerCallId) return deny;
     return { applied: true, decision: "hang_up", state: current ?? {

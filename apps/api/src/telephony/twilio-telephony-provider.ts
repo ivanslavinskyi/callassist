@@ -57,7 +57,7 @@ export class TwilioTelephonyProvider implements TelephonyProvider {
     }
     const binding = options?.binding;
     const snapshot = options?.executionSnapshot;
-    if (!binding || (snapshot?.version !== 3 && snapshot?.version !== 7 && snapshot?.version !== 8) || binding.callBriefId !== brief.id ||
+    if (!binding || (snapshot?.version !== 3 && snapshot?.version !== 7 && snapshot?.version !== 8 && snapshot?.version !== 9) || binding.callBriefId !== brief.id ||
         binding.compilationSnapshotHash !== snapshot.compilationSnapshotHash) {
       throw new Error("ANSWERING_APPROVAL_REQUIRED");
     }

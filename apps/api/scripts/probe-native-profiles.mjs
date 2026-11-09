@@ -17,6 +17,7 @@ import { NativeLiveV2Call } from '../src/voice/native-live-v2-call.ts';
 import { renderSpeech } from '../src/voice/rendered-speech.ts';
 import { pcmuHasSpeech } from '../src/voice/pcmu-activity.ts';
 import { hasNativeFarewellCue } from '../src/voice/live-native-completion.ts';
+import { assessProbeClosing } from './native-closing-evidence.ts';
 const cacheFolder=new URL('../../../.tools/native-profiles-provider-results/',import.meta.url);
 const budget=createExperimentBudget(process.env,fileURLToPath(new URL('experiment-ledger.jsonl',cacheFolder)));
 process.env.OPENAI_API_KEY=budget.key;
@@ -167,10 +168,11 @@ for(const name of selected){
   }
   const action=await repository.nativeLive.readAction(attempt.id);
   const progressivePass=!scenario.progressive||!!firstTaskText&&/стоим|стоит|цен[ауые]/i.test(firstTaskText)&&!/запис|запиc|при[её]м|если|100|ста франк|ста швейцар|ноября|14|16/i.test(firstTaskText);
-  const result={scenario:name,sourceDigest,discarded,elapsedMs:Date.now()-started,hungup,closed:controller.closed,actionState:action?.state??null,actorStages:stage,reciprocal,
+  const closingEvidence=assessProbeClosing(transcript.filter(row=>row.role==='assistant').map(row=>row.text).join(''));
+  const result={scenario:name,sourceDigest,closingEvidence,discarded,elapsedMs:Date.now()-started,hungup,closed:controller.closed,actionState:action?.state??null,actorStages:stage,reciprocal,
    ...(scenario.progressive?{firstTaskText,progressivePass,clarifications}:{}),
    afterFarewellCaptionMs:firstFarewellAt?Date.now()-firstFarewellAt:null,afterVoicedPlaybackMs:hungup?Date.now()-phone.voicedAt:null,
-   accepted:scenario.refusal?discarded&&controller.closed:hungup&&(scenario.expectNoAction?!action:!authority||action?.state==='confirmed')&&(!scenario.lunch||stage===3)&&progressivePass,configuration:descriptor?.nativeConfiguration??null,stats:{delegations:new Set(events.map(e=>e.delegation).filter(Boolean)).size,incomplete:events.filter(e=>e.type==='response.incomplete').length,toolCalls:events.filter(e=>e.item?.type==='function_call').length}};
+   accepted:scenario.refusal?discarded&&controller.closed:hungup&&(scenario.expectNoAction?!action:!authority||action?.state==='confirmed')&&(!scenario.lunch||stage===3)&&progressivePass&&closingEvidence.clean,configuration:descriptor?.nativeConfiguration??null,stats:{delegations:new Set(events.map(e=>e.delegation).filter(Boolean)).size,incomplete:events.filter(e=>e.type==='response.incomplete').length,toolCalls:events.filter(e=>e.item?.type==='function_call').length}};
   results.push(result);
   await writeFile(new URL(name+'-trace.json',folder),JSON.stringify({result,transcript,events,trace:repository.nativeLive.traces.get(attempt.id)??[]},null,2));
   const sound=Buffer.concat(phone.audio),header=Buffer.alloc(44);header.write('RIFF');header.writeUInt32LE(36+sound.length,4);header.write('WAVEfmt ',8);header.writeUInt32LE(16,16);header.writeUInt16LE(7,20);header.writeUInt16LE(1,22);header.writeUInt32LE(8000,24);header.writeUInt32LE(8000,28);header.writeUInt16LE(1,32);header.writeUInt16LE(8,34);header.write('data',36);header.writeUInt32LE(sound.length,40);await writeFile(new URL(name+'-assistant.wav',folder),Buffer.concat([header,sound]));

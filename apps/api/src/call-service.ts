@@ -833,7 +833,7 @@ export class CallService {
     if (current.brief.status !== "ready") return current;
     // This schema retains one recording per brief. Reuse must not overwrite
     // earlier audio or fail only after the new provider call is placed.
-    if (!this.#nativePreflight && current.compilation?.compiledBrief?.schemaVersion === "9") throw new CallServiceError("LIVE_TASK_NOT_SUPPORTED");
+    if (!this.#nativePreflight && (current.compilation?.compiledBrief?.schemaVersion === "9" || current.compilation?.compiledBrief?.schemaVersion === "10")) throw new CallServiceError("LIVE_TASK_NOT_SUPPORTED");
     if (this.#nativePreflight && current.recording) throw new CallServiceError("LIVE_NEW_CALL_REQUIRED");
     if (current.compilation?.compiledBrief && ["5","6","7"].includes(current.compilation.compiledBrief.schemaVersion)) {
       throw new CallServiceError("LIVE_REAPPROVAL_REQUIRED");
@@ -874,7 +874,7 @@ export class CallService {
         });
       }
       const execution = reserved.attempt.executionSnapshot;
-      if (this.telephonyProvider.mode === "twilio" && (execution?.version === 3 || execution?.version === 7 || execution?.version === 8)) {
+      if (this.telephonyProvider.mode === "twilio" && (execution?.version === 3 || execution?.version === 7 || (execution?.version === 8 || execution?.version === 9))) {
         await this.recordTelemetry(id, {
           callAttemptId: reserved.attempt.id, idempotencyKey: `answering:${reserved.attempt.id}:pending`,
           payload: { name: "answering.updated", metadata: {
@@ -1032,7 +1032,7 @@ export class CallService {
     const attempt = await this.repository.getLatestAttempt(id);
     const current = await this.#require(id);
     if (!attempt || attempt.id !== input.attemptId || terminalStatuses.has(attempt.status) ||
-        current.brief.lifecycle?.stopRequestedBy || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8)) return false;
+        current.brief.lifecycle?.stopRequestedBy || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8 && attempt.executionSnapshot?.version !== 9)) return false;
     try {
       if (result.decision === "message") {
         if (!this.telephonyProvider.playVoicemail || !attempt.executionSnapshot.answering.message) throw new Error("VOICEMAIL_UNAVAILABLE");
@@ -1053,7 +1053,7 @@ export class CallService {
     if (!job.callId || !job.callAttemptId) throw new DurableJobExecutionError("DURABLE_JOB_TARGET_INVALID");
     const attempt = await this.repository.getAttempt(job.callId, job.callAttemptId);
     const snapshot = await this.#require(job.callId);
-    if (!attempt || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8) || terminalStatuses.has(attempt.status)) return;
+    if (!attempt || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8 && attempt.executionSnapshot?.version !== 9) || terminalStatuses.has(attempt.status)) return;
     const state = snapshot.brief.lifecycle?.answering;
     // A human conversation has its own consent and maximum duration deadlines.
     if (state?.streamAdmitted && (state.decision === "consent" || snapshot.brief.lifecycle?.consent === "granted")) return;

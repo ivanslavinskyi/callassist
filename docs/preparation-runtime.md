@@ -131,8 +131,25 @@ the same validation, moderation, compilation, review and approval as manual inpu
 Effective tester access is captured even when no scenario is selected. The catalog
 adds no compilation stage and no ordinary-turn model lookup. The 8 November catalog
 change used `live-native-context-2026-11-08` without changing its compiler policy,
-schema or approval format. The current role-fidelity release uses
-`live-native-context-2026-11-09` and compiler 14; its formats remain schema 9 / approval 8.
+schema or approval format. The earlier role-fidelity release,
+`live-native-context-2026-11-09` with compiler 14, used schema 9 / approval 8.
+The subsequent task-boundary release uses `live-native-task-2026-11-09`,
+`preparation-live-native-task-2026-11-09`, compiler 15, schema 10 and approval 9.
+Its optional prohibitions, task-specific stopping conditions and unresolved
+criteria may be empty. Product controls remain enforced outside these lists.
+The compiler supplies audit-only `taskEvidence` for criteria, restrictions and
+follow-up conditions. Local validation checks complete/unique target coverage,
+source paths and exact source substrings; the existing combined audit checks
+semantic support, explicit restriction coverage, internal-instruction leakage and
+conditional branch applicability. A matching substring alone is not semantic proof.
+Evidence is included in the compilation hash but excluded from execution plans,
+Live prompts and translated review fields. Empty sections are omitted from review.
+Explicit user restrictions remain visible even when similar to system rules.
+The successful preparation path retains generation plus one combined audit and
+the existing moderation requests; repair limits, deadlines and Live autonomy are
+unchanged. Historical policy prompts, approvals and their schemas remain supported.
+Activate the saved policy with `runtime:configure --apply` while API/workers are
+stopped and work is drained; prepare a fresh plan to exercise the new format.
 
 New objective and context fields each allow 4,000 JavaScript string units after
 trimming. The shared aggregate counts normalized Unicode code points: warning at
@@ -333,7 +350,8 @@ constraints, authorization, language, clarification, refusals and injection.
 The `roles` suite contains six synthetic scenarios across five locales with
 `--full`: matching first names, different names, a third-party subject, a true
 principal subject, two facts with different subjects, and an explicit correction.
-It defaults to compiler 14's policy. Use
+It retains compiler 14's policy as its default. To evaluate the current task-boundary
+release on this corpus, pass `--prompt-version=preparation-live-native-task-2026-11-09`. Use
 `--prompt-version=preparation-live-native-integrity-2026-11-08` for a baseline on
 the same corpus. Reports carry source-grounded subject expectations and fields to
 review. `statusMismatches` is an automatic status screen; `criticalFailures: null`

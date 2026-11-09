@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { unzipSync, strFromU8 } from "fflate";
 import postgres from "postgres";
-import { defaultVoiceConsentRuntimePolicy, normalizeCreateCallBriefInput, type CreateCallBriefInput, type TelemetryExportInput } from "@callassist/contracts";
+import { defaultPreparationRuntimePolicy, defaultVoiceConsentRuntimePolicy, normalizeCreateCallBriefInput, type CreateCallBriefInput, type TelemetryExportInput } from "@callassist/contracts";
 import { isolatedTestDatabase } from "../db/isolated-test-database";
 import { PostgresCallRepository } from "../storage/postgres-call-repository";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
@@ -49,7 +49,8 @@ describe("durable telemetry export", () => {
     const input: CreateCallBriefInput = { recipientName: "Test clinic", phoneNumber: "+41710000001", objective: "Ask opening hours",
       context: "Private Unicode context: Привет\nsecond line", assistantProfileId: "sebastian", representedPersonFirstName: "Test", representedPersonLastName: "Caller",
       assistanceReason: "none", locale: "en-GB", allowLanguageSwitch: false, allowedFacts: ["Private approved fact"] };
-    const call = await repository.create(input, await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input)), owner);
+    const call = await repository.create(input, await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input), 1,
+      { policy: { ...defaultPreparationRuntimePolicy, promptVersion: "preparation-live-native-task-2026-11-09" } }), owner);
     callId = call.id;
     await sql`UPDATE call_briefs SET created_at=now()-interval '40 days' WHERE id=${callId}`;
     await repository.approveCompilation(callId, await originalPlanReview(repository, callId));
@@ -127,6 +128,19 @@ describe("durable telemetry export", () => {
       .toHaveLength(2);
     expect(lines(files, "call_briefs")[0]!.data.context).toContain("Привет\nsecond line");
     expect(lines(files, "call_attempts")[0]).toMatchObject({ selectedInPeriod: true, data: { id: attemptId, consent_runtime_policy: defaultVoiceConsentRuntimePolicy } });
+    const stored = await repository.get(callId);
+    // The archive preserves the immutable compilation; approval time belongs to its separate receipt.
+    expect(lines(files, "call_compilations")[0]!.data.compilation).toEqual({ ...stored!.compilation, approvedAt: null });
+    expect(stored!.compilation).toMatchObject({ compilerVersion: "brief-compiler-15", compiledBrief: {
+      schemaVersion: "10", prohibitedActions: [], taskEvidence: expect.any(Array)
+    } });
+    const execution = lines(files, "call_attempts")[0]!.data.execution_snapshot;
+    expect(execution).toMatchObject({ version: 9, plan: { prohibitedActions: [] } });
+    expect((execution as { plan: object }).plan).not.toHaveProperty("taskEvidence");
+    expect(lines(files, "call_compilation_approvals")[0]!.data.execution_snapshot).toEqual(execution);
+    const inspector = await repository.getAdminCallInspector(callId);
+    expect(inspector.timeline.some(event => event.payload.name === "realtime.ready")).toBe(true);
+    expect(JSON.stringify(inspector)).not.toContain("taskEvidence");
     expect(files["data/voice_consent_settings.jsonl"]).toBeUndefined();
     expect(files["data/voice_consent_settings_audit.jsonl"]).toBeUndefined();
     expect(lines(files, "final_transcript_revisions")).toHaveLength(2);

@@ -47,7 +47,7 @@ export function projectPlanReview(compilation: CallCompilation, source: PlanSour
     if ("contextAppendix" in compiled) compiled.contextAppendix.forEach((section,index) => {
       for (const key of ["title","description","content"] as const) add(`contextAppendix.${index}.${key}`,section[key],text => {section[key]=text;});
     });
-    if (compiled.schemaVersion === "9" && compiled.nativeAppointmentAuthorization) {
+    if ((compiled.schemaVersion === "9" || compiled.schemaVersion === "10") && compiled.nativeAppointmentAuthorization) {
       const native = compiled.nativeAppointmentAuthorization;
       add("nativeAppointmentAuthorization.serviceDescription",native.serviceDescription,text=>{native.serviceDescription=text;});
       native.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.requirements.${index}.description`,item.description,text=>{item.description=text;}); });

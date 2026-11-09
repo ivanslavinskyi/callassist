@@ -63,7 +63,7 @@ Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 
 | Selection | Result |
 | --- | --- |
-| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 14 policy required, hangup enabled; recommended |
+| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 15 policy required, hangup enabled; recommended |
 | `CALL_RUNTIME_PROFILE=managed` | Managed Live, compiler 6 policy required, hangup enabled; rollback |
 | `VOICE_RUNTIME_DRIVER=live`, fallback `false`, experiment `off` | Managed `unified_live`; default selection |
 | Same settings, experiment `native_v1` | Earlier informational experiment; eligibility may select managed control |
@@ -87,7 +87,7 @@ checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.t
 | Compiler | `brief-compiler-14` | Earlier compilers remain readable; not all are executable for new work |
 | Compiled plan | Schema `9` | Archived schemas are read through explicit readers |
 | Approved snapshot | Version `8` | Native v2 also accepts version `7` through its legacy authority adapter |
-| Runtime and prompt identity | `live-native-context-2026-11-09` | Frozen per-attempt descriptor and configuration hashes |
+| Runtime and prompt identity | `live-native-task-2026-11-09` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
 | Summary generator | `summary-v8` | Earlier artifacts are preserved |
 | Native evaluator format | `native-summary-v3` | Selected for context v2; v6/v7 retain their formats when replayed |

@@ -6,7 +6,8 @@ export const NATIVE_ACTIONS_POLICY = "preparation-live-native-actions-2026-11-06
 export const NATIVE_PROGRESSIVE_POLICY = "preparation-live-native-progressive-2026-11-07";
 export const NATIVE_INTEGRITY_POLICY = "preparation-live-native-integrity-2026-11-08";
 export const NATIVE_ROLES_POLICY = "preparation-live-native-roles-2026-11-09";
-export const isIntegrityPolicy = (version: string | undefined) => version === NATIVE_INTEGRITY_POLICY || version === NATIVE_ROLES_POLICY;
+export const NATIVE_TASK_POLICY = "preparation-live-native-task-2026-11-09";
+export const isIntegrityPolicy = (version: string | undefined) => version === NATIVE_TASK_POLICY || version === NATIVE_INTEGRITY_POLICY || version === NATIVE_ROLES_POLICY;
 export const isProgressivePolicy=(version:string|undefined)=>version===NATIVE_PROGRESSIVE_POLICY||isIntegrityPolicy(version);
 export const isNativeActionsPolicy = (version: string | undefined) => version === NATIVE_ACTIONS_POLICY || isProgressivePolicy(version);
 const selector = z.union([

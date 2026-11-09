@@ -19,7 +19,7 @@ export async function verifyExecutionLanguage(compiled: CompiledCallBrief, raw: 
   if ("contextAppendix" in compiled) compiled.contextAppendix.forEach((section, index) => {
     for (const key of ["title", "description", "content"] as const) collect(section[key], `contextAppendix.${index}.${key}`);
   });
-    if (compiled.schemaVersion === "9" && compiled.nativeAppointmentAuthorization) {
+    if ((compiled.schemaVersion === "9" || compiled.schemaVersion === "10") && compiled.nativeAppointmentAuthorization) {
       const native = compiled.nativeAppointmentAuthorization;
       collect(native.serviceDescription,"nativeAppointmentAuthorization.serviceDescription");
       native.requirements.forEach((item,index)=>{ collect(item.description,`nativeAppointmentAuthorization.requirements.${index}.description`); });

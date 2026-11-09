@@ -51,14 +51,14 @@ Use the normal local setup in the [README](../README.md) and
 | Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
 | Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
-| Latest integrity plan | Policy `preparation-live-native-roles-2026-11-09`, compiler 14, schema 9, approval 8 |
-| Native instructions | Newly described attempts use `live-native-context-2026-11-09` |
+| Latest integrity plan | Policy `preparation-live-native-task-2026-11-09`, compiler 15, schema 10, approval 9 |
+| Native instructions | Newly described attempts use `live-native-task-2026-11-09`; Live delegates silently and the backend alone extracts closing quotes |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
 
 The public admin preparation API cannot set `promptVersion`. The
 [runtime profile command](runtime-profiles.md) applies the policy with revision/audit
-provenance. Selecting a generation model alone does not activate compiler 14.
+provenance. Selecting a generation model alone does not activate compiler 15.
 An existing approved plan retains its version. Create and approve a new plan to
 exercise new preparation instructions.
 

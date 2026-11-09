@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
-import { defaultPreparationCapacity, defaultPreparationRuntimePolicy } from "@callassist/contracts";
+import { defaultPreparationCapacity, defaultPreparationRuntimePolicy, normalizeCreateCallBriefInput } from "@callassist/contracts";
+import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { originalPlanReview } from "../test-helpers/original-plan-review";
+import { hasValidCompilationSnapshotHash } from "../brief-compiler/compilation-integrity";
 import { isolatedTestDatabase } from "./isolated-test-database";
 import { configureRuntimeProfile } from "./configure-runtime-profile";
 import { PostgresPreparationPolicyStore } from "../storage/preparation-policy-store";
@@ -32,6 +35,29 @@ async function request(status: "cancelled" | "queued") {
 }
 async function settings() { return (await sql`SELECT policy,capacity,approved_profiles FROM preparation_settings WHERE id=true`)[0]!; }
 
+it("persists schema10 evidence and an immutable approval9 without exposing evidence to execution",async()=>{
+  const repository=new PostgresCallRepository(db.url,Buffer.alloc(32,19));
+  let attemptId: string | undefined;
+  try{
+    const input=normalizeCreateCallBriefInput({recipientName:"Nina",representedPersonFirstName:"Nina",representedPersonLastName:"Keller",
+      phoneNumber:"+41710000125",assistantProfileId:"anna",locale:"en-GB",objective:"Ask what Nina wants for dinner.",allowedFacts:[]});
+    const compilation=await new DeterministicBriefCompiler().compile(input,1,{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-native-task-2026-11-09"}});
+    const brief=await repository.create(input,compilation);
+    await repository.approveCompilation(brief.id,await originalPlanReview(repository,brief.id));
+    const stored=await repository.get(brief.id);
+    expect(stored!.compilation!.compiledBrief).toMatchObject({schemaVersion:"10",prohibitedActions:[],taskEvidence:compilation.compiledBrief!.schemaVersion==="10"?compilation.compiledBrief!.taskEvidence:[]});
+    expect(hasValidCompilationSnapshotHash(stored!.compilation!)).toBe(true);
+    const {attempt}=await repository.startAttempt(brief.id,{provider:"twilio"});
+    attemptId = attempt.id;
+    expect(attempt.executionSnapshot).toMatchObject({version:9,plan:{prohibitedActions:[]}});
+    expect(attempt.executionSnapshot!.plan).not.toHaveProperty("taskEvidence");
+    expect(await repository.refreshAnsweringApproval(brief.id)).toBe(false);
+  }finally{
+    if (attemptId) await sql`UPDATE call_attempts SET status='completed',ended_at=now() WHERE id=${attemptId}`;
+    await repository.close();
+  }
+});
+
 it("previews without writes, atomically applies once under concurrency and preserves models, limits and pinned work", async () => {
   const id = await request("cancelled");
   const beforeRequest = await sql`SELECT * FROM call_preparation_requests WHERE id=${id}`;
@@ -43,17 +69,17 @@ it("previews without writes, atomically applies once under concurrency and prese
   const results = await Promise.all([configureRuntimeProfile(["--apply"], env), configureRuntimeProfile(["--apply"], env)]);
   expect(results.filter(result => result.changed)).toHaveLength(1);
   expect(results.every(result => result.ready)).toBe(true);
-  expect(await settings()).toEqual({ ...before, policy: { ...before.policy, revision: 8, promptVersion: "preparation-live-native-roles-2026-11-09" } });
+  expect(await settings()).toEqual({ ...before, policy: { ...before.policy, revision: 8, promptVersion: "preparation-live-native-task-2026-11-09" } });
   expect(await sql`SELECT * FROM call_preparation_requests WHERE id=${id}`).toEqual(beforeRequest);
   const rows = await sql`SELECT * FROM preparation_settings_audit ORDER BY created_at`;
   expect(rows).toHaveLength(audit.length + 1);
-  expect(rows.at(-1)!.next_settings).toMatchObject({ runtimeProfile: "native_v2", runtimeRelease: "native-v2-2026-11-09" });
+  expect(rows.at(-1)!.next_settings).toMatchObject({ runtimeProfile: "native_v2", runtimeRelease: "native-v2-task-2026-11-09" });
   const repository = { getPreparationSettings: () => new PostgresPreparationPolicyStore(sql).get() };
   expect(await assertRuntimeProfileReady(repository, env)).toMatchObject({ ready: true });
   await expect(assertRuntimeProfileReady(repository, { ...env, CALL_RUNTIME_PROFILE: "managed" })).rejects.toThrow("RUNTIME_PROFILE_MISMATCH");
   const fresh = await request("cancelled");
   expect((await sql`SELECT runtime_policy FROM call_preparation_requests WHERE id=${fresh}`)[0]!.runtime_policy.promptVersion)
-    .toBe("preparation-live-native-roles-2026-11-09");
+    .toBe("preparation-live-native-task-2026-11-09");
   expect(await configureRuntimeProfile(["--apply"], { ...env, CALL_RUNTIME_PROFILE: "managed" })).toMatchObject({ changed: true, ready: true });
   expect((await settings()).policy).toEqual({ ...before.policy, revision: 9 });
   expect(await sql`SELECT * FROM call_preparation_requests WHERE id=${id}`).toEqual(beforeRequest);

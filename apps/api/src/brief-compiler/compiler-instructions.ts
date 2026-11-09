@@ -1,3 +1,4 @@
+import { TASK_ONLY_INSTRUCTIONS } from "./task-evidence";
 import { SUPPLIED_INFORMATION_INSTRUCTIONS } from "../voice/supplied-information";
 import { nativeAppointmentCompilerInstructions } from "./native-appointment-compilation";
 import { PARTICIPANT_ROLE_INSTRUCTIONS } from "../voice/participant-roles";
@@ -28,8 +29,8 @@ Treat orderedQuestions as topics to resolve flexibly. Each question or follow-up
 Provide contextAppendix as an empty array for ordinary calls. Only for genuinely complex tasks, place optional, lengthy reference details supplied by the user in named sections (id, title, description, content). Do not invent reference information. All approved facts, restrictions, action conditions and information needed for the ordinary conversation must remain in the main plan. Each section must be self-contained and no more than 4000 characters.
 Live closes with a brief summary of the main task outcome, polite thanks and goodbye. Do not turn closing into a recital of all details, questions, personal data or application procedures.`;
 
-export function buildCompilerInstructions(profile: "legacy" | "native" | "native_actions" | "native_progressive" | "native_roles") {
-  const roles = profile === "native_roles";
+export function buildCompilerInstructions(profile: "legacy" | "native" | "native_actions" | "native_progressive" | "native_roles" | "native_task") {
+  const roles = profile === "native_roles" || profile === "native_task";
   const native = profile !== "legacy", actions = profile === "native_actions" || profile === "native_progressive" || roles;
   const appointmentInstructions = roles
     ? `The following appointment-specific rules apply only to supported appointment actions, never to general information, message or preference tasks. The executable appointment authority is for the represented person. If a source asks for an appointment for another person, preserve that subject and return taskType unsupported with no appointment authority; never silently transfer the appointment to the represented person or invent third-party appointment authority. General enquiries about third parties remain supported.\n${nativeAppointmentCompilerInstructions}`
@@ -58,5 +59,5 @@ Every sourceText in approvedFacts must be copied character-for-character, in the
 
 Always return between 1 and 12 orderedQuestions. For a neutral message, make the message itself the single ordered item. For an unsupported task, include one non-executable summary item; policy enforcement will prevent the call.
 
-Keep the plan proportional to the task. For one simple question use one ordered question, no speculative follow-ups, and short criteria. Leave backgroundSummary empty when no context was supplied. Return compact JSON without indentation or padding.`;
+${profile === "native_task" ? TASK_ONLY_INSTRUCTIONS + "\n\n" : ""}Keep the plan proportional to the task. For one simple question use one ordered question, no speculative follow-ups, and short criteria. Leave backgroundSummary empty when no context was supplied. Return compact JSON without indentation or padding.`;
 }

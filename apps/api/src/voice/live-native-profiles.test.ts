@@ -9,10 +9,12 @@ import { assertPinnedLiveRuntime, type RuntimeDescriptor } from "./runtime-descr
 import { PARTICIPANT_ROLE_INSTRUCTIONS } from "./participant-roles";
 
 describe("approved native profiles",()=>{
-  it.each(["general","book","confirm_existing","reschedule","cancel"] as const)("assembles only the approved %s capabilities",async profile=>{
+  it.each(([8, 9] as const).flatMap(version =>
+    (["general","book","confirm_existing","reschedule","cancel"] as const).map(profile => ({version, profile}))
+  ))("assembles only the approved $profile capabilities for snapshot $version",async ({version, profile})=>{
     const h=await approvedCall();try{
-      const snapshot=structuredClone(h.snapshot) as unknown as Extract<ApprovedExecutionSnapshot,{version:8}>;
-      snapshot.version=8;snapshot.plan.appointmentAuthorization=null;
+      const snapshot=structuredClone(h.snapshot) as unknown as Extract<ApprovedExecutionSnapshot,{version:8|9}>;
+      snapshot.version=version;snapshot.plan.appointmentAuthorization=null;
       snapshot.plan.nativeAppointmentAuthorization=profile==="general"?null:{...nativeAuthority,operation:profile,
         existingAppointment:profile==="book"?null:{date:"2099-09-10",startTime:"12:00",reference:null},
         alternatives:["book","reschedule"].includes(profile)?nativeAuthority.alternatives:[]};
@@ -24,6 +26,12 @@ describe("approved native profiles",()=>{
       expect(s.instructions).not.toContain("status_check");expect(s.backendInstructions.includes("status_check")).toBe(profile!=="general");
       expect(s.instructions).toContain(PARTICIPANT_ROLE_INSTRUCTIONS);expect(s.backendInstructions).toContain(PARTICIPANT_ROLE_INSTRUCTIONS);
       expect(s.instructions).toContain('Address the recipient directly as "you"');
+      // Spoken Live owns the farewell; only the backend extracts evidence.
+      expect(s.instructions).not.toMatch(/with its exact spoken quote|latest recipient quote|closingQuote|recipientQuote/);
+      expect(s.instructions).toContain("silently and listen");
+      expect(s.instructions).toContain("substantive correction or question");
+      expect(s.backendInstructions).toContain("you alone extract closingQuote and recipientQuote directly from the observed transcript");
+      expect(s.backendInstructions).toContain("After an accepted end_call return no spoken message");
       expect(s.instructions).not.toContain("MAIN task outcome for the represented person by name");
       expect(s.instructions.includes("For an appointment result")).toBe(profile!=="general");
       expect(s.instructions.includes("Discussing a third party does not transfer appointment authority")).toBe(profile!=="general");

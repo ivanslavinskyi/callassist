@@ -5,7 +5,7 @@ import { twilioAnsweringPricingVersion } from "../config/provider-pricing-policy
 
 /** Stable identities; recorded atomically with the decision before returning TwiML. */
 export function answeringUsage(attempt: CallAttemptRecord, state: AnsweringState): TelephonyProviderOperationRecord[] {
-  if (state.phase === "pending" || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8)) return [];
+  if (state.phase === "pending" || (attempt.executionSnapshot?.version !== 3 && attempt.executionSnapshot?.version !== 7 && attempt.executionSnapshot?.version !== 8 && attempt.executionSnapshot?.version !== 9)) return [];
   const kinds = state.message === "issued" ? ["answering_detection", "voicemail_tts"] as const : ["answering_detection"] as const;
   return kinds.map(operationType => {
     const amd = operationType === "answering_detection";

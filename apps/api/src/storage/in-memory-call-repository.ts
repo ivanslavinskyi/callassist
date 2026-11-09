@@ -2830,7 +2830,7 @@ export class InMemoryCallRepository implements CallRepository {
   async refreshAnsweringApproval(id: string) {
     const snapshot = this.#require(id);
     if (snapshot.brief.status !== "ready" || !snapshot.compilation || (this.#attempts.get(id)?.length ?? 0) > 0) return false;
-    if ([3, 4, 5, 6, 7, 8].includes(this.#currentCompilation(id).executionSnapshot?.version ?? 0)) return false;
+    if ([3, 4, 5, 6, 7, 8, 9].includes(this.#currentCompilation(id).executionSnapshot?.version ?? 0)) return false;
     const compilation = { ...copy(snapshot.compilation), revision: snapshot.compilation.revision + 1,
       approvedAt: null, compiledAt: new Date().toISOString() };
     compilation.snapshotHash = createCompilationSnapshotHash(compilation);

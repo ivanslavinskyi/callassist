@@ -21,7 +21,7 @@ export const preparationRuntimePolicySchema = z.strictObject({
   generation: preparationProfileSchema,
   audit: preparationProfileSchema,
   review: preparationProfileSchema,
-  promptVersion: z.enum(["preparation-2026-10-05", "preparation-live-native-v2-2026-11-06", "preparation-live-native-actions-2026-11-06", "preparation-live-native-progressive-2026-11-07", "preparation-live-native-integrity-2026-11-08", "preparation-live-native-roles-2026-11-09"]),
+  promptVersion: z.enum(["preparation-2026-10-05", "preparation-live-native-v2-2026-11-06", "preparation-live-native-actions-2026-11-06", "preparation-live-native-progressive-2026-11-07", "preparation-live-native-integrity-2026-11-08", "preparation-live-native-roles-2026-11-09", "preparation-live-native-task-2026-11-09"]),
   pricingVersion: z.literal("openai-preparation-2026-10-05"),
   timeoutMs: z.number().int().min(1000).max(300_000),
   requestTimeoutMs: z.number().int().min(1000).max(120_000),
