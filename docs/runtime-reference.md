@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated 2026-11-09 for the task-boundary release (`2342741`), schema `0001`–`0115`.
+Updated 2026-11-10 for the plan-only release (implementation `579b4ea`), schema `0001`–`0115`.
 Current domain behavior is documented in [the engineer guide](engineer-guide.md).
 The route inventory below links to source registration modules. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed

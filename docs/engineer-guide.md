@@ -1,6 +1,6 @@
 # SHPROHLI engineer guide
 
-Source reviewed: 2026-11-09, application commit `2342741`, including task boundaries and silent closing,
+Source reviewed: 2026-11-10, implementation commit `579b4ea`, including the plan-only boundary and closing recovery,
 schema catalog `0001`–`0115`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.

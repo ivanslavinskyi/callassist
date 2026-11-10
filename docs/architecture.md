@@ -1,6 +1,6 @@
 # Architecture
 
-**Source reviewed:** 2026-11-09, application commit `2342741`; migration catalog `0001`–`0115`.
+**Source reviewed:** 2026-11-10, implementation commit `579b4ea`; migration catalog `0001`–`0115`.
 
 SHPROHLI has a Next.js web application, a Fastify API, PostgreSQL-backed durable
 workers and shared TypeScript contracts. The API owns authorization and immutable
