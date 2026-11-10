@@ -25,16 +25,16 @@ describe("approved native profiles",()=>{
       expect(s.instructions).toContain("Backend tools:");expect(s.instructions).toContain("Do not generate <|SpawnThinking|> when:");
       expect(s.instructions).not.toContain("status_check");expect(s.backendInstructions.includes("status_check")).toBe(profile!=="general");
       expect(s.instructions).toContain(PARTICIPANT_ROLE_INSTRUCTIONS);expect(s.backendInstructions).toContain(PARTICIPANT_ROLE_INSTRUCTIONS);
-      expect(s.instructions).toContain('Address the recipient directly as "you"');
+      expect(s.instructions).toContain('address the recipient as "you"');
       // Spoken Live owns the farewell; only the backend extracts evidence.
       expect(s.instructions).not.toMatch(/with its exact spoken quote|latest recipient quote|closingQuote|recipientQuote/);
-      expect(s.instructions).toContain("silently and listen");
-      expect(s.instructions).toContain("substantive correction or question");
-      expect(s.backendInstructions).toContain("you alone extract closingQuote and recipientQuote directly from the observed transcript");
-      expect(s.backendInstructions).toContain("After an accepted end_call return no spoken message");
+      expect(s.instructions).toContain("silently to request disconnection");
+      expect(s.instructions).toContain("substantive question or correction");
+      expect(s.backendInstructions).toContain("extract closingQuote and recipientQuote from the observed transcript");
+      expect(s.backendInstructions).toContain("After accepted end_call, return no text");
       expect(s.instructions).not.toContain("MAIN task outcome for the represented person by name");
-      expect(s.instructions.includes("For an appointment result")).toBe(profile!=="general");
-      expect(s.instructions.includes("Discussing a third party does not transfer appointment authority")).toBe(profile!=="general");
+      expect(s.instructions.includes("For an appointment,")).toBe(profile!=="general");
+      expect(s.instructions).toContain("Semantic fidelity never expands the approved execution snapshot's action authority");
       expect(s.backendInstructions.includes("noActionRequired must be null")).toBe(profile==="general");
       expect(s.backendInstructions.includes("never cancel it separately first")).toBe(profile==="reschedule");
       expect(s.backendInstructions.includes("explicit cancellation confirmation")).toBe(profile==="cancel");
@@ -75,7 +75,7 @@ describe("approved native profiles",()=>{
       expect(session.instructions).toContain("including facts about third parties");
       expect(session.instructions).toContain("The author of the source task is not automatically the speaker of incoming call audio");
       expect(session.instructions).toContain("Semantic fidelity never expands the approved execution snapshot's action authority");
-      expect(session.instructions).toContain("You choose ordinary replies, pacing and follow-ups without backend permission");
+      expect(session.instructions).toContain("You lead the conversation: choose useful replies, pacing and follow-ups");
     }finally{await h.service.close();}
   });
   it("pins backend, tools, opening and budget identity; does not expose task content",async()=>{

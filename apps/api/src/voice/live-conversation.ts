@@ -496,6 +496,9 @@ export class OpenAILiveConversation implements VoiceConversation {
       }
     } else if (event.type === "session.output_audio.delta" && this.#ready) {
       if (!decodePcmu(event.delta)) { this.#fail("LIVE_INVALID_OUTPUT_AUDIO"); return; }
+      // Native speech and backend reasoning can overlap. Backend occupancy is
+      // not a speech boundary: muting here clips useful replies and makes the
+      // model's closing quotes disagree with the delivered transcript.
       // Protected playback resumes behind a transcript fence. The task opening
       // opens before task context is sent, preserving speech ahead of its ACKs.
       if (this.lifecycle && (this.#outputSuspended || !this.#outputEpochReady)) {

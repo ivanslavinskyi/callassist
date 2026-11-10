@@ -4,7 +4,7 @@ import { callCompilationSchema, defaultPreparationRuntimePolicy, nativeActionCom
 import { DeterministicBriefCompiler, OpenAIBriefCompiler, type PreparationRequestMetadata } from "./brief-compiler";
 import { hasValidCompilationSnapshotHash } from "./compilation-integrity";
 import { verifyExecutionFidelity, type ExecutionFidelityVerdict } from "./execution-fidelity";
-import { NATIVE_INTEGRITY_POLICY, NATIVE_ROLES_POLICY, isIntegrityPolicy, isNativeActionsPolicy, isProgressivePolicy } from "./native-appointment-compilation";
+import { NATIVE_INTEGRITY_POLICY, NATIVE_ROLES_POLICY, isIntegrityPolicy, isNativeActionsPolicy, isProgressivePolicy, nativeAppointmentCompilerInstructions, nativeAppointmentNormalizationInstructions } from "./native-appointment-compilation";
 import { nativeAuthority } from "../test-helpers/native-appointment";
 import { preparationRequestReserve } from "../config/preparation-pricing";
 
@@ -55,6 +55,20 @@ function provider(verdicts: unknown[], plans: object[] = [generalOutput(wrongPla
 }
 
 describe("combined execution language and source fidelity audit", () => {
+  it("checks missing executable numeric limits in the same audit without flattening complex conditions", async () => {
+    const compiled = nativeActionCompiledCallBriefSchema.parse({ ...plan, taskType: "appointment_coordination",
+      nativeAppointmentAuthorization: { ...nativeAuthority, limits: { finishBy: null, maxTotalPrice: null },
+        requirements: [{ id: "budget", description: "At most CHF 100 total", sourceText: "at most CHF 100 total" }] } });
+    const missing = { ...clean, semanticViolations: [{ path: "nativeAppointmentAuthorization.limits.maxTotalPrice", reason: "source_omitted" }] };
+    const request = vi.fn(async (_body: object) => ({ output_text: JSON.stringify(missing) }));
+    expect(await verifyExecutionFidelity(compiled, { ...raw, objective: "Book only if at most CHF 100 total" }, request, "audit-model")).toEqual(missing);
+    expect(request).toHaveBeenCalledTimes(1);
+    const instructions = (request.mock.calls[0]![0] as { instructions: string }).instructions;
+    expect(instructions).toContain("A text requirement alone does not enforce a numeric ceiling");
+    expect(instructions).toContain("alternative-specific conditions");
+    expect(instructions).toContain(nativeAppointmentNormalizationInstructions);
+    expect(nativeAppointmentCompilerInstructions).toContain(nativeAppointmentNormalizationInstructions);
+  });
   it("supplies unprojected plan, labelled parties and complete original sources in one request", async () => {
     const input: RawCallBrief = { ...raw, recipientName: "Нина", context: "Предпочтение касается получателя, не заказчика.",
       allowedFacts: ["Вера не ест мясо."], clarificationAnswers: [{ issueCode: "ambiguous_recipient_or_subject", answer: "Получателя." }],
@@ -201,6 +215,10 @@ describe("roles preparation policy and bounded repair", () => {
     const result = await new OpenAIBriefCompiler({ apiKey: "test", ...mock }).compile(raw, 1, { policy });
     expect(result.policyDecision.status).toBe("blocked");
     expect(mock.count()).toEqual({ generations: 4, audits: 4 });
+    const repairs = mock.fetchImplementation.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))
+      .filter(body => body.text?.format.name === "callassist_compiled_brief");
+    expect(repairs[2].input[0].content).toContain("Language mismatch at orderedQuestions.0.text");
+    expect(repairs[3].input[0].content).toContain("Semantic fidelity failure at localizedObjective");
   });
 
   it("fails closed on a malformed combined verdict rather than approving or spending a repair loop", async () => {
@@ -218,8 +236,8 @@ describe("roles preparation policy and bounded repair", () => {
     expect(mock.fetchImplementation).toHaveBeenCalledTimes(5);
   });
 
-  it("allows a faithful appointment for the represented person without applying the recipient preference rule", async () => {
-    const input = { ...raw, recipientName: "Praxis", objective: "Запиши меня на консультацию на следующей неделе с девяти до пяти." };
+  it.each([false, true])("preserves appointment authority and targets numeric repairs at the generator schema (repair=%s)", async repair => {
+    const input = { ...raw, recipientName: "Praxis", objective: "Запиши меня на консультацию на следующей неделе с девяти до пяти." + (repair ? " Не дороже 100 CHF." : "") };
     const appointment = { ...plan, taskType: "appointment_coordination" as const,
       localizedObjective: "Eine Beratung für Nina Keller nächste Woche zwischen neun und siebzehn Uhr vereinbaren.",
       opening: { ...plan.opening, recipientAddress: "Praxis", purposeStatement: "Ich rufe wegen einer Beratung für Nina Keller an." },
@@ -227,15 +245,23 @@ describe("roles preparation policy and bounded repair", () => {
       conditionalFollowUps: [], successCriteria: ["Der Termin für Nina Keller ist bestätigt."],
       namedEntities: [{ type: "organisation" as const, value: "Praxis" }, { type: "person" as const, value: "Nina Keller" }],
       nativeAppointmentInterpretation: { intent: "book", authorityEvidence: { source: "objective", clarificationAnswerIndex: null, quote: input.objective },
-        authorization: { ...nativeAuthority, requirements: [], serviceDescription: "Beratung", alternatives: [{ ...nativeAuthority.alternatives[0], requirements: [],
+        authorization: { ...nativeAuthority, limits: { finishBy: null, maxTotalPrice: repair ? { amount: 100, currency: "CHF" } : null }, requirements: [], serviceDescription: "Beratung", alternatives: [{ ...nativeAuthority.alternatives[0], requirements: [],
           rules: [{ dates: { kind: "next_calendar_week" }, weekdays: [], excludedWeekdays: [], excludedDates: [], startTime: "09:00", endTime: "17:00" }] }] } } };
-    const mock = provider([clean], [appointment]);
+    const missing = structuredClone(appointment);
+    missing.nativeAppointmentInterpretation.authorization.limits.maxTotalPrice = null;
+    const mock = provider(repair ? [{ ...clean, semanticViolations: [{ path: "nativeAppointmentAuthorization.limits.maxTotalPrice", reason: "source_omitted" }] }, clean] : [clean], repair ? [missing, appointment] : [appointment]);
     const result = await new OpenAIBriefCompiler({ apiKey: "test", ...mock, now: () => new Date("2099-09-01T10:00:00Z") }).compile(input, 1, { policy });
     expect(result.policyDecision.status).toBe("ready_for_review");
     expect(result.compiledBrief).toMatchObject({ schemaVersion: "9", nativeAppointmentAuthorization: { operation: "book" } });
     const audit = JSON.parse(String(mock.fetchImplementation.mock.calls[2]![1]!.body));
     expect(JSON.parse(audit.input).compiledTask.nativeAppointmentAuthorization.operation).toBe("book");
-    expect(mock.fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(mock.fetchImplementation).toHaveBeenCalledTimes(repair ? 6 : 4);
+    if (repair) {
+      const correction = JSON.parse(String(mock.fetchImplementation.mock.calls[3]![1]!.body)).input[0].content;
+      expect(correction).toContain("nativeAppointmentInterpretation.authorization.limits.maxTotalPrice");
+      expect(correction).toContain("a textual requirement is not a substitute");
+      expect(result.compiledBrief).toMatchObject({ nativeAppointmentAuthorization: { limits: { maxTotalPrice: { amount: 100, currency: "CHF" } } } });
+    }
   });
 
   it("retains the historical language-only audit and compiler13 for the pinned integrity policy", async () => {

@@ -248,6 +248,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     let displayObjective: CallCompilation["displayObjective"];
     let localPolicy: PolicyDecision | null = null;
     let validationFeedback: string[] = [];
+    const auditRepairFeedback = new Set<string>();
     let languageRepairs = 0;
     let repairKind: PreparationRequestMetadata["repairKind"] = "none";
 
@@ -318,10 +319,14 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             if (languageRepairs < executionLanguageRepairLimit) {
               languageRepairs += 1;
               repairKind = semanticIssues.length ? "integrity" : "language";
-              validationFeedback = [
+              const findings = [
                 ...languageIssues.map(path => `Language mismatch at ${path}: regenerate all runtime text in ${rawBrief.locale}, including dates, conditions and approved facts. Preserve identity names, addresses and reference IDs. Do not copy source-language prose into runtime fields.`),
-                ...semanticIssues.map(({ path, reason }) => `Semantic fidelity failure at ${path} (${reason}): regenerate from the original labelled parties and full task sources. Preserve who each preference, fact, request and condition concerns, including recipient and third-party subjects; do not merge people by name similarity. Restore omitted facts and restrictions without inventing facts or broadening action authority. Make all plan fields mutually consistent.${taskOnly ? " Repair the affected task content itself; do not add a prohibition telling Live to avoid the compiler error. Remove unsupported internal rules while retaining explicit user restrictions and branch conditions." : ""}`)
+                ...semanticIssues.map(({ path, reason }) => `Semantic fidelity failure at ${path} (${reason}): regenerate from the original labelled parties and full task sources. Preserve who each preference, fact, request and condition concerns, including recipient and third-party subjects; do not merge people by name similarity. Restore omitted facts and restrictions without inventing facts or broadening action authority. Make all plan fields mutually consistent.${path.startsWith("nativeAppointmentAuthorization") ? " This audit path is in the canonical plan; repair the corresponding field under nativeAppointmentInterpretation.authorization in your output schema." : ""}${path === "nativeAppointmentAuthorization.limits.maxTotalPrice" ? " Put the source's explicit common maximum amount and normalized currency in nativeAppointmentInterpretation.authorization.limits.maxTotalPrice; a textual requirement is not a substitute. Apply the approved currency conventions, without guessing a missing currency or flattening branch-specific prices." : ""}${taskOnly ? " Repair the affected task content itself; do not add a prohibition telling Live to avoid the compiler error. Remove unsupported internal rules while retaining explicit user restrictions and branch conditions." : ""}`)
               ];
+              // A language repair must not undo an earlier semantic correction.
+              // Keep deduplicated constraints within the same bounded repair loop.
+              for (const finding of findings) auditRepairFeedback.add(finding);
+              validationFeedback = ["Retain corrections from earlier audits. The findings below are regression constraints, not a request to recreate a field that was removed correctly; use the original sources and current output schema.", ...auditRepairFeedback];
               continue;
             }
             localPolicy = blockedDecision(semanticIssues.length ? "fact_integrity_failure" : "plan_constraint_failure");

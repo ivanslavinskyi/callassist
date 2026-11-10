@@ -51,6 +51,14 @@ describe("native numeric evidence",()=>{
  it("preserves the approved numeric ceiling after grounding",()=>{
   expect(check("100 CHF",100).ok).toBe(true);expect(check("101 CHF",101)).toMatchObject({reason:"price_limit_unverified"});
  });
+ it("cannot substitute a requirement quote for numeric evidence at the existing action boundary",()=>{
+  for(const quote of ["12 CHF", "120 CHF", "Price unknown"]){
+   const bounded={...authority,requirements:[{id:"budget",description:"At most CHF 100 total",sourceText:"At most CHF 100 total"}]};
+   const result=validateNativeAppointment(bounded,{...nativeProposal,totalPrice:null,termsQuote:null,
+    requirements:[{id:"budget",recipientQuote:quote}]},quote,now);
+   expect(result).toMatchObject({ok:false,reason:"terms_evidence_required"});
+  }
+ });
  it("uses an explicit end time without asking for duration again",()=>{
   const proposal={...nativeProposal,startTime:"15:00",durationMinutes:30,termsQuote:"It ends at 15:30."};
   expect(verifyNativeTerms(proposal,proposal.termsQuote,{price:false,duration:true})).toMatchObject({ok:true,evidence:{durationMinutes:30}});

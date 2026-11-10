@@ -1991,3 +1991,15 @@ button:disabled { cursor: wait; opacity: .55; }
 .test-scenario-buttons { display: flex; flex-wrap: wrap; gap: .5rem; margin: .6rem 0 1rem; }
 .test-scenario-buttons button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .provided-information { margin-block: 1rem; overflow-wrap: anywhere; }
+
+.call-analysis-progress { display: grid; gap: 10px; width: min(100%, 420px); margin-block: 14px; }
+.call-analysis-label { color: var(--ink); font-size: 13px; font-weight: 650; }
+.call-analysis-track { display: block; position: relative; overflow: hidden; height: 8px; border-radius: 999px; background: var(--line); isolation: isolate; }
+.call-analysis-sweep { position: absolute; inset-block: 0; left: 0; width: 44%; border-radius: inherit; background: linear-gradient(90deg, var(--ink), var(--accent-strong)); animation: call-analysis-sweep 1.4s ease-in-out infinite alternate; }
+.call-analysis-progress.is-compact { display: inline-grid; width: 160px; max-width: 100%; margin: 0; gap: 5px; vertical-align: middle; }
+.call-analysis-progress.is-compact .call-analysis-label { font-size: inherit; font-weight: inherit; }
+.call-analysis-progress.is-compact .call-analysis-track { height: 4px; }
+@keyframes call-analysis-sweep { from { transform: translateX(0); } to { transform: translateX(127%); } }
+@media (prefers-reduced-motion: reduce) {
+  .call-analysis-sweep { animation: none; width: 100%; opacity: .65; background: repeating-linear-gradient(120deg, var(--ink) 0 8px, var(--line) 8px 16px); }
+}

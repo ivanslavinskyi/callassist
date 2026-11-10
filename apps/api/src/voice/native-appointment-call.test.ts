@@ -18,6 +18,35 @@ async function fixture(authority:NativeAppointmentAuthorization=nativeAuthority)
  return {call,store,ports,proposal,prepare,result,readback,ack,marks};
 }
 describe("native appointment journal",()=>{
+ it.each([
+  ["Нет, вместо этого семнадцатого в десять.","Запишите Нину Келлер на семнадцатое сентября 2099 года в десять.","Да, записал."],
+  ["No, instead the seventeenth at ten.","Please book Nina Keller for 17 September 2099 at 10:00.","Yes, booked."],
+  ["Nein, stattdessen am siebzehnten um zehn.","Bitte buchen Sie Nina Keller am 17. September 2099 um 10 Uhr.","Ja, eingetragen."],
+  ["Non, plutôt le dix-sept à dix heures.","Réservez pour Nina Keller le 17 septembre 2099 à 10 heures.","Oui, c'est réservé."],
+  ["No, invece il diciassette alle dieci.","Prenoti per Nina Keller il 17 settembre 2099 alle 10.","Sì, è prenotato."]
+ ])("replaces a rejected date with one authorized booking using existing evidence: %s",async(correction,request,answer)=>{
+  const h=await fixture({...nativeAuthority,limits:{finishBy:null,maxTotalPrice:{amount:100,currency:"CHF"}}});
+  Object.assign(h.proposal,{totalPrice:{amount:90,currency:"CHF"},termsQuote:"90 CHF total."});
+  h.call.transcript("recipient","90 CHF total.",0,900);await h.prepare();h.readback();await h.ack();
+  const oldId=h.call.action!.id;
+  h.call.transcript("recipient",`noiseઠa young man ${correction}`,3100,4000);
+  expect(await h.result({outcome:"declined",recipientQuote:correction,detailsMatch:true})).toMatchObject({ok:true,action:{state:"declined"}});
+  const replacement={...h.proposal,date:"2099-09-17",startTime:"10:00"};
+  expect(await h.call.tool("prepare_appointment",{proposal:{...replacement,totalPrice:{amount:120,currency:"CHF"}},intent:"request"},()=>true)).toMatchObject({ok:false});
+  expect(await h.call.tool("prepare_appointment",{proposal:replacement,intent:"request"},()=>true)).toMatchObject({ok:true,action:{state:"authorized"}});
+  expect(h.call.action!.id).not.toBe(oldId);
+  h.call.transcript("assistant",request,5000,6000);h.call.audio(speech);h.call.transcript("recipient",answer,6100,7000);await h.ack();
+  expect(await h.result({assistantQuote:request,recipientQuote:answer})).toMatchObject({ok:true,action:{state:"confirmed",proposal:{date:"2099-09-17",startTime:"10:00"}}});
+  h.call.close();
+ });
+ it("repairs a decline binding without accepting ambiguity, old evidence or a changed commitment",async()=>{
+  const h=await fixture();await h.prepare();h.readback();await h.ack();
+  h.call.transcript("recipient","No, instead tomorrow at ten.",3100,4000);
+  expect(await h.result({outcome:"declined",recipientQuote:"No, instead tomorrow at ten.",detailsMatch:false})).toMatchObject({ok:false,reason:"decline_not_established",instruction:expect.stringContaining("detailsMatch must be true")});
+  expect(await h.call.tool("prepare_appointment",{proposal:{...h.proposal,date:"2099-09-17"},intent:"status_check"},()=>true)).toMatchObject({ok:false,reason:"existing_action_requires_resolution"});
+  expect(await h.result({outcome:"declined",recipientQuote:"No, instead tomorrow at ten."})).toMatchObject({ok:true});
+  h.call.close();
+ });
  it("does not reuse a confirmed numeric result after a later correction at closing",async()=>{
   const h=await fixture({...nativeAuthority,limits:{finishBy:null,maxTotalPrice:{amount:100,currency:"CHF"}}});
   Object.assign(h.proposal,{totalPrice:{amount:90,currency:"CHF"},termsQuote:"90 CHF total."});h.call.transcript("recipient","90 CHF total.",0,900);

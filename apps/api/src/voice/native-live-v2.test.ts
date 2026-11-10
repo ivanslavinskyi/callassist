@@ -8,12 +8,13 @@ import { nativeProposal } from "../test-helpers/native-appointment";
 import { voiceRuntimeMode } from "../config/voice-runtime";
 import { NATIVE_COMPLETION_TIMING } from "./live-native-completion";
 import { NATIVE_TRACE_DRAIN_MS } from "./live-native-configuration";
+import type { CallLocale } from "@callassist/contracts";
 
 const cleanup:Array<()=>Promise<void>>=[];
 afterEach(async()=>{for(const close of cleanup.splice(0))await close();vi.useRealTimers();});
-async function fixture(withAppointment=false,objective?:string){
+async function fixture(withAppointment=false,objective?:string,appointmentAuthority=authorization,locale:CallLocale="en-GB"){
   vi.useFakeTimers({toFake:["setTimeout","clearTimeout","setInterval","clearInterval"]});
-  const h=await approvedCall(withAppointment?authorization:undefined,undefined,undefined,undefined,undefined,undefined,undefined,objective);const live=new TestSocket(),twilio=new TestSocket();live.autoAcknowledge=true;
+  const h=await approvedCall(withAppointment?appointmentAuthority:undefined,undefined,locale,undefined,undefined,undefined,undefined,objective);const live=new TestSocket(),twilio=new TestSocket();live.autoAcknowledge=true;
   await h.repository.nativeLive.reserve(h.brief.id,h.attempt.id);
   await h.repository.nativeLive.bind(h.attempt.id,"CA-LIVE");
   const tts=vi.fn<typeof fetch>(),hangup=vi.spyOn(h.service,"prepareAgentHangup").mockResolvedValue(true);
@@ -30,6 +31,81 @@ async function fixture(withAppointment=false,objective?:string){
   return{...h,live,twilio,call,tts,hangup,attach};
 }
 describe("native Live v2",()=>{
+  it("updates a closing decision after a reciprocal goodbye without another assistant phrase",async()=>{
+    const h=await fixture();await h.attach();
+    h.call.transcript("recipient","At nine.",0,500,()=>{});
+    h.call.transcript("assistant","The office opens at nine.",600,1600,()=>{});h.call.audio(speech);
+    const farewell="Thank you, goodbye.";
+    h.call.transcript("assistant",farewell,1600,2600,()=>{});h.call.audio(speech);
+    const end=(recipientQuote:string)=>h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:farewell,recipientQuote,noActionRequired:null})},()=>true);
+    expect(await end("At nine.")).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);const oldMark=h.twilio.sent.filter(e=>e.event==="mark").at(-1);
+    h.call.activity("started");h.call.transcript("recipient","Goodbye.",2800,3300,()=>{});h.call.activity("stopped");
+    h.twilio.receive(oldMark);await vi.advanceTimersByTimeAsync(351);expect(h.hangup).not.toHaveBeenCalled();
+    expect(await end("At nine.")).toMatchObject({reason:"latest_recipient_evidence_required"});
+    expect(await end("Goodbye.")).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));
+    await vi.advanceTimersByTimeAsync(351);await flush();expect(h.hangup).toHaveBeenCalledTimes(1);
+    expect(h.live.sent.filter(e=>e.type==="session.commentary.append")).toHaveLength(1);
+  });
+  it("reconciles a changed date, records one replacement and hangs up after playback without extra reviews",async()=>{
+    const h=await fixture(true,undefined,{...authorization,windows:[...authorization.windows,{date:"2099-09-17",startTime:"09:00",endTime:"17:00"}]});await h.attach();
+    const invoke=(name:string,args:object)=>h.call.tool({name,arguments:JSON.stringify(args)},()=>true);
+    const readback=async(text:string,start:number)=>{h.call.transcript("assistant",text,start,start+800,()=>{});h.call.audio(speech);await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark"&&e.mark.name.startsWith("native-action:")).at(-1));await flush();};
+    h.call.transcript("recipient","The sixteenth at three is available.",0,500,()=>{});
+    const first=await invoke("prepare_appointment",{proposal:{...nativeProposal,alternativeId:"approved"},intent:"request"});const old=first.action as any;
+    const request="Please book Nina Keller for 16 September 2099 at 15:00.";await readback(request,1000);
+    const correction="No, instead 17 September at 10:00.";h.call.transcript("recipient",correction,2100,2900,()=>{});
+    expect(await invoke("record_appointment_result",{actionId:old.id,episode:1,outcome:"declined",assistantQuote:request,recipientQuote:correction,latestRecipientQuote:correction,detailsMatch:true,previousAppointmentReleased:false})).toMatchObject({ok:true});
+    const second=await invoke("prepare_appointment",{proposal:{...nativeProposal,alternativeId:"approved",date:"2099-09-17",startTime:"10:00"},intent:"request"});const next=second.action as any;expect(second.ok).toBe(true);expect(next.id).not.toBe(old.id);
+    const nextRequest="Please book Nina Keller for 17 September 2099 at 10:00.";await readback(nextRequest,3000);
+    h.call.transcript("recipient","Yes, booked.",4100,4500,()=>{});
+    expect(await invoke("record_appointment_result",{actionId:next.id,episode:1,outcome:"confirmed",assistantQuote:nextRequest,recipientQuote:"Yes, booked.",latestRecipientQuote:"Yes, booked.",detailsMatch:true,previousAppointmentReleased:false})).toMatchObject({ok:true});
+    const closing="Nina Keller is booked for 17 September at ten. Thank you, goodbye.";
+    h.call.transcript("assistant",closing,5000,6000,()=>{});h.call.audio(speech);
+    expect(await invoke("end_call",{reason:"objective_resolved",closingQuote:closing,recipientQuote:"Yes, booked.",noActionRequired:null})).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));await vi.advanceTimersByTimeAsync(351);await flush();
+    expect(h.hangup).toHaveBeenCalledTimes(1);expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
+    expect(await h.repository.nativeLive.readAction(h.attempt.id)).toMatchObject({state:"confirmed",proposal:{date:"2099-09-17",startTime:"10:00"}});
+  });
+  it("preserves useful speech and evidence while native delegation is still running",async()=>{
+    const h=await fixture();await h.attach();
+    h.live.receive({type:"session.input_transcript.delta",delta:"Margherita.",start_ms:0,end_ms:500});
+    h.live.receive({type:"session.delegation.created",offset_ms:600,delegation:{id:"overlap",response_id:"overlap-response"}});
+    h.live.receive({type:"response.event",delegation_id:"overlap",event:{type:"response.created",response:{id:"overlap-response"}}});
+    const quote="You would like Margherita. Thank you, goodbye.";
+    h.live.receive({type:"session.output_transcript.delta",delta:quote,start_ms:800,end_ms:2000});
+    h.live.receive({type:"session.output_audio.delta",delta:speech});
+    expect(h.twilio.sent.filter(e=>e.event==="media")).toHaveLength(1);
+    h.live.receive({type:"response.event",delegation_id:"overlap",event:{type:"response.output_item.done",response_id:"overlap-response",item:{type:"function_call",call_id:"overlap-end",name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:quote,recipientQuote:"Margherita.",noActionRequired:null})}}});
+    h.live.receive({type:"response.event",delegation_id:"overlap",event:{type:"response.completed",response:{id:"overlap-response",status:"completed",output:[]}}});
+    for(let i=0;i<8;i++)await flush();
+    expect(JSON.parse(h.live.sent.find(e=>e.item?.call_id==="overlap-end").item.output)).toMatchObject({ok:true});
+    expect((await h.repository.get(h.brief.id))!.transcript.map(s=>s.text).join(" ")).toContain(quote);
+    await vi.advanceTimersByTimeAsync(1001);
+    const mark=h.twilio.sent.find(e=>e.event==="mark");expect(mark).toBeTruthy();
+    h.twilio.receive(mark);await vi.advanceTimersByTimeAsync(351);await flush();
+    expect(h.hangup).toHaveBeenCalledTimes(1);
+  });
+  it("does not clip a conclusion that starts during an automatic quiet review",async()=>{
+    const h=await fixture();await h.attach();
+    h.live.receive({type:"session.input_transcript.delta",delta:"Margherita.",start_ms:0,end_ms:500});
+    h.live.receive({type:"session.output_transcript.delta",delta:"Understood.",start_ms:600,end_ms:800});
+    h.live.receive({type:"session.output_audio.delta",delta:speech});
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.quietEpisodeMs+1);
+    const command=h.live.sent.find(e=>e.type==="response.create");expect(command).toBeDefined();
+    const quote="You would like Margherita. Thank you, goodbye.";
+    const before=h.twilio.sent.filter(e=>e.event==="media").length;
+    h.live.receive({type:"session.output_transcript.delta",delta:quote,start_ms:7000,end_ms:9000});
+    h.live.receive({type:"session.output_audio.delta",delta:speech});
+    expect(h.twilio.sent.filter(e=>e.event==="media")).toHaveLength(before+1);
+    await backendReply(h,"overlapping-review",{closingQuote:quote,recipientQuote:"Margherita."});
+    expect(JSON.parse(h.live.sent.find(e=>e.item?.call_id==="overlapping-review-end").item.output)).toMatchObject({ok:true});
+    h.live.receive({type:"session.input_transcript.delta",delta:"Actually, a correction.",start_ms:9500,end_ms:10000});
+    h.live.receive({type:"session.output_audio.delta",delta:speech});
+    expect(h.twilio.sent.filter(e=>e.event==="media")).toHaveLength(before+2);
+    await vi.advanceTimersByTimeAsync(1400);expect(h.hangup).not.toHaveBeenCalled();
+  });
   it("repairs appointment-only closing evidence to null for a general task without repeating speech",async()=>{
     const h=await fixture();await h.attach();
     const answer="Margherita.",closing="Sie möchten Pizza Margherita. Vielen Dank und auf Wiederhören.";
@@ -89,17 +165,25 @@ describe("native Live v2",()=>{
     h.live.receive({type:"response.event",event:{type:"response.completed",response:{id,status:"completed",output:[]}}});
     for(let i=0;i<8;i++)await flush();
   }
-  it("recovers a missed general delegation after German goodbye, then waits for playback and hangs up exactly once",async()=>{
-    const h=await fixture();await h.attach();
-    const quote="Sie möchten Pizza Margherita. Vielen Dank und auf Wiederhören.";
-    h.live.receive({type:"session.input_transcript.delta",event_id:"recipient-answer",delta:"Margherita.",start_ms:0,end_ms:900});
+  it.each([
+    {locale:"de-CH",answer:"Margherita.",quote:"Sie möchten Pizza Margherita. Vielen Dank und auf Wiederhören."},
+    {locale:"de-DE",answer:"Margherita.",quote:"Sie möchten Pizza Margherita. Vielen Dank und auf Wiedersehen."},
+    {locale:"fr-CH",answer:"Margherita.",quote:"Vous souhaitez une pizza Margherita. Merci et au revoir."},
+    {locale:"it-CH",answer:"Margherita.",quote:"Desidera una pizza Margherita. Grazie e arrivederci."},
+    {locale:"en-GB",answer:"Margherita.",quote:"You would like a Margherita pizza. Thank you, goodbye."},
+    {locale:"en-US",answer:"Margherita.",quote:"You would like a Margherita pizza. Thank you, goodbye."},
+    {locale:"ru-RU",answer:"Маргарита.",quote:"Вы хотите пиццу Маргарита. Спасибо, до свидания."}
+  ] satisfies Array<{locale:CallLocale;answer:string;quote:string}>)("recovers closing in $locale, waits for playback and hangs up exactly once",async({locale,answer,quote})=>{
+    const h=await fixture(false,undefined,authorization,locale);await h.attach();
+    expect(h.live.sent.find(e=>e.type==="session.start").session.instructions).toContain(`Speak ${locale}`);
+    h.live.receive({type:"session.input_transcript.delta",event_id:"recipient-answer",delta:answer,start_ms:0,end_ms:900});
     h.live.receive({type:"session.output_transcript.delta",event_id:"farewell",delta:quote,start_ms:1000,end_ms:5000});
     h.live.receive({type:"session.output_audio.delta",delta:speech});
     await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.farewellQuietMs-1);
     expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(1);
     expect(h.hangup).not.toHaveBeenCalled();
-    await backendReply(h,"closing-review",{closingQuote:quote,recipientQuote:"Margherita."});
+    await backendReply(h,"closing-review",{closingQuote:quote,recipientQuote:answer});
     expect(JSON.parse(h.live.sent.find(e=>e.item?.call_id==="closing-review-end").item.output)).toMatchObject({ok:true});
     await vi.advanceTimersByTimeAsync(1001);const mark=h.twilio.sent.find(e=>e.event==="mark");expect(mark).toBeTruthy();
     h.twilio.receive(mark);await vi.advanceTimersByTimeAsync(351);await flush();
@@ -112,6 +196,49 @@ describe("native Live v2",()=>{
     h.call.transcript("recipient","Danke Auf Wiederhören",2100,3000,()=>{});
     expect(await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:quote,recipientQuote:"Danke. Auf Wiedersehen."})},()=>true)).toMatchObject({ok:false,reason:"latest_recipient_evidence_required"});
     expect(await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:quote,recipientQuote:"Danke. Auf Wiederhören."})},()=>true)).toMatchObject({ok:true});
+  });
+  it.each(["Thank you, goodbye.","Thank you and have a peaceful afternoon."])("reviews a new conclusion after a previous farewell review without new input: %s",async(ending)=>{
+    const h=await fixture();await h.attach();
+    h.call.transcript("recipient","Margherita.",0,900,()=>{});
+    h.call.transcript("assistant","I have noted your answer. Thank you, goodbye.",1000,3000,()=>{});h.call.audio(speech);
+    const reviews=()=>h.live.sent.filter(e=>e.type==="response.create");
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.farewellQuietMs);
+    expect(reviews()).toHaveLength(1);await backendReply(h,"first-closing-without-tool");
+    // A punctuation-only tail and unchanged silence must not restart the backend.
+    h.call.transcript("assistant"," …",3000,3100,()=>{});
+    for(let i=0;i<20;i++)h.call.audio(silence);
+    await vi.advanceTimersByTimeAsync(20000);expect(reviews()).toHaveLength(1);
+    const closing="You want a Margherita pizza. "+ending;
+    h.call.transcript("assistant",closing,3200,6000,()=>{});h.call.audio(speech);
+    await vi.advanceTimersByTimeAsync(300);h.call.audio(speech);
+    await vi.advanceTimersByTimeAsync(300);expect(reviews()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.quietEpisodeMs);
+    expect(reviews()).toHaveLength(2);
+    await backendReply(h,"new-conclusion",{closingQuote:closing,recipientQuote:"Margherita."});
+    expect(JSON.parse(h.live.sent.find(e=>e.item?.call_id==="new-conclusion-end").item.output)).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));
+    await vi.advanceTimersByTimeAsync(351);await flush();
+    expect(h.hangup).toHaveBeenCalledTimes(1);expect(h.call.closed).toBe(true);
+    expect(h.live.sent.filter(e=>e.type==="session.commentary.append")).toHaveLength(1);
+  });
+  it("preserves a new question after goodbye, rejects old evidence and closes after its answer",async()=>{
+    const h=await fixture();await h.attach();
+    h.call.transcript("recipient","Margherita.",0,900,()=>{});
+    const first="You want Margherita. Thank you, goodbye.";
+    h.call.transcript("assistant",first,1000,2000,()=>{});h.call.audio(speech);
+    const end=(closingQuote:string,recipientQuote:string)=>h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote,recipientQuote,noActionRequired:null})},()=>true);
+    expect(await end(first,"Margherita.")).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);const oldMark=h.twilio.sent.filter(e=>e.event==="mark").at(-1);
+    h.call.activity("started");const question="Wait, which pizza did I say?";
+    h.call.transcript("recipient",question,2100,3000,()=>{});h.call.activity("stopped");h.twilio.receive(oldMark);
+    await vi.advanceTimersByTimeAsync(351);expect(h.hangup).not.toHaveBeenCalled();
+    expect(await end(first,"Margherita.")).toMatchObject({reason:"latest_recipient_evidence_required"});
+    const answer="You said Margherita. Thank you, goodbye.";
+    h.call.transcript("assistant",answer,3200,4500,()=>{});h.call.audio(speech);
+    expect(h.twilio.sent.filter(e=>e.event==="media")).toHaveLength(2);
+    expect(await end(answer,question)).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));
+    await vi.advanceTimersByTimeAsync(351);await flush();expect(h.hangup).toHaveBeenCalledTimes(1);
   });
   it("checks an unknown farewell once after a longer quiet episode and never loops on unchanged silence",async()=>{
     const h=await fixture();await h.attach();h.call.transcript("recipient","Yes, it arrived.",0,1000,()=>{});
@@ -127,7 +254,7 @@ describe("native Live v2",()=>{
     await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.quietEpisodeMs);await backendReply(h,"waiting-review");
     expect(h.hangup).not.toHaveBeenCalled();expect(h.call.closed).toBe(false);
     const input=JSON.stringify(h.live.sent.filter(e=>e.type==="response.item.create"&&e.item?.type==="message").at(-1));
-    expect(input).toContain("return no tool call and no spoken message");
+    expect(input).toContain("return no tool call or message");
     h.call.transcript("assistant","No answer was available. Thank you, goodbye.",2100,3000,()=>{});h.call.audio(speech);
     await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.farewellQuietMs);expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(2);
   });
@@ -149,6 +276,44 @@ describe("native Live v2",()=>{
     h.live.receive({type:"response.event",delegation_id:"already-working",event:{type:"response.completed",response:{id:"existing-backend",status:"completed",output:[]}}});
     for(let i=0;i<8;i++)await flush();
     expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(1);expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("does not add a quiet review after backend work, but preserves recovery for a new unrecognized farewell",async()=>{
+    const h=await fixture();await h.attach();
+    h.call.transcript("recipient","It arrived.",0,1000,()=>{});h.call.transcript("assistant","Understood.",1000,2000,()=>{});h.call.audio(speech);
+    h.live.receive({type:"response.event",delegation_id:"current",event:{type:"response.created",response:{id:"current-backend"}}});
+    await vi.advanceTimersByTimeAsync(7000);
+    h.live.receive({type:"response.event",delegation_id:"current",event:{type:"response.completed",response:{id:"current-backend",status:"completed",output:[]}}});
+    for(let i=0;i<8;i++)await flush();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
+    h.call.transcript("assistant","Nina's application arrived. Thank you and have a peaceful afternoon.",2100,4000,()=>{});h.call.audio(speech);
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.quietEpisodeMs);
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(1);
+  });
+  it("does not duplicate rejected result work and closes an unresolved action after an observed farewell",async()=>{
+    const h=await fixture(true);await h.attach();
+    h.call.transcript("recipient","Three is available.",0,500,()=>{});
+    const prepared=await h.call.tool({name:"prepare_appointment",arguments:JSON.stringify({proposal:{...nativeProposal,alternativeId:"approved"},intent:"request"})},()=>true);
+    const action=prepared.action as any,request="Please book Nina Keller for 16 September 2099 at 15:00.",reply="No, instead tomorrow at ten.";
+    h.call.transcript("assistant",request,1000,3000,()=>{});h.call.audio(speech);
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.find(e=>e.event==="mark"));await flush();
+    h.call.transcript("recipient",reply,3100,4000,()=>{});
+    h.live.receive({type:"response.event",delegation_id:"result-repair",event:{type:"response.created",response:{id:"result-repair"}}});
+    expect(await h.call.tool({name:"record_appointment_result",arguments:JSON.stringify({actionId:action.id,episode:1,outcome:"declined",assistantQuote:request,recipientQuote:reply,latestRecipientQuote:reply,detailsMatch:false,previousAppointmentReleased:false})},()=>true)).toMatchObject({reason:"decline_not_established"});
+    await vi.advanceTimersByTimeAsync(15000);
+    h.live.receive({type:"response.event",delegation_id:"result-repair",event:{type:"response.completed",response:{id:"result-repair",status:"completed",output:[]}}});
+    for(let i=0;i<8;i++)await flush();
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
+    const closing="I cannot confirm Nina's appointment. Thank you, goodbye.";
+    h.call.transcript("assistant",closing,4100,5500,()=>{});h.call.audio(speech);
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.farewellQuietMs);
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(1);
+    await backendReply(h,"uncertain-end",{reason:"cannot_proceed",closingQuote:closing,recipientQuote:reply});
+    expect(JSON.parse(h.live.sent.find(e=>e.item?.call_id==="uncertain-end-end").item.output)).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));await vi.advanceTimersByTimeAsync(351);await flush();
+    expect(h.hangup).toHaveBeenCalledTimes(1);
+    expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toMatchObject([{reason:"cannot_proceed"}]);
+    expect((await h.repository.nativeLive.readAction(h.attempt.id))?.state).not.toBe("confirmed");
   });
   it("rejects an old review decision after a substantive correction",async()=>{
     const h=await fixture();await h.attach();const quote="Nina’s application arrived. Thank you, goodbye.";

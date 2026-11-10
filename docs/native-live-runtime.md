@@ -285,6 +285,14 @@ semantically satisfies a condition; exact quote presence alone cannot prove that
 These tools journal a **spoken arrangement**. They do not connect to the recipient's
 calendar, send payment, pay a deposit, send an email or schedule an application callback.
 
+Live owns ordinary replies, useful follow-ups and discussion of nonbinding options.
+Comparing a quoted price with an approved limit does not itself require delegation;
+the existing server validation remains mandatory before any commitment. Backend
+results report facts, current action state and essential details, rather than a
+script for Live to repeat. Live waits only for a result that its next statement or
+commitment actually depends on, and incorporates late results into the current
+conversation without replaying completed work.
+
 Sources: [authority validation](../apps/api/src/appointments/native-appointment-authorization.ts),
 [numeric evidence](../apps/api/src/appointments/native-terms-evidence.ts),
 [action handler and tool schemas](../apps/api/src/voice/native-appointment-call.ts),
@@ -297,6 +305,16 @@ says goodbye **before** delegating `end_call`. It should not enumerate every fac
 criterion or internal check. The tool requires observed closing speech and the
 latest recipient quote. A substantive correction must be handled; a reciprocal
 goodbye can reuse the existing closing without repeating it.
+
+Normally the conclusion is one or two short sentences containing the actual answer
+or result, thanks and goodbye, without waiting for another acknowledgment between
+them. If the outcome was already stated, only the missing thanks/farewell is needed.
+The closing quote is one literal observed span; the backend must not concatenate
+separate utterances into fabricated evidence or require another recap.
+The recap and thanks are speaking goals, not disconnection gates. Once the task is
+resolved (or inability honestly explained) and goodbye is spoken, missing stylistic
+elements must not reopen the conversation. A new substantive question, correction,
+false result claim or unresolved required action still requires handling.
 
 Live generates `<|SpawnThinking|>` silently after its farewell and listens. The
 backend alone extracts `closingQuote` and `recipientQuote` from the observed
@@ -323,6 +341,22 @@ New speech can invalidate it. A mark returned because playback was cleared is no
 proof of delivery. Native-v2 scheduling values are 400 ms for a farewell hint,
 6,000 ms for a quiet-episode recovery and 2,000 ms for an action-boundary recovery.
 They schedule reviews, not automatic success or permission to disconnect.
+
+The existing recovery follows the same division of responsibility. Only before a
+spoken farewell, when applicable answers and required action results are available,
+it may return concise verified facts without a speech script. After the observed
+farewell it calls `end_call` if the task is resolved and no substantive issue remains;
+it must not return commentary merely to improve the recap or thanks. A missing
+substantive answer or required result does not authorize completion. Recovery reuses recorded action results instead of
+calling appointment tools merely to close. These instructions are behavioral goals,
+not proof that every model response complies; see the
+[local candidate results](plans/live-conversation-autonomy-2026-11-10.md).
+
+Review deduplication includes the recipient input revision and normalized recent
+assistant text at dispatch. A new assistant conclusion can therefore be reviewed
+without another recipient turn. Punctuation-only tails, continuous audio and
+unchanged silence do not create a new review context. Existing quiet timers and
+backend-busy coordination remain in force; there is no additional polling loop.
 
 The continuous closing helper uses a 1,000 ms quiet interval before a mark and
 350 ms after acknowledgment to allow late activity to revoke completion, with a

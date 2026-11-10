@@ -5,6 +5,7 @@ import type { UiLocale } from "@callassist/contracts";
 import type { CallLifecycle } from "@callassist/contracts";
 import { callResultHelp, callResultLabel } from "@/lib/call-status";
 import { callPresentationCopy } from "@/lib/i18n/call-presentation";
+import { CallAnalysisProgress } from "./call-analysis-progress";
 
 export function CallLifecycleSummary({ lifecycle, locale, message }: { lifecycle?: CallLifecycle; locale: UiLocale; message?: string | null }) {
   if (!lifecycle?.result) return null;
@@ -25,6 +26,7 @@ export function CallLifecycleSummary({ lifecycle, locale, message }: { lifecycle
   return <section className={`call-lifecycle-summary result-${lifecycle.result}`} aria-label={label}>
     <div className="lifecycle-heading"><h2>{callPresentationCopy[locale].result}: {label}</h2>{credit ? <span className="lifecycle-credit">{credit}</span> : null}</div>
     <p>{help}</p>
+    {lifecycle.assessment?.status === "pending" ? <CallAnalysisProgress locale={locale} /> : null}
     {lifecycle.answering && lifecycle.answering.decision !== "consent" && lifecycle.consent !== "granted" && (!lifecycle.conversationStartedAt || automatedAnswer) ? <>
       <p>{answeringMessages[locale].message[lifecycle.answering.message === "issued" ? "unknown" : lifecycle.answering.message]}</p>
       {message ? <><p>{answeringMessages[locale].approvedMessage}</p><blockquote>{message}</blockquote></> : null}

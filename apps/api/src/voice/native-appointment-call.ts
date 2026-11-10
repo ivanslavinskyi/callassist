@@ -7,13 +7,18 @@ import { verifyNativeTerms } from "../appointments/native-terms-evidence";
 import { pcmuHasSpeech } from "./pcmu-activity";
 
 const resultSchema=z.strictObject({actionId:z.uuid(),episode:z.number().int().min(1).max(10),
-  outcome:z.enum(["confirmed","declined","uncertain"]),assistantQuote:z.string().min(1).max(8000),recipientQuote:z.string().min(1).max(8000),
-  latestRecipientQuote:z.string().min(1).max(8000),
-  detailsMatch:z.boolean(),previousAppointmentReleased:z.boolean()});
-const prepareSchema=z.strictObject({proposal:nativeAppointmentProposalSchema,intent:z.enum(["request","status_check"])});
+  outcome:z.enum(["confirmed","declined","uncertain"]),
+  assistantQuote:z.string().min(1).max(8000).describe("Short exact assistant-only request/readback or status question. Never include recipient words."),
+  recipientQuote:z.string().min(1).max(8000).describe("Short exact recipient-only result or correction. Never include the assistant's question, combine speakers or rewrite ASR. A yes answering a clear status question is quoted as just the recipient's yes; put the question in assistantQuote."),
+  latestRecipientQuote:z.string().min(1).max(8000).describe("Short exact quote from the latest recipient fragment; may equal recipientQuote. No assistant words."),
+  detailsMatch:z.boolean().describe("True when the observed result unambiguously concerns this action/person/proposal after all corrections. For declined, true means this proposal was rejected, including an explicit replacement offer; it does NOT mean the replacement has the same details. For confirmed, all authorized details must be confirmed. False means ambiguous or unrelated evidence."),previousAppointmentReleased:z.boolean()});
+const prepareSchema=z.strictObject({proposal:nativeAppointmentProposalSchema.extend({
+  operation:nativeAppointmentProposalSchema.shape.operation.describe("Keep the approved operation. confirm_existing commits attendance; it is not an informational status_check."),
+  unavailableAlternatives:nativeAppointmentProposalSchema.shape.unavailableAlternatives.describe("Only earlier alternative IDs from the approved ordered alternatives, never the selected alternative itself or a previously rejected date. Use [] for the first/only alternative, including a changed date within it.")
+}),intent:z.enum(["request","status_check"])});
 export const nativeAppointmentTools=[
   {type:"function",name:"prepare_appointment",strict:true,description:"Check and journal a concrete appointment action BEFORE Live requests the commitment. This grants permission only. Same proposal is idempotent. If delivery or existing booking is uncertain, use status_check for the same proposal; never repeat a booking request. Return exact recipient quotes for conditions and earlier unavailable alternatives.",parameters:z.toJSONSchema(prepareSchema)},
-  {type:"function",name:"record_appointment_result",strict:true,description:"Record the provider's explicit result AFTER Live's authorized readback and playback. Quote the actual assistant readback and the provider result exactly. latestRecipientQuote separately quotes the latest observed recipient words, including later acknowledgments. detailsMatch considers the result AND all later corrections, and means the reply confirms this operation, represented person, date/time and all conditions; availability, an unrelated yes or requested personal details do not confirm a booking. For reschedule require explicit replacement/release of the old appointment. This records a recipient statement, not external calendar verification.",parameters:z.toJSONSchema(resultSchema)}
+  {type:"function",name:"record_appointment_result",strict:true,description:"Record the provider's result for the current proposal. Use short exact observed quotes, retaining meaningful negation and corrections; do not copy unrelated ASR noise or paraphrase. assistantQuote identifies the request or status question; recipientQuote gives its result; latestRecipientQuote anchors the latest observed reply. detailsMatch binds the outcome to this proposal: true for its explicit rejection as well as its exact confirmation. An explicit counteroffer rejecting this proposal is declined, not uncertain just because the new details differ. Availability or an unrelated yes is not confirmation. Confirmed requires observed playback; reschedule also requires release/replacement of the old appointment. This records a recipient statement, not external calendar verification.",parameters:z.toJSONSchema(resultSchema)}
 ];
 type Fragment={role:"assistant"|"recipient";text:string;start:number;end:number;sequence:number};
 type Ports={store:NativeLiveStore;callId:string;attemptId:string;snapshotHash:string;representedPerson:string;locale:string;
@@ -119,7 +124,7 @@ export class NativeAppointmentCall {
       validateNativeAppointment(this.authority,parsed.data.proposal,text,new Date());
     if(!checked.ok)return checked;
     if(previous && previous.state!=="declined") {
-      if(previous.proposalHash!==proposalHash)return {ok:false,reason:"existing_action_requires_resolution",action:previous,instruction:"Do not create another arrangement. Clarify the status of the existing proposal first."};
+      if(previous.proposalHash!==proposalHash)return {ok:false,reason:"existing_action_requires_resolution",action:previous,instruction:"First record the existing proposal's result from observed evidence. If the provider explicitly rejected it or corrected it to a different offer, record declined with detailsMatch true for that rejection, then prepare the replacement within the approved bounds. Ask a status question only if the old proposal's result is genuinely unknown; never repeat an answered question or create a duplicate arrangement."};
       if(previous.state==="confirmed" || previous.state==="authorized")return {ok:true,action:previous,instruction:previous.state==="confirmed"?"Provider confirmation is already recorded. Do not book again.":"This is the same authorized proposal; do not issue a duplicate request."};
       if(parsed.data.intent!=="status_check")return {ok:false,reason:"status_check_required",action:previous};
       if(previous.episode>=10)return {ok:false,reason:"reconciliation_limit"};
@@ -137,7 +142,7 @@ export class NativeAppointmentCall {
     if(!current()||this.#closed){await this.#save({...this.#action!,state:"uncertain",delivery:{...action.delivery,status:"interrupted"}});return {ok:false,reason:"stale_request"};}
     return {ok:true,action:this.#action,startsAt:checked.startsAt,
       dateLabel:new Intl.DateTimeFormat(this.ports.locale,{timeZone:"UTC",weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(`${checked.proposal.date}T12:00:00Z`)),
-      instruction:parsed.data.intent==="status_check"?"Ask the provider to clarify whether this exact arrangement for the represented person is already in effect. Do not request it again.":"Live may now naturally request this exact operation for the named represented person. Read back the operation, full date, time and relevant conditions once. Then listen for the provider's result and Generate <|SpawnThinking|> for record_appointment_result. Authorization is not a completed booking."};
+      instruction:parsed.data.intent==="status_check"?"Only an informational status check of this exact arrangement is authorized, not another commitment.":"This exact operation and its person, date, time and conditions are authorized, not completed. The provider's result must be recorded before success is reported."};
   }
   async #result(args:unknown,current:()=>boolean):Promise<Record<string,unknown>>{
     const parsed=resultSchema.safeParse(args);if(!parsed.success)return {ok:false,reason:"invalid_arguments"};
@@ -170,7 +175,8 @@ export class NativeAppointmentCall {
     if(value.outcome==="confirmed" && (!value.detailsMatch||!spoken||!reply||reply.end<=spoken.start||!latest||latest.sequence!==latestRecipient||action.state!=="delivered"||action.delivery.status!=="played"||
       !action.delivery.assistantQuote?.includes(value.assistantQuote)||(this.authority.operation==="reschedule"&&!value.previousAppointmentReleased)))
       return {ok:false,reason:"confirmation_not_established",action,instruction:"Keep the result uncertain. If necessary ask one status clarification for the same arrangement, never request a duplicate booking."};
-    if(value.outcome==="declined" && (!value.detailsMatch||!reply||!latest||latest.sequence!==latestRecipient))return {ok:false,reason:"decline_not_established"};
+    if(value.outcome==="declined" && (!value.detailsMatch||!spoken||!reply||reply.end<=spoken.start||!latest||latest.sequence!==latestRecipient))return {ok:false,reason:"decline_not_established",
+      instruction:"detailsMatch must be true when the evidence explicitly rejects THIS proposal, including a correction to a different offer. It does not require the offered replacement to match the rejected details. Use short exact quotes of the request/status question, rejection and latest reply. Re-evaluate existing evidence without another question; retain uncertainty if the rejection is ambiguous."};
     if(value.outcome==="declined"&&action.state==="confirmed")return {ok:false,reason:"confirmed_action_requires_reconciliation",instruction:"A contradiction after confirmation is uncertain. Record uncertainty and clarify the status of the same arrangement before considering another proposal."};
     if(!current())return {ok:false,reason:"stale_request"};
     await this.#save({...action,state:value.outcome,confirmation:value.outcome==="confirmed"?{
@@ -180,7 +186,7 @@ export class NativeAppointmentCall {
       await this.#save({...this.#action,state:"uncertain",confirmation:null});
       return {ok:false,reason:"stale_request",action:this.#action};
     }
-    return {ok:true,action:this.#action,instruction:value.outcome==="confirmed"?"The provider's confirmation is recorded. Live may briefly state the main result for the represented person by name, thank the provider and say goodbye. No further confirmation question is required. After the spoken goodbye Generate <|SpawnThinking|> for end_call.":"Respect this outcome; do not report success. A declined option permits discussing the next authorized option."};
+    return {ok:true,action:this.#action,instruction:value.outcome==="confirmed"?"The provider's confirmation is recorded for this proposal and represented person. No further confirmation question is required.":"This result is not confirmation. A declined proposal permits preparing a replacement within the approved authority; an uncertain result requires reconciliation."};
   }
   async settled(reconcileTerms=false){
     await this.#queue;

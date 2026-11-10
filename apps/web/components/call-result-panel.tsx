@@ -12,6 +12,7 @@ import { formatTranscriptOffset, writeTextToClipboard } from "@/lib/final-transc
 import { getTextLanguageLabel } from "@/lib/i18n/language-messages";
 import { textArtifactMessages } from "@/lib/i18n/text-artifact-messages";
 import { CallSummaryPresentation } from "./call-summary-presentation";
+import { CallAnalysisProgress } from "./call-analysis-progress";
 import { useCallTextArtifacts } from "./use-call-text-artifacts";
 import { useUiLocale } from "./ui-locale-provider";
 import { useCallDraftStore } from "./call-draft-provider";
@@ -108,7 +109,8 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
       </div>
       {summary ? <div lang={taskLanguage}><CallSummaryPresentation summary={summary} uiLocale={locale}
         sourceHref={(id) => `#${sourceSegmentAnchor(revision.id, id)}`} onSource={revealSource} /></div>
-        : <div role="status"><p>{availabilityMessage ?? (waitingSummary ? (pollingPaused ? copy.pending : copy.summaryLoading) : summaryArtifact ? (summaryArtifact.retryable ? copy.summaryFailed : copy.summaryRetryUnavailable) : !canSummarize ? copy.unsupported : copy.summaryMissing)}</p>
+        : <div>{waitingSummary && !pollingPaused ? <CallAnalysisProgress locale={locale} label={copy.summaryLoading} />
+          : <p role="status">{waitingSummary ? copy.pending : availabilityMessage ?? (summaryArtifact ? (summaryArtifact.retryable ? copy.summaryFailed : copy.summaryRetryUnavailable) : !canSummarize ? copy.unsupported : copy.summaryMissing)}</p>}
           {allowSummaryGeneration && !waitingSummary && canSummarize && canRequestTextArtifact(summaryArtifact) ? <button type="button" className="secondary-button" disabled={busy !== null}
             onClick={() => void generate("summary", summaryArtifact?.status === "failed")}>{summaryArtifact ? copy.retry : copy.createSummary}</button> : null}
         </div>}

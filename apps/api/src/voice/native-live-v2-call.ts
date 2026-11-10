@@ -35,10 +35,11 @@ export class NativeLiveV2Call implements LiveLifecycle {
   #lastSpeechForwardAt:number|null=null;
   #completionReminder:ReturnType<typeof setTimeout>|undefined;
   #reviewedActionBoundaries=new Set<string>();#actionInputBaseline=0;#inputSpeaking=false;
-  #closingReviewedInput=-1;#farewellReviewedInput=-1;
+  #closingReviewedContext:string|null=null;#farewellReviewedContext:string|null=null;
   #assistantReviewText="";#hasRecipientWords=false;#farewellCue=false;
+  #backendReviewedText:string|null=null;
   #completionReady=false;#completionDeferred=false;
-  #completionCandidate:{kind:"closing"|"result";reason:string;inputRevision:number;actionBoundary?:string;farewell:boolean;content:string}|undefined;
+  #completionCandidate:{kind:"closing"|"result";reason:string;inputRevision:number;reviewContext:string;actionBoundary?:string;farewell:boolean;content:string}|undefined;
   readonly closing: LiveNativeClosing;
   constructor(private readonly options: OpenAILiveBridgeOptions) {
     this.closing=new LiveNativeClosing({ continuous:true,
@@ -112,10 +113,12 @@ export class NativeLiveV2Call implements LiveLifecycle {
     const next=record.state==="delivered"
       ? "Playback of the authorized request is observed; this is NOT the provider's result. When the provider answers (or if they already answered), Generate <|SpawnThinking|> for record_appointment_result before announcing completion."
       : record.state==="confirmed"
-        ? "The provider's result is recorded. Give the concise outcome, thanks and goodbye, then Generate <|SpawnThinking|> for end_call. If you already said the conclusion, do not repeat it; Generate <|SpawnThinking|> for end_call now."
+        ? "The provider's confirmation is recorded for this proposal. No further confirmation question is needed."
         : record.state==="uncertain"
           ? "The outcome is uncertain. Use status_check for the identical proposal; never repeat the commitment."
-          : "Authorization alone is not completion. After the provider answers the authorized request, Generate <|SpawnThinking|> for record_appointment_result.";
+          : record.state==="declined"
+            ? "This proposal was rejected. Do not ask about it again. A replacement may be prepared within the approved authority using the provider's existing offer; the replacement is not yet authorized."
+          : "The proposal is authorized, not confirmed. The provider's answer to the authorized request must be recorded before reporting success.";
     this.#live?.nativeState(next+"\n"+JSON.stringify({applicationAppointmentState:{actionId:record.id,proposalHash:record.proposalHash,
       episode:record.episode,revision:record.revision,state:record.state,delivery:record.delivery.status,intent:record.intent,
       proposal:{...record.proposal,requirements:[],unavailableAlternatives:[],termsQuote:null,selectionEvidence:null},
@@ -128,15 +131,23 @@ export class NativeLiveV2Call implements LiveLifecycle {
     if(this.#closed||this.#discarding||this.#decision||!this.#ready||!this.#admitted||this.#inputSpeaking)return;
     const action=this.#appointment?.action;
     const boundary=action?`${action.id}:${action.episode}:${action.state}`:undefined;
-    const common={inputRevision:this.#inputRevision,farewell:false};
+    // Deduplicate settled conversation content, not just the recipient's turn.
+    // A later assistant conclusion can need recovery without any new input.
+    // Punctuation-only caption updates and audio/silence do not change this key;
+    // the existing quiet timer still waits for speech to settle before review.
+    const reviewContext=`${this.#inputRevision}:${closingEvidence(this.#assistantReviewText)}`;
+    const common={inputRevision:this.#inputRevision,reviewContext,farewell:false};
+    const fast=this.#farewellCue&&this.#farewellReviewedContext!==reviewContext;
     let delay:number=NATIVE_COMPLETION_TIMING.actionBoundaryMs;
-    if(action?.state==="delivered"&&this.#inputRevision>this.#actionInputBaseline&&!this.#reviewedActionBoundaries.has(boundary!)){
+    if(!fast&&action?.state==="delivered"&&this.#inputRevision>this.#actionInputBaseline&&!this.#reviewedActionBoundaries.has(boundary!)){
       this.#completionCandidate={...common,kind:"result",actionBoundary:boundary,reason:"delivered_action_without_result",
         content:"The authorized appointment request has been delivered and the recipient has spoken, but no result is recorded. Review the latest observed conversation and current action state. If the provider's result is already available, call record_appointment_result using actual quotes, including all later corrections. Otherwise let Live clarify the missing result. Never repeat the original commitment, claim success from delivery alone, or ask for information already provided. This review itself grants no action or disconnection permission."};
     }else if(this.#hasRecipientWords&&this.#assistantReviewText.trim()){
-      const fast=this.#farewellCue&&this.#farewellReviewedInput!==this.#inputRevision;
       const confirmed=action?.state==="confirmed"&&!this.#reviewedActionBoundaries.has(boundary!);
-      if(!fast&&!confirmed&&(this.#closingReviewedInput===this.#inputRevision||this.#farewellReviewedInput===this.#inputRevision))return;
+      // Do not immediately re-review the same quiet text just handled by the
+      // backend. New speech still enables the language-independent fallback.
+      if(!fast&&!confirmed&&this.#assistantReviewText===this.#backendReviewedText)return;
+      if(!fast&&!confirmed&&(this.#closingReviewedContext===reviewContext||this.#farewellReviewedContext===reviewContext))return;
       delay=fast?NATIVE_COMPLETION_TIMING.farewellQuietMs:confirmed?NATIVE_COMPLETION_TIMING.actionBoundaryMs:NATIVE_COMPLETION_TIMING.quietEpisodeMs;
       this.#completionCandidate={...common,kind:"closing",farewell:fast,actionBoundary:confirmed?boundary:undefined,
         reason:fast?"farewell_without_end_call":confirmed?"confirmed_action_without_end_call":"quiet_episode_without_end_call",content:NATIVE_CLOSING_REVIEW};
@@ -156,8 +167,8 @@ export class NativeLiveV2Call implements LiveLifecycle {
     this.#completionReady=false;
     if(candidate.actionBoundary)this.#reviewedActionBoundaries.add(candidate.actionBoundary);
     if(candidate.kind==="closing"){
-      this.#closingReviewedInput=this.#inputRevision;
-      if(candidate.farewell)this.#farewellReviewedInput=this.#inputRevision;
+      this.#closingReviewedContext=candidate.reviewContext;
+      if(candidate.farewell)this.#farewellReviewedContext=candidate.reviewContext;
     }
     this.#trace?.event("host",{type:candidate.kind==="closing"?"closing.backend_review":"appointment.backend_review",
       reason:candidate.reason,inputRevision:this.#inputRevision,profile:this.#session?.profile});
@@ -270,8 +281,17 @@ export class NativeLiveV2Call implements LiveLifecycle {
       const section="contextAppendix" in context.snapshot?context.snapshot.contextAppendix.find(s=>s.id===args.sectionId):undefined;
       return section?{ok:true,section}:{ok:false,reason:"unknown_section"};
     }
-    if(call.name==="prepare_appointment"||call.name==="record_appointment_result")
-      return this.#appointment?this.#appointment.tool(call.name,args,current):{ok:false,reason:"appointment_not_authorized"};
+    if(call.name==="prepare_appointment"||call.name==="record_appointment_result"){
+      if(!this.#appointment)return{ok:false,reason:"appointment_not_authorized"};
+      const action=this.#appointment.action;
+      if(call.name==="record_appointment_result"&&action&&args.actionId===action.id&&args.episode===action.episode){
+        // The backend is already handling this boundary, including any argument
+        // repair. The missing-result watchdog must not duplicate that work.
+        this.#reviewedActionBoundaries.add(`${action.id}:${action.episode}:${action.state}`);
+        this.#armCompletionReminder();
+      }
+      return this.#appointment.tool(call.name,args,current);
+    }
     if(call.name!=="end_call"||Object.keys(args).some(k=>!["reason","closingQuote","recipientQuote","noActionRequired"].includes(k))||!["objective_resolved","cannot_proceed","recipient_requested_end"].includes(String(args.reason)))return{ok:false,reason:"invalid_arguments"};
     if(!this.#appointment&&args.noActionRequired!=null)
       return{ok:false,reason:"no_action_required_not_applicable",instruction:"For this general task, retry end_call with noActionRequired: null, preserving the actual closingQuote and latest recipientQuote. This field is only for conditional appointment authority; do not repeat an already spoken closing."};
@@ -290,7 +310,7 @@ export class NativeLiveV2Call implements LiveLifecycle {
       return {ok:false,reason:"appointment_result_unconfirmed",instruction:"Do not report success. Clarify the same proposal, or finish with its uncertainty and cannot_proceed."};
     if(!this.#observations.length)return{ok:false,reason:"recipient_evidence_required"};
     if(typeof args.closingQuote!=="string"||args.closingQuote.length>1600||!this.closing.observed(args.closingQuote))
-      return{ok:false,reason:"closing_quote_not_observed",observedAssistantTail:this.closing.observedTail,instruction:"Quote the actual spoken main outcome, thanks and goodbye. Wait for its captions; do not repeat an already delivered farewell."};
+      return{ok:false,reason:"closing_quote_not_observed",observedAssistantTail:this.closing.observedTail,instruction:"Use a literal observed span of the actual concluding speech. The outcome may precede thanks and goodbye. Wait for captions; do not invent a joined quote or repeat a delivered farewell."};
     if(typeof args.recipientQuote!=="string"||!closingEvidence(args.recipientQuote)||args.recipientQuote.length>1600||
       !closingEvidence(this.#observations.map(o=>o.text).join("")).endsWith(closingEvidence(args.recipientQuote)))
       return{ok:false,reason:"latest_recipient_evidence_required",observedRecipientTail:this.#observations.map(o=>o.text).join("").slice(-1600),instruction:"Re-evaluate the latest recipient speech. A reciprocal goodbye permits the same closing quote; a new question requires an answer."};
@@ -310,7 +330,13 @@ export class NativeLiveV2Call implements LiveLifecycle {
     try{await this.options.service.prepareAgentHangup(this.#context.brief.id,this.#context.attemptId,this.#provider);this.#trace?.event("host",{type:"closing.hangup_completed"});this.#close("agent_hangup");}
     catch{this.#fail("LIVE_HANGUP_FAILED");}}
   backendProgress(){this.#backendFailures=0;this.#flushCompletionReview();}
-  backendIdle(){this.#flushCompletionReview();}
+  backendIdle(){
+    if(!this.#live?.backendPending&&this.#completionReady&&this.#completionDeferred&&this.#completionCandidate?.reason==="quiet_episode_without_end_call"){
+      this.#backendReviewedText=this.#assistantReviewText;
+      this.#armCompletionReminder();
+    }
+    this.#flushCompletionReview();
+  }
   backendFailed(current?:()=>boolean,code="LIVE_BACKEND_FAILED"){
     if(current&&!current())return;this.#trace?.event("host",{type:"backend.failure",code});
     if(code.includes("TIMEOUT")||++this.#backendFailures>2){this.#fail(code);return;}
