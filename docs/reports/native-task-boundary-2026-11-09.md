@@ -1,5 +1,9 @@
 # Native task boundaries, roles and silent closing — 9 November 2026
 
+Historical report for the previous runtime. Its raw-source context and approval
+contract are superseded by [the plan-only runtime](../native-live-runtime.md)
+implemented on 10 November 2026; they are not current execution requirements.
+
 **Status:** implemented and pushed; exact-commit CI passed; the owner reported a
 completed production rollout. Production telephone acceptance of this release is
 not yet recorded. Host details, backup identifiers and configuration snapshots

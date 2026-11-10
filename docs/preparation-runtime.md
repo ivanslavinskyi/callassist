@@ -1,6 +1,6 @@
 # Call-plan preparation runtime
 
-**Source reviewed:** 2026-11-09, current working tree. This describes code, not the
+**Source reviewed:** 2026-11-10, current working tree. This describes code, not the
 state or measured capacity of a deployed server. See the [native runtime](native-live-runtime.md)
 for startup context, conversation and action boundaries. Dated preparation plans
 and measurements are [historical evidence](archive/README.md). Host configuration
@@ -8,12 +8,13 @@ and rollout procedures live only in the ignored `docs/local-operations/` directo
 
 ## Immutable policy and operator controls
 
-Native task-boundary revision, 9 November 2026: policy
-`preparation-live-native-task-2026-11-09` selects `brief-compiler-15`, plan schema 10
-and approval 9. The previous progressive instruction remains: resolve prerequisites
+Native plan-only revision, 10 November 2026: policy
+`preparation-live-plan-only-2026-11-10` selects `brief-compiler-16`, plan schema 10
+and approval 10. The previous progressive instruction remains: resolve prerequisites
 before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
-Full original task sources and facts remain available at Live startup.
-`CALL_RUNTIME_PROFILE=native_v2` selects this task-boundary policy through the audited
+Live and its backend receive the complete approved localized plan; original sources
+remain in preparation, audit and post-call assessment only.
+`CALL_RUNTIME_PROFILE=native_v2` selects this plan-only policy through the audited
 `runtime:configure --apply` command. Startup checks that the saved policy matches.
 Historical jobs retain their pinned policy. The unprofiled in-memory default remains
 `preparation-live-native-v2-2026-11-06`; the historical SQL seed uses the managed policy.
@@ -28,7 +29,8 @@ API has no `promptVersion` setter. See [runtime profiles](runtime-profiles.md) a
 | `live-native-progressive-2026-11-07` | `brief-compiler-12` | 9 | 8 |
 | `live-native-integrity-2026-11-08` | `brief-compiler-13` | 9 | 8 |
 | `live-native-roles-2026-11-09` | `brief-compiler-14` | 9 | 8 |
-| `live-native-task-2026-11-09` (named native profile) | `brief-compiler-15` | 10 | 9 |
+| `live-native-task-2026-11-09` (historical) | `brief-compiler-15` | 10 | 9 |
+| `live-plan-only-2026-11-10` (named native profile) | `brief-compiler-16` | 10 | 10 |
 
 All policy IDs in the table start with `preparation-`. The earlier
 `preparation-2026-10-05` policy uses compiler 6 / schema 4. Historical readers
@@ -134,9 +136,10 @@ adds no compilation stage and no ordinary-turn model lookup. The 8 November cata
 change used `live-native-context-2026-11-08` without changing its compiler policy,
 schema or approval format. The earlier role-fidelity release,
 `live-native-context-2026-11-09` with compiler 14, used schema 9 / approval 8.
-The subsequent task-boundary release uses `live-native-task-2026-11-09`,
+The subsequent historical task-boundary release used `live-native-task-2026-11-09`,
 `preparation-live-native-task-2026-11-09`, compiler 15, schema 10 and approval 9.
-Its optional prohibitions, task-specific stopping conditions and unresolved
+Compiler 16 retains that task schema and audit while removing raw sources from
+approval 10; see the plan-only boundary below. Optional prohibitions, task-specific stopping conditions and unresolved
 criteria may be empty. Product controls remain enforced outside these lists.
 The compiler supplies audit-only `taskEvidence` for criteria, restrictions and
 follow-up conditions. Local validation checks complete/unique target coverage,
@@ -370,8 +373,8 @@ constraints, authorization, language, clarification, refusals and injection.
 The `roles` suite contains six synthetic scenarios across five locales with
 `--full`: matching first names, different names, a third-party subject, a true
 principal subject, two facts with different subjects, and an explicit correction.
-It retains compiler 14's policy as its default. To evaluate the current task-boundary
-release on this corpus, pass `--prompt-version=preparation-live-native-task-2026-11-09`. Use
+It retains compiler 14's policy as its default. To evaluate the current plan-only
+release on this corpus, pass `--prompt-version=preparation-live-plan-only-2026-11-10`. Use
 `--prompt-version=preparation-live-native-integrity-2026-11-08` for a baseline on
 the same corpus. Reports carry source-grounded subject expectations and fields to
 review. `statusMismatches` is an automatic status screen; `criticalFailures: null`
@@ -389,3 +392,14 @@ report the highest passed step and working reserve, not CPU count as worker coun
 
 Hedging, parallel audit/moderation and persisted intermediate compilation candidates
 remain the explicitly deferred optimizations from the original plan.
+
+## Plan-only conversation boundary (10 November 2026)
+
+`preparation-live-plan-only-2026-11-10` pins compiler 16, compiled schema 10 and
+approval 10. It preserves source text in compilation and post-call assessment,
+but excludes it from all conversational runtime inputs. The existing combined
+audit receives the full localized execution projection and verifies that no
+necessary fact, correction, disclosure condition or conditional completion rule
+relies on source text at execution. New preparation uses the same request/repair
+budget. Historical policies retain their prompt versions. See
+[native context](native-live-runtime.md#task-preparation-and-initial-context).

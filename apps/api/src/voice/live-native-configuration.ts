@@ -7,7 +7,7 @@ export const NATIVE_TOOL_ARGUMENT_LIMIT = 425_984;
 // Match the Live transport's bounded session.close grace period. This is only
 // post-hangup trace drainage; it must never keep the telephone call open.
 export const NATIVE_TRACE_DRAIN_MS = 15_000;
-export const NATIVE_CONFIGURATION_VERSION = "live-native-task-2026-11-09";
+export const NATIVE_CONFIGURATION_VERSION = "live-plan-only-2026-11-10";
 export function nativeResponsesConfiguration(session: NativeSession, model = "gpt-6-luna") {
   return { model, parallel_tool_calls: false, tool_choice: "auto" as const,
     tools: session.tools ?? [], reasoning: { effort: "low" as const },

@@ -6,7 +6,9 @@ The archive retains the original versioned compilation from
 `call_compilations.compilation_ciphertext`, including schema-10 `taskEvidence`.
 This is source provenance for criteria and restrictions, not spoken content.
 Approval records and attempts separately export execution snapshots, including
-version 9; their plans omit `taskEvidence`. The immutable compilation can have
+versions 9 and 10; their plans omit `taskEvidence`. Version 10 additionally omits
+`taskSources` and nested requirement `sourceText`, while the archived compilation
+retains the original material for assessment and audit. The immutable compilation can have
 `approvedAt=null` while a separate approval receipt records the actual approval.
 The archive must not substitute the current compiled plan or synthesize approval
 metadata from the repository's hydrated view.
@@ -18,7 +20,8 @@ The combined semantic/language audit is still accounted under `language_audit`;
 repairs retain their request identity and diagnostics. Authorized export decrypts
 retained content under its existing privacy and retention rules, while ordinary
 admin timelines remain content-minimized. The integration suite covers schema10
-compilation, approval9, accounting records, admin visibility and ZIP checksums.
+compilation, approval10, terminal decision 3, accounting records, admin visibility
+and ZIP checksums. Historical formats remain readable through versioned contracts.
 
 ## Consent policy export scope
 

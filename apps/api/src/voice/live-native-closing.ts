@@ -30,16 +30,28 @@ export class LiveNativeClosing {
     // In continuous mode the backend must identify the actual concluding
     // episode. Arbitrary previous audio/captions are not closing evidence.
     if (this.ports.continuous && (!quote || !this.observed(quote))) return false;
-    const recent = this.#recent;
+    const recent = this.#recent, deadline = this.#deadline;
+    this.#deadline = null;
     this.cancel(true);
     this.#active = true; this.#lastActivity = Date.now();
     if (this.ports.continuous && recent.at > 0) {
       this.#voiceMs = recent.voiceMs; this.#caption = recent.caption;
       this.#changed();
     }
-    this.#deadline = setTimeout(() => { this.cancel(); this.ports.failed("LIVE_NATIVE_CLOSING_TIMEOUT"); }, 30_000);
-    this.#deadline.unref?.();
+    this.#deadline = deadline;
+    this.boundRecovery();
     return true;
+  }
+  boundRecovery() {
+    if(this.#deadline)return;
+    this.#deadline=setTimeout(()=>{
+      this.#deadline=null;
+      // Never cut off an ongoing recipient turn. The settled review will either
+      // resume conversation or bound its empty-response recovery again.
+      if(this.#speaking)return;
+      this.cancel();this.ports.failed("LIVE_NATIVE_CLOSING_TIMEOUT");
+    },30_000);
+    this.#deadline.unref?.();
   }
   audio(payload: string) {
     const bytes = Buffer.from(payload, "base64");
@@ -99,7 +111,13 @@ export class LiveNativeClosing {
     return true;
   }
   // A clear returns pending Twilio marks too. It never establishes playback.
-  pause() { this.cancel(true); }
+  pause() {
+    // Revoke playback permission, retaining the original bounded closing episode.
+    const deadline = this.#deadline;
+    this.#deadline = null;
+    this.cancel(true);
+    this.#deadline = deadline;
+  }
   cancel(preserveEpisode = false) {
     if (this.#active) this.ports.observe?.("cancelled", this.#revision, this.#mark);
     this.#revision++; this.#active = false; this.#mark = null;

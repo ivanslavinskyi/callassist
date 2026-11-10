@@ -16,7 +16,7 @@ it("projects only known identities into every Live prompt without changing the a
     snapshot.plan.successCriteria = ["Иван hat seine Wahl genannt."];
     const parties = { recipientName: "Иван", representedPerson: "Юлия Петрова" };
     const original = JSON.stringify(snapshot);
-    const context = { snapshot, brief: { ...call.brief, ...parties } } as VoiceConversationContext;
+    const context = { snapshot, brief: { ...call.brief, ...parties } } as unknown as VoiceConversationContext;
     const prompts = [buildLiveInstructions(context), JSON.stringify(executionData(snapshot, parties)),
       ...liveExecutionContext(snapshot, parties), managedBackendInstructions(snapshot, parties)].join("\n");
     expect(prompts).toContain("Ivan fragen");

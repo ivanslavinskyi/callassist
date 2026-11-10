@@ -22,7 +22,7 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 ## Voice runtime selection
 
 The recommended profile is `CALL_RUNTIME_PROFILE=native_v2`, as selected by
-`.env.example`. It binds the Native v2 voice mode, compiler 15 policy and enabled
+`.env.example`. It binds the Native v2 voice mode, compiler 16 policy and enabled
 hangup. Use [runtime profiles](runtime-profiles.md) for the audited application command,
 read-only check and startup diagnostics. Without a profile, the default is managed
 `unified_live` with experiment `off`; low-level Native v2 requires
@@ -33,7 +33,7 @@ See the maintained [native specification](native-live-runtime.md) for complete
 startup context, prompt responsibilities, action profiles, declared recording,
 privacy, closing and summary-v8 behavior.
 
-The task-boundary preparation path uses compiler 15 / schema 10 / approval 9. A named
+The plan-only preparation path uses compiler 16 / schema 10 / approval 10. A named
 profile declares the policy; its configuration command saves it and startup validates
 it. Low-level voice flags and model changes alone do not update the policy.
 The settings API has no `promptVersion` setter; its read-only `runtimeProfile` field

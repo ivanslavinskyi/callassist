@@ -1,4 +1,4 @@
-import { nativeAppointmentProposalSchema, nativeAppointmentRuleContains, type NativeAppointmentAuthorization,
+import { nativeAppointmentProposalSchema, nativeAppointmentRuleContains, type NativeAppointmentExecutionAuthorization,
   type NativeAppointmentProposal } from "@callassist/contracts";
 import { evaluateAppointmentCalendar } from "./appointment-calendar";
 import { verifyNativeTerms } from "./native-terms-evidence";
@@ -7,7 +7,7 @@ import type { NativeAppointmentTermsEvidence } from "@callassist/contracts";
 export type NativeProposalCheck = {ok:true;proposal:NativeAppointmentProposal;startsAt:string;termsEvidence?:NativeAppointmentTermsEvidence}|{ok:false;reason:string};
 /** Calendar/numeric authority is deterministic. Requirement/selection meaning is
  * a backend observation backed by exact recipient text, not external verification. */
-export function validateNativeAppointment(authority:NativeAppointmentAuthorization,input:unknown,recipientText:string,now:Date):NativeProposalCheck {
+export function validateNativeAppointment(authority:NativeAppointmentExecutionAuthorization,input:unknown,recipientText:string,now:Date):NativeProposalCheck {
   const parsed=nativeAppointmentProposalSchema.safeParse(input);
   const no=(reason:string):NativeProposalCheck=>({ok:false,reason});
   if(!parsed.success)return no("invalid_arguments");

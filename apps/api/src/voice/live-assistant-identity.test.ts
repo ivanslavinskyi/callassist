@@ -24,7 +24,7 @@ describe("Live product identity", () => {
       legacy.plan.callLocale = locale;
       const before = JSON.stringify(legacy);
       const context: VoiceConversationContext = {
-        brief: { ...call.brief, agentName: profile.displayName }, snapshot: legacy, attemptId: call.attempt.id,
+        brief: call.brief, snapshot: legacy, attemptId: call.attempt.id,
         sendAudio: vi.fn(), clearPlayback: vi.fn(), requestFarewell: () => true,
         interruptFarewell: () => false, isClosing: () => false, telemetry: vi.fn(), fail: vi.fn()
       };

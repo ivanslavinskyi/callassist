@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import WebSocket, { type RawData } from "ws";
-import type { CallSnapshot, TerminalDecision } from "@callassist/contracts";
+import { planOnlyExecutionSnapshotSchema, type CallSnapshot, type TerminalDecision } from "@callassist/contracts";
 import type { OpenAILiveBridgeOptions, LiveLifecycle } from "./openai-live-bridge";
 import { OpenAILiveConversation } from "./live-conversation";
 import type { VoiceConversationContext } from "./voice-runtime";
@@ -14,7 +14,7 @@ import { liveRuntimeDescriptor } from "./runtime-descriptor";
 import { object } from "./live-usage";
 import { NativeAppointmentCall } from "./native-appointment-call";
 import type { NativeSession } from "./live-native-prompts";
-import { hasNativeFarewellCue, NATIVE_CLOSING_REVIEW, NATIVE_COMPLETION_TIMING } from "./live-native-completion";
+import { hasNativeFarewellCue, NATIVE_CLOSING_REVIEW, NATIVE_COMPLETION_TIMING, NATIVE_INTERRUPTED_CLOSING_REVIEW, NATIVE_CLOSING_SUSPENDED, NATIVE_CLOSING_EMPTY_REVIEW } from "./live-native-completion";
 
 /** A media/session lifecycle, not a conversation scheduler. No consent flow,
  * application TTS, scripted task turns or backend-driven speech permission. */
@@ -24,6 +24,7 @@ export class NativeLiveV2Call implements LiveLifecycle {
   #context: VoiceConversationContext | undefined; #session: NativeSession | undefined;
   #trace: LiveProtocolTrace | undefined; #starting: Promise<void> | undefined;
   #observations: Array<{id:string;text:string}>=[]; #inputRevision=0; #decisionRevision=0;
+  #suspendedClosing=false; #interruptedReviewRevision:number|null=null; #closingRecoveryNotified=false;
   #decision: TerminalDecision | null=null; #discarding=false; #hangup=false;
   #idle: ReturnType<typeof setTimeout> | undefined; #maximum: ReturnType<typeof setTimeout> | undefined;
   #traceCloseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -65,7 +66,8 @@ export class NativeLiveV2Call implements LiveLifecycle {
     await this.preflight(binding.callBriefId,binding.callAttemptId);
   }
   async #initialize(snapshot:CallSnapshot,attempt:CallAttemptRecord) {
-    const execution=attempt.executionSnapshot!;
+    if(attempt.executionSnapshot?.version!==10) throw new Error("LIVE_V2_REAPPROVAL_REQUIRED");
+    const execution=planOnlyExecutionSnapshotSchema.parse(attempt.executionSnapshot);
     if(!this.options.agentHangupEnabled) throw new Error("LIVE_V2_HANGUP_REQUIRED");
     this.#session=nativeV2Session(execution);
     const privacy=await this.options.service.repository.nativeLive.get(attempt.id);
@@ -73,9 +75,8 @@ export class NativeLiveV2Call implements LiveLifecycle {
     this.#trace=new LiveProtocolTrace(this.options.service.repository.nativeLive,attempt.id,
       code=>this.options.logger?.warn({callAttemptId:attempt.id,code},"Live trace unavailable"));
     const identities=execution.runtime.spokenIdentities;
-    const context:VoiceConversationContext={ brief:{...snapshot.brief,
-      representedPerson:identities?.representedPerson.spoken??snapshot.brief.representedPerson,
-      recipientName:identities?.recipient.spoken??snapshot.brief.recipientName}, snapshot:execution,attemptId:attempt.id,
+    const context:VoiceConversationContext={ brief:{id:execution.callBriefId, locale:execution.plan.callLocale, voiceGender:execution.runtime.voiceGender,
+      representedPerson:identities!.representedPerson.spoken, recipientName:identities!.recipient.spoken}, snapshot:execution,attemptId:attempt.id,
       sendAudio:payload=>this.audio(payload), clearPlayback:()=>{},requestFarewell:()=>false,interruptFarewell:()=>false,
       isClosing:()=>this.closing.active,
       trace:(direction,event)=>{
@@ -137,20 +138,20 @@ export class NativeLiveV2Call implements LiveLifecycle {
     // the existing quiet timer still waits for speech to settle before review.
     const reviewContext=`${this.#inputRevision}:${closingEvidence(this.#assistantReviewText)}`;
     const common={inputRevision:this.#inputRevision,reviewContext,farewell:false};
-    const fast=this.#farewellCue&&this.#farewellReviewedContext!==reviewContext;
+    const fast=!this.#suspendedClosing&&this.#farewellCue&&this.#farewellReviewedContext!==reviewContext;
     let delay:number=NATIVE_COMPLETION_TIMING.actionBoundaryMs;
-    if(!fast&&action?.state==="delivered"&&this.#inputRevision>this.#actionInputBaseline&&!this.#reviewedActionBoundaries.has(boundary!)){
+    if(!this.#suspendedClosing&&!fast&&action?.state==="delivered"&&this.#inputRevision>this.#actionInputBaseline&&!this.#reviewedActionBoundaries.has(boundary!)){
       this.#completionCandidate={...common,kind:"result",actionBoundary:boundary,reason:"delivered_action_without_result",
         content:"The authorized appointment request has been delivered and the recipient has spoken, but no result is recorded. Review the latest observed conversation and current action state. If the provider's result is already available, call record_appointment_result using actual quotes, including all later corrections. Otherwise let Live clarify the missing result. Never repeat the original commitment, claim success from delivery alone, or ask for information already provided. This review itself grants no action or disconnection permission."};
     }else if(this.#hasRecipientWords&&this.#assistantReviewText.trim()){
       const confirmed=action?.state==="confirmed"&&!this.#reviewedActionBoundaries.has(boundary!);
       // Do not immediately re-review the same quiet text just handled by the
       // backend. New speech still enables the language-independent fallback.
-      if(!fast&&!confirmed&&this.#assistantReviewText===this.#backendReviewedText)return;
+      if(!this.#suspendedClosing&&!fast&&!confirmed&&this.#assistantReviewText===this.#backendReviewedText)return;
       if(!fast&&!confirmed&&(this.#closingReviewedContext===reviewContext||this.#farewellReviewedContext===reviewContext))return;
       delay=fast?NATIVE_COMPLETION_TIMING.farewellQuietMs:confirmed?NATIVE_COMPLETION_TIMING.actionBoundaryMs:NATIVE_COMPLETION_TIMING.quietEpisodeMs;
       this.#completionCandidate={...common,kind:"closing",farewell:fast,actionBoundary:confirmed?boundary:undefined,
-        reason:fast?"farewell_without_end_call":confirmed?"confirmed_action_without_end_call":"quiet_episode_without_end_call",content:NATIVE_CLOSING_REVIEW};
+        reason:this.#suspendedClosing?"interrupted_accepted_closing":fast?"farewell_without_end_call":confirmed?"confirmed_action_without_end_call":"quiet_episode_without_end_call",content:this.#suspendedClosing?NATIVE_INTERRUPTED_CLOSING_REVIEW:NATIVE_CLOSING_REVIEW};
     }else return;
     // Speech resets the timer; backend completion wakes a due check without polling.
     this.#completionReminder=setTimeout(()=>{this.#completionReady=true;this.#flushCompletionReview();},delay);
@@ -165,6 +166,7 @@ export class NativeLiveV2Call implements LiveLifecycle {
     }
     if(!this.#live?.nativeReview(candidate.content))return;
     this.#completionReady=false;
+    if(candidate.reason==="interrupted_accepted_closing")this.#interruptedReviewRevision=candidate.inputRevision;
     if(candidate.actionBoundary)this.#reviewedActionBoundaries.add(candidate.actionBoundary);
     if(candidate.kind==="closing"){
       this.#closingReviewedContext=candidate.reviewContext;
@@ -257,7 +259,12 @@ export class NativeLiveV2Call implements LiveLifecycle {
       this.closing.caption(text);this.#assistantReviewText=(this.#assistantReviewText+text).slice(-1600);
       this.#farewellCue=hasNativeFarewellCue(this.#assistantReviewText);
     }
-    else{this.#inputRevision++;if(text.trim()){this.#decision=null;this.closing.pause();}
+    else{this.#inputRevision++;if(text.trim()){
+      if(this.#decision&&!this.#suspendedClosing){
+        this.#suspendedClosing=true;this.#closingRecoveryNotified=false;
+        this.#live?.nativeState(NATIVE_CLOSING_SUSPENDED);
+      }
+      this.#decision=null;this.closing.pause();}
       if(/[\p{L}\p{N}]/u.test(text))this.#hasRecipientWords=true;
       this.#observations.push({id:`fragment-${this.#inputRevision}`,text:text.slice(0,8000)});this.#observations=this.#observations.slice(-8);}
     if(text.trim())this.#armCompletionReminder();
@@ -296,15 +303,18 @@ export class NativeLiveV2Call implements LiveLifecycle {
     if(!this.#appointment&&args.noActionRequired!=null)
       return{ok:false,reason:"no_action_required_not_applicable",instruction:"For this general task, retry end_call with noActionRequired: null, preserving the actual closingQuote and latest recipientQuote. This field is only for conditional appointment authority; do not repeat an already spoken closing."};
     const action=await this.#appointment?.settled(true);
-    let noActionRequired:{conditionSourceQuote:string;recipientQuote:string}|undefined;
+    let noActionRequired:{conditionPlanPath:string;conditionPlanQuote:string;recipientQuote:string}|undefined;
     if(args.noActionRequired!=null){
-      const evidence=object(args.noActionRequired),sources="taskSources" in context.snapshot?context.snapshot.taskSources:null;
-      const sourceTexts=sources?[sources.objective,sources.context,...sources.allowedFacts,...sources.clarificationAnswers.map(a=>a.answer)]:[];
-      if(!this.#appointment||action||args.reason!=="objective_resolved"||Object.keys(evidence).some(k=>!["conditionSourceQuote","recipientQuote"].includes(k))||
-        typeof evidence.conditionSourceQuote!=="string"||evidence.conditionSourceQuote.trim().length<8||evidence.conditionSourceQuote.length>2000||!sourceTexts.some(t=>t.includes(evidence.conditionSourceQuote as string))||
+      const evidence=object(args.noActionRequired);
+      const path=typeof evidence.conditionPlanPath==="string"?evidence.conditionPlanPath:"";
+      const match=/^(?:successCriteria\.(\d+)|conditionalFollowUps\.(\d+)\.condition)$/.exec(path);
+      const plan=context.snapshot.plan;
+      const condition=path==="localizedObjective"?plan.localizedObjective:match?.[1]!==undefined?plan.successCriteria[Number(match[1])]:match?.[2]!==undefined?plan.conditionalFollowUps[Number(match[2])]?.condition:undefined;
+      if(!this.#appointment||action||args.reason!=="objective_resolved"||Object.keys(evidence).some(k=>!["conditionPlanPath","conditionPlanQuote","recipientQuote"].includes(k))||
+        typeof evidence.conditionPlanQuote!=="string"||evidence.conditionPlanQuote.trim().length<2||evidence.conditionPlanQuote.length>2000||!condition?.includes(evidence.conditionPlanQuote)||
         typeof evidence.recipientQuote!=="string"||evidence.recipientQuote.length>2000||!this.#appointment.observesRecipient(evidence.recipientQuote))
         return {ok:false,reason:"conditional_resolution_evidence_required",instruction:"Use an actual conditional instruction in the approved task and its observed recipient answer. An unknown or attempted action is not not_required."};
-      noActionRequired={conditionSourceQuote:evidence.conditionSourceQuote,recipientQuote:evidence.recipientQuote};
+      noActionRequired={conditionPlanPath:path,conditionPlanQuote:evidence.conditionPlanQuote,recipientQuote:evidence.recipientQuote};
     }
     if(this.#appointment&&args.reason==="objective_resolved"&&action?.state!=="confirmed"&&!noActionRequired)
       return {ok:false,reason:"appointment_result_unconfirmed",instruction:"Do not report success. Clarify the same proposal, or finish with its uncertainty and cannot_proceed."};
@@ -316,12 +326,12 @@ export class NativeLiveV2Call implements LiveLifecycle {
       return{ok:false,reason:"latest_recipient_evidence_required",observedRecipientTail:this.#observations.map(o=>o.text).join("").slice(-1600),instruction:"Re-evaluate the latest recipient speech. A reciprocal goodbye permits the same closing quote; a new question requires an answer."};
     if(this.#decision&&this.closing.active)return{ok:true,state:"closing_requested"};
     const inputRevision=this.#inputRevision;
-    const decision:TerminalDecision={version:2,callBriefId:context.brief.id,callAttemptId:context.attemptId,snapshotHash:context.snapshot.compilationSnapshotHash,
+    const decision:TerminalDecision={version:3,callBriefId:context.brief.id,callAttemptId:context.attemptId,snapshotHash:context.snapshot.compilationSnapshotHash,
       revision:++this.#decisionRevision,reason:args.reason as TerminalDecision["reason"],evidence:this.#observations.map(o=>o.id),observations:[...this.#observations],actionState:action?.state==="authorized"?"sending":action?.state==="declined"?null:action?.state??null,locale:context.snapshot.plan.callLocale,...(noActionRequired?{noActionRequired}:{})};
     await this.options.service.repository.recordTerminalDecision(decision);
     if(!current()||inputRevision!==this.#inputRevision||this.#discarding)return{ok:false,reason:"stale_request"};
     if(!this.closing.request(args.closingQuote))return{ok:false,reason:"closing_quote_not_observed"};
-    this.#decision=decision;
+    this.#decision=decision;this.#suspendedClosing=false;this.#interruptedReviewRevision=null;this.#closingRecoveryNotified=false;
     return{ok:true,state:"closing_requested",instruction:"The spoken closing is observed. Listen quietly for corrections; no further farewell, tool acknowledgment or spoken confirmation is needed."};
   }
   async #finish(){if(this.#hangup||this.#closed||!this.#context)return;this.#hangup=true;
@@ -330,7 +340,23 @@ export class NativeLiveV2Call implements LiveLifecycle {
     try{await this.options.service.prepareAgentHangup(this.#context.brief.id,this.#context.attemptId,this.#provider);this.#trace?.event("host",{type:"closing.hangup_completed"});this.#close("agent_hangup");}
     catch{this.#fail("LIVE_HANGUP_FAILED");}}
   backendProgress(){this.#backendFailures=0;this.#flushCompletionReview();}
-  backendIdle(){
+  backendIdle(result?:{usefulMessage:boolean;current:boolean;continuation:boolean}){
+    if(this.#suspendedClosing&&result?.current){
+      if(result.usefulMessage){
+        // A current answer may arrive directly or after an approved tool lookup.
+        // Other pending work must not preserve the obsolete closing deadline.
+        this.#suspendedClosing=false;this.#interruptedReviewRevision=null;this.closing.cancel(true);
+      }else if(!result.continuation&&!this.#live?.backendPending&&this.#interruptedReviewRevision!==null){
+        const revision=this.#interruptedReviewRevision;this.#interruptedReviewRevision=null;
+        if(revision===this.#inputRevision){
+          this.closing.boundRecovery();
+          if(!this.#closingRecoveryNotified){
+            this.#closingRecoveryNotified=true;this.#live?.nativeState(NATIVE_CLOSING_EMPTY_REVIEW);
+            this.#trace?.event("host",{type:"closing.empty_review_recovery",inputRevision:revision});
+          }
+        }
+      }
+    }
     if(!this.#live?.backendPending&&this.#completionReady&&this.#completionDeferred&&this.#completionCandidate?.reason==="quiet_episode_without_end_call"){
       this.#backendReviewedText=this.#assistantReviewText;
       this.#armCompletionReminder();

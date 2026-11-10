@@ -12,7 +12,7 @@ export interface VoiceRuntime {
 
 /** Attempt-bound application controls; the runtime must gate model context and actions by call phase. */
 export interface VoiceConversationContext {
-  brief: CallBrief;
+  brief: Pick<CallBrief, "id" | "representedPerson" | "recipientName" | "locale" | "voiceGender">;
   snapshot: ApprovedExecutionSnapshot;
   attemptId: string;
   sendAudio(payload: string): void;

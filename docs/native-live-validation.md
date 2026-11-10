@@ -1,7 +1,7 @@
 # Native GPT-Live validation
 
 **Status:** maintained engineering procedure.\
-**Source reviewed:** 2026-11-09.\
+**Source reviewed:** 2026-11-10.\
 **Scope:** `live_native_v2` verification; commands do not imply a production deployment.
 
 Use the [runtime specification](native-live-runtime.md) for behavior and the
@@ -51,23 +51,23 @@ Use the normal local setup in the [README](../README.md) and
 | Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
 | Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
-| Latest integrity plan | Policy `preparation-live-native-task-2026-11-09`, compiler 15, schema 10, approval 9 |
-| Native instructions | Newly described attempts use `live-native-task-2026-11-09`; Live delegates silently and the backend alone extracts closing quotes |
+| Latest integrity plan | Policy `preparation-live-plan-only-2026-11-10`, compiler 16, schema 10, approval 10 |
+| Native instructions | Newly described attempts use `live-plan-only-2026-11-10`; Live delegates silently and the backend alone extracts closing quotes |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
 
 The public admin preparation API cannot set `promptVersion`. The
 [runtime profile command](runtime-profiles.md) applies the policy with revision/audit
-provenance. Selecting a generation model alone does not activate compiler 15.
+provenance. Selecting a generation model alone does not activate compiler 16.
 An existing approved plan retains its version. Create and approve a new plan to
 exercise new preparation instructions.
 
 Provider session admission precedes dialing and can accrue usage before a human
 answers. Health checks do not start calls. Restart processes only after confirming
 that no active call or relevant job would be interrupted; configuration is read at
-startup. The [9 November release record](reports/native-task-boundary-2026-11-09.md)
-records the completed owner-reported production rollout; a new controlled production
-call remains a separate acceptance step. Use the current local runbook for host
+startup. The [10 November stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
+records automated checks and the owner-reported successful local test; production
+deployment and a controlled production call remain separate steps. Use the current local runbook for host
 operations. The 8 November preparation record describes the earlier schema transition.
 
 For the new feature checks, verify objective encryption/backfill separately from
@@ -114,7 +114,7 @@ auditor. Compare repeated live runs with only the plan fixed, only the closing p
 fixed and both fixed. Do not infer speech accuracy from passing mock tests or a
 post-call `goal=achieved` alone.
 
-For compiler 15, include a simple task with no restrictions, an explicit restriction
+For compiler 16, include a simple task with no restrictions, an explicit restriction
 that resembles an internal rule, an omitted restriction and a conditional branch
 that does not apply. Verify that only user task content appears in the reviewed
 plan. On a real call, check that one natural farewell is followed by silence and
@@ -123,6 +123,15 @@ probe acceptance helper `apps/api/scripts/native-closing-evidence.ts` rejects th
 captured duplicate-farewell/tool-narration pattern; its unit test does not generate
 speech. The existing paid probe requires its diagnostic credentials and budget;
 the helper is not a production speech filter or a universal semantic detector.
+
+Place distinct source-only canaries in every raw field and nested requirement quote.
+Verify absence from Live, its backend, reference-tool responses and recovery while
+approved facts and numeric limits remain available. Preserve source access for the
+post-call evaluator. Reject old approvals rather than silently dropping their facts.
+Exercise noise without captions, a false short caption, a new question with pauses,
+empty recovery, stale marks and backend text after failed/unattributed responses.
+A current answer after a successful or rejected tool lookup must resume conversation
+without retaining the old closing deadline. These checks add no runtime model stage.
 
 Generate the eight synthetic PDF fixtures from `apps/api`:
 

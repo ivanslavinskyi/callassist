@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approvedCall, authorization, flush, speech, silence, TestSocket } from "./voice-test-helpers";
+import { approvedPlanOnlyCall as approvedCall, authorization, flush, speech, silence, TestSocket } from "./voice-test-helpers";
 import { NativeLiveV2Call } from "./native-live-v2-call";
 import { nativeV2Session } from "./live-task-context";
 import { LiveProtocolTrace } from "./live-protocol-trace";
@@ -112,7 +112,7 @@ describe("native Live v2",()=>{
     h.call.transcript("recipient",answer,0,1000,()=>{});h.call.transcript("assistant",closing,1000,3000,()=>{});h.call.audio(speech);
     const args={reason:"objective_resolved",closingQuote:closing,recipientQuote:answer};
     const end=(noActionRequired:unknown)=>h.call.tool({name:"end_call",arguments:JSON.stringify({...args,noActionRequired})},()=>true);
-    const rejected=await end({conditionSourceQuote:"If pizza, ask which kind.",recipientQuote:answer});
+    const rejected=await end({conditionPlanPath:"localizedObjective",conditionPlanQuote:"If pizza, ask which kind.",recipientQuote:answer});
     expect(rejected).toMatchObject({ok:false,reason:"no_action_required_not_applicable",instruction:expect.stringContaining("noActionRequired: null")});
     expect(h.hangup).not.toHaveBeenCalled();expect(h.call.closed).toBe(false);
     expect((await h.repository.exportCallTextData(h.brief.id)).terminalDecisions).toHaveLength(0);
@@ -132,9 +132,9 @@ describe("native Live v2",()=>{
     const args={reason:"objective_resolved",closingQuote:closing,recipientQuote:answer};
     const end=(extra:object)=>h.call.tool({name:"end_call",arguments:JSON.stringify({...args,...extra})},()=>true);
     expect(await end({})).toMatchObject({reason:"appointment_result_unconfirmed"});
-    expect(await end({noActionRequired:{conditionSourceQuote:"Invented condition",recipientQuote:answer}})).toMatchObject({reason:"conditional_resolution_evidence_required"});
-    expect(await end({noActionRequired:{conditionSourceQuote:condition,recipientQuote:"CHF 200"}})).toMatchObject({reason:"conditional_resolution_evidence_required"});
-    expect(await end({noActionRequired:{conditionSourceQuote:condition,recipientQuote:answer}})).toMatchObject({ok:true});
+    expect(await end({noActionRequired:{conditionPlanPath:"localizedObjective",conditionPlanQuote:"Invented condition",recipientQuote:answer}})).toMatchObject({reason:"conditional_resolution_evidence_required"});
+    expect(await end({noActionRequired:{conditionPlanPath:"localizedObjective",conditionPlanQuote:condition,recipientQuote:"CHF 200"}})).toMatchObject({reason:"conditional_resolution_evidence_required"});
+    expect(await end({noActionRequired:{conditionPlanPath:"localizedObjective",conditionPlanQuote:condition,recipientQuote:answer}})).toMatchObject({ok:true});
     await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.find(e=>e.event==="mark"));await vi.advanceTimersByTimeAsync(351);await flush();
     expect(h.hangup).toHaveBeenCalledTimes(1);expect(await h.repository.nativeLive.readAction(h.attempt.id)).toBeNull();
   });
@@ -165,6 +165,90 @@ describe("native Live v2",()=>{
     h.live.receive({type:"response.event",event:{type:"response.completed",response:{id,status:"completed",output:[]}}});
     for(let i=0;i<8;i++)await flush();
   }
+  it("recovers a noisy abandoned fragment after accepted closing without another spoken farewell",async()=>{
+    const h=await fixture();await h.attach();const farewell="You want Margherita. Thank you, goodbye.";
+    h.call.transcript("recipient","Margherita.",0,500,()=>{});
+    h.call.transcript("assistant",farewell,600,1600,()=>{});h.call.audio(speech);
+    expect(await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:farewell,recipientQuote:"Margherita.",noActionRequired:null})},()=>true)).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(170);h.call.activity("started");
+    h.call.transcript("recipient","Aber",1800,1900,()=>{});h.call.activity("stopped");
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.quietEpisodeMs);
+    const review=JSON.stringify(h.live.sent.filter(e=>e.item?.type==="message").at(-1));
+    expect(review).toContain("previously accepted end_call");expect(h.hangup).not.toHaveBeenCalled();
+    await backendReply(h,"noise-review",{closingQuote:farewell,recipientQuote:"Aber"});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));
+    await vi.advanceTimersByTimeAsync(351);await flush();expect(h.hangup).toHaveBeenCalledTimes(1);
+    expect(h.live.sent.filter(e=>e.type==="session.commentary.append")).toHaveLength(1);
+  });
+  it("notifies Live once after an empty interrupted-closing review and bounds the failed closing episode",async()=>{
+    const h=await fixture();await h.attach();const farewell="You want Margherita. Thank you, goodbye.";
+    h.call.transcript("recipient","Margherita.",0,500,()=>{});h.call.transcript("assistant",farewell,600,1600,()=>{});h.call.audio(speech);
+    await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:farewell,recipientQuote:"Margherita."})},()=>true);
+    h.call.transcript("recipient","Aber",1800,1900,()=>{});
+    await vi.advanceTimersByTimeAsync(NATIVE_COMPLETION_TIMING.quietEpisodeMs);await backendReply(h,"empty-noise-review");
+    expect(h.live.sent.filter(e=>e.type==="session.thinking.append"&&e.content.includes("review supplied no decision"))).toHaveLength(1);
+    const count=h.live.sent.filter(e=>e.type==="response.create").length;
+    h.call.backendIdle({usefulMessage:false,current:true,continuation:false});
+    await vi.advanceTimersByTimeAsync(20000);expect(h.call.closed).toBe(false);
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(count);
+    await vi.advanceTimersByTimeAsync(5000);expect(h.call.closed).toBe(true);expect(h.hangup).not.toHaveBeenCalled();
+    expect(h.live.sent.filter(e=>e.type==="session.thinking.append"&&e.content.includes("review supplied no decision"))).toHaveLength(1);
+  });
+  it("keeps a genuine question split by a pause after goodbye and ignores the old playback mark",async()=>{
+    const h=await fixture();await h.attach();const farewell="The office opens at nine. Thank you, goodbye.";
+    h.call.transcript("recipient","At nine.",0,500,()=>{});h.call.transcript("assistant",farewell,600,1600,()=>{});h.call.audio(speech);
+    const end=(closingQuote:string,recipientQuote:string)=>h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote,recipientQuote})},()=>true);
+    await end(farewell,"At nine.");await vi.advanceTimersByTimeAsync(1001);const old=h.twilio.sent.filter(e=>e.event==="mark").at(-1);
+    h.call.activity("started");h.call.transcript("recipient","Aber",1800,1900,()=>{});h.call.activity("stopped");
+    h.twilio.receive(old);await vi.advanceTimersByTimeAsync(2500);expect(h.hangup).not.toHaveBeenCalled();
+    h.call.activity("started");h.call.transcript("recipient"," what about Saturday?",2000,3000,()=>{});
+    await vi.advanceTimersByTimeAsync(35000);expect(h.call.closed).toBe(false);expect(h.hangup).not.toHaveBeenCalled();expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
+    h.call.activity("stopped");const answer="Saturday is still unknown. Thank you, goodbye.";
+    h.call.transcript("assistant",answer,3500,5000,()=>{});h.call.audio(speech);
+    expect(await end(answer,"Aber what about Saturday?")).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));
+    await vi.advanceTimersByTimeAsync(351);await flush();expect(h.hangup).toHaveBeenCalledTimes(1);
+  });
+  it.each(["completed","failed","unattributed","continuation","repaired_continuation","stale","concurrent"] as const)("handles %s backend text after interrupted closing without confusing failure with a useful answer",async mode=>{
+    const h=await fixture();await h.attach();const farewell="It arrived. Thank you, goodbye.";
+    h.call.transcript("recipient","It arrived.",0,500,()=>{});h.call.transcript("assistant",farewell,600,1600,()=>{});h.call.audio(speech);
+    await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:farewell,recipientQuote:"It arrived."})},()=>true);
+    h.call.transcript("recipient","Wait, what is the next step?",1800,2500,()=>{});
+    const scope=mode==="unattributed"?{}:{delegation_id:"new-question"};
+    const receive=(event:object,extra:object={})=>h.live.receive({type:"response.event",...scope,...extra,event});
+    receive({type:"response.created",response:{id:"new-answer"}});
+    if(mode==="stale")h.live.receive({type:"session.input_transcript.delta",delta:"Actually, I meant another document.",start_ms:2600,end_ms:3200});
+    if(mode==="concurrent")h.live.receive({type:"response.event",delegation_id:"other-work",event:{type:"response.created",response:{id:"other-answer"}}});
+    let responseId="new-answer";
+    if(mode==="continuation"||mode==="repaired_continuation"){
+      vi.spyOn(h.call,"tool").mockResolvedValueOnce(mode==="repaired_continuation"?{ok:false,reason:"unknown_section"}:{ok:true,section:{id:"details",content:"Approved detail"}});
+      receive({type:"response.completed",response:{id:responseId,status:"completed",output:[{type:"function_call",call_id:"lookup",name:"get_task_context",arguments:'{"sectionId":"details"}'}]}});
+      for(let i=0;i<8;i++)await flush();
+      const command=h.live.sent.filter(e=>e.type==="response.create").at(-1);
+      responseId="lookup-answer";
+      receive({type:"response.created",response:{id:responseId}},{client_event_id:command.event_id});
+    }
+    receive({type:"response.output_text.delta",response_id:responseId,delta:"The next step is"});
+    receive({type:mode==="failed"?"response.failed":"response.completed",response:{id:responseId,status:mode==="failed"?"failed":"completed",output:[{type:"message",content:[{type:"output_text",text:"The next step is to bring the approved document."}]}]}});
+    for(let i=0;i<8;i++)await flush();
+    if(mode==="concurrent"){
+      h.live.receive({type:"response.event",delegation_id:"other-work",event:{type:"response.completed",response:{id:"other-answer",status:"completed",output:[]}}});
+      for(let i=0;i<8;i++)await flush();
+    }
+    // No incoming activity: otherwise the recipient-speaking safeguard would
+    // mask an incorrectly retained or cancelled closing deadline.
+    await vi.advanceTimersByTimeAsync(30001);
+    expect(h.call.closed).toBe(mode==="failed"||mode==="unattributed"||mode==="stale");expect(h.hangup).not.toHaveBeenCalled();
+  });
+  it("does not revoke accepted closing for background activity without words",async()=>{
+    const h=await fixture();await h.attach();const farewell="It arrived. Thank you, goodbye.";
+    h.call.transcript("recipient","It arrived.",0,500,()=>{});h.call.transcript("assistant",farewell,600,1600,()=>{});h.call.audio(speech);
+    await h.call.tool({name:"end_call",arguments:JSON.stringify({reason:"objective_resolved",closingQuote:farewell,recipientQuote:"It arrived."})},()=>true);
+    h.call.activity("started");await vi.advanceTimersByTimeAsync(900);expect(h.hangup).not.toHaveBeenCalled();h.call.activity("stopped");
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));
+    await vi.advanceTimersByTimeAsync(351);await flush();expect(h.hangup).toHaveBeenCalledTimes(1);
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
+  });
   it.each([
     {locale:"de-CH",answer:"Margherita.",quote:"Sie möchten Pizza Margherita. Vielen Dank und auf Wiederhören."},
     {locale:"de-DE",answer:"Margherita.",quote:"Sie möchten Pizza Margherita. Vielen Dank und auf Wiedersehen."},
@@ -374,8 +458,8 @@ describe("native Live v2",()=>{
     for(let i=0;i<8;i++)await flush();
     expect(JSON.parse(h.live.sent.find(e=>e.item?.call_id==="review-end").item.output)).toMatchObject({ok:true});
   });
-  it("preloads all approved sources and tools, sends no TTS or consent handoff and preserves the first audio frame",async()=>{
-    const h=await fixture();expect(h.snapshot.version).toBe(7);
+  it("preloads the approved localized plan and tools, sends no TTS or consent handoff and preserves the first audio frame",async()=>{
+    const h=await fixture();expect(h.snapshot.version).toBe(10);
     const start=h.live.sent.find(e=>e.type==="session.start").session;
     expect(start.store).toBe(false);expect(start.delegation.responses.tools.map((t:any)=>t.name)).toEqual(["end_call","stop_and_discard"]);
     expect(JSON.stringify(start.input)).toContain("Application sent: 12 July");
@@ -405,7 +489,7 @@ describe("native Live v2",()=>{
     h.twilio.receive(mark);await vi.advanceTimersByTimeAsync(351);await flush();
     expect(h.hangup).toHaveBeenCalledTimes(1);
     const decisions=(await h.repository.exportCallTextData(h.brief.id)).terminalDecisions!;
-    expect(decisions[0]).toMatchObject({version:2,reason:"objective_resolved"});expect(decisions[0].summary).toBeUndefined();
+    expect(decisions[0]).toMatchObject({version:3,reason:"objective_resolved"});expect(decisions[0].summary).toBeUndefined();
   });
   it("revokes a pending closing mark on a recipient correction",async()=>{
     const h=await fixture();await h.attach();h.call.transcript("recipient","Yes.",0,1000,()=>{});
@@ -427,12 +511,12 @@ describe("native Live v2",()=>{
     expect((await h.repository.nativeLive.get(h.attempt.id))?.state).toBe("discard_requested");
     expect(h.call.closed).toBe(true);
   });
-  it("keeps the complete original context while retrieving only optional approved appendix sections",async()=>{
-    const h=await fixture();if(h.snapshot.version!==7)throw Error("fixture");
-    const snapshot=structuredClone(h.snapshot);snapshot.taskSources.context="я".repeat(4000);snapshot.taskSources.allowedFacts=["Critical original fact"];
+  it("keeps localized approved facts while indexing only optional approved appendix sections",async()=>{
+    const h=await fixture();if(h.snapshot.version!==10)throw Error("fixture");
+    const snapshot=structuredClone(h.snapshot);snapshot.plan.backgroundSummary="a".repeat(4000);snapshot.plan.approvedFacts=["Critical approved fact"];
     snapshot.contextAppendix=[{id:"reference",title:"Reference",description:"Optional reference",content:"Optional text"}];
     const session=nativeV2Session(snapshot),data=JSON.parse((session.input.find((item:any)=>item.role==="user") as any).content[0].text);
-    expect(data.sourceMaterial.context).toHaveLength(4000);expect(data.sourceMaterial.allowedFacts).toEqual(["Critical original fact"]);
+    expect(data.approvedTask.backgroundSummary).toHaveLength(4000);expect(data.approvedTask.approvedFacts).toEqual(["Critical approved fact"]);expect(data).not.toHaveProperty("sourceMaterial");
     expect(data.appendixIndex).toEqual([{id:"reference",title:"Reference",description:"Optional reference"}]);
     expect(JSON.stringify(session.input)).not.toContain("Optional text");
     expect(session.backendInstructions).not.toContain("Optional text");

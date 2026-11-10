@@ -30,7 +30,7 @@ describe("runtime descriptor persistence privacy", () => {
       await sql`UPDATE call_briefs SET user_id=${owner} WHERE id=${call.brief.id}`;
       await sql`UPDATE call_attempts SET user_id=${owner} WHERE id=${call.attempt.id}`;
       const snapshot = (await repository.get(call.brief.id))!;
-      const descriptor = liveRuntimeDescriptor({ brief: snapshot.brief, snapshot: call.snapshot } as VoiceConversationContext,
+      const descriptor = liveRuntimeDescriptor({ brief: snapshot.brief, snapshot: call.snapshot } as unknown as VoiceConversationContext,
         snapshot.compilation!, "fixture runtime prompt", { live: "gpt-live-1", delegation: "gpt-6-luna", speech: "gpt-4o-mini-tts" }, {});
       if (variant === "native") {
         descriptor.runtime = "live_native_v1"; descriptor.runtimeVersion = "live-native-v1";

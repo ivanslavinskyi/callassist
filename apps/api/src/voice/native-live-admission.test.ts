@@ -1,4 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
+import { defaultPreparationRuntimePolicy } from "@callassist/contracts";
+import { PLAN_ONLY_POLICY } from "../brief-compiler/native-appointment-compilation";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import type { TelephonyProvider } from "../telephony/telephony-provider";
@@ -11,7 +14,9 @@ afterEach(async()=>{for(const close of cleanup.splice(0))await close();vi.restor
 async function fixture(){
   const provider:TelephonyProvider={mode:"twilio",startCall:vi.fn(async()=>({providerCallId:"CA-native",providerStatus:"queued"})),
     stopCall:vi.fn(async()=>{}),startRecording:vi.fn(),getRecordingMedia:vi.fn(),deleteRecording:vi.fn(),purgeCallRecordings:vi.fn(async()=>{})};
-  const repository=new InMemoryCallRepository(),service=new CallService(repository,provider),live=new TestSocket();
+  const compiler=new DeterministicBriefCompiler(),compile=compiler.compile.bind(compiler);
+  vi.spyOn(compiler,"compile").mockImplementation((input,revision)=>compile(input,revision,{policy:{...defaultPreparationRuntimePolicy,promptVersion:PLAN_ONLY_POLICY}}));
+  const repository=new InMemoryCallRepository(),service=new CallService(repository,provider,undefined,undefined,compiler),live=new TestSocket();
   const runtime=new OpenAILiveBridge({service,apiKey:"fixture",nativeV2:true,agentHangupEnabled:true,validateStreamToken:()=>true,createLiveSocket:()=>live.ws});
   const brief=await service.create({recipientName:"Office",phoneNumber:"+41710000001",objective:"Ask whether the application was received.",
     representedPersonFirstName:"Nina",representedPersonLastName:"Keller",assistantProfileId:"anna",assistanceReason:"none",locale:"en-GB",audioRetentionDays:7,allowedFacts:[],allowLanguageSwitch:false});

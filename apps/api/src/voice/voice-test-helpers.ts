@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { vi } from "vitest";
 import WebSocket from "ws";
-import type { AppointmentAuthorization, CallLocale, AssistantProfileId, AssistanceReason } from "@callassist/contracts";
+import { nativeAuthorityFromLegacy, type AppointmentAuthorization, CallLocale, AssistantProfileId, AssistanceReason } from "@callassist/contracts";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import type { CallRepository } from "../storage/call-repository";
 import { CallService } from "../call-service";
@@ -72,5 +72,33 @@ export async function approvedCall(appointment?: AppointmentAuthorization, repos
   const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
   await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
   if (attempt.executionSnapshot?.version !== 7) throw new Error("Missing native approval fixture");
+  return { service, repository, brief, attempt, snapshot: attempt.executionSnapshot };
+}
+
+export async function approvedPlanOnlyCall(appointment?: AppointmentAuthorization, repository: CallRepository = new InMemoryCallRepository(), locale: CallLocale = "en-GB", providerCallId = "CA-LIVE", profile: AssistantProfileId = "anna", assistanceReason: AssistanceReason = "speech_impairment", allowedFacts: string[] = ["Application sent: 12 July"], objective = "Ask whether the application sent on 12 July was received") {
+  const compiler = new DeterministicBriefCompiler();
+  {
+    const compile = compiler.compile.bind(compiler);
+    vi.spyOn(compiler, "compile").mockImplementation(async (input, revision) => {
+      const result = await compile(input, revision);
+      if (!result.compiledBrief || result.compiledBrief.schemaVersion !== "8") throw new Error("Missing current fixture plan");
+      if(appointment) result.compiledBrief = { ...result.compiledBrief, taskType: "appointment_coordination", appointmentAuthorization: appointment,blockingIssues:[] };
+      result.policyDecision=evaluateCompiledBrief(result.rawBrief,result.compiledBrief);
+      result.compiledBrief={...result.compiledBrief,schemaVersion:"10",appointmentAuthorization:null,
+        nativeAppointmentAuthorization:appointment?nativeAuthorityFromLegacy(appointment):null,taskEvidence:[]};
+      result.compilerVersion="brief-compiler-16";
+      result.snapshotHash = createCompilationSnapshotHash(result);
+      return result;
+    });
+  }
+  const service = new CallService(repository, undefined, undefined, undefined, compiler);
+  const brief = await service.create({ recipientName: "Example AG", phoneNumber: "+41710000001",
+    objective, assistantProfileId: profile,
+    representedPersonFirstName: "Nina", representedPersonLastName: "Keller", assistanceReason,
+    locale, audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts });
+  await service.approveCompilation(brief.id, await originalPlanReview(service, brief.id));
+  const { attempt } = await repository.startAttempt(brief.id, { provider: "twilio" });
+  await repository.attachProviderCall(attempt.id, providerCallId, "in-progress");
+  if (attempt.executionSnapshot?.version !== 10) throw new Error("Missing native approval fixture");
   return { service, repository, brief, attempt, snapshot: attempt.executionSnapshot };
 }

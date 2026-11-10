@@ -128,9 +128,10 @@ can count as substantive. Assessment uncertainty has a bounded settlement path.
 ### Native v2
 
 The explicit `native_v2` mode uses `NativeLiveV2Call`, version
-`live-native-task-2026-11-09`. Live receives complete task sources and facts at
+`live-plan-only-2026-11-10`. Live receives the complete approved localized plan at
 startup, owns the declarative opening, ordinary replies and short closing, and uses
-backend tools at action/refusal/termination boundaries. Optional indexed references
+backend tools at action/refusal/termination boundaries. Original task sources stay
+outside Live and its backend, but remain available for post-call assessment. Optional indexed references
 are fetched only when needed. General/book/confirm_existing/reschedule/cancel profiles
 follow approved authority; numeric terms are checked against recipient quotes.
 Recording starts at connection; refusal triggers durable deletion. This mode requires

@@ -208,10 +208,6 @@ describe("native identity integrity", () => {
     expect(execution.runtime.spokenIdentities).toMatchObject({
       recipient: { original: input.recipientName }, representedPerson: { original: "Nina Keller", spoken: "Nina Keller" }
     });
-    const session = nativeV2Session(execution);
-    expect(session.profile).toBe(profile);
-    expect(JSON.stringify(session.input)).toContain("Nina Keller");
-    expect(session.tools!.some(tool => tool !== null && typeof tool === "object" &&
-      "name" in tool && tool.name === "prepare_appointment")).toBe(profile !== "general");
+    expect(()=>nativeV2Session(execution)).toThrow("LIVE_V2_REAPPROVAL_REQUIRED");
   });
 });

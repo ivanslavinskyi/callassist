@@ -17,7 +17,7 @@ export interface LiveLifecycle {
   startup(): { instructions: string; input: unknown[] };
   backendFailed?(current?: () => boolean, code?: string): void;
   backendProgress?(): void;
-  backendIdle?(): void;
+  backendIdle?(result?:{usefulMessage:boolean;current:boolean;continuation:boolean}): void;
   consentDecisionUnavailable?(reason?: "provider_failure" | "contract_violation"): void;
   consentFragmentDiscarded?(): void;
   consentSemanticReady?(): boolean;

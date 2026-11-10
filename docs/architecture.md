@@ -38,8 +38,8 @@ integration keeps runtime selection explicit; see the
 [acceptance decision](reports/native-v2-stable-acceptance-2026-11-08.md) and subsequent
 [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
-The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the task-boundary
-preparation policy: compiler 15, plan schema 10 and approval 9. The audited configuration
+The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the plan-only
+preparation policy: compiler 16, plan schema 10 and approval 10. The audited configuration
 command applies the policy; API and worker startup require a matching saved value.
 The [profile contract](runtime-profiles.md) defines activation and rollback. Low-level
 compatibility flags and model choices alone do not switch the preparation policy.
@@ -53,8 +53,10 @@ See the [native runtime specification](native-live-runtime.md) for the version m
   It is hashed and stored with the compilation, but omitted from the approved
   execution plan and Live input. The existing combined audit checks semantic
   support; a matching source substring alone is insufficient.
-- Live receives primary task context at startup. Optional indexed appendix content
-  is retrieved only when needed. Tools cannot expand approved permissions.
+- Live and its backend receive only the approved localized plan at startup.
+  Original task fields and audit source quotations stay outside the conversational
+  runtime; post-call assessment retains the original source. Optional approved
+  appendix content is retrieved only when needed. Tools cannot expand permissions.
 - Appointment journals distinguish authorization, delivery, uncertainty and confirmed
   outcome. Spoken claims do not independently verify the recipient's calendar.
 - Transcript revisions, result artifacts and assessment revisions preserve their

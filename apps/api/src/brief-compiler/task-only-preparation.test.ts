@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { callCompilationSchema, compiledCallBriefSchema, createApprovedExecutionPlan, createApprovedExecutionSnapshot,
   defaultPreparationRuntimePolicy, normalizeCreateCallBriefInput, taskOnlyCompiledCallBriefSchema } from "@callassist/contracts";
 import { DeterministicBriefCompiler, OpenAIBriefCompiler, type BriefCompilerRunOptions, type BriefCompilerProviderRequestResult } from "./brief-compiler";
-import { NATIVE_TASK_POLICY } from "./native-appointment-compilation";
+import { NATIVE_TASK_POLICY, PLAN_ONLY_POLICY } from "./native-appointment-compilation";
 import { taskEvidenceIssues } from "./task-evidence";
 import { hasValidCompilationSnapshotHash } from "./compilation-integrity";
 import { planReviewFields } from "../text-processing/plan-review-fields";
@@ -75,10 +75,29 @@ describe("task-only preparation",()=>{
     const snapshot=await repo.get(brief.id);const approval=createApprovedExecutionSnapshot(snapshot!);
     expect(approval.version).toBe(9);expect(approval.plan.prohibitedActions).toEqual([]);
     expect(approval.plan).not.toHaveProperty("taskEvidence");
-    const session=nativeV2Session(approval);
-    expect(session.profile).toBe("general");expect(JSON.stringify(session)).not.toContain('"taskEvidence"');
+    expect(()=>nativeV2Session(approval)).toThrow("LIVE_V2_REAPPROVAL_REQUIRED");
     expect(planReviewFields(c).some(f=>f.id.startsWith("taskEvidence"))).toBe(false);
     expect(await repo.refreshAnsweringApproval(brief.id)).toBe(false);
+  });
+  it("uses the same request budget for plan-only approval and audits its complete execution projection",async()=>{
+    const plan=await fixture(),mock=provider([plan]);
+    const c=await new OpenAIBriefCompiler({apiKey:"test",...mock}).compile(raw,1,{policy:{...policy,promptVersion:PLAN_ONLY_POLICY}});
+    expect(c.compilerVersion).toBe("brief-compiler-16");expect(c.policyDecision.status).toBe("ready_for_review");
+    expect(callCompilationSchema.parse(c)).toEqual(c);expect(hasValidCompilationSnapshotHash(c)).toBe(true);
+    expect(mock.fetchImplementation).toHaveBeenCalledTimes(4);
+    const bodies=mock.fetchImplementation.mock.calls.map(call=>JSON.parse(String(call[1]?.body)));
+    expect(bodies[1].input[0].content).toContain("Only the complete approved localized plan will be available");
+    expect(bodies[1].input[0].content).not.toContain("The original approved user context will also be available to Live");
+    const audit=bodies.find(b=>b.text?.format?.name==="execution_fidelity_audit");
+    expect(audit.instructions).toContain("Runtime completeness");
+    const input=JSON.parse(audit.input);expect(input.executionTask.localizedObjective).toBe(plan.localizedObjective);
+    expect(input.sourceMaterial.objective).toBe(raw.objective);
+    const repo=new InMemoryCallRepository(),brief=await repo.create(raw,c);
+    await repo.approveCompilation(brief.id,await originalPlanReview(repo,brief.id));
+    const approval=createApprovedExecutionSnapshot((await repo.get(brief.id))!);
+    expect(approval.version).toBe(10);expect(approval).not.toHaveProperty("taskSources");
+    const session=nativeV2Session(approval);expect(session.profile).toBe("general");
+    expect(JSON.stringify(session)).not.toContain('"taskEvidence"');expect(JSON.stringify(session)).not.toContain('"sourceMaterial"');
   });
   it("validates exact source paths and quotes without interpreting source strings as instructions",async()=>{
     const p=await fixture();expect(taskEvidenceIssues(p,raw)).toEqual([]);

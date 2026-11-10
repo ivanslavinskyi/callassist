@@ -50,7 +50,7 @@ describe("durable telemetry export", () => {
       context: "Private Unicode context: Привет\nsecond line", assistantProfileId: "sebastian", representedPersonFirstName: "Test", representedPersonLastName: "Caller",
       assistanceReason: "none", locale: "en-GB", allowLanguageSwitch: false, allowedFacts: ["Private approved fact"] };
     const call = await repository.create(input, await new DeterministicBriefCompiler().compile(normalizeCreateCallBriefInput(input), 1,
-      { policy: { ...defaultPreparationRuntimePolicy, promptVersion: "preparation-live-native-task-2026-11-09" } }), owner);
+      { policy: { ...defaultPreparationRuntimePolicy, promptVersion: "preparation-live-plan-only-2026-11-10" } }), owner);
     callId = call.id;
     await sql`UPDATE call_briefs SET created_at=now()-interval '40 days' WHERE id=${callId}`;
     await repository.approveCompilation(callId, await originalPlanReview(repository, callId));
@@ -58,6 +58,10 @@ describe("durable telemetry export", () => {
     await repository.updateVoiceConsentSettings({ mode: "hybrid_deterministic_v1", expectedRevision: 1, reason: "PRIVATE-GLOBAL-CONSENT-NOTE" }, actor);
     const providerCallId = `CA-${randomUUID()}`, providerRecordingId = `RE-${randomUUID()}`;
     await repository.attachProviderCall(attemptId, providerCallId, "in-progress");
+    await repository.recordTerminalDecision({version:3,callBriefId:callId,callAttemptId:attemptId,
+      snapshotHash:attempt.attempt.executionSnapshot!.compilationSnapshotHash,revision:1,
+      reason:"objective_resolved",evidence:["hours"],observations:[{id:"hours",text:"At nine."}],
+      actionState:null,locale:"en-GB"});
     const diagnostic = { callAttemptId: attemptId, idempotencyKey: "playback:fixture", payload: { name: "conversation.task",
       metadata: { runtimeVersion: "live-managed-v9", phase: "speak", revision: 4, cause: "application_playback", playback } } } as const;
     const first = await repository.appendCallTelemetryEvent(callId, diagnostic);
@@ -131,13 +135,16 @@ describe("durable telemetry export", () => {
     const stored = await repository.get(callId);
     // The archive preserves the immutable compilation; approval time belongs to its separate receipt.
     expect(lines(files, "call_compilations")[0]!.data.compilation).toEqual({ ...stored!.compilation, approvedAt: null });
-    expect(stored!.compilation).toMatchObject({ compilerVersion: "brief-compiler-15", compiledBrief: {
+    expect(stored!.compilation).toMatchObject({ compilerVersion: "brief-compiler-16", compiledBrief: {
       schemaVersion: "10", prohibitedActions: [], taskEvidence: expect.any(Array)
     } });
     const execution = lines(files, "call_attempts")[0]!.data.execution_snapshot;
-    expect(execution).toMatchObject({ version: 9, plan: { prohibitedActions: [] } });
+    expect(execution).toMatchObject({ version: 10, plan: { prohibitedActions: [] } });
+    expect(execution).not.toHaveProperty("taskSources");
     expect((execution as { plan: object }).plan).not.toHaveProperty("taskEvidence");
     expect(lines(files, "call_compilation_approvals")[0]!.data.execution_snapshot).toEqual(execution);
+    expect((await repository.exportCallTextData(callId)).terminalDecisions).toMatchObject([{version:3,reason:"objective_resolved"}]);
+    expect(JSON.stringify(lines(files,"call_terminal_decisions"))).toContain('"version":3');
     const inspector = await repository.getAdminCallInspector(callId);
     expect(inspector.timeline.some(event => event.payload.name === "realtime.ready")).toBe(true);
     expect(JSON.stringify(inspector)).not.toContain("taskEvidence");

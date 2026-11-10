@@ -320,7 +320,7 @@ export class UnifiedLiveCall implements LiveLifecycle {
     }), details => this.options.logger?.warn({ callAttemptId: attempt.id, ...details }, "Live diagnostic events unavailable"),
     selection.session ? "live-native-v1" : "live-managed-v9");
     const context: VoiceConversationContext = {
-      brief: { ...snapshot.brief, representedPerson: identities.representedPerson.spoken, recipientName: identities.recipient.spoken,
+      brief: { id:approved.callBriefId, representedPerson: identities.representedPerson.spoken, recipientName: identities.recipient.spoken,
         voiceGender: execution.runtime.voiceGender, locale: execution.plan.callLocale }, snapshot: execution, attemptId: attempt.id,
       sendAudio: payload => this.#sendAudio(payload), clearPlayback: () => this.#clear(),
       requestFarewell: (_id, reason) => this.#requestClosing(reason),

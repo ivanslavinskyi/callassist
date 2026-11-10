@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { nativeAppointmentProposalSchema, type NativeAppointmentAction, type NativeAppointmentAuthorization } from "@callassist/contracts";
+import { nativeAppointmentProposalSchema, type NativeAppointmentAction, type NativeAppointmentExecutionAuthorization } from "@callassist/contracts";
 import type { NativeLiveStore } from "../storage/native-live-store";
 import { validateNativeAppointment } from "../appointments/native-appointment-authorization";
 import { verifyNativeTerms } from "../appointments/native-terms-evidence";
@@ -30,7 +30,7 @@ export class NativeAppointmentCall {
   #mark:string|null=null;#markSequence=0;#voiceMs=0;#caption=false;#timer:ReturnType<typeof setTimeout>|null=null;
   #queue:Promise<unknown>=Promise.resolve();#closed=false;#generation=0;
   #playbackWaiters=new Set<()=>void>();
-  constructor(readonly authority:NativeAppointmentAuthorization,private readonly ports:Ports){}
+  constructor(readonly authority:NativeAppointmentExecutionAuthorization,private readonly ports:Ports){}
   get action(){return this.#action;}
   #checkCurrentTerms(action:NativeAppointmentAction){
     const current=this.#fragments.filter(f=>f.role==="recipient").map(f=>f.text).join("");

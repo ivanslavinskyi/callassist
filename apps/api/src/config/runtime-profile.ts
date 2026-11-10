@@ -1,10 +1,10 @@
 /** Reviewed runtime/preparation pairs. Profile selection never changes model or capacity settings. */
 export const runtimeProfiles = {
   native_v2: {
-    name: "native_v2", release: "native-v2-task-2026-11-09", mode: "live_native_v2",
-    experiment: "native_v2", promptVersion: "preparation-live-native-task-2026-11-09",
-    compilerVersion: "brief-compiler-15", planSchemaVersion: "10",
-    runtimeVersion: "live-native-task-2026-11-09", minimumMigration: "0115_default_audio_retention_copy.sql"
+    name: "native_v2", release: "native-v2-plan-only-2026-11-10", mode: "live_native_v2",
+    experiment: "native_v2", promptVersion: "preparation-live-plan-only-2026-11-10",
+    compilerVersion: "brief-compiler-16", planSchemaVersion: "10",
+    runtimeVersion: "live-plan-only-2026-11-10", minimumMigration: "0115_default_audio_retention_copy.sql"
   },
   managed: {
     name: "managed", release: "managed-v9", mode: "unified_live",

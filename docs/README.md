@@ -1,16 +1,17 @@
 # Documentation
 
-**Source reviewed:** 2026-11-09, application commit `2342741`; schema catalog `0001`–`0115`.
+**Source reviewed:** 2026-11-10, current candidate; schema catalog `0001`–`0115`.
 
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
 Its current configuration supports explicit activation in development and production.
 The environment example selects the stable native profile; managed Live remains the
 default without a profile and a recovery option on a compatible build. The current
-native profile uses compiler 15 / plan schema 10 / approval 9. Source availability
-alone does not establish deployment. The [9 November release record](reports/native-task-boundary-2026-11-09.md)
-distinguishes automated checks, local telephone feedback and the completed
-owner-reported rollout. Host-specific evidence remains in local operational records.
+native profile uses compiler 16 / plan schema 10 / approval 10, with the approved
+localized plan as the sole conversation task context. Post-call assessment retains
+the original source. The [10 November stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
+distinguishes automated checks and the owner-reported successful local test from
+production rollout, which remains separate. Host-specific evidence stays in local operational records.
 
 ## Maintained references
 

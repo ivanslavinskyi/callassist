@@ -1,7 +1,7 @@
 # Native GPT-Live runtime
 
-**Status:** Native v2 baseline accepted on 2026-11-08; task-boundary and silent-closing release implemented on 2026-11-09. Deployment and telephone evidence are recorded separately below.\
-**Source reviewed:** 2026-11-09, application commit `2342741`.\
+**Status:** Plan-only runtime and closing recovery implemented; owner reported a successful local test on 2026-11-10. Production rollout remains separate.\
+**Source reviewed:** 2026-11-10, current candidate.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
 This is the maintained specification for `live_native_v2`. It describes application
@@ -10,9 +10,9 @@ or the deployed environment. Use the [validation guide](native-live-validation.m
 for checks. The [native integrity record](reports/native-live-integrity-2026-11-08.md)
 and [task information and testing record](reports/task-input-testing-implementation-2026-11-08.md)
 provide dated evidence for their respective changes. The
-[9 November release record](reports/native-task-boundary-2026-11-09.md) covers the
-current contracts and completed owner-reported rollout; production voice acceptance
-of that release remains pending.
+[9 November release record](reports/native-task-boundary-2026-11-09.md) describes
+the previous contracts and rollout. The [10 November stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
+records the current changes, checks and owner-reported local acceptance.
 
 ## Architecture and ownership
 
@@ -66,7 +66,7 @@ Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 
 | Selection | Result |
 | --- | --- |
-| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 15 policy required, hangup enabled; recommended |
+| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 16 policy required, hangup enabled; recommended |
 | `CALL_RUNTIME_PROFILE=managed` | Managed Live, compiler 6 policy required, hangup enabled; rollback |
 | `VOICE_RUNTIME_DRIVER=live`, fallback `false`, experiment `off` | Managed `unified_live`; default selection |
 | Same settings, experiment `native_v1` | Earlier informational experiment; eligibility may select managed control |
@@ -84,13 +84,14 @@ Automatic fallback and the Realtime driver remain incompatible with native v2.
 [voice-runtime.ts](../apps/api/src/config/voice-runtime.ts); startup requirements are
 checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.ts).
 
-| Contract | Current native task-boundary path | Compatibility |
+| Contract | Current native plan-only path | Compatibility |
 | --- | --- | --- |
-| Preparation prompt policy | `preparation-live-native-task-2026-11-09` | Previously pinned policies retain their compiler behavior |
-| Compiler | `brief-compiler-15` | Earlier compilers remain readable; not all are executable for new work |
+| Preparation prompt policy | `preparation-live-plan-only-2026-11-10` | Previously pinned policies retain their compiler behavior |
+| Compiler | `brief-compiler-16` | Earlier compilers remain readable; new native calls require compiler 16 |
 | Compiled plan | Schema `10` | Archived schemas are read through explicit readers |
-| Approved snapshot | Version `9` | Version `8` also accepted; version `7` uses the legacy authority adapter |
-| Runtime and prompt identity | `live-native-task-2026-11-09` | Frozen per-attempt descriptor and configuration hashes |
+| Approved snapshot | Version `10` | Earlier versions remain readable; new preparation and approval required for native execution |
+| Terminal decision | Version `3` | Versions 1/2 remain readable; conditional evidence now refers to the approved plan |
+| Runtime and prompt identity | `live-plan-only-2026-11-10` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
 | Summary generator | `summary-v8` | Earlier artifacts are preserved |
 | Native evaluator format | `native-summary-v3` | Selected for context v2; v6/v7 retain their formats when replayed |
@@ -114,44 +115,53 @@ Sources: [preparation policy](../packages/contracts/src/preparation-policy.ts),
 
 ## Task preparation and initial context
 
-Preparation keeps the original objective, context, allowed facts, clarification
-answers and delivery instruction alongside the compiled plan. The approved snapshot
-freezes those sources, opening settings, spoken identities and action authority.
-Edits require a new compilation and approval. User-supplied material is task data,
-not a higher-priority instruction to the voice model or evaluator.
+Compiler 16 keeps original objective/context/facts/clarifications/delivery text in
+the saved compilation for preparation audit and post-call assessment. Approval 10
+contains only the complete localized execution plan, opening settings, spoken
+identities, action authority and localized optional references. It has no
+`taskSources`; execution requirements contain `id`/`description`, never `sourceText`.
+Live and its Responses backend use this same approved task. Edits require a new
+compilation and approval. Snapshots 7/8/9 remain readable but require new preparation
+and approval before a call on this profile; there is no raw-source fallback.
 
-Relevant facts in the objective, context, facts list and clarification answers are
-available for disclosure when needed. `approvedFacts` is not the complete disclosure
-boundary. Live and the backend share instructions to preserve identifiers and their
-subjects, respect explicit withholding, and clarify contradictions. Personal details
-alone do not authorize a new action. Appointment authority is grounded separately
-in the objective or clarification answers; context can supply conditions and values.
-The review UI exposes original sources. Scenario buttons populate the objective
-through the same preparation pipeline and require no conversation-time catalog read.
+The existing combined audit checks both source fidelity and completeness of the
+execution projection. Relevant supplied facts, exact identifiers, disclosure
+conditions and conditional outcomes must be represented in the localized plan.
+Required facts cannot be hidden in an optional reference. No new model stage is
+added. Post-call assessment deliberately retains the saved original source;
+its inputs and results are not injected into the conversation.
 
 `nativeV2Session` assembles:
 
 1. A developer input message containing the opening instruction.
-2. A user input message containing parties, the approved plan, original source
-   material, opening fields and an optional appendix index.
+2. A user input message containing approved parties, the localized plan, opening
+   fields and an optional appendix index.
 3. Conversation instructions in `session.instructions`.
 4. Backend instructions, tools and output budget in `delegation.responses`.
 
-The complete primary task is available at startup. Optional appendix content is
-stored separately: only ID/title/description are sent initially, and
-`get_task_context(sectionId)` retrieves one approved section. This is not a search
-service or permission to add facts or authority. An appendix cannot replace a
-missing critical condition in the approved task.
+`get_task_context(sectionId)` returns only an approved localized reference. Neither
+tool responses nor recovery may read original task fields. Runtime role and
+information-sharing instructions refer to approved plan data; historical compiler
+instructions retain their original versions for audit compatibility.
 
-The shared role contract distinguishes the principal, the recipient heard on incoming
-audio, and the subject of each fact. Overlapping names do not merge those roles.
-Original task text defines semantic relationships; derived questions or criteria
-cannot transfer a recipient's preference to the principal. This does not expand
-the approved snapshot's action authority. Compiler 15 retains compiler 14's combined
-source-fidelity/language audit and also checks task boundaries and conditional criteria.
-Source evidence is compilation metadata, not Live input. Optional task restrictions
-may be empty; product controls remain independent. Prior pinned policies keep their
-original behavior. See [preparation runtime](preparation-runtime.md).
+Conditional completion without an appointment uses terminal decision version 3:
+`conditionPlanPath` and `conditionPlanQuote` bind the condition to the immutable
+plan; `recipientQuote` binds its observed outcome to the conversation. The existing
+backend evaluates meaning and the host checks exact evidence and action state.
+An unknown or attempted action cannot be reported as not required.
+
+After new recipient text suspends an accepted closing, old playback marks lose
+permission to hang up. One existing state update informs Live; the existing quiet
+review re-evaluates the interruption. Noise or reciprocal closing can reuse the
+observed farewell; a real question stays answerable. An empty review gets one
+state-recovery notification, not a repeated polling/model loop. The closing
+failure deadline survives suspension, but never disconnects an actively speaking
+recipient; settled empty recovery is bounded again. A successful, current and
+attributed backend answer resumes ordinary conversation, including text-only
+continuations after a tool result or rejection. Partial failed responses, stale
+answers and unattributed output cannot cancel the recovery deadline. Other pending
+backend work does not invalidate a current useful answer. Failure is not recorded
+as successful completion.
 
 Live closes with the actual outcome and preserves its subject. A recipient's own
 preference is addressed directly; the principal is named when the result concerns
@@ -489,8 +499,8 @@ Sources: [trace writer](../apps/api/src/voice/live-protocol-trace.ts),
   not inferred from shorter timers or caption timestamps.
 
 The [validation guide](native-live-validation.md) defines the software checks and
-remaining acoustic acceptance. See the [current release record](reports/native-task-boundary-2026-11-09.md)
-for completed checks and the owner-reported rollout. Host-specific procedures and
+remaining acoustic acceptance. See the [current stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
+for completed checks and the owner-reported local test. Host-specific procedures and
 recovery evidence remain in the local runbook; the 8 November production preparation
 record is historical.
 

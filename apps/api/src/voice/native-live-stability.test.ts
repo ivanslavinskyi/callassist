@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approvedCall, flush, speech, TestSocket } from "./voice-test-helpers";
+import { approvedPlanOnlyCall as approvedCall, flush, speech, TestSocket } from "./voice-test-helpers";
 import { NativeLiveV2Call } from "./native-live-v2-call";
 import { LiveNativeClosing } from "./live-native-closing";
 

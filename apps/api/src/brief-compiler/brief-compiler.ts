@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { taskEvidenceIssues } from "./task-evidence";
 import { preparationRequestReserve } from "../config/preparation-pricing";
-import { isNativeActionsPolicy, isProgressivePolicy, isIntegrityPolicy, NATIVE_ROLES_POLICY, NATIVE_TASK_POLICY, nativeAppointmentInterpretationJsonSchema, prepareNativeAppointmentOutput } from "./native-appointment-compilation";
+import { isNativeActionsPolicy, isProgressivePolicy, isIntegrityPolicy, NATIVE_ROLES_POLICY, PLAN_ONLY_POLICY, isTaskPolicy, nativeAppointmentInterpretationJsonSchema, prepareNativeAppointmentOutput } from "./native-appointment-compilation";
 import {preparationIssue,moderationIssueCategories,type PreparationIssue} from "@callassist/contracts";
 import { buildCompilerInstructions } from "./compiler-instructions";
 import { equivalentIdentityLabel, preservesIdentityLabel } from "./identity-label";
@@ -226,14 +226,15 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     const native = options.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions = isNativeActionsPolicy(options.policy?.promptVersion);
     const progressive = isProgressivePolicy(options.policy?.promptVersion), integrity = isIntegrityPolicy(options.policy?.promptVersion);
-    const taskOnly = options.policy?.promptVersion === NATIVE_TASK_POLICY;
+    const planOnly = options.policy?.promptVersion === PLAN_ONLY_POLICY;
+    const taskOnly = isTaskPolicy(options.policy?.promptVersion);
     const roles = taskOnly || options.policy?.promptVersion === NATIVE_ROLES_POLICY;
     const rawBrief = (native ? createCallBriefInputSchema : storedCallBriefInputSchema).parse(input);
     const currentDateTime = this.#now().toISOString();
     const moderation=await this.#isFlaggedByModeration(rawBrief,deadline,requestBudget);
     if (moderation.flagged) {
       return createCompilation({
-        native, nativeActions, progressive, integrity, roles, taskOnly,
+        native, nativeActions, progressive, integrity, roles, taskOnly, planOnly,
         rawBrief,
         compiledBrief: null,
         policyDecision: {...blockedDecision("input_moderation_flagged"),...(integrity?{issue:preparationIssue("input_moderation_flagged","input_moderation",moderation.categories)}:{})},
@@ -276,7 +277,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       const refusal = extractRefusal(response);
       if (refusal) {
         return createCompilation({
-          native, nativeActions, progressive, integrity, roles, taskOnly,
+          native, nativeActions, progressive, integrity, roles, taskOnly, planOnly,
           rawBrief,
           compiledBrief: null,
           policyDecision: {...blockedDecision("model_refusal"),...(integrity?{issue:preparationIssue("model_refusal","model_refusal")}:{})},
@@ -305,7 +306,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             const auditRequest = (body: object) => this.#request(this.#responsesEndpoint, body, compilationDeadline,
               "language_audit", options.policy?.audit.model ?? model, requestBudget);
             if (roles) {
-              const verdict = await verifyExecutionFidelity(compiledBrief, rawBrief, auditRequest, options.policy?.audit.model ?? model);
+              const verdict = await verifyExecutionFidelity(compiledBrief, rawBrief, auditRequest, options.policy?.audit.model ?? model, planOnly);
               languageIssues = verdict.languageViolations;
               semanticIssues = verdict.semanticViolations;
             } else {
@@ -369,7 +370,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 
     if (Date.now() >= deadline || options.signal?.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { cause: new Error("PREPARATION_DEADLINE_EXCEEDED") });
     return createCompilation({
-      native, nativeActions, progressive, integrity, roles, taskOnly,
+      native, nativeActions, progressive, integrity, roles, taskOnly, planOnly,
       rawBrief,
       compiledBrief,
       policyDecision,
@@ -437,8 +438,9 @@ export class OpenAIBriefCompiler implements BriefCompiler {
   ) {
     const native = requestBudget.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions = isNativeActionsPolicy(requestBudget.policy?.promptVersion);
-    const taskOnly = requestBudget.policy?.promptVersion === NATIVE_TASK_POLICY;
-    const instructions = taskOnly ? taskCompilerInstructions : requestBudget.policy?.promptVersion === NATIVE_ROLES_POLICY ? rolesCompilerInstructions
+    const planOnly = requestBudget.policy?.promptVersion === PLAN_ONLY_POLICY;
+    const taskOnly = isTaskPolicy(requestBudget.policy?.promptVersion);
+    const instructions = planOnly ? planOnlyCompilerInstructions : taskOnly ? taskCompilerInstructions : requestBudget.policy?.promptVersion === NATIVE_ROLES_POLICY ? rolesCompilerInstructions
       : isProgressivePolicy(requestBudget.policy?.promptVersion) ? progressiveCompilerInstructions
       : nativeActions ? nativeActionsCompilerInstructions : native ? nativeCompilerInstructions : compilerInstructions;
     return (await this.#request(
@@ -622,7 +624,8 @@ export class DeterministicBriefCompiler implements BriefCompiler {
     const native = options.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions=isNativeActionsPolicy(options.policy?.promptVersion);
     const progressive = isProgressivePolicy(options.policy?.promptVersion), integrity = isIntegrityPolicy(options.policy?.promptVersion);
-    const taskOnly = options.policy?.promptVersion === NATIVE_TASK_POLICY;
+    const planOnly = options.policy?.promptVersion === PLAN_ONLY_POLICY;
+    const taskOnly = isTaskPolicy(options.policy?.promptVersion);
     const roles = taskOnly || options.policy?.promptVersion === NATIVE_ROLES_POLICY;
     const rawBrief = (native ? createCallBriefInputSchema : storedCallBriefInputSchema).parse(input);
     const compiledBrief = compiledCallBriefSchema.parse({
@@ -672,7 +675,7 @@ export class DeterministicBriefCompiler implements BriefCompiler {
       blockingIssues: deterministicMockAppointmentIntent(rawBrief) ? [{ code: "missing_scheduling_constraints", question: appointmentClarification(rawBrief) }] : []
     });
     return createCompilation({
-      native, nativeActions, progressive, integrity, roles, taskOnly,
+      native, nativeActions, progressive, integrity, roles, taskOnly, planOnly,
       rawBrief,
       compiledBrief,
       policyDecision: evaluateCompiledBrief(rawBrief, compiledBrief, {
@@ -823,7 +826,7 @@ function createCompilation(input: {
   nativeActions?: boolean;
   progressive?: boolean;
   integrity?:boolean;
-  roles?: boolean; taskOnly?: boolean;
+  roles?: boolean; taskOnly?: boolean; planOnly?: boolean;
   rawBrief: RawCallBrief;
   compiledBrief: CompiledCallBrief | null;
   policyDecision: PolicyDecision;
@@ -832,8 +835,8 @@ function createCompilation(input: {
   displayObjective?: CallCompilation["displayObjective"];
   revision: number;
 }): CallCompilation {
-  const { native = true, nativeActions = false, progressive = false, integrity=false, roles = false, taskOnly = false, ...original } = input;
-  const compilerVersion = taskOnly ? "brief-compiler-15" : roles ? "brief-compiler-14" : integrity?"brief-compiler-13":progressive ? "brief-compiler-12" : nativeActions ? "brief-compiler-11" : native ? BRIEF_COMPILER_VERSION : "brief-compiler-6";
+  const { native = true, nativeActions = false, progressive = false, integrity=false, roles = false, taskOnly = false, planOnly = false, ...original } = input;
+  const compilerVersion = planOnly ? "brief-compiler-16" : taskOnly ? "brief-compiler-15" : roles ? "brief-compiler-14" : integrity?"brief-compiler-13":progressive ? "brief-compiler-12" : nativeActions ? "brief-compiler-11" : native ? BRIEF_COMPILER_VERSION : "brief-compiler-6";
   if(integrity&&original.policyDecision.status!=="ready_for_review"){
     const decision=original.policyDecision,code=decision.reasonCodes[0]??"model_refusal";
     const categories=original.compiledBrief?.riskCategories??[];
@@ -1497,3 +1500,6 @@ const taskOnlyModelSchema = {
     taskEvidence: z.toJSONSchema(taskEvidenceSchema)
   }
 };
+
+const planOnlyCompilerInstructions = taskCompilerInstructions.replaceAll("The original approved user context will also be available to Live from session start.", "Only the complete approved localized plan will be available to Live and its backend; original user context is unavailable during execution.") + `
+Execution boundary: the approved localized plan is the ONLY task context available to Live and its reasoning backend. The raw objective, context, facts, clarification answers, delivery instruction and audit sourceText are NOT available during the call. Preserve every task-relevant fact, subject, exact value, disclosure restriction, conditional branch, outcome criterion and latest correction in the existing localized plan fields. Use approvedFacts/backgroundSummary for relevant supplied facts and explicit conditions in the appropriate task fields. A conditional action must explain when no action is required. Preserve explicit numeric price/currency limits structurally. Optional appendix sections are localized approved references only; mandatory conditions must remain in the primary plan. Never rely on raw sources as a runtime fallback, never add a second translated raw task alongside the plan, and never manufacture product controls as user restrictions. Source quotations remain audit metadata only.`;

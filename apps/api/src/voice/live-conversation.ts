@@ -943,6 +943,9 @@ export class OpenAILiveConversation implements VoiceConversation {
         }
       }
       const succeeded = event.type === "response.completed" && response.status === "completed";
+      if(succeeded && Array.isArray(response.output) && response.output.some(item=>{
+        const message=object(item);return message.type==="message" && Array.isArray(message.content) && message.content.some(part=>typeof object(part).text==="string" && String(object(part).text).trim());
+      }))run.usefulMessage=true;
       const usage = liveResponsesUsage(response.usage);
       this.#accounting(() => this.options.service.completeProviderOperation({
         operationId: run.operationId, outcome: succeeded ? "succeeded" : "provider_error",
@@ -1070,7 +1073,13 @@ export class OpenAILiveConversation implements VoiceConversation {
       }).catch(() => this.#fail("LIVE_TOOL_FAILURE")).finally(() => {
         run.settled = true;
         this.#flushContinuations();
-        if(this.nativeSession?.version===2)this.lifecycle?.backendIdle?.();
+        if(this.nativeSession?.version===2)this.lifecycle?.backendIdle?.({
+          usefulMessage:succeeded&&!!run.usefulMessage,
+          // Rejection is inherited by continuations for tool safety. It must
+          // not disqualify a later text-only explanation or clarification.
+          current:succeeded&&!run.timedOut&&(!run.rejected||run.calls.length===0)&&!this.#unattributedRuns.has(run.id)&&run.epoch===this.#epoch,
+          continuation:run.continuation
+        });
         if (this.#backendEnabled) this.scheduleTaskDecision();
         else if (run.consent) this.requestConsentDecision();
       });

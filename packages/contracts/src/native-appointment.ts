@@ -24,7 +24,11 @@ export const nativeAppointmentAuthorizationSchema = z.strictObject({
   alternatives: z.array(nativeAppointmentAlternativeSchema).max(8),
   requirements: z.array(nativeAppointmentRequirementSchema).max(12),
   limits: appointmentLimitsSchema, maxAppointments: z.literal(1), financialPolicy: z.literal("no_unapproved_terms")
-}).superRefine((value, context) => {
+}).superRefine(validateNativeAuthority);
+function validateNativeAuthority(value: {
+  operation: string; existingAppointment: unknown; requirements: Array<{id:string}>;
+  alternatives: Array<{id:string;requirements:Array<{id:string}>}>
+}, context: z.RefinementCtx) {
   const requiresExisting = value.operation !== "book";
   if (requiresExisting !== (value.existingAppointment !== null)) context.addIssue({code:"custom",path:["existingAppointment"],message:"An existing appointment is required only for confirmation, rescheduling or cancellation"});
   const needsAlternatives = value.operation === "book" || value.operation === "reschedule";
@@ -33,7 +37,24 @@ export const nativeAppointmentAuthorizationSchema = z.strictObject({
   if (new Set(ids).size !== ids.length) context.addIssue({code:"custom",path:["alternatives"],message:"Alternative IDs must be unique"});
   for (const requirements of [value.requirements,...value.alternatives.map(item=>[...value.requirements,...item.requirements])])
     if(new Set(requirements.map(item=>item.id)).size!==requirements.length) context.addIssue({code:"custom",path:["requirements"],message:"Requirement IDs must be unique within an alternative"});
-});
+
+}
+/** Runtime requirements deliberately exclude compiler source quotations. */
+export const nativeAppointmentExecutionAuthorizationSchema = z.strictObject({
+  ...nativeAppointmentAuthorizationSchema.shape,
+  requirements: z.array(nativeAppointmentRequirementSchema.omit({sourceText:true})).max(12),
+  alternatives: z.array(nativeAppointmentAlternativeSchema.extend({
+    requirements: z.array(nativeAppointmentRequirementSchema.omit({sourceText:true})).max(12)
+  })).max(8)
+}).superRefine(validateNativeAuthority);
+export type NativeAppointmentExecutionAuthorization = z.infer<typeof nativeAppointmentExecutionAuthorizationSchema>;
+export function nativeExecutionAuthority(value: NativeAppointmentAuthorization): NativeAppointmentExecutionAuthorization {
+  const requirement = ({id,description}: {id:string;description:string}) => ({id,description});
+  return nativeAppointmentExecutionAuthorizationSchema.parse({...value,
+    requirements:value.requirements.map(requirement),
+    alternatives:value.alternatives.map(a=>({...a,requirements:a.requirements.map(requirement)}))});
+}
+
 export type NativeAppointmentAuthorization = z.infer<typeof nativeAppointmentAuthorizationSchema>;
 export type NativeAppointmentOperation = z.infer<typeof nativeAppointmentOperationSchema>;
 export const nativeAppointmentProposalSchema = z.strictObject({

@@ -10,7 +10,7 @@ describe("immutable runtime descriptor boundary", () => {
     const call = await approvedCall();
     try {
       const snapshot = (await call.service.get(call.brief.id))!;
-      const context = { brief: snapshot.brief, snapshot: call.snapshot } as VoiceConversationContext;
+      const context = { brief: snapshot.brief, snapshot: call.snapshot } as unknown as VoiceConversationContext;
       const models = { live: "gpt-live-1", delegation: "gpt-6-luna", speech: "gpt-4o-mini-tts" };
       const descriptor = liveRuntimeDescriptor(context, snapshot.compilation!, "private runtime instructions Nina Keller",
         models, { SHPROHLI_RELEASE_SHA: "not-a-release-secret" });

@@ -1,7 +1,7 @@
 # Runtime profiles
 
 **Status:** implemented; production deployment is a separate operation.\
-**Source reviewed:** 2026-11-09.
+**Source reviewed:** 2026-11-10.
 
 `CALL_RUNTIME_PROFILE` selects a reviewed pair of voice runtime and preparation
 instructions. The checked-in environment example selects `native_v2`. Existing
@@ -9,14 +9,16 @@ installations without this variable retain their previous low-level behavior.
 
 | Profile | Voice | Preparation policy | Compiler / plan schema |
 | --- | --- | --- | --- |
-| `native_v2` | Native v2, `live-native-task-2026-11-09` | `preparation-live-native-task-2026-11-09` | 15 / 10 |
+| `native_v2` | Native v2, `live-plan-only-2026-11-10` | `preparation-live-plan-only-2026-11-10` | 16 / 10 |
 | `managed` | Managed Live, `live-managed-v9` | `preparation-2026-10-05` | 6 / 4 |
 
 Both profiles select the Live driver, disable automatic Realtime fallback and enable
 agent hangup. Models, service tiers, provider budgets, capacity limits, pricing and
-approved model profiles retain their existing settings. The 9 November native
-release preserves roles, keeps user constraints separate from internal rules,
-and checks source evidence in the existing combined audit. Optional restrictions
+approved model profiles retain their existing settings. The plan-only native release preserves roles and checks execution completeness
+and source fidelity in the existing combined audit. Approval 10 excludes original
+task fields and audit source quotations from Live and its backend; post-call
+assessment retains the original source. Earlier approvals require new preparation
+and approval on this profile. Optional restrictions
 can be empty. Live delegates silently after its farewell; only the backend supplies
 closing quotes. General calls require `end_call.noActionRequired=null`.
 
@@ -40,10 +42,10 @@ The profile defines the desired configuration. PostgreSQL retains the audited
 preparation policy used to pin new requests. Startup checks alignment without
 silently changing that policy.
 
-The task-boundary release requires an explicit transition from the previous
-integrity or roles policy using the existing command below. It needs no new database
+The plan-only release requires an explicit transition from the previous
+task, integrity or roles policy using the existing command below. It needs no new database
 migration. Previously approved plans, completed artifacts and pinned preparation
-jobs are not rewritten; prepare and approve a new revision to receive compiler 15
+jobs are not rewritten; prepare and approve a new revision to receive compiler 16
 semantic validation. Startup rejects a saved policy that does not match the selected
 release rather than silently running new calls with the previous preparation policy.
 
@@ -100,8 +102,9 @@ with all instances stopped, not a hot switch in the admin UI.
 
 ## Rollback
 
-SQL catalog equality is not sufficient for binary rollback. The task-boundary
-release adds compiled schema 10 / approval 9 without a SQL migration; older binaries
+SQL catalog equality is not sufficient for binary rollback. The plan-only
+release retains compiled schema 10 and adds approval 10 / terminal decision 3
+without a SQL migration; older binaries
 may reject those artifacts or the newly saved policy. Do not automatically restart
 them after new preparations have been accepted. Prefer a compatible forward fix or
 the managed profile on the upgraded build.

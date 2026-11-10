@@ -1,14 +1,16 @@
 # Task information, recordings and testing scenarios
 
-**Implemented:** 2026-11-08; source reviewed 2026-11-09 at `2342741`. This document describes
+**Implemented:** 2026-11-08; source reviewed 2026-11-10. This document describes
 code behavior, not a production deployment. Native v2 supports explicit selection
 in development and production.
 
 ## Task information
 
 Relevant facts can be entered in the objective, optional context, facts list or
-clarification answers. The frozen native startup bundle retains all four sources;
-the `approvedFacts` array is not the entire disclosure boundary. Live and its
+clarification answers. Preparation preserves their relevant meaning and exact values
+in the approved localized plan; the native startup bundle excludes the raw sources.
+Post-call assessment retains the originals. The `approvedFacts` array is not the
+entire disclosure boundary. Live and its
 backend receive the same instructions to disclose information only when useful,
 honor restrictions, preserve exact values and subjects, and clarify contradictions.
 Personal details do not independently authorize payments, callbacks or new actions.
@@ -31,7 +33,7 @@ Scenario insertion does not bypass these limits or any
 moderation, compilation, review, approval, credit or destination checks.
 
 Existing compiler prompt versions were preserved. The native runtime instruction
-identity is `live-native-task-2026-11-09`; no extra model stage or ordinary-turn
+identity is `live-plan-only-2026-11-10`; no extra model stage or ordinary-turn
 lookup was added. See [native runtime](native-live-runtime.md) for tool boundaries.
 
 ### Objective storage and backfill
