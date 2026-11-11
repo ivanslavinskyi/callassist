@@ -1,8 +1,8 @@
-import { calendarDateDetails, formatLocale, type NativeAppointmentAuthorization, type NativeAppointmentAction } from "@callassist/contracts";
+import { calendarDateDetails, formatLocale, type NativeAppointmentExecutionAuthorization, type NativeAppointmentAction } from "@callassist/contracts";
 import type { UiLocale } from "@/lib/i18n/messages";
 import { nativeAppointmentCopy, nativeAppointmentScope } from "@/lib/i18n/native-appointment-messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
-export function NativeAppointmentDetails({authority,locale,headingLevel=2}:{authority:NativeAppointmentAuthorization;locale:UiLocale;headingLevel?:2|4}){
+export function NativeAppointmentDetails({authority,locale,headingLevel=2}:{authority:NativeAppointmentExecutionAuthorization;locale:UiLocale;headingLevel?:2|4}){
  const copy=nativeAppointmentCopy(locale),Heading=headingLevel===4?"h4":"h2";
  const date=(value:string)=>calendarDateDetails(value,formatLocale(locale),"numeric").dateLabel;
  const days=(values:number[])=>values.map(day=>new Intl.DateTimeFormat(formatLocale(locale),{weekday:"short",timeZone:"UTC"}).format(new Date(Date.UTC(2024,0,day)))).join(", ");

@@ -427,7 +427,7 @@ export const PREVIOUS_BRIEF_COMPILER_VERSION = "brief-compiler-5" as const;
 export const CALL_POLICY_VERSION = "callassist-policy-3" as const;
 export const LEGACY_BRIEF_COMPILER_VERSION = "brief-compiler-3" as const;
 export function isSupportedBriefCompilerVersion(value: unknown) {
-  return value === BRIEF_COMPILER_VERSION || ["brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", "brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14", "brief-compiler-15", "brief-compiler-16"].includes(String(value)) || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === "brief-compiler-4" || value === LEGACY_BRIEF_COMPILER_VERSION;
+  return value === BRIEF_COMPILER_VERSION || ["brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", "brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14", "brief-compiler-15", "brief-compiler-16", "brief-compiler-17"].includes(String(value)) || value === PREVIOUS_BRIEF_COMPILER_VERSION || value === "brief-compiler-4" || value === LEGACY_BRIEF_COMPILER_VERSION;
 }
 
 export const callTaskTypeSchema = z.enum([
@@ -496,6 +496,15 @@ export const compiledNamedEntitySchema = z.object({
   value: z.string().trim().min(1).max(160)
 });
 export type CompiledNamedEntity = z.infer<typeof compiledNamedEntitySchema>;
+
+/** Audit-only link between a localized label and an exact original source span. */
+export const namedEntitySourceSchema = z.strictObject({
+  path: z.string().regex(/^(recipientName|representedPerson|objective|context|deliveryInstruction)$|^allowedFacts\.\d+$|^clarificationAnswers\.\d+\.answer$/),
+  quote: z.string().min(1).max(160)
+});
+export const sourcedNamedEntitySchema = compiledNamedEntitySchema.extend({
+  source: namedEntitySourceSchema.nullable().optional()
+});
 
 export const callPlanAssumptionCodeSchema = z.enum([
   "spoken_answers_saved_in_callassist",
@@ -566,8 +575,19 @@ const taskOnlyOptionalFields = {
   unresolvedCriteria: z.array(z.string().trim().min(2).max(400)).max(10)
 };
 export const taskOnlyCompiledCallBriefSchema = nativeActionCompiledCallBriefSchema.extend({
-  schemaVersion: z.literal("10"), ...taskOnlyOptionalFields, taskEvidence: taskEvidenceSchema
+  schemaVersion: z.literal("10"), ...taskOnlyOptionalFields, taskEvidence: taskEvidenceSchema,
+  namedEntities: z.array(sourcedNamedEntitySchema).max(40)
 });
+/** New preparation stores exactly the localized facts and authority used at execution. */
+export const holisticCompiledCallBriefSchema = nativeActionCompiledCallBriefSchema.omit({ namedEntities: true }).extend({
+  schemaVersion: z.literal("11"), ...taskOnlyOptionalFields,
+  approvedFacts: z.array(z.string().trim().min(1).max(400)).max(40),
+  nativeAppointmentAuthorization: nativeAppointmentExecutionAuthorizationSchema.nullable()
+});
+export type HolisticCompiledCallBrief = z.infer<typeof holisticCompiledCallBriefSchema>;
+export function localizedFactText(fact: CompiledFact | string): string {
+  return typeof fact === "string" ? fact : fact.callLanguageText;
+}
 export const archivedMissionBriefSchema = previousCompiledCallBriefSchema.extend({
   schemaVersion: z.literal("5"), taskInstructions: z.string().trim().min(10).max(8_000), orderedQuestions: z.array(compiledQuestionSchema).max(12)
 });
@@ -577,7 +597,7 @@ export const archivedLimitedBriefSchema = archivedMissionBriefSchema.extend({
 export const archivedConsistentBriefSchema = archivedLimitedBriefSchema.extend({
   schemaVersion: z.literal("7"), appointmentAuthorization: z.union([archivedAppointmentV3Schema, archivedAppointmentV2Schema]).nullable()
 });
-export const compiledCallBriefSchema = z.discriminatedUnion("schemaVersion", [legacyCompiledCallBriefSchema, previousCompiledCallBriefSchema, archivedMissionBriefSchema, archivedLimitedBriefSchema, archivedConsistentBriefSchema, currentCompiledCallBriefSchema, nativeActionCompiledCallBriefSchema, taskOnlyCompiledCallBriefSchema]);
+export const compiledCallBriefSchema = z.discriminatedUnion("schemaVersion", [legacyCompiledCallBriefSchema, previousCompiledCallBriefSchema, archivedMissionBriefSchema, archivedLimitedBriefSchema, archivedConsistentBriefSchema, currentCompiledCallBriefSchema, nativeActionCompiledCallBriefSchema, taskOnlyCompiledCallBriefSchema, holisticCompiledCallBriefSchema]);
 export type CompiledCallBrief = z.infer<typeof compiledCallBriefSchema>;
 export type CurrentCompiledCallBrief = z.infer<typeof currentCompiledCallBriefSchema>;
 
@@ -738,11 +758,9 @@ export function createApprovedExecutionPlan(
     successCriteria: compiled.successCriteria,
     unresolvedCriteria: compiled.unresolvedCriteria,
     stopConditions: compiled.stopConditions,
-    approvedFacts: compiled.approvedFacts.map(
-      ({ callLanguageText }) => callLanguageText
-    ),
+    approvedFacts: compiled.approvedFacts.map(localizedFactText),
     prohibitedActions: compiled.prohibitedActions,
-    ...((compiled.schemaVersion === "9" || compiled.schemaVersion === "10") ? {nativeAppointmentAuthorization:compiled.nativeAppointmentAuthorization} : {}),
+    ...((compiled.schemaVersion === "9" || compiled.schemaVersion === "10" || compiled.schemaVersion === "11") ? {nativeAppointmentAuthorization:compiled.nativeAppointmentAuthorization} : {}),
     ...("appointmentAuthorization" in compiled ? { appointmentAuthorization: compiled.appointmentAuthorization } : {}),
     ...("taskInstructions" in compiled ? { taskInstructions: compiled.taskInstructions } : {})
   });
@@ -751,9 +769,28 @@ export function createApprovedExecutionPlan(
 /** Shared deterministic projection for the compiler audit and new approvals. */
 export function createPlanOnlyExecutionPlan(compiled: CompiledCallBrief) {
   const plan = createApprovedExecutionPlan(compiled);
+  if (compiled.schemaVersion === "11") return planOnlyExecutionPlanSchema.parse(plan);
   if (compiled.schemaVersion !== "10") throw new Error("PLAN_ONLY_COMPILATION_REQUIRED");
   return planOnlyExecutionPlanSchema.parse({...plan,
     nativeAppointmentAuthorization:compiled.nativeAppointmentAuthorization ? nativeExecutionAuthority(compiled.nativeAppointmentAuthorization) : null});
+}
+
+/** Identical task-bearing data for review and immutable native approval. */
+export function createPlanOnlyTaskContext(compiled: CompiledCallBrief, raw: RawCallBrief, voiceGender: CallVoiceGender) {
+  const spokenIdentities = createSpokenIdentities(compiled.callLocale, raw.recipientName, raw.representedPerson);
+  return {
+    plan: createPlanOnlyExecutionPlan(compiled), spokenIdentities,
+    contextAppendix: "contextAppendix" in compiled ? compiled.contextAppendix : [],
+    nativeOpening: buildNativeOpening({locale: compiled.callLocale, representedPerson: spokenIdentities.representedPerson.spoken,
+      assistantName: ASSISTANT_NAME, voiceGender, addressingStyle: compiled.addressingStyle,
+      assistanceReason: raw.assistanceReason, purposeExample: compiled.opening.purposeStatement})
+  };
+}
+
+/** Shared byte-for-byte primary task projection for audit and voice admission. */
+export function planOnlyContextText(context:ReturnType<typeof createPlanOnlyTaskContext>) {
+  return JSON.stringify({parties:context.spokenIdentities,approvedTask:context.plan,opening:context.nativeOpening,
+    appendixIndex:context.contextAppendix.map(({id,title,description})=>({id,title,description}))});
 }
 
 export const policyDecisionStatusSchema = z.enum([
@@ -789,12 +826,20 @@ export const policyDecisionSchema = z.discriminatedUnion("policyVersion", [legac
 export type PolicyDecision = z.infer<typeof policyDecisionSchema>;
 
 export const callCompilationSchema = z.object({
+  // Non-authoritative diagnostics; absent on historical compilations. Kept with encrypted content.
+  validationFindings: z.array(z.strictObject({
+    attempt: z.number().int().min(0).max(4),
+    stage: z.enum(["local", "audit"]), path: z.string().min(1).max(240),
+    reason: z.string().min(1).max(120),
+    sourcePath: z.string().max(240).optional(), sourceQuote: z.string().max(160).optional(),
+    value: z.string().max(160).optional()
+  })).max(200).optional(),
   displayObjective: z.object({ text: z.string().trim().min(1).max(2000), language: z.string().min(2).max(35) }).optional(),
   rawBrief: callBriefInputBaseSchema.superRefine(validateLanguagePolicy),
   compiledBrief: compiledCallBriefSchema.nullable(),
   policyDecision: policyDecisionSchema,
   compilerModel: z.string().trim().min(1).max(120),
-  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, "brief-compiler-4", PREVIOUS_BRIEF_COMPILER_VERSION, "brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", BRIEF_COMPILER_VERSION, "brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14", "brief-compiler-15", "brief-compiler-16"]),
+  compilerVersion: z.enum([LEGACY_BRIEF_COMPILER_VERSION, "brief-compiler-4", PREVIOUS_BRIEF_COMPILER_VERSION, "brief-compiler-6", "brief-compiler-7", "brief-compiler-8", "brief-compiler-9", BRIEF_COMPILER_VERSION, "brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14", "brief-compiler-15", "brief-compiler-16", "brief-compiler-17"]),
   compilerResponseId: z.string().trim().min(1).max(160).nullable(),
   revision: z.number().int().positive(),
   compiledAt: z.string().datetime(),
@@ -802,7 +847,7 @@ export const callCompilationSchema = z.object({
   snapshotHash: z.string().regex(/^[a-f0-9]{64}$/)
 }).superRefine((compilation, context) => {
   const legacy = compilation.compilerVersion === LEGACY_BRIEF_COMPILER_VERSION;
-  const expectedSchema = ["brief-compiler-15", "brief-compiler-16"].includes(compilation.compilerVersion) ? "10" : legacy ? "3" : ["brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14"].includes(compilation.compilerVersion) ? "9" : compilation.compilerVersion === BRIEF_COMPILER_VERSION ? "8"
+  const expectedSchema = compilation.compilerVersion === "brief-compiler-17" ? "11" : ["brief-compiler-15", "brief-compiler-16"].includes(compilation.compilerVersion) ? "10" : legacy ? "3" : ["brief-compiler-11", "brief-compiler-12", "brief-compiler-13", "brief-compiler-14"].includes(compilation.compilerVersion) ? "9" : compilation.compilerVersion === BRIEF_COMPILER_VERSION ? "8"
     : compilation.compilerVersion === "brief-compiler-9" ? "7" : compilation.compilerVersion === "brief-compiler-8" ? "6"
     : compilation.compilerVersion === "brief-compiler-7" ? "5" : "4";
   if ((compilation.compiledBrief && compilation.compiledBrief.schemaVersion !== expectedSchema) ||
@@ -989,7 +1034,8 @@ export function createApprovedExecutionSnapshot(
   }
 
   const spokenIdentities = createSpokenIdentities(compiled.callLocale, compilation.rawBrief.recipientName, compilation.rawBrief.representedPerson);
-  const planOnly = compilation.compilerVersion === "brief-compiler-16";
+  const planOnly = compilation.compilerVersion === "brief-compiler-16" || compilation.compilerVersion === "brief-compiler-17";
+  const taskContext = planOnly ? createPlanOnlyTaskContext(compiled, compilation.rawBrief, snapshot.brief.voiceGender) : null;
   const plan = createApprovedExecutionPlan(compiled);
   return approvedExecutionSnapshotSchema.parse({
     version: planOnly ? 10 : compiled.schemaVersion === "10" ? 9 : compiled.schemaVersion === "9" ? 8 : compiled.schemaVersion === "8" ? APPROVED_EXECUTION_SNAPSHOT_VERSION
@@ -998,14 +1044,14 @@ export function createApprovedExecutionSnapshot(
     compilationRevision: compilation.revision,
     compilationSnapshotHash: compilation.snapshotHash,
     approvedAt: compilation.approvedAt,
-    plan: planOnly ? createPlanOnlyExecutionPlan(compiled) : { appointmentAuthorization: null, ...plan },
+    plan: taskContext ? taskContext.plan : { appointmentAuthorization: null, ...plan },
     answering: answeringApproval(compiled.voicemailAction, compiled.callLocale),
     ...("contextAppendix" in compiled ? {
       ...(!planOnly ? {taskSources: liveTaskSourcesSchema.parse({ objective: compilation.rawBrief.objective, context: compilation.rawBrief.context,
         allowedFacts: compilation.rawBrief.allowedFacts, clarificationAnswers: compilation.rawBrief.clarificationAnswers,
         deliveryInstruction: compilation.rawBrief.deliveryInstruction })} : {}),
-      contextAppendix: compiled.contextAppendix,
-      nativeOpening: buildNativeOpening({ locale: compiled.callLocale, representedPerson: spokenIdentities.representedPerson.spoken,
+      contextAppendix: taskContext?.contextAppendix ?? compiled.contextAppendix,
+      nativeOpening: taskContext?.nativeOpening ?? buildNativeOpening({ locale: compiled.callLocale, representedPerson: spokenIdentities.representedPerson.spoken,
         assistantName: ASSISTANT_NAME, voiceGender: snapshot.brief.voiceGender, addressingStyle: compiled.addressingStyle,
         assistanceReason: compilation.rawBrief.assistanceReason, purposeExample: compiled.opening.purposeStatement })
     } : {}),

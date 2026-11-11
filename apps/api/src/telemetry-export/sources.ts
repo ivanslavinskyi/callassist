@@ -1,4 +1,4 @@
-import { preparationCheckpointSchema, preparationRuntimePolicySchema, applicationPlaybackDiagnosticSchema, liveRuntimeDiagnosticSchema } from "@callassist/contracts";
+import { preparationDiagnosticMetadataSchema, preparationCheckpointSchema, preparationRuntimePolicySchema, applicationPlaybackDiagnosticSchema, liveRuntimeDiagnosticSchema } from "@callassist/contracts";
 import { decryptJson, type DataEncryptionMaterial } from "../security/encryption";
 import { calculateProviderUsageCost } from "../config/provider-pricing-policy";
 import type { AdminProviderUsageBucket } from "../storage/call-repository";
@@ -16,6 +16,7 @@ const artifacts = "t.artifact_id IN (SELECT id FROM call_text_artifacts WHERE ca
 const operations = "t.operation_id IN (SELECT id FROM export_operations)";
 const jobs = "t.job_id IN (SELECT id FROM export_jobs)";
 export const exportSources: ExportSource[] = [
+  {...source("preparation_validation_events", "id preparation_id operation_id job_generation worker_attempt metadata detail_ciphertext created_at", "t.preparation_id IN (SELECT id FROM export_preparations WHERE available) AND t.created_at>now()-interval '30 days'", "t.created_at,t.id"),optional:true},
   { ...source("call_runtime_captures", "id call_brief_id call_attempt_id schema_version policy_version status started_at completed_at expires_at record_count payload_bytes dropped_records issue_codes", calls), optional: true },
   { ...source("call_runtime_diagnostics", "id capture_id call_brief_id call_attempt_id sequence schema_version kind observed_at session_offset_ms metadata payload_ciphertext payload_bytes record_bytes idempotency_key",
     `${calls} AND EXISTS (SELECT 1 FROM call_runtime_captures c WHERE c.id=t.capture_id AND c.status IN ('collecting','complete','partial') AND c.expires_at>now())`, "t.call_attempt_id,t.sequence"), optional: true },
@@ -151,6 +152,7 @@ export function mapExportRow(s: ExportSource, data: Record<string, unknown>, key
     if (field.endsWith("_ciphertext")) mapped[field.replace(/_ciphertext$/, "")] = value === null ? null : decryptJson(String(value), key);
     else if (s.table === "call_attempts" && field === "consent_runtime_policy") mapped[field] = value === null ? null : exportedConsentPolicySchema.parse(value);
     else if (s.table === "provider_operation_results" && field === "response_metadata") mapped[field] = value === null ? null : preparationTransportDiagnosticsSchema.strip().parse(value);
+    else if (s.table === "preparation_validation_events" && field === "metadata") mapped[field] = preparationDiagnosticMetadataSchema.parse(value);
     else if (s.table === "preparation_request_checkpoints" && field === "metadata") mapped[field] = preparationCheckpointSchema.strip().parse(value);
     else if (s.table === "call_preparation_requests" && field === "runtime_policy") mapped[field] = exportedPreparationPolicySchema.parse(value);
     else if (s.table === "audit_events" && field === "metadata") mapped[field] = metadata(value);

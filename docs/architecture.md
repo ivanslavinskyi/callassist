@@ -1,6 +1,6 @@
 # Architecture
 
-**Source reviewed:** 2026-11-10, implementation commit `579b4ea`; migration catalog `0001`–`0115`.
+**Source reviewed:** 2026-11-11, current candidate; migration catalog `0001`–`0116`.
 
 SHPROHLI has a Next.js web application, a Fastify API, PostgreSQL-backed durable
 workers and shared TypeScript contracts. The API owns authorization and immutable
@@ -39,7 +39,7 @@ integration keeps runtime selection explicit; see the
 [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
 
 The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the plan-only
-preparation policy: compiler 16, plan schema 10 and approval 10. The audited configuration
+preparation policy: compiler 17, plan schema 11 and approval 10. The audited configuration
 command applies the policy; API and worker startup require a matching saved value.
 The [profile contract](runtime-profiles.md) defines activation and rollback. Low-level
 compatibility flags and model choices alone do not switch the preparation policy.
@@ -49,20 +49,29 @@ See the [native runtime specification](native-live-runtime.md) for the version m
 
 - Preparation preserves the complete original task and facts alongside a reviewable
   plan. Approval freezes authority, language, identity and runtime settings.
-- Audit-only `taskEvidence` grounds criteria and restrictions in original sources.
-  It is hashed and stored with the compilation, but omitted from the approved
-  execution plan and Live input. The existing combined audit checks semantic
-  support; a matching source substring alone is insufficient.
+- Compiler 17 assembles one compact candidate into the runtime plan. The existing
+  holistic audit checks source fidelity, language, authority and consistency against
+  the complete sources and exact execution context, with one shared recovery budget.
+  New plans omit model-written source quotations and duplicated `taskEvidence`;
+  historical compilations and hashes remain readable.
 - Live and its backend receive only the approved localized plan at startup.
   Original task fields and audit source quotations stay outside the conversational
   runtime; post-call assessment retains the original source. Optional approved
   appendix content is retrieved only when needed. Tools cannot expand permissions.
+- The review translation uses the detected task-input language independently of UI
+  and call language. Its receipt binds approval to the canonical plan; the display
+  translation never becomes conversational authority.
 - Appointment journals distinguish authorization, delivery, uncertainty and confirmed
-  outcome. Spoken claims do not independently verify the recipient's calendar.
+  outcome. Tool contracts derive from approved authority; invalid arguments are
+  repaired from existing observations without requiring a prescribed human phrase.
+  Spoken claims do not independently verify the recipient's calendar.
 - Transcript revisions, result artifacts and assessment revisions preserve their
   source identities. Display reassessment does not rewrite canonical credit evidence.
 - Privacy deletion fences late writes. Encrypted trace content is separate from
   operational diagnostics and accounting; missing evidence is never reconstructed.
+- Preparation validation diagnostics survive failures before plan publication.
+  Bounded private evidence is encrypted, expires and is cleared on cancellation or
+  deletion; sensitive admin access requires a reason and an audited read.
 - Provider expenses, account billing and user credits are separate quantities.
 
 Live chooses ordinary speech and follow-ups. After one natural closing it delegates

@@ -18,7 +18,7 @@ const selector = z.union([
   z.strictObject({kind:z.literal("relative_days"),startOffsetDays:z.number().int().min(0).max(3650),count:z.number().int().min(1).max(3650).nullable()}),
   z.strictObject({kind:z.literal("next_calendar_week")})
 ]);
-const modelRule = z.strictObject({dates:selector,weekdays:z.array(z.number().int().min(1).max(7)).max(7),
+export const modelRule = z.strictObject({dates:selector,weekdays:z.array(z.number().int().min(1).max(7)).max(7),
   excludedWeekdays:z.array(z.number().int().min(1).max(7)).max(7),excludedDates:z.array(appointmentDateSchema).max(366),
   startTime:appointmentTimeSchema,endTime:appointmentTimeSchema});
 const modelAuthority = z.strictObject({...nativeAppointmentAuthorizationSchema.shape,alternatives:z.array(nativeAppointmentAlternativeSchema.extend({rules:z.array(modelRule).min(1).max(31)})).max(8)});
@@ -50,10 +50,21 @@ export function prepareNativeAppointmentOutput(value:unknown,raw:RawCallBrief,no
   for(const requirement of [...authorization.requirements,...authorization.alternatives.flatMap(a=>a.requirements)])
     if(!allSources.some(text=>text.includes(requirement.sourceText)))return fail("Every additional requirement needs exact supplied source text");
   if(!Number.isFinite(now.getTime()))return fail("Invalid trusted clock");
-  const parts=new Intl.DateTimeFormat("en-CA-u-ca-iso8601-nu-latn",{timeZone:authorization.timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
+  const alternatives=authorization.alternatives.map(alternative=>({...alternative,rules:resolveNativeDateRules(alternative.rules,authorization.timeZone,now)}));
+  const canonical=nativeAppointmentAuthorizationSchema.safeParse({...authorization,alternatives});
+  if(!canonical.success)return fail(canonical.error.issues.map(i=>`${i.path.join(".")}: ${i.message}`).join("; "));
+  const today = new Intl.DateTimeFormat("en-CA", {timeZone:authorization.timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
+  if(alternatives.some(a=>a.rules.some(r=>r.endDate!==null&&r.endDate<today)))return fail("A permitted period is wholly in the past; clarify the intended dates");
+  return {success:true as const,output:{...output,appointmentAuthorization:null,nativeAppointmentAuthorization:canonical.data},context};
+}
+
+
+/** Calendar normalization has no source-text or authority interpretation. */
+export function resolveNativeDateRules(rules: Array<z.infer<typeof modelRule>>, timeZone: string, now: Date) {
+  const parts=new Intl.DateTimeFormat("en-CA-u-ca-iso8601-nu-latn",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
   const part=(type:string)=>parts.find(p=>p.type===type)!.value;
   const today=`${part("year")}-${part("month")}-${part("day")}`;
-  const alternatives=authorization.alternatives.map(alternative=>({...alternative,rules:alternative.rules.flatMap(rule=>{
+  return rules.flatMap(rule=>{
     const {dates,...clock}=rule;
     if(dates.kind==="dates")return dates.dates.map(date=>({...clock,startDate:date,endDate:date}));
     if(dates.kind==="range")return [{...clock,startDate:dates.startDate,endDate:dates.endDate}];
@@ -63,11 +74,7 @@ export function prepareNativeAppointmentOutput(value:unknown,raw:RawCallBrief,no
     }
     const startDate=addDays(today,8-(new Date(`${today}T00:00:00Z`).getUTCDay()||7));
     return [{...clock,startDate,endDate:addDays(startDate,6)}];
-  })}));
-  const canonical=nativeAppointmentAuthorizationSchema.safeParse({...authorization,alternatives});
-  if(!canonical.success)return fail(canonical.error.issues.map(i=>`${i.path.join(".")}: ${i.message}`).join("; "));
-  if(alternatives.some(a=>a.rules.some(r=>r.endDate!==null&&r.endDate<today)))return fail("A permitted period is wholly in the past; clarify the intended dates");
-  return {success:true as const,output:{...output,appointmentAuthorization:null,nativeAppointmentAuthorization:canonical.data},context};
+  });
 }
 
 // Shared with the auditor so an allowed normalization is not "repaired" away.

@@ -1269,7 +1269,7 @@ async function createConsentHarness(failRecording = false, locale: typeof brief.
     const compile = compiler.compile.bind(compiler);
     vi.spyOn(compiler, "compile").mockImplementation(async (input, revision) => {
       const compilation = await compile(input, revision, {policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-2026-10-05"}});
-      if (!compilation.compiledBrief) throw new Error("Expected a ready plan fixture");
+      if (!compilation.compiledBrief || compilation.compiledBrief.schemaVersion==="11") throw new Error("Expected a ready historical plan fixture");
       compilation.compiledBrief = { ...compilation.compiledBrief, schemaVersion: "4",
         taskType: "appointment_coordination", appointmentAuthorization };
       compilation.snapshotHash = createCompilationSnapshotHash(compilation);

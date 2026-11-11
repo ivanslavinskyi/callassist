@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { callCompilationSchema, defaultPreparationRuntimePolicy, nativeActionCompiledCallBriefSchema,
+import { callCompilationSchema, defaultPreparationRuntimePolicy, nativeActionCompiledCallBriefSchema, taskOnlyCompiledCallBriefSchema,
   normalizeCreateCallBriefInput, type RawCallBrief } from "@callassist/contracts";
 import { DeterministicBriefCompiler, OpenAIBriefCompiler, type PreparationRequestMetadata } from "./brief-compiler";
 import { hasValidCompilationSnapshotHash } from "./compilation-integrity";
@@ -30,6 +30,7 @@ const plan = nativeActionCompiledCallBriefSchema.parse({
 const wrongPlan = { ...plan, localizedObjective: "Nina fragen, was Nina Keller zum Mittagessen möchte.",
   orderedQuestions: [{ ...plan.orderedQuestions[0]!, purpose: "Den Essenswunsch von Nina Keller erfahren." }],
   successCriteria: ["Es ist geklärt, was Nina Keller zum Mittagessen möchte."] };
+const planOnlyPlan = taskOnlyCompiledCallBriefSchema.parse({ ...plan, schemaVersion: "10", taskEvidence: [] });
 const policy = { ...defaultPreparationRuntimePolicy, promptVersion: NATIVE_ROLES_POLICY } as const;
 const clean: ExecutionFidelityVerdict = { languageViolations: [], semanticViolations: [] };
 const roleFailure: ExecutionFidelityVerdict = { languageViolations: [], semanticViolations: [
@@ -128,7 +129,7 @@ describe("combined execution language and source fidelity audit", () => {
     expect(body.instructions).toContain("Preserve all unaffected source facts and restrictions");
   });
 
-  it("keeps a valid large calendar within the existing request reservation limit", async () => {
+  it.each([false, true])("keeps a valid large calendar within the existing request reservation limit (planOnly=%s)", async planOnly => {
     const base = nativeAuthority.alternatives[0]!;
     const authority = { ...nativeAuthority, alternatives: Array.from({ length: 8 }, (_, a) => ({ ...base, id: `option_${a}`,
       rules: Array.from({ length: 30 }, (_, r) => { const date = `2099-09-${String(r + 1).padStart(2, "0")}`;
@@ -136,11 +137,45 @@ describe("combined execution language and source fidelity audit", () => {
     const compiled = nativeActionCompiledCallBriefSchema.parse({ ...plan, taskType: "appointment_coordination", nativeAppointmentAuthorization: authority });
     const request = vi.fn(async (body: object) => {
       const bytes = Buffer.byteLength(JSON.stringify(body));
-      expect(bytes).toBeLessThan(100_000);
+      expect(bytes).toBeLessThan(planOnly ? 200_000 : 100_000);
       expect(() => preparationRequestReserve({ model: "gpt-5.6", serviceTier: "default" }, bytes, 2048)).not.toThrow();
+      if (planOnly) {
+        const schema = (body as any).text.format.schema;
+        const paths: string[] = schema.properties.semanticViolations.items.properties.path.enum;
+        expect(paths).toContain("nativeAppointmentAuthorization.alternatives.7");
+        expect(paths).toContain("nativeAppointmentAuthorization.limits.maxTotalPrice");
+        expect(paths.some(path => path.includes(".rules."))).toBe(false);
+        expect(paths.length).toBeLessThan(1000);
+        expect(JSON.stringify(schema).length).toBeLessThan(15_000);
+        expect(JSON.parse((body as any).input).compiledTask.nativeAppointmentAuthorization).toEqual(authority);
+      }
       return { output_text: JSON.stringify(clean) };
     });
-    expect(await verifyExecutionFidelity(compiled, raw, request, "gpt-5.6")).toEqual(clean);
+    const input = planOnly ? taskOnlyCompiledCallBriefSchema.parse({ ...compiled, schemaVersion: "10", taskEvidence: [] }) : compiled;
+    expect(await verifyExecutionFidelity(input, raw, request, "gpt-5.6", planOnly)).toEqual(clean);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("constrains plan-only audit paths to actual fields in the same response schema", async () => {
+    const request = vi.fn(async (body: any) => {
+      const schema = body.text.format.schema;
+      const language: string[] = schema.properties.languageViolations.items.enum;
+      const semantic: string[] = schema.properties.semanticViolations.items.properties.path.enum;
+      expect(language).toContain("orderedQuestions.0.text");
+      expect(language).not.toContain("namedEntities.0.value");
+      expect(semantic).toContain("namedEntities.0.value");
+      expect(semantic.some(path => path.startsWith("taskEvidence"))).toBe(false);
+      for (const invalid of ["compiledTask.localizedObjective", "executionTask.localizedObjective", "orderedQuestions[0].text", "orderedQuestions.99.text", "sourceMaterial.objective"])
+        expect([...language, ...semantic]).not.toContain(invalid);
+      return { output_text: JSON.stringify(roleFailure) };
+    });
+    expect(await verifyExecutionFidelity(planOnlyPlan, raw, request, "audit-model", true)).toEqual(roleFailure);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["compiledTask.localizedObjective", "orderedQuestions[0].text", "orderedQuestions.99.text"])("never drops or guesses an invalid finding from a nonconforming provider: %s", async path => {
+    const request = vi.fn(async () => ({ output_text: JSON.stringify({ ...clean, semanticViolations: [{ path, reason: "source_changed" }] }) }));
+    await expect(verifyExecutionFidelity(planOnlyPlan, raw, request, "audit-model", true)).rejects.toThrow("EXECUTION_FIDELITY_AUDIT_INVALID_PATH");
     expect(request).toHaveBeenCalledTimes(1);
   });
 

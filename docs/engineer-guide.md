@@ -1,7 +1,7 @@
 # SHPROHLI engineer guide
 
-Source reviewed: 2026-11-10, implementation commit `579b4ea`, including the plan-only boundary and closing recovery,
-schema catalog `0001`–`0115`. This describes the
+Source reviewed: 2026-11-11, including holistic preparation, canonical language,
+appointment contract repair and schema catalog `0001`–`0116`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
 The dated implementation records in the [documentation index](README.md) retain
@@ -128,7 +128,7 @@ can count as substantive. Assessment uncertainty has a bounded settlement path.
 ### Native v2
 
 The explicit `native_v2` mode uses `NativeLiveV2Call`, version
-`live-plan-only-2026-11-10`. Live receives the complete approved localized plan at
+`live-plan-only-2026-11-11.2`. Live receives the complete approved localized plan at
 startup, owns the declarative opening, ordinary replies and short closing, and uses
 backend tools at action/refusal/termination boundaries. Original task sources stay
 outside Live and its backend, but remain available for post-call assessment. Optional indexed references
@@ -579,6 +579,9 @@ native appointment action revisions. `0113` adds encrypted objective projections
 and the fresh-call 30-day default; `0114` adds testing grants, scenario heads and
 encrypted revisions, audit and preparation attribution; `0115` upgrades known public
 retention copy while preserving historical publications and acceptances.
+`0116` adds correlated preparation validation events and encrypted evidence with
+retention, cancellation/deletion cleanup and audited sensitive access, including
+failures that produced no compilation.
 These are additive contracts. Production selection is supported, while deployment,
 backfills and existing-account policy transitions remain explicit actions. See the
 [production preparation record](reports/native-v2-production-readiness-2026-11-08.md).

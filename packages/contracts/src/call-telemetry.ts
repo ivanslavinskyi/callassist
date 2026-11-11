@@ -16,6 +16,14 @@ const safeTokenSchema = z.string()
   .max(160)
   .regex(/^[a-z0-9_.:/-]+$/i);
 const emptyMetadataSchema = z.strictObject({});
+// Raw requirement IDs/quotes remain in the encrypted trace. Hashes permit correlation.
+export const appointmentValidationTelemetrySchema = z.strictObject({
+  category:z.enum(["arguments","evidence","authority"]),
+  field:z.enum(["proposal","alternativeId","requirements","unavailableAlternatives","selectionEvidence","termsQuote","date/startTime","totalPrice","durationMinutes","operation","timeZone","party","existingAppointment","requiresUnapprovedTerms"]),
+  observationRevision:z.number().int().nonnegative(),
+  expectedIdHashes:z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(24).optional(),
+  receivedIdHashes:z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(24).optional()
+});
 // Technical playback milestones only. Released audio is not evidence of heard words.
 export const applicationPlaybackDiagnosticSchema = z.strictObject({
   markId: safeTokenSchema,
@@ -298,7 +306,8 @@ export const callTelemetryPayloadSchema = z.discriminatedUnion("name", [
       requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       snapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
       proposalFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-      generation: z.number().int().nonnegative()
+      generation: z.number().int().nonnegative(),
+      validation: appointmentValidationTelemetrySchema.optional()
     })
   }),
   z.strictObject({

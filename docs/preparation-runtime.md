@@ -1,6 +1,6 @@
 # Call-plan preparation runtime
 
-**Source reviewed:** 2026-11-10, current working tree. This describes code, not the
+**Source reviewed:** 2026-11-11, current working tree. This describes code, not the
 state or measured capacity of a deployed server. See the [native runtime](native-live-runtime.md)
 for startup context, conversation and action boundaries. Dated preparation plans
 and measurements are [historical evidence](archive/README.md). Host configuration
@@ -8,13 +8,13 @@ and rollout procedures live only in the ignored `docs/local-operations/` directo
 
 ## Immutable policy and operator controls
 
-Native plan-only revision, 10 November 2026: policy
-`preparation-live-plan-only-2026-11-10` selects `brief-compiler-16`, plan schema 10
-and approval 10. The previous progressive instruction remains: resolve prerequisites
+Native holistic revision, 11 November 2026: policy
+`preparation-live-holistic-2026-11-11` selects `brief-compiler-17`, plan schema 11
+and the existing approval 10. The progressive instruction remains: resolve prerequisites
 before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
 Live and its backend receive the complete approved localized plan; original sources
 remain in preparation, audit and post-call assessment only.
-`CALL_RUNTIME_PROFILE=native_v2` selects this plan-only policy through the audited
+`CALL_RUNTIME_PROFILE=native_v2` selects this holistic policy through the audited
 `runtime:configure --apply` command. Startup checks that the saved policy matches.
 Historical jobs retain their pinned policy. The unprofiled in-memory default remains
 `preparation-live-native-v2-2026-11-06`; the historical SQL seed uses the managed policy.
@@ -30,7 +30,8 @@ API has no `promptVersion` setter. See [runtime profiles](runtime-profiles.md) a
 | `live-native-integrity-2026-11-08` | `brief-compiler-13` | 9 | 8 |
 | `live-native-roles-2026-11-09` | `brief-compiler-14` | 9 | 8 |
 | `live-native-task-2026-11-09` (historical) | `brief-compiler-15` | 10 | 9 |
-| `live-plan-only-2026-11-10` (named native profile) | `brief-compiler-16` | 10 | 10 |
+| `live-plan-only-2026-11-10` (historical) | `brief-compiler-16` | 10 | 10 |
+| `live-holistic-2026-11-11` (named native profile) | `brief-compiler-17` | 11 | 10 |
 
 All policy IDs in the table start with `preparation-`. The earlier
 `preparation-2026-10-05` policy uses compiler 6 / schema 4. Historical readers
@@ -39,7 +40,60 @@ plan does not silently upgrade its authority or make it eligible for native v2.
 Sources: [policy contract](../packages/contracts/src/preparation-policy.ts) and
 [compiler selection](../apps/api/src/brief-compiler/brief-compiler.ts).
 
-Preparation failures now expose an optional typed `issue`: reason kind/code, known
+## Holistic preparation (current native profile)
+
+The canonical plan is the single task authority for Live and its reasoning backend.
+All its human-language content is in the selected call language, including objectives,
+facts, question purposes, conditions, criteria, native descriptions and the full
+appendix. Input language and UI language do not change that contract. Names and exact
+identifiers are preserved. A translated review is a separate display artifact bound
+to the canonical revision/hash; approving it never replaces the execution plan.
+
+The generator writes a compact task with plain localized facts and optional typed
+appointment proposals. It does not write source quotations, named-entity proofs,
+task-evidence paths, application settings or stable requirement IDs. The application
+supplies trusted settings and parties, resolves relative calendars using one frozen
+reference time and assembles the exact approval-10 execution context. Structural,
+size and native authority invariants remain deterministic.
+
+The existing `language_audit` stage reviews that complete context against the original
+task. Its only output is `accept`, `revise` or `clarify`, plus a bounded message. It
+checks material fidelity, language, roles, permissions and completeness. First-person
+source text belongs to the principal by default; generated assistant speech must
+attribute those facts correctly. No language-specific extraction or literal citation
+matching gates run on this policy.
+
+There is one shared recovery: regenerate an invalid candidate, correct a semantic
+finding using the actual rejected candidate, or repeat an invalid audit against the
+unchanged context. There are at most two candidates and two audits, within existing
+provider, deadline and cost limits. Input/output moderation and bounded transport
+retry remain; no new model stage or voice-stage request is added.
+
+Approval 10, native action evidence and terminal decision contracts are unchanged.
+The conversation follow-up uses voice identity `live-plan-only-2026-11-11`; it keeps
+full approved startup context and the existing action-boundary tools. Summary source 3 carries source-free appointment
+authority for schema 11. Readers retain historical contracts and snapshot hashes;
+historical pinned policies retain their earlier validation paths.
+
+Migration `0116` adds independent preparation validation events. Safe metadata exposes
+stage/code, correlation IDs, attempts, policy/model/build and hashes. Private evidence
+contains supplied sources, usable/partial model output, schema errors, rejected
+candidates and exact audited contexts; opaque provider reasoning is not retained.
+Evidence is encrypted and bounded to 256 KiB per event, 1 MiB and 100 events per
+preparation, with explicit truncation. Retention is 30 days; cancellation removes
+private evidence and account/call deletion purges it. Stale worker writes cannot
+recreate deleted evidence. Diagnostic failure never replaces the preparation result.
+
+The existing admin inspector shows safe events. Its private access/export action
+requires a superadmin, an explicit reason, an audited access record and a no-store
+response. Telemetry exports include available evidence; ordinary logs retain only
+fixed safe codes and correlation IDs. Preparation observability includes outcomes by
+policy, cause and recovery use. See the [implementation plan](plans/preparation-audit-simplification-2026-11-11.md)
+and [validation evidence](reports/preparation-holistic-validation-2026-11-11.md).
+
+## User-facing errors and historical validation
+
+Preparation failures expose an optional typed `issue`: reason kind/code, known
 source/category, affected fields, retryability and next action. All seven UI locales
 explain policy restrictions, unsupported actions, missing input and technical failures.
 Unknown model refusals do not invent a safety category; output moderation is a generated
@@ -149,6 +203,49 @@ conditional branch applicability. A matching substring alone is not semantic pro
 Evidence is included in the compilation hash but excluded from execution plans,
 Live prompts and translated review fields. Empty sections are omitted from review.
 Explicit user restrictions remain visible even when similar to system rules.
+
+Current plan-only model output places `sources` beside each criterion/restriction
+(`{text,sources}`) and follow-up (`{condition,question,sources}`). The API constructs
+canonical `taskEvidence` indexes from those items before validation. The model no
+longer maintains a second target list, so duplicate or missing cross-references
+cannot arise from indexing mistakes. No sources are guessed or filled in. Exact
+quotes and semantic support still pass the existing checks. This is a provider
+transport change only; stored plans, review/execution shapes and historical policy
+formats are unchanged. Repair feedback uses the new item paths.
+
+The same plan-only audit constrains returned paths with enums of existing fields.
+Language findings use exact spoken-field paths. Semantic findings can name fields
+through three path components; deeper calendar/authority details are reported on
+their containing item or section. All underlying content remains in the audit.
+Evidence mismatches point to the supported task field, not the provenance table.
+This bounds the schema without enumerating every calendar leaf or accepting guessed
+paths. A nonconforming, truncated or malformed provider response still fails closed.
+Neither change adds a model request, parser-repair model or retry allowance.
+
+Plan-only generation also supplies `namedEntities[].source`: an exact original
+name plus its source field, alongside the localized `value`. The optional stored
+field preserves historical source-free schema-10 records without adding defaults
+or rewriting their hashes. New generated entries explicitly use an object for
+person/organisation/location provenance; other labels may also carry an exact
+source term. Date/reference entries normally use null. A provided quote is always
+validated; dates retain their existing calendar checks.
+Local validation checks the quoted source and preserves literal identifiers,
+numbered labels and postal addresses. A source match only admits the candidate
+to the existing combined audit: that audit must verify identity equivalence,
+branch/role preservation and all entity mentions in the executable prose,
+including entities omitted from metadata. No city alias dictionary, fuzzy name
+acceptance, extra model stage or additional repair allowance is introduced.
+Source provenance is hashed with the compilation and excluded from execution and
+translated review prose. Deploy updated readers with the writer: older binaries
+that strip the new source field cannot verify hashes of newly sourced plans.
+
+Bounded `validationFindings` on new compilations retain attempt, local/audit stage,
+field and reason, plus entity source/value when available. These non-authoritative
+diagnostics live with encrypted compilation content, not content-free operational
+logs, and are excluded from approval hashes and execution. Entity repairs receive
+the specific mismatch instead of only a generic fact-integrity error. Historical
+plans and approvals are not repaired in place; a new preparation is required.
+
 The successful preparation path retains generation plus one combined audit and
 the existing moderation requests; repair limits, deadlines and Live autonomy are
 unchanged. Historical policy prompts, approvals and their schemas remain supported.
@@ -393,7 +490,7 @@ report the highest passed step and working reserve, not CPU count as worker coun
 Hedging, parallel audit/moderation and persisted intermediate compilation candidates
 remain the explicitly deferred optimizations from the original plan.
 
-## Plan-only conversation boundary (10 November 2026)
+## Historical plan-only preparation (10 November 2026)
 
 `preparation-live-plan-only-2026-11-10` pins compiler 16, compiled schema 10 and
 approval 10. It preserves source text in compilation and post-call assessment,

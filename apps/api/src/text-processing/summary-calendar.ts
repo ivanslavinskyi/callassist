@@ -37,7 +37,7 @@ export function composeCalendarSummary(summary: CallSummaryPayload, context: Sum
   const result = structuredClone(summary);
   if (summary.schemaVersion !== 3 || !summary.appointmentExtraction) return result;
   result.unresolved = [...new Set((summary.unresolvedDetails ?? []).map(d => d.text))];
-  if(context.version===2&&context.nativeAppointmentAuthorization)return /^summary-v[678]:/.test(generatorVersion)
+  if((context.version === 2 || context.version === 3)&&context.nativeAppointmentAuthorization)return /^summary-v[678]:/.test(generatorVersion)
     ? composeNativeSummary(result,context,language) : composeNativeCalendar(result,context,language,generatorVersion);
   if (!context.appointmentAuthorization) return callSummaryPayloadSchema.parse(result);
   const candidates = summary.appointmentExtraction.candidates;
@@ -100,7 +100,7 @@ export function composeCalendarSummary(summary: CallSummaryPayload, context: Sum
 
 /** Native reports keep operation semantics and approved rules. The journal and
  * independently cited conversation must agree; neither can supply the other. */
-function composeNativeSummary(summary: CallSummaryPayload, context: Extract<SummarySourceContext,{version:2}>, language: TextLanguage): CallSummaryPayload {
+function composeNativeSummary(summary: CallSummaryPayload, context: Extract<SummarySourceContext,{version:2|3}>, language: TextLanguage): CallSummaryPayload {
   const authority = context.nativeAppointmentAuthorization!, action = context.nativeAppointmentAction;
   const extraction = summary.appointmentExtraction!, outcome = extraction.nativeOutcome;
   if (!outcome || outcome.operation !== authority.operation) throw new Error("SUMMARY_NATIVE_OUTCOME_INVALID");
@@ -172,7 +172,7 @@ function composeNativeSummary(summary: CallSummaryPayload, context: Extract<Summ
 
 /** A native confirmation is an attributed provider statement, not a calendar API receipt.
  * The transcript must independently describe the same result; the journal never upgrades it. */
-function composeNativeCalendar(summary:CallSummaryPayload,context:Extract<SummarySourceContext,{version:2}>,language:TextLanguage,generatorVersion:string):CallSummaryPayload {
+function composeNativeCalendar(summary:CallSummaryPayload,context:Extract<SummarySourceContext,{version:2|3}>,language:TextLanguage,generatorVersion:string):CallSummaryPayload {
   const authority=context.nativeAppointmentAuthorization!,action=context.nativeAppointmentAction;
   const matches=action&&action.snapshotHash===context.compilationSnapshotHash&&action.callAttemptId===context.callAttemptId&&action.proposal.operation===authority.operation;
   const proposal=matches?action.proposal:null;

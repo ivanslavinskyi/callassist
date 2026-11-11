@@ -1,4 +1,4 @@
-import { getAppointmentAuthorization, type CallCompilation } from "@callassist/contracts";
+import { getAppointmentAuthorization, localizedFactText, type CallCompilation } from "@callassist/contracts";
 
 /** Execution controls, source facts, IDs and policy codes are never rewritten by translation. */
 export function planReviewFields(compilation: CallCompilation) {
@@ -18,12 +18,12 @@ export function planReviewFields(compilation: CallCompilation) {
     for (const key of ["successCriteria", "unresolvedCriteria", "stopConditions", "prohibitedActions"] as const) {
       compiled[key].forEach((text, index) => add(`${key}.${index}`, text));
     }
-    compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText));
+    compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}${typeof fact === "string" ? "" : ".callLanguageText"}`, localizedFactText(fact)));
     compiled.blockingIssues.forEach((issue, index) => add(`blockingIssues.${index}.question`, issue.question));
     if ("contextAppendix" in compiled) compiled.contextAppendix.forEach((section,index) => {
       for (const key of ["title","description","content"] as const) add(`contextAppendix.${index}.${key}`,section[key]);
     });
-    if ((compiled.schemaVersion === "9" || compiled.schemaVersion === "10") && compiled.nativeAppointmentAuthorization) {
+    if ((compiled.schemaVersion === "9" || compiled.schemaVersion === "10" || compiled.schemaVersion === "11") && compiled.nativeAppointmentAuthorization) {
       const native = compiled.nativeAppointmentAuthorization;
       add("nativeAppointmentAuthorization.serviceDescription",native.serviceDescription);
       native.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.requirements.${index}.description`,item.description); });

@@ -10,6 +10,7 @@ import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { nativeV2Session } from "../voice/live-task-context";
 import { buildCompilerInstructions } from "./compiler-instructions";
+import { inlineTaskModelOutput } from "../test-helpers/inline-task-model-output";
 
 const policy = {...defaultPreparationRuntimePolicy,promptVersion:NATIVE_TASK_POLICY} as const;
 const raw = normalizeCreateCallBriefInput({recipientName:"Nina",representedPersonFirstName:"Nina",representedPersonLastName:"Keller",
@@ -30,7 +31,8 @@ function provider(plans: object[], verdicts: object[]=[{languageViolations:[],se
     if(String(url).endsWith("moderations"))return Response.json({results:[{flagged:false}]});
     const accounting={model:body.model,service_tier:"default",usage:{input_tokens:100,output_tokens:20,total_tokens:120}};
     if(body.text.format.name==="execution_fidelity_audit")return Response.json({...accounting,output_text:JSON.stringify(verdicts[Math.min(audits++,verdicts.length-1)])});
-    return Response.json({...accounting,output_text:JSON.stringify({...plans[Math.min(generations++,plans.length-1)],
+    const plan=plans[Math.min(generations++,plans.length-1)]!;
+    return Response.json({...accounting,output_text:JSON.stringify({...(body.text.format.schema.properties.taskEvidence ? plan : inlineTaskModelOutput(plan)),
       nativeAppointmentInterpretation:{intent:"none",authorityEvidence:null,authorization:null}})});
   });
   return {fetchImplementation};

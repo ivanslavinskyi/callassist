@@ -49,6 +49,7 @@ export * from "./spoken-identities";
 export * from "./plan-review-cases";
 export * from "./voice-consent";
 export * from "./preparation-policy";
+export * from "./preparation-validation";
 export * from "./live-task";
 export * from "./summary-coverage";
 export * from "./testing";

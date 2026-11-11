@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated 2026-11-10 for the plan-only release (implementation `579b4ea`), schema `0001`–`0115`.
+Updated 2026-11-11 for holistic preparation and appointment contract repair, schema `0001`–`0116`.
 Current domain behavior is documented in [the engineer guide](engineer-guide.md).
 The route inventory below links to source registration modules. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
@@ -22,7 +22,7 @@ environment. Exact locked package versions are in [pnpm-lock.yaml](../pnpm-lock.
 ## Voice runtime selection
 
 The recommended profile is `CALL_RUNTIME_PROFILE=native_v2`, as selected by
-`.env.example`. It binds the Native v2 voice mode, compiler 16 policy and enabled
+`.env.example`. It binds the Native v2 voice mode, compiler 17 policy and enabled
 hangup. Use [runtime profiles](runtime-profiles.md) for the audited application command,
 read-only check and startup diagnostics. Without a profile, the default is managed
 `unified_live` with experiment `off`; low-level Native v2 requires
@@ -33,7 +33,8 @@ See the maintained [native specification](native-live-runtime.md) for complete
 startup context, prompt responsibilities, action profiles, declared recording,
 privacy, closing and summary-v8 behavior.
 
-The plan-only preparation path uses compiler 16 / schema 10 / approval 10. A named
+The holistic preparation path uses compiler 17 / schema 11 / approval 10 and requires
+migration 0116 for independent encrypted validation diagnostics. A named
 profile declares the policy; its configuration command saves it and startup validates
 it. Low-level voice flags and model changes alone do not update the policy.
 The settings API has no `promptVersion` setter; its read-only `runtimeProfile` field
@@ -439,11 +440,17 @@ an implemented end-to-end deadline. Include review and UI completion in measurem
 
 ## Recent configuration and workers
 
-The current schema catalog ends at **0115**. Migrations 0102–0107 implement preparation
+The current schema catalog ends at **0116**. Migrations 0102–0107 implement preparation
 policy/admission/observability; 0108 adds Swiss-only account-phone settings; 0109 adds
 immutable creation UI language and the owner result-email outbox. Migrations 0110–0112
 add native privacy/trace, attempt scoping and appointment action revisions. Catalog
 availability is not deployment evidence. Operational procedures are local-only.
+
+Migration 0116 adds preparation validation events with safe correlated metadata and
+bounded encrypted evidence, including failures before plan publication. Sensitive
+access is audited; cancellation, deletion and retention clear private evidence.
+The Inspector reads it through
+`POST /api/admin/call-preparations/:id/sensitive-access` with a superadmin reason.
 
 Migrations 0113–0115 add the encrypted objective projection and 30-day fresh-call
 default, tester grants/versioned scenarios/preparation attribution, and exact

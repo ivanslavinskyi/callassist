@@ -132,6 +132,9 @@ export class NativeLiveV2Call implements LiveLifecycle {
     if(this.#closed||this.#discarding||this.#decision||!this.#ready||!this.#admitted||this.#inputSpeaking)return;
     const action=this.#appointment?.action;
     const boundary=action?`${action.id}:${action.episode}:${action.state}`:undefined;
+    // A later recipient answer can resolve a previously inconclusive result.
+    // Deduplicate that result work only while its observed input is unchanged.
+    const resultBoundary=boundary?`${boundary}:${this.#inputRevision}`:undefined;
     // Deduplicate settled conversation content, not just the recipient's turn.
     // A later assistant conclusion can need recovery without any new input.
     // Punctuation-only caption updates and audio/silence do not change this key;
@@ -140,8 +143,8 @@ export class NativeLiveV2Call implements LiveLifecycle {
     const common={inputRevision:this.#inputRevision,reviewContext,farewell:false};
     const fast=!this.#suspendedClosing&&this.#farewellCue&&this.#farewellReviewedContext!==reviewContext;
     let delay:number=NATIVE_COMPLETION_TIMING.actionBoundaryMs;
-    if(!this.#suspendedClosing&&!fast&&action?.state==="delivered"&&this.#inputRevision>this.#actionInputBaseline&&!this.#reviewedActionBoundaries.has(boundary!)){
-      this.#completionCandidate={...common,kind:"result",actionBoundary:boundary,reason:"delivered_action_without_result",
+    if(!this.#suspendedClosing&&!fast&&action?.state==="delivered"&&this.#inputRevision>this.#actionInputBaseline&&!this.#reviewedActionBoundaries.has(resultBoundary!)){
+      this.#completionCandidate={...common,kind:"result",actionBoundary:resultBoundary,reason:"delivered_action_without_result",
         content:"The authorized appointment request has been delivered and the recipient has spoken, but no result is recorded. Review the latest observed conversation and current action state. If the provider's result is already available, call record_appointment_result using actual quotes, including all later corrections. Otherwise let Live clarify the missing result. Never repeat the original commitment, claim success from delivery alone, or ask for information already provided. This review itself grants no action or disconnection permission."};
     }else if(this.#hasRecipientWords&&this.#assistantReviewText.trim()){
       const confirmed=action?.state==="confirmed"&&!this.#reviewedActionBoundaries.has(boundary!);
@@ -294,7 +297,7 @@ export class NativeLiveV2Call implements LiveLifecycle {
       if(call.name==="record_appointment_result"&&action&&args.actionId===action.id&&args.episode===action.episode){
         // The backend is already handling this boundary, including any argument
         // repair. The missing-result watchdog must not duplicate that work.
-        this.#reviewedActionBoundaries.add(`${action.id}:${action.episode}:${action.state}`);
+        this.#reviewedActionBoundaries.add(`${action.id}:${action.episode}:${action.state}:${this.#inputRevision}`);
         this.#armCompletionReminder();
       }
       return this.#appointment.tool(call.name,args,current);

@@ -1163,3 +1163,7 @@ export async function repeatUnansweredCall(id: string, uiLocale?: import("@calla
   const preparation = await waitForCallPreparation(async () => result);
   return (await getCallSnapshot(preparation.callBriefId!)).brief;
 }
+
+export function getPreparationValidationEvidence(id:string,reason:string) {
+  return apiRequest<Array<{event:import("@callassist/contracts").PreparationDiagnosticEvent;detail:unknown}>>(`/api/admin/call-preparations/${encodeURIComponent(id)}/sensitive-access`,{method:"POST",body:JSON.stringify({reason})});
+}

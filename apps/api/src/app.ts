@@ -2038,6 +2038,17 @@ export function buildApp({
       }
     );
 
+    app.post<{ Params: { id: string } }>("/api/admin/call-preparations/:id/sensitive-access", async (request,reply)=>{
+      const actor=await authorizeSensitiveCallMutation(request,reply);
+      if(!actor)return;
+      if(!isUuid(request.params.id))return reply.status(404).send({error:"CALL_PREPARATION_NOT_FOUND"});
+      const parsed=sensitiveCallAccessInputSchema.safeParse(request.body);
+      if(!parsed.success)return reply.status(400).send({error:"INVALID_SENSITIVE_CALL_ACCESS"});
+      try {
+        return reply.header("Cache-Control","private, no-store").send(await service.getPreparationValidationEvidence(request.params.id,actor.id,parsed.data.reason));
+      } catch(error) { return sendRepositoryError(reply,error); }
+    });
+
     app.post<{ Params: { id: string } }>(
       "/api/admin/calls/:id/sensitive-access",
       async (request, reply) => {

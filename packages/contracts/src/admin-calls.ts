@@ -1,3 +1,4 @@
+import { preparationDiagnosticEventSchema } from "./preparation-validation";
 import { preparationCheckpointSchema } from "./preparation-policy";
 import { z } from "zod";
 import { preparationTransportDiagnosticsSchema } from "./preparation-diagnostics";
@@ -155,6 +156,7 @@ export type PreparationWorkerAttemptTrace = z.infer<typeof preparationWorkerAtte
 
 export const adminCallPreparationInspectorSchema = z.strictObject({
   preparation: callPreparationSchema,
+  validationEvents:z.array(preparationDiagnosticEventSchema).optional(),
   generatedAt: z.iso.datetime(),
   cost: adminOperationsOverviewSchema.shape.cost,
   timeline: z.array(preparationRequestTraceSchema).optional(),

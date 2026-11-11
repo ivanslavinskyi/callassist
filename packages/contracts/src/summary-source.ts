@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { appointmentAuthorizationSchema, appointmentDateSchema, appointmentTimeSchema, appointmentTimeZoneSchema } from "./appointment";
 
-import { nativeAppointmentAuthorizationSchema, nativeAppointmentActionSchema } from "./native-appointment";
+import { nativeAppointmentAuthorizationSchema, nativeAppointmentExecutionAuthorizationSchema, nativeAppointmentActionSchema } from "./native-appointment";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const ids = z.array(z.string().min(1).max(160)).max(30);
@@ -14,7 +14,7 @@ const legacySummarySourceContextSchema = z.strictObject({
     state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
     date: appointmentDateSchema, startTime: appointmentTimeSchema, timeZone: appointmentTimeZoneSchema }).nullable()
 });
-export const summarySourceContextSchema=z.union([legacySummarySourceContextSchema,legacySummarySourceContextSchema.extend({version:z.literal(2),nativeAppointmentAuthorization:nativeAppointmentAuthorizationSchema.nullable(),nativeAppointmentAction:nativeAppointmentActionSchema.nullable()})]);
+export const summarySourceContextSchema=z.union([legacySummarySourceContextSchema,legacySummarySourceContextSchema.extend({version:z.literal(2),nativeAppointmentAuthorization:nativeAppointmentAuthorizationSchema.nullable(),nativeAppointmentAction:nativeAppointmentActionSchema.nullable()}), legacySummarySourceContextSchema.extend({version:z.literal(3),nativeAppointmentAuthorization:nativeAppointmentExecutionAuthorizationSchema.nullable(),nativeAppointmentAction:nativeAppointmentActionSchema.nullable()})]);
 export type SummarySourceContext = z.infer<typeof summarySourceContextSchema>;
 
 /** Provider extraction contains observations and citations, never a trusted calendar verdict. */

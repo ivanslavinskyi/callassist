@@ -1,7 +1,7 @@
 # Native GPT-Live runtime
 
-**Status:** Plan-only runtime and closing recovery implemented; owner reported a successful local test on 2026-11-10. Production rollout remains separate.\
-**Source reviewed:** 2026-11-10, current candidate.\
+**Status:** Plan-only runtime, closing recovery and appointment contract repair implemented; user confirmed correct local behavior on 2026-11-11. Production rollout remains separate.\
+**Source reviewed:** 2026-11-11, current candidate.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
 This is the maintained specification for `live_native_v2`. It describes application
@@ -12,7 +12,9 @@ and [task information and testing record](reports/task-input-testing-implementat
 provide dated evidence for their respective changes. The
 [9 November release record](reports/native-task-boundary-2026-11-09.md) describes
 the previous contracts and rollout. The [10 November stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
-records the current changes, checks and owner-reported local acceptance.
+records that stabilization. The
+[11 November validation record](reports/preparation-holistic-validation-2026-11-11.md)
+records the current preparation/appointment changes, checks and user-reported local acceptance.
 
 ## Architecture and ownership
 
@@ -56,7 +58,10 @@ flowchart LR
 There is no per-turn host approval or application TTS for ordinary native-v2 speech.
 There is still orchestration at admission, refusal, action, completion and failure
 boundaries. Bounded recovery can request a silent backend review if the model misses
-a necessary action-result or closing delegation.
+a necessary action-result or closing delegation. Missing-result recovery is
+deduplicated for the current observed recipient input; a later answer can resolve
+an earlier inconclusive attempt without another commitment. Unchanged input never
+starts another result review.
 
 Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 [Live transport and delegation](../apps/api/src/voice/live-conversation.ts),
@@ -66,7 +71,7 @@ Sources: [NativeLiveV2Call](../apps/api/src/voice/native-live-v2-call.ts),
 
 | Selection | Result |
 | --- | --- |
-| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 16 policy required, hangup enabled; recommended |
+| `CALL_RUNTIME_PROFILE=native_v2` | Native v2, compiler 17 preparation policy, hangup enabled; recommended |
 | `CALL_RUNTIME_PROFILE=managed` | Managed Live, compiler 6 policy required, hangup enabled; rollback |
 | `VOICE_RUNTIME_DRIVER=live`, fallback `false`, experiment `off` | Managed `unified_live`; default selection |
 | Same settings, experiment `native_v1` | Earlier informational experiment; eligibility may select managed control |
@@ -86,12 +91,12 @@ checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.t
 
 | Contract | Current native plan-only path | Compatibility |
 | --- | --- | --- |
-| Preparation prompt policy | `preparation-live-plan-only-2026-11-10` | Previously pinned policies retain their compiler behavior |
-| Compiler | `brief-compiler-16` | Earlier compilers remain readable; new native calls require compiler 16 |
-| Compiled plan | Schema `10` | Archived schemas are read through explicit readers |
+| Preparation prompt policy | `preparation-live-holistic-2026-11-11` | Previously pinned policies retain their compiler behavior |
+| Compiler | `brief-compiler-17` | Earlier compilers remain readable; approved compiler-16 plans remain compatible with approval 10 |
+| Compiled plan | Schema `11` | Archived schemas are read through explicit readers |
 | Approved snapshot | Version `10` | Earlier versions remain readable; new preparation and approval required for native execution |
 | Terminal decision | Version `3` | Versions 1/2 remain readable; conditional evidence now refers to the approved plan |
-| Runtime and prompt identity | `live-plan-only-2026-11-10` | Frozen per-attempt descriptor and configuration hashes |
+| Runtime and prompt identity | `live-plan-only-2026-11-11.2` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
 | Summary generator | `summary-v8` | Earlier artifacts are preserved |
 | Native evaluator format | `native-summary-v3` | Selected for context v2; v6/v7 retain their formats when replayed |
@@ -277,12 +282,33 @@ evidence object and its existing authorisation/observation checks.
    `uncertain`, subject to the remaining guards.
 5. Uncertain delivery/result uses `intent=status_check` for the same proposal.
    A repeated commitment is not the recovery mechanism. A later correction can
-   invalidate a previously confirmed result.
+   invalidate a previously confirmed result. A short affirmative answer is evaluated
+   with its question: acceptance of a direct request or an affirmative status answer
+   can confirm the arrangement, while capability, availability and a promise only
+   to check cannot. No fixed phrase or grammatical tense is required.
 
 The journal is scoped to attempt and snapshot. Revisions, episode identity and
 idempotent results survive retries. An explicit matching decline can allow another
 authorized proposal. `first_matching` means a qualifying offered slot, not the
 earliest possible slot; earliest-selection modes require their own quoted evidence.
+
+The `prepare_appointment` schema is derived from that same approved authority:
+operation and time zone are fixed, alternative and requirement IDs are enumerated,
+and no approved requirements means an empty evidence array. The existing validator
+still enforces the selected branch and earlier alternatives. Price, availability and
+confirmation do not become invented additional condition IDs.
+
+Rejected proposals identify the category (`arguments`, `evidence`, `authority`),
+field and expected/received IDs. The existing backend continuation repairs arguments
+from the observed conversation before considering a clarification. A missing quote
+in tool arguments does not imply a missing human answer. One contiguous recipient
+price quote is sufficient; a short later affirmative answer need not be appended
+or restated as a complete sentence. There is no additional model stage or retry loop.
+
+`conversation.tool_result` retains the specific reason, snapshot, request fingerprint
+and generation, with optional validation category/field, observation revision and
+SHA-256 hashes of expected/received IDs. Raw IDs and quotes remain in the protected
+tool trace. Existing events without these optional fields remain valid.
 
 Quoted amounts, currency and required duration are checked deterministically.
 The parser accepts supported numeric/word forms, rejects inconsistent totals and
@@ -298,8 +324,9 @@ calendar, send payment, pay a deposit, send an email or schedule an application 
 Live owns ordinary replies, useful follow-ups and discussion of nonbinding options.
 Comparing a quoted price with an approved limit does not itself require delegation;
 the existing server validation remains mandatory before any commitment. Backend
-results report facts, current action state and essential details, rather than a
-script for Live to repeat. Live waits only for a result that its next statement or
+results provide missing facts only. Successful appointment tools publish state
+directly; their backend continuation emits no redundant status narration. Internal
+authorization and journal messages are never spoken instructions. Live waits only for a result that its next statement or
 commitment actually depends on, and incorporates late results into the current
 conversation without replaying completed work.
 
@@ -499,8 +526,8 @@ Sources: [trace writer](../apps/api/src/voice/live-protocol-trace.ts),
   not inferred from shorter timers or caption timestamps.
 
 The [validation guide](native-live-validation.md) defines the software checks and
-remaining acoustic acceptance. See the [current stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
-for completed checks and the owner-reported local test. Host-specific procedures and
+remaining acoustic acceptance. See the [current validation record](reports/preparation-holistic-validation-2026-11-11.md)
+for completed checks, the user-reported local result and the automated acoustic-probe limit. Host-specific procedures and
 recovery evidence remain in the local runbook; the 8 November production preparation
 record is historical.
 

@@ -1,6 +1,6 @@
 # Task information, recordings and testing scenarios
 
-**Implemented:** 2026-11-08; source reviewed 2026-11-10. This document describes
+**Implemented:** 2026-11-08; source reviewed 2026-11-11. This document describes
 code behavior, not a production deployment. Native v2 supports explicit selection
 in development and production.
 
@@ -33,7 +33,7 @@ Scenario insertion does not bypass these limits or any
 moderation, compilation, review, approval, credit or destination checks.
 
 Existing compiler prompt versions were preserved. The native runtime instruction
-identity is `live-plan-only-2026-11-10`; no extra model stage or ordinary-turn
+identity is `live-plan-only-2026-11-11`; no extra model stage or ordinary-turn
 lookup was added. See [native runtime](native-live-runtime.md) for tool boundaries.
 
 ### Objective storage and backfill

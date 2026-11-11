@@ -1,3 +1,4 @@
+import { preparationValidationCodeSchema, preparationValidationStageSchema } from "@callassist/contracts";
 const safeErrorCodePattern = /^[A-Z][A-Z0-9_]{1,79}$/;
 const safeErrorTypePattern = /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/;
 
@@ -110,7 +111,7 @@ export function safeRequestForLog(request: LogRequest) {
   };
 }
 
-type SafeError = { type: string; message: string; stack: string; code?: string; statusCode?: number; cause?: SafeError };
+type SafeError = { type: string; message: string; stack: string; preparationId?:string; diagnosticId?:string; code?: string; validationCode?:string; stage?:string; statusCode?: number; cause?: SafeError };
 export function safeErrorForLog(error: unknown, depth = 0): SafeError {
   if (!error || typeof error !== "object") return {
     type: "Error",
@@ -118,6 +119,7 @@ export function safeErrorForLog(error: unknown, depth = 0): SafeError {
     stack: "[Redacted]"
   };
   const candidate = error as {
+    preparationId?:unknown; diagnosticId?:unknown; validationCode?:unknown; stage?:unknown;
     name?: unknown;
     code?: unknown;
     statusCode?: unknown;
@@ -149,7 +151,10 @@ export function safeErrorForLog(error: unknown, depth = 0): SafeError {
     message: "[Redacted]",
     stack: "[Redacted]",
     code,
+    ...Object.fromEntries(["preparationId","diagnosticId"].flatMap(key=>{const value=candidate[key as "preparationId"|"diagnosticId"];return typeof value==="string"&&/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value)?[[key,value]]:[];})),
     statusCode,
+    ...(preparationValidationCodeSchema.safeParse(candidate.validationCode).success ? {validationCode:String(candidate.validationCode)} : {}),
+    ...(preparationValidationStageSchema.safeParse(candidate.stage).success ? {stage:String(candidate.stage)} : {}),
     ...(depth < 2 && candidate.cause ? { cause: safeErrorForLog(candidate.cause, depth + 1) } : {})
   };
 }

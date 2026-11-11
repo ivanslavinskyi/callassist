@@ -306,7 +306,7 @@ describe("deterministic brief policy", () => {
       namedEntities: [
         ...modelOutput.namedEntities,
         { type: "person", value: "Hans Meier" }
-      ] as CompiledCallBrief["namedEntities"]
+      ] as Exclude<CompiledCallBrief,{schemaVersion:"11"}>["namedEntities"]
     }))).toMatchObject({
       status: "blocked",
       reasonCodes: ["fact_integrity_failure"]

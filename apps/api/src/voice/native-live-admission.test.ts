@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { DeterministicBriefCompiler } from "../brief-compiler/brief-compiler";
-import { defaultPreparationRuntimePolicy } from "@callassist/contracts";
+import { defaultPreparationRuntimePolicy, HOLISTIC_PREPARATION_POLICY } from "@callassist/contracts";
 import { PLAN_ONLY_POLICY } from "../brief-compiler/native-appointment-compilation";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
@@ -11,11 +11,12 @@ import { flush, TestSocket } from "./voice-test-helpers";
 
 const cleanup:Array<()=>Promise<void>>=[];
 afterEach(async()=>{for(const close of cleanup.splice(0))await close();vi.restoreAllMocks();});
-async function fixture(){
+async function fixture(promptVersion:typeof defaultPreparationRuntimePolicy.promptVersion=PLAN_ONLY_POLICY){
   const provider:TelephonyProvider={mode:"twilio",startCall:vi.fn(async()=>({providerCallId:"CA-native",providerStatus:"queued"})),
     stopCall:vi.fn(async()=>{}),startRecording:vi.fn(),getRecordingMedia:vi.fn(),deleteRecording:vi.fn(),purgeCallRecordings:vi.fn(async()=>{})};
   const compiler=new DeterministicBriefCompiler(),compile=compiler.compile.bind(compiler);
-  vi.spyOn(compiler,"compile").mockImplementation((input,revision)=>compile(input,revision,{policy:{...defaultPreparationRuntimePolicy,promptVersion:PLAN_ONLY_POLICY}}));
+  vi.spyOn(compiler,"compile").mockImplementation((input,revision,options)=>compile(input,revision,
+    options?.policy?options:{...options,policy:{...defaultPreparationRuntimePolicy,promptVersion}}));
   const repository=new InMemoryCallRepository(),service=new CallService(repository,provider,undefined,undefined,compiler),live=new TestSocket();
   const runtime=new OpenAILiveBridge({service,apiKey:"fixture",nativeV2:true,agentHangupEnabled:true,validateStreamToken:()=>true,createLiveSocket:()=>live.ws});
   const brief=await service.create({recipientName:"Office",phoneNumber:"+41710000001",objective:"Ask whether the application was received.",
@@ -24,8 +25,8 @@ async function fixture(){
   cleanup.push(async()=>{runtime.close();live.receive({type:"session.closed",reason:"close_requested",usage:{seconds:0}});await flush();await service.close();});
   return{service,repository,provider,runtime,live,brief};
 }
-it("does not dial when Live rejects the complete startup context",async()=>{
-  const h=await fixture(),starting=h.service.start(h.brief.id);
+it.each([PLAN_ONLY_POLICY,HOLISTIC_PREPARATION_POLICY] as const)("does not dial when Live rejects the complete startup context: %s",async promptVersion=>{
+  const h=await fixture(promptVersion),starting=h.service.start(h.brief.id);
   const rejected=expect(starting).rejects.toMatchObject({code:"LIVE_CONTEXT_TOO_LARGE"});
   await flush();await flush();h.live.emit("open");
   expect(h.provider.startCall).not.toHaveBeenCalled();
@@ -33,8 +34,8 @@ it("does not dial when Live rejects the complete startup context",async()=>{
   expect(h.provider.startCall).not.toHaveBeenCalled();
   expect((await h.repository.getLatestAttempt(h.brief.id))?.status).toBe("failed");
 });
-it("dials only after admission and freezes the connection-recording intent before the provider request",async()=>{
-  const h=await fixture(),starting=h.service.start(h.brief.id);await flush();await flush();h.live.emit("open");
+it.each([PLAN_ONLY_POLICY,HOLISTIC_PREPARATION_POLICY] as const)("dials only after admission and freezes the recording intent: %s",async promptVersion=>{
+  const h=await fixture(promptVersion),starting=h.service.start(h.brief.id);await flush();await flush();h.live.emit("open");
   expect(h.provider.startCall).not.toHaveBeenCalled();h.live.startLive("admitted");await starting;
   expect(h.provider.startCall).toHaveBeenCalledTimes(1);
   const attempt=(await h.repository.getLatestAttempt(h.brief.id))!,privacy=await h.repository.nativeLive.get(attempt.id);

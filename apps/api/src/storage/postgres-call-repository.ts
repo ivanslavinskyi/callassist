@@ -1,3 +1,4 @@
+import { PostgresPreparationValidationStore } from "./preparation-validation-store";
 import { nativeAppointmentActionSchema } from "@callassist/contracts";
 import { PostgresNativeLiveStore } from "./native-live-store";
 import { maintainPreparationTelemetry, preparationRuntimeStatus } from "./preparation-observability";
@@ -1344,6 +1345,14 @@ export class PostgresCallRepository implements CallRepository {
       await insertPreparationProviderPermit(transaction, input.id, lease, input.requestMetadata?.timeoutMs ?? 35000, input.estimatedTokens);
       return true;
     });
+  }
+
+  recordPreparationValidation(id: string, input: import("@callassist/contracts").PreparationDiagnosticInput, lease: DurableJobLease) {
+    return new PostgresPreparationValidationStore(this.#sql,this.#encryptionKey).record(id,input,lease);
+  }
+  listPreparationValidation(id: string) { return new PostgresPreparationValidationStore(this.#sql,this.#encryptionKey).list(id); }
+  getPreparationValidationEvidence(id:string,actor:string,reason:string) {
+    return new PostgresPreparationValidationStore(this.#sql,this.#encryptionKey).evidence(id,actor,reason);
   }
 
   async getPreparationDiagnostics(id: string) {

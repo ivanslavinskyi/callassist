@@ -1,7 +1,7 @@
 # Native GPT-Live validation
 
 **Status:** maintained engineering procedure.\
-**Source reviewed:** 2026-11-10.\
+**Source reviewed:** 2026-11-11.\
 **Scope:** `live_native_v2` verification; commands do not imply a production deployment.
 
 Use the [runtime specification](native-live-runtime.md) for behavior and the
@@ -45,28 +45,28 @@ Use the normal local setup in the [README](../README.md) and
 
 | Requirement | Expected state |
 | --- | --- |
-| Database | Catalog through `0115`; API and workers use the same intended database |
+| Database | Catalog through `0116`; API and workers use the same intended database |
 | Profile | `CALL_RUNTIME_PROFILE=native_v2` on API and every worker |
 | Configuration | `runtime:configure --apply` completed; `runtime:check` passes |
 | Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
 | Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
-| Latest integrity plan | Policy `preparation-live-plan-only-2026-11-10`, compiler 16, schema 10, approval 10 |
-| Native instructions | Newly described attempts use `live-plan-only-2026-11-10`; Live delegates silently and the backend alone extracts closing quotes |
+| Latest integrity plan | Policy `preparation-live-holistic-2026-11-11`, compiler 17, schema 11, approval 10 |
+| Native instructions | Newly described attempts use `live-plan-only-2026-11-11.2`; full canonical startup context and tools derived from approved appointment authority |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
 
 The public admin preparation API cannot set `promptVersion`. The
 [runtime profile command](runtime-profiles.md) applies the policy with revision/audit
-provenance. Selecting a generation model alone does not activate compiler 16.
+provenance. Selecting a generation model alone does not activate compiler 17.
 An existing approved plan retains its version. Create and approve a new plan to
 exercise new preparation instructions.
 
 Provider session admission precedes dialing and can accrue usage before a human
 answers. Health checks do not start calls. Restart processes only after confirming
 that no active call or relevant job would be interrupted; configuration is read at
-startup. The [10 November stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
-records automated checks and the owner-reported successful local test; production
+startup. The [11 November validation record](reports/preparation-holistic-validation-2026-11-11.md)
+records automated checks and the user-reported correct local behavior; production
 deployment and a controlled production call remain separate steps. Use the current local runbook for host
 operations. The 8 November preparation record describes the earlier schema transition.
 
@@ -81,6 +81,8 @@ insertion do not call a provider or start preparation automatically.
 | Boundary | Representative source tests |
 | --- | --- |
 | Preparation, conditional order, typed failures | `brief-compiler/native-preparation.test.ts`, `compiler-instructions.test.ts`, `preparation-issues.test.ts` |
+| Holistic preparation, canonical language and bounded recovery | `brief-compiler/holistic-preparation.test.ts`, `text-processing/plan-language-workflow.test.ts` |
+| Independent encrypted preparation diagnostics | `preparation-validation-api.test.ts`, `storage/preparation-validation-store.integration.test.ts` |
 | Roles, source fidelity, bounded audit repair | `brief-compiler/execution-fidelity.test.ts`, `preparation-role-evaluation.test.ts`, `voice/live-native-profiles.test.ts` |
 | Task-only constraints, source coverage, conditional criteria and request accounting | `brief-compiler/task-only-preparation.test.ts` |
 | Current format persistence, admin timeline and exported evidence | `db/configure-runtime-profile.integration.test.ts`, `telemetry-export/telemetry-export.integration.test.ts` |
@@ -88,6 +90,7 @@ insertion do not call a provider or start preparation automatically.
 | Historical contracts and approvals | `brief-compiler/archived-native-compatibility.test.ts`, contract `live-task.test.ts` |
 | Startup and conversational profiles | `voice/native-live-admission.test.ts`, `live-native-prompts.test.ts`, `live-native-profiles.test.ts` |
 | Numeric evidence and action lifecycle | `appointments/native-terms-evidence.test.ts`, `native-appointment-authorization.test.ts`, `voice/native-appointment-call.test.ts` |
+| Approved tool IDs, internal argument repair and private diagnostics | `voice/native-appointment-contract.test.ts`, `voice/native-live-v2.test.ts` |
 | Interruptions, closing and recovery | `voice/live-native-closing.test.ts`, `native-live-stability.test.ts`, `native-live-v2.test.ts` |
 | Grounded result and partial coverage | `text-processing/native-summary.test.ts`, `native-summary-source.test.ts`, `summary-workflow.test.ts` |
 | Privacy, retry and durable history | `storage/native-live-privacy.integration.test.ts`, `call-retry.integration.test.ts`, `history-read-model.test.ts` |
@@ -114,7 +117,7 @@ auditor. Compare repeated live runs with only the plan fixed, only the closing p
 fixed and both fixed. Do not infer speech accuracy from passing mock tests or a
 post-call `goal=achieved` alone.
 
-For compiler 16, include a simple task with no restrictions, an explicit restriction
+For the current compiler, include a simple task with no restrictions, an explicit restriction
 that resembles an internal rule, an omitted restriction and a conditional branch
 that does not apply. Verify that only user task content appears in the reviewed
 plan. On a real call, check that one natural farewell is followed by silence and
@@ -132,6 +135,22 @@ Exercise noise without captions, a false short caption, a new question with paus
 empty recovery, stale marks and backend text after failed/unattributed responses.
 A current answer after a successful or rejected tool lookup must resume conversation
 without retaining the old closing deadline. These checks add no runtime model stage.
+
+For appointment regressions, replay the saved private capture entirely offline from
+`apps/api` with `node --import tsx scripts/replay-appointment-contract.mjs --capture PATH`.
+The current fixture expects the five captured rejected proposals; it freezes their
+timestamps, uses the actual handler in memory and verifies unchanged full startup
+context plus seven authority controls. It neither modifies the saved call nor sends
+private transcript data to a provider; `--live` is rejected.
+
+The separate synthetic backend evaluation is
+`node --use-system-ca --import tsx scripts/evaluate-plan-conversation.mjs --live --backend-only`.
+It uses fictional participants, bounded provider reservations and no telephone calls.
+Record first-response failures separately from repairs in existing tool continuations.
+Neither this text-model run nor the offline replay establishes acoustic naturalness.
+Also verify that a detected task-input language controls the review translation
+independently of UI/call language and that only the canonical call-language plan
+enters Live and its backend.
 
 Generate the eight synthetic PDF fixtures from `apps/api`:
 

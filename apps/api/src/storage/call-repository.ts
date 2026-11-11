@@ -1,3 +1,4 @@
+import { localizedFactText } from "@callassist/contracts";
 import type { NativeTranscriptCapture, NativeTranscriptResult } from "./native-transcript";
 import type { AnsweringTransitionInput, AnsweringTransitionResult } from "../telephony/answering-policy";
 import type { VoiceActionInput, VoiceActionRecord, VoiceActionTransition } from "./voice-action";
@@ -827,6 +828,9 @@ export interface CallRepository extends CallTextRepository {
   ): Promise<CallPreparation | null>;
   getAdminCallPreparation(id: string): Promise<CallPreparation | null>;
   recordRuntimeDescriptor(callId: string, attemptId: string, descriptor: import("../voice/runtime-descriptor").RuntimeDescriptor): Promise<void>;
+  recordPreparationValidation(id: string, input: import("@callassist/contracts").PreparationDiagnosticInput, lease: DurableJobLease): Promise<void>;
+  listPreparationValidation(id: string): Promise<import("@callassist/contracts").PreparationDiagnosticEvent[]>;
+  getPreparationValidationEvidence(id: string, actorUserId: string, reason: string): Promise<Array<{event:import("@callassist/contracts").PreparationDiagnosticEvent;detail:unknown}>>;
   getPreparationDiagnostics(id: string): Promise<{ timeline: import("@callassist/contracts").PreparationRequestTrace[]; initialQueueMs: number | null; workerAttempts: import("@callassist/contracts").PreparationWorkerAttemptTrace[] }>;
   claimCallPreparation(
     id: string,
@@ -1204,9 +1208,7 @@ export function buildRuntimeBriefFields(
   return {
     objective: compiled.localizedObjective,
     context: buildRuntimeContext(compiled),
-    allowedFacts: compiled.approvedFacts.map(
-      ({ callLanguageText }) => callLanguageText
-    ),
+    allowedFacts: compiled.approvedFacts.map(localizedFactText),
     status
   };
 }

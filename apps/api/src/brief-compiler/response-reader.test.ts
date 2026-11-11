@@ -9,6 +9,10 @@ function streamed(text: string, chunkSize = 1) {
   } }), { headers: { "content-type": "text/event-stream; charset=utf-8" } });
 }
 describe("bounded Responses stream", () => {
+  it.each([{bytes:[0xff]},{bytes:[0xe2,0x82]}])("classifies invalid or unfinished UTF-8 as a response format error: %j",async({bytes})=>{
+    await expect(readProviderResponse(new Response(new Uint8Array(bytes)),new AbortController().signal))
+      .rejects.toMatchObject({code:"OPENAI_STREAM_INVALID"});
+  });
   it("cancels runaway JSON padding across deltas before waiting for completion", async () => {
     const delta = (text: string) => `data: ${JSON.stringify({type:"response.output_text.delta",delta:text})}\n\n`;
     const cancel = vi.fn();

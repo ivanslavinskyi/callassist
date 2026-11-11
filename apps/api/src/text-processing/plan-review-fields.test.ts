@@ -13,7 +13,7 @@ const legacy = {
     orderedQuestions: [], conditionalFollowUps: [], successCriteria: [], unresolvedCriteria: [], stopConditions: [], prohibitedActions: [],
     approvedFacts: [], blockingIssues: [] },
   policyDecision: { clarificationQuestions: [] }
-} as unknown as CallCompilation;
+} as unknown as CallCompilation & {compiledBrief:Extract<NonNullable<CallCompilation["compiledBrief"]>,{schemaVersion:"3"}>};
 
 describe("appointment review translation fields", () => {
   it("adds only the service description and never emits execution controls for translation", () => {

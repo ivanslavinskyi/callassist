@@ -160,7 +160,7 @@ function validateAppointmentExtraction(input: Extract<TextProcessingInput, {kind
   if (outcome.disposition === "confirmed" && (outcome.candidateId === null || candidates.get(outcome.candidateId)?.status !== "reported_confirmed")) invalid("TEXT_INVALID_REFERENCES");
   if (outcome.disposition === "not_required" && (outcome.candidateId !== null || outcome.previousAppointmentReleased !== null ||
     extraction.conditions.length > 0 || extraction.candidates.some(c => c.status === "reported_confirmed") ||
-    (input.sourceContext?.version === 2 && input.sourceContext.nativeAppointmentAction !== null))) invalid("TEXT_INVALID_REFERENCES");
+    ((input.sourceContext?.version === 2 || input.sourceContext?.version === 3) && input.sourceContext.nativeAppointmentAction !== null))) invalid("TEXT_INVALID_REFERENCES");
 }
 
 function orderedTranslations(value: unknown, source: Array<{ id: string; text: string }>) {

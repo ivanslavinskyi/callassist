@@ -1,3 +1,5 @@
+import { boundedDiagnostic, DIAGNOSTIC_EVENT_LIMIT, DIAGNOSTIC_PREPARATION_BYTES } from "./preparation-validation-store";
+import { preparationDiagnosticEventSchema, preparationDiagnosticAccessSchema, type PreparationDiagnosticInput, type PreparationDiagnosticEvent } from "@callassist/contracts";
 import { MemoryNativeLiveStore } from "./native-live-store";
 import { initialPreparationSettings, PreparationPolicyError } from "./preparation-policy-store";
 import { assertPinnedLiveRuntime } from "../voice/runtime-descriptor";
@@ -933,6 +935,42 @@ export class InMemoryCallRepository implements CallRepository {
     if (!(this.#attempts.get(callId) ?? []).some(attempt => attempt.id === attemptId && ["dialing", "in_progress", "awaiting_approval"].includes(attempt.status))) throw new CallRepositoryError("CALL_ATTEMPT_NOT_FOUND");
     assertPinnedLiveRuntime(this.#runtimeDescriptors.get(attemptId), descriptor);
     if (!this.#runtimeDescriptors.has(attemptId)) this.#runtimeDescriptors.set(attemptId, copy(descriptor));
+  }
+
+  readonly #validationEvents = new Map<string, Array<{event:PreparationDiagnosticEvent;detail:unknown}>>();
+  readonly preparationDiagnosticAccessEvents:Array<{preparationId:string;actorUserId:string;reason:string}>=[];
+  #validationAvailable(id:string) {
+    const p=this.#callPreparations.get(id);
+    const callId=p?.preparation.callBriefId ?? p?.targetCallBriefId;
+    const available=!!p && !(p.userId && this.#diagnosticRevokedUsers.has(p.userId)) && !(callId && this.#callDataDeletions.has(callId));
+    if(!available)this.#validationEvents.delete(id);
+    if(p?.preparation.status==="cancelled")for(const row of this.#validationEvents.get(id)??[]) {
+      row.detail=null;row.event.metadata.retainedBytes=0;row.event.metadata.truncated=true;
+    }
+    return available;
+  }
+  async recordPreparationValidation(id:string,input:PreparationDiagnosticInput,lease:DurableJobLease) {
+    if(!this.#validationAvailable(id)||this.#callPreparations.get(id)!.preparation.status==="cancelled")return;
+    const job=[...this.#durableJobs.values()].find(item=>item.id===lease.jobId);
+    if(!job||job.status!=="running"||job.callPreparationId!==id||job.leaseOwner!==lease.workerId||
+      (lease.generation!==undefined&&job.generation!==lease.generation)||
+      (lease.attemptNumber!==undefined&&job.attemptCount!==lease.attemptNumber))return;
+    const rows=this.#validationEvents.get(id)??[];
+    if(rows.length>=DIAGNOSTIC_EVENT_LIMIT||rows.some(row=>row.event.id===input.id))return;
+    const bounded=boundedDiagnostic(input,DIAGNOSTIC_PREPARATION_BYTES-rows.reduce((n,row)=>n+row.event.metadata.retainedBytes,0));
+    rows.push({event:preparationDiagnosticEventSchema.parse({id:input.id,preparationId:id,operationId:input.operationId??null,
+      jobGeneration:job.generation,workerAttempt:job.attemptCount,createdAt:new Date().toISOString(),metadata:bounded.metadata}),detail:copy(bounded.detail)});
+    this.#validationEvents.set(id,rows);
+  }
+  async listPreparationValidation(id:string) {
+    if(!this.#validationAvailable(id))return [];
+    return copy((this.#validationEvents.get(id)??[]).filter(r=>Date.parse(r.event.createdAt)>Date.now()-30*86400000).map(r=>r.event));
+  }
+  async getPreparationValidationEvidence(id:string,actorUserId:string,reason:string) {
+    if(!this.#validationAvailable(id))throw new CallRepositoryError("CALL_PREPARATION_NOT_FOUND");
+    preparationDiagnosticAccessSchema.parse({reason});
+    this.preparationDiagnosticAccessEvents.push({preparationId:id,actorUserId,reason});
+    return copy((this.#validationEvents.get(id)??[]).filter(r=>Date.parse(r.event.createdAt)>Date.now()-30*86400000));
   }
 
   async getPreparationDiagnostics(id: string) {

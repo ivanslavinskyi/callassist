@@ -23,6 +23,13 @@ explicit compatibility paths. Repository checks do not establish the deployed ve
 See the [native runtime specification](docs/native-live-runtime.md).
 Use [runtime profiles](docs/runtime-profiles.md) to align voice and preparation without manual SQL.
 
+The 11 November update uses compiler 17 / schema 11 and runtime
+`live-plan-only-2026-11-11.2`: one holistic review in the existing audit stage,
+encrypted preparation diagnostics, canonical call-language context and appointment
+tools bound to approved authority. The user accepted the local correction. See the
+[validation and acceptance record](docs/reports/preparation-holistic-validation-2026-11-11.md);
+production activation remains separate.
+
 ## Develop
 
 Requires Node.js >=22.19, Corepack/pnpm 10.12.4 and PostgreSQL 17 (Docker is provided).

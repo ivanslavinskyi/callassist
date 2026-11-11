@@ -482,6 +482,8 @@ describe("CallService", () => {
     expect(operations.every(({ result }) => result?.outcome === "succeeded"))
       .toBe(true);
     const inspector = await service.getAdminCallPreparationInspector(preparation.id);
+    expect(inspector.validationEvents?.some(e=>e.metadata.code==="PREPARATION_FAILED")).toBe(true);
+    expect(JSON.stringify(inspector.validationEvents)).not.toContain("output_text");
     expect(inspector.timeline).toHaveLength(3);
     expect(inspector.timeline!.every(request => request.diagnostics?.version === 1)).toBe(true);
     expect(inspector.timeline!.find(request => request.providerRequestId === "req_invalid_one"))

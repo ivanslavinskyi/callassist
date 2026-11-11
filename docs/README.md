@@ -1,17 +1,20 @@
 # Documentation
 
-**Source reviewed:** 2026-11-10, current candidate; schema catalog `0001`–`0115`.
+**Source reviewed:** 2026-11-11, current candidate; schema catalog `0001`–`0116`.
 
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
 Its current configuration supports explicit activation in development and production.
 The environment example selects the stable native profile; managed Live remains the
 default without a profile and a recovery option on a compatible build. The current
-native profile uses compiler 16 / plan schema 10 / approval 10, with the approved
+native profile uses compiler 17 / plan schema 11 / approval 10, with the approved
 localized plan as the sole conversation task context. Post-call assessment retains
 the original source. The [10 November stabilization record](plans/native-runtime-plan-boundary-stabilization-2026-11-10.md)
 distinguishes automated checks and the owner-reported successful local test from
-production rollout, which remains separate. Host-specific evidence stays in local operational records.
+production rollout, which remains separate. The
+[11 November preparation and appointment record](reports/preparation-holistic-validation-2026-11-11.md)
+documents the current runtime `live-plan-only-2026-11-11.2`, diagnostics, verification
+and user-reported local acceptance. Host-specific evidence stays in local operational records.
 
 ## Maintained references
 
@@ -29,7 +32,7 @@ production rollout, which remains separate. Host-specific evidence stays in loca
 ## Verification records
 
 [Task boundaries, participant roles and silent closing, 9 November 2026](reports/native-task-boundary-2026-11-09.md)
-records the current release, unchanged SQL catalog, regression coverage, CI and
+records that release, its unchanged SQL catalog, regression coverage, CI and
 deployment evidence, with production telephone acceptance still pending.
 
 [Task information, testing and PDF assessment, 8 November 2026](reports/task-input-testing-implementation-2026-11-08.md)
@@ -41,6 +44,13 @@ records the earlier native integrity checkpoint, dated test evidence, local acti
 and outstanding acceptance. It does not claim fresh telephone validation.
 
 ## Implementation plans
+
+[Simplifying plan preparation and failure diagnostics](plans/preparation-audit-simplification-2026-11-11.md)
+records the smaller compiler contract, holistic audit, one shared recovery,
+compatibility with the current voice runtime and detailed failure diagnostics,
+including evaluation and rollout. It is implemented and activated locally;
+[validation evidence](reports/preparation-holistic-validation-2026-11-11.md) records
+regressions, repeated model evaluation and the limits of local verification.
 
 [Task input, audio retention and test scenarios](plans/task-input-retention-and-test-scenarios-2026-11-08.md)
 records the approved design and implementation decisions for facts in any task field,

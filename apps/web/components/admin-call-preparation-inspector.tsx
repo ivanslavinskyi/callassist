@@ -4,7 +4,7 @@ import { formatLocale } from "@callassist/contracts";
 import type { AdminCallPreparationInspector as InspectorData } from "@callassist/contracts";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getAdminCallPreparationInspector } from "@/lib/api";
+import { getAdminCallPreparationInspector, getPreparationValidationEvidence } from "@/lib/api";
 import { adminCallMessages } from "@/lib/i18n/admin-call-messages";
 import { AdminCostBreakdown } from "./admin-cost-breakdown";
 import { AdminPreparationTiming } from "./admin-preparation-timing";
@@ -17,6 +17,9 @@ export function AdminCallPreparationInspector({
   const locale = "en" as const;
   const copy = adminCallMessages[locale];
   const [inspector, setInspector] = useState<InspectorData | null>(null);
+  const [reason,setReason]=useState("");
+  const [evidence,setEvidence]=useState<unknown>(null);
+  const [loadingEvidence,setLoadingEvidence]=useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,6 +86,29 @@ export function AdminCallPreparationInspector({
             ) : null}
           </section>
           <AdminPreparationTiming inspector={inspector} />
+          <section className="admin-inspector-summary">
+            <h2>Plan validation</h2>
+            <p>Application validation is recorded separately from provider transport results. Private evidence is retained for up to 30 days.</p>
+            <ol>{inspector.validationEvents?.map(event=><li key={event.id}>
+              <time>{formatDate(event.createdAt,locale)}</time>{" "}{event.metadata.stage}: <strong>{event.metadata.code}</strong>
+              {` · candidate ${event.metadata.candidateAttempt}, audit ${event.metadata.auditAttempt} · worker ${event.jobGeneration}/${event.workerAttempt}`}
+              {event.metadata.truncated?" · evidence truncated":""}
+            </li>)}</ol>
+            <label>Reason for private evidence access<input value={reason} maxLength={500} onChange={e=>setReason(e.target.value)} /></label>
+            <button type="button" disabled={loadingEvidence||reason.trim().length<3} onClick={async()=>{
+              setLoadingEvidence(true);setError(null);
+              try {setEvidence(await getPreparationValidationEvidence(preparationId,reason));}
+              catch {setError("Private diagnostic evidence could not be loaded.");}
+              finally {setLoadingEvidence(false);}
+            }}>Inspect private evidence</button>
+            {evidence!==null?<>
+              <button type="button" onClick={()=>{
+                const url=URL.createObjectURL(new Blob([JSON.stringify({preparationId,evidence},null,2)],{type:"application/json"}));
+                const link=document.createElement("a");link.href=url;link.download=`preparation-${preparationId}.json`;link.click();URL.revokeObjectURL(url);
+              }}>Export diagnostic JSON</button>
+              <details><summary>Private source, candidate and audit responses</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(evidence,null,2)}</pre></details>
+            </>:null}
+          </section>
           <AdminCostBreakdown cost={inspector.cost} locale={locale} />
         </>
       ) : null}

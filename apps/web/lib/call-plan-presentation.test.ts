@@ -1,3 +1,4 @@
+import { localizedFactText } from "@callassist/contracts";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -42,7 +43,7 @@ describe("complete readable call plan", () => {
       ...plan.successCriteria, ...plan.unresolvedCriteria!, ...plan.stopConditions!,
       ...plan.orderedQuestions.flatMap(q => [q.text, q.purpose]),
       ...plan.conditionalFollowUps!.flatMap(q => [q.condition, q.question]),
-      ...plan.approvedFacts.map(f => f.callLanguageText), ...plan.prohibitedActions]) expect(html).toContain(value);
+      ...plan.approvedFacts.map(localizedFactText), ...plan.prohibitedActions]) expect(html).toContain(value);
     expect(html).toContain(planReviewMessages[locale].required);
     expect(html).toContain(planReviewMessages[locale].optional);
     expect(html).not.toContain("AUDIT ONLY SOURCE");

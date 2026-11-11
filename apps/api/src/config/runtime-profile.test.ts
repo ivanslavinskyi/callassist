@@ -11,8 +11,8 @@ import { NATIVE_CONFIGURATION_VERSION } from "../voice/live-native-configuration
 describe("explicit runtime profiles", () => {
   it("pins the role-fidelity release and requires an explicit transition from the previous native policy", async () => {
     expect(runtimeProfiles.native_v2).toMatchObject({
-      promptVersion: "preparation-live-plan-only-2026-11-10",
-      compilerVersion: "brief-compiler-16", planSchemaVersion: "10",
+      promptVersion: "preparation-live-holistic-2026-11-11",
+      compilerVersion: "brief-compiler-17", planSchemaVersion: "11",
       runtimeVersion: NATIVE_CONFIGURATION_VERSION
     });
     const previous = new InMemoryCallRepository({ preparationPromptVersion: "preparation-live-native-integrity-2026-11-08" });
@@ -44,7 +44,7 @@ describe("explicit runtime profiles", () => {
     await expect(assertRuntimeProfileReady(repository, { CALL_RUNTIME_PROFILE: "native_v2" })).rejects.toThrow("RUNTIME_PROFILE_MISMATCH");
     expect(await repository.getPreparationSettings()).toEqual(before);
     const native = new InMemoryCallRepository({ preparationPromptVersion: runtimeProfiles.native_v2.promptVersion });
-    expect(await assertRuntimeProfileReady(native, { CALL_RUNTIME_PROFILE: "native_v2" })).toMatchObject({ ready: true, compilerVersion: "brief-compiler-16" });
+    expect(await assertRuntimeProfileReady(native, { CALL_RUNTIME_PROFILE: "native_v2" })).toMatchObject({ ready: true, compilerVersion: "brief-compiler-17" });
     await expect(assertRuntimeProfileReady(native, { CALL_RUNTIME_PROFILE: "managed" })).rejects.toThrow("RUNTIME_PROFILE_MISMATCH");
   });
   it.each(["native_v2", "managed"] as const)("prepares new %s tasks with the declared compiler/schema", async name => {

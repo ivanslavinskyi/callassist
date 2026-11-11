@@ -1,3 +1,4 @@
+import { validationCode } from "./brief-compiler/preparation-validation";
 import { PreparationPolicyError } from "./storage/preparation-policy-store";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
@@ -439,8 +440,13 @@ export class CallService {
       preparation,
       generatedAt,
       ...await this.repository.getPreparationDiagnostics(id),
+      validationEvents:await this.repository.listPreparationValidation(id),
       cost: buildAdminCostOverview(facts, this.#operationalCostPolicy)
     });
+  }
+
+  getPreparationValidationEvidence(id:string,actorUserId:string,reason:string) {
+    return this.repository.getPreparationValidationEvidence(id,actorUserId,reason);
   }
 
   getAdminCallSensitiveContent(
@@ -833,9 +839,9 @@ export class CallService {
     if (current.brief.status !== "ready") return current;
     // This schema retains one recording per brief. Reuse must not overwrite
     // earlier audio or fail only after the new provider call is placed.
-    if (!this.#nativePreflight && (current.compilation?.compiledBrief?.schemaVersion === "9" || current.compilation?.compiledBrief?.schemaVersion === "10")) throw new CallServiceError("LIVE_TASK_NOT_SUPPORTED");
+    if (!this.#nativePreflight && (current.compilation?.compiledBrief?.schemaVersion === "9" || current.compilation?.compiledBrief?.schemaVersion === "10" || current.compilation?.compiledBrief?.schemaVersion === "11")) throw new CallServiceError("LIVE_TASK_NOT_SUPPORTED");
     if (this.#nativePreflight && current.recording) throw new CallServiceError("LIVE_NEW_CALL_REQUIRED");
-    if (this.#nativePreflight && current.compilation?.compilerVersion !== "brief-compiler-16") throw new CallServiceError("LIVE_REAPPROVAL_REQUIRED");
+    if (this.#nativePreflight && !["brief-compiler-16","brief-compiler-17"].includes(current.compilation?.compilerVersion ?? "")) throw new CallServiceError("LIVE_REAPPROVAL_REQUIRED");
     if (current.compilation?.compiledBrief && ["5","6","7"].includes(current.compilation.compiledBrief.schemaVersion)) {
       throw new CallServiceError("LIVE_REAPPROVAL_REQUIRED");
     }
@@ -1629,8 +1635,17 @@ export class CallService {
         retryable: false
       });
     }
+    const diagnostic=async(event:import("@callassist/contracts").PreparationDiagnosticInput)=>{
+      try { await this.repository.recordPreparationValidation(job.callPreparationId!,event,currentLease(lease)); }
+      catch { writePiiSafeOperationalError("PREPARATION_DIAGNOSTIC_WRITE_FAILED",{preparationId:job.callPreparationId,diagnosticId:event.id}); }
+    };
+    const publicationEvent=async(code:import("@callassist/contracts").PreparationValidationCode,detail?:unknown)=>diagnostic({
+      id:randomUUID(),metadata:{version:1,stage:"publication",code,candidateAttempt:0,auditAttempt:0,recoveryUsed:false,
+        policy:work.runtimePolicy.promptVersion,policyRevision:work.runtimePolicy.revision},detail});
+    let publishing=false;
     const preparationDeadline = Date.parse(work.preparation.createdAt) + Math.min(this.#preparationTimeoutMs, work.runtimePolicy.timeoutMs);
     if (Date.now() >= preparationDeadline) {
+      await diagnostic({id:randomUUID(),metadata:{version:1,stage:"outcome",code:"DEADLINE_EXCEEDED",candidateAttempt:0,auditAttempt:0,recoveryUsed:false}});
       throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { retryable: false,
         cause: new Error("PREPARATION_DEADLINE_EXCEEDED") });
     }
@@ -1639,7 +1654,7 @@ export class CallService {
         normalizeCreateCallBriefInput(work.input),
         work.targetRevision,
         {
-          policy: work.runtimePolicy, signal: lease.signal,
+          policy: work.runtimePolicy, signal: lease.signal, diagnostic,
           checkpoint: (id, event) => this.repository.recordPreparationCheckpoint(id, event),
           maxProviderRequests: work.runtimePolicy.maxProviderRequests,
           deadlineAtMs: preparationDeadline,
@@ -1682,7 +1697,8 @@ export class CallService {
         }
       );
       lease.signal?.throwIfAborted();
-      if (Date.now() >= preparationDeadline) throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { retryable: false });
+      if (Date.now() >= preparationDeadline) throw new DurableJobExecutionError("BRIEF_COMPILER_UNAVAILABLE", { retryable: false, cause:new Error("PREPARATION_DEADLINE_EXCEEDED") });
+      publishing=true;
       const publication = {
         preparationId: job.callPreparationId,
         lease: currentLease(lease)
@@ -1709,7 +1725,10 @@ export class CallService {
         );
         await this.preparePlanReview(snapshot.id);
       }
+      await publicationEvent("PUBLICATION_SUCCEEDED");
     } catch (error) {
+      if(publishing)await publicationEvent("PUBLICATION_FAILED",{validationCode:validationCode(error)});
+      if(error&&typeof error==="object")Object.assign(error,{preparationId:job.callPreparationId});
       if (error instanceof BriefCompilerError) {
         throw new DurableJobExecutionError(
           mapBriefCompilerError(error).code,

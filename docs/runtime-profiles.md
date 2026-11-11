@@ -1,7 +1,7 @@
 # Runtime profiles
 
 **Status:** implemented; production deployment is a separate operation.\
-**Source reviewed:** 2026-11-10.
+**Source reviewed:** 2026-11-11.
 
 `CALL_RUNTIME_PROFILE` selects a reviewed pair of voice runtime and preparation
 instructions. The checked-in environment example selects `native_v2`. Existing
@@ -9,13 +9,14 @@ installations without this variable retain their previous low-level behavior.
 
 | Profile | Voice | Preparation policy | Compiler / plan schema |
 | --- | --- | --- | --- |
-| `native_v2` | Native v2, `live-plan-only-2026-11-10` | `preparation-live-plan-only-2026-11-10` | 16 / 10 |
+| `native_v2` | Native v2, `live-plan-only-2026-11-11.2` | `preparation-live-holistic-2026-11-11` | 17 / 11 |
 | `managed` | Managed Live, `live-managed-v9` | `preparation-2026-10-05` | 6 / 4 |
 
 Both profiles select the Live driver, disable automatic Realtime fallback and enable
 agent hangup. Models, service tiers, provider budgets, capacity limits, pricing and
-approved model profiles retain their existing settings. The plan-only native release preserves roles and checks execution completeness
-and source fidelity in the existing combined audit. Approval 10 excludes original
+approved model profiles retain their existing settings. The holistic native release uses
+a smaller generation contract and checks execution completeness and source fidelity
+in the existing audit, with one shared recovery. Approval 10 excludes original
 task fields and audit source quotations from Live and its backend; post-call
 assessment retains the original source. Earlier approvals require new preparation
 and approval on this profile. Optional restrictions
@@ -42,10 +43,10 @@ The profile defines the desired configuration. PostgreSQL retains the audited
 preparation policy used to pin new requests. Startup checks alignment without
 silently changing that policy.
 
-The plan-only release requires an explicit transition from the previous
-task, integrity or roles policy using the existing command below. It needs no new database
-migration. Previously approved plans, completed artifacts and pinned preparation
-jobs are not rewritten; prepare and approve a new revision to receive compiler 16
+The holistic release requires migration `0116_preparation_validation_events.sql`
+and an explicit transition from the previous policy using the command below.
+Previously approved plans, completed artifacts and pinned preparation
+jobs are not rewritten; prepare and approve a new revision to receive compiler 17
 semantic validation. Startup rejects a saved policy that does not match the selected
 release rather than silently running new calls with the previous preparation policy.
 
@@ -66,8 +67,8 @@ corepack pnpm --filter @callassist/api runtime:check:prod
 ```
 
 The operation requires PostgreSQL and the current migration catalog, at least
-through `0115`. It validates applied migration names and checksums before changing
-settings. No new SQL migration is needed for profiles.
+through `0116`. It validates applied migration names and checksums before changing
+settings. The configurator does not apply migrations itself.
 
 Application takes a transaction lock, checks for active calls and unfinished
 preparations, changes only `policy.promptVersion` and its revision, and writes
@@ -102,9 +103,9 @@ with all instances stopped, not a hot switch in the admin UI.
 
 ## Rollback
 
-SQL catalog equality is not sufficient for binary rollback. The plan-only
-release retains compiled schema 10 and adds approval 10 / terminal decision 3
-without a SQL migration; older binaries
+SQL catalog equality is not sufficient for binary rollback. The holistic release
+adds compiled schema 11 and summary source 3 while retaining approval 10 and
+terminal decision 3. Older binaries
 may reject those artifacts or the newly saved policy. Do not automatically restart
 them after new preparations have been accepted. Prefer a compatible forward fix or
 the managed profile on the upgraded build.

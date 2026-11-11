@@ -80,7 +80,7 @@ export class TextArtifactService {
     // The new native narrative policy fixes a known v6 generation failure.
     // Create a new artifact; keep failed evidence and queued v6 work immutable.
     if (artifact.kind === "call_summary" && artifact.status === "failed" && /^summary-v[67]:/.test(artifact.generatorVersion) &&
-        artifact.sourceContext?.version === 2 &&
+        (artifact.sourceContext?.version === 2 || artifact.sourceContext?.version === 3) &&
         textGeneratorVersion(this.processor, "call_summary").startsWith("summary-v8:") && artifact.transcriptRevisionId)
       return this.requestTranscriptArtifact(callId, "call_summary", {sourceRevisionId:artifact.transcriptRevisionId,targetLanguage:artifact.targetLanguage});
     const snapshot = await this.repository.get(callId);
@@ -206,7 +206,7 @@ export class TextArtifactService {
     // taken from the brief, recipient speech or a model/tool authorization.
     const inputs = chunkBySize(source.segments).map(segments => ({ ...summaryInput(compilation, segments, artifact.targetLanguage),
       ...(artifact.sourceContext ? { sourceContext: assertSummaryContext(artifact) } : {}),
-      ...(/^summary-v[678]:/.test(artifact.generatorVersion) && artifact.sourceContext?.version === 2 && (artifact.generatorVersion.startsWith("summary-v8:")||artifact.sourceContext.nativeAppointmentAuthorization)
+      ...(/^summary-v[678]:/.test(artifact.generatorVersion) && (artifact.sourceContext?.version === 2 || artifact.sourceContext?.version === 3) && (artifact.generatorVersion.startsWith("summary-v8:")||artifact.sourceContext.nativeAppointmentAuthorization)
         ? { nativeFormat: artifact.generatorVersion.startsWith("summary-v8:")?"native-summary-v3" as const:artifact.generatorVersion.startsWith("summary-v7:") ? "native-summary-v2" as const : "native-summary-v1" as const, nativeTaskSources: {
           objective: compilation.rawBrief.objective, context: compilation.rawBrief.context,
           allowedFacts: compilation.rawBrief.allowedFacts, clarificationAnswers: compilation.rawBrief.clarificationAnswers,
@@ -248,7 +248,7 @@ export class TextArtifactService {
     // jobs may obtain a new-format artifact without overwriting the original.
     return matching.find(item => item.generatorVersion === generatorVersion) ??
       matching.find(item => compatibleTextGeneratorVersion(item.generatorVersion, generatorVersion, kind) &&
-        !(item.sourceContext?.version === 2 && (
+        !((item.sourceContext?.version === 2 || item.sourceContext?.version === 3) && (
           (item.sourceContext.nativeAppointmentAuthorization&&/^summary-v[678]:/.test(generatorVersion) && /^summary-v[45]:/.test(item.generatorVersion)) ||
           (generatorVersion.startsWith("summary-v8:") && /^summary-v[67]:/.test(item.generatorVersion) && item.status === "failed"))));
   }

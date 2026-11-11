@@ -3,7 +3,7 @@ import { SUPPLIED_INFORMATION_INSTRUCTIONS } from './supplied-information';
 import type { TranscriptSegment } from "@callassist/contracts";
 import WebSocket, { type RawData } from "ws";
 import { createHash, randomUUID } from "node:crypto";
-import { ASSISTANT_NAME, getAppointmentAuthorization, LIVE_VOICES, resolveInitialDisclosure } from "@callassist/contracts";
+import { ASSISTANT_NAME, appointmentValidationTelemetrySchema, getAppointmentAuthorization, LIVE_VOICES, resolveInitialDisclosure } from "@callassist/contracts";
 import { liveAssistantIdentityInstructions } from "./live-assistant-identity";
 import type { VoiceConversation, VoiceConversationContext } from "./voice-runtime";
 import type { LiveLifecycle, OpenAILiveBridgeOptions } from "./openai-live-bridge";
@@ -1157,10 +1157,16 @@ export class OpenAILiveConversation implements VoiceConversation {
         const result = await this.lifecycle.tool(call, current);
         if (["end_call", "request_appointment", "confirm_appointment", "report_task_state", "prepare_appointment", "record_appointment_result"].includes(call.name)) {
           const fingerprint = createHash("sha256").update(this.context.attemptId + ":" + call.call_id).digest("hex");
+          const detail=object(result.validation);
+          const idHashes=(value:unknown)=>Array.isArray(value)&&value.every(id=>typeof id==="string")
+            ? value.map(id=>createHash("sha256").update(id).digest("hex")):undefined;
+          const validation=appointmentValidationTelemetrySchema.safeParse({category:detail.category,field:detail.field,
+            observationRevision:detail.observationRevision,expectedIdHashes:idHashes(detail.expectedIds),receivedIdHashes:idHashes(detail.receivedIds)});
           this.context.telemetry("live:tool:" + fingerprint, { name: "conversation.tool_result", metadata: {
             tool: call.name as "end_call", outcome: result.ok ? "accepted" : "rejected",
             reason: String(result.reason ?? "application_result"), requestFingerprint: fingerprint,
-            generation: epoch, snapshotHash: this.context.snapshot.compilationSnapshotHash
+            generation: epoch, snapshotHash: this.context.snapshot.compilationSnapshotHash,
+            ...(validation.success?{validation:validation.data}:{})
           } });
         }
         return result;

@@ -17,11 +17,12 @@ const raw = normalizeCreateCallBriefInput({ recipientName: "Office", phoneNumber
   assistantProfileId: "sebastian", representedPersonFirstName: "Anna", representedPersonLastName: "Example", locale: "en-GB",
   audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: [] });
 
-async function setup(long: boolean|"over_limit" = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy: boolean | "v5" | "v6" = false, native: boolean|"general" = false) {
+async function setup(long: boolean|"over_limit" = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy: boolean | "v5" | "v6" = false, native: boolean|"general"|"holistic" = false) {
   const repository = new InMemoryCallRepository();
   const taskRaw=native===true?{...raw,objective:"Ask the price; book only if it costs at most CHF 100."}:raw;
-  const compilation = await new DeterministicBriefCompiler().compile(taskRaw,1,native==="general"?{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-native-integrity-2026-11-08"}}:{});
+  const compilation = await new DeterministicBriefCompiler().compile(taskRaw,1,native==="holistic"?{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-holistic-2026-11-11"}}:native==="general"?{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-native-integrity-2026-11-08"}}:{});
   if (native===true) {
+    if(!compilation.compiledBrief || compilation.compiledBrief.schemaVersion==="11")throw new Error("Expected historical fixture");
     compilation.compilerVersion = "brief-compiler-12";
     compilation.compiledBrief = { ...compilation.compiledBrief!, schemaVersion: "9", contextAppendix: [], appointmentAuthorization: null,
       nativeAppointmentAuthorization: {...nativeAuthority,limits:{finishBy:null,maxTotalPrice:{amount:100,currency:"CHF"}}}, localizedObjective: taskRaw.objective,
@@ -59,6 +60,11 @@ async function setup(long: boolean|"over_limit" = false, failCompaction = false,
 }
 
 describe("summary execution", () => {
+  it("builds and evaluates the new source-free native summary context without changing historical readers",async()=>{
+    const h=await setup(false,false,undefined,false,false,"holistic");await h.service.process(h.job,h.lease);
+    expect(h.process.mock.calls[0]![0]).toMatchObject({nativeFormat:"native-summary-v3",sourceContext:{version:3}});
+    expect((await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id))?.status).toBe("ready");
+  });
   it("pins original task sources for the general profile as well as appointments",async()=>{
     const h=await setup(false,false,undefined,false,false,"general");await h.service.process(h.job,h.lease);
     expect(h.process.mock.calls[0]![0]).toMatchObject({nativeFormat:"native-summary-v3",nativeTaskSources:{objective:raw.objective,context:raw.context,allowedFacts:raw.allowedFacts}});

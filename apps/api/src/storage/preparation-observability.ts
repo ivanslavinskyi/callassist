@@ -15,6 +15,8 @@ export async function maintainPreparationTelemetry(sql: postgres.Sql) {
         AND o.started_at >= now()-interval '90 days' AND o.started_at < date_trunc('day',now())
       GROUP BY 1,2,3,4 ON CONFLICT(day,model,tier,stage) DO UPDATE SET requests=excluded.requests,successes=excluded.successes,
         unknown_usage=excluded.unknown_usage,duration_total_ms=excluded.duration_total_ms,duration_p95_ms=excluded.duration_p95_ms,updated_at=now()`;
+    await tx`DELETE FROM preparation_validation_events WHERE created_at<clock_timestamp()-interval '30 days'`;
+    await tx`DELETE FROM preparation_diagnostic_access_events WHERE created_at<clock_timestamp()-interval '30 days'`;
     await tx`DELETE FROM preparation_daily_metrics WHERE day < (now() AT TIME ZONE 'UTC')::date-90`;
     await tx`SELECT set_config('callassist.preparation_retention','enabled',true)`;
     // Deleted calls/accounts take precedence over the diagnostic retention period.
@@ -31,13 +33,18 @@ export async function maintainPreparationTelemetry(sql: postgres.Sql) {
   });
 }
 export async function preparationRuntimeStatus(sql: postgres.Sql) {
-  const [workers, queue, metrics] = await Promise.all([
+  const [workers, queue, metrics,validationOutcomes] = await Promise.all([
     sql`SELECT worker_id AS id,role,active_jobs AS active,metrics,last_seen_at AS "lastSeenAt",stopped_at AS "stoppedAt",
       (stopped_at IS NULL AND last_seen_at>clock_timestamp()-interval '15 seconds') AS ready
       FROM durable_worker_heartbeats WHERE last_seen_at>clock_timestamp()-interval '1 day' ORDER BY last_seen_at DESC LIMIT 100`,
     sql`SELECT work_class AS class,status,count(*)::int AS count,extract(epoch FROM(clock_timestamp()-min(created_at)))*1000 AS "oldestMs"
       FROM durable_jobs WHERE status IN ('running','queued') GROUP BY work_class,status`,
-    sql`SELECT * FROM preparation_daily_metrics WHERE day >= current_date-30 ORDER BY day DESC LIMIT 1000`
+    sql`SELECT * FROM preparation_daily_metrics WHERE day >= current_date-30 ORDER BY day DESC LIMIT 1000`,
+    sql`WITH final AS (SELECT DISTINCT ON(preparation_id) preparation_id,metadata,created_at FROM preparation_validation_events
+      WHERE created_at>now()-interval '30 days' AND (metadata->>'stage'='outcome' OR metadata->>'code'='PUBLICATION_FAILED')
+      ORDER BY preparation_id,created_at DESC,id DESC)
+      SELECT metadata->>'policy' AS policy,metadata->>'code' AS outcome,
+        (metadata->>'recoveryUsed')::boolean AS recovered,count(*)::int AS preparations FROM final GROUP BY 1,2,3`
   ]);
-  return { workers, queue, metrics };
+  return { workers, queue, metrics,validationOutcomes };
 }

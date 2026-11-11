@@ -16,10 +16,10 @@ export async function buildSummarySourceContext(repository: CallRepository, arti
   // is not the time the recipient answered. Use only observed in-progress evidence.
   const connected = events.find(e => e.callAttemptId === attempt.id && e.payload.name === "connection.confirmed" && e.payload.metadata.providerStatus === "in-progress");
   const nativeAction=data.nativeAppointmentActions?.filter(a=>a.callAttemptId===attempt.id&&a.snapshotHash===compilation.snapshotHash).at(-1)??null;
-  const native=(compilation.compiledBrief.schemaVersion === "9" || compilation.compiledBrief.schemaVersion === "10")||nativeAction!==null;
+  const native=(compilation.compiledBrief.schemaVersion === "9" || compilation.compiledBrief.schemaVersion === "10" || compilation.compiledBrief.schemaVersion === "11")||nativeAction!==null;
   const legacyAuthority=getAppointmentAuthorization(compilation.compiledBrief);
-  return summarySourceContextSchema.parse({ version: native?2:1,
-    ...(native?{nativeAppointmentAuthorization:((compilation.compiledBrief.schemaVersion === "9" || compilation.compiledBrief.schemaVersion === "10")?compilation.compiledBrief.nativeAppointmentAuthorization:legacyAuthority?nativeAuthorityFromLegacy(legacyAuthority):null),nativeAppointmentAction:nativeAction}:{}), callAttemptId: attempt.id, compilationId: artifact.compilationId,
+  return summarySourceContextSchema.parse({ version: compilation.compiledBrief.schemaVersion === "11" ? 3 : native?2:1,
+    ...(native?{nativeAppointmentAuthorization:((compilation.compiledBrief.schemaVersion === "9" || compilation.compiledBrief.schemaVersion === "10" || compilation.compiledBrief.schemaVersion === "11")?compilation.compiledBrief.nativeAppointmentAuthorization:legacyAuthority?nativeAuthorityFromLegacy(legacyAuthority):null),nativeAppointmentAction:nativeAction}:{}), callAttemptId: attempt.id, compilationId: artifact.compilationId,
     compilationSnapshotHash: compilation.snapshotHash, transcriptRevisionId: source.id, transcriptSourceHash: source.sourceHash,
     callCreatedAt: attempt.startedAt, callConnectedAt: connected?.occurredAt ?? null, callEndedAt: attempt.endedAt,
     approvedAt: attempt.executionSnapshot?.approvedAt ?? compilation.approvedAt,

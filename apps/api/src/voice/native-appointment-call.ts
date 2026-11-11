@@ -6,18 +6,34 @@ import { validateNativeAppointment } from "../appointments/native-appointment-au
 import { verifyNativeTerms } from "../appointments/native-terms-evidence";
 import { pcmuHasSpeech } from "./pcmu-activity";
 
+export const APPOINTMENT_RESULT_MEANING = `Interpret the assistant's question and the provider's full answer together, including later corrections. Confirmed means the provider unambiguously accepts the exact requested operation or says it is already done. A direct or polite booking request followed by an unambiguous yes can confirm it; a clear question "Is that exact appointment already booked?" followed by "Yes" confirms it too. Do not require a special phrase, tense or repetition of details. A request only to confirm the provider's ability to act is a capability check, even when it names the person, date and price: an affirmative answer to that check alone is uncertain. This differs from a polite request to actually make the booking. A promise to check, try or act after an unmet prerequisite is not confirmation. Declined means this proposal was rejected; uncertain means its result is still unknown. An unfinished fragment alone is insufficient: wait for its continuation, then use the existing complete answer instead of asking again.`;
 const resultSchema=z.strictObject({actionId:z.uuid(),episode:z.number().int().min(1).max(10),
-  outcome:z.enum(["confirmed","declined","uncertain"]),
+  outcome:z.enum(["confirmed","declined","uncertain"]).describe(APPOINTMENT_RESULT_MEANING),
   assistantQuote:z.string().min(1).max(8000).describe("Short exact assistant-only request/readback or status question. Never include recipient words."),
   recipientQuote:z.string().min(1).max(8000).describe("Short exact recipient-only result or correction. Never include the assistant's question, combine speakers or rewrite ASR. A yes answering a clear status question is quoted as just the recipient's yes; put the question in assistantQuote."),
   latestRecipientQuote:z.string().min(1).max(8000).describe("Short exact quote from the latest recipient fragment; may equal recipientQuote. No assistant words."),
   detailsMatch:z.boolean().describe("True when the observed result unambiguously concerns this action/person/proposal after all corrections. For declined, true means this proposal was rejected, including an explicit replacement offer; it does NOT mean the replacement has the same details. For confirmed, all authorized details must be confirmed. False means ambiguous or unrelated evidence."),previousAppointmentReleased:z.boolean()});
 const prepareSchema=z.strictObject({proposal:nativeAppointmentProposalSchema.extend({
   operation:nativeAppointmentProposalSchema.shape.operation.describe("Keep the approved operation. confirm_existing commits attendance; it is not an informational status_check."),
+  termsQuote:nativeAppointmentProposalSchema.shape.termsQuote.describe("One short contiguous verbatim recipient span with the price/duration, including relevant qualifiers. Do not join separate replies. A numeric price statement suffices; do not append a later yes or ask for a longer sentence."),
   unavailableAlternatives:nativeAppointmentProposalSchema.shape.unavailableAlternatives.describe("Only earlier alternative IDs from the approved ordered alternatives, never the selected alternative itself or a previously rejected date. Use [] for the first/only alternative, including a changed date within it.")
 }),intent:z.enum(["request","status_check"])});
-export const nativeAppointmentTools=[
-  {type:"function",name:"prepare_appointment",strict:true,description:"Check and journal a concrete appointment action BEFORE Live requests the commitment. This grants permission only. Same proposal is idempotent. If delivery or existing booking is uncertain, use status_check for the same proposal; never repeat a booking request. Return exact recipient quotes for conditions and earlier unavailable alternatives.",parameters:z.toJSONSchema(prepareSchema)},
+export function nativeAppointmentPrepareSchema(authority:NativeAppointmentExecutionAuthorization) {
+  const requirementIds=[...new Set([...authority.requirements,...authority.alternatives.flatMap(a=>a.requirements)].map(r=>r.id))];
+  const alternativeIds=authority.alternatives.map(a=>a.id);
+  const evidence=(ids:string[],maximum:number)=>z.array(nativeAppointmentProposalSchema.shape.requirements.element.extend({
+    id:ids.length?z.enum(ids):nativeAppointmentProposalSchema.shape.requirements.element.shape.id
+  })).max(Math.min(ids.length,maximum));
+  return prepareSchema.extend({proposal:prepareSchema.shape.proposal.extend({
+    operation:z.literal(authority.operation),timeZone:z.literal(authority.timeZone),
+    alternativeId:alternativeIds.length?z.enum(alternativeIds):z.null(),
+    requirements:evidence(requirementIds,24).describe("Evidence only for approved requirement IDs of the selected alternative and common requirements. Use [] when none exist. Never invent IDs for price, availability or confirmation; price belongs in totalPrice and termsQuote."),
+    unavailableAlternatives:evidence(alternativeIds.slice(0,-1),7).describe("Evidence for earlier approved alternatives only. Use [] for the first/only alternative; a different date in the same alternative is not another alternative."),
+    selectionEvidence:authority.alternatives.every(a=>a.selection==="first_matching")?z.null():nativeAppointmentProposalSchema.shape.selectionEvidence
+  })});
+}
+export const nativeAppointmentTools=(authority:NativeAppointmentExecutionAuthorization)=>[
+  {type:"function",name:"prepare_appointment",strict:true,description:"Authorize and journal the proposed action BEFORE requesting the recipient's commitment. This does not book in the recipient's calendar. Use only approved condition IDs; repair argument errors from the current conversation without another spoken question. Same proposal is idempotent. For genuinely uncertain delivery/result use status_check of the same proposal, never a duplicate booking.",parameters:z.toJSONSchema(nativeAppointmentPrepareSchema(authority))},
   {type:"function",name:"record_appointment_result",strict:true,description:"Record the provider's result for the current proposal. Use short exact observed quotes, retaining meaningful negation and corrections; do not copy unrelated ASR noise or paraphrase. assistantQuote identifies the request or status question; recipientQuote gives its result; latestRecipientQuote anchors the latest observed reply. detailsMatch binds the outcome to this proposal: true for its explicit rejection as well as its exact confirmation. An explicit counteroffer rejecting this proposal is declined, not uncertain just because the new details differ. Availability or an unrelated yes is not confirmation. Confirmed requires observed playback; reschedule also requires release/replacement of the old appointment. This records a recipient statement, not external calendar verification.",parameters:z.toJSONSchema(resultSchema)}
 ];
 type Fragment={role:"assistant"|"recipient";text:string;start:number;end:number;sequence:number};
@@ -106,12 +122,16 @@ export class NativeAppointmentCall {
     }
     return this.#serialized(async()=>{
     if(this.#closed||!current())return {ok:false,reason:"stale_request"};
-    if(name==="prepare_appointment")return this.#prepare(args,current);
+    if(name==="prepare_appointment") {
+      const result=await this.#prepare(args,current);
+      return result.validation?{...result,validation:{...(result.validation as object),observationRevision:this.#sequence}}:result;
+    }
     if(name==="record_appointment_result")return this.#result(args,current);
     return {ok:false,reason:"unknown_tool"};
   });}
   async #prepare(args:unknown,current:()=>boolean):Promise<Record<string,unknown>>{
-    const parsed=prepareSchema.safeParse(args);if(!parsed.success)return {ok:false,reason:"invalid_arguments"};
+    const parsed=prepareSchema.safeParse(args);if(!parsed.success)return {ok:false,reason:"invalid_arguments",
+      validation:{category:"arguments",field:"proposal"},instruction:"Correct the tool argument shape from the approved plan and existing conversation. Do not ask the recipient to repeat an answer or dictate tool arguments."};
     const text=this.#fragments.filter(f=>f.role==="recipient").map(f=>f.text).join("");
     const {requirements:_requirements,unavailableAlternatives:_unavailable,selectionEvidence:_selection,termsQuote:_terms,...identity}=parsed.data.proposal;
     const proposalHash=createHash("sha256").update(JSON.stringify({snapshotHash:this.ports.snapshotHash,proposal:identity})).digest("hex");

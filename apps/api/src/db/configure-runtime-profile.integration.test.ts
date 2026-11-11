@@ -69,17 +69,17 @@ it("previews without writes, atomically applies once under concurrency and prese
   const results = await Promise.all([configureRuntimeProfile(["--apply"], env), configureRuntimeProfile(["--apply"], env)]);
   expect(results.filter(result => result.changed)).toHaveLength(1);
   expect(results.every(result => result.ready)).toBe(true);
-  expect(await settings()).toEqual({ ...before, policy: { ...before.policy, revision: 8, promptVersion: "preparation-live-plan-only-2026-11-10" } });
+  expect(await settings()).toEqual({ ...before, policy: { ...before.policy, revision: 8, promptVersion: "preparation-live-holistic-2026-11-11" } });
   expect(await sql`SELECT * FROM call_preparation_requests WHERE id=${id}`).toEqual(beforeRequest);
   const rows = await sql`SELECT * FROM preparation_settings_audit ORDER BY created_at`;
   expect(rows).toHaveLength(audit.length + 1);
-  expect(rows.at(-1)!.next_settings).toMatchObject({ runtimeProfile: "native_v2", runtimeRelease: "native-v2-plan-only-2026-11-10" });
+  expect(rows.at(-1)!.next_settings).toMatchObject({ runtimeProfile: "native_v2", runtimeRelease: "native-v2-holistic-2026-11-11" });
   const repository = { getPreparationSettings: () => new PostgresPreparationPolicyStore(sql).get() };
   expect(await assertRuntimeProfileReady(repository, env)).toMatchObject({ ready: true });
   await expect(assertRuntimeProfileReady(repository, { ...env, CALL_RUNTIME_PROFILE: "managed" })).rejects.toThrow("RUNTIME_PROFILE_MISMATCH");
   const fresh = await request("cancelled");
   expect((await sql`SELECT runtime_policy FROM call_preparation_requests WHERE id=${fresh}`)[0]!.runtime_policy.promptVersion)
-    .toBe("preparation-live-plan-only-2026-11-10");
+    .toBe("preparation-live-holistic-2026-11-11");
   expect(await configureRuntimeProfile(["--apply"], { ...env, CALL_RUNTIME_PROFILE: "managed" })).toMatchObject({ changed: true, ready: true });
   expect((await settings()).policy).toEqual({ ...before.policy, revision: 9 });
   expect(await sql`SELECT * FROM call_preparation_requests WHERE id=${id}`).toEqual(beforeRequest);

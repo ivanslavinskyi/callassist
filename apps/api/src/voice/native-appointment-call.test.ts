@@ -18,6 +18,24 @@ async function fixture(authority:NativeAppointmentAuthorization=nativeAuthority)
  return {call,store,ports,proposal,prepare,result,readback,ack,marks};
 }
 describe("native appointment journal",()=>{
+ it("repairs the last call's invented condition IDs with existing answers, then accepts a short contextual confirmation",async()=>{
+  const h=await fixture({...nativeAuthority,limits:{finishBy:null,maxTotalPrice:{amount:100,currency:"CHF"}}});
+  h.call.transcript("recipient","90 франков.",0,800);
+  h.call.transcript("recipient","Давайте на 16 сентября, на три часа дня.",900,1800);
+  h.call.transcript("assistant","Это полная стоимость?",1900,2500);
+  h.call.transcript("recipient","Да",2600,2800);
+  Object.assign(h.proposal,{totalPrice:{amount:90,currency:"CHF"},termsQuote:"90 франков."});
+  const bad={...h.proposal,requirements:[{id:"full_price_includes_mandatory_costs",recipientQuote:"Да"}]};
+  expect(await h.call.tool("prepare_appointment",{proposal:bad,intent:"request"},()=>true)).toMatchObject({ok:false,reason:"invalid_evidence_ids",
+    validation:{category:"arguments",field:"requirements",expectedIds:[],receivedIds:["full_price_includes_mandatory_costs"],observationRevision:4}});
+  expect(h.call.action).toBeNull();
+  expect(await h.prepare()).toMatchObject({ok:true,action:{state:"authorized"}});
+  const request="Запишите, пожалуйста, Нину Келлер на 16 сентября 2099 года в 15:00 за 90 франков.";
+  h.call.transcript("assistant",request,3000,5000);h.call.audio(speech);
+  h.call.transcript("recipient","Да",5100,5300);await h.ack();
+  expect(await h.result({assistantQuote:request,recipientQuote:"Да"})).toMatchObject({ok:true,action:{state:"confirmed"}});
+  expect(h.call.action?.episode).toBe(1);h.call.close();
+ });
  it.each([
   ["Нет, вместо этого семнадцатого в десять.","Запишите Нину Келлер на семнадцатое сентября 2099 года в десять.","Да, записал."],
   ["No, instead the seventeenth at ten.","Please book Nina Keller for 17 September 2099 at 10:00.","Yes, booked."],

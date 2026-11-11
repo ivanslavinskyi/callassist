@@ -19,7 +19,7 @@ const compilation = {
     blockingIssues: [{ code: "missing_request_detail", question: "Welcher Antrag?" }],
     riskCategories: [], namedEntities: [], assumptions: []
   }
-} as unknown as CallCompilation;
+} as unknown as CallCompilation & {compiledBrief:Extract<NonNullable<CallCompilation["compiledBrief"]>,{schemaVersion:"3"}>};
 const ids = ["localizedObjective", "opening.recipientAddress", "opening.purposeStatement", "opening.readinessQuestion", "orderedQuestions.0.text", "orderedQuestions.0.purpose", "conditionalFollowUps.0.condition", "conditionalFollowUps.0.question", "successCriteria.0", "unresolvedCriteria.0", "stopConditions.0", "approvedFacts.0.callLanguageText", "prohibitedActions.0", "blockingIssues.0.question", "policyDecision.clarificationQuestions.0"];
 function artifact(): CallTextArtifact {
   return { id: "a1", kind: "plan_review", status: "ready", compilationId: source.compilationId, sourceHash: source.snapshotHash,
@@ -41,6 +41,14 @@ function appointmentArtifact(): CallTextArtifact {
 }
 
 describe("translated plan projection", () => {
+  it("translates schema11 fact strings without reintroducing citation metadata",()=>{
+    const c:CallCompilation={...compilation,compiledBrief:{...compilation.compiledBrief,schemaVersion:"11",appointmentAuthorization:null,nativeAppointmentAuthorization:null,contextAppendix:[],approvedFacts:["A-17"]}};
+    const ready=artifact();const payload=ready.payload as {fields:Array<{id:string;text:string}>};
+    payload.fields=payload.fields.map(f=>f.id==="approvedFacts.0.callLanguageText"?{...f,id:"approvedFacts.0"}:f);
+    const result=projectPlanReview(c,source,ready);
+    expect(result?.compiledBrief?.approvedFacts).toEqual(["Перевод approvedFacts.0.callLanguageText"]);
+    expect(c.compiledBrief?.approvedFacts).toEqual(["A-17"]);expect(result?.snapshotHash).toBe(c.snapshotHash);
+  });
   it("translates native permission text while preserving operation, dates, limits and source evidence",()=>{
     const native=nativeAuthorityFromLegacy(appointmentAuthorization);
     native.requirements=[{id:"doctor",description:"Only Dr Example",sourceText:"Only Dr Example"}];
@@ -133,7 +141,7 @@ describe("translated plan projection", () => {
     const display = projectPlanReview(compilation, source, artifact());
     expect(display?.compiledBrief?.localizedObjective).toBe("Перевод localizedObjective");
     expect(display?.compiledBrief?.orderedQuestions[0]?.required).toBe(true);
-    expect(display?.compiledBrief?.approvedFacts[0]?.sourceText).toBe("A-17");
+    expect((display?.compiledBrief?.approvedFacts[0] as {sourceText:string})?.sourceText).toBe("A-17");
     expect(display?.compiledBrief?.blockingIssues[0]?.code).toBe(compilation.compiledBrief?.blockingIssues[0]?.code);
     expect(display?.rawBrief).toEqual(compilation.rawBrief);
     expect(display?.snapshotHash).toBe(compilation.snapshotHash);

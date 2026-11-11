@@ -23,11 +23,16 @@ export function providerBackoffMs(headers: Headers, now = Date.now()): number {
   return Math.min(900000, Math.ceil(delay));
 }
 export async function readProviderResponse(response: Response, signal: AbortSignal,
-  event?: (type: string, response: Record<string, unknown> | null, outputBytes: number) => Promise<void>): Promise<unknown> {
+  event?: (type: string, response: Record<string, unknown> | null, outputBytes: number) => Promise<void>,
+  captureText?: (text:string)=>void): Promise<unknown> {
   if (!response.body) throw new ResponseReadError("OPENAI_STREAM_INCOMPLETE");
   const reader = response.body.getReader();
   const stream = response.headers.get("content-type")?.toLowerCase().includes("text/event-stream");
   const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decode = (value?: Uint8Array, streaming=false) => {
+    try { return decoder.decode(value,{stream:streaming}); }
+    catch { throw new ResponseReadError("OPENAI_STREAM_INVALID"); }
+  };
   let bytes = 0, buffer = "", data: string[] = [], eventBytes = 0;
   let terminal: Record<string, unknown> | null = null;
   // Structured output can degenerate into endless JSON whitespace while the
@@ -62,7 +67,7 @@ export async function readProviderResponse(response: Response, signal: AbortSign
     const outputBytes = value.type === "response.output_text.delta" && typeof value.delta === "string"
       ? new TextEncoder().encode(value.delta).byteLength : 0;
     await event?.(value.type, payload, outputBytes);
-    if (outputBytes) checkJsonProgress(value.delta as string);
+    if (outputBytes) { captureText?.(value.delta as string); checkJsonProgress(value.delta as string); }
     if (value.type === "response.completed") {
       if (!payload || payload.status !== "completed") throw new ResponseReadError("OPENAI_STREAM_INVALID", payload);
       terminal = payload;
@@ -75,10 +80,12 @@ export async function readProviderResponse(response: Response, signal: AbortSign
       signal.throwIfAborted();
       const chunk = await reader.read();
       signal.throwIfAborted();
-      if (chunk.done) { buffer += decoder.decode(); break; }
+      if (chunk.done) { buffer += decode(); break; }
       bytes += chunk.value.byteLength;
       if (bytes > 8_000_000) throw new ResponseReadError("OPENAI_BODY_LIMIT");
-      buffer += decoder.decode(chunk.value, { stream: true });
+      const decoded=decode(chunk.value,true);
+      buffer += decoded;
+      if(!stream)captureText?.(decoded);
       if (buffer.length > 2_000_000) throw new ResponseReadError("OPENAI_BODY_LIMIT");
       if (!stream) continue;
       let newline: number;

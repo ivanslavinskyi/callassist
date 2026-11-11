@@ -31,6 +31,43 @@ async function fixture(withAppointment=false,objective?:string,appointmentAuthor
   return{...h,live,twilio,call,tts,hangup,attach};
 }
 describe("native Live v2",()=>{
+  it("completes one authorized booking after a short contextual yes with no extra backend review",async()=>{
+    const h=await fixture(true,undefined,authorization,"ru-RU");await h.attach();
+    const invoke=(name:string,args:object)=>h.call.tool({name,arguments:JSON.stringify(args)},()=>true);
+    h.call.transcript("recipient","На шестнадцатое сентября в пятнадцать часов свободно.",0,900,()=>{});
+    const prepared=await invoke("prepare_appointment",{proposal:{...nativeProposal,alternativeId:"approved"},intent:"request"});
+    expect(prepared.ok).toBe(true);const action=prepared.action as any;
+    const request="Запишите, пожалуйста, Нину Келлер на 16 сентября 2099 года в 15:00.";
+    h.call.transcript("assistant",request,1000,3000,()=>{});h.call.audio(speech);
+    h.call.transcript("recipient","Да",3100,3400,()=>{});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark"&&e.mark.name.startsWith("native-action:")).at(-1));await flush();
+    expect(await invoke("record_appointment_result",{actionId:action.id,episode:1,outcome:"confirmed",assistantQuote:request,
+      recipientQuote:"Да",latestRecipientQuote:"Да",detailsMatch:true,previousAppointmentReleased:false})).toMatchObject({ok:true});
+    const goodbye="Нина Келлер записана на 16 сентября в 15:00. Спасибо, до свидания.";
+    h.call.transcript("assistant",goodbye,4000,6000,()=>{});h.call.audio(speech);
+    expect(await invoke("end_call",{reason:"objective_resolved",closingQuote:goodbye,recipientQuote:"Да",noActionRequired:null})).toMatchObject({ok:true});
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.filter(e=>e.event==="mark").at(-1));await vi.advanceTimersByTimeAsync(351);await flush();
+    expect(h.hangup).toHaveBeenCalledTimes(1);
+    expect(h.live.sent.filter(e=>e.type==="response.create")).toHaveLength(0);
+    expect(await h.repository.nativeLive.readAction(h.attempt.id)).toMatchObject({state:"confirmed",episode:1});
+  });
+  it("records contract failures with observation revision and hashed IDs, keeping private arguments in the trace",async()=>{
+    const h=await fixture(true);await h.attach();const telemetry=vi.spyOn(h.service,"recordTelemetry");
+    h.live.receive({type:"session.input_transcript.delta",delta:"Yes.",start_ms:0,end_ms:500});
+    h.live.receive({type:"session.delegation.created",offset_ms:600,delegation:{id:"argument-repair",response_id:"argument-response"}});
+    h.live.receive({type:"response.event",delegation_id:"argument-repair",event:{type:"response.created",response:{id:"argument-response"}}});
+    const privateId="private_customer_0760000000";
+    h.live.receive({type:"response.event",delegation_id:"argument-repair",event:{type:"response.completed",response:{id:"argument-response",status:"completed",
+      output:[{type:"function_call",call_id:"bad-condition",name:"prepare_appointment",arguments:JSON.stringify({intent:"request",proposal:{...nativeProposal,alternativeId:"approved",requirements:[{id:privateId,recipientQuote:"Yes."}]}})}]}}});
+    for(let i=0;i<12;i++)await flush();
+    const payload=telemetry.mock.calls.map(([,input])=>input.payload).find(p=>p.name==="conversation.tool_result");
+    expect(payload).toMatchObject({name:"conversation.tool_result",metadata:{reason:"invalid_evidence_ids",snapshotHash:h.snapshot.compilationSnapshotHash,
+      validation:{category:"arguments",field:"requirements",observationRevision:1,expectedIdHashes:[],receivedIdHashes:[expect.stringMatching(/^[a-f0-9]{64}$/)]}}});
+    expect(JSON.stringify(payload)).not.toContain(privateId);expect(JSON.stringify(payload)).not.toContain("Yes.");
+    const output=h.live.sent.find(e=>e.type==="response.item.create"&&e.item?.call_id==="bad-condition");
+    expect(JSON.parse(output.item.output)).toMatchObject({validation:{receivedIds:[privateId],expectedIds:[]}});
+    expect(await h.repository.nativeLive.readAction(h.attempt.id)).toBeNull();
+  });
   it("updates a closing decision after a reciprocal goodbye without another assistant phrase",async()=>{
     const h=await fixture();await h.attach();
     h.call.transcript("recipient","At nine.",0,500,()=>{});
@@ -437,6 +474,30 @@ describe("native Live v2",()=>{
     expect(JSON.stringify(input)).toContain("Never repeat the original commitment");
     expect((await h.repository.nativeLive.readAction(h.attempt.id))?.state).toBe("delivered");expect(h.hangup).not.toHaveBeenCalled();
     h.call.transcript("recipient","Thank you.",4100,4500,()=>{});await vi.advanceTimersByTimeAsync(3000);expect(reviews()).toHaveLength(1);
+  });
+  it("uses a later answer after an inconclusive result without repeating the appointment or reviewing unchanged input",async()=>{
+    const h=await fixture(true);await h.attach();
+    const invoke=(name:string,args:unknown)=>h.call.tool({name,arguments:JSON.stringify(args)},()=>true);
+    h.call.transcript("recipient","Three is available.",0,500,()=>{});
+    const prepared=await invoke("prepare_appointment",{proposal:{...nativeProposal,alternativeId:"approved"},intent:"request"});
+    const action=prepared.action as any,request="Please book Nina Keller for 16 September 2099 at 15:00.";
+    h.call.transcript("assistant",request,1000,3000,()=>{});h.call.audio(speech);
+    await vi.advanceTimersByTimeAsync(1001);h.twilio.receive(h.twilio.sent.find(e=>e.event==="mark"));await flush();
+    h.call.transcript("recipient","The booking is",3100,3300,()=>{});
+    // Replay the real-model probe's premature end_call on a truncated answer.
+    expect(await invoke("end_call",{reason:"objective_resolved",closingQuote:request,recipientQuote:"The booking is",noActionRequired:null})).toMatchObject({ok:false,reason:"appointment_result_unconfirmed"});
+    expect(h.hangup).not.toHaveBeenCalled();
+    const result={actionId:action.id,episode:1,outcome:"confirmed",assistantQuote:request,recipientQuote:"The booking is",latestRecipientQuote:"The booking is",detailsMatch:false,previousAppointmentReleased:false};
+    expect(await invoke("record_appointment_result",result)).toMatchObject({reason:"confirmation_not_established"});
+    const reviews=()=>h.live.sent.filter(e=>e.type==="response.create");
+    await vi.advanceTimersByTimeAsync(2001);expect(reviews()).toHaveLength(0);
+    h.call.activity("started");h.call.transcript("recipient"," confirmed.",3400,3600,()=>{});
+    await vi.advanceTimersByTimeAsync(3000);expect(reviews()).toHaveLength(0);
+    h.call.activity("stopped");await vi.advanceTimersByTimeAsync(2001);expect(reviews()).toHaveLength(1);
+    // Re-use the delivered request and complete answer; no new prepare/status question.
+    expect(await invoke("record_appointment_result",{...result,recipientQuote:"The booking is confirmed.",latestRecipientQuote:"confirmed.",detailsMatch:true})).toMatchObject({ok:true,action:{state:"confirmed",episode:1}});
+    expect(h.live.sent.filter(e=>e.type==="session.commentary.append")).toHaveLength(1); // Opening only.
+    expect(h.hangup).not.toHaveBeenCalled();
   });
   it("reviews missing closing delegation once after a confirmed action, without granting hangup",async()=>{
     const h=await fixture(true);await h.attach();h.call.transcript("recipient","There is a slot at three.",0,500,()=>{});

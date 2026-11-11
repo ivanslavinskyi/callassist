@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { taskEvidenceIssues } from "./task-evidence";
+import { HOLISTIC_PREPARATION_POLICY, holisticCompiledCallBriefSchema, localizedFactText, nativeExecutionAuthority,
+  type PreparationDiagnosticInput, type PreparationValidationCode } from "@callassist/contracts";
+import { prepareHolistic } from "./holistic-preparation";
+import { PreparationValidationError, validationCode } from "./preparation-validation";
+import { TASK_EVIDENCE_INSTRUCTIONS, taskEvidenceIssues } from "./task-evidence";
+import { INLINE_TASK_EVIDENCE_INSTRUCTIONS, inlineTaskFieldsSchema, projectInlineTaskEvidence } from "./inline-task-evidence";
+import { ENTITY_PROVENANCE_INSTRUCTIONS, entityDiagnostic, entityRepairFeedback, namedEntityFindings } from "./named-entity-provenance";
 import { preparationRequestReserve } from "../config/preparation-pricing";
 import { isNativeActionsPolicy, isProgressivePolicy, isIntegrityPolicy, NATIVE_ROLES_POLICY, PLAN_ONLY_POLICY, isTaskPolicy, nativeAppointmentInterpretationJsonSchema, prepareNativeAppointmentOutput } from "./native-appointment-compilation";
 import {preparationIssue,moderationIssueCategories,type PreparationIssue} from "@callassist/contracts";
@@ -10,14 +16,14 @@ import { writePiiSafeOperationalError } from "../runtime/pii-safe-logger";
 import { preparationCheckpointSchema, type PreparationRuntimePolicy, type PreparationCheckpoint } from "@callassist/contracts";
 // SPDX-License-Identifier: LicenseRef-Proprietary
 // Copyright (c) 2026 Ivan Slavinskyi. All rights reserved.
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   BRIEF_COMPILER_VERSION,
   CALL_BRIEF_SCHEMA_VERSION,
   CALL_POLICY_VERSION,
   compiledCallBriefSchema,
   currentCompiledCallBriefSchema,
-  nativeActionCompiledCallBriefSchema, taskOnlyCompiledCallBriefSchema, taskEvidenceSchema,
+  nativeActionCompiledCallBriefSchema, taskOnlyCompiledCallBriefSchema, taskEvidenceSchema, sourcedNamedEntitySchema, namedEntitySourceSchema,
   nativeAppointmentRuleContains,
   getAppointmentAuthorization,
   createApprovedExecutionPlan,
@@ -67,6 +73,7 @@ export type PreparationRequestMetadata = {
 };
 
 export type BriefCompilerRunOptions = {
+  diagnostic?: (event: PreparationDiagnosticInput) => Promise<void>;
   policy?: PreparationRuntimePolicy;
   signal?: AbortSignal;
   checkpoint?: (clientRequestId: string, checkpoint: PreparationCheckpoint) => Promise<void>;
@@ -127,6 +134,7 @@ export interface BriefCompiler {
 }
 
 export class BriefCompilerError extends Error {
+  readonly validationCode: PreparationValidationCode;
   readonly retryAfterMs: number;
   readonly responseId: string | null;
   readonly clientRequestId: string | null;
@@ -157,6 +165,7 @@ export class BriefCompilerError extends Error {
     this.validationPaths = options?.validationPaths ?? [];
     this.statusCode = options?.statusCode ?? null;
     this.stage = options?.stage ?? null;
+    this.validationCode = validationCode({ code, cause: options?.cause, validationPaths: this.validationPaths });
   }
 }
 
@@ -208,10 +217,68 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     this.#now = options.now ?? (() => new Date());
   }
 
-  async compile(
+  async compile(input: NormalizedCallBriefInput, revision = 1, options: BriefCompilerRunOptions = {}): Promise<CallCompilation> {
+    const referenceTime=this.#now();
+    let lastOperationId:string|null=null;
+    let candidateAttempt=0,auditAttempt=0,recoveryUsed=false;
+    const emit = async (event:PreparationDiagnosticInput) => {
+      if(event.operationId)lastOperationId=event.operationId;
+      candidateAttempt=Math.max(candidateAttempt,event.metadata.candidateAttempt);auditAttempt=Math.max(auditAttempt,event.metadata.auditAttempt);recoveryUsed ||= event.metadata.recoveryUsed;
+      if(event.metadata.stage==="outcome")event={...event,metadata:{...event.metadata,candidateAttempt,auditAttempt,recoveryUsed}};
+      try { await options.diagnostic?.({...event,operationId:event.operationId??(event.metadata.stage!=="source"?lastOperationId:null)}); }
+      catch { writePiiSafeOperationalError("PREPARATION_DIAGNOSTIC_WRITE_FAILED",{diagnosticId:event.id}); }
+    };
+    const release=process.env.SHPROHLI_RELEASE_SHA;
+    const base={...(release&&/^[a-f0-9]{40}$/i.test(release)?{build:release}:{}),version:1 as const,candidateAttempt:0,auditAttempt:0,recoveryUsed:false,
+      ...(options.policy?{policy:options.policy.promptVersion,policyRevision:options.policy.revision}: {})};
+    await emit({id:randomUUID(),metadata:{...base,stage:"source",code:"SOURCE_CAPTURED"},detail:{input,referenceTime:referenceTime.toISOString()}});
+    try {
+      const result=options.policy?.promptVersion===HOLISTIC_PREPARATION_POLICY
+        ? await this.#compileHolistic(input,revision,{...options,diagnostic:emit},referenceTime)
+        : await this.#compileLegacy(input,revision,{...options,diagnostic:emit},referenceTime);
+      await emit({id:randomUUID(),metadata:{...base,stage:"outcome",compiler:result.compilerVersion,
+        code:result.policyDecision.status==="ready_for_review"?"PREPARATION_READY":result.policyDecision.status==="needs_clarification"?"PREPARATION_CLARIFICATION":"PREPARATION_BLOCKED"},
+        detail:{policyDecision:result.policyDecision}});
+      return result;
+    } catch(error) {
+      const stage=error instanceof PreparationValidationError?error.stage:error instanceof BriefCompilerError?error.stage??"candidate_validation":"outcome";
+      const diagnosticId=randomUUID();
+      await emit({id:diagnosticId,metadata:{...base,stage,code:options.signal?.aborted?"PREPARATION_CANCELLED":validationCode(error)},
+        detail:{validationPaths:error instanceof BriefCompilerError?error.validationPaths:[],
+          issues:error instanceof PreparationValidationError?error.detail:error instanceof z.ZodError?error.issues:undefined}});
+      await emit({id:randomUUID(),metadata:{...base,stage:"outcome",code:options.signal?.aborted?"PREPARATION_CANCELLED":"PREPARATION_FAILED"},detail:{validationCode:validationCode(error),diagnosticId}});
+      const failure=error instanceof PreparationValidationError ? new BriefCompilerError("OPENAI_RESPONSE_INVALID",{
+        cause:error,stage:error.stage==="language_audit"?"language_audit":"compilation",validationPaths:[]}) : error;
+      if(failure&&typeof failure==="object")Object.assign(failure,{diagnosticId});
+      throw failure;
+    }
+  }
+
+  async #compileHolistic(input:NormalizedCallBriefInput,revision:number,options:BriefCompilerRunOptions,referenceTime:Date) {
+    const policy=options.policy!;
+    const deadline=Math.min(Date.now()+Math.min(policy.timeoutMs,this.#timeoutMs),options.deadlineAtMs??Infinity);
+    const compilationDeadline=deadline-Math.min(this.#requestTimeoutMs??defaultModerationRequestTimeoutMs,Math.floor((deadline-Date.now())/4));
+    const budget=createRequestBudget({...options,deadlineAtMs:deadline});
+    let candidateAttempt=0,auditAttempt=0,recoveryUsed=false;
+    budget.diagnostic=event=>options.diagnostic!({...event,metadata:{...event.metadata,candidateAttempt,auditAttempt,recoveryUsed}});
+    const raw=createCallBriefInputSchema.parse(input);
+    if(Date.now()>=deadline)throw new BriefCompilerError("OPENAI_REQUEST_FAILED",{cause:new Error("PREPARATION_DEADLINE_EXCEEDED")});
+    const moderation=await this.#isFlaggedByModeration(raw,deadline,budget);
+    if(moderation.flagged)return createCompilation({holistic:true,integrity:true,rawBrief:raw,compiledBrief:null,
+      policyDecision:{...blockedDecision("input_moderation_flagged"),policyVersion:CALL_POLICY_VERSION,issue:preparationIssue("input_moderation_flagged","input_moderation",moderation.categories)},
+      compilerModel:policy.generation.model,compilerResponseId:null,revision});
+    return prepareHolistic(raw,revision,{policy,referenceTime,voiceGender:input.voiceGender,diagnostic:options.diagnostic!,
+      request:(body,stage,model,repair,attempt)=>{budget.repairKind=repair;budget.repairNumber=attempt;
+        if(stage==="language_audit")auditAttempt++;else candidateAttempt++;recoveryUsed ||= repair!=="none";
+        return this.#request(this.#responsesEndpoint,body,compilationDeadline,stage,model,budget);},
+      moderate:compiled=>this.#isFlaggedByModerationText(buildRuntimeModerationText(compiled),deadline,"output_moderation",budget)});
+  }
+
+  async #compileLegacy(
     input: NormalizedCallBriefInput,
     revision = 1,
-    options: BriefCompilerRunOptions = {}
+    options: BriefCompilerRunOptions = {},
+    referenceTime: Date = this.#now()
   ) {
     const deadline = Math.min(Date.now() + Math.min(options.policy?.timeoutMs ?? Infinity, this.#timeoutMs), options.deadlineAtMs ?? Infinity);
     if (deadline <= Date.now()) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", {
@@ -230,7 +297,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     const taskOnly = isTaskPolicy(options.policy?.promptVersion);
     const roles = taskOnly || options.policy?.promptVersion === NATIVE_ROLES_POLICY;
     const rawBrief = (native ? createCallBriefInputSchema : storedCallBriefInputSchema).parse(input);
-    const currentDateTime = this.#now().toISOString();
+    const currentDateTime = referenceTime.toISOString();
     const moderation=await this.#isFlaggedByModeration(rawBrief,deadline,requestBudget);
     if (moderation.flagged) {
       return createCompilation({
@@ -250,6 +317,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     let localPolicy: PolicyDecision | null = null;
     let validationFeedback: string[] = [];
     const auditRepairFeedback = new Set<string>();
+    const validationFindings: NonNullable<CallCompilation["validationFindings"]> = [];
     let languageRepairs = 0;
     let repairKind: PreparationRequestMetadata["repairKind"] = "none";
 
@@ -287,7 +355,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         });
       }
 
-      const parsed = parseCompiledBriefResponse(response, rawBrief, new Date(currentDateTime), nativeActions, taskOnly);
+      const parsed = parseCompiledBriefResponse(response, rawBrief, new Date(currentDateTime), nativeActions, taskOnly, planOnly);
       if (parsed.success) {
         displayObjective = parsed.displayObjective;
         compiledBrief = enforceAppointmentPlan(rawBrief, {
@@ -299,6 +367,8 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             question: appointmentClarification(rawBrief, compiledBrief.sourceLanguage) }] };
         }
         localPolicy = evaluateCompiledBrief(rawBrief, compiledBrief, parsed.context);
+        const entityFindings = namedEntityFindings(rawBrief, compiledBrief, {identifiers: protectedIdentifiers, addresses: protectedPostalAddresses});
+        if (planOnly) validationFindings.push(...entityFindings.map(finding => ({...finding, attempt, stage: "local" as const})));
         if (localPolicy.status === "ready_for_review") {
           let languageIssues: string[];
           let semanticIssues: ExecutionFidelityVerdict["semanticViolations"] = [];
@@ -317,6 +387,11 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             throw new BriefCompilerError("OPENAI_RESPONSE_INVALID", { cause, stage: "language_audit", validationPaths: [roles ? "execution_fidelity_audit" : "execution_language_audit"] });
           }
           if (languageIssues.length || semanticIssues.length) {
+            if (planOnly) {
+              const findings = [...semanticIssues, ...languageIssues.map(path => ({path, reason: "language_mismatch"}))];
+              validationFindings.push(...findings.slice(0, Math.max(0, 200 - validationFindings.length)).map(finding => ({...finding,
+                ...entityDiagnostic(compiledBrief!, finding.path), attempt, stage: "audit" as const})));
+            }
             if (languageRepairs < executionLanguageRepairLimit) {
               languageRepairs += 1;
               repairKind = semanticIssues.length ? "integrity" : "language";
@@ -326,6 +401,9 @@ export class OpenAIBriefCompiler implements BriefCompiler {
               ];
               // A language repair must not undo an earlier semantic correction.
               // Keep deduplicated constraints within the same bounded repair loop.
+              if (planOnly) findings.push(...entityRepairFeedback(semanticIssues.filter(finding => finding.path.startsWith("namedEntities.")).map(finding => ({
+                ...finding, ...entityDiagnostic(compiledBrief!, finding.path)
+              }))));
               for (const finding of findings) auditRepairFeedback.add(finding);
               validationFeedback = ["Retain corrections from earlier audits. The findings below are regression constraints, not a request to recreate a field that was removed correctly; use the original sources and current output schema.", ...auditRepairFeedback];
               continue;
@@ -342,6 +420,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
           validationFeedback = localPolicy.reasonCodes.map((reason) => reason === "fact_integrity_failure"
             ? "fact_integrity_failure: preserve every supplied name, address and reference exactly; use only supplied facts and dates derived from schedulingInterpretation; do not invent identifiers"
             : "plan_constraint_failure: preserve selected task settings and keep semantic intent, requested authority, operation and time zone consistent; availability alone grants no authority");
+          if (planOnly && entityFindings.length) validationFeedback = entityRepairFeedback(entityFindings);
           continue;
         }
         break;
@@ -377,6 +456,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       compilerModel: model,
       compilerResponseId: stringOrNull(response.id),
       displayObjective,
+      ...(planOnly && validationFindings.length ? {validationFindings: validationFindings.slice(0, 200)} : {}),
       revision
     });
   }
@@ -484,7 +564,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             type: "json_schema",
             name: "callassist_compiled_brief",
             strict: true,
-            schema: taskOnly ? taskOnlyModelSchema : nativeActions ? nativeActionsModelSchema : native ? nativeModelCompiledBriefJsonSchema : modelCompiledBriefJsonSchema
+            schema: planOnly ? planOnlyModelSchema : taskOnly ? taskOnlyModelSchema : nativeActions ? nativeActionsModelSchema : native ? nativeModelCompiledBriefJsonSchema : modelCompiledBriefJsonSchema
           }
         }
       },
@@ -532,6 +612,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       const diagnostics = new PreparationRequestDiagnostics(started - reservedAt, actualTimeout, Buffer.byteLength(requestBody));
       let response: Response | undefined, payload: Record<string, unknown> | null = null, error: unknown;
       let requestId: string | null = null, responseId: string | null = null, actualTier: string | null = null;
+      let partialOutput="";
       const seen = new Set<PreparationCheckpoint["kind"]>();
       const checkpoint = async (kind: PreparationCheckpoint["kind"]) => {
         if (!budget.checkpoint || seen.has(kind)) return;
@@ -568,7 +649,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
             if (type === "response.created") await checkpoint("response_created");
             if (type === "response.output_text.delta") await checkpoint("first_output");
             if (["response.completed", "response.failed", "response.incomplete"].includes(type)) await checkpoint("terminal");
-          }), signal);
+          }, text=>{if(paid&&budget.diagnostic&&partialOutput.length<65536)partialOutput+=text.slice(0,65536-partialOutput.length);}), signal);
           payload = objectOrNull(value);
           responseId = stringOrNull(payload?.id) ?? responseId;
           actualTier = serviceTier(payload?.service_tier) ?? actualTier;
@@ -596,7 +677,19 @@ export class OpenAIBriefCompiler implements BriefCompiler {
         usage: parseOpenAITextTokenUsage(payload?.usage)
       };
       // Accounting may finish late, but the caller must never publish after its deadline.
-      await awaitWithAbort(completeProviderRequest(budget, result), deadlineSignal);
+      try { await awaitWithAbort(completeProviderRequest(budget, result), deadlineSignal); } finally {
+      await budget.diagnostic?.({id:randomUUID(),operationId:clientRequestId,metadata:{version:1,stage,
+        code:payload?.status==="incomplete"?"OUTPUT_INCOMPLETE":error?validationCode(error):response?.ok?"RESPONSE_RECEIVED":"PROVIDER_UNAVAILABLE",candidateAttempt:budget.repairNumber+1,auditAttempt:0,
+        recoveryUsed:budget.repairNumber>0,model,...(paid?{promptHash:createHash("sha256").update(JSON.stringify((body as {instructions?:unknown;input?:unknown}).instructions??(body as {input?:unknown}).input)).digest("hex"),
+        schemaHash:createHash("sha256").update(JSON.stringify((body as {text?:unknown}).text)).digest("hex")} : {}),requestHash:createHash("sha256").update(requestBody).digest("hex"),
+        ...(budget.policy?{policy:budget.policy.promptVersion,policyRevision:budget.policy.revision}:{}),
+        remainingMs:Math.max(0,Math.min(300000,deadline-Date.now()))},
+        detail:{responseId,providerRequestId:requestId,status:payload?.status??null,
+          output:payload?.output_text??(Array.isArray(payload?.output)
+            ?payload.output.filter(item=>!item||typeof item!=="object"||item.type!=="reasoning"):payload?.output)??null,
+          partialOutput:!payload||response?.headers.get("content-type")?.includes("text/event-stream")?partialOutput:"",
+          partialOutputCapped:partialOutput.length>=65536,transportOutcome:result.outcome,errorCode:result.errorCode}});
+      }
       if (Date.now() >= deadline || budget.signal?.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, clientRequestId });
       if ((!error && response?.ok) || (error instanceof ResponseReadError && payload?.status === "incomplete")) return payload;
       const status = response?.status ?? null;
@@ -610,7 +703,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
     }
     throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage });
     } catch (error) {
-      if (deadlineSignal.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, cause: error });
+      if (deadlineSignal.aborted) throw new BriefCompilerError("OPENAI_REQUEST_FAILED", { stage, cause: deadlineController.signal.aborted ? new Error("PREPARATION_DEADLINE_EXCEEDED") : error });
       throw error;
     } finally { clearTimeout(deadlineTimer); }
   }
@@ -620,7 +713,15 @@ export class OpenAIBriefCompiler implements BriefCompiler {
 export class DeterministicBriefCompiler implements BriefCompiler {
   readonly model = "deterministic-dev";
 
-  async compile(input: NormalizedCallBriefInput, revision = 1, options: BriefCompilerRunOptions = {}) {
+  async compile(input: NormalizedCallBriefInput, revision = 1, options: BriefCompilerRunOptions = {}): Promise<CallCompilation> {
+    if(options.policy?.promptVersion===HOLISTIC_PREPARATION_POLICY) {
+      const previous=await this.compile(input,revision,{...options,policy:{...options.policy,promptVersion:PLAN_ONLY_POLICY}});
+      const c=previous.compiledBrief;
+      const compiled=c?holisticCompiledCallBriefSchema.parse({...c,schemaVersion:"11",approvedFacts:c.approvedFacts.map(localizedFactText),
+        nativeAppointmentAuthorization:c.schemaVersion!=="11"&&"nativeAppointmentAuthorization" in c&&c.nativeAppointmentAuthorization?nativeExecutionAuthority(c.nativeAppointmentAuthorization):null}):null;
+      return createCompilation({holistic:true,integrity:true,rawBrief:previous.rawBrief,compiledBrief:compiled,
+        policyDecision:previous.policyDecision,compilerModel:this.model,compilerResponseId:null,revision});
+    }
     const native = options.policy?.promptVersion !== "preparation-2026-10-05";
     const nativeActions=isNativeActionsPolicy(options.policy?.promptVersion);
     const progressive = isProgressivePolicy(options.policy?.promptVersion), integrity = isIntegrityPolicy(options.policy?.promptVersion);
@@ -694,6 +795,7 @@ export function evaluateCompiledBrief(
   compiledBrief: CompiledCallBrief,
   context?: AppointmentCompilationContext
 ): PolicyDecision {
+  if(compiledBrief.schemaVersion==="11")throw new Error("HOLISTIC_REVIEW_REQUIRED");
   const sourceFacts = compiledBrief.approvedFacts.map(
     ({ sourceText }) => sourceText
   );
@@ -737,7 +839,10 @@ export function evaluateCompiledBrief(
     preservesIdentityLabel(value, executionText, sourceText) ||
     ((compiledBrief.schemaVersion === "9" || compiledBrief.schemaVersion === "10") && compiledBrief.namedEntities.some(entity =>
       ["person", "organisation", "location"].includes(entity.type) &&
-      equivalentIdentityLabel(value, entity.value, sourceText)))) ||
+      equivalentIdentityLabel(value, entity.value, sourceText))) ||
+    (compiledBrief.schemaVersion === "10" && compiledBrief.namedEntities.some(entity =>
+      ["person", "organisation", "location"].includes(entity.type) && entity.source?.quote === value &&
+      (entity.source.path === "recipientName" || entity.source.path === "representedPerson")))) ||
     !protectedPostalAddresses(sourceText).every(value => executionText.includes(value))) {
     return blockedDecision("fact_integrity_failure");
   }
@@ -746,11 +851,7 @@ export function evaluateCompiledBrief(
   )) {
     return blockedDecision("fact_integrity_failure");
   }
-  if (compiledBrief.namedEntities.some(({ type, value }) =>
-    ["person", "organisation", "location"].includes(type) &&
-    !sourceText.includes(value) && ![rawBrief.recipientName, rawBrief.representedPerson].some(original =>
-      equivalentIdentityLabel(original, value, sourceText))
-  )) {
+  if (namedEntityFindings(rawBrief, compiledBrief, {identifiers: protectedIdentifiers, addresses: protectedPostalAddresses}).length) {
     return blockedDecision("fact_integrity_failure");
   }
   if (
@@ -822,6 +923,7 @@ function blockedDecision(
 }
 
 function createCompilation(input: {
+  holistic?:boolean;
   native?: boolean;
   nativeActions?: boolean;
   progressive?: boolean;
@@ -833,10 +935,11 @@ function createCompilation(input: {
   compilerModel: string;
   compilerResponseId: string | null;
   displayObjective?: CallCompilation["displayObjective"];
+  validationFindings?: CallCompilation["validationFindings"];
   revision: number;
 }): CallCompilation {
-  const { native = true, nativeActions = false, progressive = false, integrity=false, roles = false, taskOnly = false, planOnly = false, ...original } = input;
-  const compilerVersion = planOnly ? "brief-compiler-16" : taskOnly ? "brief-compiler-15" : roles ? "brief-compiler-14" : integrity?"brief-compiler-13":progressive ? "brief-compiler-12" : nativeActions ? "brief-compiler-11" : native ? BRIEF_COMPILER_VERSION : "brief-compiler-6";
+  const { holistic=false, native = true, nativeActions = false, progressive = false, integrity=false, roles = false, taskOnly = false, planOnly = false, ...original } = input;
+  const compilerVersion = holistic ? "brief-compiler-17" : planOnly ? "brief-compiler-16" : taskOnly ? "brief-compiler-15" : roles ? "brief-compiler-14" : integrity?"brief-compiler-13":progressive ? "brief-compiler-12" : nativeActions ? "brief-compiler-11" : native ? BRIEF_COMPILER_VERSION : "brief-compiler-6";
   if(integrity&&original.policyDecision.status!=="ready_for_review"){
     const decision=original.policyDecision,code=decision.reasonCodes[0]??"model_refusal";
     const categories=original.compiledBrief?.riskCategories??[];
@@ -918,7 +1021,7 @@ function buildRuntimeIntegrityText(compiled: CompiledCallBrief) {
     ...plan.approvedFacts,
     ...plan.prohibitedActions,
     getAppointmentAuthorization(plan)?.serviceDescription ?? "",
-    ...((compiled.schemaVersion === "9" || compiled.schemaVersion === "10")&&compiled.nativeAppointmentAuthorization?[compiled.nativeAppointmentAuthorization.serviceDescription,...compiled.nativeAppointmentAuthorization.requirements.map(r=>r.description),...compiled.nativeAppointmentAuthorization.alternatives.flatMap(a=>a.requirements.map(r=>r.description))]:[])
+    ...((compiled.schemaVersion === "9" || compiled.schemaVersion === "10" || compiled.schemaVersion === "11")&&compiled.nativeAppointmentAuthorization?[compiled.nativeAppointmentAuthorization.serviceDescription,...compiled.nativeAppointmentAuthorization.requirements.map(r=>r.description),...compiled.nativeAppointmentAuthorization.alternatives.flatMap(a=>a.requirements.map(r=>r.description))]:[])
   ].join("\n");
 }
 
@@ -951,7 +1054,7 @@ function parseCompiledBriefResponse(
   response: OpenAIResponsePayload,
   rawBrief: RawCallBrief,
   now: Date,
-  nativeActions = false, taskOnly = false
+  nativeActions = false, taskOnly = false, planOnly = false
 ):
   | { success: true; data: CompiledCallBrief; context: AppointmentCompilationContext; displayObjective?: CallCompilation["displayObjective"] }
   | {
@@ -971,7 +1074,13 @@ function parseCompiledBriefResponse(
   }
   try {
     modelOutput = JSON.parse(extractOutputText(response));
+    if (planOnly) modelOutput = projectInlineTaskEvidence(modelOutput);
   } catch (cause) {
+    if (cause instanceof z.ZodError) return {
+      success: false, cause,
+      validationPaths: cause.issues.map(issue => issue.path.join(".") || "output"),
+      validationFeedback: cause.issues.map(issue => `${issue.path.join(".") || "output"}: ${issue.message}. Keep source references beside each item in the requested schema.`)
+    };
     return {
       success: false,
       cause,
@@ -990,7 +1099,12 @@ function parseCompiledBriefResponse(
     assumptions: deriveProductAssumptions(rawBrief)
   });
   if (parsed.success) {
-    const evidenceIssues = taskEvidenceIssues(parsed.data, rawBrief);
+    const evidenceIssues = taskEvidenceIssues(parsed.data, rawBrief).map(path => {
+      if (!planOnly || parsed.data.schemaVersion !== "10") return path;
+      const match = /^taskEvidence\.(\d+)(.*)$/.exec(path);
+      const target = match && parsed.data.taskEvidence[Number(match[1])]?.path.replace(/\.condition$/, "");
+      return target ? `${target}${match![2]}` : path;
+    });
     if (evidenceIssues.length) return {success:false,cause:new Error("TASK_EVIDENCE_INVALID"),validationPaths:evidenceIssues,
       validationFeedback:evidenceIssues.map(path=>`${path}: provide one valid source reference for each task condition/criterion/restriction; remove invented system instructions, never invent a source quote`)};
     const sourceObjective = modelOutput && typeof modelOutput === "object" && "sourceObjective" in modelOutput ? modelOutput.sourceObjective : undefined;
@@ -1031,6 +1145,7 @@ function serviceTier(value: unknown): string | null {
 }
 
 type ProviderRequestBudget = {
+  diagnostic?: BriefCompilerRunOptions["diagnostic"];
   policy?: PreparationRuntimePolicy;
   signal?: AbortSignal;
   checkpoint?: BriefCompilerRunOptions["checkpoint"];
@@ -1051,6 +1166,7 @@ function createRequestBudget(
     throw new TypeError("maxProviderRequests must be a non-negative integer");
   }
   return {
+    diagnostic: options.diagnostic,
     used: 0,
     policy: options.policy, signal: options.signal, checkpoint: options.checkpoint,
     max,
@@ -1501,5 +1617,16 @@ const taskOnlyModelSchema = {
   }
 };
 
-const planOnlyCompilerInstructions = taskCompilerInstructions.replaceAll("The original approved user context will also be available to Live from session start.", "Only the complete approved localized plan will be available to Live and its backend; original user context is unavailable during execution.") + `
+const { taskEvidence: _separateTaskEvidence, ...planOnlyProperties } = taskOnlyModelSchema.properties;
+const planOnlyModelSchema = { ...taskOnlyModelSchema,
+  required: taskOnlyModelSchema.required.filter(key => key !== "taskEvidence"),
+  properties: { ...planOnlyProperties, ...z.toJSONSchema(inlineTaskFieldsSchema).properties,
+  namedEntities: z.toJSONSchema(z.array(sourcedNamedEntitySchema.extend({source: namedEntitySourceSchema.nullable()})).max(40))
+} };
+const planOnlyCompilerInstructions = taskCompilerInstructions
+  .replace(TASK_EVIDENCE_INSTRUCTIONS, INLINE_TASK_EVIDENCE_INSTRUCTIONS)
+  .replaceAll("The original approved user context will also be available to Live from session start.", "Only the complete approved localized plan will be available to Live and its backend; original user context is unavailable during execution.")
+  .replace("Copy recipientName, representedPerson, person names, organisation names, location names, and postal addresses character-for-character instead of translating, transliterating, correcting, or inflecting them.", "Preserve original identity spellings verbatim in namedEntities.source; any localized name must designate the same complete entity. Copy postal addresses character-for-character.")
+  .replace("with names, addresses and identifiers preserved exactly.", "with entity identity preserved through sourced names, and addresses and identifiers preserved exactly.") + `
+${ENTITY_PROVENANCE_INSTRUCTIONS}
 Execution boundary: the approved localized plan is the ONLY task context available to Live and its reasoning backend. The raw objective, context, facts, clarification answers, delivery instruction and audit sourceText are NOT available during the call. Preserve every task-relevant fact, subject, exact value, disclosure restriction, conditional branch, outcome criterion and latest correction in the existing localized plan fields. Use approvedFacts/backgroundSummary for relevant supplied facts and explicit conditions in the appropriate task fields. A conditional action must explain when no action is required. Preserve explicit numeric price/currency limits structurally. Optional appendix sections are localized approved references only; mandatory conditions must remain in the primary plan. Never rely on raw sources as a runtime fallback, never add a second translated raw task alongside the plan, and never manufacture product controls as user restrictions. Source quotations remain audit metadata only.`;

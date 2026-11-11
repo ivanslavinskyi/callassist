@@ -1,5 +1,6 @@
+import { localizedFactText } from "@callassist/contracts";
 import { NativeAppointmentDetails } from "./native-appointment-details";
-import type { CompiledCallBrief, NativeOpening, LiveTaskAppendixSection, NativeAppointmentAuthorization } from "@callassist/contracts";
+import type { CompiledCallBrief, NativeOpening, LiveTaskAppendixSection, NativeAppointmentExecutionAuthorization } from "@callassist/contracts";
 import { calendarDateDetails, formatLocale } from "@callassist/contracts";
 import { messages, type UiLocale } from "@/lib/i18n/messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
@@ -11,7 +12,7 @@ export type CallPlanPresentationData = Pick<CompiledCallBrief,
   "resultHandling" | "opening" | "orderedQuestions" | "approvedFacts" |
   "prohibitedActions"
 > & Partial<Pick<CompiledCallBrief, "backgroundSummary" | "conditionalFollowUps" | "unresolvedCriteria" | "stopConditions">>
-  & { nativeAppointmentAuthorization?:NativeAppointmentAuthorization|null; appointmentAuthorization?: Exclude<CompiledCallBrief, {schemaVersion: "3"}>["appointmentAuthorization"]; contextAppendix?: LiveTaskAppendixSection[]; taskInstructions?: string };
+  & { nativeAppointmentAuthorization?:NativeAppointmentExecutionAuthorization|null; appointmentAuthorization?: Exclude<CompiledCallBrief, {schemaVersion: "3"}>["appointmentAuthorization"]; contextAppendix?: LiveTaskAppendixSection[]; taskInstructions?: string };
 
 export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2, nativeOpening }: {
   plan: CallPlanPresentationData;
@@ -94,7 +95,7 @@ export function CallPlanPresentation({ plan, uiLocale, headingLevel = 2, nativeO
       <div>
         <Heading>{copy.approvedInformation}</Heading>
         {plan.approvedFacts.length ? <ul>{plan.approvedFacts.map((fact, index) =>
-          <li key={index}>{fact.callLanguageText}</li>
+          <li key={index}>{localizedFactText(fact)}</li>
         )}</ul> : <p>{copy.none}</p>}
       </div>
       {plan.prohibitedActions.length ? <div>

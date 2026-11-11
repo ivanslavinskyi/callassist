@@ -1,4 +1,5 @@
 "use client";
+import { localizedFactText } from "@callassist/contracts";
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { demoMessages } from "@/lib/i18n/demo-messages";
@@ -131,7 +132,7 @@ function DemoPlayer({ locale, scenarioId, registerHref, sessionAware, autoStart,
         <div className={styles.reviewScroll} tabIndex={0} role="region" aria-label={copy.fullPlan}>
           <div className={styles.planObjective}>{scenario.plan.localizedObjective}</div>
           <h3>{copy.questions}</h3><ol>{scenario.plan.orderedQuestions.map(q => <li key={q.text}>{q.text}</li>)}</ol>
-          <h3>{copy.facts}</h3><ul>{scenario.plan.approvedFacts.map(f => <li key={f.callLanguageText}>{f.callLanguageText}</li>)}</ul>
+          <h3>{copy.facts}</h3><ul>{scenario.plan.approvedFacts.map(f => <li key={localizedFactText(f)}>{localizedFactText(f)}</li>)}</ul>
           <div className={styles.guardrails}><h3>{copy.limits}</h3><ul>{scenario.plan.prohibitedActions.map(limit => <li key={limit}>{limit}</li>)}</ul></div>
           <details><summary>{copy.fullPlan}</summary><CallPlanPresentation plan={scenario.plan} uiLocale={locale} headingLevel={4} /></details>
         </div>

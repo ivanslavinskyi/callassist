@@ -42,12 +42,15 @@ export function projectPlanReview(compilation: CallCompilation, source: PlanSour
     for (const key of ["successCriteria", "unresolvedCriteria", "stopConditions", "prohibitedActions"] as const) {
       compiled[key].forEach((value, index) => add(`${key}.${index}`, value, (text) => { compiled[key][index] = text; }));
     }
-    compiled.approvedFacts.forEach((fact, index) => add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText, (text) => { fact.callLanguageText = text; }));
+    compiled.approvedFacts.forEach((fact, index) => {
+      if (typeof fact === "string") add(`approvedFacts.${index}`, fact, text => { compiled.approvedFacts[index] = text; });
+      else add(`approvedFacts.${index}.callLanguageText`, fact.callLanguageText, text => { fact.callLanguageText = text; });
+    });
     compiled.blockingIssues.forEach((issue, index) => add(`blockingIssues.${index}.question`, issue.question, (text) => { issue.question = text; }));
     if ("contextAppendix" in compiled) compiled.contextAppendix.forEach((section,index) => {
       for (const key of ["title","description","content"] as const) add(`contextAppendix.${index}.${key}`,section[key],text => {section[key]=text;});
     });
-    if ((compiled.schemaVersion === "9" || compiled.schemaVersion === "10") && compiled.nativeAppointmentAuthorization) {
+    if ((compiled.schemaVersion === "9" || compiled.schemaVersion === "10" || compiled.schemaVersion === "11") && compiled.nativeAppointmentAuthorization) {
       const native = compiled.nativeAppointmentAuthorization;
       add("nativeAppointmentAuthorization.serviceDescription",native.serviceDescription,text=>{native.serviceDescription=text;});
       native.requirements.forEach((item,index)=>{ add(`nativeAppointmentAuthorization.requirements.${index}.description`,item.description,text=>{item.description=text;}); });

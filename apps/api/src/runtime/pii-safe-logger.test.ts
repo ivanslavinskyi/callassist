@@ -1,3 +1,6 @@
+import { BriefCompilerError } from "../brief-compiler/brief-compiler";
+import { PreparationValidationError } from "../brief-compiler/preparation-validation";
+import { DurableJobExecutionError } from "../jobs/durable-job";
 import Fastify, { LogController } from "fastify";
 import { describe, expect, it } from "vitest";
 import {
@@ -8,6 +11,13 @@ import {
 } from "./pii-safe-logger";
 
 describe("PII-safe runtime logging", () => {
+  it("preserves exact validation code, stage and evidence reference through the worker error chain",()=>{
+    const compiler=Object.assign(new BriefCompilerError("OPENAI_RESPONSE_INVALID",{stage:"language_audit",cause:new PreparationValidationError("AUDIT_OUTPUT_INVALID","language_audit",{path:"PRIVATE_NAME",value:"PRIVATE_VALUE"})}),{diagnosticId:"11111111-1111-4111-8111-111111111111"});
+    const error=new DurableJobExecutionError("BRIEF_COMPILER_RESPONSE_INVALID",{cause:compiler,retryable:false});
+    const safe=safeErrorForLog(error);expect(safe.cause).toMatchObject({validationCode:"AUDIT_OUTPUT_INVALID",stage:"language_audit",diagnosticId:compiler.diagnosticId});
+    expect(JSON.stringify(safe)).not.toContain("PRIVATE");
+    expect(safeErrorForLog({validationCode:"PRIVATE_VALUE",stage:"PRIVATE_VALUE",diagnosticId:"PRIVATE_VALUE"})).not.toHaveProperty("diagnosticId");
+  });
   it("preserves a bounded database cause without logging SQL, parameters or private text", () => {
     const cause = Object.assign(new Error("private account in query"), { code: "40P01", query: "private SQL", parameters: ["secret"] });
     const error = Object.assign(new Error("private envelope", { cause }), { code: "BRIEF_COMPILATION_FAILED" });

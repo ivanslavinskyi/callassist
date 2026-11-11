@@ -22,7 +22,7 @@ const excluded: Record<string, string[]> = {
   // Recipient addresses and rendered mail are delivery data, not call telemetry.
   // Original transcript/assessment and creation UI locale have their own sources.
   notification_content_and_delivery: ["superadmin_notification_settings", "superadmin_notifications", "superadmin_notification_audit", "user_call_notifications"],
-  export_storage_and_audit: ["admin_telemetry_privacy_epoch", "admin_telemetry_exports", "admin_telemetry_export_parts", "admin_telemetry_export_events", "admin_telemetry_export_recordings"]
+  export_storage_and_audit: ["preparation_diagnostic_access_events","admin_telemetry_privacy_epoch", "admin_telemetry_exports", "admin_telemetry_export_parts", "admin_telemetry_export_events", "admin_telemetry_export_recordings"]
 };
 const directory = new URL("../db/migrations/", import.meta.url);
 describe("telemetry source inventory", () => {
