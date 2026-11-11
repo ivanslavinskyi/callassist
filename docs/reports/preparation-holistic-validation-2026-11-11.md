@@ -398,3 +398,12 @@ The migration catalog validated all 116 entries. First-party license and public
 copy checks passed. All 387 local links in the 12 changed Markdown documents
 resolved, including heading anchors. The earlier runtime/database tests are
 recorded above; full repository verification is also defined by `.github/workflows/ci.yml`.
+
+The first full CI run found four stale release expectations: two configuration
+tests still pinned compiler 16, the upgrade test stopped at migration 0115, and
+rotation expected 31 ciphertext families instead of 33 after the diagnostic tables.
+Those fixtures were aligned with the implemented profile/catalog. Runtime behavior
+was unchanged. The initial run passed 2,656 API tests plus all web/contract tests;
+its four failures are retained in [the original CI run](https://github.com/ivanslavinskyi/callassist/actions/runs/43087153320).
+All 17 tests in the four affected suites then passed locally against a disposable
+database, including upgrade idempotency and encryption rotation.

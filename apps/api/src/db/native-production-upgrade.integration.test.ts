@@ -112,7 +112,7 @@ it("upgrades 0109 without changing existing recording retention or consent, and 
   expect((await sql`SELECT column_default FROM information_schema.columns
     WHERE table_name='call_briefs' AND column_name='audio_retention_days'`)[0]!.column_default).toBe("30");
   const before = await sql`SELECT * FROM schema_migrations ORDER BY name`;
-  expect(before.at(-1)!.name).toBe("0115_default_audio_retention_copy.sql");
+  expect(before.at(-1)!.name).toBe("0116_preparation_validation_events.sql");
   await runMigrations(target.toString());
   expect(await sql`SELECT * FROM schema_migrations ORDER BY name`).toEqual(before);
   expect(await sql`SELECT * FROM call_compilation_approvals ORDER BY id`).toEqual(beforeApprovals);

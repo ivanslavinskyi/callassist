@@ -137,7 +137,7 @@ it("rotates immutable text evidence and queued input without changing source has
     const [ownerNotification] = await sql`SELECT payload_ciphertext FROM user_call_notifications WHERE id=${ownerNotificationId}`;
     expect(decryptJson(ownerNotification!.payload_ciphertext, currentKeyring)).toEqual(ownerPayload);
     expect(rotation).toMatchObject({
-      ciphertextFamilies: 31, remainingNonActiveCiphertexts: 0
+      ciphertextFamilies: 33, remainingNonActiveCiphertexts: 0
     });
     expect(rotation.rewrittenCiphertexts).toBeGreaterThanOrEqual(4);
     expect((await current.get(historical.id))?.compilation?.snapshotHash).toBe(historicalHash);

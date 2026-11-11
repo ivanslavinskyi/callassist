@@ -33,11 +33,11 @@ it("reports the selected release to admins and rejects readiness when the saved 
   vi.stubEnv("VOICE_RUNTIME_LIVE_EXPERIMENT", "native_v2"); vi.stubEnv("REALTIME_AGENT_HANGUP_ENABLED", "true");
   const f = await fixture(); await f.auth.setUserRoleForTest(f.user.id, "superadmin");
   const initial = await f.app.inject({ method: "GET", url, headers: { cookie: f.cookie } });
-  expect(initial.json().runtimeProfile).toMatchObject({ name: "native_v2", compilerVersion: "brief-compiler-16", ready: false });
+  expect(initial.json().runtimeProfile).toMatchObject({ name: "native_v2", compilerVersion: "brief-compiler-17", ready: false });
   expect((await f.app.inject({ method: "GET", url: "/health/ready" })).statusCode).toBe(503);
   const settings = await f.repository.getPreparationSettings();
   vi.spyOn(f.repository, "getPreparationSettings").mockResolvedValue({ ...settings,
-    policy: { ...settings.policy, promptVersion: "preparation-live-plan-only-2026-11-10" } });
+    policy: { ...settings.policy, promptVersion: "preparation-live-holistic-2026-11-11" } });
   const ready = await f.app.inject({ method: "GET", url: "/health/ready" });
   expect(ready.statusCode).toBe(200);
   expect(ready.json()).toEqual({ status: "ready", checks: { database: "ready", runtimeProfile: "ready" } });
