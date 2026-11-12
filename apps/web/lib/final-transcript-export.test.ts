@@ -43,6 +43,19 @@ const input = {
 };
 
 describe("final transcript export", () => {
+  it("exports the displayed brand spelling while preserving the source and recipient's words", () => {
+    const source = { ...finalTranscript, text: "Grüezi, ich bin Schprochli. Ich bin Schprochli.", segments: [
+      { ...finalTranscript.segments[0], text: "Grüezi, ich bin Schprochli." },
+      { ...finalTranscript.segments[1], text: "Ich bin Schprochli." }
+    ] };
+    const original = structuredClone(source);
+    const exportInput = { ...input, finalTranscript: source };
+    for (const output of [buildFinalTranscriptCopyText(exportInput), JSON.stringify(buildFinalTranscriptPdfDefinition(exportInput))]) {
+      expect(output).toContain("Grüezi, ich bin Shprohli.");
+      expect(output).toContain("Ich bin Schprochli.");
+    }
+    expect(source).toEqual(original);
+  });
   it("describes the actual source in copied text and PDF, including legacy defaults", () => {
     const native = { ...input, finalTranscript: { ...finalTranscript, source: "live_native" as const } };
     const nativeText = buildFinalTranscriptCopyText(native);

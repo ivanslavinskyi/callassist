@@ -1,5 +1,5 @@
 import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
-import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
+import { ASSISTANT_DISPLAY_NAME, transcriptDisplayText } from "./assistant-identity";
 import { summaryExportLines } from "./summary-presentation";
 import { summaryCoverageMessages } from "@callassist/contracts";
 import type { CallSummaryPayload } from "@callassist/contracts";
@@ -33,7 +33,7 @@ export function buildDerivedTranscriptCopyText(input: DerivedTranscriptExport) {
   const copy = textArtifactMessages[input.uiLocale];
   return [...exportHeader(input), "", coverageNote(input), ...summaryExportLines(input.summary), "", appointmentNote(input), transcriptSourceDescription(input.uiLocale,input.revision.source), "", ...input.segments.map((segment) => {
     const timestamp = segment.startSeconds === null ? "" : `[~${formatTranscriptOffset(segment.startSeconds)}] `;
-    return `${timestamp}[${segment.id}] ${speaker(input, segment)}: ${segment.text}`;
+    return `${timestamp}[${segment.id}] ${speaker(input, segment)}: ${transcriptDisplayText(segment)}`;
   }), ...(input.segments.length ? [] : [input.text]), "", input.translationLanguage ? copy.translationNote : "", messages[input.uiLocale].live.aiWarning].filter((value, index, values) => value || values[index - 1]).join("\n");
 }
 
@@ -59,7 +59,7 @@ export function buildDerivedTranscriptPdfDefinition(input: DerivedTranscriptExpo
       ...(created ? [{ label: common.sourceCreated, value: created }] : [])
     ],
     turns: input.segments.map(segment => ({
-      id: segment.id, role: segment.role, text: segment.text,
+      id: segment.id, role: segment.role, text: transcriptDisplayText(segment),
       speaker: segment.role === "unknown" ? common.unassigned : speaker(input, segment),
       offset: segment.startSeconds === null ? null : `~${formatTranscriptOffset(segment.startSeconds)}`
     })),

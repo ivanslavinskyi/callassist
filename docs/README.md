@@ -1,6 +1,6 @@
 # Documentation
 
-**Source reviewed:** 2026-11-11, current candidate; schema catalog `0001`–`0116`.
+**Source reviewed:** 2026-11-12, stable checkpoint `stable-2026-11-12`; schema catalog `0001`–`0116`.
 
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
@@ -13,8 +13,10 @@ the original source. The [10 November stabilization record](plans/native-runtime
 distinguishes automated checks and the owner-reported successful local test from
 production rollout, which remains separate. The
 [11 November preparation and appointment record](reports/preparation-holistic-validation-2026-11-11.md)
-documents the current runtime `live-plan-only-2026-11-11.2`, diagnostics, verification
-and user-reported local acceptance. Host-specific evidence stays in local operational records.
+documents that release's diagnostics, verification and user-reported local acceptance.
+The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
+records the current runtime `live-plan-only-2026-11-12.2`, accepted pronunciation,
+German greeting and transcript spelling. Host-specific evidence stays in local operational records.
 
 ## Maintained references
 
@@ -30,6 +32,10 @@ and user-reported local acceptance. Host-specific evidence stays in local operat
 | [Task information and testing](task-input-and-testing.md) | Information sources, 30-day audio default, tester grants, scenario catalog, expense attribution and PDF assessment |
 
 ## Verification records
+
+[Brand pronunciation, German greeting and stable checkpoint, 12 November 2026](reports/native-brand-stable-2026-11-12.md)
+records the accepted instruction-only change, display spelling, regression coverage
+and the Git/CI checkpoint. It preserves the prior preparation and action contracts.
 
 [Task boundaries, participant roles and silent closing, 9 November 2026](reports/native-task-boundary-2026-11-09.md)
 records that release, its unchanged SQL catalog, regression coverage, CI and

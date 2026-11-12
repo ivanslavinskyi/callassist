@@ -1,7 +1,7 @@
 # Native GPT-Live validation
 
 **Status:** maintained engineering procedure.\
-**Source reviewed:** 2026-11-11.\
+**Source reviewed:** 2026-11-12.\
 **Scope:** `live_native_v2` verification; commands do not imply a production deployment.
 
 Use the [runtime specification](native-live-runtime.md) for behavior and the
@@ -52,7 +52,7 @@ Use the normal local setup in the [README](../README.md) and
 | Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
 | Latest integrity plan | Policy `preparation-live-holistic-2026-11-11`, compiler 17, schema 11, approval 10 |
-| Native instructions | Newly described attempts use `live-plan-only-2026-11-11.2`; full canonical startup context and tools derived from approved appointment authority |
+| Native instructions | Newly described attempts use `live-plan-only-2026-11-12.2`; full canonical startup context and tools derived from approved appointment authority |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
 
@@ -65,8 +65,10 @@ exercise new preparation instructions.
 Provider session admission precedes dialing and can accrue usage before a human
 answers. Health checks do not start calls. Restart processes only after confirming
 that no active call or relevant job would be interrupted; configuration is read at
-startup. The [11 November validation record](reports/preparation-holistic-validation-2026-11-11.md)
-records automated checks and the user-reported correct local behavior; production
+startup. The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
+records the accepted pronunciation/display update and its verification. The
+[11 November validation record](reports/preparation-holistic-validation-2026-11-11.md)
+retains preparation and appointment evidence; production
 deployment and a controlled production call remain separate steps. Use the current local runbook for host
 operations. The 8 November preparation record describes the earlier schema transition.
 
@@ -89,6 +91,7 @@ insertion do not call a provider or start preparation automatically.
 | Empty sections and explicit restrictions in seven UI locales | Web `lib/task-only-plan.test.tsx` |
 | Historical contracts and approvals | `brief-compiler/archived-native-compatibility.test.ts`, contract `live-task.test.ts` |
 | Startup and conversational profiles | `voice/native-live-admission.test.ts`, `live-native-prompts.test.ts`, `live-native-profiles.test.ts` |
+| Assistant identity and transcript spelling | API `voice/live-assistant-identity.test.ts`; contract `live-task.test.ts`; web `lib/native-transcript-display.test.ts`, `final-transcript-export.test.ts`, `call-result-projection.test.ts`, `components/call-result-panel.test.tsx` |
 | Numeric evidence and action lifecycle | `appointments/native-terms-evidence.test.ts`, `native-appointment-authorization.test.ts`, `voice/native-appointment-call.test.ts` |
 | Approved tool IDs, internal argument repair and private diagnostics | `voice/native-appointment-contract.test.ts`, `voice/native-live-v2.test.ts` |
 | Interruptions, closing and recovery | `voice/live-native-closing.test.ts`, `native-live-stability.test.ts`, `native-live-v2.test.ts` |

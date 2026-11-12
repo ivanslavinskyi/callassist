@@ -53,7 +53,7 @@ export function buildNativeOpening(input: {
   if (why === undefined) throw new Error("UNSUPPORTED_OPENING_LOCALE");
   const copy: Record<string, [string, string, string]> = {
     ru: [`Здравствуйте! Я ${name}, ИИ-ассистент. Звоню от имени ${person}${why}.`, "Разговор записывается и расшифровывается.", informal ? "Тебе удобно сейчас говорить?" : "Вам удобно сейчас говорить?"],
-    de: [`Guten Tag, ich bin ${name}, ${female ? "eine KI-Assistentin" : "ein KI-Assistent"}. Ich rufe${why} im Auftrag von ${person} an.`, "Das Gespräch wird aufgezeichnet und transkribiert.", informal ? "Passt es dir gerade zu sprechen?" : "Passt es Ihnen gerade zu sprechen?"],
+    de: [`Grüezi, ich bin ${name}, ${female ? "eine KI-Assistentin" : "ein KI-Assistent"}. Ich rufe${why} im Auftrag von ${person} an.`, "Das Gespräch wird aufgezeichnet und transkribiert.", informal ? "Passt es dir gerade zu sprechen?" : "Passt es Ihnen gerade zu sprechen?"],
     en: [`Hello, I’m ${name}, an AI assistant calling on behalf of ${person}${why}.`, "This call is being recorded and transcribed.", "Is now a good time to talk?"],
     fr: [`Bonjour, je suis ${name}, ${female ? "une assistante IA" : "un assistant IA"}. J’appelle au nom de ${person}${why}.`, "Cet appel est enregistré et transcrit.", informal ? "Tu as un moment pour parler ?" : "Avez-vous un moment pour parler ?"],
     it: [`Buongiorno, sono ${name}, ${female ? "un’assistente IA" : "un assistente IA"}. Chiamo per conto di ${person}${why}.`, "La chiamata viene registrata e trascritta.", informal ? "Hai un momento per parlare?" : "Ha un momento per parlare?"]

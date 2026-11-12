@@ -7,6 +7,10 @@ Latest local runtime: `live-plan-only-2026-11-11.2`; compiler 17, schema 11 and
 approval 10. The user confirmed correct behavior after the final local restart.
 Earlier sections retain their original verification chronology and runtime versions.
 
+Subsequent checkpoint: [12 November stable acceptance](native-brand-stable-2026-11-12.md)
+updates pronunciation, German greetings and transcript display while retaining
+this preparation and appointment implementation.
+
 ## Implementation
 
 The native profile now writes compiler 17 / schema 11 under

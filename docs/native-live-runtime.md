@@ -1,7 +1,7 @@
 # Native GPT-Live runtime
 
-**Status:** Plan-only runtime, closing recovery and appointment contract repair implemented; user confirmed correct local behavior on 2026-11-11. Production rollout remains separate.\
-**Source reviewed:** 2026-11-11, current candidate.\
+**Status:** Stable checkpoint `stable-2026-11-12`, accepted by the user after local testing. Production rollout remains separate.\
+**Source reviewed:** 2026-11-12.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
 This is the maintained specification for `live_native_v2`. It describes application
@@ -15,6 +15,8 @@ the previous contracts and rollout. The [10 November stabilization record](plans
 records that stabilization. The
 [11 November validation record](reports/preparation-holistic-validation-2026-11-11.md)
 records the current preparation/appointment changes, checks and user-reported local acceptance.
+The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
+records the subsequent accepted pronunciation, German greeting and display spelling.
 
 ## Architecture and ownership
 
@@ -96,7 +98,7 @@ checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.t
 | Compiled plan | Schema `11` | Archived schemas are read through explicit readers |
 | Approved snapshot | Version `10` | Earlier versions remain readable; new preparation and approval required for native execution |
 | Terminal decision | Version `3` | Versions 1/2 remain readable; conditional evidence now refers to the approved plan |
-| Runtime and prompt identity | `live-plan-only-2026-11-11.2` | Frozen per-attempt descriptor and configuration hashes |
+| Runtime and prompt identity | `live-plan-only-2026-11-12.2` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
 | Summary generator | `summary-v8` | Earlier artifacts are preserved |
 | Native evaluator format | `native-summary-v3` | Selected for context v2; v6/v7 retain their formats when replayed |
@@ -223,6 +225,19 @@ commentary when media is ready. Live chooses the wording and includes:
 - only the selected assistance reason: speech impairment, language barrier or none;
 - recording and transcription notice;
 - a natural readiness question, then a pause before the first task question.
+
+Both German call locales (`de-CH`, `de-DE`) open with “Grüezi”. The written name
+remains `Shprohli`; session and opening instructions share localized pronunciation
+cues and IPA `/ˈʃprox.li/`, with an audible /x/ from the first introduction in every
+call language. German instructions also contain a phonetic first-sentence example,
+“Grüezi, ich bin Schprochli, …”, with the selected voice's grammatical gender.
+The user confirmed the intended pronunciation in two cedar samples on 12 November;
+this does not establish reliability across all calls or voices. Native captions may
+use the phonetic spelling. The web transcript and copy/PDF exports display
+`Shprohli` in the assistant's German self-introduction (`ich bin`, `mein Name ist`
+or `hier spricht`). This presentation rule runs after live fragment grouping; it
+does not change other speakers, unassigned text, source evidence or its hashes.
+Actual pronunciation still requires audio evaluation.
 
 Readiness is conversational, not affirmative recording consent. Native v2 requests
 recording from connection with `recording_basis=declarative_local`. The stored value

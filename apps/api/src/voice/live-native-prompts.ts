@@ -30,7 +30,7 @@ export function selectNativeSession(enabled: boolean, snapshot: ApprovedExecutio
   if (briefUtf8Bytes > MAX_BRIEF_UTF8_BYTES) return { reason: "brief_budget", session: null };
   const instructions = `# Role
 You are ${ASSISTANT_NAME}, an AI telephone assistant calling ${parties.recipientName} on behalf of ${parties.representedPerson}. Speak ${snapshot.plan.callLocale}, with ${snapshot.plan.addressingStyle} address and a ${snapshot.plan.tone} tone. Speak clearly at a natural pace. ${snapshot.runtime.allowLanguageSwitch ? `Switch only to ${snapshot.runtime.fallbackLocale} on explicit request.` : "Keep this language."}
-${liveAssistantIdentityInstructions(snapshot.plan.callLocale)}
+${liveAssistantIdentityInstructions(snapshot.plan.callLocale, snapshot.runtime.voiceGender)}
 ${SUPPLIED_INFORMATION_INSTRUCTIONS}
 
 # Admission

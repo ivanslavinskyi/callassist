@@ -15,6 +15,21 @@ const translation = { id: "artifact-1", kind: "transcript_translation", status: 
 } as CallTextArtifact;
 
 describe("revision-bound call results", () => {
+  it("exports the displayed brand spelling without changing the revision or evidence references", () => {
+    const source: FinalTranscriptRevision = { ...revision, text: "Grüezi, ich bin Schprochli.", segments: [
+      { ...revision.segments[0], role: "assistant", text: "Grüezi, ich bin Schprochli." }
+    ] };
+    const original = structuredClone(source);
+    const input = { brief: { recipientName: "Office", locale: "de-CH" } as CallBrief,
+      revision: source, segments: source.segments, text: source.text, translationLanguage: null, uiLocale: "de" as const };
+    for (const output of [buildDerivedTranscriptCopyText(input), JSON.stringify(buildDerivedTranscriptPdfDefinition(input))]) {
+      expect(output).toContain("Grüezi, ich bin Shprohli.");
+      expect(output).not.toContain("Schprochli");
+      expect(output).toContain(source.sourceHash);
+      expect(output).toContain(source.segments[0].id);
+    }
+    expect(source).toEqual(original);
+  });
   it("qualifies exported reports with journal state only from the same attempt", () => {
     const boundRevision = { ...revision, callAttemptId: "attempt-2" };
     const action = { callAttemptId: boundRevision.callAttemptId, state: "uncertain" as const, delivery: null };

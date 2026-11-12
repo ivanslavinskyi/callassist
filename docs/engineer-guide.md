@@ -1,7 +1,7 @@
 # SHPROHLI engineer guide
 
-Source reviewed: 2026-11-11, including holistic preparation, canonical language,
-appointment contract repair and schema catalog `0001`–`0116`. This describes the
+Source reviewed: 2026-11-12, including holistic preparation, canonical language,
+appointment contract repair, brand pronunciation/display and schema catalog `0001`–`0116`. This describes the
 implementation, not the currently deployed environment. Deployment runbooks,
 recovery procedures and VPS topology are local, ignored operational materials.
 The dated implementation records in the [documentation index](README.md) retain
@@ -128,7 +128,7 @@ can count as substantive. Assessment uncertainty has a bounded settlement path.
 ### Native v2
 
 The explicit `native_v2` mode uses `NativeLiveV2Call`, version
-`live-plan-only-2026-11-11.2`. Live receives the complete approved localized plan at
+`live-plan-only-2026-11-12.2`. Live receives the complete approved localized plan at
 startup, owns the declarative opening, ordinary replies and short closing, and uses
 backend tools at action/refusal/termination boundaries. Original task sources stay
 outside Live and its backend, but remain available for post-call assessment. Optional indexed references
@@ -142,6 +142,11 @@ The audited configuration command applies that policy and startup verifies align
 See [runtime profiles](runtime-profiles.md), the [native specification](native-live-runtime.md)
 and [validation guide](native-live-validation.md). Low-level compatibility flags or a
 model change in Admin System alone do not select the integrity compiler.
+
+The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
+adds a German spoken-name example and “Grüezi” in both German locales. Web
+transcripts and copy/PDF exports use `Shprohli` in the assistant's German
+self-introduction; stored transcript evidence remains unchanged.
 
 ### Managed default and compatibility paths
 

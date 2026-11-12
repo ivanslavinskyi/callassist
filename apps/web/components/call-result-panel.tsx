@@ -1,5 +1,5 @@
 "use client";
-import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
+import { ASSISTANT_DISPLAY_NAME, transcriptDisplayText } from "@/lib/assistant-identity";
 import { transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 import { consentTimeline } from "@/lib/i18n/consent-timeline";
 
@@ -148,6 +148,6 @@ function TranscriptLine({ segment, brief, sourceId }: { segment: SourceSegment; 
     <div className="speaker-mark">{segment.role === "assistant" ? "AI" : segment.role === "recipient" ? "RE" : segment.role === "system" ? "✓" : "?"}</div>
     <div><div className="speaker-row"><strong>{segment.role === "assistant" ? ASSISTANT_DISPLAY_NAME : segment.role === "recipient" ? brief.recipientName : segment.role === "system" ? consentTimeline[locale].system : messages.live.unassignedSpeaker}</strong>
       {segment.startSeconds !== null ? <time>~{formatTranscriptOffset(segment.startSeconds)}</time> : null}
-    </div><p>{segment.text}</p></div>
+    </div><p>{transcriptDisplayText(segment)}</p></div>
   </article>;
 }

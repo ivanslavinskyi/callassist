@@ -4,7 +4,7 @@ export const runtimeProfiles = {
     name: "native_v2", release: "native-v2-holistic-2026-11-11", mode: "live_native_v2",
     experiment: "native_v2", promptVersion: "preparation-live-holistic-2026-11-11",
     compilerVersion: "brief-compiler-17", planSchemaVersion: "11",
-    runtimeVersion: "live-plan-only-2026-11-11.2", minimumMigration: "0116_preparation_validation_events.sql"
+    runtimeVersion: "live-plan-only-2026-11-12.2", minimumMigration: "0116_preparation_validation_events.sql"
   },
   managed: {
     name: "managed", release: "managed-v9", mode: "unified_live",

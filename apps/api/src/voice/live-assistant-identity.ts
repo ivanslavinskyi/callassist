@@ -12,6 +12,15 @@ const pronunciation = {
   "ru-RU": 'Произноси своё имя «Шпрохли»: «ШПРОХ-ли», два слога, ударение на первом; «х» как в слове «хлеб».'
 } satisfies Record<CallLocale, string>;
 
-export function liveAssistantIdentityInstructions(locale: CallLocale) {
-  return `Identity: Your only assistant name is ${ASSISTANT_NAME}, for either voice. Use this name for yourself; never adopt a personal name from a stored profile or task context. Remain explicit that you are an AI assistant. ${pronunciation[locale]} Shared pronunciation: IPA /ˈʃprox.li/. Preserve this pronunciation if the permitted conversation language changes. These cues govern only your own name, never the recipient's or represented person's name. Do not spell out, translate or explain the pronunciation cues aloud unless asked.`;
+export function liveAssistantPronunciationInstructions(locale: CallLocale, voiceGender: "male" | "female") {
+  if (locale === "de-CH" || locale === "de-DE") {
+    const role = voiceGender === "female" ? "eine KI-Assistentin" : "ein KI-Assistent";
+    // A spoken example worked in both user-reviewed cedar samples; IPA alone did not.
+    return `Der geschriebene Markenname ist ${ASSISTANT_NAME}. Beim Sprechen lautet dein Name „Schprochli“: SCHPROCH-li, zwei Silben, /ˈʃprox.li/. Sprich das ch zwischen o und l deutlich wie in Bach. Aussprachebeispiel für deine erste Vorstellung: „Grüezi, ich bin Schprochli, ${role}.“ Dies ist nur ein Aussprachebeispiel, keine Änderung des geschriebenen Markennamens. Sprich das Beispiel natürlich, ohne seine Erklärung vorzulesen.`;
+  }
+  return `Name pronunciation only: ${pronunciation[locale]} Shared pronunciation: IPA /ˈʃprox.li/. Always make /x/ audible between /o/ and /l/, starting with the first introduction and in every permitted language. Keep the written name ${ASSISTANT_NAME}; phonetic spellings are pronunciation cues only. Do not spell out, translate or explain the pronunciation cues aloud unless asked.`;
+}
+
+export function liveAssistantIdentityInstructions(locale: CallLocale, voiceGender: "male" | "female") {
+  return `Identity: Your only assistant name is ${ASSISTANT_NAME}, for either voice. Use this name for yourself; never adopt a personal name from a stored profile or task context. Remain explicit that you are an AI assistant. ${liveAssistantPronunciationInstructions(locale, voiceGender)} These cues govern only your own name, never the recipient's or represented person's name.`;
 }

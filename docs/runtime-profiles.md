@@ -1,7 +1,7 @@
 # Runtime profiles
 
-**Status:** implemented; production deployment is a separate operation.\
-**Source reviewed:** 2026-11-11.
+**Status:** stable checkpoint `stable-2026-11-12`; production deployment is a separate operation.\
+**Source reviewed:** 2026-11-12.
 
 `CALL_RUNTIME_PROFILE` selects a reviewed pair of voice runtime and preparation
 instructions. The checked-in environment example selects `native_v2`. Existing
@@ -9,8 +9,12 @@ installations without this variable retain their previous low-level behavior.
 
 | Profile | Voice | Preparation policy | Compiler / plan schema |
 | --- | --- | --- | --- |
-| `native_v2` | Native v2, `live-plan-only-2026-11-11.2` | `preparation-live-holistic-2026-11-11` | 17 / 11 |
+| `native_v2` | Native v2, `live-plan-only-2026-11-12.2` | `preparation-live-holistic-2026-11-11` | 17 / 11 |
 | `managed` | Managed Live, `live-managed-v9` | `preparation-2026-10-05` | 6 / 4 |
+
+The [12 November checkpoint](reports/native-brand-stable-2026-11-12.md) updates
+voice instructions and transcript display only. It retains the holistic profile
+release, preparation policy, compiler/schema versions and migration catalog.
 
 Both profiles select the Live driver, disable automatic Realtime fallback and enable
 agent hangup. Models, service tiers, provider budgets, capacity limits, pricing and

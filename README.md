@@ -23,8 +23,13 @@ explicit compatibility paths. Repository checks do not establish the deployed ve
 See the [native runtime specification](docs/native-live-runtime.md).
 Use [runtime profiles](docs/runtime-profiles.md) to align voice and preparation without manual SQL.
 
-The 11 November update uses compiler 17 / schema 11 and runtime
-`live-plan-only-2026-11-11.2`: one holistic review in the existing audit stage,
+The current stable checkpoint is `stable-2026-11-12`, with runtime
+`live-plan-only-2026-11-12.2`. It adds the user-accepted Shprohli pronunciation
+instructions, “Grüezi” for both German call locales and canonical brand spelling
+in the displayed German introduction and transcript exports, without TTS. See the
+[stable checkpoint record](docs/reports/native-brand-stable-2026-11-12.md).
+
+It retains the 11 November compiler 17 / schema 11 update: one holistic review in the existing audit stage,
 encrypted preparation diagnostics, canonical call-language context and appointment
 tools bound to approved authority. The user accepted the local correction. See the
 [validation and acceptance record](docs/reports/preparation-holistic-validation-2026-11-11.md);

@@ -1,6 +1,6 @@
 import { consentTimeline } from "./i18n/consent-timeline";
 import { transcriptSourceCopy, transcriptSourceDescription } from "./i18n/transcript-source-copy";
-import { ASSISTANT_DISPLAY_NAME } from "./assistant-identity";
+import { ASSISTANT_DISPLAY_NAME, transcriptDisplayText } from "./assistant-identity";
 import { extendMessages } from "./i18n/extend-messages";
 import type {
   CallBrief,
@@ -97,7 +97,7 @@ export function buildFinalTranscriptPdfDefinition(
     ],
     turns: finalTranscript.segments.map(segment => ({
       speaker: speakerName(brief, segment.role, copy.unassigned, consentTimeline[uiLocale].system), role: segment.role,
-      offset: `~${formatTranscriptOffset(segment.startSeconds)}`, text: segment.text
+      offset: `~${formatTranscriptOffset(segment.startSeconds)}`, text: transcriptDisplayText(segment)
     })),
     text: finalTranscript.text ?? "",
     notes: [copy.warning]
@@ -141,7 +141,7 @@ function transcriptLines(brief: CallBrief, finalTranscript: FinalTranscript, una
   }
   return finalTranscript.segments.map(
     (segment) =>
-      `[~${formatTranscriptOffset(segment.startSeconds)}] ${speakerName(brief, segment.role, unassigned, system)}: ${segment.text}`
+      `[~${formatTranscriptOffset(segment.startSeconds)}] ${speakerName(brief, segment.role, unassigned, system)}: ${transcriptDisplayText(segment)}`
   );
 }
 

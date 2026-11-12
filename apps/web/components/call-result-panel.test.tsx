@@ -18,6 +18,17 @@ function render(status: CallTextArtifact["status"]) {
   return renderToStaticMarkup(<CallResultPanel brief={brief} userId="owner" revision={revision} taskLanguage="ru"
     promptLanguage="ru" initialArtifacts={[artifact]} />);
 }
+it.each(["de-CH", "de-DE"] as const)("displays the canonical name in a saved %s opening without rewriting its source", locale => {
+  const source: FinalTranscriptRevision = { ...revision, text: "Grüezi, ich bin Schprochli.", segments: [
+    { id: "opening", role: "assistant", text: "Grüezi, ich bin Schprochli.", startSeconds: 0, endSeconds: 2 }
+  ] };
+  const original = structuredClone(source);
+  const html = renderToStaticMarkup(<CallResultPanel brief={{ ...brief, locale }} userId="owner" revision={source}
+    taskLanguage="de" promptLanguage="de" initialArtifacts={[]} showSummary={false} />);
+  expect(html).toContain("Grüezi, ich bin Shprohli.");
+  expect(html).not.toContain("Schprochli");
+  expect(source).toEqual(original);
+});
 it.each(uiLocales.flatMap(locale => (["queued", "processing"] as const).map(status => ({ locale, status }))))("shows localized $status progress in the result panel in $locale while capabilities load", ({ locale, status }) => {
   state.locale = locale; state.pollingPaused = false; state.availabilityStatus = "loading";
   const html = render(status);

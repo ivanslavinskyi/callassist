@@ -1,7 +1,7 @@
 "use client";
 
 import { isLiveTranscript } from "@callassist/contracts";
-import { ASSISTANT_DISPLAY_NAME } from "@/lib/assistant-identity";
+import { ASSISTANT_DISPLAY_NAME, transcriptDisplayText } from "@/lib/assistant-identity";
 import { transcriptSourceCopy, transcriptSourceDescription } from "@/lib/i18n/transcript-source-copy";
 
 import { consentTimeline } from "@/lib/i18n/consent-timeline";
@@ -732,7 +732,7 @@ export function LiveCall({ callId, userId, userRole }: { callId: string; userId:
                           })}
                         </time>
                       </div>
-                      <p>{segment.text}</p>
+                      <p>{transcriptDisplayText(segment)}</p>
                       {segment.role !== "system" ? <span className="locale-tag">{segment.locale}</span> : null}
                     </div>
                   </article>

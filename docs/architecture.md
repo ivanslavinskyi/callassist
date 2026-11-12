@@ -1,6 +1,6 @@
 # Architecture
 
-**Source reviewed:** 2026-11-11, current candidate; migration catalog `0001`–`0116`.
+**Source reviewed:** 2026-11-12, stable checkpoint `stable-2026-11-12`; migration catalog `0001`–`0116`.
 
 SHPROHLI has a Next.js web application, a Fastify API, PostgreSQL-backed durable
 workers and shared TypeScript contracts. The API owns authorization and immutable
@@ -37,6 +37,9 @@ Native v2 was accepted as stable on 2026-11-08 after local telephone testing. Th
 integration keeps runtime selection explicit; see the
 [acceptance decision](reports/native-v2-stable-acceptance-2026-11-08.md) and subsequent
 [production preparation](reports/native-v2-production-readiness-2026-11-08.md).
+The [12 November checkpoint](reports/native-brand-stable-2026-11-12.md) records the
+current accepted voice instructions and transcript display without changing these
+runtime boundaries.
 
 The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the plan-only
 preparation policy: compiler 17, plan schema 11 and approval 10. The audited configuration

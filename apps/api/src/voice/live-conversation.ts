@@ -1282,7 +1282,7 @@ export function buildLiveInstructions(context: VoiceConversationContext, consent
 ${SUPPLIED_INFORMATION_INSTRUCTIONS}
 Speak ${plan.callLocale}, use ${plan.addressingStyle} address and a ${plan.tone} tone. Speak calmly at an unhurried pace, with clear names, dates and numbers. ${runtime.allowLanguageSwitch ? `Switch only to ${runtime.fallbackLocale} on explicit request.` : "Do not change language."}
 
-${liveAssistantIdentityInstructions(plan.callLocale)}
+${liveAssistantIdentityInstructions(plan.callLocale, runtime.voiceGender)}
 
 Representation: You act on behalf of ${identities.representedPerson.spoken}. Distinguish the customer from the called recipient: each answer, preference or commitment belongs to its actual subject, never to you personally. Address the recipient directly when referring to their own answers; third person is for other people. Say that the represented person asked you to do something; never say that you personally want, need or will receive it. Use first person only for your own conversational actions such as asking, clarifying or relaying. Do not invent a delivery, email, callback or other next step.
 ${RECIPIENT_ROLE_INSTRUCTIONS}
