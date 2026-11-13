@@ -20,12 +20,29 @@ const unmatchedAction: Record<TextLanguage, string> = {
   uk: "Не вдалося однозначно зіставити збережену дію із записом, обговореним у розмові."
 };
 
+const conversationCopy: Record<TextLanguage, {confirmed:string;unconfirmed:string}> = {
+  en:{confirmed:"Confirmed by the recipient in the conversation.",unconfirmed:"The conversation does not establish a confirmed result within the approved conditions."},
+  de:{confirmed:"Von der Gegenstelle im Gespräch bestätigt.",unconfirmed:"Das Gespräch belegt kein bestätigtes Ergebnis innerhalb der genehmigten Bedingungen."},
+  ru:{confirmed:"Подтверждено собеседником в разговоре.",unconfirmed:"В разговоре не подтверждён результат, соответствующий утверждённым условиям."},
+  uk:{confirmed:"Підтверджено співрозмовником у розмові.",unconfirmed:"У розмові не підтверджено результат, що відповідає затвердженим умовам."},
+  fr:{confirmed:"Confirmé par l’interlocuteur pendant la conversation.",unconfirmed:"La conversation ne confirme pas un résultat conforme aux conditions approuvées."},
+  it:{confirmed:"Confermato dall’interlocutore durante la conversazione.",unconfirmed:"La conversazione non conferma un risultato conforme alle condizioni approvate."}
+};
+
+function conversationAppointment(summary:CallSummaryPayload, context:SummarySourceContext,
+  operation:NonNullable<CallSummaryPayload["appointmentResult"]>["operation"],
+  candidate:NonNullable<CallSummaryPayload["appointmentExtraction"]>["candidates"][number]|undefined, confirmed:boolean) {
+  if (!context.representedPerson || !candidate?.date || !candidate.startTime || !candidate.timeZone) return;
+  summary.appointmentResult={operation,representedPerson:context.representedPerson,date:candidate.date,startTime:candidate.startTime,
+    timeZone:candidate.timeZone,status:confirmed?"confirmed":"unconfirmed",sourceSegmentIds:candidate.sourceSegmentIds};
+}
+
 /** Publication repeats the provenance/computation check, including cached chunks. */
 export function assertSummaryArtifactOutput(artifact: CallTextArtifact, payload: unknown) {
-  if (artifact.kind !== "call_summary" || !/^summary-v[45678]:/.test(artifact.generatorVersion)) return;
+  if (artifact.kind !== "call_summary" || !/^summary-v[456789]:/.test(artifact.generatorVersion)) return;
   const context = summarySourceContextSchema.parse(artifact.sourceContext);
   const parsed = callSummaryPayloadSchema.parse(payload);
-  if (parsed.schemaVersion !== 3 || artifact.contextHash !== textPayloadHash(context) ||
+  if ((!artifact.generatorVersion.startsWith("summary-v9:") && parsed.appointmentResult) || parsed.schemaVersion !== 3 || artifact.contextHash !== textPayloadHash(context) ||
       context.compilationId !== artifact.compilationId || context.transcriptRevisionId !== artifact.transcriptRevisionId || context.transcriptSourceHash !== artifact.sourceHash ||
       textPayloadHash(composeCalendarSummary(parsed, context, artifact.targetLanguage, artifact.generatorVersion)) !== textPayloadHash(parsed))
     throw new Error("SUMMARY_CONTEXT_INVALID");
@@ -35,10 +52,12 @@ export function assertSummaryArtifactOutput(artifact: CallTextArtifact, payload:
 export function composeCalendarSummary(summary: CallSummaryPayload, context: SummarySourceContext, language: TextLanguage,
   generatorVersion = "summary-v5:"): CallSummaryPayload {
   const result = structuredClone(summary);
+  const conversation = generatorVersion.startsWith("summary-v9:");
+  if (conversation) { delete result.appointmentResult; delete result.calendar; }
   if (summary.schemaVersion !== 3 || !summary.appointmentExtraction) return result;
   result.unresolved = [...new Set((summary.unresolvedDetails ?? []).map(d => d.text))];
-  if((context.version === 2 || context.version === 3)&&context.nativeAppointmentAuthorization)return /^summary-v[678]:/.test(generatorVersion)
-    ? composeNativeSummary(result,context,language) : composeNativeCalendar(result,context,language,generatorVersion);
+  if((context.version === 2 || context.version === 3)&&context.nativeAppointmentAuthorization)return /^summary-v[6789]:/.test(generatorVersion)
+    ? composeNativeSummary(result,context,language,conversation) : composeNativeCalendar(result,context,language,generatorVersion);
   if (!context.appointmentAuthorization) return callSummaryPayloadSchema.parse(result);
   const candidates = summary.appointmentExtraction.candidates;
   const superseded = new Set(candidates.flatMap(c => c.supersedes));
@@ -62,14 +81,16 @@ export function composeCalendarSummary(summary: CallSummaryPayload, context: Sum
   const text = candidateText + verdictText;
   const action = context.actionEvidence;
   const actionMatches = !!chosen && !!action && action.date === chosen.date && action.startTime === chosen.startTime && action.timeZone === chosen.timeZone;
-  const actionState = actionMatches ? action.state : "unconfirmed";
-  const actionText = !legacy && action && !actionMatches ? unmatchedAction[language]
+  const spokenConfirmed = chosen?.status === "reported_confirmed" && evaluation.eligibility === "within" && evaluation.pastAtReference === false;
+  const actionState = conversation ? spokenConfirmed ? "confirmed" : "unconfirmed" : actionMatches ? action.state : "unconfirmed";
+  const actionText = conversation ? conversationCopy[language][spokenConfirmed?"confirmed":"unconfirmed"] : !legacy && action && !actionMatches ? unmatchedAction[language]
     : actionState === "confirmed" ? words.confirmed : words.unconfirmed;
   const windows = evaluation.windowIndex === null ? context.appointmentAuthorization.windows : [context.appointmentAuthorization.windows[evaluation.windowIndex]!];
   const sourceText = windows.map(w => `${calendarDateDetails(w.date, language).dateLabel}, ${w.startTime}–${w.endTime}`).join("; ");
   result.calendar = { version: APPOINTMENT_CALENDAR_VERSION, contextHash: textPayloadHash(context), candidateId: chosen?.id ?? null,
     ...evaluation, sourceSegmentIds: chosen?.sourceSegmentIds ?? [], label: words.label, text,
     sourceLabel: words.source, sourceText, actionState, actionText };
+  if (conversation) conversationAppointment(result,context,"book",chosen,spokenConfirmed);
   for (const condition of summary.appointmentExtraction.conditions) {
     const finding = result.findings.find(f => f.id === condition.checkId);
     if (!finding) throw new Error("SUMMARY_CALENDAR_CONDITION_INVALID");
@@ -98,9 +119,9 @@ export function composeCalendarSummary(summary: CallSummaryPayload, context: Sum
   return callSummaryPayloadSchema.parse(result);
 }
 
-/** Native reports keep operation semantics and approved rules. The journal and
- * independently cited conversation must agree; neither can supply the other. */
-function composeNativeSummary(summary: CallSummaryPayload, context: Extract<SummarySourceContext,{version:2|3}>, language: TextLanguage): CallSummaryPayload {
+/** Preserve operation and schedule semantics. Historical versions additionally
+ * require the live journal; v9 uses independently cited conversation evidence. */
+function composeNativeSummary(summary: CallSummaryPayload, context: Extract<SummarySourceContext,{version:2|3}>, language: TextLanguage, conversation=false): CallSummaryPayload {
   const authority = context.nativeAppointmentAuthorization!, action = context.nativeAppointmentAction;
   const extraction = summary.appointmentExtraction!, outcome = extraction.nativeOutcome;
   if (!outcome || outcome.operation !== authority.operation) throw new Error("SUMMARY_NATIVE_OUTCOME_INVALID");
@@ -108,7 +129,7 @@ function composeNativeSummary(summary: CallSummaryPayload, context: Extract<Summ
     if (summary.assessment?.goal.status === "achieved")
       summary.assessment.goal.status = summary.assessment.conversation.status === "confirmed" ? "partial" : "uncertain";
   };
-  if (outcome.disposition === "not_required" && !action && !extraction.candidates.some(c => c.status === "reported_confirmed")) {
+  if (outcome.disposition === "not_required" && (conversation || !action) && !extraction.candidates.some(c => c.status === "reported_confirmed")) {
     delete summary.calendar;
     if (summary.assessment?.criteria.some(c => c.status !== "achieved")) downgrade();
     return callSummaryPayloadSchema.parse(summary);
@@ -141,22 +162,23 @@ function composeNativeSummary(summary: CallSummaryPayload, context: Extract<Summ
     ? authority.alternatives.some(a => a.id === proposal!.alternativeId && a.rules.some(r => nativeAppointmentRuleContains(r,proposal!.date,proposal!.startTime)))
     : proposal!.alternativeId === null && existing?.date === proposal!.date && existing.startTime === proposal!.startTime);
   const replacement = authority.operation !== "reschedule" || outcome.previousAppointmentReleased === true;
-  const confirmed = approvedAction && action!.state === "confirmed" && outcome.disposition === "confirmed" &&
+  const confirmed = (conversation || (approvedAction && action!.state === "confirmed")) && outcome.disposition === "confirmed" &&
     chosen?.status === "reported_confirmed" && replacement && evaluation.eligibility === "within" && evaluation.pastAtReference === false;
   if (authority.operation === "cancel") {
     // A cancelled existing slot must never appear as a new calendar appointment.
     delete summary.calendar;
   } else {
     const words = copy[language];
-    const actionState = sameAction ? action!.state === "authorized" ? "sending" : action!.state === "declined" ? "uncertain" : action!.state : "unconfirmed";
+    const actionState = conversation ? confirmed ? "confirmed" : "unconfirmed" : sameAction ? action!.state === "authorized" ? "sending" : action!.state === "declined" ? "uncertain" : action!.state : "unconfirmed";
     summary.calendar = {version:APPOINTMENT_CALENDAR_VERSION,contextHash:textPayloadHash(context),candidateId:chosen?.id??null,...evaluation,
       sourceSegmentIds:chosen?.sourceSegmentIds??[],label:words.label,
       text:(chosen?.date&&chosen.startTime?`${calendarDateDetails(chosen.date,language).dateLabel}, ${chosen.startTime}. `:"")+
         (evaluation.eligibility==="within"?words.within:evaluation.eligibility==="outside"?words.outside:words.unknown),
       sourceLabel:words.source,sourceText:window?`${calendarDateDetails(window.date,language).dateLabel}, ${window.startTime}–${window.endTime}`:"",
       actionState:actionState==="confirmed"&&!confirmed?"unconfirmed":actionState,
-      actionText:confirmed?words.confirmed:action&&!sameAction?unmatchedAction[language]:words.unconfirmed};
+      actionText:conversation?conversationCopy[language][confirmed?"confirmed":"unconfirmed"]:confirmed?words.confirmed:action&&!sameAction?unmatchedAction[language]:words.unconfirmed};
   }
+  if (conversation) conversationAppointment(summary,context,authority.operation,chosen,confirmed);
   for (const condition of extraction.conditions) {
     const finding = summary.findings.find(f=>f.id===condition.checkId);
     if (!finding) throw new Error("SUMMARY_CALENDAR_CONDITION_INVALID");

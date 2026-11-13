@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 export const HOLISTIC_PREPARATION_POLICY = "preparation-live-holistic-2026-11-11" as const;
+export const MATERIAL_PREPARATION_POLICY = "preparation-live-holistic-2026-11-13" as const;
+export const RELIABLE_PREPARATION_POLICY = "preparation-live-holistic-2026-11-13-v2" as const;
+/** All holistic policies retain compiler 17 and the identical execution contract. */
+export function isHolisticPreparationPolicy(value: string | undefined) {
+  return value === HOLISTIC_PREPARATION_POLICY || value === MATERIAL_PREPARATION_POLICY || value === RELIABLE_PREPARATION_POLICY;
+}
 
 export const preparationModelSchema = z.enum(["gpt-5.6", "gpt-5.6-terra", "gpt-6-luna"]);
 export const preparationProfileSchema = z.strictObject({
@@ -23,7 +29,7 @@ export const preparationRuntimePolicySchema = z.strictObject({
   generation: preparationProfileSchema,
   audit: preparationProfileSchema,
   review: preparationProfileSchema,
-  promptVersion: z.enum(["preparation-2026-10-05", "preparation-live-native-v2-2026-11-06", "preparation-live-native-actions-2026-11-06", "preparation-live-native-progressive-2026-11-07", "preparation-live-native-integrity-2026-11-08", "preparation-live-native-roles-2026-11-09", "preparation-live-native-task-2026-11-09", "preparation-live-plan-only-2026-11-10", HOLISTIC_PREPARATION_POLICY]),
+  promptVersion: z.enum(["preparation-2026-10-05", "preparation-live-native-v2-2026-11-06", "preparation-live-native-actions-2026-11-06", "preparation-live-native-progressive-2026-11-07", "preparation-live-native-integrity-2026-11-08", "preparation-live-native-roles-2026-11-09", "preparation-live-native-task-2026-11-09", "preparation-live-plan-only-2026-11-10", HOLISTIC_PREPARATION_POLICY, MATERIAL_PREPARATION_POLICY, RELIABLE_PREPARATION_POLICY]),
   pricingVersion: z.literal("openai-preparation-2026-10-05"),
   timeoutMs: z.number().int().min(1000).max(300_000),
   requestTimeoutMs: z.number().int().min(1000).max(120_000),

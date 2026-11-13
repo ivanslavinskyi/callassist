@@ -14,6 +14,7 @@ import {
   TextProcessingError,
   TextValidationError,
   type TextProcessingInput,
+  type TextProcessingRunOptions,
   type TextProcessingPayload
 } from "./text-processor";
 
@@ -77,17 +78,21 @@ export function validateTextProcessingInput(input: TextProcessingInput): void {
 /** The provider only returns translated text; roles, timing and ordering are local. */
 export function validateTextProcessingOutput(
   input: TextProcessingInput,
-  value: unknown
+  value: unknown,
+  options: Pick<TextProcessingRunOptions, "legacyReviewValidation"> = {}
 ): TextProcessingPayload {
   const payload = record(value);
   if (input.kind === "plan_review" || input.kind === "clarification_review") {
     keys(payload, ["fields"]);
-    const translated = orderedTranslations(payload.fields, input.fields);
+    // Review text is a display translation. Validate its structure and binding,
+    // not lexical equivalence: natural translation can change compound words and
+    // numeric formatting. Execution and assessment keep their own unchanged guards.
+    const translated = orderedTranslations(payload.fields, input.fields, options.legacyReviewValidation === true);
     return planReviewPayloadSchema.parse({ fields: translated });
   }
   if (input.kind === "transcript_translation") {
     keys(payload, ["segments"]);
-    const translated = orderedTranslations(payload.segments, input.segments);
+    const translated = orderedTranslations(payload.segments, input.segments, true);
     const segments = input.segments.map((segment, index) => ({ ...segment, text: translated[index]!.text }));
     return transcriptTranslationPayloadSchema.parse({ segments, text: segments.map((segment) => segment.text).join("\n") });
   }
@@ -95,8 +100,9 @@ export function validateTextProcessingOutput(
   const parsed = callSummaryPayloadSchema.safeParse(payload);
   if (!parsed.success || parsed.data.findings.length !== input.checks.length) invalid();
   const summary = parsed.data;
+  if (summary.appointmentResult) invalid();
   if (input.sourceContext) {
-    if (summary.schemaVersion !== 3 || !summary.appointmentExtraction || summary.calendar || !summary.unresolvedDetails || summary.unresolved.length) invalid();
+    if (summary.schemaVersion !== 3 || !summary.appointmentExtraction || summary.calendar || summary.appointmentResult || !summary.unresolvedDetails || summary.unresolved.length) invalid();
     validateAppointmentExtraction(input, summary.appointmentExtraction);
     if (summary.unresolvedDetails.some(d => !input.checks.some(c => c.id === d.checkId))) invalid("TEXT_INVALID_REFERENCES");
   } else if (summary.schemaVersion !== 2 || summary.calendar) invalid();
@@ -160,21 +166,23 @@ function validateAppointmentExtraction(input: Extract<TextProcessingInput, {kind
   if (outcome.disposition === "confirmed" && (outcome.candidateId === null || candidates.get(outcome.candidateId)?.status !== "reported_confirmed")) invalid("TEXT_INVALID_REFERENCES");
   if (outcome.disposition === "not_required" && (outcome.candidateId !== null || outcome.previousAppointmentReleased !== null ||
     extraction.conditions.length > 0 || extraction.candidates.some(c => c.status === "reported_confirmed") ||
-    ((input.sourceContext?.version === 2 || input.sourceContext?.version === 3) && input.sourceContext.nativeAppointmentAction !== null))) invalid("TEXT_INVALID_REFERENCES");
+    (input.assessmentBasis !== "conversation" && (input.sourceContext?.version === 2 || input.sourceContext?.version === 3) && input.sourceContext.nativeAppointmentAction !== null))) invalid("TEXT_INVALID_REFERENCES");
 }
 
-function orderedTranslations(value: unknown, source: Array<{ id: string; text: string }>) {
+function orderedTranslations(value: unknown, source: Array<{ id: string; text: string }>, checkLiterals: boolean) {
   if (!Array.isArray(value) || value.length !== source.length) invalid();
   return value.map((entry, index) => {
     const item = record(entry);
     keys(item, ["id", "text"]);
     if (item.id !== source[index]!.id || !nonempty(item.text)) invalid();
-    const sourceText = source[index]!.text;
-    const translatedText = item.text as string;
-    if (protectedIdentifiers(sourceText).some((identifier) => !translatedText.includes(identifier)) ||
-      protectedIdentifiers(translatedText).some((identifier) => !sourceText.includes(identifier))) invalid();
-    assertGroundedIdentifiers(translatedText, sourceText);
-    assertGroundedIdentifiers(sourceText, translatedText);
+    if (checkLiterals) {
+      const sourceText = source[index]!.text;
+      const translatedText = item.text as string;
+      if (protectedIdentifiers(sourceText).some((identifier) => !translatedText.includes(identifier)) ||
+        protectedIdentifiers(translatedText).some((identifier) => !sourceText.includes(identifier))) invalid();
+      assertGroundedIdentifiers(translatedText, sourceText);
+      assertGroundedIdentifiers(sourceText, translatedText);
+    }
     return { id: source[index]!.id, text: item.text as string };
   });
 }
@@ -254,5 +262,13 @@ export function textOutputJsonSchema(input: TextProcessingInput) {
 }
 
 export function providerTextInput(input: TextProcessingInput) {
+  if (input.kind === "call_summary" && input.assessmentBasis === "conversation" && input.sourceContext) {
+    const {actionEvidence: _legacy, ...context} = input.sourceContext;
+    if ("nativeAppointmentAction" in context) {
+      const {nativeAppointmentAction: _native, ...sourceContext} = context;
+      return {...input, sourceContext};
+    }
+    return {...input, sourceContext: context};
+  }
   return input;
 }

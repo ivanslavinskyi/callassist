@@ -11,7 +11,7 @@ import { textArtifactMaximumRequests } from "../storage/call-text-repository";
 import { DurableJobExecutionError, type DurableJob, type DurableJobLease } from "../jobs/durable-job";
 import { planReviewFields } from "./plan-review-fields";
 import { textDirectionEnabled, type TextCapabilities } from "./text-capabilities";
-import { TEXT_PROCESSOR_VERSION, TextProcessingError, textGeneratorVersion, compatibleTextGeneratorVersion, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
+import { TEXT_PROCESSOR_VERSION, TextProcessingError, textGeneratorVersion, compatibleTextGeneratorVersion, legacyReviewGenerator, type TextProcessingInput, type TextProcessor, type TextProcessingPayload } from "./text-processor";
 import { summaryInput } from "./summary-input";
 import { buildSummarySourceContext, assertSummaryContext } from "./summary-source";
 import { composeCalendarSummary } from "./summary-calendar";
@@ -32,7 +32,7 @@ export class TextArtifactService {
     }
     const kind = reviewKind(snapshot.compilation);
     const policy=await this.repository.getCompilationPreparationPolicy(callId,source.compilationId);
-    const generatorVersion=policy && this.processor.driver==='openai' ? `${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}` : textGeneratorVersion(this.processor,kind);
+    const generatorVersion=textGeneratorVersion(policy && this.processor.driver==='openai' ? {generatorVersion:`${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}`} : this.processor,kind);
     const existing = await this.#find(callId, kind, source.compilationId, null, source.snapshotHash, input.targetLanguage,generatorVersion);
     if (existing) return existing;
     this.#assertDirection(kind, reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage), input.targetLanguage);
@@ -77,18 +77,31 @@ export class TextArtifactService {
     const artifact = await this.repository.getTextArtifact(callId, artifactId);
     if (!artifact) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_FOUND");
     if (artifact.status === "ready") return artifact;
+    // New review validation gets a new identity; preserve the failed old evidence,
+    // ready translations and approvals. Never retry an older compilation as current.
+    if ((artifact.kind === "plan_review" || artifact.kind === "clarification_review") &&
+        artifact.status === "failed" && artifact.generatorVersion.startsWith(`${TEXT_PROCESSOR_VERSION}:`)) {
+      const source = await this.repository.getPlanSource(callId);
+      if (source.compilationId !== artifact.compilationId || source.snapshotHash !== artifact.sourceHash)
+        throw new CallRepositoryError("TEXT_ARTIFACT_STALE");
+      return this.requestPlanReview(callId, { ...source, targetLanguage: artifact.targetLanguage });
+    }
     // The new native narrative policy fixes a known v6 generation failure.
     // Create a new artifact; keep failed evidence and queued v6 work immutable.
     if (artifact.kind === "call_summary" && artifact.status === "failed" && /^summary-v[67]:/.test(artifact.generatorVersion) &&
         (artifact.sourceContext?.version === 2 || artifact.sourceContext?.version === 3) &&
-        textGeneratorVersion(this.processor, "call_summary").startsWith("summary-v8:") && artifact.transcriptRevisionId)
+        /^summary-v[89]:/.test(textGeneratorVersion(this.processor, "call_summary")) && artifact.transcriptRevisionId)
       return this.requestTranscriptArtifact(callId, "call_summary", {sourceRevisionId:artifact.transcriptRevisionId,targetLanguage:artifact.targetLanguage});
     const snapshot = await this.repository.get(callId);
     if (!snapshot) throw new CallRepositoryError("CALL_NOT_FOUND");
     const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
       ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
     this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
-    if (!compatibleTextGeneratorVersion(artifact.generatorVersion, textGeneratorVersion(this.processor, artifact.kind), artifact.kind)) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
+    const policy = (artifact.kind === "plan_review" || artifact.kind === "clarification_review") && artifact.compilationId
+      ? await this.repository.getCompilationPreparationPolicy(callId, artifact.compilationId) : null;
+    const expectedGenerator = textGeneratorVersion(policy && this.processor.driver === "openai"
+      ? {generatorVersion:`${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}`} : this.processor, artifact.kind);
+    if (!compatibleTextGeneratorVersion(artifact.generatorVersion, expectedGenerator, artifact.kind)) throw new CallRepositoryError("TEXT_ARTIFACT_NOT_RETRYABLE");
     return this.repository.retryTextArtifact(callId, artifactId);
   }
 
@@ -105,7 +118,7 @@ export class TextArtifactService {
       const sourceLanguage = snapshot.compilation && ["plan_review", "clarification_review"].includes(artifact.kind)
         ? reviewSourceLanguage(snapshot.compilation, snapshot.languageContext?.detectedInputLanguage) : "*";
       this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
-      const expectedGenerator=policy && this.processor.driver==='openai' ? `${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}` : textGeneratorVersion(this.processor,artifact.kind);
+      const expectedGenerator=textGeneratorVersion(policy && this.processor.driver==='openai' ? {generatorVersion:`${TEXT_PROCESSOR_VERSION}:openai:${policy.review.model}`} : this.processor,artifact.kind);
       if (!compatibleTextGeneratorVersion(artifact.generatorVersion, expectedGenerator, artifact.kind)) throw new DurableJobExecutionError("TEXT_GENERATOR_UNAVAILABLE", { retryable: false });
       if (artifact.kind === "call_summary") {
         artifact = await this.repository.freezeTextArtifactContext(artifact.id,
@@ -129,6 +142,7 @@ export class TextArtifactService {
         const output = await this.processor.process(input, {
           maxProviderRequests: input.kind === "call_summary" && ["native-summary-v2","native-summary-v3"].includes(input.nativeFormat??"") ? 2 : 1,
           signal: baseLease.signal, profile: policy?.review,
+          ...(legacyReviewGenerator(artifact.generatorVersion,expectedGenerator,artifact.kind) ? {legacyReviewValidation:true} : {}),
           beforeProviderRequest: (request) => {
             this.#assertDirection(artifact.kind, sourceLanguage, artifact.targetLanguage);
             return this.repository.reserveTextArtifactProviderRequest({
@@ -205,12 +219,13 @@ export class TextArtifactService {
     // These are committed original segments retrieved from storage, never a claim
     // taken from the brief, recipient speech or a model/tool authorization.
     const inputs = chunkBySize(source.segments).map(segments => ({ ...summaryInput(compilation, segments, artifact.targetLanguage),
+      ...(artifact.generatorVersion.startsWith("summary-v9:") ? {assessmentBasis: "conversation" as const} : {}),
       ...(artifact.sourceContext ? { sourceContext: assertSummaryContext(artifact) } : {}),
-      ...(/^summary-v[678]:/.test(artifact.generatorVersion) && (artifact.sourceContext?.version === 2 || artifact.sourceContext?.version === 3) && (artifact.generatorVersion.startsWith("summary-v8:")||artifact.sourceContext.nativeAppointmentAuthorization)
-        ? { nativeFormat: artifact.generatorVersion.startsWith("summary-v8:")?"native-summary-v3" as const:artifact.generatorVersion.startsWith("summary-v7:") ? "native-summary-v2" as const : "native-summary-v1" as const, nativeTaskSources: {
+      ...(/^summary-v[6789]:/.test(artifact.generatorVersion) && (artifact.sourceContext?.version === 2 || artifact.sourceContext?.version === 3) && (/^summary-v[89]:/.test(artifact.generatorVersion)||artifact.sourceContext.nativeAppointmentAuthorization)
+        ? { nativeFormat: /^summary-v[89]:/.test(artifact.generatorVersion)?"native-summary-v3" as const:artifact.generatorVersion.startsWith("summary-v7:") ? "native-summary-v2" as const : "native-summary-v1" as const, nativeTaskSources: {
           objective: compilation.rawBrief.objective, context: compilation.rawBrief.context,
           allowedFacts: compilation.rawBrief.allowedFacts, clarificationAnswers: compilation.rawBrief.clarificationAnswers,
-          ...(artifact.generatorVersion.startsWith("summary-v8:")?{deliveryInstruction:compilation.rawBrief.deliveryInstruction}:{})
+          ...(/^summary-v[89]:/.test(artifact.generatorVersion)?{deliveryInstruction:compilation.rawBrief.deliveryInstruction}:{})
         } } : {}),
       applicationFacts: { transcriptPersisted: true as const, resultHandling: compilation.compiledBrief!.resultHandling } }));
     return inputs.length === 1 ? [await this.#assessmentInput(artifact, inputs[0]!)] : inputs;
@@ -248,9 +263,10 @@ export class TextArtifactService {
     // jobs may obtain a new-format artifact without overwriting the original.
     return matching.find(item => item.generatorVersion === generatorVersion) ??
       matching.find(item => compatibleTextGeneratorVersion(item.generatorVersion, generatorVersion, kind) &&
+        !(item.status === "failed" && legacyReviewGenerator(item.generatorVersion,generatorVersion,kind)) &&
         !((item.sourceContext?.version === 2 || item.sourceContext?.version === 3) && (
-          (item.sourceContext.nativeAppointmentAuthorization&&/^summary-v[678]:/.test(generatorVersion) && /^summary-v[45]:/.test(item.generatorVersion)) ||
-          (generatorVersion.startsWith("summary-v8:") && /^summary-v[67]:/.test(item.generatorVersion) && item.status === "failed"))));
+          (item.sourceContext.nativeAppointmentAuthorization&&/^summary-v[6789]:/.test(generatorVersion) && /^summary-v[45]:/.test(item.generatorVersion)) ||
+          (/^summary-v[89]:/.test(generatorVersion) && /^summary-v[67]:/.test(item.generatorVersion) && item.status === "failed"))));
   }
   #assertDirection(kind: TextArtifactKind, sourceLanguage: string, targetLanguage: TextLanguage) {
     if (!this.capabilities.enabled) throw new TextArtifactServiceError("TEXT_GENERATION_DISABLED");

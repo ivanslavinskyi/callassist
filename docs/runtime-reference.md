@@ -1,6 +1,6 @@
 # Runtime and API reference
 
-Updated 2026-11-11 for holistic preparation and appointment contract repair, schema `0001`–`0116`.
+Updated 2026-11-13 for stable preparation, display translation and conversation-based assessment, schema `0001`–`0116`.
 Current domain behavior is documented in [the engineer guide](engineer-guide.md).
 The route inventory below links to source registration modules. Configuration values describe
 the repository defaults, not provider availability, supported pricing or a deployed
@@ -31,7 +31,7 @@ and `REALTIME_AGENT_HANGUP_ENABLED=true`. Production is supported; the obsolete
 `VOICE_RUNTIME_NATIVE_V2_LOCAL` flag is ignored.
 See the maintained [native specification](native-live-runtime.md) for complete
 startup context, prompt responsibilities, action profiles, declared recording,
-privacy, closing and summary-v8 behavior.
+privacy, closing and summary-v9 behavior.
 
 The holistic preparation path uses compiler 17 / schema 11 / approval 10 and requires
 migration 0116 for independent encrypted validation diagnostics. A named
@@ -154,13 +154,19 @@ See [registration/call behavior and tests](archive/registration-and-call-improve
 
 Migrations 0073/0074 add stop events and final assessments. List/snapshot/Inspector responses share the `lifecycle` projection, including `assessment_pending` and `assessment_unavailable`. Operations exposes independent `lifecycle.goals` and `userGoalFeedback` counts. Those two migrations introduce no production environment variable; migration 0075 and opt-out require the additional settings below. Apply migrations before restarting all API/worker processes; do not leave an old worker using immediate refunds. History lives at `/[locale]/app/history`. [Final assessment semantics and verification](archive/post-call-assessment-diagnosis-2026-09-15.md).
 
-`summary-v8` creates grounded summary/findings and assessment from the executed
-source context and original transcript. Context v2 uses `native-summary-v3` for
-schema-9 and schema-10 general and appointment profiles, or a native action. Older contexts keep
+`summary-v9` creates grounded summary/findings and assessment from the executed
+source context and original transcript. Internal action journals neither prove nor
+invalidate conversation-based achievement. A server-derived appointment card keeps
+the explicit approved authority and recipient-confirmation disclaimer. Contexts v2/v3
+use `native-summary-v3` for schema-9/10/11 general and appointment profiles, or a native action. Older contexts keep
 their compatible format; legacy reports remain readable. Normal short successful
 inputs need one request; eligible native inputs allow one targeted grounding repair,
 separately accounted under the shared request budget. Long-call consolidation can
 return explicit partial coverage. See [result semantics and limits](native-live-runtime.md#results-history-and-notifications).
+New display reviews use `review-translation-v1:text-processing-v2:...`; this is a
+code-selected artifact identity, not a separate database-policy switch. The
+[activation list](plans/production-activation-stable-2026-11-13.md) records all new
+versions and preserved contracts.
 
 Display reassessment does not rewrite canonical billing evidence. The five-minute
 reservation deadline starts when termination is first processed and survives

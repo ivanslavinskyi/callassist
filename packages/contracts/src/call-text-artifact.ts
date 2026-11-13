@@ -2,7 +2,7 @@ import { applicationPlaybackReceiptSchema, transcriptSourceSchema, transcriptSeg
 import { z } from "zod";
 import { languageTagSchema, textLanguageSchema } from "./languages";
 import { callAssessmentDecisionSchema } from "./call-assessment";
-import { appointmentExtractionSchema, summaryCalendarSchema, summarySourceContextSchema } from "./summary-source";
+import { appointmentExtractionSchema, summaryCalendarSchema, summarySourceContextSchema, summaryAppointmentResultSchema } from "./summary-source";
 import { archivedSummaryAssessmentSchema, archivedSummaryExtractionSchema, archivedSummaryCalendarSchema } from "./archived-summary";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -36,6 +36,7 @@ export const callSummaryPayloadSchema = z.strictObject({
   unresolvedDetails: z.array(z.strictObject({ checkId: z.string().min(1).max(160),
     reason: z.literal("conversation_evidence"), text: z.string().min(1).max(4000) })).max(30).optional(),
   calendar: z.union([archivedSummaryCalendarSchema, summaryCalendarSchema]).optional(),
+  appointmentResult: summaryAppointmentResultSchema.optional(),
   assessment: z.union([archivedSummaryAssessmentSchema, callAssessmentDecisionSchema]).optional(),
   overview: z.array(z.strictObject({
     label: z.string().trim().min(1).max(160).nullable(), text: z.string().trim().min(1).max(1200),
@@ -45,6 +46,8 @@ export const callSummaryPayloadSchema = z.strictObject({
   nextSteps: z.array(z.strictObject({ text: z.string().trim().min(1).max(2000), sourceSegmentIds: z.array(z.string().min(1)).min(1).max(30) })).max(30),
   unresolved: z.array(z.string().trim().min(1).max(4000)).max(30)
 }).superRefine((value, context) => {
+  if (value.appointmentResult && value.schemaVersion !== 3)
+    context.addIssue({code:"custom",message:"Conversation appointment requires schema 3",path:["appointmentResult"]});
   if (value.schemaVersion === 2 && (value.calendar || value.appointmentExtraction))
     context.addIssue({ code: "custom", message: "Calendar evidence requires schema 3" });
   if (value.schemaVersion >= 3 && !value.appointmentExtraction)

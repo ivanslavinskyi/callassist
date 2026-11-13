@@ -2,7 +2,7 @@ import { validateNativeAppointment } from "../appointments/native-appointment-au
 import { nativeProposal } from "../test-helpers/native-appointment";
 import { describe,expect,it,vi } from "vitest";
 import { createApprovedExecutionSnapshot, createPlanOnlyTaskContext, callCompilationSchema, planOnlyContextText,
-  normalizeCreateCallBriefInput, resolveTaskLanguage, type PreparationDiagnosticInput } from "@callassist/contracts";
+  normalizeCreateCallBriefInput, resolveTaskLanguage, MATERIAL_PREPARATION_POLICY, RELIABLE_PREPARATION_POLICY, type PreparationDiagnosticInput } from "@callassist/contracts";
 import { OpenAIBriefCompiler, type BriefCompilerRunOptions } from "./brief-compiler";
 import { holisticCandidate, holisticInput, holisticPolicy } from "../test-helpers/holistic-candidate";
 import { hasValidCompilationSnapshotHash } from "./compilation-integrity";
@@ -14,7 +14,7 @@ import { responseText,validationCode,PreparationValidationError } from "./prepar
 import { assembleHolisticCandidate, holisticCandidateSchema } from "./holistic-contract";
 import { nativeAuthority } from "../test-helpers/native-appointment";
 
-function provider(candidates:unknown[],audits:unknown[]=[{verdict:"accept",message:""}]) {
+function mockProvider(candidates:unknown[],audits:unknown[]=[{verdict:"accept",message:""}],policy:NonNullable<BriefCompilerRunOptions["policy"]>=holisticPolicy) {
   let generation=0,audit=0;
   const bodies:Array<Record<string,any>>=[];
   const fetchImplementation=vi.fn<typeof fetch>(async(url,init)=>{
@@ -24,10 +24,11 @@ function provider(candidates:unknown[],audits:unknown[]=[{verdict:"accept",messa
     if(value instanceof Response)return value.clone();
     return Response.json({status:"completed",output_text:typeof value==="string"?value:JSON.stringify(value)});
   });
-  const run=(options:BriefCompilerRunOptions={})=>new OpenAIBriefCompiler({apiKey:"test",fetchImplementation}).compile(holisticInput,1,{policy:holisticPolicy,...options});
+  const run=(options:BriefCompilerRunOptions={})=>new OpenAIBriefCompiler({apiKey:"test",fetchImplementation}).compile(holisticInput,1,{policy,...options});
   return {run,bodies,fetchImplementation,count:()=>({generation,audit})};
 }
-describe("holistic preparation and unchanged voice runtime",()=>{
+describe.each([holisticPolicy,{...holisticPolicy,promptVersion:MATERIAL_PREPARATION_POLICY},{...holisticPolicy,promptVersion:RELIABLE_PREPARATION_POLICY}])("holistic preparation and unchanged voice runtime: $promptVersion",policy=>{
+  const provider=(candidates:unknown[],audits?:unknown[])=>mockProvider(candidates,audits,policy);
   it("recovers a localized language name before it can silently select the account fallback",async()=>{
     const good={...await holisticCandidate(),sourceLanguage:"ru-RU"};
     const events:PreparationDiagnosticInput[]=[],p=provider([{...good,sourceLanguage:"Russisch"},good]);
@@ -39,7 +40,9 @@ describe("holistic preparation and unchanged voice runtime",()=>{
     const schema=p.bodies.find(b=>b.text?.format.name==="callassist_holistic_candidate")!.text.format.schema;
     expect(new RegExp(schema.properties.sourceLanguage.pattern).test("Russisch")).toBe(false);
     const audit=JSON.parse(p.bodies.find(b=>b.text?.format.name==="callassist_holistic_review")!.input);
-    expect(audit.sourceLanguage).toBe("ru-RU");expect(audit.execution.plan).not.toHaveProperty("sourceLanguage");
+    if(policy.promptVersion===RELIABLE_PREPARATION_POLICY)expect(audit).not.toHaveProperty("sourceLanguage");
+    else expect(audit.sourceLanguage).toBe("ru-RU");
+    expect(audit.execution.plan).not.toHaveProperty("sourceLanguage");
     expect(events.some(e=>e.metadata.code==="OUTPUT_SCHEMA_INVALID")).toBe(true);
   });
   it.each(["ru","RU-ru","pl","zh-Hant","sr-Latn","und","mul"])("preserves generic source-language tags independently of the call language: %s",async tag=>{
@@ -122,6 +125,14 @@ describe("holistic preparation and unchanged voice runtime",()=>{
     expect((await p.run()).policyDecision.status).toBe("needs_clarification");expect(p.count().generation).toBe(1);
     const refusal=provider([Response.json({status:"completed",output:[{content:[{type:"refusal",refusal:"Cannot comply"}]}]})]);
     expect((await refusal.run()).policyDecision.reasonCodes).toEqual(["model_refusal"]);expect(refusal.count().generation).toBe(1);
+  });
+  it("does not let audit acceptance silently override a blocking policy category",async()=>{
+    const flagged={...await holisticCandidate(),riskCategories:["prompt_injection"]};
+    const blocked=await provider([flagged]).run();
+    expect(blocked.policyDecision).toMatchObject({status:"blocked",reasonCodes:["prohibited_content"]});
+    const corrected=provider([flagged,await holisticCandidate()],[{verdict:"revise",message:"Remove the unsupported risk category; the task only asks for office hours."},{verdict:"accept",message:""}]);
+    expect((await corrected.run()).policyDecision.status).toBe("ready_for_review");
+    expect(corrected.count()).toEqual({generation:2,audit:2});
   });
   it("keeps global request budgets and cancellation active",async()=>{
     const p=provider([await holisticCandidate()]);

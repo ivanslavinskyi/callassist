@@ -40,6 +40,9 @@ describe("revision-bound call results", () => {
     const foreign = { ...input, appointmentAction: { ...action, callAttemptId: "foreign-attempt" } };
     expect(buildDerivedTranscriptCopyText(foreign)).not.toContain(appointmentResultMessages.ru.unresolved);
     expect(JSON.stringify(buildDerivedTranscriptPdfDefinition(foreign))).not.toContain(appointmentResultMessages.ru.unresolved);
+    const conversation={...input,summaryGeneratorVersion:"summary-v9:test",summary:{schemaVersion:3 as const,appointmentExtraction:{candidates:[],conditions:[]},overview:[],findings:[],nextSteps:[],unresolved:[]}};
+    expect(buildDerivedTranscriptCopyText(conversation)).not.toContain(appointmentResultMessages.ru.unresolved);
+    expect(JSON.stringify(buildDerivedTranscriptPdfDefinition(conversation))).not.toContain(appointmentResultMessages.ru.unresolved);
   });
   it("shows journal uncertainty independently of reported text and never borrows another attempt's booking", () => {
     const action = { callAttemptId: "current-attempt", state: "uncertain" as const, delivery: null };

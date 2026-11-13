@@ -84,7 +84,7 @@ export function finalAssessmentSuite(make:()=>Promise<{repository:CallRepository
     expect(facts.lifecycle?.goals?.[category==="task_answer"?"achieved":"notAchieved"]).toBe(1);
     expect(facts.userGoalFeedback).toEqual({yes:0,partly:0,no:0,notProvided:1});
   });
-  it.each(["summary-v4", "summary-v5", "summary-v6", "summary-v7", "summary-v8"])("freezes a %s context and publishes an immutable assessment revision without rebilling", async version => {
+  it.each(["summary-v4", "summary-v5", "summary-v6", "summary-v7", "summary-v8", "summary-v9"])("freezes a %s context and publishes an immutable assessment revision without rebilling", async version => {
     const f = await fixture(); await f.r.updateStatus(f.brief.id,"completed");
     const old = await final(f); await f.r.completeTextArtifact(old.artifact.id,old.payload,old.lease);
     await f.r.completeDurableJob(old.lease.jobId,old.lease.workerId,new Date().toISOString());

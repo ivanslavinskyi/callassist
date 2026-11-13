@@ -1,7 +1,7 @@
 # Native GPT-Live runtime
 
-**Status:** Stable checkpoint `stable-2026-11-12`, accepted by the user after local testing. Production rollout remains separate.\
-**Source reviewed:** 2026-11-12.\
+**Status:** Stable checkpoint `stable-2026-11-13`, accepted by the user after local testing. Production rollout remains separate.\
+**Source reviewed:** 2026-11-13.\
 **Audience:** engineers changing preparation, voice, appointment actions, results or accounting.
 
 This is the maintained specification for `live_native_v2`. It describes application
@@ -17,6 +17,9 @@ records that stabilization. The
 records the current preparation/appointment changes, checks and user-reported local acceptance.
 The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
 records the subsequent accepted pronunciation, German greeting and display spelling.
+The [13 November checkpoint](reports/preparation-results-stable-2026-11-13.md)
+retains that voice implementation and updates preparation, display translation and
+post-call assessment. See the [activation list](plans/production-activation-stable-2026-11-13.md).
 
 ## Architecture and ownership
 
@@ -93,14 +96,14 @@ checked in [runtime-environment.ts](../apps/api/src/config/runtime-environment.t
 
 | Contract | Current native plan-only path | Compatibility |
 | --- | --- | --- |
-| Preparation prompt policy | `preparation-live-holistic-2026-11-11` | Previously pinned policies retain their compiler behavior |
+| Preparation prompt policy | `preparation-live-holistic-2026-11-13-v2` | Preparation instructions only; previously pinned policies retain their compiler behavior |
 | Compiler | `brief-compiler-17` | Earlier compilers remain readable; approved compiler-16 plans remain compatible with approval 10 |
 | Compiled plan | Schema `11` | Archived schemas are read through explicit readers |
 | Approved snapshot | Version `10` | Earlier versions remain readable; new preparation and approval required for native execution |
 | Terminal decision | Version `3` | Versions 1/2 remain readable; conditional evidence now refers to the approved plan |
 | Runtime and prompt identity | `live-plan-only-2026-11-12.2` | Frozen per-attempt descriptor and configuration hashes |
 | Opening | `native-declarative-v1` | Part of the approved snapshot |
-| Summary generator | `summary-v8` | Earlier artifacts are preserved |
+| Summary generator | `summary-v9` | Conversation-based assessment; earlier artifacts are preserved |
 | Native evaluator format | `native-summary-v3` | Selected for context v2; v6/v7 retain their formats when replayed |
 | Telemetry archive | Root/schema `4` | Existing JSONL record versions `2`/`3` are retained |
 
@@ -431,8 +434,17 @@ and delivery instruction. Older general plans do not automatically become contex
 The evaluator distinguishes task achievement from action disposition. A correct
 conditional decision not to book can achieve the task; an unknown condition cannot.
 General tasks cannot invent appointment authority or an appointment outcome. For
-appointments, the result checks operation/person/slot, matching attempt/snapshot,
-recipient evidence and replacement of the old appointment where required.
+appointments, the result uses the approved operation/person/slot from the original
+attempt/snapshot, recipient evidence and replacement of the old appointment where
+required. Starting with summary v9, internal action journals neither establish nor
+invalidate conversation-based achievement. Journals remain stored for diagnostics
+and historical report compatibility but are excluded from the evaluator input.
+The server still checks approved calendar rules and preserves substantive uncertainty.
+An explicit appointment authority and a concrete transcript-backed result produce
+the appointment card, including the notice that recipient confirmation is not an
+independent calendar check. General tasks and inactive conditional actions do not
+produce an appointment card. Live tools and closing rules retain their existing
+journal requirements; this change applies only after the call.
 
 A native input may use one bounded grounding repair, charged as a separate physical
 request. The validator, input and shared budgets remain in force. Normal successful
@@ -446,7 +458,7 @@ An already-preserved assessment is not silently recomputed. UI, copy, PDF and em
 show the partial-review warning.
 
 Ready historical artifacts are retained. Failed native v6/v7 artifacts can be retried
-through a new v8 artifact; queued work and old evidence remain pinned. The display
+through a new v9 artifact; queued work and old evidence remain pinned. The display
 assessment revision can change without rewriting canonical billing evidence or
 charging a second credit. Cards and both notification readers use the selected
 display assessment. Calendar export uses the supported result projection, not a

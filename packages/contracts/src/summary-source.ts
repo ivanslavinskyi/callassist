@@ -10,6 +10,7 @@ const legacySummarySourceContextSchema = z.strictObject({
   transcriptRevisionId: z.uuid(), transcriptSourceHash: hash,
   callCreatedAt: z.iso.datetime(), callConnectedAt: z.iso.datetime().nullable(), callEndedAt: z.iso.datetime().nullable(),
   approvedAt: z.iso.datetime().nullable(), appointmentAuthorization: appointmentAuthorizationSchema.nullable(),
+  representedPerson: z.string().min(1).max(300).optional(),
   actionEvidence: z.strictObject({ id: z.uuid(), version: z.number().int().positive(),
     state: z.enum(["sending", "delivered", "uncertain", "confirmed"]),
     date: appointmentDateSchema, startTime: appointmentTimeSchema, timeZone: appointmentTimeZoneSchema }).nullable()
@@ -51,5 +52,13 @@ export const summaryCalendarSchema = z.strictObject({
 export type SummaryCalendar = z.infer<typeof summaryCalendarSchema>;
 
 export function supportsSummaryAssessment(version: string): boolean {
-  return version.startsWith("summary-v3:") || /^summary-v[45678]:grounded-v3:/.test(version);
+  return version.startsWith("summary-v3:") || /^summary-v[456789]:grounded-v3:/.test(version);
 }
+
+/** Published conversation evidence, never a live authorization or calendar receipt. */
+export const summaryAppointmentResultSchema = z.strictObject({
+  operation: z.enum(["book", "confirm_existing", "reschedule", "cancel"]),
+  representedPerson: z.string().min(1).max(300),
+  date: appointmentDateSchema, startTime: appointmentTimeSchema, timeZone: appointmentTimeZoneSchema,
+  status: z.enum(["confirmed", "unconfirmed"]), sourceSegmentIds: ids.min(1)
+});

@@ -23,6 +23,7 @@ export async function buildSummarySourceContext(repository: CallRepository, arti
     compilationSnapshotHash: compilation.snapshotHash, transcriptRevisionId: source.id, transcriptSourceHash: source.sourceHash,
     callCreatedAt: attempt.startedAt, callConnectedAt: connected?.occurredAt ?? null, callEndedAt: attempt.endedAt,
     approvedAt: attempt.executionSnapshot?.approvedAt ?? compilation.approvedAt,
+    ...(artifact.generatorVersion.startsWith("summary-v9:") ? {representedPerson: compilation.rawBrief.representedPerson} : {}),
     appointmentAuthorization: getAppointmentAuthorization(compilation.compiledBrief),
     actionEvidence: action ? { id: action.id, version: action.version, state: action.state,
       date: action.proposal.date, startTime: action.proposal.startTime, timeZone: action.proposal.timeZone } : null });

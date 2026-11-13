@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import type { CallTextArtifact, CreateCallBriefInput } from "@callassist/contracts";
+import { defaultPreparationRuntimePolicy, type CallTextArtifact, type CreateCallBriefInput } from "@callassist/contracts";
 import { buildApp } from "../app";
 import { CallService } from "../call-service";
 import { InMemoryCallRepository } from "../storage/in-memory-call-repository";
 import { DurableJobWorker } from "../jobs/durable-job-worker";
 import { originalPlanReview } from "../test-helpers/original-plan-review";
 import { defaultEndpointRateLimitPolicy } from "../config/endpoint-rate-limit-policy";
+import { TextArtifactService } from "./text-artifact-service";
+import { textGeneratorVersion } from "./text-processor";
 
 const input: CreateCallBriefInput = {
   recipientName: "Fixture Office", phoneNumber: "+41523686688", objective: "Ask which documents are needed. Do not book an appointment.",
@@ -35,6 +37,80 @@ async function fixture(textArtifactLimit?: number) {
 }
 
 describe("plan translation and review API workflow", () => {
+  async function historicalReview(h: Awaited<ReturnType<typeof fixture>>, failed = false) {
+    const artifact = await h.repository.enqueueTextArtifact({ callId: h.call.id, kind: "plan_review",
+      compilationId: h.source.compilationId, sourceHash: h.source.snapshotHash, targetLanguage: "ru",
+      generatorVersion: h.service.textArtifacts.processor.generatorVersion });
+    if (failed) {
+      const job = (await h.repository.claimDueDurableJob({ types: ["text_artifact_generation"], workerId: randomUUID(),
+        now: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }))!;
+      const lease = { jobId: job.id, workerId: job.leaseOwner!, generation: job.generation,
+        attemptNumber: job.attemptCount, checkedAt: new Date().toISOString() };
+      await h.repository.claimTextArtifact(artifact.id, lease);
+      await h.repository.failTextArtifact(artifact.id, "TEXT_RESPONSE_INVALID", lease, true);
+      await h.repository.failDurableJob(job.id, lease.workerId, "TEXT_RESPONSE_INVALID", lease.checkedAt, lease.checkedAt, false);
+    }
+    return (await h.repository.getTextArtifact(h.call.id, artifact.id))!;
+  }
+
+  it("finishes historical queued reviews under their pinned rules and reuses the ready result", async () => {
+    const h = await fixture();
+    const old = await historicalReview(h);
+    const process = vi.spyOn(h.service.textArtifacts.processor, "process");
+    expect((await h.service.textArtifacts.requestPlanReview(h.call.id, { ...h.source, targetLanguage: "ru" })).id).toBe(old.id);
+    await h.worker.runOnce();
+    expect(process).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({ legacyReviewValidation: true }));
+    const ready = (await h.repository.getTextArtifact(h.call.id, old.id))!;
+    expect(ready).toMatchObject({ status: "ready", generatorVersion: old.generatorVersion });
+    expect(await h.service.textArtifacts.requestPlanReview(h.call.id, { ...h.source, targetLanguage: "ru" })).toEqual(ready);
+    expect(await h.service.textArtifacts.retry(h.call.id, old.id)).toEqual(ready);
+  });
+
+  it("retries a failed historical review once under the new version without changing its plan or failure evidence", async () => {
+    const h = await fixture();
+    const old = await historicalReview(h, true);
+    const compilation = (await h.repository.get(h.call.id))!.compilation;
+    const process = vi.spyOn(h.service.textArtifacts.processor, "process");
+    const next = await h.service.textArtifacts.retry(h.call.id, old.id);
+    expect(next.id).not.toBe(old.id);
+    expect(next).toMatchObject({ status: "queued", compilationId: old.compilationId, sourceHash: old.sourceHash,
+      generatorVersion: textGeneratorVersion(h.service.textArtifacts.processor, "plan_review") });
+    expect((await h.service.textArtifacts.retry(h.call.id, old.id)).id).toBe(next.id);
+    await h.worker.runOnce();
+    expect((await h.repository.getTextArtifact(h.call.id, next.id))?.status).toBe("ready");
+    expect(process.mock.calls[0]?.[1]?.legacyReviewValidation).toBeUndefined();
+    expect(await h.repository.getTextArtifact(h.call.id, old.id)).toEqual(old);
+    expect((await h.repository.get(h.call.id))!.compilation).toEqual(compilation);
+    expect(await h.repository.getCurrentReviewReceipt(h.call.id)).toBeNull();
+  });
+
+  it("rejects migration of a failed translation belonging to an older plan", async () => {
+    const h = await fixture();
+    const old = await historicalReview(h, true);
+    vi.spyOn(h.repository, "getPlanSource").mockResolvedValue({ ...h.source, compilationId: randomUUID() });
+    await expect(h.service.textArtifacts.retry(h.call.id, old.id)).rejects.toMatchObject({ code: "TEXT_ARTIFACT_STALE" });
+    expect(await h.repository.listTextArtifacts(h.call.id)).toHaveLength(1);
+  });
+
+  it("uses the compilation's pinned review model for new generation and retry", async () => {
+    const h = await fixture();
+    const mock = h.service.textArtifacts.processor;
+    const process = vi.fn(mock.process.bind(mock));
+    const policy = { ...defaultPreparationRuntimePolicy, review: { model: "gpt-6-luna" as const, serviceTier: "default" as const } };
+    vi.spyOn(h.repository, "getCompilationPreparationPolicy").mockResolvedValue(policy);
+    const service = new TextArtifactService(h.repository, {
+      driver: "openai", model: "gpt-5.6", generatorVersion: "text-processing-v2:openai:gpt-5.6", process
+    }, h.service.textArtifacts.capabilities);
+    const artifact = await service.requestPlanReview(h.call.id, { ...h.source, targetLanguage: "ru" });
+    expect(artifact.generatorVersion).toBe("review-translation-v1:text-processing-v2:openai:gpt-6-luna");
+    await expect(service.retry(h.call.id, artifact.id)).resolves.toMatchObject({ id: artifact.id });
+    const worker = new DurableJobWorker(h.repository, { text_artifact_generation: (job, lease) => service.process(job, lease) });
+    closers.push(() => worker.close());
+    await worker.runOnce();
+    expect(process).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({ profile: policy.review }));
+    expect((await h.repository.getTextArtifact(h.call.id, artifact.id))?.status).toBe("ready");
+  });
+
   it("does not translate a failed compiler plan or hide its preparation recovery behind translation", async () => {
     const { service, repository, call } = await fixture();
     const current = (await repository.get(call.id))!;

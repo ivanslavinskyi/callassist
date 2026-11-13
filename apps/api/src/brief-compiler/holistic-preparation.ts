@@ -3,8 +3,8 @@ import { z } from "zod";
 import { CALL_POLICY_VERSION, createPlanOnlyTaskContext, planOnlyContextText, callCompilationSchema, preparationIssue,
   type RawCallBrief, type CallCompilation, type PolicyDecision, type PreparationDiagnosticInput,
   type PreparationRuntimePolicy, type HolisticCompiledCallBrief } from "@callassist/contracts";
-import { holisticCandidateSchema, holisticVerdictSchema, holisticVerdictJsonSchema, assembleHolisticCandidate,
-  HOLISTIC_GENERATION_INSTRUCTIONS, HOLISTIC_AUDIT_INSTRUCTIONS } from "./holistic-contract";
+import { holisticCandidateSchema, holisticVerdictSchema, holisticVerdictJsonSchema, assembleHolisticCandidate } from "./holistic-contract";
+import { holisticPreparationContract } from "./material-preparation-contract";
 import { PreparationValidationError, responseJson, validationCode } from "./preparation-validation";
 import { createCompilationSnapshotHash } from "./compilation-integrity";
 import type { BriefCompilerStage, PreparationRequestMetadata } from "./brief-compiler";
@@ -21,6 +21,7 @@ const hash=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).d
 const issueDetail=(error:unknown)=>error instanceof z.ZodError ? error.issues : error instanceof PreparationValidationError ? error.detail : null;
 
 export async function prepareHolistic(raw:RawCallBrief,revision:number,deps:HolisticPreparationDependencies):Promise<CallCompilation> {
+  const contract=holisticPreparationContract(deps.policy.promptVersion,raw.locale);
   let recoveryUsed=false,candidateAttempt=0,auditAttempt=0;
   let feedback:unknown=null,rejectedCandidate:unknown=null,responseId:string|null=null;
   const diagnostic=async(code:PreparationDiagnosticInput["metadata"]["code"],stage:PreparationDiagnosticInput["metadata"]["stage"],detail?:unknown,candidateHash?:string)=>{
@@ -57,10 +58,10 @@ export async function prepareHolistic(raw:RawCallBrief,revision:number,deps:Holi
     const previousCandidate=rejectedCandidate;rejectedCandidate=null;
     try {
       const response=await deps.request({model:deps.policy.generation.model,store:false,max_output_tokens:deps.policy.maxOutputTokens,
-        reasoning:{effort:"low"},instructions:HOLISTIC_GENERATION_INSTRUCTIONS,
+        reasoning:{effort:"low"},instructions:contract.generation,
         input:JSON.stringify({trusted,sources,...(feedback?{correction:{rejectedCandidate:previousCandidate,currentFinding:feedback}}:{})}),
         text:{verbosity:"low",format:{type:"json_schema",name:"callassist_holistic_candidate",strict:true,
-          schema:z.toJSONSchema(holisticCandidateSchema)}}},candidateAttempt===1?"compilation":"compilation_repair",
+          schema:z.toJSONSchema(contract.candidateSchema)}}},candidateAttempt===1?"compilation":"compilation_repair",
         deps.policy.generation.model,candidateAttempt===1?"none":"integrity",candidateAttempt-1);
       responseId=response&&typeof response==="object"&&"id" in response&&typeof response.id==="string"?response.id:null;
       // Keep the actual rejected output, not a path into an earlier candidate.
@@ -91,7 +92,7 @@ export async function prepareHolistic(raw:RawCallBrief,revision:number,deps:Holi
       let verdict:z.infer<typeof holisticVerdictSchema>;
       try {
         const response=await deps.request({model:deps.policy.audit.model,store:false,max_output_tokens:2048,reasoning:{effort:"low"},
-          instructions:HOLISTIC_AUDIT_INSTRUCTIONS,input:JSON.stringify({trusted,sources,execution,sourceLanguage:compiled.sourceLanguage,
+          instructions:contract.audit,input:JSON.stringify({trusted,sources,execution,...(contract.auditSourceLanguage?{sourceLanguage:compiled.sourceLanguage}:{}),
             proposedBlockingQuestions:compiled.blockingIssues,taskPolicy:{taskType:compiled.taskType,riskCategories:compiled.riskCategories},
             ...(auditFeedback?{responseFormatCorrection:auditFeedback}:{})}),
           text:{verbosity:"low",format:{type:"json_schema",name:"callassist_holistic_review",strict:true,schema:holisticVerdictJsonSchema}}},

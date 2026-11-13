@@ -115,7 +115,7 @@ describe("OpenAI text transformations", () => {
     await expect(fixture.processor.process(translation)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
   });
 
-  it("rejects lost or invented protected identifiers in translations", async () => {
+  it("keeps literal identifier checks for pinned historical reviews", async () => {
     const input: TextProcessingInput = {
       kind: "plan_review", targetLanguage: "ru",
       fields: [{ id: "fact", text: "Email nina@example.com; reference ABC12345." }]
@@ -126,7 +126,7 @@ describe("OpenAI text transformations", () => {
       "Email nina@example.com; reference ABC12345. Copy to new@example.com."
     ]) {
       const fixture = setup({ fields: [{ id: "fact", text }] });
-      await expect(fixture.processor.process(input)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
+      await expect(fixture.processor.process(input, { legacyReviewValidation: true })).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
     }
   });
 
@@ -154,11 +154,11 @@ describe("OpenAI text transformations", () => {
     await expect(valid.processor.process(input)).resolves.toMatchObject({ findings: [{ text: "Стоимость — CHF 25." }] });
   });
 
-  it("preserves numeric facts in both directions of a translation", async () => {
+  it("keeps numeric grounding for pinned historical reviews", async () => {
     const input: TextProcessingInput = { kind: "plan_review", targetLanguage: "ru", fields: [{ id: "fact", text: "Maximum CHF 25; 17.09.2026 at 17:00." }] };
     for (const text of ["Максимум CHF 250; 17.09.2026 в 17:00.", "Максимум CHF 25; 17.09.2026."]) {
       const fixture = setup({ fields: [{ id: "fact", text }] });
-      await expect(fixture.processor.process(input)).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
+      await expect(fixture.processor.process(input, { legacyReviewValidation: true })).rejects.toMatchObject({ code: "TEXT_RESPONSE_INVALID" });
     }
     const valid = setup({ fields: [{ id: "fact", text: "Максимум CHF 25; 17.09.2026 в 17:00." }] });
     await expect(valid.processor.process(input)).resolves.toMatchObject({ fields: [{ id: "fact" }] });

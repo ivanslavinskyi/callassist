@@ -55,6 +55,7 @@
     "typecheck": "tsc --noEmit",
     "eval:preparation": "node --use-system-ca --import tsx scripts/evaluate-preparation.ts",
     "eval:preparation:holistic": "node --use-system-ca --import tsx scripts/evaluate-holistic-preparation.mjs",
+    "eval:preparation:material": "node --use-system-ca --import tsx scripts/evaluate-material-preparation.mjs",
     "eval:preparation:language": "node --use-system-ca --import tsx scripts/evaluate-canonical-language.mjs",
     "load:preparation": "node --import tsx scripts/load-preparation.ts",
     "test:isolated": "node --import tsx scripts/test-isolated.ts"

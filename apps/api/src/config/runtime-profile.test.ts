@@ -11,7 +11,7 @@ import { NATIVE_CONFIGURATION_VERSION } from "../voice/live-native-configuration
 describe("explicit runtime profiles", () => {
   it("pins the role-fidelity release and requires an explicit transition from the previous native policy", async () => {
     expect(runtimeProfiles.native_v2).toMatchObject({
-      promptVersion: "preparation-live-holistic-2026-11-11",
+      promptVersion: "preparation-live-holistic-2026-11-13-v2",
       compilerVersion: "brief-compiler-17", planSchemaVersion: "11",
       runtimeVersion: NATIVE_CONFIGURATION_VERSION
     });

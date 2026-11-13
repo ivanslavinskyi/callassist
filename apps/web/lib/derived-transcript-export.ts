@@ -25,6 +25,7 @@ export type DerivedTranscriptExport = {
   uiLocale: UiLocale;
   appointmentAction?: CallSnapshot["appointmentAction"];
   summary?: CallSummaryPayload | null;
+  summaryGeneratorVersion?: string;
   assessment?: CallAssessmentSummary | null;
   assessmentPending?: boolean;
 };
@@ -76,7 +77,7 @@ function coverageNote(input: DerivedTranscriptExport) {
   return input.summary?.evaluationCoverage?.status === "partial" ? summaryCoverageMessages[input.uiLocale] : "";
 }
 function appointmentNote(input: DerivedTranscriptExport) {
-  if (input.summary?.calendar) return "";
+  if (input.summary?.calendar || (input.summary && input.summaryGeneratorVersion?.startsWith("summary-v9:"))) return "";
   const state = appointmentResultState(input.appointmentAction, input.revision);
   return state ? appointmentResultMessages[input.uiLocale][state] : "";
 }

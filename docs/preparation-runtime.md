@@ -1,6 +1,6 @@
 # Call-plan preparation runtime
 
-**Source reviewed:** 2026-11-11, current working tree. This describes code, not the
+**Source reviewed:** 2026-11-13, stable checkpoint `stable-2026-11-13`. This describes code, not the
 state or measured capacity of a deployed server. See the [native runtime](native-live-runtime.md)
 for startup context, conversation and action boundaries. Dated preparation plans
 and measurements are [historical evidence](archive/README.md). Host configuration
@@ -8,8 +8,8 @@ and rollout procedures live only in the ignored `docs/local-operations/` directo
 
 ## Immutable policy and operator controls
 
-Native holistic revision, 11 November 2026: policy
-`preparation-live-holistic-2026-11-11` selects `brief-compiler-17`, plan schema 11
+Native holistic revision, 13 November 2026: policy
+`preparation-live-holistic-2026-11-13-v2` selects `brief-compiler-17`, plan schema 11
 and the existing approval 10. The progressive instruction remains: resolve prerequisites
 before dependent actions, reveal constraints when relevant, and avoid a spoken agenda.
 Live and its backend receive the complete approved localized plan; original sources
@@ -31,7 +31,9 @@ API has no `promptVersion` setter. See [runtime profiles](runtime-profiles.md) a
 | `live-native-roles-2026-11-09` | `brief-compiler-14` | 9 | 8 |
 | `live-native-task-2026-11-09` (historical) | `brief-compiler-15` | 10 | 9 |
 | `live-plan-only-2026-11-10` (historical) | `brief-compiler-16` | 10 | 10 |
-| `live-holistic-2026-11-11` (named native profile) | `brief-compiler-17` | 11 | 10 |
+| `live-holistic-2026-11-11` (historical, frozen instructions) | `brief-compiler-17` | 11 | 10 |
+| `live-holistic-2026-11-13` (historical, frozen instructions) | `brief-compiler-17` | 11 | 10 |
+| `live-holistic-2026-11-13-v2` (named native profile) | `brief-compiler-17` | 11 | 10 |
 
 All policy IDs in the table start with `preparation-`. The earlier
 `preparation-2026-10-05` policy uses compiler 6 / schema 4. Historical readers
@@ -63,6 +65,32 @@ source text belongs to the principal by default; generated assistant speech must
 attribute those facts correctly. No language-specific extraction or literal citation
 matching gates run on this policy.
 
+The 13 November revision makes the blocking threshold explicit: judge the complete
+execution meaning, not isolated wording or editorial preferences. Real role,
+permission, language and outcome defects still require correction. Writer and
+reviewer share the existing appointment contract: rules define branch membership,
+ordered alternatives encode conditional fallback, and common/branch requirements
+cannot widen those rules. Repairs preserve unaffected content and resolve structural
+defects in the authority itself. Feedback may name an existing field when that
+makes the semantic correction actionable. No verdict/schema or runtime tool change
+is involved. Both earlier holistic policies retain their exact prompts and provider schemas.
+
+The v2 follow-up binds generation and audit instructions to the selected call language,
+including `localizedObjective`; schema descriptions reinforce this without changing
+accepted fields. Advisory `sourceLanguage` remains stored and structurally validated,
+but is not supplied to the v2 semantic auditor. Runtime-necessary existing-appointment
+date/time clarification must remain before approval: conversation cannot fill immutable
+authority. Explicitly conditional questions and identical duplicated numeric caps are
+not independent rejection reasons; lost conditions, wrong limits and foreign-language
+execution prose remain material defects. Conditional questions should be generated in
+`conditionalFollowUps`, with matching conditional success criteria.
+General information enquiries may clarify their scope with the recipient instead
+of demanding a narrower task before the call. Faithful name transliteration is
+allowed. Later alternatives already require earlier-unavailability evidence through
+the unchanged action validator; audit must not demand redundant requirement text
+to enforce that existing rule. Readback instructions are assessed across the complete
+plan rather than requiring identical detail in every spoken example.
+
 There is one shared recovery: regenerate an invalid candidate, correct a semantic
 finding using the actual rejected candidate, or repeat an invalid audit against the
 unchanged context. There are at most two candidates and two audits, within existing
@@ -70,7 +98,7 @@ provider, deadline and cost limits. Input/output moderation and bounded transpor
 retry remain; no new model stage or voice-stage request is added.
 
 Approval 10, native action evidence and terminal decision contracts are unchanged.
-The conversation follow-up uses voice identity `live-plan-only-2026-11-11`; it keeps
+The conversation follow-up uses voice identity `live-plan-only-2026-11-12.2`; it keeps
 full approved startup context and the existing action-boundary tools. Summary source 3 carries source-free appointment
 authority for schema 11. Readers retain historical contracts and snapshot hashes;
 historical pinned policies retain their earlier validation paths.
@@ -321,6 +349,14 @@ prompt/generator versions must be rejected rather than silently replayed differe
 
 The preparation deadline ends at plan publication/failure; automatic review
 translation is a separate durable job with its own timeout and retry budget.
+New plan/clarification review artifacts use `review-translation-v1` and validate
+field structure and source binding, leaving semantic fidelity to the existing
+translation instructions. Numeric/identifier equivalence heuristics no longer block
+these display translations. Ready historical translations remain reusable; queued
+historical work retains its old validation, and failed old reviews can be retried as
+new artifacts without rewriting the source plan or failure evidence. Summary and
+transcript validation, voice input and approval receipts are unchanged. See the
+[translation verification](reports/review-translation-simplification-2026-11-13.md).
 Pinning the review profile does not give it the same absolute deadline. Browser
 submission recovery currently waits up to eight minutes. The desired 10–15 second
 target and 30-second total ceiling are not implemented end-to-end. Neither more

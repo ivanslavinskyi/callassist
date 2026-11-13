@@ -1,7 +1,7 @@
 # Runtime profiles
 
-**Status:** stable checkpoint `stable-2026-11-12`; production deployment is a separate operation.\
-**Source reviewed:** 2026-11-12.
+**Status:** stable checkpoint `stable-2026-11-13`; production deployment is a separate operation.\
+**Source reviewed:** 2026-11-13.
 
 `CALL_RUNTIME_PROFILE` selects a reviewed pair of voice runtime and preparation
 instructions. The checked-in environment example selects `native_v2`. Existing
@@ -9,12 +9,24 @@ installations without this variable retain their previous low-level behavior.
 
 | Profile | Voice | Preparation policy | Compiler / plan schema |
 | --- | --- | --- | --- |
-| `native_v2` | Native v2, `live-plan-only-2026-11-12.2` | `preparation-live-holistic-2026-11-11` | 17 / 11 |
+| `native_v2` | Native v2, `live-plan-only-2026-11-12.2` | `preparation-live-holistic-2026-11-13-v2` | 17 / 11 |
 | `managed` | Managed Live, `live-managed-v9` | `preparation-2026-10-05` | 6 / 4 |
 
 The [12 November checkpoint](reports/native-brand-stable-2026-11-12.md) updates
 voice instructions and transcript display only. It retains the holistic profile
 release, preparation policy, compiler/schema versions and migration catalog.
+The [13 November preparation update](reports/preparation-material-validation-2026-11-13.md)
+changes the profile's preparation policy/release metadata only. Its voice runtime,
+compiler/schema versions, action validators and migration catalog stay unchanged.
+The subsequent `2026-11-13-v2` preparation policy makes the selected call language
+explicit, excludes advisory source-language metadata from semantic grading and
+explains required pre-call appointment details. It preserves both previous holistic
+policies and their instructions for pinned jobs. Voice and assessment remain unchanged.
+See the [v2 validation record](reports/preparation-reliability-v2-2026-11-13.md)
+for the paired model evaluation and the limits of local acceptance.
+The same stable checkpoint independently adds `review-translation-v1` and
+`summary-v9`; these are selected by the application build, not the profile command.
+See the [complete activation list](plans/production-activation-stable-2026-11-13.md).
 
 Both profiles select the Live driver, disable automatic Realtime fallback and enable
 agent hangup. Models, service tiers, provider budgets, capacity limits, pricing and

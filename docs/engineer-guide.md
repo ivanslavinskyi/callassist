@@ -147,6 +147,11 @@ The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
 adds a German spoken-name example and “Grüezi” in both German locales. Web
 transcripts and copy/PDF exports use `Shprohli` in the assistant's German
 self-introduction; stored transcript evidence remains unchanged.
+The [13 November checkpoint](reports/preparation-results-stable-2026-11-13.md)
+retains that runtime and adds preparation policy `preparation-live-holistic-2026-11-13-v2`,
+display-only `review-translation-v1` and conversation-based `summary-v9`.
+See the [production activation list](plans/production-activation-stable-2026-11-13.md)
+for the distinction between saved-policy activation and code-version selection.
 
 ### Managed default and compatibility paths
 

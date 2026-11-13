@@ -14,7 +14,8 @@ import { MockTextProcessor } from "./mock-text-processor";
 import { OpenAITextProcessor } from "./openai-text-processor";
 
 export const TEXT_PROCESSOR_VERSION = "text-processing-v2";
-export const SUMMARY_PROCESSOR_VERSION = "summary-v8";
+export const REVIEW_PROCESSOR_VERSION = "review-translation-v1";
+export const SUMMARY_PROCESSOR_VERSION = "summary-v9";
 export const MAX_TEXT_PROCESSING_SOURCE_CHARACTERS = 60_000;
 
 export type TextProcessingInput = (
@@ -24,6 +25,7 @@ export type TextProcessingInput = (
   | { kind: "call_summary"; segments: SourceSegment[]; checks: Array<{ id: string; text: string }>;
       context: { objective: string; taskType: string; recipient: string; representedPerson: string };
       sourceContext?: SummarySourceContext;
+      assessmentBasis?: "conversation";
       nativeFormat?: "native-summary-v1" | "native-summary-v2" | "native-summary-v3";
       nativeTaskSources?: Pick<CallCompilation["rawBrief"], "objective" | "context" | "allowedFacts" | "clarificationAnswers"> & {deliveryInstruction?:string};
       extraction?: CallSummaryPayload;
@@ -62,6 +64,8 @@ export type TextProcessingProviderRequestResult = {
   diagnostics?:import("@callassist/contracts").PreparationTransportDiagnostics;
 };
 export type TextProcessingRunOptions = {
+  /** Only queued historical reviews retain the old literal-comparison contract. */
+  legacyReviewValidation?: boolean;
   profile?: import("@callassist/contracts").PreparationProfile;
   maxProviderRequests?: number;
   signal?: AbortSignal;
@@ -78,14 +82,20 @@ export interface TextProcessor {
 
 /** Summary changes must not invalidate queued translations or their reusable chunks. */
 export function textGeneratorVersion(processor: Pick<TextProcessor, "generatorVersion">, kind: TextArtifactKind) {
+  if (kind === "plan_review" || kind === "clarification_review") return `${REVIEW_PROCESSOR_VERSION}:${processor.generatorVersion}`;
   return kind === "call_summary" ? `${SUMMARY_PROCESSOR_VERSION}:grounded-v3:${processor.generatorVersion}` : processor.generatorVersion;
+}
+
+export function legacyReviewGenerator(actual: string, expected: string, kind: TextArtifactKind) {
+  return (kind === "plan_review" || kind === "clarification_review") && expected === `${REVIEW_PROCESSOR_VERSION}:${actual}`;
 }
 
 /** Older jobs retain their pinned input instructions and calendar projection. */
 export function compatibleTextGeneratorVersion(actual: string, expected: string, kind: TextArtifactKind): boolean {
   if (actual === expected) return true;
-  const previous = /^summary-v([4567]):(grounded-v3:.+)$/.exec(actual);
-  const current = /^summary-v([5678]):(grounded-v3:.+)$/.exec(expected);
+  if (legacyReviewGenerator(actual, expected, kind)) return true;
+  const previous = /^summary-v([45678]):(grounded-v3:.+)$/.exec(actual);
+  const current = /^summary-v([56789]):(grounded-v3:.+)$/.exec(expected);
   return kind === "call_summary" && !!previous && !!current && Number(previous[1]) < Number(current[1]) && previous[2] === current[2];
 }
 

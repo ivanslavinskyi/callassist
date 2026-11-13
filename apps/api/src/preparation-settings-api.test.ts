@@ -37,7 +37,7 @@ it("reports the selected release to admins and rejects readiness when the saved 
   expect((await f.app.inject({ method: "GET", url: "/health/ready" })).statusCode).toBe(503);
   const settings = await f.repository.getPreparationSettings();
   vi.spyOn(f.repository, "getPreparationSettings").mockResolvedValue({ ...settings,
-    policy: { ...settings.policy, promptVersion: "preparation-live-holistic-2026-11-11" } });
+    policy: { ...settings.policy, promptVersion: "preparation-live-holistic-2026-11-13-v2" } });
   const ready = await f.app.inject({ method: "GET", url: "/health/ready" });
   expect(ready.statusCode).toBe(200);
   expect(ready.json()).toEqual({ status: "ready", checks: { database: "ready", runtimeProfile: "ready" } });

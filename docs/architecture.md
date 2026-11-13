@@ -1,6 +1,6 @@
 # Architecture
 
-**Source reviewed:** 2026-11-12, stable checkpoint `stable-2026-11-12`; migration catalog `0001`–`0116`.
+**Source reviewed:** 2026-11-13, stable checkpoint `stable-2026-11-13`; migration catalog `0001`–`0116`.
 
 SHPROHLI has a Next.js web application, a Fastify API, PostgreSQL-backed durable
 workers and shared TypeScript contracts. The API owns authorization and immutable
@@ -40,6 +40,11 @@ integration keeps runtime selection explicit; see the
 The [12 November checkpoint](reports/native-brand-stable-2026-11-12.md) records the
 current accepted voice instructions and transcript display without changing these
 runtime boundaries.
+The [13 November checkpoint](reports/preparation-results-stable-2026-11-13.md)
+keeps the same voice implementation, simplifies preparation/display translation,
+and evaluates task achievement from the conversation without requiring an internal
+action journal. Explicit approved appointment authority still controls whether a
+conversation-derived appointment card is available.
 
 The recommended `CALL_RUNTIME_PROFILE=native_v2` binds voice selection to the plan-only
 preparation policy: compiler 17, plan schema 11 and approval 10. The audited configuration

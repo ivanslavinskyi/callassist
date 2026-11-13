@@ -20,6 +20,16 @@ Normalize spoken dates and times only inside appointmentExtraction using the ori
 /** Pin the historical instructions for queued v4/v5 jobs, replacing only their
  * legacy calendar section for explicitly versioned native work. */
 export function nativeSummaryInstructions(legacy: string, input: TextProcessingInput): string {
+  const pinned = pinnedNativeSummaryInstructions(legacy, input);
+  if (input.kind !== "call_summary" || input.assessmentBasis !== "conversation") return pinned;
+  return pinned
+    .replace("and actionEvidence describes only application execution.", "and the approved task defines the permitted result.")
+    .replace("calendar and action guards are applied by the server.", "calendar guards are applied by the server.")
+    .replace("nativeAppointmentAction is the original attempt's application journal.", "Internal action journals are not part of this assessment.")
+    .replace("calendar membership and journal consistency.", "calendar membership.") + `\nAssessment basis: conversation. Evaluate the approved task and ALL its restrictions against the complete original transcript, including recipient confirmation, conditional branches and later corrections. Internal tool calls, registration states and disconnection reasons neither prove nor disprove task completion and must not lower or raise the assessment. Do not require application-owned registration, an external calendar receipt or a special confirmation phrase when the task asks for a spoken agreement. A substantive yes to an exact request/readback can confirm it; readiness, an offer, an assistant's claim or a promise to check cannot. Preserve authorized operation, person, date/time, price/duration bounds, ordered alternatives and other conditions even when they are not repeated in a criterion. For a reschedule require confirmation of replacement of the old appointment; for cancellation require confirmation of cancellation. Only a condition established in the conversation can make an action not required. Keep conflicting or missing material evidence uncertain. Report a goal as achieved only when all applicable task requirements are fulfilled. Missing internal registration is never an unresolved user task.`;
+}
+
+function pinnedNativeSummaryInstructions(legacy: string, input: TextProcessingInput): string {
   if (!hasNativeSummaryContext(input)) return legacy;
   const start = legacy.indexOf("When call_summary includes sourceContext,");
   const end = legacy.indexOf("The user message is a JSON data envelope", start);

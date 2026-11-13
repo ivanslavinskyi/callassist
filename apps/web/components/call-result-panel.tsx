@@ -12,6 +12,7 @@ import { formatTranscriptOffset, writeTextToClipboard } from "@/lib/final-transc
 import { getTextLanguageLabel } from "@/lib/i18n/language-messages";
 import { textArtifactMessages } from "@/lib/i18n/text-artifact-messages";
 import { CallSummaryPresentation } from "./call-summary-presentation";
+import { CallAppointmentResult } from "./native-appointment-details";
 import { CallAnalysisProgress } from "./call-analysis-progress";
 import { useCallTextArtifacts } from "./use-call-text-artifacts";
 import { useUiLocale } from "./ui-locale-provider";
@@ -22,10 +23,11 @@ import { needsTranscriptTranslation } from "@/lib/text-capabilities";
 import type { CallSnapshot } from "@callassist/contracts";
 import { appointmentResultMessages } from "@/lib/i18n/appointment-result-messages";
 
-export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction, assessment, showSummary=true, allowSummaryGeneration=true }: {
+export function CallResultPanel({ brief, userId, revision, taskLanguage, promptLanguage, initialArtifacts, appointmentAction, nativeAppointmentAction, assessment, showSummary=true, allowSummaryGeneration=true }: {
   brief: CallBrief; userId: string; revision: FinalTranscriptRevision; taskLanguage: TextLanguage;
   promptLanguage: string | null; initialArtifacts?: CallTextArtifact[];
   appointmentAction?: CallSnapshot["appointmentAction"];
+  nativeAppointmentAction?: CallSnapshot["nativeAppointmentAction"];
   assessment?: import("@callassist/contracts").CallAssessmentSummary | null;
   showSummary?: boolean; allowSummaryGeneration?: boolean;
 }) {
@@ -83,7 +85,7 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     });
   }
   function exportInput(): DerivedTranscriptExport {
-    return { brief, revision, appointmentAction, summary, assessment, assessmentPending: waitingSummary, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
+    return { brief, revision, appointmentAction, summary, summaryGeneratorVersion:summaryArtifact?.generatorVersion, assessment, assessmentPending: waitingSummary, segments: displayed.segments, text: displayed.text, uiLocale: locale, translationLanguage: displayedView === "translated" ? taskLanguage : null };
   }
   async function copyText() {
     const input = exportInput();
@@ -100,7 +102,8 @@ export function CallResultPanel({ brief, userId, revision, taskLanguage, promptL
     } catch { setExportStatus("failed"); }
   }
   return <div className="call-result-panel">
-    {appointmentState && !summary?.calendar ? <p role="status">
+    <CallAppointmentResult summary={summary} generatorVersion={summaryArtifact?.generatorVersion} action={nativeAppointmentAction} attemptId={revision.callAttemptId} locale={locale}/>
+    {appointmentState && !summary?.calendar && !(summary && summaryArtifact?.generatorVersion.startsWith("summary-v9:")) ? <p role="status">
       {appointmentResultMessages[locale][appointmentState]}
     </p> : null}
     {showSummary ? <section className="call-result-summary" aria-labelledby={`summary-heading-${revision.id}`}>

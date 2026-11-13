@@ -17,7 +17,7 @@ const raw = normalizeCreateCallBriefInput({ recipientName: "Office", phoneNumber
   assistantProfileId: "sebastian", representedPersonFirstName: "Anna", representedPersonLastName: "Example", locale: "en-GB",
   audioRetentionDays: 0, allowLanguageSwitch: false, allowedFacts: [] });
 
-async function setup(long: boolean|"over_limit" = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy: boolean | "v5" | "v6" = false, native: boolean|"general"|"holistic" = false) {
+async function setup(long: boolean|"over_limit" = false, failCompaction = false, override?: TextProcessor, automatic = false, legacy: boolean | "v5" | "v6" | "v8" = false, native: boolean|"general"|"holistic" = false) {
   const repository = new InMemoryCallRepository();
   const taskRaw=native===true?{...raw,objective:"Ask the price; book only if it costs at most CHF 100."}:raw;
   const compilation = await new DeterministicBriefCompiler().compile(taskRaw,1,native==="holistic"?{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-holistic-2026-11-11"}}:native==="general"?{policy:{...defaultPreparationRuntimePolicy,promptVersion:"preparation-live-native-integrity-2026-11-08"}}:{});
@@ -49,7 +49,7 @@ async function setup(long: boolean|"over_limit" = false, failCompaction = false,
   });
   const processor: TextProcessor = override ?? { ...mock, driver: "mock", model: mock.model, generatorVersion: mock.generatorVersion, process };
   await repository.completeFinalTranscript(recording.id, segments.map(s => s.text).join("\n"), segments, undefined,
-    automatic ? { summaryGeneratorVersion: legacy ? textGeneratorVersion(processor, "call_summary").replace(/^summary-v\d+:/, legacy === "v6" ? "summary-v6:" : legacy === "v5" ? "summary-v5:" : "summary-v4:") : textGeneratorVersion(processor, "call_summary") } : undefined);
+    automatic ? { summaryGeneratorVersion: legacy ? textGeneratorVersion(processor, "call_summary").replace(/^summary-v\d+:/, legacy === "v8" ? "summary-v8:" : legacy === "v6" ? "summary-v6:" : legacy === "v5" ? "summary-v5:" : "summary-v4:") : textGeneratorVersion(processor, "call_summary") } : undefined);
   const service = new TextArtifactService(repository, processor, { enabled: true, directions: allTextDirections() });
   const revision = (await repository.getCurrentTranscriptRevision(brief.id))!;
   const artifact = automatic ? (await repository.listTextArtifacts(brief.id)).find(a => a.kind === "call_summary")!
@@ -69,6 +69,15 @@ describe("summary execution", () => {
     const h=await setup(false,false,undefined,false,false,"general");await h.service.process(h.job,h.lease);
     expect(h.process.mock.calls[0]![0]).toMatchObject({nativeFormat:"native-summary-v3",nativeTaskSources:{objective:raw.objective,context:raw.context,allowedFacts:raw.allowedFacts}});
   });
+  it("pins queued v8 work and never silently reevaluates its saved assessment",async()=>{
+    const h=await setup(false,false,undefined,true,"v8","holistic");
+    await h.service.process(h.job,h.lease);
+    expect(h.process.mock.calls[0]![0]).not.toHaveProperty("assessmentBasis");
+    const saved=await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id);
+    expect(saved?.generatorVersion).toMatch(/^summary-v8:/);
+    expect((await h.service.requestTranscriptArtifact(h.artifact.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:"en"})).id).toBe(h.artifact.id);
+    expect(h.process).toHaveBeenCalledTimes(1);
+  });
   it("pins queued v6 native instructions and reuses its successful report",async()=>{
     const h=await setup(false,false,undefined,true,"v6",true);
     expect((await h.service.requestTranscriptArtifact(h.artifact.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:"en"})).id).toBe(h.artifact.id);
@@ -76,19 +85,19 @@ describe("summary execution", () => {
     expect(h.process.mock.calls[0]![0]).toMatchObject({nativeFormat:"native-summary-v1"});
     expect((await h.service.requestTranscriptArtifact(h.artifact.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:"en"})).id).toBe(h.artifact.id);
   });
-  it("retries a failed native v6 report as a new v8 artifact without rewriting the failed evidence",async()=>{
+  it("retries a failed native v6 report as a new v9 artifact without rewriting the failed evidence",async()=>{
     const h=await setup(false,false,new MockTextProcessor({fixture:()=>({})}),true,"v6",true);
     await expect(h.service.process(h.job,h.lease)).rejects.toMatchObject({code:"TEXT_RESPONSE_INVALID"});
     await h.repository.failDurableJob(h.job.id,h.lease.workerId,"TEXT_RESPONSE_INVALID",new Date().toISOString(),new Date().toISOString(),false);
     const old=await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id);
     expect(old).toMatchObject({status:"failed",sourceContext:{version:2}});
     const next=await h.service.retry(h.artifact.callId,h.artifact.id);
-    expect(next).toMatchObject({status:"queued",generatorVersion:expect.stringMatching(/^summary-v8:/)});
+    expect(next).toMatchObject({status:"queued",generatorVersion:expect.stringMatching(/^summary-v9:/)});
     expect(next.id).not.toBe(h.artifact.id);
     expect(await h.repository.getTextArtifact(h.artifact.callId,h.artifact.id)).toEqual(old);
     expect(await h.service.retry(h.artifact.callId,h.artifact.id)).toEqual({...next,updatedAt:expect.any(String)});
   });
-  it("creates a separate native v8 report, reevaluates an old partial and reuses the new immutable result", async () => {
+  it("creates a separate native v9 report, reevaluates an old partial and reuses the new immutable result", async () => {
     const seen: TextProcessingInput[] = [];
     const processor = new OpenAITextProcessor({apiKey:"fixture",fetchImplementation:async (_url, init) => {
       const input=JSON.parse(JSON.parse(String(init!.body)).input[1].content);seen.push(input);
@@ -105,7 +114,7 @@ describe("summary execution", () => {
     const before=await h.repository.exportCallTextData(old.callId);
     await h.repository.completeDurableJob(h.job.id,h.lease.workerId,new Date().toISOString());
     const fresh=await h.service.requestTranscriptArtifact(old.callId,"call_summary",{sourceRevisionId:h.revision.id,targetLanguage:old.targetLanguage});
-    expect(fresh.id).not.toBe(old.id);expect(fresh.generatorVersion).toMatch(/^summary-v8:/);
+    expect(fresh.id).not.toBe(old.id);expect(fresh.generatorVersion).toMatch(/^summary-v9:/);
     const job=(await h.repository.claimDueDurableJob({types:["text_artifact_generation"],workerId:randomUUID(),now:new Date().toISOString(),leaseExpiresAt:new Date(Date.now()+60000).toISOString()}))!;
     await h.service.process(job,{jobId:job.id,workerId:job.leaseOwner!,generation:job.generation,attemptNumber:job.attemptCount,checkedAt:new Date().toISOString()});
     const saved=(await h.repository.getTextArtifact(old.callId,fresh.id))!;
@@ -226,9 +235,9 @@ describe("summary execution", () => {
     expect(input.checks).toEqual([{ id: "goal", text: compilation.compiledBrief!.localizedObjective }]);
     expect(input.context).toMatchObject({ recipient: "Office", representedPerson: "Anna Example" });
     const processor = new MockTextProcessor();
-    expect(textGeneratorVersion(processor, "plan_review")).toBe(processor.generatorVersion);
+    expect(textGeneratorVersion(processor, "plan_review")).toBe(`review-translation-v1:${processor.generatorVersion}`);
     expect(textGeneratorVersion(processor, "transcript_translation")).toBe(processor.generatorVersion);
-    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v8:grounded-v3:${processor.generatorVersion}`);
+    expect(textGeneratorVersion(processor, "call_summary")).toBe(`summary-v9:grounded-v3:${processor.generatorVersion}`);
   });
 
   it("uses one request for an ordinary transcript, persists new format and never regenerates a ready result", async () => {

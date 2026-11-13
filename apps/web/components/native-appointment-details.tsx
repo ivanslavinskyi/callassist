@@ -1,4 +1,4 @@
-import { calendarDateDetails, formatLocale, type NativeAppointmentExecutionAuthorization, type NativeAppointmentAction } from "@callassist/contracts";
+import { calendarDateDetails, formatLocale, type NativeAppointmentExecutionAuthorization, type NativeAppointmentAction, type CallSummaryPayload } from "@callassist/contracts";
 import type { UiLocale } from "@/lib/i18n/messages";
 import { nativeAppointmentCopy, nativeAppointmentScope } from "@/lib/i18n/native-appointment-messages";
 import { appointmentMessages } from "@/lib/i18n/appointment-messages";
@@ -26,4 +26,18 @@ export function NativeAppointmentResult({action,locale}:{action:NativeAppointmen
  const copy=nativeAppointmentCopy(locale);return <section className="review-questions"><h3>{copy.operation[action.proposal.operation]} · {action.representedPerson}</h3>
  <p>{calendarDateDetails(action.proposal.date,formatLocale(locale),"numeric").dateLabel}, {action.proposal.startTime} ({action.proposal.timeZone})</p>
  <p>{copy.state[action.state]}</p>{action.state==="confirmed"?<p className="muted-text">{copy.source}</p>:null}</section>;
+}
+
+export function ConversationAppointmentResult({result,locale}:{result:NonNullable<CallSummaryPayload["appointmentResult"]>;locale:UiLocale}){
+ const copy=nativeAppointmentCopy(locale);
+ return <section className="review-questions"><h3>{copy.operation[result.operation]} · {result.representedPerson}</h3>
+  <p>{calendarDateDetails(result.date,formatLocale(locale),"numeric").dateLabel}, {result.startTime} ({result.timeZone})</p>
+  <p>{copy.state[result.status==="confirmed"?"confirmed":"uncertain"]}</p>
+  {result.status==="confirmed"?<p className="muted-text">{copy.source}</p>:null}
+ </section>;
+}
+
+export function CallAppointmentResult({summary,generatorVersion,action,attemptId,locale}:{summary:CallSummaryPayload|null;generatorVersion?:string;action?:NativeAppointmentAction|null;attemptId:string|null;locale:UiLocale}){
+ if(summary && generatorVersion?.startsWith("summary-v9:"))return summary.appointmentResult?<ConversationAppointmentResult result={summary.appointmentResult} locale={locale}/>:null;
+ return action && action.callAttemptId===attemptId?<NativeAppointmentResult action={action} locale={locale}/>:null;
 }

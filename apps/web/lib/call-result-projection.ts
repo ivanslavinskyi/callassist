@@ -43,6 +43,13 @@ export function evidencedSummary(artifact: CallTextArtifact | undefined, revisio
       artifact.sourceContext.transcriptSourceHash !== revision.sourceHash || artifact.sourceContext.compilationId !== artifact.compilationId ||
       (parsed.data.calendar && parsed.data.calendar.contextHash !== artifact.contextHash))) return null;
   const ids = new Set(revision.segments.map((segment) => segment.id));
+  if (parsed.data.appointmentResult) {
+    const result=parsed.data.appointmentResult, context=artifact.sourceContext;
+    const authority=context && (context.version===2||context.version===3) ? context.nativeAppointmentAuthorization : context?.appointmentAuthorization;
+    if (!artifact.generatorVersion.startsWith("summary-v9:") || !authority || result.operation!==authority.operation ||
+        result.representedPerson!==context?.representedPerson || result.sourceSegmentIds.some(id=>!ids.has(id)) ||
+        (result.status==="confirmed" && !revision.segments.some(s=>s.role==="recipient"&&result.sourceSegmentIds.includes(s.id)))) return null;
+  }
   for (const item of [...parsed.data.findings, ...parsed.data.nextSteps]) {
     if (item.sourceSegmentIds.some((id) => !ids.has(id))) return null;
     if ("certainty" in item && item.certainty !== "unknown" && !item.sourceSegmentIds.length) return null;

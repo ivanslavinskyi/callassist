@@ -35,6 +35,6 @@ export class MockTextProcessor implements TextProcessor {
             id: check.id, label: prefix + "Result",
             text: "[MOCK: no factual summary has been generated]", certainty: "unknown", sourceSegmentIds: []
           })), nextSteps: [], unresolved: input.sourceContext ? [] : ["[MOCK: no factual summary has been generated]"] };
-    return validateTextProcessingOutput(input, output);
+    return validateTextProcessingOutput(input, output, options);
   }
 }

@@ -1,6 +1,6 @@
 # Documentation
 
-**Source reviewed:** 2026-11-12, stable checkpoint `stable-2026-11-12`; schema catalog `0001`–`0116`.
+**Source reviewed:** 2026-11-13, stable checkpoint `stable-2026-11-13`; schema catalog `0001`–`0116`.
 
 The maintained documents describe implemented behavior. Native GPT-Live v2 was
 accepted as the stable implementation on 2026-11-08 after local telephone testing.
@@ -17,6 +17,11 @@ documents that release's diagnostics, verification and user-reported local accep
 The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
 records the current runtime `live-plan-only-2026-11-12.2`, accepted pronunciation,
 German greeting and transcript spelling. Host-specific evidence stays in local operational records.
+The [13 November stable checkpoint](reports/preparation-results-stable-2026-11-13.md)
+adds preparation reliability, display translation and conversation-based results,
+retaining that voice runtime. The separate
+[production activation list](plans/production-activation-stable-2026-11-13.md)
+identifies the saved policy and code versions required on production.
 
 ## Maintained references
 
@@ -32,6 +37,11 @@ German greeting and transcript spelling. Host-specific evidence stays in local o
 | [Task information and testing](task-input-and-testing.md) | Information sources, 30-day audio default, tester grants, scenario catalog, expense attribution and PDF assessment |
 
 ## Verification records
+
+[Conversation-based assessment and appointment card, 13 November 2026](reports/conversation-assessment-2026-11-13.md)
+records summary v9, retained runtime and billing boundaries, regression tests and
+the offline replay of the last local call. Internal registration no longer gates
+an agreement evidenced by the conversation.
 
 [Brand pronunciation, German greeting and stable checkpoint, 12 November 2026](reports/native-brand-stable-2026-11-12.md)
 records the accepted instruction-only change, display spelling, regression coverage
@@ -50,6 +60,24 @@ records the earlier native integrity checkpoint, dated test evidence, local acti
 and outstanding acceptance. It does not claim fresh telephone validation.
 
 ## Implementation plans
+
+[Preparation audit reliability and simplification, 13 November 2026](plans/preparation-audit-reliability-2026-11-13.md)
+implements a follow-up: narrow blocking to material task/authority differences,
+clarify existing executable authority semantics, repair the affected permissions
+while preserving unrelated content, and isolate review-translation validation.
+The second incident confirms that a prose-only fallback repair must still fail
+review. The plan records voice, post-call assessment and credit compatibility gates.
+The [implementation report](reports/preparation-material-validation-2026-11-13.md)
+distinguishes offline checks, the bounded paid evaluation, local activation and
+outstanding telephone/production gates. The separate
+[review-translation report](reports/review-translation-simplification-2026-11-13.md)
+records simplified display validation and the successful local incident retry.
+The subsequent [multilingual USD 4 evaluation](reports/preparation-multilingual-validation-2026-11-13.md)
+records 48 real preparations and remaining reproducible audit/canonical-language
+defects. Ready status alone is not the acceptance criterion for these results.
+The [preparation v2 follow-up](reports/preparation-reliability-v2-2026-11-13.md)
+records fixes, paired replays within the same allocation, audit controls and the
+unchanged voice/assessment boundaries.
 
 [Simplifying plan preparation and failure diagnostics](plans/preparation-audit-simplification-2026-11-11.md)
 records the smaller compiler contract, holistic audit, one shared recovery,

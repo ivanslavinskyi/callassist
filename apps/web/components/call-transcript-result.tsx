@@ -27,12 +27,12 @@ export function CallTranscriptResult({snapshot,userId,view,busy,onRequest,onView
     <div className="final-transcript-heading"><div><h2>{audio || (ready && !isLiveTranscript(transcript.source)) ? copy.audio : copy.live}</h2>
       <p className="transcript-subtitle">{audio?copy.explanation:ready?transcriptSourceDescription(locale,transcript.source):copy.empty}</p></div></div>
     {!audio && transcript?.quality?.coverage==='partial' ? <p role="status" className="transcript-warning">{copy.partial}{gaps.length?` (${[...new Set(gaps)].join(', ')})`:''}</p>:null}
-    {snapshot.nativeAppointmentAction && (!revision||revision.callAttemptId===snapshot.nativeAppointmentAction.callAttemptId)?<NativeAppointmentResult action={snapshot.nativeAppointmentAction} locale={locale}/>:null}
+    {(!ready || !revision) && snapshot.nativeAppointmentAction && (!revision||revision.callAttemptId===snapshot.nativeAppointmentAction.callAttemptId)?<NativeAppointmentResult action={snapshot.nativeAppointmentAction} locale={locale}/>:null}
     {historicalSummary ? <p>{copy.historical} <button className="text-button" onClick={onViewRecording}>{copy.viewResult}</button></p>:null}
     {ready && revision ? <CallResultPanel key={revision.id} brief={snapshot.brief} userId={userId} revision={revision}
       taskLanguage={snapshot.languageContext?.taskContentLanguage??supportedTextLanguage(snapshot.brief.locale)??'en'}
       promptLanguage={snapshot.languageContext?.detectedInputLanguage??null} initialArtifacts={snapshot.textArtifacts}
-      appointmentAction={snapshot.appointmentAction} assessment={snapshot.brief.lifecycle?.assessment} showSummary={audio?cachedSummary:!historicalSummary}
+      appointmentAction={snapshot.appointmentAction} nativeAppointmentAction={snapshot.nativeAppointmentAction} assessment={snapshot.brief.lifecycle?.assessment} showSummary={audio?cachedSummary:!historicalSummary}
       allowSummaryGeneration={!audio && transcript.quality?.coverage !== 'unavailable'} /> : ready ? <div className="final-transcript-body"><p>{transcript.text||copy.empty}</p></div> : audio ?
       <div className="final-transcript-state" role="status">
         {failed ? <p>{copy.failed}</p>:null}

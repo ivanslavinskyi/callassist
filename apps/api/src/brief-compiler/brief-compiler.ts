@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HOLISTIC_PREPARATION_POLICY, holisticCompiledCallBriefSchema, localizedFactText, nativeExecutionAuthority,
+import { isHolisticPreparationPolicy, holisticCompiledCallBriefSchema, localizedFactText, nativeExecutionAuthority,
   type PreparationDiagnosticInput, type PreparationValidationCode } from "@callassist/contracts";
 import { prepareHolistic } from "./holistic-preparation";
 import { PreparationValidationError, validationCode } from "./preparation-validation";
@@ -233,7 +233,7 @@ export class OpenAIBriefCompiler implements BriefCompiler {
       ...(options.policy?{policy:options.policy.promptVersion,policyRevision:options.policy.revision}: {})};
     await emit({id:randomUUID(),metadata:{...base,stage:"source",code:"SOURCE_CAPTURED"},detail:{input,referenceTime:referenceTime.toISOString()}});
     try {
-      const result=options.policy?.promptVersion===HOLISTIC_PREPARATION_POLICY
+      const result=isHolisticPreparationPolicy(options.policy?.promptVersion)
         ? await this.#compileHolistic(input,revision,{...options,diagnostic:emit},referenceTime)
         : await this.#compileLegacy(input,revision,{...options,diagnostic:emit},referenceTime);
       await emit({id:randomUUID(),metadata:{...base,stage:"outcome",compiler:result.compilerVersion,
@@ -714,7 +714,7 @@ export class DeterministicBriefCompiler implements BriefCompiler {
   readonly model = "deterministic-dev";
 
   async compile(input: NormalizedCallBriefInput, revision = 1, options: BriefCompilerRunOptions = {}): Promise<CallCompilation> {
-    if(options.policy?.promptVersion===HOLISTIC_PREPARATION_POLICY) {
+    if(isHolisticPreparationPolicy(options.policy?.promptVersion)) {
       const previous=await this.compile(input,revision,{...options,policy:{...options.policy,promptVersion:PLAN_ONLY_POLICY}});
       const c=previous.compiledBrief;
       const compiled=c?holisticCompiledCallBriefSchema.parse({...c,schemaVersion:"11",approvedFacts:c.approvedFacts.map(localizedFactText),

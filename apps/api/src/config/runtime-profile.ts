@@ -1,8 +1,8 @@
 /** Reviewed runtime/preparation pairs. Profile selection never changes model or capacity settings. */
 export const runtimeProfiles = {
   native_v2: {
-    name: "native_v2", release: "native-v2-holistic-2026-11-11", mode: "live_native_v2",
-    experiment: "native_v2", promptVersion: "preparation-live-holistic-2026-11-11",
+    name: "native_v2", release: "native-v2-holistic-2026-11-13-v2", mode: "live_native_v2",
+    experiment: "native_v2", promptVersion: "preparation-live-holistic-2026-11-13-v2",
     compilerVersion: "brief-compiler-17", planSchemaVersion: "11",
     runtimeVersion: "live-plan-only-2026-11-12.2", minimumMigration: "0116_preparation_validation_events.sql"
   },

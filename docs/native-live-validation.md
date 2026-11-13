@@ -51,7 +51,7 @@ Use the normal local setup in the [README](../README.md) and
 | Environment | Development and production supported; obsolete `VOICE_RUNTIME_NATIVE_V2_LOCAL` ignored |
 | Completion | Enabled by the profile; conflicting low-level overrides are rejected |
 | Preparation | Verify the saved policy revision, not just the selected model |
-| Latest integrity plan | Policy `preparation-live-holistic-2026-11-11`, compiler 17, schema 11, approval 10 |
+| Latest integrity plan | Policy `preparation-live-holistic-2026-11-13-v2`, compiler 17, schema 11, approval 10 |
 | Native instructions | Newly described attempts use `live-plan-only-2026-11-12.2`; full canonical startup context and tools derived from approved appointment authority |
 | Workers | `/health/ready` and `/health/workers` pass for the selected worker mode |
 | Telephone transport | Signed Twilio callbacks and Media Stream reach the same admitted attempt |
@@ -67,6 +67,10 @@ answers. Health checks do not start calls. Restart processes only after confirmi
 that no active call or relevant job would be interrupted; configuration is read at
 startup. The [12 November stable checkpoint](reports/native-brand-stable-2026-11-12.md)
 records the accepted pronunciation/display update and its verification. The
+[13 November checkpoint](reports/preparation-results-stable-2026-11-13.md)
+records preparation/translation reliability and `summary-v9`, with the voice
+implementation unchanged. Its [activation list](plans/production-activation-stable-2026-11-13.md)
+separates policy changes from code versions. The
 [11 November validation record](reports/preparation-holistic-validation-2026-11-11.md)
 retains preparation and appointment evidence; production
 deployment and a controlled production call remain separate steps. Use the current local runbook for host

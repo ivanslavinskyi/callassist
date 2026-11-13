@@ -161,7 +161,7 @@ export class OpenAITextProcessor implements TextProcessor {
         result.actualServiceTier = typeof envelope.service_tier === "string" ? envelope.service_tier : null;
         result.usage = parseOpenAITextTokenUsage(envelope.usage);
         try {
-          output = validateTextProcessingOutput(input, JSON.parse(responseText(envelope)));
+          output = validateTextProcessingOutput(input, JSON.parse(responseText(envelope)), options);
           result.outcome = "succeeded";
         } catch (cause) {
           result.outcome = "invalid_response";
